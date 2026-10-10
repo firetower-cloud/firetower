@@ -205,7 +205,7 @@ impl Waiting {
 /// `config.toml` and every file under `credentials/`. Only those: the same
 /// directory also accumulates session records, logs and an update cache, and
 /// none of that is a credential or belongs in a vault.
-async fn collect(home: &Path) -> Result<Vec<u8>> {
+pub(crate) async fn collect(home: &Path) -> Result<Vec<u8>> {
     let mut bundle = Map::new();
 
     let config = home.join("config.toml");
@@ -547,5 +547,110 @@ mod quota_tests {
         ] {
             assert!(windows(&body).is_empty(), "{body}");
         }
+    }
+}
+
+/// What the agent's credential looks like right now, as a fingerprint.
+///
+/// Kimi rewrites the file every time it refreshes, which it does roughly every
+/// fifteen minutes while a session is working. The vault needs the new one, but
+/// not four times an hour for the same bytes, so the caller keeps the last
+/// fingerprint and only collects when it changes.
+///
+/// `None` where there is nothing to fingerprint, which is every agent that does
+/// not keep a bundle and every home that has not been written yet.
+pub(crate) async fn fingerprint(home: &Path) -> Option<String> {
+    use sha2::{Digest, Sha256};
+
+    let mut dir = tokio::fs::read_dir(home.join("credentials")).await.ok()?;
+    // Sorted, because a directory hands its entries back in whatever order it
+    // likes and a fingerprint that depends on that would change for nothing.
+    let mut files = Vec::new();
+    while let Ok(Some(entry)) = dir.next_entry().await {
+        if let Ok(bytes) = tokio::fs::read(entry.path()).await {
+            files.push((entry.file_name(), bytes));
+        }
+    }
+    if files.is_empty() {
+        return None;
+    }
+    files.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let mut hash = Sha256::new();
+    for (name, bytes) in &files {
+        hash.update(name.as_encoded_bytes());
+        hash.update(bytes);
+    }
+    Some(format!("{:x}", hash.finalize()))
+}
+
+#[cfg(test)]
+mod rotation_tests {
+    use super::*;
+
+    async fn home_with(token: &str) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        tokio::fs::create_dir_all(dir.path().join("credentials")).await.unwrap();
+        tokio::fs::write(dir.path().join("config.toml"), "default_model = \"x\"").await.unwrap();
+        tokio::fs::write(
+            dir.path().join("credentials/kimi-code-env-abc.json"),
+            format!(r#"{{"access_token":"a","refresh_token":"{token}","expires_at":1}}"#),
+        )
+        .await
+        .unwrap();
+        dir
+    }
+
+    /// A refresh changes the fingerprint; nothing else does.
+    #[tokio::test]
+    async fn a_rotated_credential_is_a_different_fingerprint() {
+        let home = home_with("R1").await;
+        let first = fingerprint(home.path()).await.expect("there is a credential");
+
+        // Reading it again says the same thing, or the vault would be rewritten
+        // every minute for bytes it already has.
+        assert_eq!(fingerprint(home.path()).await.as_deref(), Some(first.as_str()));
+
+        // Kimi spends R1 and is given R2.
+        tokio::fs::write(
+            home.path().join("credentials/kimi-code-env-abc.json"),
+            r#"{"access_token":"b","refresh_token":"R2","expires_at":2}"#,
+        )
+        .await
+        .unwrap();
+        let second = fingerprint(home.path()).await.expect("still a credential");
+        assert_ne!(first, second, "a refresh has to be noticed");
+    }
+
+    /// A home with nothing in it is every agent that keeps no bundle.
+    #[tokio::test]
+    async fn a_home_without_credentials_has_no_fingerprint() {
+        let bare = tempfile::tempdir().unwrap();
+        assert_eq!(fingerprint(bare.path()).await, None);
+
+        tokio::fs::create_dir_all(bare.path().join("credentials")).await.unwrap();
+        assert_eq!(fingerprint(bare.path()).await, None, "an empty directory is not a credential");
+    }
+
+    /// What Kimi leaves when a refresh fails must never reach the vault.
+    ///
+    /// It blanks the file in place, which changes the fingerprint — so the
+    /// rotation path fires on exactly the bytes it would be worst to keep. The
+    /// guard that stops it is in `collect`, which is why this asserts there.
+    #[tokio::test]
+    async fn a_blanked_credential_is_noticed_but_refused() {
+        let home = home_with("R1").await;
+        let before = fingerprint(home.path()).await.unwrap();
+
+        tokio::fs::write(
+            home.path().join("credentials/kimi-code-env-abc.json"),
+            r#"{"access_token":"","refresh_token":"","expires_at":0}"#,
+        )
+        .await
+        .unwrap();
+        assert_ne!(before, fingerprint(home.path()).await.unwrap(), "it did change");
+
+        let refused = collect(home.path()).await.unwrap_err().to_string();
+        assert!(refused.contains("no token in it"), "{refused}");
     }
 }

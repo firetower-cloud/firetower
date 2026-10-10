@@ -981,6 +981,28 @@ pub enum ToServer {
         /// described on [`ft_core::Agent::credential_bundle`].
         result: Result<String, String>,
     },
+    /// The agent rotated its own credential, and the vault's copy is now dead.
+    ///
+    /// Kimi issues a new refresh token every time it spends one, and writes it
+    /// into the home it was given — a directory inside a worktree that is
+    /// deleted when the workspace is reclaimed. So the vault kept the token
+    /// from sign-in, that token was spent by the first session to run, and
+    /// every session after it was handed something already used. The account
+    /// worked exactly once and then reported itself unauthorised.
+    ///
+    /// Keyed by session rather than account because the worker is never told
+    /// which account it is running; the control plane resolves it, the same way
+    /// it resolves a limit.
+    ///
+    /// **Not an `AgentLine`.** Those are journalled to `agent_lines` verbatim,
+    /// which for a credential would mean writing it to the database in the
+    /// clear — the thing the vault exists to prevent, and the reason the login
+    /// flow deletes its temporary home rather than leaving one on a host.
+    AgentCredentialRotated {
+        session_id: String,
+        /// The same bundle shape a sign-in produces.
+        bundle: String,
+    },
     /// The answer to [`ToWorker::ProbeRemote`].
     RemoteProbed {
         req: ReqId,

@@ -416,6 +416,76 @@ pub(super) async fn connect(
     Ok(())
 }
 
+/// Replace a vaulted credential with the one the agent rotated to.
+///
+/// Narrower than [`connect`] on purpose. That one is a person attaching an
+/// account: it checks for duplicates, sets a fingerprint, marks the account
+/// connected and may make it the default. None of that is true here — this is
+/// the same account, the same person, the same identity, and the only thing
+/// that has changed is which bytes open it. Running `connect` would re-answer
+/// questions nobody asked.
+///
+/// Keyed by session because the worker is never told which account it runs.
+/// Silent when the session has no account, which is a session that was
+/// reclaimed between the agent writing the file and the worker noticing.
+pub(crate) async fn rotated(
+    db: &crate::db::Db,
+    vault: &vault::Vault,
+    session_id: &str,
+    bundle: &str,
+) -> anyhow::Result<()> {
+    // `credential_key` and not the account id: they are usually `account:<id>`
+    // but not always, and the owner is whoever the secret was sealed against
+    // rather than whoever the row belongs to. Both are what `Account`
+    // reconstructs for exactly this, and getting either wrong writes a second
+    // secret beside the real one that nothing will ever read.
+    let found: Option<(String, String, String, String)> = sqlx::query_as(
+        "SELECT a.id, a.name, a.credential_key, \
+                COALESCE((SELECT sec.owner FROM secrets sec \
+                           WHERE sec.scope = 'agent' AND sec.name = a.credential_key), \
+                         a.user_id) \
+           FROM agent_accounts a \
+           JOIN sessions s ON s.agent_account_id = a.id WHERE s.id = $1",
+    )
+    .bind(session_id)
+    .fetch_optional(db.pool())
+    .await?;
+    let Some((id, name, credential_key, owner)) = found else {
+        return Ok(());
+    };
+
+    // The worker cannot tell a rotation from the credential it was lent — the
+    // agent refreshes within seconds of starting, before anything out there has
+    // looked once. So it reports what it sees and this decides, which it can,
+    // because this is the side that knows what was lent.
+    let key = vault::Key::of(vault::AGENT, &credential_key, &owner);
+    let held = vault
+        .get(key.clone(), "checking whether a credential really changed")
+        .await?;
+    if held.as_deref().map(String::as_str) == Some(bundle) {
+        return Ok(());
+    }
+
+    let mut tx = db.pool().begin().await?;
+    vault
+        .put_in(
+            &mut tx,
+            key,
+            bundle,
+            &format!("{name} refreshed its own credential"),
+        )
+        .await?;
+    // The revision is what tells a running session its credential changed
+    // underneath it, which is exactly what just happened.
+    sqlx::query("UPDATE agent_accounts SET revision = revision + 1 WHERE id = $1")
+        .bind(&id)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    tracing::info!(account = %name, "re-vaulted a rotated agent credential");
+    Ok(())
+}
+
 #[derive(Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateAccount {

@@ -1908,6 +1908,8 @@ impl Fleet {
         }
 
         let db = self.db.clone();
+        // Held for re-vaulting a credential an agent rotated mid-session.
+        let vault = self.vault.clone();
         let events = self.events.clone();
         let workers = self.workers.clone();
         let probes = self.probes.clone();
@@ -2447,6 +2449,22 @@ impl Fleet {
                                 }
                                 Some(other) => { held.insert(req, other); }
                                 None => tracing::debug!("a Codex sign-in finished after its request gave up"),
+                            }
+                        }
+                        Ok(ToServer::AgentCredentialRotated { session_id, bundle }) => {
+                            // The agent spent the token we lent it and was
+                            // given another. Keep it, or the next session is
+                            // handed one that has already been used — which is
+                            // how a Kimi account came to work exactly once.
+                            match &vault {
+                                // No vault is a control plane that keeps no
+                                // credentials, which has none to replace.
+                                None => tracing::debug!("a credential rotated with no vault to keep it in"),
+                                Some(vault) => {
+                                    if let Err(e) = crate::api::accounts::rotated(&db, vault, &session_id, &bundle).await {
+                                        tracing::warn!(session = %session_id, "keeping a rotated credential: {e:#}");
+                                    }
+                                }
                             }
                         }
                         Ok(ToServer::Error { session_id, code, message }) => {
