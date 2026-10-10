@@ -803,21 +803,33 @@ function Limits({ accounts, pending }: { accounts: Account[]; pending: boolean }
   const [shown, setShown] = useState(10);
   const [order, setOrder] = useState<Direction>("desc");
 
-  const rows = accounts
-    .flatMap((a) => (a.limits ?? []).map((l) => ({ account: a, limit: l })))
+  // Grouped by subscription, because a provider meters one account several
+  // ways at once — Kimi keeps a rolling five hours, a month, and coding inside
+  // that month — and a row each put the same name, engine and folder on screen
+  // three times. That reads as three subscriptions, which is the opposite of
+  // what naming them was for.
+  const groups = accounts
+    .map((account) => ({
+      account,
+      limits: [...(account.limits ?? [])].sort((a, b) => fuller(a, b, order)),
+    }))
+    .filter((g) => g.limits.length)
+    // An account is ranked by its fullest window: the one nearest running out
+    // is the reason to look at it, whatever the others say.
     .sort((x, y) => {
-      const a = fullness(x.limit);
-      const b = fullness(y.limit);
+      const a = peak(x.limits);
+      const b = peak(y.limits);
       if (a == null && b == null) return 0;
       if (a == null) return 1;
       if (b == null) return -1;
       return order === "desc" ? b - a : a - b;
     });
+
   // Nothing at all is a real answer — no subscription has reported a limit —
   // and it is drawn as nothing. Not knowing yet is a different thing.
-  if (!pending && !rows.length) return null;
+  if (!pending && !groups.length) return null;
 
-  const page = rows.slice(0, shown);
+  const page = groups.slice(0, shown);
 
   return (
     <section className="mt-12">
@@ -825,7 +837,7 @@ function Limits({ accounts, pending }: { accounts: Account[]; pending: boolean }
         <div>
           <h2 className="mb-4 text-title font-semibold text-bone">Limits</h2>
         </div>
-        {!pending && rows.length > 1 && (
+        {!pending && groups.length > 1 && (
           <div className="pb-4">
             <Choose
               label="Order limits by"
@@ -843,37 +855,69 @@ function Limits({ accounts, pending }: { accounts: Account[]; pending: boolean }
         )}
       </div>
 
-      <div className="grid gap-x-10 gap-y-4 sm:grid-cols-2">
+      <div className="grid gap-x-10 gap-y-7 sm:grid-cols-2">
         {pending
           ? Array.from({ length: 4 }, (_, i) => (
               <div key={i} className="min-w-0 max-w-[430px]" role="status" aria-label="Loading limits">
                 <div className="flex items-baseline gap-2">
                   <Block className="h-3.5 w-[116px]" />
                   <Block className="h-2.5 w-[82px]" />
-                  <span className="flex-1" />
-                  <Block className="h-2.5 w-[64px]" />
                 </div>
-                {i % 2 === 1 && <Block className="mt-2 h-[3px] rounded-sm" />}
-                <Block className="mt-2 h-2.5 w-[62%]" />
+                {Array.from({ length: i % 2 === 1 ? 2 : 1 }, (_, n) => (
+                  <div key={n} className="mt-3">
+                    <div className="flex items-baseline gap-2">
+                      <Block className="h-2.5 w-[94px]" />
+                      <span className="flex-1" />
+                      <Block className="h-2.5 w-[52px]" />
+                    </div>
+                    <Block className="mt-2 h-[3px] rounded-sm" />
+                  </div>
+                ))}
               </div>
             ))
-          : page.map(({ account, limit }) => (
-              <Gauge key={`${account.id}:${limit.scope}`} account={account} limit={limit} />
+          : page.map(({ account, limits }) => (
+              <div key={account.id} className="min-w-0 max-w-[430px]">
+                {/* Said once, however many ways the provider meters it. */}
+                <div className="flex items-baseline gap-2">
+                  <span className="truncate text-ui text-bone">{account.name}</span>
+                  <span className="whitespace-nowrap text-meta text-dim">{provider(account.kind)}</span>
+                  <span className="truncate text-meta text-mute">{folder(account.path)}</span>
+                </div>
+                {limits.map((limit) => (
+                  <Gauge key={limit.scope} limit={limit} />
+                ))}
+              </div>
             ))}
       </div>
 
-      {!pending && rows.length > shown && (
+      {!pending && groups.length > shown && (
         <button
           type="button"
           className="mt-5 rounded-md border border-line px-3 py-1.5 text-ui text-text transition-colors duration-150 hover:border-mute/60 hover:text-bone"
           onClick={() => setShown((n) => n + 10)}
         >
           Show more
-          <span className="ml-2 text-mute">{rows.length - shown} left</span>
+          <span className="ml-2 text-mute">{groups.length - shown} left</span>
         </button>
       )}
     </section>
   );
+}
+
+/** The fullest window an account has, which is what ranks it against others. */
+function peak(limits: Limit[]): number | null {
+  const known = limits.map(fullness).filter((n): n is number => n != null);
+  return known.length ? Math.max(...known) : null;
+}
+
+/** Windows inside one account, ordered the way the accounts are. */
+function fuller(a: Limit, b: Limit, order: Direction): number {
+  const x = fullness(a);
+  const y = fullness(b);
+  if (x == null && y == null) return 0;
+  if (x == null) return 1;
+  if (y == null) return -1;
+  return order === "desc" ? y - x : x - y;
 }
 
 const SAGE = { text: "text-sage", bar: "var(--color-sage)" };
@@ -898,9 +942,15 @@ function tone(l: Limit) {
 }
 
 /** `five_hour` is how an agent spells it; nobody says that out loud. */
+// Every spelling providers actually use, mapped to one wording. Claude says
+// `five_hour` and Codex says `5_hour` for the same five hours, which read as
+// "5-hour window" and "5 hour" side by side on the same screen — two different
+// things, as far as anybody looking could tell.
 const WINDOWS: Record<string, string> = {
   five_hour: "5-hour window",
+  "5_hour": "5-hour window",
   seven_day: "7-day window",
+  "7_day": "7-day window",
   month: "this month",
   // Kimi meters coding separately from the rest of the plan, and says so.
   month_code: "this month, coding",
@@ -916,43 +966,42 @@ function resets(at?: number | null) {
   return `resets in ${untilText(left)}`;
 }
 
-function Gauge({ account, limit }: { account: Account; limit: Limit }) {
+function Gauge({ limit }: { limit: Limit }) {
   const shade = tone(limit);
   const pct = limit.usedPercent;
   const when = resets(limit.resetsAt);
 
   return (
-    <div className="min-w-0 max-w-[430px]">
-      {/* Which subscription this is: what it is called, what it runs, and where
-          it is filed. "perso" alone is ambiguous the moment somebody has one
-          per provider, which is the ordinary case. */}
+    <div className="mt-3">
+      {/* The window and when it turns over on one line, because they are one
+          fact in two halves, with the figure against the right edge where the
+          eye can run down a column of them. */}
       <div className="flex items-baseline gap-2">
-        <span className="truncate text-ui text-bone">{account.name}</span>
-        <span className="whitespace-nowrap text-meta text-dim">{provider(account.kind)}</span>
-        <span className="truncate text-meta text-mute">{folder(account.path)}</span>
+        <span className="whitespace-nowrap text-meta text-dim">{window_(limit.scope)}</span>
+        <span className="min-w-0 truncate text-meta text-mute">
+          {pct == null && limit.status === "allowed"
+            ? "this agent reports no percentage"
+            : when ?? "no reset time reported"}
+        </span>
         <span className="flex-1" />
-        <span className={`whitespace-nowrap text-meta ${shade.text} ${pct != null ? "tabular-nums" : ""}`}>
+        <span
+          className={`whitespace-nowrap text-meta ${shade.text} ${pct != null ? "tabular-nums" : ""}`}
+        >
           {pct != null ? `${percent(pct)} used` : capitalise(limit.status)}
         </span>
       </div>
 
       {pct != null && (
-        <div className="mt-2 h-[3px] overflow-hidden rounded-[2px]"
-          style={{ background: `color-mix(in srgb, ${shade.bar} 20%, var(--color-ground))` }}>
-          <div className="h-full rounded-[2px]"
-            style={{ width: `${Math.min(100, Math.max(0, pct))}%`, background: shade.bar }} />
+        <div
+          className="mt-1.5 h-[3px] overflow-hidden rounded-[2px]"
+          style={{ background: `color-mix(in srgb, ${shade.bar} 20%, var(--color-ground))` }}
+        >
+          <div
+            className="h-full rounded-[2px]"
+            style={{ width: `${Math.min(100, Math.max(0, pct))}%`, background: shade.bar }}
+          />
         </div>
       )}
-
-      {/* The window and when it turns over, together: they are one fact said in
-          two halves, and they were on separate lines. */}
-      <div className="mt-1.5 text-meta text-mute">
-        <span className="text-dim">{window_(limit.scope)}</span>
-        {" — "}
-        {pct == null && limit.status === "allowed"
-          ? "this agent reports no percentage, so there is no meter to draw"
-          : when ?? "no reset time reported"}
-      </div>
     </div>
   );
 }
