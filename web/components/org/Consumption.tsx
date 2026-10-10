@@ -956,7 +956,29 @@ const WINDOWS: Record<string, string> = {
   month_code: "this month, coding",
   account: "this account",
 };
-const window_ = (scope: string) => WINDOWS[scope] ?? scope.replace(/_/g, " ");
+/**
+ * What a window is called, including ones nobody has seen yet.
+ *
+ * Providers meter per model as well as per period — Claude Code's own binary
+ * knows `seven_day_opus` and `seven_day_sonnet`, and its usage panel draws a
+ * row per model from an allowlist it fetches. None has appeared on the wire
+ * here, but the parser keeps every key it is sent, so one will arrive without
+ * anybody changing anything and it should not read as "seven day opus".
+ *
+ * So a known period with something after it keeps the period's wording and
+ * says what the rest is: `seven_day_opus` becomes "7-day window, opus". A key
+ * nobody anticipated at all still loses its underscores.
+ */
+const window_ = (scope: string) => {
+  const known = WINDOWS[scope];
+  if (known) return known;
+  for (const [prefix, label] of Object.entries(WINDOWS)) {
+    if (scope.startsWith(`${prefix}_`)) {
+      return `${label}, ${scope.slice(prefix.length + 1).replace(/_/g, " ")}`;
+    }
+  }
+  return scope.replace(/_/g, " ");
+};
 
 /** "in 1 h 12 m", from the unix second an agent reported. */
 function resets(at?: number | null) {
