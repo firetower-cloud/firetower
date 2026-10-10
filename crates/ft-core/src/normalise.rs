@@ -323,10 +323,14 @@ impl ClaudeNormaliser {
             Some("assistant") => self.assistant(v, &mut out),
             Some("user") => self.user(v, &mut out),
             Some("result") => self.result(v, &mut out),
-            Some("rate_limit_event") => match limits(v) {
-                Some(event) => out.push(event),
-                None => out.push(raw(v)),
-            },
+            Some("rate_limit_event") => {
+                let found = limits(v);
+                if found.is_empty() {
+                    out.push(raw(v));
+                } else {
+                    out.extend(found);
+                }
+            }
             // Anything else new. Kept, not named.
             _ => out.push(raw(v)),
         }
@@ -1184,16 +1188,56 @@ fn denied(v: &Value) -> Vec<String> {
 /// Deliberately shallow. The agent reports a window, a status and a reset time
 /// and no proportion of anything, so this carries those three and invents
 /// nothing. A bar without a numerator would be a drawing, not a reading.
-fn limits(v: &Value) -> Option<TurnEvent> {
-    let info = v.get("rate_limit_info")?;
-    Some(TurnEvent::Limited {
-        window: str_at(info, "rateLimitType")?.to_string(),
-        status: str_at(info, "status").unwrap_or("unknown").to_string(),
+fn limits(v: &Value) -> Vec<TurnEvent> {
+    let Some(info) = v.get("rate_limit_info") else {
+        return Vec::new();
+    };
+    let status = str_at(info, "status").unwrap_or("unknown").to_string();
+
+    // Every window the agent reported, with how full each one is.
+    //
+    // This used to read the three fields beside it and hard-code no
+    // percentage, on the grounds that Claude Code sent none. It does now, and
+    // has for a while: `unifiedWindows` carries a utilization per window, and
+    // its own `/usage` draws the bars this was declining to. Worse, the single
+    // `rateLimitType` beside it names only one of them — the seven-day window
+    // was not missing a number, it was missing entirely.
+    let windows: Vec<TurnEvent> = info
+        .get("unifiedWindows")
+        .and_then(Value::as_object)
+        .map(|found| {
+            found
+                .iter()
+                .filter_map(|(name, w)| {
+                    let used = w.get("utilization").and_then(Value::as_f64)?;
+                    Some(TurnEvent::Limited {
+                        window: name.clone(),
+                        status: status.clone(),
+                        resets_at: w.get("resetsAt").and_then(Value::as_i64),
+                        // A ratio of one, like Kimi's, kept to a tenth.
+                        used_percent: Some(
+                            ((used * 1000.0).round() / 10.0).clamp(0.0, 100.0) as f32,
+                        ),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    if !windows.is_empty() {
+        return windows;
+    }
+
+    // An older Claude Code, which names one window and says nothing about how
+    // full it is. A bar without a numerator would be a drawing, not a reading.
+    let Some(window) = str_at(info, "rateLimitType") else {
+        return Vec::new();
+    };
+    vec![TurnEvent::Limited {
+        window: window.to_string(),
+        status,
         resets_at: info.get("resetsAt").and_then(Value::as_i64),
-        // Claude Code sends none, and a bar without a numerator would be a
-        // drawing rather than a reading.
         used_percent: None,
-    })
+    }]
 }
 
 /// How full the model's context got, and how big it is.

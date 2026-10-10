@@ -949,3 +949,74 @@ fn a_reader_rebuilt_from_the_journal_bills_the_next_turn_as_its_own() {
         second.cost_usd,
     );
 }
+
+/// Claude Code reports how full each window is, and used to be read as if not.
+///
+/// Verbatim from a real `rate_limit_event`. The parser took the three fields
+/// beside `unifiedWindows` and hard-coded no percentage — so the page drew
+/// "this agent reports no percentage" while the agent's own `/usage` drew the
+/// bars. And `rateLimitType` names one window, so the seven-day one was not
+/// short of a number, it was absent.
+#[test]
+fn every_window_claude_reports_is_read_including_how_full_it_is() {
+    let line = serde_json::json!({
+        "type": "rate_limit_event",
+        "rate_limit_info": {
+            "status": "allowed",
+            "resetsAt": 1_791_375_600_i64,
+            "rateLimitType": "five_hour",
+            "unifiedWindows": {
+                "five_hour": { "utilization": 0.04,  "resetsAt": 1_791_375_600_i64 },
+                "seven_day": { "utilization": 0.165, "resetsAt": 1_791_824_400_i64 }
+            }
+        }
+    })
+    .to_string();
+
+    let mut reader = ClaudeNormaliser::new();
+    let mut found: Vec<_> = reader
+        .push(&line)
+        .into_iter()
+        .filter_map(|e| match e {
+            TurnEvent::Limited { window, status, resets_at, used_percent } => {
+                Some((window, status, resets_at, used_percent))
+            }
+            _ => None,
+        })
+        .collect();
+    found.sort_by(|a, b| a.0.cmp(&b.0));
+
+    assert_eq!(
+        found,
+        vec![
+            ("five_hour".to_string(), "allowed".to_string(), Some(1_791_375_600), Some(4.0)),
+            ("seven_day".to_string(), "allowed".to_string(), Some(1_791_824_400), Some(16.5)),
+        ],
+        "both windows, and a ratio of one read as per cent to a tenth",
+    );
+}
+
+/// An older Claude Code names one window and says nothing about how full it is.
+#[test]
+fn a_rate_limit_without_windows_still_reports_the_one_it_names() {
+    let line = serde_json::json!({
+        "type": "rate_limit_event",
+        "rate_limit_info": {
+            "status": "allowed",
+            "resetsAt": 1_791_375_600_i64,
+            "rateLimitType": "five_hour"
+        }
+    })
+    .to_string();
+
+    let found: Vec<_> = ClaudeNormaliser::new()
+        .push(&line)
+        .into_iter()
+        .filter_map(|e| match e {
+            TurnEvent::Limited { window, used_percent, .. } => Some((window, used_percent)),
+            _ => None,
+        })
+        .collect();
+    // None and not zero: a bar without a numerator would be a drawing.
+    assert_eq!(found, vec![("five_hour".to_string(), None)]);
+}
