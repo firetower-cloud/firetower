@@ -2130,7 +2130,10 @@ mod tests {
         // And the answers are not trivially empty or trivially everything,
         // which an equal-but-broken pair would also satisfy.
         let ana_sees = seen(ana.to_string(), Level::Viewer, true).await;
-        assert!(ana_sees.contains(&"granted-deep".to_string()), "{ana_sees:?}");
+        assert!(
+            ana_sees.contains(&"granted-deep".to_string()),
+            "{ana_sees:?}"
+        );
         // `d.shared` is granted to the team that is everybody on first boot, so
         // seeing it is right. `d.locked` is granted to nobody.
         assert!(ana_sees.contains(&"everyones".to_string()), "{ana_sees:?}");

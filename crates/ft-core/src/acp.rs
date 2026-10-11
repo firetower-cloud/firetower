@@ -12,12 +12,26 @@ use std::collections::{BTreeMap, BTreeSet};
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "acp")]
 pub enum Record {
-    Started { epoch: String },
-    Sent { message: Value },
-    Received { message: Value, replay: bool },
-    Ready { session: String },
-    Failed { detail: String },
-    ConfigurationRejected { id: String, detail: String },
+    Started {
+        epoch: String,
+    },
+    Sent {
+        message: Value,
+    },
+    Received {
+        message: Value,
+        replay: bool,
+    },
+    Ready {
+        session: String,
+    },
+    Failed {
+        detail: String,
+    },
+    ConfigurationRejected {
+        id: String,
+        detail: String,
+    },
     /// What the agent says the session has spent, as `/usage` reported it.
     ///
     /// Running totals, not a turn's own figures — see `AcpNormaliser::spent`.
@@ -27,7 +41,10 @@ pub enum Record {
     /// Not a `Received`, because the exchange that produced it is not part of
     /// anybody's conversation: the worker asks, reads the answer and journals
     /// this instead, so the transcript stays what the person actually said.
-    Metered { input: u64, output: u64 },
+    Metered {
+        input: u64,
+        output: u64,
+    },
 }
 
 /// One quota window, on its way to `agent_account_limits`.
@@ -54,7 +71,9 @@ pub struct Window {
 /// from never leaves the agent. A session with no turns yet says "no LLM calls
 /// yet" instead, and that is a `None` rather than a zero.
 pub fn metered(text: &str) -> Option<(u64, u64)> {
-    let line = text.lines().find_map(|l| l.trim().strip_prefix("Session total:"))?;
+    let line = text
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("Session total:"))?;
     let (input, output) = line.split_once(',')?;
     Some((
         input.trim().strip_suffix("input")?.trim().parse().ok()?,
@@ -677,10 +696,7 @@ impl AcpNormaliser {
         // ends the turn, so a gauge dropped for want of a turn would be the
         // only one that ever arrives.
         if update["sessionUpdate"] == "usage_update" {
-            if let (Some(used), Some(size)) = (
-                update["used"].as_u64(),
-                update["size"].as_u64(),
-            ) {
+            if let (Some(used), Some(size)) = (update["used"].as_u64(), update["size"].as_u64()) {
                 self.context = Some((used, size));
             }
             return;

@@ -260,9 +260,7 @@ fn signed(bundle: &Map<String, Value>) -> bool {
             && body
                 .as_str()
                 .and_then(|text| serde_json::from_str::<Value>(text).ok())
-                .is_some_and(|json| {
-                    json["access_token"].as_str().is_some_and(|t| !t.is_empty())
-                })
+                .is_some_and(|json| json["access_token"].as_str().is_some_and(|t| !t.is_empty()))
     })
 }
 
@@ -425,7 +423,9 @@ mod tests {
 /// Called right after a turn, it is as fresh as the request that turn just
 /// made. Expired is a 401, which is a `None` and not an error worth raising.
 pub async fn allowance(home: &Path) -> Option<Vec<Allowance>> {
-    let config = tokio::fs::read_to_string(home.join("config.toml")).await.ok()?;
+    let config = tokio::fs::read_to_string(home.join("config.toml"))
+        .await
+        .ok()?;
     // One key out of a TOML file, rather than a parser and a dependency for it.
     // The file is Kimi's and this is the only line of it we have ever wanted.
     let base = config
@@ -594,8 +594,12 @@ mod rotation_tests {
 
     async fn home_with(token: &str) -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
-        tokio::fs::create_dir_all(dir.path().join("credentials")).await.unwrap();
-        tokio::fs::write(dir.path().join("config.toml"), "default_model = \"x\"").await.unwrap();
+        tokio::fs::create_dir_all(dir.path().join("credentials"))
+            .await
+            .unwrap();
+        tokio::fs::write(dir.path().join("config.toml"), "default_model = \"x\"")
+            .await
+            .unwrap();
         tokio::fs::write(
             dir.path().join("credentials/kimi-code-env-abc.json"),
             format!(r#"{{"access_token":"a","refresh_token":"{token}","expires_at":1}}"#),
@@ -609,11 +613,16 @@ mod rotation_tests {
     #[tokio::test]
     async fn a_rotated_credential_is_a_different_fingerprint() {
         let home = home_with("R1").await;
-        let first = fingerprint(home.path()).await.expect("there is a credential");
+        let first = fingerprint(home.path())
+            .await
+            .expect("there is a credential");
 
         // Reading it again says the same thing, or the vault would be rewritten
         // every minute for bytes it already has.
-        assert_eq!(fingerprint(home.path()).await.as_deref(), Some(first.as_str()));
+        assert_eq!(
+            fingerprint(home.path()).await.as_deref(),
+            Some(first.as_str())
+        );
 
         // Kimi spends R1 and is given R2.
         tokio::fs::write(
@@ -632,8 +641,14 @@ mod rotation_tests {
         let bare = tempfile::tempdir().unwrap();
         assert_eq!(fingerprint(bare.path()).await, None);
 
-        tokio::fs::create_dir_all(bare.path().join("credentials")).await.unwrap();
-        assert_eq!(fingerprint(bare.path()).await, None, "an empty directory is not a credential");
+        tokio::fs::create_dir_all(bare.path().join("credentials"))
+            .await
+            .unwrap();
+        assert_eq!(
+            fingerprint(bare.path()).await,
+            None,
+            "an empty directory is not a credential"
+        );
     }
 
     /// What Kimi leaves when a refresh fails must never reach the vault.
@@ -652,7 +667,11 @@ mod rotation_tests {
         )
         .await
         .unwrap();
-        assert_ne!(before, fingerprint(home.path()).await.unwrap(), "it did change");
+        assert_ne!(
+            before,
+            fingerprint(home.path()).await.unwrap(),
+            "it did change"
+        );
 
         let refused = collect(home.path()).await.unwrap_err().to_string();
         assert!(refused.contains("no token in it"), "{refused}");

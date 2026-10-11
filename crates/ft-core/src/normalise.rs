@@ -1356,7 +1356,7 @@ fn limits(v: &Value) -> Vec<TurnEvent> {
                         resets_at: w.get("resetsAt").and_then(Value::as_i64),
                         // A ratio of one, like Kimi's, kept to a tenth.
                         used_percent: Some(
-                            ((used * 1000.0).round() / 10.0).clamp(0.0, 100.0) as f32,
+                            ((used * 1000.0).round() / 10.0).clamp(0.0, 100.0) as f32
                         ),
                     })
                 })

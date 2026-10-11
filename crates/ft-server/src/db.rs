@@ -2731,7 +2731,10 @@ mod tests {
             output_tokens: 110,
             cost_usd: Some(0.061),
             duration_ms: Some(4_200),
-            models: vec![model("claude-sonnet-5", 1_000, 0.06), model("claude-haiku-4-5", 100, 0.001)],
+            models: vec![
+                model("claude-sonnet-5", 1_000, 0.06),
+                model("claude-haiku-4-5", 100, 0.001),
+            ],
             ..Default::default()
         };
 
@@ -2758,13 +2761,31 @@ mod tests {
         assert_eq!(haiku.get::<i64, _>("cache_read_tokens"), 200);
 
         // Every name copied in, because in a minute the workspace may be gone.
-        assert_eq!(haiku.get::<Option<String>, _>("workspace_name").as_deref(), Some("agent/usage"));
-        assert_eq!(haiku.get::<Option<String>, _>("session_title").as_deref(), Some("Usage tracking"));
-        assert_eq!(haiku.get::<Option<String>, _>("task_key").as_deref(), Some("github:acme/web#5138"));
-        assert_eq!(haiku.get::<Option<String>, _>("task_provider").as_deref(), Some("github"));
-        assert_eq!(haiku.get::<Option<String>, _>("repo_remote").as_deref(), Some("acme/web"));
+        assert_eq!(
+            haiku.get::<Option<String>, _>("workspace_name").as_deref(),
+            Some("agent/usage")
+        );
+        assert_eq!(
+            haiku.get::<Option<String>, _>("session_title").as_deref(),
+            Some("Usage tracking")
+        );
+        assert_eq!(
+            haiku.get::<Option<String>, _>("task_key").as_deref(),
+            Some("github:acme/web#5138")
+        );
+        assert_eq!(
+            haiku.get::<Option<String>, _>("task_provider").as_deref(),
+            Some("github")
+        );
+        assert_eq!(
+            haiku.get::<Option<String>, _>("repo_remote").as_deref(),
+            Some("acme/web")
+        );
         assert_eq!(haiku.get::<String, _>("path"), "u.admin");
-        assert_eq!(haiku.get::<Option<String>, _>("ran_as").as_deref(), Some(who.as_str()));
+        assert_eq!(
+            haiku.get::<Option<String>, _>("ran_as").as_deref(),
+            Some(who.as_str())
+        );
         // The turn's duration, not the model's share of it.
         assert_eq!(haiku.get::<Option<i64>, _>("duration_ms"), Some(4_200));
 
@@ -2805,7 +2826,10 @@ mod tests {
             cache_write_tokens: Some(4_000),
             cache_write_1h_tokens: Some(3_200),
             cache_write_5m_tokens: Some(800),
-            models: vec![wrote_this("claude-sonnet-5", 3_000), wrote_this("claude-haiku-4-5", 1_000)],
+            models: vec![
+                wrote_this("claude-sonnet-5", 3_000),
+                wrote_this("claude-haiku-4-5", 1_000),
+            ],
             ..Default::default()
         };
         db.record_consumption(&session, "turn_ttl", &usage, None)
@@ -2839,7 +2863,11 @@ mod tests {
 
         // Codex says nothing about either kind, and NULL says that where a zero
         // would claim it wrote nothing for an hour.
-        let silent = Usage { input_tokens: 10, output_tokens: 1, ..Default::default() };
+        let silent = Usage {
+            input_tokens: 10,
+            output_tokens: 1,
+            ..Default::default()
+        };
         db.record_consumption(&session, "turn_mute", &silent, Some("gpt-5-codex"))
             .await
             .unwrap();
@@ -2878,7 +2906,12 @@ mod tests {
             ..Default::default()
         };
         let wrote = db
-            .record_consumption(&session, "turn_acp", &gauge, Some("kimi-code/kimi-for-coding"))
+            .record_consumption(
+                &session,
+                "turn_acp",
+                &gauge,
+                Some("kimi-code/kimi-for-coding"),
+            )
             .await
             .unwrap();
         assert_eq!(wrote, 1, "a turn that happened is a turn that is recorded");
@@ -2970,12 +3003,11 @@ mod tests {
         db.record_consumption(&session, "turn_d", &usage, None)
             .await
             .unwrap();
-        let fell_back: String = sqlx::query_scalar(
-            "SELECT model FROM consumption_events WHERE turn_id = 'turn_d'",
-        )
-        .fetch_one(db.pool())
-        .await
-        .unwrap();
+        let fell_back: String =
+            sqlx::query_scalar("SELECT model FROM consumption_events WHERE turn_id = 'turn_d'")
+                .fetch_one(db.pool())
+                .await
+                .unwrap();
         assert_eq!(fell_back, "claude", "the agent, since the model is unknown");
     }
 
@@ -2994,7 +3026,12 @@ mod tests {
         // against the session, so this writes nothing and says so rather than
         // failing — the caller logs it instead of tearing down the line reader.
         let wrote = db
-            .record_consumption(&session, "turn_late", &Usage::default(), Some("claude-opus-5"))
+            .record_consumption(
+                &session,
+                "turn_late",
+                &Usage::default(),
+                Some("claude-opus-5"),
+            )
             .await
             .unwrap();
         assert_eq!(wrote, 0);
@@ -3031,7 +3068,11 @@ mod tests {
             .bind(&org)
             .bind(n.to_string())
             .bind(&who)
-            .bind(if n % 2 == 0 { "claude-opus-5" } else { "gpt-5-codex" })
+            .bind(if n % 2 == 0 {
+                "claude-opus-5"
+            } else {
+                "gpt-5-codex"
+            })
             .execute(db.pool())
             .await
             .unwrap();
@@ -3119,7 +3160,11 @@ mod tests {
             .bind(&org)
             .bind(n)
             .bind(who.as_str())
-            .bind(if n % 2 == 0 { "claude-opus-5" } else { "claude-haiku-4-5" })
+            .bind(if n % 2 == 0 {
+                "claude-opus-5"
+            } else {
+                "claude-haiku-4-5"
+            })
             .execute(db.pool())
             .await
             .unwrap();
@@ -5794,7 +5839,9 @@ mod tests {
 /// An enum rather than a string from the query, because these become SQL. The
 /// shape of every one is the same — a key to group on and a name to draw — so
 /// adding the next dimension is two lines here and nothing anywhere else.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize, utoipa::ToSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize, utoipa::ToSchema,
+)]
 #[serde(rename_all = "camelCase")]
 pub enum Dimension {
     Task,
@@ -5827,7 +5874,9 @@ impl Dimension {
 /// Five of these mean the same thing whatever is being grouped; `breadth` is
 /// the one that changes, because the count worth ranking by depends on what a
 /// row is — a task sprawling across worktrees, a model reaching people.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize, utoipa::ToSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize, utoipa::ToSchema,
+)]
 #[serde(rename_all = "camelCase")]
 pub enum Sort {
     Tokens,
@@ -5842,7 +5891,9 @@ pub enum Sort {
     Name,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize, utoipa::ToSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize, utoipa::ToSchema,
+)]
 #[serde(rename_all = "camelCase")]
 pub enum Direction {
     Asc,
@@ -6259,7 +6310,10 @@ impl Db {
         // time and nowhere else, which is how `perTurn` shipped returning
         // nothing at all — see `every_sort_returns_rows`.
         let extra = match sort {
-            Sort::Breadth => format!(", COUNT(DISTINCT {}) AS {breadth}", Self::breadth_source(by)),
+            Sort::Breadth => format!(
+                ", COUNT(DISTINCT {}) AS {breadth}",
+                Self::breadth_source(by)
+            ),
             _ => String::new(),
         };
 

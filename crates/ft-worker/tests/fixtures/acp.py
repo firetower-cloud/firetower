@@ -2,6 +2,7 @@
 import json, sys
 scenario = sys.argv[1]
 active = None
+spent = {"turns": 0}
 
 def emit(message):
     print(json.dumps({"jsonrpc": "2.0", **message}), flush=True)
@@ -16,6 +17,10 @@ for line in sys.stdin:
             emit({"id": m["id"], "error": {"code": -32000, "message": "Authentication required"}})
         else:
             emit({"id": m["id"], "result": {"sessionId": "fixture-session"}})
+            # An agent that meters says so, unprompted, the way Kimi does.
+            # One that does not is never asked — see `meters` in acp.rs.
+            if scenario == "metered":
+                emit({"method":"session/update","params":{"sessionId":"fixture-session","update":{"sessionUpdate":"available_commands_update","availableCommands":[{"name":"usage","description":"Show session token usage"}]}}})
     elif method == "session/load":
         if scenario == "missing":
             emit({"id":m["id"], "error":{"code":-32602,"message":"Invalid params: Unknown sessionId: old-session","data":{"sessionId":"old-session"}}})
@@ -26,6 +31,15 @@ for line in sys.stdin:
             emit({"id":m["id"], "result":{}})
     elif method == "session/prompt":
         active = m["id"]
+        said = "".join(part.get("text", "") for part in m["params"].get("prompt", []))
+        if said == "/usage":
+            # Answered locally, as a slash command is: no model, and the
+            # session total rather than this turn's.
+            spent["turns"] += 1
+            emit({"method":"session/update","params":{"sessionId":m["params"]["sessionId"],"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":f"Context: 20355 / 1048576 tokens (2%)\nSession total: {spent['turns'] * 20000} input, {spent['turns'] * 40} output"}}}})
+            emit({"id":active,"result":{"stopReason":"end_turn"}})
+            active = None
+            continue
         if scenario == "malformed":
             print("not json", flush=True)
         elif scenario == "exit":

@@ -372,3 +372,68 @@ async fn a_second_configuration_is_rejected_until_the_first_has_a_response() {
     peer.sent("session/prompt").await;
     peer.finish().await;
 }
+
+/// An agent that meters is asked; one that does not is left alone.
+///
+/// Both halves matter. The question costs a round trip the turn waits on, so
+/// asking an agent that never answers means every turn waits out the timeout
+/// before it can be reported finished — which is what this suite caught when
+/// the probe went out unconditionally: a fixture with no `/usage` turned a
+/// two-millisecond cancellation into a five-second one.
+#[tokio::test]
+async fn only_an_agent_that_offers_usage_is_asked_for_it() {
+    let mut peer = Peer::start("metered", false).await;
+    peer.ready().await;
+    peer.send(Input::Prompt {
+        text: "work".into(),
+    })
+    .await;
+
+    // The reading arrives before the reply that ends the turn, so the turn is
+    // still open when the normaliser reads it.
+    let mut spent = None;
+    loop {
+        match peer.record().await {
+            Record::Metered { input, output } => spent = Some((input, output)),
+            Record::Received { message, .. } if message["result"]["stopReason"] == "end_turn" => {
+                break
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(
+        spent,
+        Some((20_000, 40)),
+        "what the fixture said it had spent"
+    );
+
+    // And none of the asking is in the journal: the transcript is what the
+    // person said, not what we asked behind them.
+    peer.send(Input::Prompt {
+        text: "again".into(),
+    })
+    .await;
+    let mut asked_aloud = 0;
+    loop {
+        match peer.record().await {
+            Record::Sent { message } if message["method"] == "session/prompt" => {
+                let said = message["params"]["prompt"][0]["text"]
+                    .as_str()
+                    .unwrap_or("");
+                if said == "/usage" {
+                    asked_aloud += 1;
+                }
+            }
+            Record::Received { message, .. } if message["result"]["stopReason"] == "end_turn" => {
+                break
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(
+        asked_aloud, 0,
+        "the question is bookkeeping, not conversation"
+    );
+
+    peer.finish().await;
+}

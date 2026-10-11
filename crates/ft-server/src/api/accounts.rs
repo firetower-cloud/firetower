@@ -265,13 +265,14 @@ pub(super) async fn list_accounts(
     .fetch_all(state.db.pool())
     .await?;
     for account in &mut rows {
-        account.limits =
-            sqlx::query_as("SELECT account_id, scope, status, resets_at, observed_at, \
+        account.limits = sqlx::query_as(
+            "SELECT account_id, scope, status, resets_at, observed_at, \
                  used_percent::float4 AS used_percent \
-            FROM agent_account_limits WHERE account_id=$1 ORDER BY scope")
-                .bind(&account.id)
-                .fetch_all(state.db.pool())
-                .await?;
+            FROM agent_account_limits WHERE account_id=$1 ORDER BY scope",
+        )
+        .bind(&account.id)
+        .fetch_all(state.db.pool())
+        .await?;
     }
     Ok(Json(rows))
 }

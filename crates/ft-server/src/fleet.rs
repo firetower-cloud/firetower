@@ -4294,7 +4294,10 @@ mod tests {
         let spent = replay_into_progress("plain");
         assert_eq!(spent.len(), 1, "one turn, one bill");
         let bill = &spent[0];
-        assert!(!bill.turn.is_empty(), "a turn without an id cannot be billed");
+        assert!(
+            !bill.turn.is_empty(),
+            "a turn without an id cannot be billed"
+        );
 
         // Two models ran, and the small one is on the bill as much as the
         // large one. Totals would have hidden that.
@@ -4317,7 +4320,10 @@ mod tests {
         assert!(sonnet.cost_usd.is_some_and(|c| c > 0.06));
 
         // What the whole turn came to, as the agent itself reported it.
-        assert!(bill.usage.cost_usd.is_some_and(|c| (c - 0.061_320_2).abs() < 1e-6));
+        assert!(bill
+            .usage
+            .cost_usd
+            .is_some_and(|c| (c - 0.061_320_2).abs() < 1e-6));
     }
 
     /// Codex reports no per-model breakdown, so the name on its rows is

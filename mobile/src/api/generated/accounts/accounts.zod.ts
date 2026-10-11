@@ -19,7 +19,7 @@ export const ListAccountsResponseItem = zod.object({
   "resetsAt": zod.int().nullish(),
   "scope": zod.string(),
   "status": zod.string(),
-  "usedPercent": zod.int().nullish()
+  "usedPercent": zod.number().nullish()
 })),
   "mode": zod.string(),
   "name": zod.string(),
@@ -48,7 +48,7 @@ export const CreateAccountResponse = zod.object({
   "resetsAt": zod.int().nullish(),
   "scope": zod.string(),
   "status": zod.string(),
-  "usedPercent": zod.int().nullish()
+  "usedPercent": zod.number().nullish()
 })),
   "mode": zod.string(),
   "name": zod.string(),
@@ -80,7 +80,7 @@ export const UpdateAccountResponse = zod.object({
   "resetsAt": zod.int().nullish(),
   "scope": zod.string(),
   "status": zod.string(),
-  "usedPercent": zod.int().nullish()
+  "usedPercent": zod.number().nullish()
 })),
   "mode": zod.string(),
   "name": zod.string(),
@@ -106,7 +106,7 @@ export const SessionAccountResponse = zod.object({
   "resetsAt": zod.int().nullish(),
   "scope": zod.string(),
   "status": zod.string(),
-  "usedPercent": zod.int().nullish()
+  "usedPercent": zod.number().nullish()
 })),
   "mode": zod.string(),
   "name": zod.string(),
@@ -119,7 +119,7 @@ export const SessionAccountResponse = zod.object({
   "resetsAt": zod.int().nullish(),
   "scope": zod.string(),
   "status": zod.string(),
-  "usedPercent": zod.int().nullish()
+  "usedPercent": zod.number().nullish()
 })),
   "switches": zod.array(zod.object({
   "afterLine": zod.int(),

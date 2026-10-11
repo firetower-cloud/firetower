@@ -2,6 +2,7 @@ export * from './access/access.zod';
 export * from './accounts/accounts.zod';
 export * from './agents/agents.zod';
 export * from './auth/auth.zod';
+export * from './consumption/consumption.zod';
 export * from './conversation/conversation.zod';
 export * from './events/events.zod';
 export * from './hosts/hosts.zod';

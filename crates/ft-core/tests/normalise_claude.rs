@@ -842,20 +842,31 @@ fn a_second_turn_is_not_billed_for_the_first() {
 
     // The second is its own, not the running total — which the raw line gives
     // as 29,176 read, 6,272 written, 126 out.
-    assert_eq!(second.cache_read_tokens, 17_702, "29,176 cumulative less 11,474");
+    assert_eq!(
+        second.cache_read_tokens, 17_702,
+        "29,176 cumulative less 11,474"
+    );
     assert_eq!(second.cache_write_tokens, 44, "6,272 cumulative less 6,228");
     assert_eq!(second.output_tokens, 112, "126 cumulative less 14");
 
     // Money the same way: 0.081429 so far, 0.068377 of it already charged.
     assert!(
-        turns[1].cost_usd.is_some_and(|c| (c - 0.013_052).abs() < 1e-6),
+        turns[1]
+            .cost_usd
+            .is_some_and(|c| (c - 0.013_052).abs() < 1e-6),
         "the turn's own cost, not the session's: {:?}",
         turns[1].cost_usd
     );
 
     // A model that ran only in the second turn appears only there.
-    assert!(!turns[0].models.iter().any(|m| m.model == "claude-haiku-4-5"));
-    assert!(turns[1].models.iter().any(|m| m.model == "claude-haiku-4-5"));
+    assert!(!turns[0]
+        .models
+        .iter()
+        .any(|m| m.model == "claude-haiku-4-5"));
+    assert!(turns[1]
+        .models
+        .iter()
+        .any(|m| m.model == "claude-haiku-4-5"));
 
     // The kind of cache write, which `modelUsage` never says and the turn's own
     // block does. Already per-turn there — 44 after 6,228 rather than 6,272 —
@@ -879,7 +890,10 @@ fn a_second_turn_is_not_billed_for_the_first() {
         .flat_map(|t| &t.models)
         .map(|m| m.input_tokens + m.output_tokens + m.cache_read_tokens + m.cache_write_tokens)
         .sum();
-    assert_eq!(billed, 36_485, "not 54,203, which is turn one counted twice");
+    assert_eq!(
+        billed, 36_485,
+        "not 54,203, which is turn one counted twice"
+    );
 }
 
 /// A control plane that restarts mid-session does not re-bill what it has.
@@ -897,7 +911,10 @@ fn a_second_turn_is_not_billed_for_the_first() {
 /// restarting between them amounts to.
 #[test]
 fn a_reader_rebuilt_from_the_journal_bills_the_next_turn_as_its_own() {
-    let path = format!("{}/tests/streams/two_turns.ndjson", env!("CARGO_MANIFEST_DIR"));
+    let path = format!(
+        "{}/tests/streams/two_turns.ndjson",
+        env!("CARGO_MANIFEST_DIR")
+    );
     let text = std::fs::read_to_string(&path).unwrap();
     let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
     // Line 14 is the first turn's `result`; everything after it is turn two.
@@ -912,7 +929,11 @@ fn a_reader_rebuilt_from_the_journal_bills_the_next_turn_as_its_own() {
             _ => None,
         })
         .collect();
-    assert_eq!(replayed.len(), 1, "the journal up to here is one finished turn");
+    assert_eq!(
+        replayed.len(),
+        1,
+        "the journal up to here is one finished turn"
+    );
 
     // What the restart has to not forget.
     let first = replayed[0]
@@ -944,7 +965,9 @@ fn a_reader_rebuilt_from_the_journal_bills_the_next_turn_as_its_own() {
     assert_eq!(opus.cache_write_tokens, 44, "not 6,272");
     assert_eq!(opus.output_tokens, 112, "not 126");
     assert!(
-        second.cost_usd.is_some_and(|c| (c - 0.013_052).abs() < 1e-6),
+        second
+            .cost_usd
+            .is_some_and(|c| (c - 0.013_052).abs() < 1e-6),
         "and its own cost, not 0.081429: {:?}",
         second.cost_usd,
     );
@@ -978,9 +1001,12 @@ fn every_window_claude_reports_is_read_including_how_full_it_is() {
         .push(&line)
         .into_iter()
         .filter_map(|e| match e {
-            TurnEvent::Limited { window, status, resets_at, used_percent } => {
-                Some((window, status, resets_at, used_percent))
-            }
+            TurnEvent::Limited {
+                window,
+                status,
+                resets_at,
+                used_percent,
+            } => Some((window, status, resets_at, used_percent)),
             _ => None,
         })
         .collect();
@@ -989,8 +1015,18 @@ fn every_window_claude_reports_is_read_including_how_full_it_is() {
     assert_eq!(
         found,
         vec![
-            ("five_hour".to_string(), "allowed".to_string(), Some(1_791_375_600), Some(4.0)),
-            ("seven_day".to_string(), "allowed".to_string(), Some(1_791_824_400), Some(16.5)),
+            (
+                "five_hour".to_string(),
+                "allowed".to_string(),
+                Some(1_791_375_600),
+                Some(4.0)
+            ),
+            (
+                "seven_day".to_string(),
+                "allowed".to_string(),
+                Some(1_791_824_400),
+                Some(16.5)
+            ),
         ],
         "both windows, and a ratio of one read as per cent to a tenth",
     );
@@ -1013,7 +1049,11 @@ fn a_rate_limit_without_windows_still_reports_the_one_it_names() {
         .push(&line)
         .into_iter()
         .filter_map(|e| match e {
-            TurnEvent::Limited { window, used_percent, .. } => Some((window, used_percent)),
+            TurnEvent::Limited {
+                window,
+                used_percent,
+                ..
+            } => Some((window, used_percent)),
             _ => None,
         })
         .collect();

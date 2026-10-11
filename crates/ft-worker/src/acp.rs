@@ -364,6 +364,13 @@ where
     let mut pending: HashMap<String, Value> = HashMap::new();
     let mut cancel_deadline = None;
     let mut queued = VecDeque::new();
+    // Whether this agent has said it answers `/usage`.
+    //
+    // Asking one that does not is not free: the question goes unanswered and
+    // every turn waits out the timeout before it can be reported finished.
+    // Agents advertise their commands unprompted, so there is no need to
+    // guess — and an agent that never mentions one is simply never asked.
+    let mut meters = false;
     loop {
         if active.is_none() {
             if let Some(text) = queued.pop_front() {
@@ -441,12 +448,20 @@ where
                 // written, so the figures are in hand when the turn closes.
                 // Held back rather than chased afterwards: once the turn is
                 // over there is nothing left to attach them to.
-                if message.get("method").is_none() && active.is_some_and(|id| message["id"] == id) {
+                if meters && message.get("method").is_none() && active.is_some_and(|id| message["id"] == id) {
                     let probe = next_id;
                     next_id += 1;
                     if let Some(spent) = meter(stdin, stdout, out, &saved.session, probe).await {
                         record(out, spent).await?;
                     }
+                }
+                // What this agent can be asked, as it announces itself.
+                if message["params"]["update"]["sessionUpdate"] == "available_commands_update" {
+                    meters = message["params"]["update"]["availableCommands"]
+                        .as_array()
+                        .is_some_and(|all| {
+                            all.iter().any(|c| c["name"] == ft_core::acp::USAGE_COMMAND[1..])
+                        });
                 }
                 record(out, Record::Received { message: message.clone(), replay: false }).await?;
                 if message.get("method").is_none() && configuring.as_ref().is_some_and(|id| *id == message["id"]) {

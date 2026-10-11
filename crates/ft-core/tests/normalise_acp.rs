@@ -447,7 +447,9 @@ fn a_metered_turn_is_billed_the_difference_rather_than_the_session() {
     let mut reader = AcpNormaliser::default();
     let mut push = |record: Record| reader.push(&serde_json::to_string(&record).unwrap());
     push(Record::Started { epoch: "e".into() });
-    push(Record::Ready { session: "s".into() });
+    push(Record::Ready {
+        session: "s".into(),
+    });
 
     let turn = |reader: &mut AcpNormaliser, id: u64, input: u64, output: u64| {
         reader.push(
@@ -517,7 +519,9 @@ fn a_turn_that_never_reached_a_model_is_not_reported_as_finished() {
     let mut reader = AcpNormaliser::default();
     let mut push = |record: Record| reader.push(&serde_json::to_string(&record).unwrap());
     push(Record::Started { epoch: "e".into() });
-    push(Record::Ready { session: "s".into() });
+    push(Record::Ready {
+        session: "s".into(),
+    });
 
     let turn = |reader: &mut AcpNormaliser, id: u64, meter: Option<(u64, u64)>| {
         reader.push(
@@ -555,7 +559,10 @@ fn a_turn_that_never_reached_a_model_is_not_reported_as_finished() {
     assert_eq!(status, TurnStatus::Failed);
     let detail = detail.expect("and it says why, as far as anyone can know");
     assert!(detail.contains("without calling a model"), "{detail}");
-    assert!(detail.contains("sign-in"), "the likely cause is named: {detail}");
+    assert!(
+        detail.contains("sign-in"),
+        "the likely cause is named: {detail}"
+    );
 
     // And work resumes being work once the account is good again.
     let (status, _) = turn(&mut reader, 3, Some((40_453, 84)));
@@ -567,4 +574,3 @@ fn a_turn_that_never_reached_a_model_is_not_reported_as_finished() {
     let (status, _) = turn(&mut reader, 4, None);
     assert_eq!(status, TurnStatus::Completed);
 }
-
