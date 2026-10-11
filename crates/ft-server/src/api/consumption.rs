@@ -100,6 +100,7 @@ pub(super) async fn consumption(
     let me = principal.owner().unwrap_or_default().to_string();
 
     let slice = Slice {
+        within: None,
         from: ask.from,
         to: ask.to,
         // `me` rather than an id, so a link somebody shares does not quietly
@@ -137,37 +138,37 @@ pub(super) async fn consumption(
     // asked for, and the interface folds everything past the ninth anyway.
     if let Some(then) = ask.then.filter(|t| *t != ask.group) {
         for group in groups.iter_mut().take(12) {
-            let mut narrowed = Slice {
+            // One level down is the same ledger asked again with the rows
+            // narrowed to this group. Every dimension narrows the same way, so
+            // every combination works — "by model, then by person" is the
+            // person ledger over one model's rows.
+            //
+            // `find` is dropped: it matched the outer rows, and applying it
+            // again inside would hide children of a group it already chose.
+            let narrowed = Slice {
                 from: slice.from,
                 to: slice.to,
                 person: slice.person.clone(),
                 team: slice.team.clone(),
                 find: None,
+                within: Some((ask.group, group.key.clone())),
             };
-            // Grouping by person and then by something else is the same as
-            // asking for that person. Every other dimension needs its own
-            // filter, which `consumption_groups` does not take — so for now
-            // only person narrows, and the rest come back empty rather than
-            // wrong.
-            if ask.group == Dimension::Person {
-                narrowed.person = group.key.clone();
-                group.children = state
-                    .db
-                    .consumption_groups(
-                        &me,
-                        &narrowed,
-                        Ledger {
-                            by: then,
-                            sort: ask.sort,
-                            direction: ask.direction,
-                            limit: 6,
-                            offset: 0,
-                        },
-                        None,
-                    )
-                    .await?
-                    .0;
-            }
+            group.children = state
+                .db
+                .consumption_groups(
+                    &me,
+                    &narrowed,
+                    Ledger {
+                        by: then,
+                        sort: ask.sort,
+                        direction: ask.direction,
+                        limit: 6,
+                        offset: 0,
+                    },
+                    None,
+                )
+                .await?
+                .0;
         }
     }
 

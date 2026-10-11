@@ -2923,6 +2923,7 @@ mod tests {
                     person: None,
                     team: None,
                     find: None,
+                    within: None,
                 },
             )
             .await
@@ -3042,6 +3043,7 @@ mod tests {
             person: None,
             team: None,
             find: None,
+            within: None,
         };
 
         for by in [
@@ -3077,6 +3079,105 @@ mod tests {
                         "{by:?} by {sort:?} {dir:?}: no row carried a model split"
                     );
                 }
+            }
+        }
+    }
+
+    /// Every second-level grouping, not just the one that used to work.
+    ///
+    /// `then by` was built for person and nothing else: narrowing meant
+    /// setting `Slice::person`, so "by model, then by person" had nowhere to
+    /// say which model and came back with no children at all. Six of the seven
+    /// groupings silently drew an explanation where the data should have been.
+    ///
+    /// This is the same shape of guard as `every_sort_returns_rows` above, and
+    /// for the same reason: the failure is a SQL that only breaks for some
+    /// combinations, at run time, where nothing else looks.
+    #[tokio::test]
+    async fn every_second_level_narrows_to_its_parent() {
+        let (db, who) = db_with_user().await;
+        let org = db.org().await.unwrap();
+
+        // Two of everything that can vary, so a second level has something to
+        // be a subset of. One person throughout — a second principal is more
+        // setup than the assertions need, and `person` as an inner dimension
+        // returning one child still proves the narrowing ran.
+        for n in 0..8i32 {
+            sqlx::query(
+                "INSERT INTO consumption_events (
+                     org_id, occurred_at, path, ran_as, workspace_id, workspace_name,
+                     session_id, session_title, turn_id, task_key, task_provider,
+                     repo_remote, agent, account_id, account_name, model,
+                     input_tokens, output_tokens, cost_usd)
+                 VALUES ($1, now() - ($2::text || ' minutes')::interval, 'u.admin'::ltree, $3,
+                         'w' || ($2 % 2), 'agent/thing' || ($2 % 2),
+                         's' || ($2 % 2), 'Thing', 't' || $2::text,
+                         'github:acme/web#' || ($2 % 2), 'github',
+                         'acme/repo' || ($2 % 2), 'claude',
+                         'acc' || ($2 % 2), 'Account', $4, 1000, 100, 0.5)",
+            )
+            .bind(&org)
+            .bind(n)
+            .bind(who.as_str())
+            .bind(if n % 2 == 0 { "claude-opus-5" } else { "claude-haiku-4-5" })
+            .execute(db.pool())
+            .await
+            .unwrap();
+        }
+
+        let every = [
+            Dimension::Task,
+            Dimension::Model,
+            Dimension::Person,
+            Dimension::Repository,
+            Dimension::Directory,
+            Dimension::Subscription,
+            Dimension::Workspace,
+        ];
+        let when = |within| Slice {
+            from: chrono::Utc::now() - chrono::Duration::days(1),
+            to: chrono::Utc::now() + chrono::Duration::days(1),
+            person: None,
+            team: None,
+            find: None,
+            within,
+        };
+        let cut = |by| Ledger {
+            by,
+            sort: Sort::Tokens,
+            direction: Direction::Desc,
+            limit: 6,
+            offset: 0,
+        };
+
+        for outer in every {
+            // The rows as the page would draw them, to narrow to one of.
+            let (parents, _, _) = db
+                .consumption_groups(&who, &when(None), cut(outer), None)
+                .await
+                .unwrap_or_else(|e| panic!("{outer:?}: {e:#}"));
+            let parent = parents.first().expect("a ledger to narrow");
+            let (parent_key, parent_tokens) = (parent.key.clone(), parent.tokens);
+
+            for inner in every.into_iter().filter(|d| *d != outer) {
+                let narrowed = when(Some((outer, parent_key.clone())));
+                let (children, _, _) = db
+                    .consumption_groups(&who, &narrowed, cut(inner), None)
+                    .await
+                    .unwrap_or_else(|e| panic!("{outer:?} then {inner:?}: {e:#}"));
+
+                assert!(
+                    !children.is_empty(),
+                    "{outer:?} then {inner:?} came back with nothing",
+                );
+                // Narrowed, not merely grouped again: a second level that adds
+                // up to more than its parent is the filter having done nothing,
+                // which is exactly how this looked before.
+                let under: i64 = children.iter().map(|c| c.tokens).sum();
+                assert!(
+                    under <= parent_tokens,
+                    "{outer:?} then {inner:?}: {under} under a parent of {parent_tokens}",
+                );
             }
         }
     }
@@ -5805,6 +5906,19 @@ pub struct Slice {
     /// The thing that makes a thousand tasks usable: at that size finding the
     /// one you mean matters more than ranking all of them.
     pub find: Option<String>,
+    /// Only the turns belonging to one value of one dimension.
+    ///
+    /// What makes a second level possible for anything rather than only for
+    /// people. "Group by model, then by person" is the person-grouped ledger
+    /// asked again with the rows narrowed to one model — and before this there
+    /// was nowhere to say which model, so `person` was the only dimension the
+    /// slice could express and every other combination came back empty.
+    ///
+    /// The key is itself an `Option`, and that is the point rather than an
+    /// oversight: a row filed against no task is a real group with a NULL key,
+    /// and narrowing to it has to mean "the ones with no task" instead of "do
+    /// not narrow". Hence the bool beside it in SQL.
+    pub within: Option<(Dimension, Option<String>)>,
 }
 
 /// How to cut the ledger, and how much of it to hand back.
@@ -5935,6 +6049,23 @@ impl Db {
     /// of these queries without each one counting its own placeholders.
     fn consumption_where() -> String {
         Self::consumption_where_on("c")
+    }
+
+    /// Narrowed to one value of one dimension, for a second-level grouping.
+    ///
+    /// `$9` says whether to narrow at all and `$10` is the value, two
+    /// parameters rather than one because `$10 IS NULL` cannot tell "every
+    /// row" from "the rows filed against nothing". `IS NOT DISTINCT FROM`
+    /// rather than `=` for the same reason: NULL = NULL is not true, and the
+    /// group with no key is one people open.
+    fn narrowed(within: Option<Dimension>) -> String {
+        match within {
+            None => " AND NOT $9::bool AND $10::text IS NULL".into(),
+            Some(d) => {
+                let (key, _) = d.columns();
+                format!(" AND (NOT $9::bool OR {key} IS NOT DISTINCT FROM $10::text)")
+            }
+        }
     }
 
     /// The same, for a second copy of the table inside the one statement.
@@ -6105,7 +6236,13 @@ impl Db {
     /// The exception is sorting *by* a count — there the whole set has to be
     /// counted to know what the top of it is, so the column joins the grouping
     /// and only then.
-    fn ledger_sql(by: Dimension, sort: Sort, dir: Direction, tail_select: bool) -> String {
+    fn ledger_sql(
+        by: Dimension,
+        sort: Sort,
+        dir: Direction,
+        tail_select: bool,
+        within: Option<Dimension>,
+    ) -> String {
         let (key, name) = by.columns();
         let joins = Self::consumption_joins(by);
         let breadth = Self::breadth_of(by);
@@ -6135,7 +6272,7 @@ impl Db {
                         MIN(c.occurred_at) AS first_at, MAX(c.occurred_at) AS last_at\
                         {extra} \
                    FROM consumption_events c {joins} \
-                  WHERE {tail} \
+                  WHERE {tail}{narrow} \
                     AND ($6::text IS NULL \
                          OR COALESCE({name}, '') || ' ' || COALESCE({key}, '') ILIKE '%' || $6 || '%') \
                   GROUP BY 1), \
@@ -6145,6 +6282,7 @@ impl Db {
                    FROM grouped g)",
             with_ = Self::consumption_with(),
             tail = Self::consumption_where(),
+            narrow = Self::narrowed(within),
         );
 
         if tail_select {
@@ -6165,15 +6303,15 @@ impl Db {
 
     /// Everything about the rows that will be drawn, and nothing about the rest.
     ///
-    /// Keyed by `= ANY($9)` rather than a lateral per row. A correlated
+    /// Keyed by `= ANY($11)` rather than a lateral per row. A correlated
     /// `key = p.key OR (p.key IS NULL AND key IS NULL)` cannot use an index —
     /// whether the NULL branch applies is not known until the row is read — and
     /// twenty-five of those cost ten seconds on 2.06 M rows. An array
     /// comparison is one indexed scan for all of them.
     ///
-    /// `$10` says whether the page included the group with no key at all — work
+    /// `$12` says whether the page included the group with no key at all — work
     /// filed against no task — because `= ANY` can never match a NULL.
-    fn ledger_detail_sql(by: Dimension) -> String {
+    fn ledger_detail_sql(by: Dimension, within: Option<Dimension>) -> String {
         let (key, _) = by.columns();
         format!(
             "{with_} \
@@ -6184,15 +6322,16 @@ impl Db {
                     COUNT(DISTINCT c.ran_as) AS people, \
                     COUNT(DISTINCT c.task_key) AS tasks \
                FROM consumption_events c \
-              WHERE {tail} AND ({key} = ANY($9) OR ($10 AND {key} IS NULL)) \
+              WHERE {tail}{narrow} AND ({key} = ANY($11) OR ($12 AND {key} IS NULL)) \
               GROUP BY 1",
             with_ = Self::consumption_with(),
             tail = Self::consumption_where(),
+            narrow = Self::narrowed(within),
         )
     }
 
     /// The per-model split for the drawn rows, same keying as the detail.
-    fn ledger_models_sql(by: Dimension) -> String {
+    fn ledger_models_sql(by: Dimension, within: Option<Dimension>) -> String {
         let (key, _) = by.columns();
         format!(
             "{with_} \
@@ -6200,10 +6339,11 @@ impl Db {
                     SUM(c.input_tokens + c.output_tokens \
                         + c.cache_read_tokens + c.cache_write_tokens)::bigint AS tokens \
                FROM consumption_events c \
-              WHERE {tail} AND ({key} = ANY($9) OR ($10 AND {key} IS NULL)) \
+              WHERE {tail}{narrow} AND ({key} = ANY($11) OR ($12 AND {key} IS NULL)) \
               GROUP BY 1, 2 ORDER BY 3 DESC",
             with_ = Self::consumption_with(),
             tail = Self::consumption_where(),
+            narrow = Self::narrowed(within),
         )
     }
 
@@ -6253,10 +6393,15 @@ impl Db {
                     .bind(slice.find.as_deref())
                     .bind(offset)
                     .bind(limit)
+                    // Narrowing: whether to, and to what. Always bound, so
+                    // every query here still takes the same shape.
+                    .bind(slice.within.is_some())
+                    .bind(slice.within.as_ref().and_then(|(_, k)| k.clone()))
             };
         }
 
-        let page = Self::ledger_sql(by, sort, dir, false);
+        let within = slice.within.as_ref().map(|(d, _)| *d);
+        let page = Self::ledger_sql(by, sort, dir, false, within);
         let rows = bound!(&page)
             .fetch_all(&self.pool)
             .await
@@ -6291,7 +6436,7 @@ impl Db {
             let has_null = groups.iter().any(|g| g.key.is_none());
             let at = |g: &Group| g.key.clone();
 
-            let detail = Self::ledger_detail_sql(by);
+            let detail = Self::ledger_detail_sql(by, within);
             for r in bound!(&detail)
                 .bind(&keys)
                 .bind(has_null)
@@ -6309,7 +6454,7 @@ impl Db {
                 }
             }
 
-            let models = Self::ledger_models_sql(by);
+            let models = Self::ledger_models_sql(by, within);
             for r in bound!(&models)
                 .bind(&keys)
                 .bind(has_null)
@@ -6371,7 +6516,7 @@ impl Db {
 
         // Only worth asking when something was left out.
         let rest = if total > offset + limit {
-            let tail = Self::ledger_sql(by, sort, dir, true);
+            let tail = Self::ledger_sql(by, sort, dir, true, within);
             let r = bound!(&tail)
                 .fetch_one(&self.pool)
                 .await

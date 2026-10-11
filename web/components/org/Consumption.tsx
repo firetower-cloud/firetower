@@ -1433,8 +1433,7 @@ function Ledger({
             )}
             {nested && open === id && !g.children?.length && (
               <p className="bg-panel px-4 py-2.5 text-meta text-mute">
-                A second level is only cut for a grouping that can be narrowed. Group by person
-                first, then by anything.
+                Nothing to break this down by.
               </p>
             )}
           </div>
