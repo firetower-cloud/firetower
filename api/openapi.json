@@ -11736,7 +11736,8 @@
           "turns",
           "conversations",
           "workspaces",
-          "people"
+          "people",
+          "tasks"
         ],
         "properties": {
           "cacheReadTokens": {
@@ -11787,6 +11788,11 @@
           "rows": {
             "type": "integer",
             "format": "int64"
+          },
+          "tasks": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Tasks worked on, where a workspace was cut from one.\n\nZero is the ordinary answer on an installation nobody starts from a\ntracker, and it is a true one: a session with no `task_key` is not a\ntask we failed to record, it is work that was not filed against one."
           },
           "tokens": {
             "type": "integer",

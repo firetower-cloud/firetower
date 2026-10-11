@@ -2930,6 +2930,8 @@ mod tests {
         assert_eq!(totals.turns, 2);
         assert_eq!(totals.unreported_turns, 1);
         assert_eq!(totals.tokens, 990, "the gauge adds nothing to the bill");
+        // The fixture session is cut from one, so both turns are its work.
+        assert_eq!(totals.tasks, 1);
     }
 
     #[tokio::test]
@@ -5855,6 +5857,12 @@ pub struct Totals {
     pub conversations: i64,
     pub workspaces: i64,
     pub people: i64,
+    /// Tasks worked on, where a workspace was cut from one.
+    ///
+    /// Zero is the ordinary answer on an installation nobody starts from a
+    /// tracker, and it is a true one: a session with no `task_key` is not a
+    /// task we failed to record, it is work that was not filed against one.
+    pub tasks: i64,
 }
 
 /// One model's share of one bucket or one group.
@@ -5959,7 +5967,7 @@ impl Db {
                  SELECT c.session_id, c.turn_id, c.workspace_id, c.ran_as, \
                         c.input_tokens, c.output_tokens, c.cache_read_tokens, \
                         c.cache_write_tokens, c.cache_write_1h_tokens, \
-                        c.cache_write_5m_tokens, c.cost_usd, c.tokens_known \
+                        c.cache_write_5m_tokens, c.cost_usd, c.tokens_known, c.task_key \
                    FROM consumption_events c WHERE {tail}) \
              SELECT COALESCE(SUM(input_tokens), 0)::bigint       AS input_tokens, \
                     COALESCE(SUM(output_tokens), 0)::bigint      AS output_tokens, \
@@ -5975,7 +5983,8 @@ impl Db {
                         WHERE NOT tokens_known GROUP BY 1, 2) e)                                  AS unreported_turns, \
                     (SELECT count(*) FROM (SELECT session_id FROM rows GROUP BY 1) b)             AS conversations, \
                     (SELECT count(*) FROM (SELECT workspace_id FROM rows GROUP BY 1) c)           AS workspaces, \
-                    (SELECT count(*) FROM (SELECT ran_as FROM rows WHERE ran_as IS NOT NULL GROUP BY 1) d) AS people \
+                    (SELECT count(*) FROM (SELECT ran_as FROM rows WHERE ran_as IS NOT NULL GROUP BY 1) d) AS people, \
+                    (SELECT count(*) FROM (SELECT task_key FROM rows WHERE task_key IS NOT NULL GROUP BY 1) f) AS tasks \
                FROM rows",
             with_ = Self::consumption_with(),
             tail = Self::consumption_where()
@@ -6012,6 +6021,7 @@ impl Db {
             conversations: row.get("conversations"),
             workspaces: row.get("workspaces"),
             people: row.get("people"),
+            tasks: row.get("tasks"),
         })
     }
 

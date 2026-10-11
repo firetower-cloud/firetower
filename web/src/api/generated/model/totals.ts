@@ -30,6 +30,14 @@ export interface Totals {
   pricedRows: number;
   rows: number;
   /**
+     * Tasks worked on, where a workspace was cut from one.
+     *
+     * Zero is the ordinary answer on an installation nobody starts from a
+     * tracker, and it is a true one: a session with no `task_key` is not a
+     * task we failed to record, it is work that was not filed against one.
+     */
+  tasks: number;
+  /**
      * Everything processed. Not a bill: a cache read is about a tenth of an
      * input token and a one-hour write about twice one, so this tracks volume
      * and `cost_usd` tracks money.

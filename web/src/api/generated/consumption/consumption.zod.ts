@@ -87,6 +87,7 @@ export const ConsumptionResponse = zod.object({
   "people": zod.int(),
   "pricedRows": zod.int(),
   "rows": zod.int(),
+  "tasks": zod.int().describe('Tasks worked on, where a workspace was cut from one.\n\nZero is the ordinary answer on an installation nobody starts from a\ntracker, and it is a true one: a session with no `task_key` is not a\ntask we failed to record, it is work that was not filed against one.'),
   "tokens": zod.int().describe('Everything processed. Not a bill: a cache read is about a tenth of an\ninput token and a one-hour write about twice one, so this tracks volume\nand `cost_usd` tracks money.'),
   "turns": zod.int(),
   "unreportedTurns": zod.int().describe('Turns whose agent reported no token counts at all.\n\nNot a share of `turns` that happened to be cheap — these are turns we\nwere told nothing about, and everything above is a total over the rest.\nEvery ACP agent is in here today: Kimi answers a finished prompt with a\nstop reason and nothing else, and says in its own source that its engine\nhas no cost data. A page that silently left them out would report a\nsmaller fleet than the one that ran.'),

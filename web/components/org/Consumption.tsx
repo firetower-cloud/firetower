@@ -200,14 +200,14 @@ const share = (n: number, of: number) => {
   return `${Math.round(pct)}%`;
 };
 
-/** How much work a conversation took, which is what "turns" is for. */
+/** Turns, which has no column of its own: the unit, and how many each took. */
 function perConversation(t: Totals): string {
-  if (!t.conversations) return "";
+  if (!t.conversations) return `${plural(t.turns, "turn")}.`;
   const each = t.turns / t.conversations;
-  // One decimal below ten, because 1.4 and 2.3 are different sessions and
-  // "1 each" and "2 each" would be the same sentence for both.
+  // One decimal below ten, because 1.4 and 2.3 are different kinds of session
+  // and "2 each" would be the same sentence for both.
   const said = each < 10 ? (Math.round(each * 10) / 10).toString() : Math.round(each).toString();
-  return `About ${said} per conversation.`;
+  return `${plural(t.turns, "turn")}, about ${said} each.`;
 }
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -402,24 +402,32 @@ export function Consumption() {
               order={inOrder} onTip={setTip} />
 
             {/* The shape of the work, now that the tokens are all in the
-                headline. Workspaces are not among them: a workspace almost
-                always holds exactly one conversation — 16 and 16 here — so a
-                column of its own would be the one beside it again. It is said
-                in a note on the turn that it differs. */}
+                headline. Turns is not a column of its own — it is the unit
+                everything else is counted in, so it reads better as how many
+                a conversation took than as a number beside them. */}
             <div className="mt-6 flex flex-wrap border-t border-line">
               <Figure
-                label="Turns"
-                value={t ? count(t.turns) : "—"}
-                note={t ? perConversation(t) : ""}
+                label="Workspaces"
+                value={t ? count(t.workspaces) : "—"}
+                note={
+                  t && t.workspaces !== t.conversations
+                    ? `Holding ${plural(t.conversations, "conversation")}.`
+                    : "One conversation each."
+                }
+              />
+              <Figure
+                label="Tasks"
+                value={t ? count(t.tasks) : "—"}
+                note={
+                  t && t.tasks === 0
+                    ? "Nothing here was started from a tracker."
+                    : "Worked on in this period."
+                }
               />
               <Figure
                 label="Conversations"
                 value={t ? count(t.conversations) : "—"}
-                note={
-                  t && t.workspaces !== t.conversations
-                    ? `Across ${plural(t.workspaces, "workspace")}.`
-                    : "One workspace each."
-                }
+                note={t ? perConversation(t) : ""}
               />
               <Figure
                 label="People"
@@ -671,7 +679,7 @@ function ReadingSkeleton() {
       </div>
 
       <div className="mt-6 flex flex-wrap border-t border-line">
-        {[0, 1, 2].map((i) => (
+        {[0, 1, 2, 3].map((i) => (
           <div key={i} className="min-w-0 flex-1 basis-56 px-5 pb-0.5 pt-3 first:pl-0 [&+&]:border-l [&+&]:border-line">
             <Block className="h-3 w-[96px]" />
             <Block className="mt-2 h-[22px] w-[124px] rounded-sm" />
