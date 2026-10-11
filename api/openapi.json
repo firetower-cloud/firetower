@@ -737,6 +737,136 @@
         }
       }
     },
+    "/api/v1/consumption": {
+      "get": {
+        "tags": [
+          "consumption"
+        ],
+        "summary": "What was spent in a period.",
+        "operationId": "consumption",
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "description": "Inclusive.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "Exclusive, so a day boundary belongs to one bucket and not two.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "bucket",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Bucket"
+            }
+          },
+          {
+            "name": "group",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Dimension"
+            }
+          },
+          {
+            "name": "then",
+            "in": "query",
+            "description": "A second level, cut from each row of the first.\n\nEither order gives the same totals — it is one more `GROUP BY` column,\nnot a different query — which is why the interface can offer to swap\nthem.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Dimension"
+            }
+          },
+          {
+            "name": "person",
+            "in": "query",
+            "description": "Narrow to one person. `me` means whoever is asking.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "team",
+            "in": "query",
+            "description": "Narrow to whoever is in one team.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "find",
+            "in": "query",
+            "description": "Only groups whose name or key contains this.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Sort"
+            }
+          },
+          {
+            "name": "direction",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Direction"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "How many rows to draw. Capped, because a page that asks for everything\nis how the first version of this shipped 461 KB to draw nine rows.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Consumption"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/directories": {
       "get": {
         "tags": [
@@ -7534,6 +7664,32 @@
           }
         }
       },
+      "Bucket": {
+        "type": "string",
+        "description": "How wide a column on the chart is.",
+        "enum": [
+          "day",
+          "week",
+          "month"
+        ]
+      },
+      "ByModel": {
+        "type": "object",
+        "description": "One model's share of one bucket or one group.",
+        "required": [
+          "model",
+          "tokens"
+        ],
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "tokens": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
       "Capacity": {
         "type": "object",
         "description": "What a machine has, and what of it is being used.\n\nReported by the worker rather than asked of the host record, for the same\nreason [`DockerState`] is: these are facts about the machine a worker is\nrunning on, and a container, a server and a server-with-a-container arrive\nat them differently. A worker in a container reports the container's\nceiling where it has one, which is what its sessions actually get.\n\nMegabytes throughout. Bytes would be exact and would also be a `u64` of\ndigits nobody reads; the interface rounds to gigabytes anyway, and a\nmegabyte is under a pixel of any meter drawn from this.",
@@ -7997,6 +8153,26 @@
           }
         }
       },
+      "Column": {
+        "type": "object",
+        "description": "One column of the chart.",
+        "required": [
+          "start",
+          "models"
+        ],
+        "properties": {
+          "models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ByModel"
+            }
+          },
+          "start": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
       "Commit": {
         "type": "object",
         "properties": {
@@ -8112,6 +8288,49 @@
         "properties": {
           "account": {
             "type": "string"
+          }
+        }
+      },
+      "Consumption": {
+        "type": "object",
+        "description": "The whole page, in the terms the person asking may see it.",
+        "required": [
+          "totals",
+          "series",
+          "groups",
+          "groupCount"
+        ],
+        "properties": {
+          "groupCount": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How many groups there are in total, so a page can say what it is part of."
+          },
+          "groups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Group"
+            }
+          },
+          "rest": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Group",
+                "description": "Everything past this page, added together.\n\nDeliberately not called \"smaller\": once the order can be reversed, or by\nname, or by date, the rest is not smaller — it is only the rest."
+              }
+            ]
+          },
+          "series": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Column"
+            }
+          },
+          "totals": {
+            "$ref": "#/components/schemas/Totals"
           }
         }
       },
@@ -8436,6 +8655,26 @@
         "enum": [
           "Base",
           "Head"
+        ]
+      },
+      "Dimension": {
+        "type": "string",
+        "description": "Which way to cut the ledger.\n\nAn enum rather than a string from the query, because these become SQL. The\nshape of every one is the same — a key to group on and a name to draw — so\nadding the next dimension is two lines here and nothing anywhere else.",
+        "enum": [
+          "task",
+          "model",
+          "person",
+          "repository",
+          "directory",
+          "subscription",
+          "workspace"
+        ]
+      },
+      "Direction": {
+        "type": "string",
+        "enum": [
+          "asc",
+          "desc"
         ]
       },
       "Directory": {
@@ -9373,6 +9612,104 @@
           }
         }
       },
+      "Group": {
+        "type": "object",
+        "description": "One row of the ledger.",
+        "required": [
+          "models",
+          "tokens",
+          "pricedRows",
+          "rows",
+          "turns",
+          "conversations",
+          "workspaces",
+          "people",
+          "tasks"
+        ],
+        "properties": {
+          "children": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Group"
+            },
+            "description": "The second level, when one was asked for.\n\n`no_recursion` because this type contains itself: without it the schema\nbuilder follows `children` forever and `gen-openapi` dies on a stack\noverflow. The nesting really is only two deep — past that the interface\ndrills rather than expands — so the contract describing one level of\nchildren and stopping is accurate rather than a concession."
+          },
+          "conversations": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "costUsd": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "firstAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this was first and last worked on.\n\nAbsent on the folded remainder, which is not a thing that happened at a\ntime. Without these \"recently active\" cannot be offered at all."
+          },
+          "key": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What was grouped on. NULL where the dimension does not apply — a turn\nwith no task, a model with no subscription — which is a real row and\nnot an omission."
+          },
+          "lastAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ByModel"
+            }
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What to call it, where anything knows. A task nobody could read the\ntitle of has a key and no name, and the page draws that rather than\npretending."
+          },
+          "people": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "pricedRows": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "rows": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "tasks": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "tokens": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "turns": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "workspaces": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
       "HeldSecret": {
         "type": "object",
         "description": "A credential Firetower holds. Its name, and nothing else.",
@@ -9781,10 +10118,10 @@
           },
           "usedPercent": {
             "type": [
-              "integer",
+              "number",
               "null"
             ],
-            "format": "int32"
+            "format": "float"
           }
         }
       },
@@ -12204,6 +12541,17 @@
           }
         }
       },
+      "Sort": {
+        "type": "string",
+        "description": "What to put at the top.\n\nFive of these mean the same thing whatever is being grouped; `breadth` is\nthe one that changes, because the count worth ranking by depends on what a\nrow is — a task sprawling across worktrees, a model reaching people.",
+        "enum": [
+          "tokens",
+          "cost",
+          "recent",
+          "breadth",
+          "name"
+        ]
+      },
       "SshKey": {
         "oneOf": [
           {
@@ -12609,6 +12957,101 @@
           "sessions",
           "conversation"
         ]
+      },
+      "Totals": {
+        "type": "object",
+        "description": "The totals a period adds up to.",
+        "required": [
+          "inputTokens",
+          "outputTokens",
+          "cacheReadTokens",
+          "cacheWriteTokens",
+          "cacheWrite1hTokens",
+          "cacheWrite5mTokens",
+          "tokens",
+          "pricedRows",
+          "rows",
+          "unreportedTurns",
+          "turns",
+          "conversations",
+          "workspaces",
+          "people",
+          "tasks"
+        ],
+        "properties": {
+          "cacheReadTokens": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "cacheWrite1hTokens": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The expensive half of the write, where the agent said which it was."
+          },
+          "cacheWrite5mTokens": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "cacheWriteTokens": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "conversations": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "costUsd": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "The sum of what the agents reported, over the rows that reported any.\n\nPartial by construction: Codex reports no price. `pricedRows` against\n`rows` is how far to trust it, and the interface says so out loud."
+          },
+          "inputTokens": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "outputTokens": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "people": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "pricedRows": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "rows": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "tasks": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Tasks worked on, where a workspace was cut from one.\n\nZero is the ordinary answer on an installation nobody starts from a\ntracker, and it is a true one: a session with no `task_key` is not a\ntask we failed to record, it is work that was not filed against one."
+          },
+          "tokens": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Everything processed. Not a bill: a cache read is about a tenth of an\ninput token and a one-hour write about twice one, so this tracks volume\nand `cost_usd` tracks money."
+          },
+          "turns": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "unreportedTurns": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Turns whose agent reported no token counts at all.\n\nNot a share of `turns` that happened to be cheap — these are turns we\nwere told nothing about, and everything above is a total over the rest.\nEvery ACP agent is in here today: Kimi answers a finished prompt with a\nstop reason and nothing else, and says in its own source that its engine\nhas no cost data. A page that silently left them out would report a\nsmaller fleet than the one that ran."
+          },
+          "workspaces": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
       },
       "TrackerKey": {
         "type": "object",
@@ -13060,12 +13503,11 @@
               },
               "usedPercent": {
                 "type": [
-                  "integer",
+                  "number",
                   "null"
                 ],
-                "format": "int32",
-                "description": "How much of the window is gone, when the agent says.\n\nClaude Code does not, which is why a bar was not worth drawing.\nCodex does, and a window is a far more useful thing to see as a\nproportion than as a word.",
-                "minimum": 0
+                "format": "float",
+                "description": "How much of the window is gone, when the agent says.\n\nClaude Code does not, which is why a bar was not worth drawing.\nCodex does, and a window is a far more useful thing to see as a\nproportion than as a word."
               },
               "window": {
                 "type": "string",
@@ -13509,6 +13951,23 @@
             ],
             "format": "int64",
             "description": "Absent when the agent does not say.",
+            "minimum": 0
+          },
+          "cacheWrite1hTokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The two kinds of cache write, which are not the same price.\n\nA one-hour entry costs roughly twice what an input token does and a\nfive-minute one roughly a quarter more, so the split is most of what\ndecides whether a turn was expensive. The agent reports it per *turn*\nand not per model, so anything stored at a finer grain than that is an\napportionment rather than a measurement.",
+            "minimum": 0
+          },
+          "cacheWrite5mTokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
             "minimum": 0
           },
           "cacheWriteTokens": {

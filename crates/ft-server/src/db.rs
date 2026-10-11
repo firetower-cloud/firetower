@@ -4,7 +4,7 @@
 //! sessions and events are a projection of what workers reported, rebuildable by
 //! reconnecting and replaying from sequence zero.
 
-use crate::access::{filed_where, Level};
+use crate::access::{filed_where, filed_within, reachable, Level};
 use anyhow::{Context, Result};
 use ft_core::{
     path::ResourcePath, session::Checkout, Agent, AgentMode, AgentPresence, Compute, Event,
@@ -430,6 +430,171 @@ impl Db {
     ///
     /// Oldest first, so a backlog is worked through in the order it built up
     /// rather than starving on whatever sorts lowest.
+    /// Write down what a finished turn cost.
+    ///
+    /// One row per model the turn used, because a turn is rarely one model:
+    /// something small names things and summarises alongside the one doing the
+    /// work, and it is on the bill. Where the agent gives no breakdown — Codex
+    /// reports one set of totals and nothing else — a single row is written
+    /// against whatever the session was last told to run, falling back to the
+    /// agent's own name rather than inventing a model.
+    ///
+    /// Everything the row needs is copied in here, from the session that is
+    /// still alive at this moment. Minutes later it may not be: `reclaim.rs`
+    /// takes a workspace within the minute of its last session ending, and
+    /// takes the sessions with it. That is why this is one statement — if the
+    /// session has already gone, it writes nothing and says so, rather than
+    /// failing.
+    ///
+    /// `ON CONFLICT DO NOTHING` against `(session_id, turn_id, model)`: a line
+    /// replayed after a reconnect reports a turn that was already billed, and
+    /// billing it twice would be worse than missing it.
+    pub async fn record_consumption(
+        &self,
+        session_id: &SessionId,
+        turn_id: &str,
+        usage: &ft_core::turn::Usage,
+        fallback_model: Option<&str>,
+    ) -> Result<u64> {
+        use ft_core::turn::ModelUsage;
+
+        // The agent's breakdown where there is one, otherwise the whole turn
+        // as a single line against the session's model.
+        let single;
+        let rows: &[ModelUsage] = if usage.models.is_empty() {
+            single = [ModelUsage {
+                model: String::new(), // filled by COALESCE below
+                input_tokens: usage.input_tokens,
+                output_tokens: usage.output_tokens,
+                cache_read_tokens: usage.cache_read_tokens.unwrap_or_default(),
+                cache_write_tokens: usage.cache_write_tokens.unwrap_or_default(),
+                context_window: usage.context_window,
+                cost_usd: usage.cost_usd,
+            }];
+            &single
+        } else {
+            &usage.models
+        };
+
+        // Whether the agent said anything at all about tokens. The columns are
+        // `not null default 0` so a turn that reported nothing lands as zeros,
+        // and a zero is a claim that it was free. This is the row saying which
+        // it is — see the migration for why it is a boolean and not a NULL.
+        let known = rows.iter().any(|m| {
+            m.input_tokens + m.output_tokens + m.cache_read_tokens + m.cache_write_tokens > 0
+        });
+
+        // The TTL split is reported per turn and the rows are per model, so
+        // each model takes the share of it that matches its share of the
+        // write. Exact when one model did all the writing, which is the
+        // ordinary case; a stated apportionment when several did.
+        let wrote: u64 = rows.iter().map(|m| m.cache_write_tokens).sum();
+        let share = |of: Option<u64>, mine: u64| -> Option<i64> {
+            let total = of?;
+            if wrote == 0 {
+                return Some(0);
+            }
+            Some((total as u128 * mine as u128 / wrote as u128) as i64)
+        };
+
+        let at = chrono::Utc::now();
+        let mut written = 0;
+        for row in rows {
+            // An empty name means the breakdown was absent, so the model is
+            // whatever the session is set to — and `s.agent` when even that is
+            // unknown, which is a true statement rather than a guess.
+            let named = (!row.model.is_empty())
+                .then_some(row.model.as_str())
+                .or(fallback_model);
+
+            let done = sqlx::query(
+                "INSERT INTO consumption_events (
+                     org_id, occurred_at, path, extra_perms, ran_as,
+                     workspace_id, workspace_name, session_id, session_title, turn_id,
+                     task_key, task_provider, repo_remote, branch,
+                     agent, account_id, account_name, model,
+                     input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+                     cache_write_1h_tokens, cache_write_5m_tokens,
+                     thinking_tokens, cost_usd, duration_ms, tokens_known)
+                 SELECT h.org_id, $2, w.path, w.extra_perms, s.user_id,
+                        w.id, w.name, s.id, s.title, $3,
+                        w.task_key, w.task_provider, w.repo, w.branch,
+                        s.agent, s.agent_account_id, a.name, COALESCE($4, s.agent),
+                        $5, $6, $7, $8,
+                        $9, $10,
+                        $11, $12::float8::numeric, $13, $14
+                   FROM sessions s
+                   JOIN workspaces w ON w.id = s.workspace_id
+                   JOIN hosts h ON h.id = w.host_id
+                   LEFT JOIN agent_accounts a ON a.id = s.agent_account_id
+                  WHERE s.id = $1
+                 ON CONFLICT DO NOTHING",
+            )
+            .bind(session_id.as_str())
+            .bind(at)
+            .bind(turn_id)
+            .bind(named)
+            .bind(row.input_tokens as i64)
+            .bind(row.output_tokens as i64)
+            .bind(row.cache_read_tokens as i64)
+            .bind(row.cache_write_tokens as i64)
+            .bind(share(usage.cache_write_1h_tokens, row.cache_write_tokens))
+            .bind(share(usage.cache_write_5m_tokens, row.cache_write_tokens))
+            .bind(usage.thinking_tokens.map(|t| t as i64))
+            .bind(row.cost_usd)
+            .bind(usage.duration_ms.map(|d| d as i64))
+            .bind(known)
+            .execute(&self.pool)
+            .await
+            .context("recording what a turn cost")?;
+            written += done.rows_affected();
+        }
+        Ok(written)
+    }
+
+    /// Keep what a tracker calls a task, the one time we manage to read it.
+    ///
+    /// The title is nobody's but the tracker's, and `workspaces` deliberately
+    /// stores only the key and the URL for that reason. But a key on its own is
+    /// a poor row on a page about spend, and the day somebody asks is often
+    /// long after the token was revoked or the issue deleted. So every view
+    /// that does succeed in reading one leaves it here, where it outlives all
+    /// of them.
+    ///
+    /// Overwrites, rather than keeping the first: an issue that was renamed is
+    /// best shown under the name it has now.
+    /// Named by the session that was looking at it, because that is who knows
+    /// which organisation is asking. A session already gone writes nothing.
+    pub async fn remember_task(
+        &self,
+        session_id: &SessionId,
+        task_key: &str,
+        url: Option<&str>,
+        title: Option<&str>,
+    ) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO consumption_tasks (org_id, task_key, url, title, title_at)
+             SELECT h.org_id, $2, $3, $4,
+                    CASE WHEN $4 IS NULL THEN NULL ELSE now() END
+               FROM sessions s
+               JOIN workspaces w ON w.id = s.workspace_id
+               JOIN hosts h ON h.id = w.host_id
+              WHERE s.id = $1
+             ON CONFLICT (org_id, task_key) DO UPDATE
+                SET url      = COALESCE(EXCLUDED.url, consumption_tasks.url),
+                    title    = COALESCE(EXCLUDED.title, consumption_tasks.title),
+                    title_at = COALESCE(EXCLUDED.title_at, consumption_tasks.title_at)",
+        )
+        .bind(session_id.as_str())
+        .bind(task_key)
+        .bind(url)
+        .bind(title)
+        .execute(&self.pool)
+        .await
+        .context("remembering what a task is called")?;
+        Ok(())
+    }
+
     pub async fn workspaces_to_purge(&self, limit: i64) -> Result<Vec<WorkspaceId>> {
         let rows = sqlx::query_scalar::<_, String>(
             "SELECT w.id FROM workspaces w
@@ -2499,6 +2664,567 @@ mod tests {
     /// to — the same account the first boot creates.
     async fn db_with_user() -> (Db, String) {
         Db::open_for_test_owned().await.unwrap()
+    }
+
+    /// A turn's bill, written down and read back.
+    ///
+    /// The half of the write path with a database in it. Everything on the
+    /// usage page until now was seeded straight into the table, which proves
+    /// the reading and nothing about the writing — so this drives
+    /// `record_consumption` the way `fleet` does and checks what landed.
+    ///
+    /// Four things it is here to hold:
+    ///   * the names are copied in, so the row survives the workspace;
+    ///   * a turn fans out to one row per model;
+    ///   * an agent that reports no breakdown still bills, against whatever it
+    ///     was last told to run;
+    ///   * the same turn arriving twice does not bill twice.
+    async fn a_session(db: &Db, who: &str) -> String {
+        let org = db.org().await.unwrap();
+        sqlx::query(
+            "INSERT INTO hosts (id, org_id, name, state, compute, path, created_by)
+             VALUES ('h_w', $1, 'mac', 'Online', '{}'::jsonb, 'u.admin'::ltree, $2)",
+        )
+        .bind(&org)
+        .bind(who)
+        .execute(db.pool())
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO workspaces (id, created_by, host_id, name, path, repo, branch,
+                                     task_key, task_provider, task_url)
+             VALUES ('w_w', $1, 'h_w', 'agent/usage', 'u.admin'::ltree, 'acme/web', 'main',
+                     'github:acme/web#5138', 'github', 'https://github.com/acme/web/issues/5138')",
+        )
+        .bind(who)
+        .execute(db.pool())
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO sessions (id, user_id, workspace_id, title, prompt, agent, status)
+             VALUES ('s_w', $1, 'w_w', 'Usage tracking', 'do it', 'claude', 'Working')",
+        )
+        .bind(who)
+        .execute(db.pool())
+        .await
+        .unwrap();
+        "s_w".to_string()
+    }
+
+    #[tokio::test]
+    async fn records_what_a_turn_cost() {
+        use ft_core::turn::{ModelUsage, Usage};
+        let (db, who) = db_with_user().await;
+        let session = SessionId::from_stored(a_session(&db, &who).await);
+
+        let model = |name: &str, input: u64, cost: f64| ModelUsage {
+            model: name.to_string(),
+            input_tokens: input,
+            output_tokens: input / 10,
+            cache_read_tokens: input * 2,
+            cache_write_tokens: 0,
+            context_window: None,
+            cost_usd: Some(cost),
+        };
+        let usage = Usage {
+            input_tokens: 1_100,
+            output_tokens: 110,
+            cost_usd: Some(0.061),
+            duration_ms: Some(4_200),
+            models: vec![
+                model("claude-sonnet-5", 1_000, 0.06),
+                model("claude-haiku-4-5", 100, 0.001),
+            ],
+            ..Default::default()
+        };
+
+        let wrote = db
+            .record_consumption(&session, "turn_1", &usage, None)
+            .await
+            .unwrap();
+        assert_eq!(wrote, 2, "one row per model that ran");
+
+        let rows = sqlx::query(
+            "SELECT model, input_tokens, cache_read_tokens, cost_usd::float8 AS cost,
+                    workspace_name, session_title, task_key, task_provider, repo_remote,
+                    branch, agent, ran_as, path::text AS path, duration_ms
+               FROM consumption_events WHERE session_id = 's_w' ORDER BY model",
+        )
+        .fetch_all(db.pool())
+        .await
+        .unwrap();
+        assert_eq!(rows.len(), 2);
+
+        let haiku = &rows[0];
+        assert_eq!(haiku.get::<String, _>("model"), "claude-haiku-4-5");
+        assert_eq!(haiku.get::<i64, _>("input_tokens"), 100);
+        assert_eq!(haiku.get::<i64, _>("cache_read_tokens"), 200);
+
+        // Every name copied in, because in a minute the workspace may be gone.
+        assert_eq!(
+            haiku.get::<Option<String>, _>("workspace_name").as_deref(),
+            Some("agent/usage")
+        );
+        assert_eq!(
+            haiku.get::<Option<String>, _>("session_title").as_deref(),
+            Some("Usage tracking")
+        );
+        assert_eq!(
+            haiku.get::<Option<String>, _>("task_key").as_deref(),
+            Some("github:acme/web#5138")
+        );
+        assert_eq!(
+            haiku.get::<Option<String>, _>("task_provider").as_deref(),
+            Some("github")
+        );
+        assert_eq!(
+            haiku.get::<Option<String>, _>("repo_remote").as_deref(),
+            Some("acme/web")
+        );
+        assert_eq!(haiku.get::<String, _>("path"), "u.admin");
+        assert_eq!(
+            haiku.get::<Option<String>, _>("ran_as").as_deref(),
+            Some(who.as_str())
+        );
+        // The turn's duration, not the model's share of it.
+        assert_eq!(haiku.get::<Option<i64>, _>("duration_ms"), Some(4_200));
+
+        // The same turn again: a line replayed after a reconnect must not bill
+        // a second time.
+        let again = db
+            .record_consumption(&session, "turn_1", &usage, None)
+            .await
+            .unwrap();
+        assert_eq!(again, 0, "a replayed turn is already paid for");
+        let total: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM consumption_events WHERE session_id = 's_w'")
+                .fetch_one(db.pool())
+                .await
+                .unwrap();
+        assert_eq!(total, 2);
+    }
+
+    #[tokio::test]
+    async fn the_two_kinds_of_cache_write_follow_who_wrote() {
+        use ft_core::turn::{ModelUsage, Usage};
+        let (db, who) = db_with_user().await;
+        let session = SessionId::from_stored(a_session(&db, &who).await);
+
+        let wrote_this = |name: &str, write: u64| ModelUsage {
+            model: name.to_string(),
+            input_tokens: 10,
+            output_tokens: 1,
+            cache_read_tokens: 0,
+            cache_write_tokens: write,
+            context_window: None,
+            cost_usd: None,
+        };
+        // The split is stated once for the turn — 4,000 written, four fifths of
+        // it for an hour — while the rows are per model. Three quarters of the
+        // writing was sonnet's, so three quarters of each kind is sonnet's.
+        let usage = Usage {
+            cache_write_tokens: Some(4_000),
+            cache_write_1h_tokens: Some(3_200),
+            cache_write_5m_tokens: Some(800),
+            models: vec![
+                wrote_this("claude-sonnet-5", 3_000),
+                wrote_this("claude-haiku-4-5", 1_000),
+            ],
+            ..Default::default()
+        };
+        db.record_consumption(&session, "turn_ttl", &usage, None)
+            .await
+            .unwrap();
+
+        let rows: Vec<(String, i64, Option<i64>, Option<i64>)> = sqlx::query_as(
+            "SELECT model, cache_write_tokens, cache_write_1h_tokens, cache_write_5m_tokens
+               FROM consumption_events WHERE turn_id = 'turn_ttl' ORDER BY model",
+        )
+        .fetch_all(db.pool())
+        .await
+        .unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                ("claude-haiku-4-5".to_string(), 1_000, Some(800), Some(200)),
+                ("claude-sonnet-5".to_string(), 3_000, Some(2_400), Some(600)),
+            ],
+        );
+        // Whatever it is apportioned to, the turn's own total survives: a sum
+        // over the rows is still the figure the agent reported.
+        let (hour, minutes): (i64, i64) = sqlx::query_as(
+            "SELECT SUM(cache_write_1h_tokens)::bigint, SUM(cache_write_5m_tokens)::bigint
+               FROM consumption_events WHERE turn_id = 'turn_ttl'",
+        )
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+        assert_eq!((hour, minutes), (3_200, 800));
+
+        // Codex says nothing about either kind, and NULL says that where a zero
+        // would claim it wrote nothing for an hour.
+        let silent = Usage {
+            input_tokens: 10,
+            output_tokens: 1,
+            ..Default::default()
+        };
+        db.record_consumption(&session, "turn_mute", &silent, Some("gpt-5-codex"))
+            .await
+            .unwrap();
+        let said: (Option<i64>, Option<i64>) = sqlx::query_as(
+            "SELECT cache_write_1h_tokens, cache_write_5m_tokens
+               FROM consumption_events WHERE turn_id = 'turn_mute'",
+        )
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+        assert_eq!(said, (None, None));
+    }
+
+    /// A turn nobody told us the cost of is recorded as exactly that.
+    ///
+    /// Every ACP agent today reports how full its context is and nothing about
+    /// what it spent — Kimi answers a finished prompt with a stop reason alone
+    /// and says in its own source that its engine has no cost data. Dropping
+    /// those turns made the sessions invisible rather than unknown: one ran,
+    /// finished, was reclaimed, and the page showed no trace of it.
+    ///
+    /// So the row is written and the zeros in it are disowned by
+    /// `tokens_known`. A total is unaffected either way — adding zero changes
+    /// no sum — and what is gained is that the page can say how much of the
+    /// period it cannot account for.
+    #[tokio::test]
+    async fn a_turn_whose_agent_reported_no_tokens_is_recorded_as_unknown() {
+        use ft_core::turn::Usage;
+        let (db, who) = db_with_user().await;
+        let session = SessionId::from_stored(a_session(&db, &who).await);
+
+        // What an ACP turn hands back: how full the window is, and nothing else.
+        let gauge = Usage {
+            context_used: Some(20_237),
+            context_window: Some(1_048_576),
+            ..Default::default()
+        };
+        let wrote = db
+            .record_consumption(
+                &session,
+                "turn_acp",
+                &gauge,
+                Some("kimi-code/kimi-for-coding"),
+            )
+            .await
+            .unwrap();
+        assert_eq!(wrote, 1, "a turn that happened is a turn that is recorded");
+
+        let (model, known, tokens): (String, bool, i64) = sqlx::query_as(
+            "SELECT model, tokens_known, input_tokens + output_tokens
+                  + cache_read_tokens + cache_write_tokens
+               FROM consumption_events WHERE turn_id = 'turn_acp'",
+        )
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+        // Named for what ran, not for the agent that ran it.
+        assert_eq!(model, "kimi-code/kimi-for-coding");
+        assert!(!known, "the agent said nothing about tokens");
+        assert_eq!(tokens, 0, "and the zeros are placeholders, which is why");
+
+        // A turn that did report is not tarred with it.
+        let real = Usage {
+            input_tokens: 900,
+            output_tokens: 90,
+            ..Default::default()
+        };
+        db.record_consumption(&session, "turn_real", &real, Some("gpt-5-codex"))
+            .await
+            .unwrap();
+        let known: bool = sqlx::query_scalar(
+            "SELECT tokens_known FROM consumption_events WHERE turn_id = 'turn_real'",
+        )
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+        assert!(known);
+
+        // And the period says how much of itself it cannot speak for.
+        let totals = db
+            .consumption_totals(
+                who.as_str(),
+                &Slice {
+                    from: chrono::Utc::now() - chrono::Duration::hours(1),
+                    to: chrono::Utc::now() + chrono::Duration::hours(1),
+                    person: None,
+                    team: None,
+                    find: None,
+                    within: None,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(totals.turns, 2);
+        assert_eq!(totals.unreported_turns, 1);
+        assert_eq!(totals.tokens, 990, "the gauge adds nothing to the bill");
+        // The fixture session is cut from one, so both turns are its work.
+        assert_eq!(totals.tasks, 1);
+    }
+
+    #[tokio::test]
+    async fn an_agent_that_reports_no_breakdown_still_bills() {
+        use ft_core::turn::Usage;
+        let (db, who) = db_with_user().await;
+        let session = SessionId::from_stored(a_session(&db, &who).await);
+
+        // Codex reports one set of totals and no `modelUsage` at all, so the
+        // only statement of what ran is what the session was last told to use.
+        let usage = Usage {
+            input_tokens: 900,
+            output_tokens: 90,
+            cost_usd: None,
+            ..Default::default()
+        };
+        let wrote = db
+            .record_consumption(&session, "turn_c", &usage, Some("gpt-5-codex"))
+            .await
+            .unwrap();
+        assert_eq!(wrote, 1, "no breakdown is one row, not none");
+
+        let (model, cost): (String, Option<f64>) = sqlx::query_as(
+            "SELECT model, cost_usd::float8 FROM consumption_events WHERE turn_id = 'turn_c'",
+        )
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+        assert_eq!(model, "gpt-5-codex");
+        // NULL, not zero. Codex reports no price and a zero would read as free.
+        assert_eq!(cost, None);
+
+        // And with nothing known at all, the agent's own name is a true
+        // statement where a guessed model would not be.
+        db.record_consumption(&session, "turn_d", &usage, None)
+            .await
+            .unwrap();
+        let fell_back: String =
+            sqlx::query_scalar("SELECT model FROM consumption_events WHERE turn_id = 'turn_d'")
+                .fetch_one(db.pool())
+                .await
+                .unwrap();
+        assert_eq!(fell_back, "claude", "the agent, since the model is unknown");
+    }
+
+    #[tokio::test]
+    async fn a_turn_whose_session_is_already_gone_writes_nothing() {
+        use ft_core::turn::Usage;
+        let (db, who) = db_with_user().await;
+        let session = SessionId::from_stored(a_session(&db, &who).await);
+        sqlx::query("DELETE FROM workspaces WHERE id = 'w_w'")
+            .execute(db.pool())
+            .await
+            .unwrap();
+
+        // `reclaim.rs` takes a workspace within the minute of its last session
+        // ending, and the last turn can land after that. It is one statement
+        // against the session, so this writes nothing and says so rather than
+        // failing — the caller logs it instead of tearing down the line reader.
+        let wrote = db
+            .record_consumption(
+                &session,
+                "turn_late",
+                &Usage::default(),
+                Some("claude-opus-5"),
+            )
+            .await
+            .unwrap();
+        assert_eq!(wrote, 0);
+    }
+
+    /// Every way of ordering the ledger returns the rows it was asked for.    /// Every way of ordering the ledger returns the rows it was asked for.
+    ///
+    /// Cheap to write and worth more than it looks. An `ORDER BY` naming a
+    /// column the grouping does not select is a query that compiles, type
+    /// checks, passes review and then fails at run time — and only for the one
+    /// option nobody clicked. That is exactly how "costliest turns" shipped
+    /// returning an empty page while the other five were fine.
+    ///
+    /// So: every dimension, every sort, both directions. 108 queries against
+    /// four rows, which is seconds, and it fails loudly the next time a sort
+    /// is added that needs something the grouping does not have.
+    #[tokio::test]
+    async fn every_sort_returns_rows() {
+        let (db, who) = db_with_user().await;
+        let org = db.org().await.unwrap();
+
+        for n in 0..4 {
+            sqlx::query(
+                "INSERT INTO consumption_events (
+                     org_id, occurred_at, path, ran_as, workspace_id, workspace_name,
+                     session_id, session_title, turn_id, task_key, task_provider,
+                     repo_remote, agent, account_id, account_name, model,
+                     input_tokens, output_tokens, cost_usd)
+                 VALUES ($1, now() - ($2 || ' hours')::interval, 'u.admin'::ltree, $3,
+                         'w' || $2, 'agent/thing' || $2, 's' || $2, 'Thing ' || $2,
+                         't' || $2, 'github:acme/web#' || $2, 'github', 'acme/web',
+                         'claude', 'acc', 'An account', $4, 1000, 100, 0.5)",
+            )
+            .bind(&org)
+            .bind(n.to_string())
+            .bind(&who)
+            .bind(if n % 2 == 0 {
+                "claude-opus-5"
+            } else {
+                "gpt-5-codex"
+            })
+            .execute(db.pool())
+            .await
+            .unwrap();
+        }
+
+        let slice = Slice {
+            from: chrono::Utc::now() - chrono::Duration::days(1),
+            to: chrono::Utc::now() + chrono::Duration::days(1),
+            person: None,
+            team: None,
+            find: None,
+            within: None,
+        };
+
+        for by in [
+            Dimension::Task,
+            Dimension::Model,
+            Dimension::Person,
+            Dimension::Repository,
+            Dimension::Directory,
+            Dimension::Subscription,
+            Dimension::Workspace,
+        ] {
+            for sort in [Sort::Tokens, Sort::Recent, Sort::Breadth, Sort::Name] {
+                for dir in [Direction::Desc, Direction::Asc] {
+                    let cut = Ledger {
+                        by,
+                        sort,
+                        direction: dir,
+                        limit: 25,
+                        offset: 0,
+                    };
+                    let (groups, _, total) = db
+                        .consumption_groups(&who, &slice, cut, None)
+                        .await
+                        .unwrap_or_else(|e| panic!("{by:?} by {sort:?} {dir:?}: {e:#}"));
+                    assert!(
+                        !groups.is_empty() && total > 0,
+                        "{by:?} sorted by {sort:?} {dir:?} came back empty"
+                    );
+                    // The detail queries run off the page's keys, so an empty
+                    // breakdown means the keying is wrong rather than the sort.
+                    assert!(
+                        groups.iter().any(|g| !g.models.is_empty()),
+                        "{by:?} by {sort:?} {dir:?}: no row carried a model split"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Every second-level grouping, not just the one that used to work.
+    ///
+    /// `then by` was built for person and nothing else: narrowing meant
+    /// setting `Slice::person`, so "by model, then by person" had nowhere to
+    /// say which model and came back with no children at all. Six of the seven
+    /// groupings silently drew an explanation where the data should have been.
+    ///
+    /// This is the same shape of guard as `every_sort_returns_rows` above, and
+    /// for the same reason: the failure is a SQL that only breaks for some
+    /// combinations, at run time, where nothing else looks.
+    #[tokio::test]
+    async fn every_second_level_narrows_to_its_parent() {
+        let (db, who) = db_with_user().await;
+        let org = db.org().await.unwrap();
+
+        // Two of everything that can vary, so a second level has something to
+        // be a subset of. One person throughout — a second principal is more
+        // setup than the assertions need, and `person` as an inner dimension
+        // returning one child still proves the narrowing ran.
+        for n in 0..8i32 {
+            sqlx::query(
+                "INSERT INTO consumption_events (
+                     org_id, occurred_at, path, ran_as, workspace_id, workspace_name,
+                     session_id, session_title, turn_id, task_key, task_provider,
+                     repo_remote, agent, account_id, account_name, model,
+                     input_tokens, output_tokens, cost_usd)
+                 VALUES ($1, now() - ($2::text || ' minutes')::interval, 'u.admin'::ltree, $3,
+                         'w' || ($2 % 2), 'agent/thing' || ($2 % 2),
+                         's' || ($2 % 2), 'Thing', 't' || $2::text,
+                         'github:acme/web#' || ($2 % 2), 'github',
+                         'acme/repo' || ($2 % 2), 'claude',
+                         'acc' || ($2 % 2), 'Account', $4, 1000, 100, 0.5)",
+            )
+            .bind(&org)
+            .bind(n)
+            .bind(who.as_str())
+            .bind(if n % 2 == 0 {
+                "claude-opus-5"
+            } else {
+                "claude-haiku-4-5"
+            })
+            .execute(db.pool())
+            .await
+            .unwrap();
+        }
+
+        let every = [
+            Dimension::Task,
+            Dimension::Model,
+            Dimension::Person,
+            Dimension::Repository,
+            Dimension::Directory,
+            Dimension::Subscription,
+            Dimension::Workspace,
+        ];
+        let when = |within| Slice {
+            from: chrono::Utc::now() - chrono::Duration::days(1),
+            to: chrono::Utc::now() + chrono::Duration::days(1),
+            person: None,
+            team: None,
+            find: None,
+            within,
+        };
+        let cut = |by| Ledger {
+            by,
+            sort: Sort::Tokens,
+            direction: Direction::Desc,
+            limit: 6,
+            offset: 0,
+        };
+
+        for outer in every {
+            // The rows as the page would draw them, to narrow to one of.
+            let (parents, _, _) = db
+                .consumption_groups(&who, &when(None), cut(outer), None)
+                .await
+                .unwrap_or_else(|e| panic!("{outer:?}: {e:#}"));
+            let parent = parents.first().expect("a ledger to narrow");
+            let (parent_key, parent_tokens) = (parent.key.clone(), parent.tokens);
+
+            for inner in every.into_iter().filter(|d| *d != outer) {
+                let narrowed = when(Some((outer, parent_key.clone())));
+                let (children, _, _) = db
+                    .consumption_groups(&who, &narrowed, cut(inner), None)
+                    .await
+                    .unwrap_or_else(|e| panic!("{outer:?} then {inner:?}: {e:#}"));
+
+                assert!(
+                    !children.is_empty(),
+                    "{outer:?} then {inner:?} came back with nothing",
+                );
+                // Narrowed, not merely grouped again: a second level that adds
+                // up to more than its parent is the filter having done nothing,
+                // which is exactly how this looked before.
+                let under: i64 = children.iter().map(|c| c.tokens).sum();
+                assert!(
+                    under <= parent_tokens,
+                    "{outer:?} then {inner:?}: {under} under a parent of {parent_tokens}",
+                );
+            }
+        }
     }
 
     /// Move a session's status the way production does.
@@ -5098,5 +5824,794 @@ mod tests {
 
         assert_eq!(hosts.len(), 1, "the readable host is still there");
         assert_eq!(hosts[0].id, keep.id);
+    }
+}
+
+// ── Consumption, read back ──────────────────────────────────────────────
+//
+// Every read goes through `filed_where`, the same predicate as hosts,
+// workspaces and secrets. That is the whole defence described in `access.rs`:
+// one function, and `grep` finds every caller. A page about money is exactly
+// the kind of new reader that would otherwise quietly return everybody's rows.
+
+/// Which way to cut the ledger.
+///
+/// An enum rather than a string from the query, because these become SQL. The
+/// shape of every one is the same — a key to group on and a name to draw — so
+/// adding the next dimension is two lines here and nothing anywhere else.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize, utoipa::ToSchema,
+)]
+#[serde(rename_all = "camelCase")]
+pub enum Dimension {
+    Task,
+    Model,
+    Person,
+    Repository,
+    Directory,
+    Subscription,
+    Workspace,
+}
+
+impl Dimension {
+    /// `(key, name)` as SQL. The key identifies the row; the name is what to
+    /// draw, and is NULL when nothing ever told us one.
+    fn columns(self) -> (&'static str, &'static str) {
+        match self {
+            Self::Task => ("c.task_key", "t.title"),
+            Self::Model => ("c.model", "c.model"),
+            Self::Person => ("c.ran_as", "p.name"),
+            Self::Repository => ("c.repo_remote", "c.repo_remote"),
+            Self::Directory => ("c.path::text", "c.path::text"),
+            Self::Subscription => ("c.account_id", "c.account_name"),
+            Self::Workspace => ("c.workspace_id", "c.workspace_name"),
+        }
+    }
+}
+
+/// What to put at the top.
+///
+/// Five of these mean the same thing whatever is being grouped; `breadth` is
+/// the one that changes, because the count worth ranking by depends on what a
+/// row is — a task sprawling across worktrees, a model reaching people.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize, utoipa::ToSchema,
+)]
+#[serde(rename_all = "camelCase")]
+pub enum Sort {
+    Tokens,
+    /// What the agent said it cost. Back, because the token sum turned out not
+    /// to rank by money at all — a turn with twice the tokens of another came
+    /// to 18% more.
+    Cost,
+    /// When something was last worked on.
+    Recent,
+    /// Whichever count means something for this grouping.
+    Breadth,
+    Name,
+}
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize, utoipa::ToSchema,
+)]
+#[serde(rename_all = "camelCase")]
+pub enum Direction {
+    Asc,
+    Desc,
+}
+
+impl Sort {
+    /// The `ORDER BY`, against the aliases the grouping query selects.
+    ///
+    /// Cost puts NULLs last in **both** directions on purpose. Codex reports no
+    /// price, so ascending by cost would otherwise rank "we do not know" as
+    /// cheapest — which is not a smaller number, it is no number.
+    fn order(self, dir: Direction, breadth: &str) -> String {
+        let d = match dir {
+            Direction::Asc => "ASC",
+            Direction::Desc => "DESC",
+        };
+        match self {
+            Self::Tokens => format!("tokens {d}"),
+            // NULLs last either way: Codex reports no price, and ascending
+            // would otherwise rank "we do not know" as the cheapest.
+            Self::Cost => format!("cost_usd {d} NULLS LAST"),
+            Self::Recent => format!("last_at {d}"),
+            Self::Breadth => format!("{breadth} {d}"),
+            // Groups with nothing to call them sort last either way rather than
+            // forming a block of blanks at the top.
+            Self::Name => format!("name {d} NULLS LAST"),
+        }
+    }
+}
+
+/// How wide a column on the chart is.
+#[derive(Debug, Clone, Copy, serde::Deserialize, serde::Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum Bucket {
+    Day,
+    Week,
+    Month,
+}
+
+impl Bucket {
+    fn unit(self) -> &'static str {
+        match self {
+            Self::Day => "day",
+            Self::Week => "week",
+            Self::Month => "month",
+        }
+    }
+}
+
+/// What a request asked for, before access is applied to it.
+pub struct Slice {
+    pub from: chrono::DateTime<chrono::Utc>,
+    pub to: chrono::DateTime<chrono::Utc>,
+    /// Only this person's turns.
+    pub person: Option<String>,
+    /// Only the turns of whoever is in this team.
+    pub team: Option<String>,
+    /// Only groups whose name or key contains this.
+    ///
+    /// The thing that makes a thousand tasks usable: at that size finding the
+    /// one you mean matters more than ranking all of them.
+    pub find: Option<String>,
+    /// Only the turns belonging to one value of one dimension.
+    ///
+    /// What makes a second level possible for anything rather than only for
+    /// people. "Group by model, then by person" is the person-grouped ledger
+    /// asked again with the rows narrowed to one model — and before this there
+    /// was nowhere to say which model, so `person` was the only dimension the
+    /// slice could express and every other combination came back empty.
+    ///
+    /// The key is itself an `Option`, and that is the point rather than an
+    /// oversight: a row filed against no task is a real group with a NULL key,
+    /// and narrowing to it has to mean "the ones with no task" instead of "do
+    /// not narrow". Hence the bool beside it in SQL.
+    pub within: Option<(Dimension, Option<String>)>,
+}
+
+/// How to cut the ledger, and how much of it to hand back.
+///
+/// A struct rather than five more parameters: these travel together, they are
+/// all about the shape of one list, and a call site passing
+/// `(by, sort, dir, 25, 0)` positionally is one transposition away from
+/// silently paging the wrong way.
+#[derive(Debug, Clone, Copy)]
+pub struct Ledger {
+    pub by: Dimension,
+    pub sort: Sort,
+    pub direction: Direction,
+    pub limit: i64,
+    pub offset: i64,
+}
+
+/// The totals a period adds up to.
+#[derive(Debug, Default, serde::Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Totals {
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub cache_write_tokens: i64,
+    /// The expensive half of the write, where the agent said which it was.
+    pub cache_write1h_tokens: i64,
+    pub cache_write5m_tokens: i64,
+    /// Everything processed. Not a bill: a cache read is about a tenth of an
+    /// input token and a one-hour write about twice one, so this tracks volume
+    /// and `cost_usd` tracks money.
+    pub tokens: i64,
+    /// The sum of what the agents reported, over the rows that reported any.
+    ///
+    /// Partial by construction: Codex reports no price. `pricedRows` against
+    /// `rows` is how far to trust it, and the interface says so out loud.
+    pub cost_usd: Option<f64>,
+    pub priced_rows: i64,
+    pub rows: i64,
+    /// Turns whose agent reported no token counts at all.
+    ///
+    /// Not a share of `turns` that happened to be cheap — these are turns we
+    /// were told nothing about, and everything above is a total over the rest.
+    /// Every ACP agent is in here today: Kimi answers a finished prompt with a
+    /// stop reason and nothing else, and says in its own source that its engine
+    /// has no cost data. A page that silently left them out would report a
+    /// smaller fleet than the one that ran.
+    pub unreported_turns: i64,
+    pub turns: i64,
+    pub conversations: i64,
+    pub workspaces: i64,
+    pub people: i64,
+    /// Tasks worked on, where a workspace was cut from one.
+    ///
+    /// Zero is the ordinary answer on an installation nobody starts from a
+    /// tracker, and it is a true one: a session with no `task_key` is not a
+    /// task we failed to record, it is work that was not filed against one.
+    pub tasks: i64,
+}
+
+/// One model's share of one bucket or one group.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ByModel {
+    pub model: String,
+    pub tokens: i64,
+}
+
+/// One column of the chart.
+#[derive(Debug, serde::Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Column {
+    pub start: chrono::DateTime<chrono::Utc>,
+    pub models: Vec<ByModel>,
+}
+
+/// One row of the ledger.
+#[derive(Debug, serde::Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Group {
+    /// What was grouped on. NULL where the dimension does not apply — a turn
+    /// with no task, a model with no subscription — which is a real row and
+    /// not an omission.
+    pub key: Option<String>,
+    /// What to call it, where anything knows. A task nobody could read the
+    /// title of has a key and no name, and the page draws that rather than
+    /// pretending.
+    pub name: Option<String>,
+    pub models: Vec<ByModel>,
+    pub tokens: i64,
+    pub cost_usd: Option<f64>,
+    pub priced_rows: i64,
+    pub rows: i64,
+    pub turns: i64,
+    pub conversations: i64,
+    pub workspaces: i64,
+    pub people: i64,
+    pub tasks: i64,
+    /// When this was first and last worked on.
+    ///
+    /// Absent on the folded remainder, which is not a thing that happened at a
+    /// time. Without these "recently active" cannot be offered at all.
+    pub first_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub last_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// The second level, when one was asked for.
+    ///
+    /// `no_recursion` because this type contains itself: without it the schema
+    /// builder follows `children` forever and `gen-openapi` dies on a stack
+    /// overflow. The nesting really is only two deep — past that the interface
+    /// drills rather than expands — so the contract describing one level of
+    /// children and stopping is accurate rather than a concession.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[schema(no_recursion)]
+    pub children: Vec<Group>,
+}
+
+impl Db {
+    /// The prelude every consumption read opens with: the person's reach,
+    /// resolved once. See [`crate::access::reachable`] for why.
+    fn consumption_with() -> String {
+        format!("WITH {}", reachable(1, Level::Viewer))
+    }
+
+    /// The shared tail: access, then the period, then whatever narrowed it.
+    ///
+    /// `$1` is the person asking, `$2`/`$3` the period, `$4`/`$5` the scope,
+    /// `$6` the search. Fixed positions so the fragment can be pasted into any
+    /// of these queries without each one counting its own placeholders.
+    fn consumption_where() -> String {
+        Self::consumption_where_on("c")
+    }
+
+    /// Narrowed to one value of one dimension, for a second-level grouping.
+    ///
+    /// `$9` says whether to narrow at all and `$10` is the value, two
+    /// parameters rather than one because `$10 IS NULL` cannot tell "every
+    /// row" from "the rows filed against nothing". `IS NOT DISTINCT FROM`
+    /// rather than `=` for the same reason: NULL = NULL is not true, and the
+    /// group with no key is one people open.
+    fn narrowed(within: Option<Dimension>) -> String {
+        match within {
+            None => " AND NOT $9::bool AND $10::text IS NULL".into(),
+            Some(d) => {
+                let (key, _) = d.columns();
+                format!(" AND (NOT $9::bool OR {key} IS NOT DISTINCT FROM $10::text)")
+            }
+        }
+    }
+
+    /// The same, for a second copy of the table inside the one statement.
+    fn consumption_where_on(a: &str) -> String {
+        format!(
+            "{visible} \
+             AND {a}.occurred_at >= $2 AND {a}.occurred_at < $3 \
+             AND ($4::text IS NULL OR {a}.ran_as = $4) \
+             AND ($5::text IS NULL OR {a}.ran_as IN \
+                  (SELECT m.user_id FROM team_members m WHERE m.team_id = $5))",
+            visible = filed_within(a, Level::Viewer)
+        )
+    }
+
+    /// What a period came to.
+    pub async fn consumption_totals(&self, person: &str, slice: &Slice) -> Result<Totals> {
+        let row = sqlx::query(&format!(
+            // Counted by `GROUP BY` in a subquery rather than `COUNT(DISTINCT)`.
+            //
+            // They are the same answer and not the same query: `COUNT(DISTINCT)`
+            // always sorts, and on a year of 2.06 M rows that was an external
+            // merge spilling 300 MB to disk across four of them — 5.3 s.
+            // `GROUP BY` is free to hash, which it does, and runs in 2.0 s.
+            // Raising `work_mem` instead made it *slower*: a sort big enough to
+            // fit in memory loses the parallel workers that were splitting it.
+            //
+            // `SUM` over a bigint also widens to numeric, which will not decode
+            // as an i64, so every total is cast back on the way out.
+            "{with_}, rows AS MATERIALIZED (\
+                 SELECT c.session_id, c.turn_id, c.workspace_id, c.ran_as, \
+                        c.input_tokens, c.output_tokens, c.cache_read_tokens, \
+                        c.cache_write_tokens, c.cache_write_1h_tokens, \
+                        c.cache_write_5m_tokens, c.cost_usd, c.tokens_known, c.task_key \
+                   FROM consumption_events c WHERE {tail}) \
+             SELECT COALESCE(SUM(input_tokens), 0)::bigint       AS input_tokens, \
+                    COALESCE(SUM(output_tokens), 0)::bigint      AS output_tokens, \
+                    COALESCE(SUM(cache_read_tokens), 0)::bigint  AS cache_read_tokens, \
+                    COALESCE(SUM(cache_write_tokens), 0)::bigint AS cache_write_tokens, \
+                    COALESCE(SUM(cache_write_1h_tokens), 0)::bigint AS cache_write_1h, \
+                    COALESCE(SUM(cache_write_5m_tokens), 0)::bigint AS cache_write_5m, \
+                    SUM(cost_usd)::float8                        AS cost_usd, \
+                    COUNT(cost_usd)                              AS priced_rows, \
+                    COUNT(*)                                     AS rows, \
+                    (SELECT count(*) FROM (SELECT session_id, turn_id FROM rows GROUP BY 1, 2) a) AS turns, \
+                    (SELECT count(*) FROM (SELECT session_id, turn_id FROM rows \
+                        WHERE NOT tokens_known GROUP BY 1, 2) e)                                  AS unreported_turns, \
+                    (SELECT count(*) FROM (SELECT session_id FROM rows GROUP BY 1) b)             AS conversations, \
+                    (SELECT count(*) FROM (SELECT workspace_id FROM rows GROUP BY 1) c)           AS workspaces, \
+                    (SELECT count(*) FROM (SELECT ran_as FROM rows WHERE ran_as IS NOT NULL GROUP BY 1) d) AS people, \
+                    (SELECT count(*) FROM (SELECT task_key FROM rows WHERE task_key IS NOT NULL GROUP BY 1) f) AS tasks \
+               FROM rows",
+            with_ = Self::consumption_with(),
+            tail = Self::consumption_where()
+        ))
+        .bind(person)
+        .bind(slice.from)
+        .bind(slice.to)
+        .bind(slice.person.as_deref())
+        .bind(slice.team.as_deref())
+        .bind(slice.find.as_deref())
+        .fetch_one(&self.pool)
+        .await
+        .context("adding up a period's consumption")?;
+
+        let input: i64 = row.get("input_tokens");
+        let output: i64 = row.get("output_tokens");
+        let cache_read: i64 = row.get("cache_read_tokens");
+        let cache_write: i64 = row.get("cache_write_tokens");
+        Ok(Totals {
+            input_tokens: input,
+            output_tokens: output,
+            cache_read_tokens: cache_read,
+            cache_write_tokens: cache_write,
+            cache_write1h_tokens: row.get("cache_write_1h"),
+            cache_write5m_tokens: row.get("cache_write_5m"),
+            // What the bill is made of: everything that was charged, including
+            // both kinds of cache. Not the context the model saw.
+            tokens: input + output + cache_read + cache_write,
+            cost_usd: row.get("cost_usd"),
+            priced_rows: row.get("priced_rows"),
+            rows: row.get("rows"),
+            unreported_turns: row.get("unreported_turns"),
+            turns: row.get("turns"),
+            conversations: row.get("conversations"),
+            workspaces: row.get("workspaces"),
+            people: row.get("people"),
+            tasks: row.get("tasks"),
+        })
+    }
+
+    /// The chart: one column per bucket, split by model.
+    ///
+    /// Buckets are made by Postgres rather than in Rust so that a month is a
+    /// month in the database's own calendar, and an empty one still has to be
+    /// filled in by the caller — `date_trunc` cannot invent a row for a week
+    /// when nothing ran.
+    pub async fn consumption_series(
+        &self,
+        person: &str,
+        slice: &Slice,
+        bucket: Bucket,
+    ) -> Result<Vec<Column>> {
+        let rows = sqlx::query(&format!(
+            "{with_} SELECT date_trunc('{unit}', c.occurred_at) AS start,
+                    c.model,
+                    SUM(c.input_tokens + c.output_tokens
+                        + c.cache_read_tokens + c.cache_write_tokens)::bigint AS tokens
+               FROM consumption_events c
+              WHERE {tail}
+              GROUP BY 1, 2
+              ORDER BY 1, 3 DESC",
+            with_ = Self::consumption_with(),
+            unit = bucket.unit(),
+            tail = Self::consumption_where()
+        ))
+        .bind(person)
+        .bind(slice.from)
+        .bind(slice.to)
+        .bind(slice.person.as_deref())
+        .bind(slice.team.as_deref())
+        .bind(slice.find.as_deref())
+        .fetch_all(&self.pool)
+        .await
+        .context("reading consumption over time")?;
+
+        let mut out: Vec<Column> = Vec::new();
+        for r in rows {
+            let start: chrono::DateTime<chrono::Utc> = r.get("start");
+            let entry = ByModel {
+                model: r.get("model"),
+                tokens: r.get("tokens"),
+            };
+            match out.last_mut() {
+                Some(last) if last.start == start => last.models.push(entry),
+                _ => out.push(Column {
+                    start,
+                    models: vec![entry],
+                }),
+            }
+        }
+        Ok(out)
+    }
+
+    /// Which count is worth ranking a row by, for this grouping.
+    ///
+    /// "Breadth" is not one number: a task that sprawled across many worktrees
+    /// and a model that reached many people are both breadth, and neither is
+    /// the other's column.
+    fn breadth_of(by: Dimension) -> &'static str {
+        match by {
+            Dimension::Task => "workspaces",
+            Dimension::Person => "tasks",
+            Dimension::Model | Dimension::Subscription => "people",
+            Dimension::Repository | Dimension::Directory => "tasks",
+            Dimension::Workspace => "turns",
+        }
+    }
+
+    /// Everything the ledger reads from.
+    ///
+    /// **The counts are asked only for the rows that will be drawn.** Folding
+    /// them into the grouping meant computing five `COUNT(DISTINCT)` for every
+    /// group to display twenty-five: on 2.06 M rows that was 2.4 s against
+    /// 0.55 s for the sums alone, and the difference was 47,166 answers nobody
+    /// was going to see. They are laterals against the page instead, each one
+    /// an index lookup on its grouping key.
+    ///
+    /// The exception is sorting *by* a count — there the whole set has to be
+    /// counted to know what the top of it is, so the column joins the grouping
+    /// and only then.
+    fn ledger_sql(
+        by: Dimension,
+        sort: Sort,
+        dir: Direction,
+        tail_select: bool,
+        within: Option<Dimension>,
+    ) -> String {
+        let (key, name) = by.columns();
+        let joins = Self::consumption_joins(by);
+        let breadth = Self::breadth_of(by);
+        let order = sort.order(dir, breadth);
+        let tok = "(c.input_tokens + c.output_tokens + c.cache_read_tokens + c.cache_write_tokens)";
+
+        // Two of the orders divide by, or rank on, a count — and the counts
+        // were moved off the grouping because computing them for every group
+        // to draw twenty-five was most of the query. So the one the order
+        // actually needs comes back, and only that one.
+        //
+        // This is deliberately the single place that decides it. Ordering by a
+        // column the grouping does not select is a query that fails at run
+        // time and nowhere else, which is how `perTurn` shipped returning
+        // nothing at all — see `every_sort_returns_rows`.
+        let extra = match sort {
+            Sort::Breadth => format!(
+                ", COUNT(DISTINCT {}) AS {breadth}",
+                Self::breadth_source(by)
+            ),
+            _ => String::new(),
+        };
+
+        let body = format!(
+            "{with_}, \
+             grouped AS (\
+                 SELECT {key} AS key, MAX({name}) AS name, \
+                        SUM{tok}::bigint AS tokens, SUM(c.cost_usd)::float8 AS cost_usd, \
+                        COUNT(c.cost_usd) AS priced_rows, COUNT(*) AS rows, \
+                        MIN(c.occurred_at) AS first_at, MAX(c.occurred_at) AS last_at\
+                        {extra} \
+                   FROM consumption_events c {joins} \
+                  WHERE {tail}{narrow} \
+                    AND ($6::text IS NULL \
+                         OR COALESCE({name}, '') || ' ' || COALESCE({key}, '') ILIKE '%' || $6 || '%') \
+                  GROUP BY 1), \
+             ranked AS (\
+                 SELECT g.*, row_number() OVER (ORDER BY {order}) AS rn, \
+                        COUNT(*) OVER () AS total \
+                   FROM grouped g)",
+            with_ = Self::consumption_with(),
+            tail = Self::consumption_where(),
+            narrow = Self::narrowed(within),
+        );
+
+        if tail_select {
+            return format!(
+                "{body} SELECT COUNT(*) AS groups, COALESCE(SUM(tokens), 0)::bigint AS tokens, \
+                        SUM(cost_usd)::float8 AS cost_usd, \
+                        COALESCE(SUM(priced_rows), 0)::bigint AS priced_rows, \
+                        COALESCE(SUM(rows), 0)::bigint AS rows, \
+                        MAX(total) AS total \
+                   FROM ranked WHERE rn > $7 + $8"
+            );
+        }
+
+        // The page's own rows, and nothing else. Detail is fetched separately,
+        // keyed by an array of what came back — see `ledger_detail_sql`.
+        format!("{body} SELECT * FROM ranked WHERE rn > $7 AND rn <= $7 + $8 ORDER BY rn")
+    }
+
+    /// Everything about the rows that will be drawn, and nothing about the rest.
+    ///
+    /// Keyed by `= ANY($11)` rather than a lateral per row. A correlated
+    /// `key = p.key OR (p.key IS NULL AND key IS NULL)` cannot use an index —
+    /// whether the NULL branch applies is not known until the row is read — and
+    /// twenty-five of those cost ten seconds on 2.06 M rows. An array
+    /// comparison is one indexed scan for all of them.
+    ///
+    /// `$12` says whether the page included the group with no key at all — work
+    /// filed against no task — because `= ANY` can never match a NULL.
+    fn ledger_detail_sql(by: Dimension, within: Option<Dimension>) -> String {
+        let (key, _) = by.columns();
+        format!(
+            "{with_} \
+             SELECT {key} AS key, \
+                    COUNT(DISTINCT (c.session_id, c.turn_id)) AS turns, \
+                    COUNT(DISTINCT c.session_id) AS conversations, \
+                    COUNT(DISTINCT c.workspace_id) AS workspaces, \
+                    COUNT(DISTINCT c.ran_as) AS people, \
+                    COUNT(DISTINCT c.task_key) AS tasks \
+               FROM consumption_events c \
+              WHERE {tail}{narrow} AND ({key} = ANY($11) OR ($12 AND {key} IS NULL)) \
+              GROUP BY 1",
+            with_ = Self::consumption_with(),
+            tail = Self::consumption_where(),
+            narrow = Self::narrowed(within),
+        )
+    }
+
+    /// The per-model split for the drawn rows, same keying as the detail.
+    fn ledger_models_sql(by: Dimension, within: Option<Dimension>) -> String {
+        let (key, _) = by.columns();
+        format!(
+            "{with_} \
+             SELECT {key} AS key, c.model, \
+                    SUM(c.input_tokens + c.output_tokens \
+                        + c.cache_read_tokens + c.cache_write_tokens)::bigint AS tokens \
+               FROM consumption_events c \
+              WHERE {tail}{narrow} AND ({key} = ANY($11) OR ($12 AND {key} IS NULL)) \
+              GROUP BY 1, 2 ORDER BY 3 DESC",
+            with_ = Self::consumption_with(),
+            tail = Self::consumption_where(),
+            narrow = Self::narrowed(within),
+        )
+    }
+
+    /// The column `breadth` counts, as opposed to what the page calls it.
+    fn breadth_source(by: Dimension) -> &'static str {
+        match by {
+            Dimension::Task => "c.workspace_id",
+            Dimension::Person => "c.task_key",
+            Dimension::Model | Dimension::Subscription => "c.ran_as",
+            Dimension::Repository | Dimension::Directory => "c.task_key",
+            // A turn is a session and a turn id together, which is why this
+            // returns an expression rather than a column name.
+            Dimension::Workspace => "(c.session_id, c.turn_id)",
+        }
+    }
+
+    /// The ledger, cut one way, sorted and paged.
+    ///
+    /// Sorting happens here rather than after the fact. It has to: a page of a
+    /// list the client sorted is a page of nothing in particular, and the
+    /// remainder underneath it would be wrong too.
+    pub async fn consumption_groups(
+        &self,
+        person: &str,
+        slice: &Slice,
+        cut: Ledger,
+        totals: Option<&Totals>,
+    ) -> Result<(Vec<Group>, Option<Group>, i64)> {
+        let Ledger {
+            by,
+            sort,
+            direction: dir,
+            limit,
+            offset,
+        } = cut;
+        // A macro rather than a closure: every query here binds the same eight
+        // values in the same order, and a closure cannot hand back a borrowed
+        // `Query` without naming a lifetime it does not have.
+        macro_rules! bound {
+            ($sql:expr) => {
+                sqlx::query($sql)
+                    .bind(person)
+                    .bind(slice.from)
+                    .bind(slice.to)
+                    .bind(slice.person.as_deref())
+                    .bind(slice.team.as_deref())
+                    .bind(slice.find.as_deref())
+                    .bind(offset)
+                    .bind(limit)
+                    // Narrowing: whether to, and to what. Always bound, so
+                    // every query here still takes the same shape.
+                    .bind(slice.within.is_some())
+                    .bind(slice.within.as_ref().and_then(|(_, k)| k.clone()))
+            };
+        }
+
+        let within = slice.within.as_ref().map(|(d, _)| *d);
+        let page = Self::ledger_sql(by, sort, dir, false, within);
+        let rows = bound!(&page)
+            .fetch_all(&self.pool)
+            .await
+            .context("reading the ledger")?;
+
+        let mut total = 0i64;
+        let mut groups: Vec<Group> = Vec::with_capacity(rows.len());
+        for r in rows {
+            total = r.get("total");
+            groups.push(Group {
+                key: r.get("key"),
+                name: r.get("name"),
+                models: Vec::new(),
+                tokens: r.get("tokens"),
+                cost_usd: r.get("cost_usd"),
+                priced_rows: r.get("priced_rows"),
+                rows: r.get("rows"),
+                turns: 0,
+                conversations: 0,
+                workspaces: 0,
+                people: 0,
+                tasks: 0,
+                first_at: r.get("first_at"),
+                last_at: r.get("last_at"),
+                children: Vec::new(),
+            });
+        }
+
+        // Detail for the drawn rows only, keyed by what came back.
+        if !groups.is_empty() {
+            let keys: Vec<String> = groups.iter().filter_map(|g| g.key.clone()).collect();
+            let has_null = groups.iter().any(|g| g.key.is_none());
+            let at = |g: &Group| g.key.clone();
+
+            let detail = Self::ledger_detail_sql(by, within);
+            for r in bound!(&detail)
+                .bind(&keys)
+                .bind(has_null)
+                .fetch_all(&self.pool)
+                .await
+                .context("counting what the drawn rows are made of")?
+            {
+                let k: Option<String> = r.get("key");
+                if let Some(g) = groups.iter_mut().find(|g| at(g) == k) {
+                    g.turns = r.get("turns");
+                    g.conversations = r.get("conversations");
+                    g.workspaces = r.get("workspaces");
+                    g.people = r.get("people");
+                    g.tasks = r.get("tasks");
+                }
+            }
+
+            let models = Self::ledger_models_sql(by, within);
+            for r in bound!(&models)
+                .bind(&keys)
+                .bind(has_null)
+                .fetch_all(&self.pool)
+                .await
+                .context("splitting the drawn rows by model")?
+            {
+                let k: Option<String> = r.get("key");
+                if let Some(g) = groups.iter_mut().find(|g| at(g) == k) {
+                    g.models.push(ByModel {
+                        model: r.get("model"),
+                        tokens: r.get("tokens"),
+                    });
+                }
+            }
+        }
+
+        // Every row belongs to exactly one group, so the groups add up to the
+        // period. On the first page that makes the remainder arithmetic —
+        // what the period came to, less what is on screen — and saves grouping
+        // two million rows a second time to learn something already known.
+        //
+        // Only on the first page: past it there are earlier pages between the
+        // total and the remainder, and those are not "the rest".
+        if offset == 0 && total > limit {
+            if let Some(t) = totals {
+                let shown: i64 = groups.iter().map(|g| g.tokens).sum();
+                let shown_cost: f64 = groups.iter().filter_map(|g| g.cost_usd).sum();
+                let shown_priced: i64 = groups.iter().map(|g| g.priced_rows).sum();
+                let shown_rows: i64 = groups.iter().map(|g| g.rows).sum();
+                return Ok((
+                    groups,
+                    Some(Group {
+                        key: None,
+                        name: None,
+                        models: Vec::new(),
+                        tokens: t.tokens - shown,
+                        // NULL stays NULL: a remainder of nothing but Codex has
+                        // no price, and zero would claim it was free.
+                        cost_usd: t
+                            .cost_usd
+                            .map(|c| c - shown_cost)
+                            .filter(|_| t.priced_rows > shown_priced),
+                        priced_rows: t.priced_rows - shown_priced,
+                        rows: t.rows - shown_rows,
+                        turns: 0,
+                        conversations: 0,
+                        workspaces: 0,
+                        people: 0,
+                        tasks: total - limit,
+                        first_at: None,
+                        last_at: None,
+                        children: Vec::new(),
+                    }),
+                    total,
+                ));
+            }
+        }
+
+        // Only worth asking when something was left out.
+        let rest = if total > offset + limit {
+            let tail = Self::ledger_sql(by, sort, dir, true, within);
+            let r = bound!(&tail)
+                .fetch_one(&self.pool)
+                .await
+                .context("adding up the rest of the ledger")?;
+            Some(Group {
+                key: None,
+                name: None,
+                models: Vec::new(),
+                tokens: r.get("tokens"),
+                cost_usd: r.get("cost_usd"),
+                priced_rows: r.get("priced_rows"),
+                rows: r.get("rows"),
+                turns: 0,
+                conversations: 0,
+                workspaces: 0,
+                people: 0,
+                tasks: r.get::<i64, _>("groups"),
+                first_at: None,
+                last_at: None,
+                children: Vec::new(),
+            })
+        } else {
+            None
+        };
+
+        Ok((groups, rest, total))
+    }
+
+    /// What a dimension has to reach for to find a name.
+    ///
+    /// Only two do. A task's title lives in `consumption_tasks` because the
+    /// tracker owns it and we only ever borrowed it; a person's name lives in
+    /// `principals`, which is never deleted, so somebody who left is still
+    /// drawn by name rather than as an id.
+    fn consumption_joins(by: Dimension) -> &'static str {
+        match by {
+            Dimension::Task => {
+                "LEFT JOIN consumption_tasks t ON t.org_id = c.org_id AND t.task_key = c.task_key"
+            }
+            Dimension::Person => "LEFT JOIN principals p ON p.id = c.ran_as",
+            _ => "",
+        }
     }
 }

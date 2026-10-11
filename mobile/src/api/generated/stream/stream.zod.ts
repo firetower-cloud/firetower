@@ -37,6 +37,10 @@ export const StreamBody = zod.union([zod.object({
 
 export const streamResponseThreeEventsItemOneThreeUsageTwoCacheReadTokensMin = 0;
 
+export const streamResponseThreeEventsItemOneThreeUsageTwoCacheWrite1hTokensMin = 0;
+
+export const streamResponseThreeEventsItemOneThreeUsageTwoCacheWrite5mTokensMin = 0;
+
 export const streamResponseThreeEventsItemOneThreeUsageTwoCacheWriteTokensMin = 0;
 
 export const streamResponseThreeEventsItemOneThreeUsageTwoContextUsedMin = 0;
@@ -62,8 +66,6 @@ export const streamResponseThreeEventsItemOneThreeUsageTwoModelsItemOutputTokens
 export const streamResponseThreeEventsItemOneThreeUsageTwoOutputTokensMin = 0;
 
 export const streamResponseThreeEventsItemOneThreeUsageTwoThinkingTokensMin = 0;
-
-export const streamResponseThreeEventsItemOneOnethreeUsedPercentMin = 0;
 
 export const streamResponseThreeEventsItemTwoLineNoMin = 0;
 
@@ -142,6 +144,8 @@ export const StreamResponse = zod.union([zod.object({
   "type": zod.enum(['TurnCompleted']),
   "usage": zod.union([zod.null(),zod.object({
   "cacheReadTokens": zod.int().min(streamResponseThreeEventsItemOneThreeUsageTwoCacheReadTokensMin).nullish().describe('Absent when the agent does not say.'),
+  "cacheWrite1hTokens": zod.int().min(streamResponseThreeEventsItemOneThreeUsageTwoCacheWrite1hTokensMin).nullish().describe('The two kinds of cache write, which are not the same price.\n\nA one-hour entry costs roughly twice what an input token does and a\nfive-minute one roughly a quarter more, so the split is most of what\ndecides whether a turn was expensive. The agent reports it per *turn*\nand not per model, so anything stored at a finer grain than that is an\napportionment rather than a measurement.'),
+  "cacheWrite5mTokens": zod.int().min(streamResponseThreeEventsItemOneThreeUsageTwoCacheWrite5mTokensMin).nullish(),
   "cacheWriteTokens": zod.int().min(streamResponseThreeEventsItemOneThreeUsageTwoCacheWriteTokensMin).nullish().describe('What was written into the cache on this turn, and billed as such.\n\nReported apart from what was read because they cost different amounts\nand mean different things: reading is the session being cheap, writing\nis it having said something new and large.'),
   "contextUsed": zod.int().min(streamResponseThreeEventsItemOneThreeUsageTwoContextUsedMin).nullish().describe('Everything the model had in front of it on the last request.\n\nInput plus both kinds of cache plus what it wrote. This is the number\nthat matters to somebody deciding whether a session has room left —\ninput alone reads as almost nothing once caching is working, which is\nexactly when it is least true.'),
   "contextWindow": zod.int().min(streamResponseThreeEventsItemOneThreeUsageTwoContextWindowMin).nullish().describe('How much room the model has at all.'),
@@ -227,7 +231,7 @@ export const StreamResponse = zod.union([zod.object({
   "resetsAt": zod.int().nullish().describe('Unix seconds.'),
   "status": zod.string().describe('`allowed`, and whatever else turns up.'),
   "type": zod.enum(['Limited']),
-  "usedPercent": zod.int().min(streamResponseThreeEventsItemOneOnethreeUsedPercentMin).nullish().describe('How much of the window is gone, when the agent says.\n\nClaude Code does not, which is why a bar was not worth drawing.\nCodex does, and a window is a far more useful thing to see as a\nproportion than as a word.'),
+  "usedPercent": zod.number().nullish().describe('How much of the window is gone, when the agent says.\n\nClaude Code does not, which is why a bar was not worth drawing.\nCodex does, and a window is a far more useful thing to see as a\nproportion than as a word.'),
   "window": zod.string().describe('`five_hour`, and whatever else turns up.')
 }).describe('What the account\'s own limits say.\n\nArrives on its own schedule rather than with a turn: a window, whether\nwe are inside it, and when it starts again. A proportion when the agent\nsends one, and nothing drawn from it when it does not — Claude Code\nsays none, which is why this is optional rather than a number somebody\nhas to trust.'),zod.object({
   "agent": zod.string().nullish(),

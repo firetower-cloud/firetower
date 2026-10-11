@@ -11,6 +11,16 @@
   --color-raise: #17171a;
   --color-overlay: #1e1e22;
   --color-line: #26262b;
+
+  /* A block standing in for a value that has not arrived yet.
+     Its own step rather than one of the surfaces: `--color-raise` was the
+     obvious reuse and measured 1.04:1 over `--color-ground` — fainter than a
+     gridline at 1.16:1, which is the most recessive thing on the page by
+     design, so a loading chart was indistinguishable from a black rectangle.
+     This sits between a gridline and the dimmest text: 1.86:1 at the top of
+     the breath and 1.32:1 at the bottom. Legibly there, without competing with
+     anything that carries meaning. */
+  --color-settling: #3e3e46;
   --color-line-soft: #1a1a1e;
 
   /* ── Text: four tiers, a real gap between each ──────────────
@@ -25,6 +35,9 @@
      Sizes were written at the point of use, so a label and a sentence and a
      caption drifted a half-pixel apart in twenty files. These are the sizes;
      anything not one of them is a mistake, and `just check-style` says so. */
+  --text-figure: 4rem; /* 64px — the one number a page exists to show */
+  --text-figure--line-height: 0.86;
+  --text-figure--letter-spacing: -0.025em;
   --text-display: 1.5rem; /* 24px — the one heading on a page */
   --text-display--line-height: 1.2;
   --text-display--letter-spacing: -0.02em;
@@ -64,9 +77,28 @@
   --color-brick: #e5645a;
   --color-brick-tint: #2a1414;
   --color-brick-deep: #6e2f2b;
+  /* Approaching, which sage/brick/slate had no step for: "fine", "broken" and
+     "neutral" cannot say "still working, but not for much longer". Only a
+     quota meter uses it, and only while one is filling. */
+  --color-amber: #fab219;
+  --color-amber-tint: #2a2008;
+  --color-amber-deep: #7a5a0d;
   --color-slate: #7d95b0;
   --color-slate-tint: #161d26;
   --color-slate-deep: #35485c;
+
+  /* Series: one hue per model, and the only place data wears colour.
+     A namespace of its own because the signals above are semantic and the file
+     kinds below are deliberately too quiet to carry a chart — the one that
+     reads "below the ember in saturation" is exactly wrong for a stacked bar.
+     Taken from the same hue families and stepped until each clears its gates
+     against `--color-panel`: worst adjacent CVD dE 12.8, normal-vision 16.2,
+     all at or above 3:1. Ember is absent on purpose. It means something is
+     waiting on you, and a page about money has no business spending it. */
+  --color-series-1: #3f86cf;
+  --color-series-2: #1f9b74;
+  --color-series-3: #8b7ad8;
+  --color-series-4: #cc5c86;
 
   /* File kinds: what a file *is*, in the tree and nowhere else. A separate
      namespace from the signals above, and deliberately below them in
@@ -426,6 +458,34 @@
 .spine-nested {
   --rail: 5px;
   --gap: 13px;
+}
+
+/* ── Waiting, on a first load only ──────────────────────────
+   A block where a value is going to be, breathing just enough to say the page
+   is working rather than broken.
+
+   Not a gradient travelling left to right. That is the shimmer every loading
+   state has, it is louder than anything else on these screens is allowed to
+   be, and it spends attention on the one thing that is not there yet.
+
+   **Only before there is an answer.** A refetch holds the previous one at
+   reduced opacity instead — see `Consumption.tsx`. Replacing a chart somebody
+   is reading with a grey box is a worse answer than a slightly stale one, and
+   it moves the page under them while they are looking at it. */
+@keyframes settling {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+.settling {
+  background: var(--color-settling);
+  border-radius: var(--radius-xs);
+  animation: settling 1.6s ease-in-out infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {

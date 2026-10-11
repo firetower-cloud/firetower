@@ -1041,6 +1041,40 @@ pub enum ToServer {
         /// described on [`ft_core::Agent::credential_bundle`].
         result: Result<String, String>,
     },
+    /// The agent rotated its own credential, and the vault's copy is now dead.
+    ///
+    /// Kimi issues a new refresh token every time it spends one, and writes it
+    /// into the home it was given — a directory inside a worktree that is
+    /// deleted when the workspace is reclaimed. So the vault kept the token
+    /// from sign-in, that token was spent by the first session to run, and
+    /// every session after it was handed something already used. The account
+    /// worked exactly once and then reported itself unauthorised.
+    ///
+    /// Keyed by session rather than account because the worker is never told
+    /// which account it is running; the control plane resolves it, the same way
+    /// it resolves a limit.
+    ///
+    /// **Not an `AgentLine`.** Those are journalled to `agent_lines` verbatim,
+    /// which for a credential would mean writing it to the database in the
+    /// clear — the thing the vault exists to prevent, and the reason the login
+    /// flow deletes its temporary home rather than leaving one on a host.
+    AgentCredentialRotated {
+        session_id: String,
+        /// The same bundle shape a sign-in produces.
+        bundle: String,
+    },
+    /// What an account's plan has left, as the provider last answered.
+    ///
+    /// ACP carries no quota, so the worker asks the provider on its own timer
+    /// and reports what it hears. Off the turn's path deliberately: this is a
+    /// standing fact about an account, and a turn that waited on somebody
+    /// else's API to finish would be our bookkeeping making an agent look slow.
+    ///
+    /// Keyed by session because the worker is never told which account it runs.
+    AgentLimits {
+        session_id: String,
+        windows: Vec<LimitWindow>,
+    },
     /// The answer to [`ToWorker::ProbeRemote`].
     RemoteProbed {
         req: ReqId,
@@ -1056,6 +1090,18 @@ pub enum ToServer {
 }
 
 /// A device code somebody has to approve before Codex is signed in.
+/// One quota window of a plan, on its way to `agent_account_limits`.
+///
+/// Per cent to a tenth, and unix seconds: a provider that reports a ratio and
+/// an ISO timestamp is converted before it gets here rather than after, so
+/// every reader downstream sees one shape whoever it came from.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LimitWindow {
+    pub window: String,
+    pub used_percent: f32,
+    pub resets_at: Option<i64>,
+}
+
 ///
 /// The two things worth showing and nothing else: this is what a person reads
 /// off a screen and types somewhere else.

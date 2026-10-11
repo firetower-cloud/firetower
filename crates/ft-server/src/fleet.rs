@@ -129,6 +129,26 @@ struct Read {
     /// that can report it.
     asks: Vec<AgentSpeech>,
     resolved: Vec<String>,
+    /// What the turn that just ended cost, when the agent said.
+    ///
+    /// Read here and written by the caller, because `read` is synchronous and
+    /// holds a lock over every session's reader — a database round trip taken
+    /// inside it would stall the whole fleet's line handling behind one slow
+    /// query. `None` where a turn reported no tokens — which is every ACP one
+    /// until an agent ships `unstable_end_turn_token_usage`.
+    spent: Option<Spent>,
+}
+
+/// One finished turn's bill, on its way to `consumption_events`.
+struct Spent {
+    turn: String,
+    usage: ft_core::turn::Usage,
+    /// What to bill the turn to when the agent gave no per-model breakdown.
+    ///
+    /// Claude Code reports `modelUsage` and this goes unused. Codex reports one
+    /// set of totals and no breakdown at all, so the only statement of what ran
+    /// is what the session was last told to use.
+    fallback_model: Option<String>,
 }
 
 /// One session's lines, read for what they say about the session.
@@ -420,6 +440,7 @@ impl Progress {
         let mut moved = None;
         let mut asks = Vec::new();
         let mut resolved = Vec::new();
+        let mut spent = None;
         for event in self.reader.push(line) {
             match event {
                 // Assistant text only. A tool's output is not the agent
@@ -459,8 +480,29 @@ impl Progress {
                         }
                     }
                 }
-                E::TurnCompleted { status, detail, .. } => {
+                E::TurnCompleted {
+                    turn,
+                    status,
+                    detail,
+                    usage,
+                } => {
                     self.in_turn = false;
+                    // The only moment the whole turn's bill exists. Before this
+                    // it is partial, and a moment later the line is forwarded
+                    // on and nothing keeps it.
+                    //
+                    // Recorded whether or not the agent said what it cost. A
+                    // turn that reported nothing is still a turn that happened,
+                    // and dropping it made Kimi sessions invisible rather than
+                    // unknown — see `tokens_known`, which is how the row says
+                    // which of the two it is.
+                    if let Some(usage) = usage {
+                        spent = Some(Spent {
+                            turn: turn.to_string(),
+                            usage,
+                            fallback_model: self.model_now(),
+                        });
+                    }
                     let note = detail.or_else(|| summarise(&self.said));
                     // A turn we stopped is not a turn that broke, whatever the
                     // agent calls it on the way out.
@@ -529,6 +571,39 @@ impl Progress {
             send,
             asks,
             resolved,
+            spent,
+        }
+    }
+
+    /// What this session is running, as the agent or its settings last said.
+    ///
+    /// Only consulted when a turn reports no per-model breakdown, which in
+    /// practice means Codex. The resolved name where there is one, so
+    /// `claude-haiku-4-5-20251001` and `haiku` do not become two rows on a page
+    /// that groups by model.
+    ///
+    /// The same order of precedence `controls` draws the pickers from, and for
+    /// the same reason: what somebody chose on this session, then what the
+    /// agent answered when its thread opened, then the account's preference.
+    /// Asking only the first used to bill a session's opening turns to the word
+    /// "Codex" — nobody picks a model to accept the default, and Codex says
+    /// which one it took before any turn runs, so the answer was there to be
+    /// read and we were not reading it.
+    fn model_now(&self) -> Option<String> {
+        match &self.reader {
+            ft_core::normalise::Reader::Claude(reader) => reader.model().map(str::to_string),
+            ft_core::normalise::Reader::Codex(reader) => self
+                .settings
+                .model
+                .clone()
+                .or_else(|| reader.reported().model.clone())
+                .or_else(|| self.preferred.model.clone()),
+            // ACP has no per-model breakdown either, and the name it does have
+            // is the `configOptions` entry the pickers are already built from.
+            // Only the agent's answer: `remember` refuses anything that is not
+            // Codex, so `settings` is empty on these and asking it would be
+            // asking a question with one possible answer.
+            ft_core::normalise::Reader::Acp(reader) => reader.model().map(str::to_string),
         }
     }
 
@@ -1833,6 +1908,8 @@ impl Fleet {
         }
 
         let db = self.db.clone();
+        // Held for re-vaulting a credential an agent rotated mid-session.
+        let vault = self.vault.clone();
         let events = self.events.clone();
         let workers = self.workers.clone();
         let probes = self.probes.clone();
@@ -2009,6 +2086,44 @@ impl Fleet {
                                     None => continue,
                                 }
                             };
+
+                            // What the turn cost, written down while the
+                            // session it belongs to still exists. Minutes
+                            // later the workspace may be reclaimed and every
+                            // name on the row with it.
+                            //
+                            // A warning rather than a `?`: a page missing one
+                            // turn is a smaller problem than a session that
+                            // stops reading its own transcript because a write
+                            // failed.
+                            if let Some(spent) = read.spent {
+                                match db
+                                    .record_consumption(
+                                        &session_id,
+                                        &spent.turn,
+                                        &spent.usage,
+                                        spent.fallback_model.as_deref(),
+                                    )
+                                    .await
+                                {
+                                    // Nothing written, no error: the session is
+                                    // gone, so the workspace was reclaimed
+                                    // between the turn ending and this landing
+                                    // and there is nothing left to attribute it
+                                    // to. Said out loud because the alternative
+                                    // is a bill quietly short by a turn and no
+                                    // way to find out — and if this is ever
+                                    // more than rare, the reclaim is too eager.
+                                    Ok(0) => tracing::warn!(
+                                        session = %session_id, turn = %spent.turn,
+                                        "a turn finished after its workspace was reclaimed; \
+                                         its usage is lost"
+                                    ),
+                                    Ok(_) => {}
+                                    Err(e) => tracing::warn!(session = %session_id,
+                                        "recording what a turn cost: {e:#}"),
+                                }
+                            }
 
                             // What the agent has to be told before it will go
                             // on. Codex opens a conversation and then waits to
@@ -2334,6 +2449,29 @@ impl Fleet {
                                 }
                                 Some(other) => { held.insert(req, other); }
                                 None => tracing::debug!("a Codex sign-in finished after its request gave up"),
+                            }
+                        }
+                        Ok(ToServer::AgentLimits { session_id, windows }) => {
+                            // Asked for rather than overheard, and from here on
+                            // indistinguishable from a limit an agent offered.
+                            if let Err(e) = crate::api::accounts::note_limits(&db, &session_id, &windows).await {
+                                tracing::debug!(session = %session_id, "noting what a plan has left: {e:#}");
+                            }
+                        }
+                        Ok(ToServer::AgentCredentialRotated { session_id, bundle }) => {
+                            // The agent spent the token we lent it and was
+                            // given another. Keep it, or the next session is
+                            // handed one that has already been used — which is
+                            // how a Kimi account came to work exactly once.
+                            match &vault {
+                                // No vault is a control plane that keeps no
+                                // credentials, which has none to replace.
+                                None => tracing::debug!("a credential rotated with no vault to keep it in"),
+                                Some(vault) => {
+                                    if let Err(e) = crate::api::accounts::rotated(&db, vault, &session_id, &bundle).await {
+                                        tracing::warn!(session = %session_id, "keeping a rotated credential: {e:#}");
+                                    }
+                                }
                             }
                         }
                         Ok(ToServer::Error { session_id, code, message }) => {
@@ -4128,6 +4266,125 @@ mod tests {
     use super::*;
     use crate::db::Db;
     use crate::transport::Connection;
+
+    /// A real Claude Code session, read for what it cost.
+    ///
+    /// Against a recording rather than a line we wrote, for the reason
+    /// `ft-core`'s own fixtures give: a stream we invented would only prove we
+    /// agree with ourselves, and every interesting thing here is a fact about
+    /// somebody else's output format.
+    ///
+    /// This is the half of the write path that has no database in it — does a
+    /// finished turn hand back the bill, with the models separated. The other
+    /// half is `records_what_a_turn_cost` in `db`.
+    fn replay_into_progress(name: &str) -> Vec<Spent> {
+        let path = format!(
+            "{}/../ft-core/tests/streams/{name}.ndjson",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("reading {path}: {e}"));
+        let mut progress = Progress::for_agent(ft_core::Agent::ClaudeCode, String::new());
+        text.lines()
+            .filter_map(|line| progress.read(line).spent)
+            .collect()
+    }
+
+    #[test]
+    fn a_finished_turn_hands_back_what_it_cost() {
+        let spent = replay_into_progress("plain");
+        assert_eq!(spent.len(), 1, "one turn, one bill");
+        let bill = &spent[0];
+        assert!(
+            !bill.turn.is_empty(),
+            "a turn without an id cannot be billed"
+        );
+
+        // Two models ran, and the small one is on the bill as much as the
+        // large one. Totals would have hidden that.
+        //
+        // Named canonically, which is the point of the assertion: this stream
+        // says `claude-haiku-4-5-20251001` and the page must not end up with
+        // that beside a `claude-haiku-4-5` as two different models. The
+        // normaliser folds the date away and this is what holds it there.
+        let mut named: Vec<_> = bill.usage.models.iter().map(|m| m.model.as_str()).collect();
+        named.sort_unstable();
+        assert_eq!(named, ["claude-haiku-4-5", "claude-sonnet-5"]);
+
+        let sonnet = bill
+            .usage
+            .models
+            .iter()
+            .find(|m| m.model == "claude-sonnet-5")
+            .expect("sonnet ran");
+        assert_eq!(sonnet.cache_read_tokens, 26_176);
+        assert!(sonnet.cost_usd.is_some_and(|c| c > 0.06));
+
+        // What the whole turn came to, as the agent itself reported it.
+        assert!(bill
+            .usage
+            .cost_usd
+            .is_some_and(|c| (c - 0.061_320_2).abs() < 1e-6));
+    }
+
+    /// Codex reports no per-model breakdown, so the name on its rows is
+    /// whatever `model_now` says — and that used to be only what somebody had
+    /// picked. Nobody picks a model to accept the default, so an untouched
+    /// session billed its turns to the word "Codex" while a session where
+    /// somebody had opened the picker billed to `gpt-5.6-sol`. Same agent, same
+    /// model, two rows on a page that groups by model.
+    #[test]
+    fn codex_bills_the_model_it_said_it_was_running() {
+        let mut progress = Progress::for_agent(ft_core::Agent::Codex, String::new());
+
+        // Codex answers `thread/start` with what it took, before any turn runs.
+        // Nobody has touched the picker: `settings.model` is still None.
+        progress.read(&format!(
+            r#"{{"id":{},"result":{{"thread":{{"id":"th_1"}},"model":"gpt-5.6-sol",
+                "approvalPolicy":"on-request","reasoningEffort":"medium"}}}}"#,
+            ft_core::codex::THREAD_START_ID
+        ));
+        assert_eq!(progress.settings.model, None, "nobody chose anything");
+
+        progress.read(
+            r#"{"method":"turn/started","params":{"threadId":"th_1",
+               "turn":{"id":"turn_1","items":[],"status":"inProgress"}}}"#,
+        );
+        progress.read(
+            r#"{"method":"thread/tokenUsage/updated","params":{"threadId":"th_1","turnId":"turn_1",
+               "tokenUsage":{"modelContextWindow":200000,
+               "last":{"inputTokens":120,"outputTokens":45,"cachedInputTokens":900,"totalTokens":1065},
+               "total":{"inputTokens":120,"outputTokens":45,"cachedInputTokens":900,"totalTokens":1065}}}}"#,
+        );
+        let spent = progress
+            .read(
+                r#"{"method":"turn/completed","params":{"threadId":"th_1",
+                   "turn":{"id":"turn_1","items":[],"status":"completed"}}}"#,
+            )
+            .spent
+            .expect("a finished turn is billed");
+
+        assert_eq!(
+            spent.fallback_model.as_deref(),
+            Some("gpt-5.6-sol"),
+            "the model it told us about, not the agent's own name",
+        );
+
+        // And what somebody chooses still wins over what it opened on, because
+        // choosing is the later statement of the two.
+        progress
+            .remember(ft_core::controls::ControlKind::Model, "gpt-5.6-mini")
+            .unwrap();
+        assert_eq!(progress.model_now().as_deref(), Some("gpt-5.6-mini"));
+    }
+
+    #[test]
+    fn a_turn_that_failed_is_still_billed() {
+        // Work that went wrong was still work. A bill only on success would
+        // under-report exactly the sessions somebody is investigating.
+        let spent = replay_into_progress("failure");
+        assert_eq!(spent.len(), 1);
+        assert!(spent[0].usage.models.iter().any(|m| m.input_tokens > 0));
+    }
 
     /// A machine that is never there.
     struct Never;

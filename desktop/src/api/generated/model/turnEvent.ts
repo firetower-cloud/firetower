@@ -120,7 +120,6 @@ export type TurnEvent = {
      * Claude Code does not, which is why a bar was not worth drawing.
      * Codex does, and a window is a far more useful thing to see as a
      * proportion than as a word.
-     * @minimum 0
      * @nullable
      */
   usedPercent?: number | null;

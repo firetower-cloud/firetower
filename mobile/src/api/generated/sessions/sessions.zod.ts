@@ -558,6 +558,10 @@ export const GetConversationQueryParams = zod.object({
 
 export const getConversationResponseEventsItemOneThreeUsageTwoCacheReadTokensMin = 0;
 
+export const getConversationResponseEventsItemOneThreeUsageTwoCacheWrite1hTokensMin = 0;
+
+export const getConversationResponseEventsItemOneThreeUsageTwoCacheWrite5mTokensMin = 0;
+
 export const getConversationResponseEventsItemOneThreeUsageTwoCacheWriteTokensMin = 0;
 
 export const getConversationResponseEventsItemOneThreeUsageTwoContextUsedMin = 0;
@@ -583,8 +587,6 @@ export const getConversationResponseEventsItemOneThreeUsageTwoModelsItemOutputTo
 export const getConversationResponseEventsItemOneThreeUsageTwoOutputTokensMin = 0;
 
 export const getConversationResponseEventsItemOneThreeUsageTwoThinkingTokensMin = 0;
-
-export const getConversationResponseEventsItemOneOnethreeUsedPercentMin = 0;
 
 export const getConversationResponseEventsItemTwoLineNoMin = 0;
 
@@ -614,6 +616,8 @@ export const GetConversationResponse = zod.object({
   "type": zod.enum(['TurnCompleted']),
   "usage": zod.union([zod.null(),zod.object({
   "cacheReadTokens": zod.int().min(getConversationResponseEventsItemOneThreeUsageTwoCacheReadTokensMin).nullish().describe('Absent when the agent does not say.'),
+  "cacheWrite1hTokens": zod.int().min(getConversationResponseEventsItemOneThreeUsageTwoCacheWrite1hTokensMin).nullish().describe('The two kinds of cache write, which are not the same price.\n\nA one-hour entry costs roughly twice what an input token does and a\nfive-minute one roughly a quarter more, so the split is most of what\ndecides whether a turn was expensive. The agent reports it per *turn*\nand not per model, so anything stored at a finer grain than that is an\napportionment rather than a measurement.'),
+  "cacheWrite5mTokens": zod.int().min(getConversationResponseEventsItemOneThreeUsageTwoCacheWrite5mTokensMin).nullish(),
   "cacheWriteTokens": zod.int().min(getConversationResponseEventsItemOneThreeUsageTwoCacheWriteTokensMin).nullish().describe('What was written into the cache on this turn, and billed as such.\n\nReported apart from what was read because they cost different amounts\nand mean different things: reading is the session being cheap, writing\nis it having said something new and large.'),
   "contextUsed": zod.int().min(getConversationResponseEventsItemOneThreeUsageTwoContextUsedMin).nullish().describe('Everything the model had in front of it on the last request.\n\nInput plus both kinds of cache plus what it wrote. This is the number\nthat matters to somebody deciding whether a session has room left —\ninput alone reads as almost nothing once caching is working, which is\nexactly when it is least true.'),
   "contextWindow": zod.int().min(getConversationResponseEventsItemOneThreeUsageTwoContextWindowMin).nullish().describe('How much room the model has at all.'),
@@ -699,7 +703,7 @@ export const GetConversationResponse = zod.object({
   "resetsAt": zod.int().nullish().describe('Unix seconds.'),
   "status": zod.string().describe('`allowed`, and whatever else turns up.'),
   "type": zod.enum(['Limited']),
-  "usedPercent": zod.int().min(getConversationResponseEventsItemOneOnethreeUsedPercentMin).nullish().describe('How much of the window is gone, when the agent says.\n\nClaude Code does not, which is why a bar was not worth drawing.\nCodex does, and a window is a far more useful thing to see as a\nproportion than as a word.'),
+  "usedPercent": zod.number().nullish().describe('How much of the window is gone, when the agent says.\n\nClaude Code does not, which is why a bar was not worth drawing.\nCodex does, and a window is a far more useful thing to see as a\nproportion than as a word.'),
   "window": zod.string().describe('`five_hour`, and whatever else turns up.')
 }).describe('What the account\'s own limits say.\n\nArrives on its own schedule rather than with a turn: a window, whether\nwe are inside it, and when it starts again. A proportion when the agent\nsends one, and nothing drawn from it when it does not — Claude Code\nsays none, which is why this is optional rather than a number somebody\nhas to trust.'),zod.object({
   "agent": zod.string().nullish(),

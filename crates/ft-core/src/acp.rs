@@ -12,13 +12,79 @@ use std::collections::{BTreeMap, BTreeSet};
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "acp")]
 pub enum Record {
-    Started { epoch: String },
-    Sent { message: Value },
-    Received { message: Value, replay: bool },
-    Ready { session: String },
-    Failed { detail: String },
-    ConfigurationRejected { id: String, detail: String },
+    Started {
+        epoch: String,
+    },
+    Sent {
+        message: Value,
+    },
+    Received {
+        message: Value,
+        replay: bool,
+    },
+    Ready {
+        session: String,
+    },
+    Failed {
+        detail: String,
+    },
+    ConfigurationRejected {
+        id: String,
+        detail: String,
+    },
+    /// What the agent says the session has spent, as `/usage` reported it.
+    ///
+    /// Running totals, not a turn's own figures — see `AcpNormaliser::spent`.
+    /// Written by the worker just before the reply that ends a turn, so the
+    /// turn it belongs to is still open when this arrives.
+    ///
+    /// Not a `Received`, because the exchange that produced it is not part of
+    /// anybody's conversation: the worker asks, reads the answer and journals
+    /// this instead, so the transcript stays what the person actually said.
+    Metered {
+        input: u64,
+        output: u64,
+    },
 }
+
+/// One quota window, on its way to `agent_account_limits`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Window {
+    pub window: String,
+    pub used_percent: u8,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resets_at: Option<i64>,
+}
+
+/// The two numbers out of what `/usage` prints.
+///
+/// Kimi builds this line from a template rather than a model, so it is parsed
+/// strictly and anything else is treated as nothing reported. Its own code:
+///
+/// ```text
+/// const input = total.inputOther + total.inputCacheRead + total.inputCacheCreation;
+/// lines.push(`Session total: ${input} input, ${total.output} output`);
+/// ```
+///
+/// Which is also why there is no cache split here to keep: the three kinds are
+/// added up before the sentence is written, and the structured object they came
+/// from never leaves the agent. A session with no turns yet says "no LLM calls
+/// yet" instead, and that is a `None` rather than a zero.
+pub fn metered(text: &str) -> Option<(u64, u64)> {
+    let line = text
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("Session total:"))?;
+    let (input, output) = line.split_once(',')?;
+    Some((
+        input.trim().strip_suffix("input")?.trim().parse().ok()?,
+        output.trim().strip_suffix("output")?.trim().parse().ok()?,
+    ))
+}
+
+/// What the worker sends to ask. A slash command is an ordinary prompt that the
+/// agent answers itself rather than passing to a model, which is why this costs
+/// no tokens to run — only the few its text adds to the context.
+pub const USAGE_COMMAND: &str = "/usage";
 
 /// Commands from Firetower to the ACP connection, not ACP wire methods.
 #[derive(Debug, Serialize, Deserialize)]
@@ -145,6 +211,35 @@ pub fn request_key(epoch: &str, id: &Value) -> String {
     format!("{epoch}:{}", id)
 }
 
+/// One turn's token counts as ACP spells them.
+///
+/// `totalTokens` is ignored: it is the sum of the others and storing a total
+/// beside its parts is one more number to disagree with itself. The three
+/// optional fields stay optional — an agent that does not break out its cache
+/// is saying it does not know, which a zero would misreport as "none".
+fn parse_usage(usage: &Value) -> Option<Usage> {
+    let count = |name: &str| usage.get(name).and_then(Value::as_u64);
+    // Two required fields in the schema; neither present means no usage block
+    // rather than a turn that did nothing.
+    let (input, output) = (count("inputTokens")?, count("outputTokens")?);
+    Some(Usage {
+        input_tokens: input,
+        output_tokens: output,
+        cache_read_tokens: count("cachedReadTokens"),
+        cache_write_tokens: count("cachedWriteTokens"),
+        thinking_tokens: count("thoughtTokens"),
+        ..Default::default()
+    })
+}
+
+/// The difference between two running totals that each may be unreported.
+///
+/// `None` only where the agent has never said, so a field it starts reporting
+/// mid-session begins from what it has said rather than from nothing.
+fn pair(now: Option<u64>, before: Option<u64>) -> Option<u64> {
+    Some(now?.saturating_sub(before.unwrap_or(0)))
+}
+
 /// Preserve the agent's option IDs, including the distinction between one-off
 /// and persistent approval. Unsupported decisions cancel rather than allow.
 pub fn permission_outcome(options: &Value, decision: &Decision) -> Value {
@@ -183,6 +278,49 @@ pub struct AcpNormaliser {
     requests: BTreeSet<String>,
     configuration_requests: BTreeSet<String>,
     configuration: Vec<(String, Control)>,
+    /// How full the context is, from `usage_update`.
+    ///
+    /// `(used, size)`. A gauge and not a bill: `used` is what is in the window
+    /// now, so a turn that re-read a cached prefix twenty times counts it once.
+    /// It reaches `context_used`/`context_window` and goes no further — see the
+    /// note on `consumption_events` for why that column is not on a fact row.
+    context: Option<(u64, u64)>,
+    /// What the agent says the session has spent, where it says anything.
+    ///
+    /// ACP's `Usage` is documented per field as "across session" and "across
+    /// all turns", so this is a running total in the same way Claude Code's
+    /// `modelUsage` is, and is differenced the same way before anything is
+    /// billed. Behind the `unstable_end_turn_token_usage` feature in the
+    /// protocol, so most agents send nothing and this stays `None`.
+    billed: Usage,
+    /// The session's running totals as `/usage` last reported them.
+    ///
+    /// `(input, output)`, where input is all three kinds added together because
+    /// that is all the sentence carries. Set by `Record::Metered` just before
+    /// the turn it belongs to closes, and taken by `spent` when it does.
+    metered: Option<(u64, u64)>,
+    /// How much of that has already been billed to earlier turns.
+    charged: (u64, u64),
+    /// Whether the turn now finishing actually reached a model.
+    ran: Ran,
+}
+
+/// Whether a model was called for a turn, where that can be known.
+///
+/// It can only be known where the agent was metered, which is the one good
+/// thing to come out of asking it what it spent: ACP reports a turn that failed
+/// before any request identically to one that succeeded — Kimi answers both
+/// with `{"stopReason":"end_turn"}` — so until there was a number to compare,
+/// a session whose credentials had expired looked perfectly healthy and
+/// silently did nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Ran {
+    /// Nobody asked, so nobody knows. Every unmetered agent is here.
+    #[default]
+    Unknown,
+    Yes,
+    /// Metered, and the session's input total did not move.
+    No,
 }
 
 impl AcpNormaliser {
@@ -191,6 +329,97 @@ impl AcpNormaliser {
             .iter()
             .map(|(_, control)| control.clone())
             .collect()
+    }
+
+    /// Which model the agent says it is running.
+    ///
+    /// ACP carries no per-model breakdown on usage, so this is the only name a
+    /// billed row can take. It is a `configOptions` entry rather than anything
+    /// usage-shaped — Kimi answers `session/new` with
+    /// `currentValue: "kimi-code/kimi-for-coding"` before any turn runs.
+    pub fn model(&self) -> Option<&str> {
+        self.configuration
+            .iter()
+            .find(|(_, c)| c.kind == ControlKind::Model)
+            .and_then(|(_, c)| c.current.as_deref())
+    }
+
+    /// How full the context is, as the agent last said.
+    pub fn context(&self) -> Option<(u64, u64)> {
+        self.context
+    }
+
+    /// What one turn cost, out of totals that are the whole session's.
+    ///
+    /// Every field of ACP's `Usage` is documented as a total — "across
+    /// session", "across all turns" — so reading it as a turn's figures bills
+    /// turn one again on every turn after it. Subtracting what has already been
+    /// handed over is the same correction `ClaudeNormaliser` makes against
+    /// `modelUsage`, and for the same reason.
+    ///
+    /// `None` when the agent said nothing, which today is every ACP agent:
+    /// `usage` here is gated behind `unstable_end_turn_token_usage` and Kimi's
+    /// build does not send it. The gauge from `usage_update` rides along
+    /// regardless, because that one is in the spec proper and does arrive.
+    fn spent(&mut self, usage: &Value) -> Option<Usage> {
+        let (used, size) = match self.context {
+            Some((used, size)) => (Some(used), Some(size)),
+            None => (None, None),
+        };
+
+        let Some(total) = parse_usage(usage) else {
+            // Nothing in the reply. What `/usage` said, if the worker asked —
+            // running totals again, so again the difference is this turn's.
+            if let Some((input, output)) = self.metered.take() {
+                let grew = input > self.charged.0;
+                // Every request sends the whole context, so a turn that called
+                // a model always moves the input total. One that did not move
+                // it called nothing — see `Ran`.
+                self.ran = if grew { Ran::Yes } else { Ran::No };
+                let delta = Usage {
+                    input_tokens: input.saturating_sub(self.charged.0),
+                    output_tokens: output.saturating_sub(self.charged.1),
+                    // `/usage` adds the three kinds of input together before
+                    // printing, so there is no split to report. NULL rather
+                    // than zero: the agent knows, it just does not say.
+                    cache_read_tokens: None,
+                    cache_write_tokens: None,
+                    context_used: used,
+                    context_window: size,
+                    // It prints tokens and never a price.
+                    cost_usd: None,
+                    ..Default::default()
+                };
+                self.charged = (input, output);
+                return Some(delta);
+            }
+            // Nothing billable was reported. A turn still carries how full the
+            // window is, which is what the conversation view draws, and no
+            // consumption row is written from it.
+            return (used.is_some()).then(|| Usage {
+                context_used: used,
+                context_window: size,
+                ..Default::default()
+            });
+        };
+
+        let since = |now: u64, then: u64| now.saturating_sub(then);
+        let delta = Usage {
+            input_tokens: since(total.input_tokens, self.billed.input_tokens),
+            output_tokens: since(total.output_tokens, self.billed.output_tokens),
+            cache_read_tokens: pair(total.cache_read_tokens, self.billed.cache_read_tokens),
+            cache_write_tokens: pair(total.cache_write_tokens, self.billed.cache_write_tokens),
+            thinking_tokens: pair(total.thinking_tokens, self.billed.thinking_tokens),
+            context_used: used,
+            context_window: size.or(total.context_window),
+            // ACP states no price on `Usage` at all. The one it has is on
+            // `usage_update`, cumulative for the session and in a currency of
+            // the agent's choosing, which is not the column we have.
+            cost_usd: None,
+            ..Default::default()
+        };
+        self.billed = total;
+        Some(delta)
     }
 
     pub fn configure(&self, kind: ControlKind, value: &str) -> Option<Value> {
@@ -283,10 +512,14 @@ impl AcpNormaliser {
         let mut events = Vec::new();
         match record {
             Record::ConfigurationRejected { .. } => {}
+            // Held until the turn it belongs to closes, which is the next
+            // record the worker writes.
+            Record::Metered { input, output } => self.metered = Some((input, output)),
             Record::Started { epoch } => {
                 self.finish(
                     TurnStatus::Interrupted,
                     Some("Agent connection restarted; previous work was not replayed.".into()),
+                    None,
                     &mut events,
                 );
                 self.epoch = epoch;
@@ -300,7 +533,7 @@ impl AcpNormaliser {
                     self.active =
                         Some((Value::Null, TurnId::new(format!("{}:startup", self.epoch))));
                 }
-                self.finish(TurnStatus::Failed, Some(detail), &mut events);
+                self.finish(TurnStatus::Failed, Some(detail), None, &mut events);
             }
             Record::Sent { message } => {
                 if matches!(
@@ -412,7 +645,41 @@ impl AcpNormaliser {
                             ),
                         }
                     };
-                    self.finish(status, detail, &mut events);
+                    // The reply is where a per-turn breakdown rides, where the
+                    // agent sends one at all.
+                    self.ran = Ran::Unknown;
+                    let spent = self.spent(&message["result"]["usage"]);
+
+                    // A turn the agent says succeeded, having called no model.
+                    //
+                    // ACP gives failure no shape of its own: Kimi answers an
+                    // expired credential with `{"stopReason":"end_turn"}`, the
+                    // same words it uses for work it actually did, and puts the
+                    // reason only in a log file of its own. So a session whose
+                    // sign-in had lapsed reported every turn as finished, said
+                    // nothing, and looked entirely well — which is how one hid
+                    // here for a day.
+                    //
+                    // The meter is what tells them apart. Every request sends
+                    // the whole context, so a turn that reached a model always
+                    // moves the session's input total; one that did not move it
+                    // did not get that far. Only ever applied to a turn the
+                    // agent called successful — a cancellation is already
+                    // honestly reported, and overriding it would be a lie in
+                    // the other direction.
+                    let (status, detail) = match (status, self.ran) {
+                        (TurnStatus::Completed, Ran::No) => (
+                            TurnStatus::Failed,
+                            Some(
+                                "The agent ended this turn without calling a model. Its \
+                                 sign-in or its quota is the usual reason — reconnect the \
+                                 account and try again."
+                                    .to_string(),
+                            ),
+                        ),
+                        (status, _) => (status, detail),
+                    };
+                    self.finish(status, detail, spent, &mut events);
                 } else {
                     events.push(TurnEvent::Raw {
                         source: RawSource::Acp,
@@ -425,6 +692,16 @@ impl AcpNormaliser {
     }
 
     fn update(&mut self, update: &Value, events: &mut Vec<TurnEvent>) {
+        // Before the active-turn guard: Kimi sends this *after* the reply that
+        // ends the turn, so a gauge dropped for want of a turn would be the
+        // only one that ever arrives.
+        if update["sessionUpdate"] == "usage_update" {
+            if let (Some(used), Some(size)) = (update["used"].as_u64(), update["size"].as_u64()) {
+                self.context = Some((used, size));
+            }
+            return;
+        }
+
         let Some((_, turn)) = &self.active else {
             return;
         };
@@ -555,7 +832,13 @@ impl AcpNormaliser {
         }
     }
 
-    fn finish(&mut self, status: TurnStatus, detail: Option<String>, events: &mut Vec<TurnEvent>) {
+    fn finish(
+        &mut self,
+        status: TurnStatus,
+        detail: Option<String>,
+        spent: Option<Usage>,
+        events: &mut Vec<TurnEvent>,
+    ) {
         for req in std::mem::take(&mut self.requests) {
             events.push(TurnEvent::RequestResolved {
                 req: RequestId::new(req),
@@ -576,7 +859,7 @@ impl AcpNormaliser {
             events.push(TurnEvent::TurnCompleted {
                 turn,
                 status,
-                usage: None,
+                usage: spent,
                 detail,
             });
         }

@@ -125,6 +125,17 @@ pub struct Worker {
 /// fast enough that a meter follows a build starting. The numbers it carries
 /// are drawn as meters that move; they are not decisions anything waits on.
 const REPORT_EVERY: std::time::Duration = std::time::Duration::from_secs(5);
+/// How often to look for an agent that has rotated its own credential.
+///
+/// Kimi refreshes about every fifteen minutes, so a minute is plenty to catch
+/// it well before the worktree can be reclaimed, and it is a hash of a small
+/// file rather than anything that costs.
+const CREDENTIALS_EVERY: std::time::Duration = std::time::Duration::from_secs(60);
+/// How often to ask a provider what an account's plan has left.
+///
+/// Somebody else's API on a timer of our choosing, so the timer is slow: a
+/// five-hour window does not move enough in ten minutes to be worth a request.
+const LIMITS_EVERY: std::time::Duration = std::time::Duration::from_secs(600);
 
 const OUTBOUND: usize = 1024;
 
@@ -356,6 +367,12 @@ impl Worker {
             // Far enough in the past that the first tick reports rather than
             // waiting five seconds to say anything at all.
             let mut last_reported = std::time::Instant::now() - REPORT_EVERY;
+            // The credential each live session last had, so a refresh is
+            // noticed without collecting the same bytes every minute.
+            let mut creds: std::collections::HashMap<String, String> =
+                std::collections::HashMap::new();
+            let mut last_creds = std::time::Instant::now() - CREDENTIALS_EVERY;
+            let mut last_limits = std::time::Instant::now() - LIMITS_EVERY;
 
             loop {
                 tokio::select! {
@@ -381,6 +398,22 @@ impl Worker {
                         if last_reported.elapsed() >= REPORT_EVERY {
                             last_reported = std::time::Instant::now();
                             self.report_usage(&out, &mut cpu_seen).await;
+                        }
+
+                        // And whether any agent has rotated the credential it
+                        // was lent. Checked while the session is alive because
+                        // the home goes when the worktree does, and a reclaim
+                        // does not wait to be asked.
+                        if last_creds.elapsed() >= CREDENTIALS_EVERY {
+                            last_creds = std::time::Instant::now();
+                            self.return_rotated_credentials(&out, &mut creds).await;
+                        }
+
+                        // What each plan has left. Nothing waits on this — not
+                        // a turn, and not this loop either.
+                        if last_limits.elapsed() >= LIMITS_EVERY {
+                            last_limits = std::time::Instant::now();
+                            self.ask_about_limits(&out).await;
                         }
                     }
 
@@ -2822,6 +2855,117 @@ You are in the directory that holds them, not inside one of them.              P
     /// has and drops the rest — none of which is a reason to disturb a session.
     /// The interface draws a workspace with no reading as one with no meters,
     /// which is honest: nothing is being measured there.
+    /// Ask each live session's provider what its plan has left.
+    ///
+    /// Off the turn's path on purpose. A quota is a standing fact about an
+    /// account, and this used to be asked as a turn was closing — so a turn
+    /// finished its work and then sat waiting on somebody else's API before it
+    /// could be reported done. That is our bookkeeping making an agent look
+    /// slow, which is never a trade worth making.
+    ///
+    /// Off *this* loop's path too. The request is spawned rather than awaited,
+    /// because the same tick forwards every agent's events every second and an
+    /// eight-second timeout here would stall all of them. Nothing downstream
+    /// waits for the answer: it arrives as a message whenever it arrives, or
+    /// never, and the page shows the previous reading until it does.
+    ///
+    /// Every failure is silence. No network, a refused token, a body in a
+    /// shape nobody expected, a provider that has no such endpoint — each ends
+    /// as no message sent, and the limits already on the page stay as they are.
+    async fn ask_about_limits(&self, out: &Out) {
+        let Ok(places) = self.store.live_workspaces().await else {
+            return;
+        };
+        for (session_id, path) in places {
+            let home = crate::agentd::dir_for(std::path::Path::new(&path))
+                .join(format!("agent-home-{session_id}"));
+            let out = out.clone();
+            tokio::spawn(async move {
+                let Some(windows) = crate::kimi::allowance(&home).await else {
+                    return;
+                };
+                if windows.is_empty() {
+                    return;
+                }
+                let _ = out
+                    .send(ToServer::AgentLimits {
+                        session_id: session_id.to_string(),
+                        windows: windows
+                            .into_iter()
+                            .map(|w| ft_proto::LimitWindow {
+                                window: w.window,
+                                used_percent: w.used_percent,
+                                resets_at: w.resets_at,
+                            })
+                            .collect(),
+                    })
+                    .await;
+            });
+        }
+    }
+
+    /// Hand back any credential an agent has rewritten since we lent it one.
+    ///
+    /// Kimi issues a new refresh token every time it spends one and writes it
+    /// into the home it was given, which lives inside the worktree and is
+    /// deleted when that is reclaimed. The vault kept the token from sign-in;
+    /// the first session to run spent it; every session after was handed
+    /// something already used and reported itself unauthorised. An account
+    /// worked exactly once.
+    ///
+    /// Sent on the control channel, never as an `AgentLine`: those are
+    /// journalled to the database verbatim, and a credential written there in
+    /// the clear is the thing the vault exists to prevent.
+    ///
+    /// Everything here is best effort. A home with no credentials in it is
+    /// every agent that does not keep a bundle, and is skipped without a word.
+    async fn return_rotated_credentials(
+        &self,
+        out: &Out,
+        seen: &mut std::collections::HashMap<String, String>,
+    ) {
+        let Ok(places) = self.store.live_workspaces().await else {
+            return;
+        };
+        // A session that has gone takes its remembered fingerprint with it,
+        // or this map grows for as long as the worker runs.
+        let live: std::collections::HashSet<String> =
+            places.iter().map(|(id, _)| id.to_string()).collect();
+        seen.retain(|id, _| live.contains(id));
+
+        for (session_id, path) in &places {
+            let home = crate::agentd::dir_for(std::path::Path::new(path))
+                .join(format!("agent-home-{session_id}"));
+            let Some(now) = crate::kimi::fingerprint(&home).await else {
+                continue;
+            };
+            // The first sighting is *not* assumed to be what we lent it.
+            // Kimi refreshes within seconds of starting, long before the first
+            // minute is up, so by the time anything here looks the token has
+            // usually already rotated once. Treating that as the baseline is
+            // how the one rotation that matters gets missed. The server
+            // compares against the vault and ignores a bundle it already has,
+            // which is the only place the question can be answered properly.
+            if seen.insert(session_id.to_string(), now.clone()).as_ref() == Some(&now) {
+                continue;
+            }
+            match crate::kimi::collect(&home).await {
+                // `collect` refuses a bundle with no token in it, which is
+                // what Kimi leaves behind when a refresh fails — exactly the
+                // moment it would be worst to overwrite a good vault entry.
+                Err(e) => tracing::debug!(session = %session_id, "not re-vaulting: {e:#}"),
+                Ok(bundle) => {
+                    let _ = out
+                        .send(ToServer::AgentCredentialRotated {
+                            session_id: session_id.to_string(),
+                            bundle: String::from_utf8_lossy(&bundle).into_owned(),
+                        })
+                        .await;
+                }
+            }
+        }
+    }
+
     async fn report_usage(
         &self,
         out: &Out,

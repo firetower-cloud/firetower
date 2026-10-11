@@ -115,3 +115,28 @@ export function pathSlug(text: string): string {
   }
   return out || "untitled";
 }
+
+/**
+ * How long until something, in the units a person would use.
+ *
+ * A monthly quota is a fortnight away and was being shown as `364 h 15 m`,
+ * which nobody reads as two weeks. Hours stop being a unit somebody can hold
+ * in their head at about two days.
+ *
+ * Zero parts are left out rather than printed: `15d 4h` and not `15d 4h 0m`,
+ * `2d 5m` and not `2d 0h 5m`. A gap in the middle is easier to read than a
+ * zero that has to be checked.
+ */
+export function untilText(ms: number): string {
+  const mins = Math.round(ms / 60_000);
+  if (mins < 1) return "under a minute";
+
+  const parts: string[] = [];
+  const days = Math.floor(mins / 1440);
+  const hours = Math.floor((mins % 1440) / 60);
+  const rest = mins % 60;
+  if (days) parts.push(`${days}d`);
+  if (hours) parts.push(`${hours}h`);
+  if (rest) parts.push(`${rest}m`);
+  return parts.join(" ");
+}

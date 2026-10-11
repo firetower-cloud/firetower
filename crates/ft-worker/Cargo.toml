@@ -16,6 +16,8 @@ portable-pty.workspace = true
 anyhow.workspace = true
 async-trait.workspace = true
 chrono.workspace = true
+# asking Kimi what its plan has left, which ACP does not carry
+reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 # an agent binary is checked against its publisher's digest before it is kept

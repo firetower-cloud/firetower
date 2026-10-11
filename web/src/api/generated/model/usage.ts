@@ -21,6 +21,23 @@ export interface Usage {
      */
   cacheReadTokens?: number | null;
   /**
+     * The two kinds of cache write, which are not the same price.
+     *
+     * A one-hour entry costs roughly twice what an input token does and a
+     * five-minute one roughly a quarter more, so the split is most of what
+     * decides whether a turn was expensive. The agent reports it per *turn*
+     * and not per model, so anything stored at a finer grain than that is an
+     * apportionment rather than a measurement.
+     * @minimum 0
+     * @nullable
+     */
+  cacheWrite1hTokens?: number | null;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  cacheWrite5mTokens?: number | null;
+  /**
      * What was written into the cache on this turn, and billed as such.
      *
      * Reported apart from what was read because they cost different amounts

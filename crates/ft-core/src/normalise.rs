@@ -355,6 +355,21 @@ pub struct ClaudeNormaliser {
     /// A request, by contrast, states the whole window it saw in one number.
     /// Subagents are excluded — they read a window of their own.
     last_request: Option<Request>,
+    /// What every `result` so far added up to, per model.
+    ///
+    /// **`modelUsage` is cumulative for the session, not for the turn.** The
+    /// second `result` of a conversation repeats the first one's tokens and
+    /// adds the new ones, so recording it as the turn's own bill charges turn
+    /// one again on turn two — 49% high after two turns, and worse from there.
+    /// Only the top-level `usage` block is per-turn.
+    ///
+    /// So the running totals are kept and each turn reports the difference.
+    /// Keyed by the canonical name, which is also what the difference is
+    /// reported under.
+    billed: std::collections::HashMap<String, crate::turn::ModelUsage>,
+    /// The same problem for money: `total_cost_usd` is the session's bill so
+    /// far, not this turn's.
+    charged: f64,
     /// The model it last said it was running, as it spelled it.
     ///
     /// Kept because nothing else keeps it. Claude Code is told which model to
@@ -437,10 +452,14 @@ impl ClaudeNormaliser {
             Some("assistant") => self.assistant(v, &mut out),
             Some("user") => self.user(v, &mut out),
             Some("result") => self.result(v, &mut out),
-            Some("rate_limit_event") => match limits(v) {
-                Some(event) => out.push(event),
-                None => out.push(raw(v)),
-            },
+            Some("rate_limit_event") => {
+                let found = limits(v);
+                if found.is_empty() {
+                    out.push(raw(v));
+                } else {
+                    out.extend(found);
+                }
+            }
             // Anything else new. Kept, not named.
             _ => out.push(raw(v)),
         }
@@ -992,7 +1011,7 @@ impl ClaudeNormaliser {
         out.push(TurnEvent::TurnCompleted {
             turn,
             status,
-            usage: usage(v, self.last_request.as_ref()),
+            usage: self.usage(v),
             detail,
         });
     }
@@ -1156,6 +1175,60 @@ fn tool_result_text(result: &Value) -> Option<String> {
     }
 }
 
+impl ClaudeNormaliser {
+    /// What *this* turn cost, out of what the session has spent so far.
+    ///
+    /// The per-model breakdown and the dollar figure both arrive as running
+    /// totals, so both are differenced against the last `result` and the new
+    /// totals kept for the next one. A model that did nothing this turn has a
+    /// difference of zero and is left out rather than reported as a row of
+    /// zeroes.
+    fn usage(&mut self, v: &Value) -> Option<Usage> {
+        let mut turn = usage(v, self.last_request.as_ref())?;
+
+        let mut fresh = Vec::new();
+        for total in std::mem::take(&mut turn.models) {
+            let before = self.billed.get(&total.model);
+            let since = |now: u64, then: fn(&crate::turn::ModelUsage) -> u64| {
+                now.saturating_sub(before.map(then).unwrap_or(0))
+            };
+            let delta = crate::turn::ModelUsage {
+                model: total.model.clone(),
+                input_tokens: since(total.input_tokens, |m| m.input_tokens),
+                output_tokens: since(total.output_tokens, |m| m.output_tokens),
+                cache_read_tokens: since(total.cache_read_tokens, |m| m.cache_read_tokens),
+                cache_write_tokens: since(total.cache_write_tokens, |m| m.cache_write_tokens),
+                context_window: total.context_window,
+                cost_usd: match (total.cost_usd, before.and_then(|m| m.cost_usd)) {
+                    (Some(now), Some(then)) => Some((now - then).max(0.0)),
+                    (now, _) => now,
+                },
+            };
+            self.billed.insert(total.model.clone(), total);
+            if delta.input_tokens
+                + delta.output_tokens
+                + delta.cache_read_tokens
+                + delta.cache_write_tokens
+                > 0
+            {
+                fresh.push(delta);
+            }
+        }
+        fresh.sort_by(|a, b| {
+            b.cost_usd
+                .unwrap_or(0.0)
+                .total_cmp(&a.cost_usd.unwrap_or(0.0))
+        });
+        turn.models = fresh;
+
+        if let Some(so_far) = turn.cost_usd {
+            turn.cost_usd = Some((so_far - self.charged).max(0.0));
+            self.charged = so_far;
+        }
+        Some(turn)
+    }
+}
+
 fn usage(v: &Value, last: Option<&Request>) -> Option<Usage> {
     let usage = v.get("usage")?;
     let (context_used, context_window) = context(v, last);
@@ -1171,6 +1244,16 @@ fn usage(v: &Value, last: Option<&Request>) -> Option<Usage> {
         cache_read_tokens: usage.get("cache_read_input_tokens").and_then(Value::as_u64),
         cache_write_tokens: usage
             .get("cache_creation_input_tokens")
+            .and_then(Value::as_u64),
+        // Per turn, like the block it sits in — `modelUsage` has no TTL split
+        // at all, so this is the only place the distinction exists.
+        cache_write_1h_tokens: usage
+            .get("cache_creation")
+            .and_then(|c| c.get("ephemeral_1h_input_tokens"))
+            .and_then(Value::as_u64),
+        cache_write_5m_tokens: usage
+            .get("cache_creation")
+            .and_then(|c| c.get("ephemeral_5m_input_tokens"))
             .and_then(Value::as_u64),
         thinking_tokens: usage
             .get("output_tokens_details")
@@ -1245,16 +1328,56 @@ fn denied(v: &Value) -> Vec<String> {
 /// Deliberately shallow. The agent reports a window, a status and a reset time
 /// and no proportion of anything, so this carries those three and invents
 /// nothing. A bar without a numerator would be a drawing, not a reading.
-fn limits(v: &Value) -> Option<TurnEvent> {
-    let info = v.get("rate_limit_info")?;
-    Some(TurnEvent::Limited {
-        window: str_at(info, "rateLimitType")?.to_string(),
-        status: str_at(info, "status").unwrap_or("unknown").to_string(),
+fn limits(v: &Value) -> Vec<TurnEvent> {
+    let Some(info) = v.get("rate_limit_info") else {
+        return Vec::new();
+    };
+    let status = str_at(info, "status").unwrap_or("unknown").to_string();
+
+    // Every window the agent reported, with how full each one is.
+    //
+    // This used to read the three fields beside it and hard-code no
+    // percentage, on the grounds that Claude Code sent none. It does now, and
+    // has for a while: `unifiedWindows` carries a utilization per window, and
+    // its own `/usage` draws the bars this was declining to. Worse, the single
+    // `rateLimitType` beside it names only one of them — the seven-day window
+    // was not missing a number, it was missing entirely.
+    let windows: Vec<TurnEvent> = info
+        .get("unifiedWindows")
+        .and_then(Value::as_object)
+        .map(|found| {
+            found
+                .iter()
+                .filter_map(|(name, w)| {
+                    let used = w.get("utilization").and_then(Value::as_f64)?;
+                    Some(TurnEvent::Limited {
+                        window: name.clone(),
+                        status: status.clone(),
+                        resets_at: w.get("resetsAt").and_then(Value::as_i64),
+                        // A ratio of one, like Kimi's, kept to a tenth.
+                        used_percent: Some(
+                            ((used * 1000.0).round() / 10.0).clamp(0.0, 100.0) as f32
+                        ),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    if !windows.is_empty() {
+        return windows;
+    }
+
+    // An older Claude Code, which names one window and says nothing about how
+    // full it is. A bar without a numerator would be a drawing, not a reading.
+    let Some(window) = str_at(info, "rateLimitType") else {
+        return Vec::new();
+    };
+    vec![TurnEvent::Limited {
+        window: window.to_string(),
+        status,
         resets_at: info.get("resetsAt").and_then(Value::as_i64),
-        // Claude Code sends none, and a bar without a numerator would be a
-        // drawing rather than a reading.
         used_percent: None,
-    })
+    }]
 }
 
 /// How full the model's context got, and how big it is.

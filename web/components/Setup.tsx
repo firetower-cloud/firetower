@@ -18,7 +18,7 @@
  * duress.** The desktop and phone apps do not offer it; they send people here.
  * One screen to get right, on the one surface that is always reachable.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Mark } from "./Signal";
 import { useSetupState, useCompleteSetup } from "@/src/api/generated/setup/setup";
@@ -33,13 +33,6 @@ export function Setup() {
     state?.needsPassword ? "Password" : null,
     state?.needsOrganization ? "Organisation" : null,
   ].filter(Boolean) as string[];
-  const [done, setDone] = useState(false);
-  // Something was answered during this visit. Without this, the moment the last
-  // step is saved the page decides it has no reason to exist and redirects —
-  // which is how somebody who came here only to set a password never reached
-  // the panel telling them where to get the app.
-  const [answered, setAnswered] = useState(false);
-
   /* While developing, `?preview=password|organisation|done` draws a step
      without the server having to be in that state, and `&member` draws it as
      somebody who is not setting the install up. Not in a build. */
@@ -52,14 +45,34 @@ export function Setup() {
 
   // Whether this visit is an install being set up, or a person being let in.
   const onboarding = params?.has("member") ? false : !state?.completed;
+  const current = shown[0];
 
-  // Nothing left to ask, and nothing was answered on the way in: the page has
-  // no reason to exist for this account. Decided after render — navigating
-  // while rendering is a state change React refuses.
-  const nothingToDo = !preview && !isLoading && outstanding.length === 0 && !!state?.completed && !done && !answered;
+  // Nothing left to ask. Mark setting up as finished, then go to the dashboard.
+  //
+  // This used to draw one more panel, saying where to get the app. But `/` *is*
+  // that page — it is the first thing in the rail — so the panel was the same
+  // words with the navigation taken away, on the one screen in the product that
+  // deliberately has none. People finished setting up and were left somewhere
+  // with no way onward and nothing to say they had arrived.
+  //
+  // Decided in an effect because navigating while rendering is a state change
+  // React refuses, and latched because this must happen once: the redirect
+  // unmounts nothing fast enough to stop a second pass from firing it again.
+  const settled = useRef(false);
+  const settling = !preview && !isLoading && !current;
   useEffect(() => {
-    if (nothingToDo) router.replace("/");
-  }, [nothingToDo, router]);
+    if (!settling || settled.current) return;
+    settled.current = true;
+    void (async () => {
+      // Awaited rather than fired and forgotten: this flag is what stops the
+      // wizard offering itself again, and leaving before it lands would mean
+      // setting up never finished.
+      if (onboarding && !state?.completed) {
+        await complete.mutateAsync().catch(() => {});
+      }
+      router.replace("/");
+    })();
+  }, [settling, onboarding, state?.completed, complete, router]);
 
   if (isLoading) {
     return (
@@ -68,16 +81,8 @@ export function Setup() {
       </div>
     );
   }
-  if (nothingToDo) return null;
-  const current = shown[0];
-  const advance = () => {
-    setAnswered(true);
-    void refetch();
-  };
-  const finish = () => {
-    if (!preview && onboarding && !state?.completed) complete.mutate();
-    setDone(true);
-  };
+  if (settling) return null;
+  const advance = () => void refetch();
   const steps = onboarding ? ["Password", "Organisation", "The app"] : ["Password", "The app"];
   const at = current === "Password" ? 0 : current === "Organisation" ? 1 : steps.length - 1;
 
@@ -94,28 +99,21 @@ export function Setup() {
         <div className="mt-9">
           {current === "Password" && <StepPassword fromFile={onboarding} onNext={advance} />}
           {current === "Organisation" && <StepOrganization onNext={advance} />}
+          {/* Only `?preview=done` reaches this now: a real visit with nothing
+              left to ask has already gone to the dashboard. */}
           {!current && (
             <>
-              <Done onSeen={finish} onboarding={onboarding} />
+              <p className="px-6 text-ui text-sage">
+                {onboarding
+                  ? "Done. This Firetower is yours."
+                  : "Your password is set. Sign in with it from here on."}
+              </p>
               <GetTheApp />
             </>
           )}
         </div>
       </div>
     </div>
-  );
-}
-
-/** Marks setting up as finished once the last panel is on screen. */
-function Done({ onSeen, onboarding }: { onSeen: () => void; onboarding: boolean }) {
-  useEffect(() => {
-    onSeen();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  return (
-    <p className="px-6 text-ui text-sage">
-      {onboarding ? "Done. This Firetower is yours." : "Your password is set. Sign in with it from here on."}
-    </p>
   );
 }
 

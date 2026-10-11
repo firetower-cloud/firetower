@@ -1251,7 +1251,7 @@ fn limits(params: &Value) -> Vec<TurnEvent> {
                 // room left, however little.
                 status: if used >= 100 { "reached" } else { "allowed" }.to_string(),
                 resets_at: window.get("resetsAt").and_then(Value::as_i64),
-                used_percent: Some(used.clamp(0, 100) as u8),
+                used_percent: Some(used.clamp(0, 100) as f32),
             })
         })
         .collect()
@@ -2003,7 +2003,7 @@ mod tests {
             } => {
                 assert_eq!(window, "5_hour");
                 assert_eq!(status, "allowed");
-                assert_eq!(*used_percent, Some(42));
+                assert_eq!(*used_percent, Some(42.0));
                 assert_eq!(*resets_at, Some(1787724427));
             }
             other => panic!("expected a limit, got {other:?}"),

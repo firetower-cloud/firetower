@@ -1,0 +1,182 @@
+//! What the fleet spent, and on what.
+//!
+//! One endpoint rather than four, because the page is one slice: the headline,
+//! the chart and the ledger all have to be the same period, the same scope and
+//! the same access, and three requests that could disagree with each other is a
+//! page that eventually does.
+//!
+//! Every read underneath is scoped by `filed_where`, so this answers in exactly
+//! the terms the rest of the product does: an administrator is not a reader of
+//! anything they were not granted.
+
+use super::ApiResult;
+use crate::auth::Principal;
+use crate::db::{Bucket, Column, Dimension, Direction, Group, Ledger, Slice, Sort, Totals};
+use crate::AppState;
+use axum::{
+    extract::{Query, State},
+    Extension, Json,
+};
+use serde::{Deserialize, Serialize};
+use utoipa::{IntoParams, ToSchema};
+
+/// What to show, and how to cut it.
+#[derive(Debug, Deserialize, IntoParams)]
+#[serde(rename_all = "camelCase")]
+#[into_params(parameter_in = Query)]
+pub struct Ask {
+    /// Inclusive.
+    pub from: chrono::DateTime<chrono::Utc>,
+    /// Exclusive, so a day boundary belongs to one bucket and not two.
+    pub to: chrono::DateTime<chrono::Utc>,
+    pub bucket: Bucket,
+    pub group: Dimension,
+    /// A second level, cut from each row of the first.
+    ///
+    /// Either order gives the same totals — it is one more `GROUP BY` column,
+    /// not a different query — which is why the interface can offer to swap
+    /// them.
+    #[serde(default)]
+    pub then: Option<Dimension>,
+    /// Narrow to one person. `me` means whoever is asking.
+    #[serde(default)]
+    pub person: Option<String>,
+    /// Narrow to whoever is in one team.
+    #[serde(default)]
+    pub team: Option<String>,
+    /// Only groups whose name or key contains this.
+    #[serde(default)]
+    pub find: Option<String>,
+    #[serde(default = "by_tokens")]
+    pub sort: Sort,
+    #[serde(default = "descending")]
+    pub direction: Direction,
+    /// How many rows to draw. Capped, because a page that asks for everything
+    /// is how the first version of this shipped 461 KB to draw nine rows.
+    #[serde(default = "a_page")]
+    pub limit: i64,
+    #[serde(default)]
+    pub offset: i64,
+}
+
+fn by_tokens() -> Sort {
+    Sort::Tokens
+}
+fn descending() -> Direction {
+    Direction::Desc
+}
+fn a_page() -> i64 {
+    25
+}
+
+/// The whole page, in the terms the person asking may see it.
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Consumption {
+    pub totals: Totals,
+    pub series: Vec<Column>,
+    pub groups: Vec<Group>,
+    /// Everything past this page, added together.
+    ///
+    /// Deliberately not called "smaller": once the order can be reversed, or by
+    /// name, or by date, the rest is not smaller — it is only the rest.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rest: Option<Group>,
+    /// How many groups there are in total, so a page can say what it is part of.
+    pub group_count: i64,
+}
+
+/// What was spent in a period.
+#[utoipa::path(
+    get, path = "/api/v1/consumption", tag = "consumption",
+    params(Ask),
+    responses((status = 200, body = Consumption)),
+)]
+pub(super) async fn consumption(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Query(ask): Query<Ask>,
+) -> ApiResult<Json<Consumption>> {
+    let me = principal.owner().unwrap_or_default().to_string();
+
+    let slice = Slice {
+        within: None,
+        from: ask.from,
+        to: ask.to,
+        // `me` rather than an id, so a link somebody shares does not quietly
+        // show them whoever sent it.
+        person: match ask.person.as_deref() {
+            Some("me") => Some(me.clone()),
+            other => other.map(str::to_string),
+        },
+        team: ask.team.clone(),
+        find: ask.find.clone().filter(|f| !f.trim().is_empty()),
+    };
+    let limit = ask.limit.clamp(1, 200);
+    let offset = ask.offset.max(0);
+
+    let totals = state.db.consumption_totals(&me, &slice).await?;
+    let series = state.db.consumption_series(&me, &slice, ask.bucket).await?;
+    let (mut groups, rest, group_count) = state
+        .db
+        .consumption_groups(
+            &me,
+            &slice,
+            Ledger {
+                by: ask.group,
+                sort: ask.sort,
+                direction: ask.direction,
+                limit,
+                offset,
+            },
+            Some(&totals),
+        )
+        .await?;
+
+    // The second level, cut from each row of the first. Only for the rows that
+    // will be drawn: a hundred groups each fanning out again is a query nobody
+    // asked for, and the interface folds everything past the ninth anyway.
+    if let Some(then) = ask.then.filter(|t| *t != ask.group) {
+        for group in groups.iter_mut().take(12) {
+            // One level down is the same ledger asked again with the rows
+            // narrowed to this group. Every dimension narrows the same way, so
+            // every combination works — "by model, then by person" is the
+            // person ledger over one model's rows.
+            //
+            // `find` is dropped: it matched the outer rows, and applying it
+            // again inside would hide children of a group it already chose.
+            let narrowed = Slice {
+                from: slice.from,
+                to: slice.to,
+                person: slice.person.clone(),
+                team: slice.team.clone(),
+                find: None,
+                within: Some((ask.group, group.key.clone())),
+            };
+            group.children = state
+                .db
+                .consumption_groups(
+                    &me,
+                    &narrowed,
+                    Ledger {
+                        by: then,
+                        sort: ask.sort,
+                        direction: ask.direction,
+                        limit: 6,
+                        offset: 0,
+                    },
+                    None,
+                )
+                .await?
+                .0;
+        }
+    }
+
+    Ok(Json(Consumption {
+        totals,
+        series,
+        groups,
+        rest,
+        group_count,
+    }))
+}

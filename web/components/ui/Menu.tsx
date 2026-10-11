@@ -43,9 +43,14 @@ export type Item<T = never> =
     };
 
 /** Where a menu can go, measured from the trigger. */
-type At = { left: number; top: number; width: number; flip: boolean };
+export type At = { left: number; top: number; width: number; flip: boolean };
 
-function useAnchor(open: boolean) {
+/**
+ * Exported because anything that opens a panel from a button needs exactly
+ * this, and a second copy of it is a second thing to fix when a panel opens off
+ * the bottom of the screen or fails to follow its trigger on a scroll.
+ */
+export function useAnchor(open: boolean) {
   const trigger = useRef<HTMLButtonElement>(null);
   const [at, setAt] = useState<At | null>(null);
 

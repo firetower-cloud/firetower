@@ -250,3 +250,327 @@ fn accepted_model_change_replaces_efforts_without_starting_or_finishing_a_turn()
         "do not advertise stale choices during restart"
     );
 }
+
+/// Replays a captured ACP connection, line for line, as the worker journalled it.
+fn replay(name: &str) -> (AcpNormaliser, Vec<TurnEvent>) {
+    let path = format!("{}/tests/streams/{name}.ndjson", env!("CARGO_MANIFEST_DIR"));
+    let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("reading {path}: {e}"));
+    let mut reader = AcpNormaliser::default();
+    let events = text
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .flat_map(|line| reader.push(line))
+        .collect();
+    (reader, events)
+}
+
+/// What a real Kimi connection actually says about what it spent.
+///
+/// Recorded from one, because the protocol and the build disagree: ACP defines
+/// a per-turn breakdown and Kimi does not send it. The parser is written for
+/// the one that is specified; this holds the line on what today's agent gives.
+#[test]
+fn a_kimi_turn_reports_a_context_gauge_and_no_bill() {
+    let (reader, events) = replay("kimi_acp");
+
+    // The model is known before any turn runs — it is a `configOptions` entry
+    // in the answer to `session/new`, which is why a billed row can be named at
+    // all when the usage block carries no model.
+    assert_eq!(reader.model(), Some("kimi-code/kimi-for-coding"));
+
+    // `usage_update` arrives *after* the reply that ends the turn, so a reader
+    // that only looked at it while a turn was open would never see one.
+    assert_eq!(reader.context(), Some((20_237, 1_048_576)));
+
+    let ended: Vec<_> = events
+        .iter()
+        .filter_map(|e| match e {
+            TurnEvent::TurnCompleted { usage, status, .. } => Some((usage, status)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(ended.len(), 1, "one prompt, one turn");
+    let (usage, status) = ended[0];
+    assert_eq!(*status, TurnStatus::Completed);
+
+    // And the turn itself is billed nothing at all — not zero tokens, nothing.
+    // The gauge is a message later than the reply that ends the turn, so the
+    // first turn of a connection has neither a bill nor a gauge to carry, and
+    // inventing one of either would be the page's first wrong number.
+    assert!(
+        usage.is_none(),
+        "a turn whose agent said nothing about tokens reports nothing: {usage:?}",
+    );
+}
+
+/// The gauge is a message behind, so it rides on the turn after it arrives.
+///
+/// Kimi sends `usage_update` once the prompt has been answered. Nothing can put
+/// it on the turn that is already over — but it is a standing fact about the
+/// session rather than about one turn, so the next turn carries what is by then
+/// known, and the session view is a turn fresher rather than permanently empty.
+#[test]
+fn a_gauge_that_arrives_late_rides_on_the_turn_after_it() {
+    let (mut reader, _) = replay("kimi_acp");
+    assert_eq!(reader.context(), Some((20_237, 1_048_576)));
+
+    reader.push(
+        &serde_json::to_string(&Record::Sent {
+            message: json!({"id":9,"method":"session/prompt","params":{"sessionId":"session_kimi"}}),
+        })
+        .unwrap(),
+    );
+    let usage = reader
+        .push(
+            &serde_json::to_string(&Record::Received {
+                message: json!({"id":9,"result":{"stopReason":"end_turn"}}),
+                replay: false,
+            })
+            .unwrap(),
+        )
+        .into_iter()
+        .find_map(|e| match e {
+            TurnEvent::TurnCompleted { usage, .. } => usage,
+            _ => None,
+        })
+        .expect("the gauge is known by now");
+
+    assert_eq!(usage.context_used, Some(20_237));
+    assert_eq!(usage.context_window, Some(1_048_576));
+    // Still nothing billable, and still no price. A gauge is not a bill.
+    assert_eq!(usage.input_tokens, 0);
+    assert_eq!(usage.output_tokens, 0);
+    assert_eq!(usage.cost_usd, None, "ACP states no price on a turn");
+}
+
+/// ACP's totals are the session's, so a turn is the difference between two.
+///
+/// Every field is documented "across session" / "across all turns". Read as a
+/// turn's own figures they bill turn one again on every turn after it — the
+/// bug that was found in Claude Code's `modelUsage` and corrected the same way.
+#[test]
+fn an_acp_turn_is_billed_the_difference_rather_than_the_running_total() {
+    let mut reader = AcpNormaliser::default();
+    let mut feed = |record: Record| reader.push(&serde_json::to_string(&record).unwrap());
+
+    feed(Record::Started { epoch: "e".into() });
+    feed(Record::Ready {
+        session: "s".into(),
+    });
+
+    let turn = |reader: &mut AcpNormaliser, id: u64, usage: serde_json::Value| {
+        reader.push(
+            &serde_json::to_string(&Record::Sent {
+                message: json!({"id":id,"method":"session/prompt","params":{"sessionId":"s"}}),
+            })
+            .unwrap(),
+        );
+        reader
+            .push(
+                &serde_json::to_string(&Record::Received {
+                    message: json!({"id":id,"result":{"stopReason":"end_turn","usage":usage}}),
+                    replay: false,
+                })
+                .unwrap(),
+            )
+            .into_iter()
+            .find_map(|e| match e {
+                TurnEvent::TurnCompleted { usage, .. } => usage,
+                _ => None,
+            })
+            .expect("a finished turn is billed")
+    };
+
+    let first = turn(
+        &mut reader,
+        1,
+        json!({"totalTokens":11_600,"inputTokens":1_000,"outputTokens":100,
+               "cachedReadTokens":10_000,"cachedWriteTokens":500,"thoughtTokens":40}),
+    );
+    assert_eq!(first.input_tokens, 1_000, "the first turn is all of it");
+    assert_eq!(first.cache_read_tokens, Some(10_000));
+
+    // The agent restates the session's totals. Only the growth is this turn's.
+    let second = turn(
+        &mut reader,
+        2,
+        json!({"totalTokens":34_300,"inputTokens":1_200,"outputTokens":400,
+               "cachedReadTokens":32_000,"cachedWriteTokens":700,"thoughtTokens":90}),
+    );
+    assert_eq!(second.input_tokens, 200, "1,200 cumulative less 1,000");
+    assert_eq!(second.output_tokens, 300, "400 less 100");
+    assert_eq!(second.cache_read_tokens, Some(22_000), "32,000 less 10,000");
+    assert_eq!(second.cache_write_tokens, Some(200));
+    assert_eq!(second.thinking_tokens, Some(50));
+
+    // And the two together are what the agent last said the session came to,
+    // which is the property the differencing exists to keep.
+    assert_eq!(first.input_tokens + second.input_tokens, 1_200);
+    assert_eq!(
+        first.cache_read_tokens.unwrap() + second.cache_read_tokens.unwrap(),
+        32_000,
+    );
+}
+
+/// The sentence `/usage` prints, and everything that is not it.
+#[test]
+fn only_the_sentence_kimi_actually_writes_is_read_as_usage() {
+    use ft_core::acp::metered;
+
+    // Verbatim from a real session, context line and all.
+    assert_eq!(
+        metered("Context: 20355 / 1048576 tokens (2%)\nSession total: 60793 input, 97 output"),
+        Some((60_793, 97)),
+    );
+    // A session that has not called a model yet says so, and that is not zero:
+    // zero would be a turn that cost nothing.
+    assert_eq!(
+        metered("Context: 7 / 1048576 tokens (0%)\nSession total: no LLM calls yet"),
+        None,
+    );
+    // Anything else at all is nothing reported rather than a number guessed at.
+    assert_eq!(metered(""), None);
+    assert_eq!(metered("Session total: 60793 input"), None);
+    assert_eq!(metered("Session total: lots input, some output"), None);
+    assert_eq!(metered("I used 60793 input, 97 output tokens"), None);
+}
+
+/// A metered ACP turn is billed its own share of a running total.
+///
+/// `/usage` reports the session, not the turn — "Session total: 60793 input" is
+/// every turn so far added up. Read as a turn's own figures it would bill turn
+/// one again on every turn after it, which is the bug that was found in Claude
+/// Code's `modelUsage` and is corrected here the same way, before it could be
+/// made twice.
+#[test]
+fn a_metered_turn_is_billed_the_difference_rather_than_the_session() {
+    let mut reader = AcpNormaliser::default();
+    let mut push = |record: Record| reader.push(&serde_json::to_string(&record).unwrap());
+    push(Record::Started { epoch: "e".into() });
+    push(Record::Ready {
+        session: "s".into(),
+    });
+
+    let turn = |reader: &mut AcpNormaliser, id: u64, input: u64, output: u64| {
+        reader.push(
+            &serde_json::to_string(&Record::Sent {
+                message: json!({"id":id,"method":"session/prompt","params":{"sessionId":"s"}}),
+            })
+            .unwrap(),
+        );
+        // What the worker writes: the reading first, then the reply it was
+        // holding. The order is the whole mechanism — a reading that landed
+        // after the reply would have no open turn to belong to.
+        reader.push(&serde_json::to_string(&Record::Metered { input, output }).unwrap());
+        reader
+            .push(
+                &serde_json::to_string(&Record::Received {
+                    message: json!({"id":id,"result":{"stopReason":"end_turn"}}),
+                    replay: false,
+                })
+                .unwrap(),
+            )
+            .into_iter()
+            .find_map(|e| match e {
+                TurnEvent::TurnCompleted { usage, .. } => usage,
+                _ => None,
+            })
+            .expect("a metered turn is billed")
+    };
+
+    // Three turns of a real session: 20,275 then 20,360 then 20,158 of input.
+    let first = turn(&mut reader, 1, 20_275, 64);
+    assert_eq!((first.input_tokens, first.output_tokens), (20_275, 64));
+
+    let second = turn(&mut reader, 2, 40_635, 143);
+    assert_eq!(second.input_tokens, 20_360, "40,635 so far less 20,275");
+    assert_eq!(second.output_tokens, 79, "143 less 64");
+
+    let third = turn(&mut reader, 3, 60_793, 97 + 143);
+    assert_eq!(third.input_tokens, 20_158);
+    assert_eq!(third.output_tokens, 97);
+
+    // The three add back up to what the agent last said the session came to,
+    // which is the property the differencing exists to keep.
+    assert_eq!(
+        first.input_tokens + second.input_tokens + third.input_tokens,
+        60_793,
+    );
+
+    // And none of them claims a cache split. `/usage` adds the three kinds of
+    // input together before printing, so NULL is the honest answer — a zero
+    // would say the session read nothing from cache, which is false.
+    for t in [&first, &second, &third] {
+        assert_eq!(t.cache_read_tokens, None);
+        assert_eq!(t.cache_write_tokens, None);
+        assert_eq!(t.cost_usd, None, "it prints tokens and never a price");
+    }
+}
+
+/// A turn that called no model is reported as failed, not as finished.
+///
+/// This is the bug the credential fix was hiding behind. Kimi answers an
+/// expired sign-in with `{"stopReason":"end_turn"}` — word for word what it
+/// says about work it really did — and writes the reason only to a log of its
+/// own. Firetower believed it, marked the session handed back, and showed
+/// somebody a healthy agent that was doing nothing at all.
+#[test]
+fn a_turn_that_never_reached_a_model_is_not_reported_as_finished() {
+    let mut reader = AcpNormaliser::default();
+    let mut push = |record: Record| reader.push(&serde_json::to_string(&record).unwrap());
+    push(Record::Started { epoch: "e".into() });
+    push(Record::Ready {
+        session: "s".into(),
+    });
+
+    let turn = |reader: &mut AcpNormaliser, id: u64, meter: Option<(u64, u64)>| {
+        reader.push(
+            &serde_json::to_string(&Record::Sent {
+                message: json!({"id":id,"method":"session/prompt","params":{"sessionId":"s"}}),
+            })
+            .unwrap(),
+        );
+        if let Some((input, output)) = meter {
+            reader.push(&serde_json::to_string(&Record::Metered { input, output }).unwrap());
+        }
+        reader
+            .push(
+                &serde_json::to_string(&Record::Received {
+                    // The agent calls every one of these a success.
+                    message: json!({"id":id,"result":{"stopReason":"end_turn"}}),
+                    replay: false,
+                })
+                .unwrap(),
+            )
+            .into_iter()
+            .find_map(|e| match e {
+                TurnEvent::TurnCompleted { status, detail, .. } => Some((status, detail)),
+                _ => None,
+            })
+            .expect("the turn closes either way")
+    };
+
+    // A turn that worked: the session's input total moved.
+    let (status, _) = turn(&mut reader, 1, Some((20_192, 43)));
+    assert_eq!(status, TurnStatus::Completed);
+
+    // One that did not. Same words from the agent, different truth.
+    let (status, detail) = turn(&mut reader, 2, Some((20_192, 43)));
+    assert_eq!(status, TurnStatus::Failed);
+    let detail = detail.expect("and it says why, as far as anyone can know");
+    assert!(detail.contains("without calling a model"), "{detail}");
+    assert!(
+        detail.contains("sign-in"),
+        "the likely cause is named: {detail}"
+    );
+
+    // And work resumes being work once the account is good again.
+    let (status, _) = turn(&mut reader, 3, Some((40_453, 84)));
+    assert_eq!(status, TurnStatus::Completed);
+
+    // An agent nobody metered is left alone. Not knowing whether a model ran is
+    // not the same as knowing one did not, and calling every unmetered turn a
+    // failure would be a far worse bug than the one being fixed.
+    let (status, _) = turn(&mut reader, 4, None);
+    assert_eq!(status, TurnStatus::Completed);
+}

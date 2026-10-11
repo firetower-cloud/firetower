@@ -6,6 +6,7 @@ export const color = {
   "raise": "#17171a",
   "overlay": "#1e1e22",
   "line": "#26262b",
+  "settling": "#3e3e46",
   "line-soft": "#1a1a1e",
   "bone": "#f4f4f5",
   "text": "#c8c8ce",
@@ -21,9 +22,16 @@ export const color = {
   "brick": "#e5645a",
   "brick-tint": "#2a1414",
   "brick-deep": "#6e2f2b",
+  "amber": "#fab219",
+  "amber-tint": "#2a2008",
+  "amber-deep": "#7a5a0d",
   "slate": "#7d95b0",
   "slate-tint": "#161d26",
   "slate-deep": "#35485c",
+  "series-1": "#3f86cf",
+  "series-2": "#1f9b74",
+  "series-3": "#8b7ad8",
+  "series-4": "#cc5c86",
   "kind-source": "#7b93b8",
   "kind-native": "#b8845f",
   "kind-data": "#c2ab63",
@@ -41,6 +49,7 @@ export const color = {
 } as const;
 
 export const size = {
+  "figure": 64,
   "display": 28,
   "title": 18,
   "body": 16,

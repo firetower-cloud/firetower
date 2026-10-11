@@ -804,3 +804,259 @@ fn an_ordinary_tool_result_resolves_no_question() {
         "a command's result is not an answer to anything"
     );
 }
+
+/// Two turns of one conversation, each billed for itself.
+///
+/// `modelUsage` and `total_cost_usd` are **cumulative for the session**, not
+/// for the turn: the second `result` repeats the first one's tokens and adds
+/// the new ones. Recorded as-is, turn two re-bills turn one — 49% high after
+/// two turns on the recording this fixture is taken from, and worse with every
+/// turn after.
+///
+/// Only the top-level `usage` block is per-turn, which is what the difference
+/// is checked against here.
+#[test]
+fn a_second_turn_is_not_billed_for_the_first() {
+    let turns: Vec<_> = replay("two_turns")
+        .into_iter()
+        .filter_map(|e| match e {
+            TurnEvent::TurnCompleted { usage, .. } => usage,
+            _ => None,
+        })
+        .collect();
+    assert_eq!(turns.len(), 2, "the recording is two turns");
+
+    let opus = |u: &ft_core::turn::Usage| {
+        u.models
+            .iter()
+            .find(|m| m.model == "claude-opus-5")
+            .cloned()
+            .expect("opus ran in both turns")
+    };
+    let (first, second) = (opus(&turns[0]), opus(&turns[1]));
+
+    // The first turn is whatever the session had spent, because it is all of it.
+    assert_eq!(first.cache_read_tokens, 11_474);
+    assert_eq!(first.cache_write_tokens, 6_228);
+    assert_eq!(first.output_tokens, 14);
+
+    // The second is its own, not the running total — which the raw line gives
+    // as 29,176 read, 6,272 written, 126 out.
+    assert_eq!(
+        second.cache_read_tokens, 17_702,
+        "29,176 cumulative less 11,474"
+    );
+    assert_eq!(second.cache_write_tokens, 44, "6,272 cumulative less 6,228");
+    assert_eq!(second.output_tokens, 112, "126 cumulative less 14");
+
+    // Money the same way: 0.081429 so far, 0.068377 of it already charged.
+    assert!(
+        turns[1]
+            .cost_usd
+            .is_some_and(|c| (c - 0.013_052).abs() < 1e-6),
+        "the turn's own cost, not the session's: {:?}",
+        turns[1].cost_usd
+    );
+
+    // A model that ran only in the second turn appears only there.
+    assert!(!turns[0]
+        .models
+        .iter()
+        .any(|m| m.model == "claude-haiku-4-5"));
+    assert!(turns[1]
+        .models
+        .iter()
+        .any(|m| m.model == "claude-haiku-4-5"));
+
+    // The kind of cache write, which `modelUsage` never says and the turn's own
+    // block does. Already per-turn there — 44 after 6,228 rather than 6,272 —
+    // so it is read straight across and not differenced.
+    assert_eq!(turns[0].cache_write_1h_tokens, Some(6_228));
+    assert_eq!(turns[0].cache_write_5m_tokens, Some(0));
+    assert_eq!(turns[1].cache_write_1h_tokens, Some(44));
+    assert_eq!(turns[1].cache_write_5m_tokens, Some(0));
+    // And it agrees with the total beside it, which is what lets a per-model
+    // share of one be taken as a share of the other.
+    for t in &turns {
+        assert_eq!(
+            t.cache_write_tokens,
+            Some(t.cache_write_1h_tokens.unwrap() + t.cache_write_5m_tokens.unwrap()),
+        );
+    }
+
+    // And the whole conversation adds up to what it actually cost.
+    let billed: u64 = turns
+        .iter()
+        .flat_map(|t| &t.models)
+        .map(|m| m.input_tokens + m.output_tokens + m.cache_read_tokens + m.cache_write_tokens)
+        .sum();
+    assert_eq!(
+        billed, 36_485,
+        "not 54,203, which is turn one counted twice"
+    );
+}
+
+/// A control plane that restarts mid-session does not re-bill what it has.
+///
+/// The differencing that makes a turn its own is memory: how much of the
+/// session's running totals has already been handed over. A fresh reader has
+/// none of it, so the first `result` line it sees after a restart carries
+/// figures for the whole session, and billing them as one turn would charge
+/// twenty turns' worth to the twenty-first.
+///
+/// It does not happen, and this is why: `fleet::resume` replays the whole
+/// journal — `agent_lines_since(session_id, 0)` — through the new reader before
+/// it is used, which rebuilds exactly this state. The test is that replaying
+/// turn one leaves a reader that bills turn two correctly, which is what
+/// restarting between them amounts to.
+#[test]
+fn a_reader_rebuilt_from_the_journal_bills_the_next_turn_as_its_own() {
+    let path = format!(
+        "{}/tests/streams/two_turns.ndjson",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let text = std::fs::read_to_string(&path).unwrap();
+    let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+    // Line 14 is the first turn's `result`; everything after it is turn two.
+    let (before, after) = lines.split_at(14);
+
+    let mut reader = ft_core::normalise::ClaudeNormaliser::default();
+    let replayed: Vec<_> = before
+        .iter()
+        .flat_map(|line| reader.push(line))
+        .filter_map(|e| match e {
+            TurnEvent::TurnCompleted { usage, .. } => usage,
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        replayed.len(),
+        1,
+        "the journal up to here is one finished turn"
+    );
+
+    // What the restart has to not forget.
+    let first = replayed[0]
+        .models
+        .iter()
+        .find(|m| m.model == "claude-opus-5")
+        .expect("opus ran");
+    assert_eq!(first.cache_read_tokens, 11_474);
+
+    // The turn that lands after the restart.
+    let second = after
+        .iter()
+        .flat_map(|line| reader.push(line))
+        .find_map(|e| match e {
+            TurnEvent::TurnCompleted { usage, .. } => usage,
+            _ => None,
+        })
+        .expect("turn two finished");
+    let opus = second
+        .models
+        .iter()
+        .find(|m| m.model == "claude-opus-5")
+        .expect("opus ran again");
+
+    assert_eq!(
+        opus.cache_read_tokens, 17_702,
+        "its own tokens — the raw line says 29,176, which is the session",
+    );
+    assert_eq!(opus.cache_write_tokens, 44, "not 6,272");
+    assert_eq!(opus.output_tokens, 112, "not 126");
+    assert!(
+        second
+            .cost_usd
+            .is_some_and(|c| (c - 0.013_052).abs() < 1e-6),
+        "and its own cost, not 0.081429: {:?}",
+        second.cost_usd,
+    );
+}
+
+/// Claude Code reports how full each window is, and used to be read as if not.
+///
+/// Verbatim from a real `rate_limit_event`. The parser took the three fields
+/// beside `unifiedWindows` and hard-coded no percentage — so the page drew
+/// "this agent reports no percentage" while the agent's own `/usage` drew the
+/// bars. And `rateLimitType` names one window, so the seven-day one was not
+/// short of a number, it was absent.
+#[test]
+fn every_window_claude_reports_is_read_including_how_full_it_is() {
+    let line = serde_json::json!({
+        "type": "rate_limit_event",
+        "rate_limit_info": {
+            "status": "allowed",
+            "resetsAt": 1_791_375_600_i64,
+            "rateLimitType": "five_hour",
+            "unifiedWindows": {
+                "five_hour": { "utilization": 0.04,  "resetsAt": 1_791_375_600_i64 },
+                "seven_day": { "utilization": 0.165, "resetsAt": 1_791_824_400_i64 }
+            }
+        }
+    })
+    .to_string();
+
+    let mut reader = ClaudeNormaliser::new();
+    let mut found: Vec<_> = reader
+        .push(&line)
+        .into_iter()
+        .filter_map(|e| match e {
+            TurnEvent::Limited {
+                window,
+                status,
+                resets_at,
+                used_percent,
+            } => Some((window, status, resets_at, used_percent)),
+            _ => None,
+        })
+        .collect();
+    found.sort_by(|a, b| a.0.cmp(&b.0));
+
+    assert_eq!(
+        found,
+        vec![
+            (
+                "five_hour".to_string(),
+                "allowed".to_string(),
+                Some(1_791_375_600),
+                Some(4.0)
+            ),
+            (
+                "seven_day".to_string(),
+                "allowed".to_string(),
+                Some(1_791_824_400),
+                Some(16.5)
+            ),
+        ],
+        "both windows, and a ratio of one read as per cent to a tenth",
+    );
+}
+
+/// An older Claude Code names one window and says nothing about how full it is.
+#[test]
+fn a_rate_limit_without_windows_still_reports_the_one_it_names() {
+    let line = serde_json::json!({
+        "type": "rate_limit_event",
+        "rate_limit_info": {
+            "status": "allowed",
+            "resetsAt": 1_791_375_600_i64,
+            "rateLimitType": "five_hour"
+        }
+    })
+    .to_string();
+
+    let found: Vec<_> = ClaudeNormaliser::new()
+        .push(&line)
+        .into_iter()
+        .filter_map(|e| match e {
+            TurnEvent::Limited {
+                window,
+                used_percent,
+                ..
+            } => Some((window, used_percent)),
+            _ => None,
+        })
+        .collect();
+    // None and not zero: a bar without a numerator would be a drawing.
+    assert_eq!(found, vec![("five_hour".to_string(), None)]);
+}

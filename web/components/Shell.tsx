@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { useMe, useLogout } from "@/src/api/generated/auth/auth";
 import { forgetToken } from "@/src/api/http";
 import { useEffect, useState } from "react";
-import { BookOpen, CircleDashed, CircleFadingArrowUp, FolderOpen, LayoutList, ListTodo, Menu, Plus, Settings2, Users, X, Building2, Download, UserRound } from "lucide-react";
+import { BookOpen, CircleDashed, CircleFadingArrowUp, FolderOpen, Gauge, LayoutList, ListTodo, Menu, Plus, Settings2, Users, X, Building2, Download, UserRound } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Mark, Signal } from "./Signal";
 import { useHasRail } from "@/src/workspace/layout";
@@ -35,20 +35,23 @@ const NAV: { href: string; label: string; icon: LucideIcon; admin?: boolean }[] 
 ];
 
 /**
- * The organisation is three screens, not one destination.
+ * The organisation is several screens, not one destination.
  *
  * Drawn as a group with its rooms under it rather than a link that expands: it
- * is two or three items, and a disclosure triangle over three rows is a control
+ * is a handful of items, and a disclosure triangle over four rows is a control
  * that exists to hide almost nothing.
  *
- * `Access` has no `admin` flag on purpose — see the note in
- * `app/organization/layout.tsx`. A member sees the group with one room in it,
- * which is honest: it is the only one that is theirs.
+ * `Access` and `Usage` have no `admin` flag on purpose — see the note in
+ * `app/organization/layout.tsx`. A member sees the group with two rooms in it,
+ * which is honest: they are the two that are theirs. Usage shows an
+ * administrator the whole installation and a member only their own work, and
+ * that is one page either way — the rows that come back are what differ.
  */
 const ORGANIZATION: { href: string; label: string; icon: LucideIcon; admin?: boolean }[] = [
   { href: "/organization/people", label: "People", icon: Users, admin: true },
   { href: "/organization/teams", label: "Teams", icon: Building2, admin: true },
   { href: "/organization/access", label: "Access", icon: FolderOpen },
+  { href: "/organization/usage", label: "Usage", icon: Gauge },
   { href: "/organization/settings", label: "Settings", icon: Settings2, admin: true },
 ];
 
