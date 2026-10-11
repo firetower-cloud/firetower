@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.45.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.44.0...firetower-v0.45.0) (2026-10-11)
+
+
+### Features
+
+* a second level for every grouping, not only for person ([4569be3](https://github.com/firetower-cloud/firetower/commit/4569be3ed7b64b1a75efbbf610e39eb4c0c15c16))
+* ask Kimi what its plan has left, since ACP will not say ([573ba75](https://github.com/firetower-cloud/firetower/commit/573ba75b69a06e8fabb1712eb0c6f3f774883d44))
+* bill an ACP turn by asking the agent what the session has spent ([9cbc43f](https://github.com/firetower-cloud/firetower/commit/9cbc43f2354a124535bf73a2ec68bf9e21501efa))
+* consumption tracking for agent usage across models ([524c1e8](https://github.com/firetower-cloud/firetower/commit/524c1e8aeca08b771ca6bb9daae67bd71f20d153))
+* count tasks, and show four figures in the order asked for ([80d3e13](https://github.com/firetower-cloud/firetower/commit/80d3e13b7f4faaddff22ad4da0dc125a63fe2612))
+* name a per-model window properly when one turns up ([44d9488](https://github.com/firetower-cloud/firetower/commit/44d9488cc65ba6e257ae4328d691da864f52de3b))
+* name the provider and the folder beside each subscription ([50bf3a8](https://github.com/firetower-cloud/firetower/commit/50bf3a80bb5017900930cbd093475ccc79ffca53))
+* one heading per subscription in Limits, not one per window ([32eb669](https://github.com/firetower-cloud/firetower/commit/32eb66903793feb9c7144bb70ddda04bbcff61c5))
+* put the breakdown behind the headline rather than under it ([992112f](https://github.com/firetower-cloud/firetower/commit/992112fd146946bee2a329f10a668862608c54b3))
+* read what ACP says about usage, and refuse to invent the rest ([8b4c746](https://github.com/firetower-cloud/firetower/commit/8b4c746377e2572197cc9b36ec98dda78ec0689b))
+* say when a turn's agent reported no tokens, instead of hiding it ([e18b849](https://github.com/firetower-cloud/firetower/commit/e18b849387e796d30d59b8bf00e39b7682f72b83))
+* show what the headline is made of, under the headline ([fcd69ea](https://github.com/firetower-cloud/firetower/commit/fcd69eadaeb24a7e292395928451c136a6e82a9a))
+* take cost off the page, and stop naming agents in a note that goes stale ([12853f2](https://github.com/firetower-cloud/firetower/commit/12853f282971c2e0290ba7e10a3f21b0722eb379))
+* take the quota poll off the turn's path, and say the numbers properly ([245db10](https://github.com/firetower-cloud/firetower/commit/245db10d5574a669f317b9c20ce41725cb9abe57))
+* three figures under the chart, not one ([c10d773](https://github.com/firetower-cloud/firetower/commit/c10d7732b3a39ccf5790ec7e6e33a798e672cb13))
+
+
+### Bug Fixes
+
+* a turn that reached no model is not a turn that succeeded ([ea31f57](https://github.com/firetower-cloud/firetower/commit/ea31f5787b566a0922f55a5cb5de77f248ba09a4))
+* bill a Codex turn to the model it said it was running ([78d1e9c](https://github.com/firetower-cloud/firetower/commit/78d1e9ce81ffa7006c50144728029ba751503e43))
+* bill each turn for its own tokens, not the session's running total ([d8d46c4](https://github.com/firetower-cloud/firetower/commit/d8d46c4e6faa6fec0878f7ad811df11e8d32e8d5))
+* do not vault a Kimi credential before Kimi has written one ([31af1f6](https://github.com/firetower-cloud/firetower/commit/31af1f6855d1c7ef3446055e973d065fd4f5d316))
+* keep the credential an agent rotated, or it works exactly once ([ff54aec](https://github.com/firetower-cloud/firetower/commit/ff54aec2e41a8596969cac707ffdc4983533e712))
+* make the branch pass the checks it was failing ([9b58e93](https://github.com/firetower-cloud/firetower/commit/9b58e9392744ec0028566330c32a59b6f23ec99e))
+* make the usage page pass the lint it has been failing all along ([2921079](https://github.com/firetower-cloud/firetower/commit/29210793db24e7fe41336f8594c77b299d6fbcb6))
+* read every window Claude reports, and how full each one is ([7d4dff9](https://github.com/firetower-cloud/firetower/commit/7d4dff9e37f436a76d4c536870b45232ac58db3b))
+
 ## [0.44.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.43.0...firetower-v0.44.0) (2026-10-06)
 
 
