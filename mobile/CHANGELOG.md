@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.7.0](https://github.com/firetower-cloud/firetower/compare/mobile-v0.6.0...mobile-v0.7.0) (2026-10-11)
+
+
+### Features
+
+* consumption tracking for agent usage across models ([524c1e8](https://github.com/firetower-cloud/firetower/commit/524c1e8aeca08b771ca6bb9daae67bd71f20d153))
+
+
+### Bug Fixes
+
+* make the branch pass the checks it was failing ([9b58e93](https://github.com/firetower-cloud/firetower/commit/9b58e9392744ec0028566330c32a59b6f23ec99e))
+
 ## [0.6.0](https://github.com/firetower-cloud/firetower/compare/mobile-v0.5.0...mobile-v0.6.0) (2026-10-06)
 
 
