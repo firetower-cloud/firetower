@@ -35,6 +35,9 @@
      Sizes were written at the point of use, so a label and a sentence and a
      caption drifted a half-pixel apart in twenty files. These are the sizes;
      anything not one of them is a mistake, and `just check-style` says so. */
+  --text-figure: 4rem; /* 64px — the one number a page exists to show */
+  --text-figure--line-height: 0.86;
+  --text-figure--letter-spacing: -0.025em;
   --text-display: 1.5rem; /* 24px — the one heading on a page */
   --text-display--line-height: 1.2;
   --text-display--letter-spacing: -0.02em;

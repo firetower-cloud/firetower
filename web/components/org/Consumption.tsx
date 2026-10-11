@@ -238,7 +238,7 @@ export function Consumption() {
   // the app is. Absolutely positioned inside the page, it scrolled away with
   // the paragraph it sat in — and because its own list hands the wheel back to
   // the page at either end, scrolling to look at it carried it off screen.
-  const anchor = useAnchor(picking);
+  const { trigger: scopeTrigger, at: scopeAt } = useAnchor(picking);
   const { data: colleagues } = useListColleagues();
   const { data: teams } = useListTeams();
   const { data: accounts, isPending: limitsPending } = useListAccounts();
@@ -311,17 +311,19 @@ export function Consumption() {
      that is broken rather than one that is waiting or empty. */
   const scopeKey = `${scope.kind}:${"id" in scope ? scope.id : ""}`;
   const wants = `${range}|${scopeKey}`;
-  const showing = useRef("");
-  useEffect(() => {
-    if (data && !isFetching) showing.current = wants;
-  }, [data, isFetching, wants]);
+  // Adjusted during render rather than in an effect, which is what React asks
+  // for when state is derived from what just arrived: an effect would paint
+  // the stale frame first and correct it, and a ref would be read during a
+  // render that may never commit.
+  const [showing, setShowing] = useState("");
+  if (data && !isFetching && showing !== wants) setShowing(wants);
 
   // The chart and the figures depend on the period and the scope, and on
   // nothing else — so a new sort keeps them, and a new period replaces them.
   // Holding the old ones would be worse than a skeleton: the sentence above
   // already says the new period, and a chart of the old one under it is a lie
   // rather than a stale answer.
-  const staleReading = isFetching && !!data && showing.current !== wants;
+  const staleReading = isFetching && !!data && showing !== wants;
   const empty = !!data && data.totals.rows === 0;
 
   // Any change to what is being listed starts again at the top. Keeping the
@@ -341,7 +343,7 @@ export function Consumption() {
           buttons stops working at the second team. */}
       <p className="mb-7 text-title text-dim">
         <button
-          ref={anchor.trigger}
+          ref={scopeTrigger}
           type="button"
           className="border-b border-dotted border-mute pb-px text-bone transition-colors hover:border-bone"
           onClick={() => setPicking((p) => !p)}
@@ -350,9 +352,9 @@ export function Consumption() {
         >
           {everyone}
         </button>
-        {picking && anchor.at && (
+        {picking && scopeAt && (
           <ScopePicker
-            at={anchor.at}
+            at={scopeAt}
             colleagues={colleagues ?? []}
             teams={teams ?? []}
             onPick={(s) => {
@@ -1019,11 +1021,11 @@ function Gauge({ limit }: { limit: Limit }) {
 
       {pct != null && (
         <div
-          className="mt-1.5 h-[3px] overflow-hidden rounded-[2px]"
+          className="mt-1.5 h-[3px] overflow-hidden rounded-full"
           style={{ background: `color-mix(in srgb, ${shade.bar} 20%, var(--color-ground))` }}
         >
           <div
-            className="h-full rounded-[2px]"
+            className="h-full rounded-full"
             style={{ width: `${Math.min(100, Math.max(0, pct))}%`, background: shade.bar }}
           />
         </div>
@@ -1101,7 +1103,7 @@ function Headline({ t }: { t?: Totals }) {
         onBlur={hide}
         className="rounded-md outline-none focus-visible:ring-1 focus-visible:ring-mute"
       >
-        <div className="text-right font-narrow text-[64px] font-semibold leading-[0.86] tracking-[-0.025em] text-bone">
+        <div className="text-right font-narrow text-figure font-semibold leading-[0.86] tracking-[-0.025em] text-bone">
           {t ? tokens(t.tokens) : "—"}
         </div>
         <div className="mt-1.5 text-right text-ui text-dim">
@@ -1168,7 +1170,7 @@ function Composition({ t, at }: { t: Totals; at: DOMRect }) {
       <dl className="grid grid-cols-[auto_auto_auto] items-baseline gap-x-3.5 gap-y-2">
         {parts.map((p) => (
           <Fragment key={p.of}>
-            <dd className="justify-self-end font-narrow text-[17px] font-semibold leading-none tracking-[-0.01em] text-bone tabular-nums">
+            <dd className="justify-self-end font-narrow text-title font-semibold leading-none tracking-[-0.01em] text-bone tabular-nums">
               {count(p.n)}
             </dd>
             <dt className="text-ui text-dim">
@@ -1190,7 +1192,7 @@ function Figure({ label, value, note }: { label: string; value: string; note: st
   return (
     <div className="min-w-0 flex-1 basis-56 px-5 pb-0.5 pt-3 first:pl-0 [&+&]:border-l [&+&]:border-line">
       <div className="text-meta text-dim">{label}</div>
-      <div className="mt-0.5 font-narrow text-[25px] font-semibold leading-tight tracking-[-0.01em] text-bone">
+      <div className="mt-0.5 font-narrow text-display font-semibold leading-tight tracking-[-0.01em] text-bone">
         {value}
       </div>
       <div className="mt-1 max-w-[30ch] text-meta text-mute">{note}</div>
@@ -1204,7 +1206,7 @@ function Key({ models, hue }: { models: string[]; hue: (m: string) => string }) 
     <div className="flex flex-wrap gap-x-5 gap-y-1 pb-4">
       {models.map((m) => (
         <span key={m} className="inline-flex items-center gap-2 text-meta text-dim">
-          <i className="block size-2 rounded-[2px]" style={{ background: hue(m) }} />
+          <i className="block size-2 rounded-full" style={{ background: hue(m) }} />
           {m}
         </span>
       ))}
@@ -1267,7 +1269,7 @@ function Trace({
         return (
           <g key={f}>
             <line x1={0} x2={W} y1={at} y2={at} stroke="var(--color-grid, #1c1c20)" strokeWidth={1} shapeRendering="crispEdges" />
-            <text x={0} y={at - 6} className="fill-mute text-[11px] tabular-nums">{tokens(max * f)}</text>
+            <text x={0} y={at - 6} className="fill-mute text-meta tabular-nums">{tokens(max * f)}</text>
           </g>
         );
       })}
@@ -1319,7 +1321,7 @@ function Trace({
                 x={x + bar / 2}
                 y={BOTTOM + 19}
                 textAnchor="middle"
-                className={`text-[11px] tabular-nums ${over === i ? "fill-text" : "fill-mute"}`}
+                className={`text-meta tabular-nums ${over === i ? "fill-text" : "fill-mute"}`}
               >
                 {label(column.start)}
               </text>
@@ -1454,7 +1456,7 @@ function Ledger({
             </div>
           </div>
           <div />
-          <div className="text-right font-narrow text-[15px] font-medium tabular-nums text-text">
+          <div className="text-right font-narrow text-body font-medium tabular-nums text-text">
             {tokens(rest.tokens)}
           </div>
         </div>
@@ -1530,7 +1532,7 @@ function Line({
         {!nested && (
           <div className="mt-0.5 flex items-baseline gap-3.5">
             {g.key && by === "task" && (
-              <span className="truncate font-mono text-[11.5px] text-dim">{g.key}</span>
+              <span className="truncate font-mono text-meta text-dim">{g.key}</span>
             )}
             <span className="whitespace-nowrap text-meta text-mute">{detail(g, by)}</span>
           </div>
@@ -1544,7 +1546,7 @@ function Line({
           ))}
         </div>
       </div>
-      <div className={`text-right font-narrow font-medium tabular-nums text-text ${nested ? "text-[13px]" : "text-[15px]"}`}>
+      <div className={`text-right font-narrow font-medium tabular-nums text-text ${nested ? "text-ui" : "text-body"}`}>
         {tokens(g.tokens)}
       </div>
     </div>
