@@ -28,6 +28,7 @@ import { Machines } from "~/ui/config/Machines";
 import { Repos } from "~/ui/config/Repos";
 import { Integrations } from "~/ui/config/Integrations";
 import { Agents } from "~/ui/config/Agents";
+import { Skills } from "~/ui/config/Skills";
 import { Secrets } from "~/ui/config/Secrets";
 import { People } from "~/ui/config/People";
 import { Teams } from "~/ui/config/Teams";
@@ -39,7 +40,7 @@ export function Configuration({ backend, onForgot }: { backend: Backend; onForgo
 
   return (
     <div className="scroll-slim h-full overflow-y-auto">
-      <div className="mx-auto max-w-[48rem] px-6 py-6 pb-16">
+      <div className="mx-auto max-w-[48rem] px-6 py-6 pb-16 has-[[data-wide]]:flex has-[[data-wide]]:min-h-full has-[[data-wide]]:max-w-none has-[[data-wide]]:p-0">
         <Pane at={paneAt(path)} backend={backend} onForgot={onForgot} />
       </div>
     </div>
@@ -56,6 +57,8 @@ function Pane({ at, backend, onForgot }: { at: string; backend: Backend; onForgo
       return <Machines live />;
     case "agents":
       return <Agents live />;
+    case "skills":
+      return <Skills />;
     case "people":
       return <People backend={backend} />;
     case "teams":

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.44.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.43.0...firetower-v0.44.0) (2026-10-06)
+
+
+### Features
+
+* implement skills system end-to-end ([#208](https://github.com/firetower-cloud/firetower/issues/208)) ([a33e558](https://github.com/firetower-cloud/firetower/commit/a33e558119d58e984d7a5f5beea6f82e9368c572))
+
 ## [0.43.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.42.0...firetower-v0.43.0) (2026-10-03)
 
 

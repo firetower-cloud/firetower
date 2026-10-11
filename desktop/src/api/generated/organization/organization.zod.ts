@@ -101,7 +101,7 @@ export const OffboardUserParams = zod.object({
 export const OffboardUserBody = zod.object({
   "destroy": zod.array(zod.object({
   "id": zod.string(),
-  "kind": zod.enum(['workspace', 'machine', 'agentAccount', 'secret', 'repository'])
+  "kind": zod.enum(['workspace', 'machine', 'agentAccount', 'secret', 'skill', 'repository'])
 }).describe('One thing to move, named the way `Filed` names it.\n\n**Not `Placed`.** That is already a schema in this contract — where an\nattached file landed in a workspace — and utoipa registers a type by its\nshort name, so a second `Placed` silently becomes whichever of the two the\ngenerator reached last. The clients then typecheck against a shape the\nserver never sends.')).optional().describe('Read back and compared with what is actually theirs, so that agreeing to\na list means agreeing to *that* list. It can change between the screen\ndrawing it and somebody pressing the button.'),
   "successors": zod.array(zod.object({
   "directory": zod.string(),
@@ -150,7 +150,7 @@ export const UserReachResponse = zod.object({
   "created": zod.array(zod.object({
   "detail": zod.string().nullish().describe('The second line: the repository, the agent, the scope.'),
   "id": zod.string().describe('What identifies it. A secret has no id of its own — it is keyed by\nscope, name and owner — so for one of those this is `scope/name/owner`,\nand\nthe owner is whoever is asking. See `Access::place`.'),
-  "kind": zod.enum(['workspace', 'machine', 'agentAccount', 'secret', 'repository']),
+  "kind": zod.enum(['workspace', 'machine', 'agentAccount', 'secret', 'skill', 'repository']),
   "name": zod.string(),
   "ownerName": zod.string().nullish().describe('Whose it is. Absent for a machine, which is the organisation\'s.'),
   "path": zod.string().describe('Where it is filed — and so who can reach it.')
@@ -171,7 +171,7 @@ export const UserReachResponse = zod.object({
 })).describe('Directories they can work in, and how they came by each.'),
   "exceptions": zod.array(zod.object({
   "id": zod.string(),
-  "kind": zod.enum(['workspace', 'machine', 'agentAccount', 'secret', 'repository']),
+  "kind": zod.enum(['workspace', 'machine', 'agentAccount', 'secret', 'skill', 'repository']),
   "level": zod.enum(['viewer', 'writer', 'admin']).describe('How much somebody may do in a directory.\n\nOrdered, and the order is the point — every check is "at least this much".\n`Ord` comes from the declaration order, so `Viewer < Writer < Admin` without\na comparison written anywhere.'),
   "name": zod.string(),
   "through": zod.union([zod.object({
@@ -186,7 +186,7 @@ export const UserReachResponse = zod.object({
   "owns": zod.array(zod.object({
   "detail": zod.string().nullish().describe('The second line: the repository, the agent, the scope.'),
   "id": zod.string().describe('What identifies it. A secret has no id of its own — it is keyed by\nscope, name and owner — so for one of those this is `scope/name/owner`,\nand\nthe owner is whoever is asking. See `Access::place`.'),
-  "kind": zod.enum(['workspace', 'machine', 'agentAccount', 'secret', 'repository']),
+  "kind": zod.enum(['workspace', 'machine', 'agentAccount', 'secret', 'skill', 'repository']),
   "name": zod.string(),
   "ownerName": zod.string().nullish().describe('Whose it is. Absent for a machine, which is the organisation\'s.'),
   "path": zod.string().describe('Where it is filed — and so who can reach it.')

@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>Firetower — starting work, with skills</title>
+<link rel="stylesheet" href="style.css">
+<style>
+#stage{display:grid;grid-template-columns:212px 1fr;filter:blur(0)}
+.sheet{position:fixed;z-index:101;top:50%;left:50%;transform:translate(-50%,-50%);
+  width:min(960px,94vw);height:min(760px,88vh);background:var(--overlay);border:1px solid var(--line);
+  border-radius:var(--r-lg);box-shadow:var(--float);display:grid;grid-template-rows:auto 1fr auto;overflow:hidden}
+.sh{padding:16px 20px 13px;border-bottom:1px solid var(--line)}
+.sb{overflow:hidden;padding:16px 20px 20px;display:grid;grid-template-columns:1fr 352px;gap:20px;min-height:0}
+.sf{border-top:1px solid var(--line);padding:12px 20px;display:flex;align-items:center;gap:9px;background:var(--panel)}
+.sf .n{flex:1;font-size:var(--meta);color:var(--dim)}
+.col{display:flex;flex-direction:column;gap:14px;min-width:0;min-height:0}
+.repo{display:flex;align-items:center;gap:9px;padding:8px 10px;border:1px solid var(--line);
+  border-radius:var(--r-sm);background:var(--raise);font-size:var(--meta)}
+.repo .slug{flex:1;color:var(--bone)}
+.repo .x{color:var(--mute)}
+.chipbtn{display:inline-flex;align-items:center;gap:7px;height:28px;padding:0 10px;border:1px dashed #33333b;
+  border-radius:var(--r-sm);color:var(--dim);font-size:var(--meta)}
+.panel{border:1px solid var(--line);border-radius:var(--r-md);background:var(--panel);display:flex;flex-direction:column;overflow:hidden;min-height:0}
+.panel .ph{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line-soft)}
+.panel .ph .t{font-size:var(--ui);color:var(--bone);font-weight:600;flex:1}
+.panel .pl{flex:1;min-height:0;overflow:auto}
+.panel .pf{border-top:1px solid var(--line-soft);padding:10px 12px;display:flex;flex-direction:column;gap:8px}
+.mini{font-size:var(--micro);color:var(--mute);line-height:1.5}
+.seg2{display:flex;gap:5px}
+.seg2 button{font-size:var(--micro);padding:3px 8px;border-radius:99px;border:1px solid var(--line);color:var(--dim);background:var(--raise)}
+.seg2 button[aria-pressed=true]{border-color:var(--ember-deep);background:var(--ember-tint);color:var(--ember-soft)}
+</style></head><body>
+
+<div id="harness">
+  <span class="brand"><b>Firetower</b> · starting work</span>
+  <div class="seg" id="agentsel">
+    <button data-a="ClaudeCode" aria-pressed="true">Claude Code</button>
+    <button data-a="Codex">Codex</button>
+    <button data-a="KimiCode">Kimi Code</button>
+  </div>
+  <div class="seg" id="reposel">
+    <button data-r="one">One repo</button>
+    <button data-r="two" aria-pressed="true">Two repos</button>
+  </div>
+  <div class="note">Change the agent or the repositories and watch the defaults and the budget move. Skills are ticked from the repositories you picked.</div>
+</div>
+
+<div id="stage">
+  <aside class="rail">
+    <h4>acme/backend</h4>
+    <div class="row"><span class="dot wait"></span>ltree path predicate</div>
+    <div class="row"><span class="dot live"></span>vault hand-over</div>
+    <h4>acme/web</h4>
+    <div class="row"><span class="dot live"></span>inspector tabs</div>
+  </aside>
+  <div></div>
+</div>
+<div id="scrim" class="show"></div>
+
+<div class="sheet">
+  <div class="sh">
+    <h2>Start work</h2>
+    <div class="mini" style="margin-top:4px">A workspace is a checkout on a machine with an agent in it. No prompt is sent — the agent comes up and waits.</div>
+  </div>
+
+  <div class="sb">
+    <div class="col" style="overflow:auto">
+      <div class="field"><label>What are you doing</label><input value="ltree path predicate" placeholder="A short name"></div>
+
+      <div class="field"><label>Repositories</label>
+        <div style="display:flex;flex-direction:column;gap:6px" id="repos"></div>
+        <button class="chipbtn">＋ add a repository</button>
+        <div class="help">Each is checked out into its own directory inside the workspace, on its own branch.</div></div>
+
+      <div class="field"><label>Branch</label><input class="mono" value="agent/ltree-predicate"></div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div class="field"><label>Machine</label><select><option>fire-01 · GCP · 8 vCPU</option><option>mac-mini · local</option></select></div>
+        <div class="field"><label>Agent</label><select id="agentpick"><option>Claude Code</option><option>Codex</option><option>Kimi Code</option></select></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div class="field"><label>Account</label><select><option>kevin@westlabs · subscription</option></select></div>
+        <div class="field"><label>Share</label><select><option>Equal share</option><option>Takes more</option><option>Yields</option></select></div>
+      </div>
+    </div>
+
+    <!-- ── the skills panel ─────────────────────────────── -->
+    <div class="col">
+      <div class="panel" style="flex:1">
+        <div class="ph">
+          <span style="color:var(--ember)">◆</span>
+          <span class="t">Skills</span>
+          <span class="pill num" id="selcount">0</span>
+          <button class="btn sm" id="browse">Browse all</button>
+        </div>
+        <div style="padding:9px 12px;border-bottom:1px solid var(--line-soft);display:flex;flex-direction:column;gap:8px">
+          <div class="findbox" style="height:28px"><span style="color:var(--mute)">⌕</span><input placeholder="Search 312 skills…"><kbd class="mono">⌘⇧S</kbd></div>
+          <div class="seg2" id="scope">
+            <button data-s="suggested" aria-pressed="true">Suggested</button>
+            <button data-s="all">Everything</button>
+          </div>
+        </div>
+        <div class="pl" id="list"></div>
+        <div class="pf">
+          <div class="bud">
+            <div class="top"><span>Context</span><b id="used">0</b><span>of <span id="max">0</span> chars</span>
+              <span class="right" id="who"></span></div>
+            <div class="bar" id="bar"><i style="width:0"></i></div>
+            <div class="budmsg" id="msg"></div>
+          </div>
+        </div>
+      </div>
+      <div class="note-slate" id="defnote"></div>
+    </div>
+  </div>
+
+  <div class="sf">
+    <span class="n" id="foot"></span>
+    <button class="btn ghost">Cancel</button>
+    <button class="btn primary">Start work</button>
+  </div>
+</div>
+
+<script src="data.js"></script>
+<script>
+const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>[...r.querySelectorAll(s)];
+let agent="ClaudeCode", repos=["acme/backend","acme/web"], scope="suggested";
+const ALWAYS=["house-prose"];                         // the personal "everywhere" set
+const of=n=>SKILLS.find(s=>s.slug===n);
+const reach=s=>s.agents.includes(agent);
+
+function defaultsFor(){
+  const byRepo=SKILLS.filter(s=>s.defaults.some(d=>repos.includes(d)));
+  const always=ALWAYS.map(of);
+  return [...new Set([...byRepo,...always])].filter(reach);
+}
+let picked=new Set(defaultsFor().map(s=>s.slug));
+
+function rows(){
+  const d=new Set(defaultsFor().map(s=>s.slug));
+  const rec=SKILLS.filter(s=>!d.has(s.slug)&&s.owner.startsWith("d/")).slice(0,4);
+  const rest=SKILLS.filter(s=>!d.has(s.slug)&&!rec.includes(s));
+  const out=[{t:"On by default",h:repos.join(" + ")+" · and your always-on",rows:[...d].map(of)}];
+  out.push({t:"Recommended",h:"shared into a directory you are in — not ticked",rows:rec});
+  if(scope==="all") out.push({t:"Everything else",h:"",rows:rest});
+  return out;
+}
+function render(){
+  const b=AGENT_BUDGET[agent];
+  let html="";
+  rows().forEach(g=>{
+    html+=`<div class="group">${g.t}${g.h?`<span class="hint">${g.h}</span>`:""}</div>`;
+    if(g.t==="On by default" && repos.includes("acme/web"))
+      html+=`<div class="note-slate" style="margin:4px 10px">2 defaults from <span class="mono">acme/web</span> are filed in a directory you have no access to. They are not selected.</div>`;
+    g.rows.forEach(s=>{
+      const on=picked.has(s.slug), ok=reach(s);
+      html+=`<div class="item ${on?"on":""} ${ok?"":"off"}" data-slug="${s.slug}">
+        <span class="check" ${on?'style="background:var(--ember);border-color:var(--ember)"':""}></span>
+        <div><div class="l1"><span class="nm mono">${s.name}</span><span class="pill num">v${s.v}</span>
+          <span class="where">${s.ownerLabel} · ${s.author}</span></div>
+          <div class="l2">${s.desc}</div>
+          <div class="l3">${s.defaults.filter(d=>repos.includes(d)).map(d=>`<span class="pill hot">${d}</span>`).join("")}
+            ${ALWAYS.includes(s.slug)?'<span class="pill hot">always on</span>':""}
+            ${s.risk.map(r=>`<span class="pill bad" title="${RISK_LABEL[r].long}">⚠ ${RISK_LABEL[r].short}</span>`).join("")}
+            ${ok?"":`<span class="pill">not on ${b.label}</span>`}
+            <span class="pill num">${cost(s)} chars</span></div></div></div>`;
+    });
+  });
+  $("#list").innerHTML=html;
+
+  const used=[...picked].map(of).filter(reach).reduce((n,s)=>n+cost(s),0);
+  const pct=Math.min(100,used/b.chars*100);
+  $("#used").textContent=used.toLocaleString(); $("#max").textContent=b.chars.toLocaleString();
+  $("#who").textContent=b.label+" · "+b.note;
+  const bar=$("#bar"); bar.className="bar"+(used>b.chars?" over":used>b.chars*.8?" warn":"");
+  bar.querySelector("i").style.width=pct+"%";
+  const m=$("#msg");
+  if(used>b.chars){ m.className="budmsg over"; m.innerHTML=`<b>Over budget.</b> ${b.label} would drop <i>every</i> skill rather than the last one. Remove about ${Math.ceil((used-b.chars)/250)}.`; }
+  else if(used>b.chars*.8){ m.className="budmsg warn"; m.textContent="Close to the limit — descriptions get truncated first, then all of them go at once."; }
+  else { m.className="budmsg"; m.textContent=`${[...picked].length} selected · room for about ${Math.floor((b.chars-used)/250)} more`; }
+
+  $("#selcount").textContent=[...picked].length;
+  const names=[...picked].map(of).filter(s=>s.defaults.some(d=>repos.includes(d)));
+  $("#defnote").innerHTML=`<b>${names.length} skills came from ${repos.join(" and ")}</b>, plus ${ALWAYS.length} you have on everywhere. Untick anything you do not want — they cost context on every turn of this session.`;
+  $("#foot").innerHTML=`Claude Code on <span class="mono">fire-01</span> · ${repos.length} ${repos.length===1?"repository":"repositories"} · <b style="color:var(--bone)">${[...picked].length} skills</b>`;
+  $("#repos").innerHTML=repos.map(r=>`<div class="repo"><span class="slug mono">${r}</span><span class="where">main</span><span class="x">✕</span></div>`).join("");
+  $("#agentpick").value=AGENT_BUDGET[agent].label;
+}
+
+document.addEventListener("click",e=>{
+  const it=e.target.closest(".item");
+  if(it && !it.classList.contains("off")){ const s=it.dataset.slug; picked.has(s)?picked.delete(s):picked.add(s); render(); return; }
+  const sc=e.target.closest("#scope button");
+  if(sc){ scope=sc.dataset.s; $$("#scope button").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.s===scope))); render(); }
+});
+$$("#agentsel button").forEach(b=>b.onclick=()=>{
+  agent=b.dataset.a; $$("#agentsel button").forEach(x=>x.setAttribute("aria-pressed",String(x.dataset.a===agent)));
+  picked=new Set(defaultsFor().map(s=>s.slug)); render();
+});
+$$("#reposel button").forEach(b=>b.onclick=()=>{
+  repos = b.dataset.r==="one" ? ["acme/backend"] : ["acme/backend","acme/web"];
+  $$("#reposel button").forEach(x=>x.setAttribute("aria-pressed",String(x.dataset.r===b.dataset.r)));
+  picked=new Set(defaultsFor().map(s=>s.slug)); render();
+});
+render();
+</script></body></html>

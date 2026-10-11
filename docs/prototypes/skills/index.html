@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Firetower — skills prototypes</title>
+<link rel="stylesheet" href="desk.css">
+<style>
+body{overflow:auto}
+.page{max-width:660px;margin:0 auto;padding:68px 28px 70px;display:flex;flex-direction:column;gap:30px}
+h1{font-size:var(--display);line-height:1.25;letter-spacing:-.02em;color:var(--bone);font-weight:600}
+.sub{font-size:var(--read);line-height:1.65;color:var(--dim);max-width:58ch}
+.links{display:flex;flex-direction:column}
+a.item{display:grid;grid-template-columns:26px 1fr auto;gap:13px;align-items:baseline;
+  padding:15px 10px;border-top:1px solid var(--line-soft);text-decoration:none;color:inherit;border-radius:var(--r-md)}
+a.item:last-child{border-bottom:1px solid var(--line-soft)}
+a.item:hover{background:color-mix(in srgb,var(--raise) 70%,transparent)}
+a.item .t{font-size:var(--ui);color:var(--bone);font-weight:600}
+a.item .d{font-size:var(--meta);color:var(--mute);line-height:1.55;margin-top:3px;max-width:52ch}
+a.item .go{color:#3a3a42;font-size:var(--ui)}
+</style></head><body>
+<div class="page">
+  <div>
+    <h1>Skills, as screens</h1>
+    <p class="sub">Four of them, in the order somebody meets them. Built at desk density with the real
+    faces and tokens, so they read as the Mac window rather than as a page.</p>
+  </div>
+  <div class="links">
+    <a class="item" href="import.html"><span class="mark">01</span>
+      <span><span class="t">Add a skill</span><span class="d">Dropping a folder, a zip, or a folder of folders. Validation, a name that collides with one the agent already ships, and which files are allowed to run.</span></span>
+      <span class="go">›</span></a>
+    <a class="item" href="library.html"><span class="mark">02</span>
+      <span><span class="t">The library</span><span class="d">Every skill you can reach, what each one does to a session, its bundle, its versions, where it is ticked by default, and who else can see it.</span></span>
+      <span class="go">›</span></a>
+    <a class="item" href="workspace.html"><span class="mark">03</span>
+      <span><span class="t">In a workspace</span><span class="d">Where you turn skills on and off while you work: the rail, the palette, calling one by name in the composer, and what the conversation says when the set changes.</span></span>
+      <span class="go">›</span></a>
+    <a class="item" href="new-workspace.html"><span class="mark">04</span>
+      <span><span class="t">Starting work</span><span class="d">Choosing skills as the workspace is created. Still on the old web styling.</span></span>
+      <span class="go">›</span></a>
+  </div>
+  <p class="aside">Forty-two skills stand in for three hundred, and the names are invented. The numbers on the
+  budget meters are not: Codex really does stop listing every skill once the descriptions pass about eight
+  thousand characters.</p>
+</div></body></html>

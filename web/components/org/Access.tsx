@@ -17,6 +17,7 @@ import { useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   Boxes,
+  Diamond,
   FolderGit2,
   FolderOpen,
   FolderPlus,
@@ -98,6 +99,7 @@ const KINDS: Record<FiledKind, { one: string; many: string; icon: typeof FolderO
   machine: { one: "Machine", many: "Machines", icon: Server },
   agentAccount: { one: "Agent account", many: "Agent accounts", icon: Sparkles },
   secret: { one: "Secret", many: "Secrets", icon: KeyRound },
+  skill: { one: "Skill", many: "Skills", icon: Diamond },
   // Never in a directory — a repository is opened by the token of whoever
   // connected it, so there is nowhere to file one. Named here because this map
   // covers every kind the server can name, and what somebody owns is drawn

@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Firetower — skills in a workspace</title>
+<link rel="stylesheet" href="desk.css">
+<style>
+#body{grid-template-columns:196px minmax(0,1fr) 392px}
+.conv{display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--ground)}
+.convscroll{flex:1;min-height:0;overflow:auto;padding:26px 0 18px}
+.thread{max-width:46rem;margin:0 auto;padding:0 28px;display:flex;flex-direction:column;gap:22px}
+.you{align-self:flex-end;max-width:34rem;background:var(--raise);box-shadow:var(--raised);
+  border-radius:var(--r-lg);padding:11px 14px;font-size:var(--read);line-height:1.6;color:var(--bone)}
+.agent{font-size:var(--read);line-height:1.7;color:var(--text)}
+.agent p{margin:0 0 12px}.agent p:last-child{margin:0}
+.agent code{font-family:"JetBrains Mono";font-size:var(--code);color:var(--syn-string)}
+.work{border-left:1px solid var(--line);padding-left:13px;display:flex;flex-direction:column;gap:5px;margin:0 0 12px}
+.work .w{font-size:var(--meta);color:var(--mute);display:flex;align-items:baseline;gap:8px}
+.work .w b{color:var(--dim);font-weight:400}
+.work .w .mono{font-size:var(--micro)}
+.work .w.skill b{color:var(--text)}
+.work .w.skill::before{content:"";width:5px;height:5px;border-radius:99px;background:var(--slate);
+  margin-right:1px;flex:none;transform:translateY(-1px)}
+.sysline{display:flex;align-items:baseline;gap:10px;font-size:var(--meta);color:var(--mute);
+  padding:8px 0;border-top:1px solid var(--line-soft);border-bottom:1px solid var(--line-soft)}
+.sysline b{color:var(--dim);font-weight:400}
+.sysline .add{color:var(--sage)}.sysline .rem{color:#8b6b66}
+
+.composer{flex:none;padding:0 28px 18px}
+.cbox{max-width:46rem;margin:0 auto;background:var(--panel);border-radius:14px;box-shadow:var(--float);position:relative}
+.cbox textarea{display:block;width:100%;background:none;border:0;outline:0;resize:none;color:var(--bone);
+  font:var(--read)/1.6 Archivo,sans-serif;padding:13px 15px 6px;min-height:52px}
+.cbox textarea::placeholder{color:var(--mute)}
+.ctray{display:flex;align-items:center;gap:7px;padding:7px 9px 9px}
+.ctray .right{margin-left:auto;display:flex;align-items:center;gap:9px}
+.skchip{height:26px;display:inline-flex;align-items:center;gap:7px;padding:0 9px;border-radius:var(--r-md);
+  background:var(--raise);box-shadow:var(--raised);font-size:var(--meta);color:var(--dim);white-space:nowrap}
+.skchip:hover{background:var(--overlay);color:var(--text)}
+.skchip .n{color:var(--text);font-weight:600;font-variant-numeric:tabular-nums}
+.ctxmeter{display:flex;gap:2px}
+.ctxmeter i{width:3px;height:10px;border-radius:1px;background:#26262b}
+.ctxmeter i.on{background:var(--mute)}
+.send{height:26px;padding:0 11px;border-radius:var(--r-md);background:var(--overlay);color:var(--bone);
+  font-size:var(--meta);font-weight:600;box-shadow:inset 0 1px 0 rgb(255 255 255/.07),0 1px 3px rgb(0 0 0/.5)}
+.firstline{max-width:46rem;margin:0 auto 9px;font-size:var(--meta);color:var(--dim);display:flex;gap:9px;align-items:baseline}
+.firstline b{color:var(--text);font-weight:600}
+.firstline a{color:var(--text);border-bottom:1px solid var(--line);text-decoration:none}
+.slash{position:absolute;bottom:calc(100% + 8px);left:0;right:0;background:var(--overlay);
+  border-radius:var(--r-lg);box-shadow:var(--float);overflow:hidden;display:none}
+.slash.show{display:block}
+.slash .hd{padding:9px 13px 5px;font-family:"Archivo Narrow";font-size:var(--micro);letter-spacing:.18em;
+  text-transform:uppercase;color:var(--mute)}
+.slash .o{display:grid;grid-template-columns:24px 1fr auto;gap:10px;align-items:baseline;padding:7px 13px}
+.slash .o[data-on=true]{background:var(--raise)}
+.slash .o .n{font-size:var(--ui);color:var(--bone);font-weight:600}
+.slash .o .d{font-size:var(--meta);color:var(--mute);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.slash .ft{padding:7px 13px;border-top:1px solid var(--line-soft);font-size:var(--micro);color:var(--mute);display:flex;gap:12px}
+
+/* inspector: what the agent did to your repository. nothing else. */
+.insp{display:flex;flex-direction:column;min-height:0;background:var(--panel);border-left:1px solid var(--line-soft)}
+.itabs{display:flex;height:var(--row);border-bottom:1px solid var(--line-soft);flex:none}
+.itabs button{flex:1;display:flex;align-items:center;justify-content:center;gap:6px;font-size:var(--meta);
+  color:var(--mute);border-bottom:2px solid transparent;margin-bottom:-1px}
+.itabs button[data-on=true]{color:var(--bone);border-bottom-color:var(--text)}
+.itabs .c{font-size:var(--micro);color:var(--dim);font-variant-numeric:tabular-nums}
+.dlist{flex:1;min-height:0;overflow:auto;padding:6px 0 14px}
+.dfile{padding:9px 12px 4px;display:flex;align-items:baseline;gap:9px;font-size:var(--meta)}
+.dfile .p{color:var(--text);font-family:"JetBrains Mono";font-size:var(--code);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dfile .s{margin-left:auto;font-size:var(--micro);color:var(--mute);font-variant-numeric:tabular-nums;white-space:nowrap}
+.dfile .s .a{color:var(--sage)}.dfile .s .r{color:#8b6b66}
+.hunk{font-family:"JetBrains Mono";font-size:var(--code);line-height:1.6;white-space:pre;overflow-x:auto;
+  padding:2px 0 10px;color:var(--mute)}
+.hunk .l{display:block;padding:0 12px}
+.hunk .l.a{background:rgb(110 192 138/.07);color:#a9cdb4}
+.hunk .l.r{background:rgb(229 100 90/.07);color:#c79a95}
+
+/* ── the modal ────────────────────────────────────────────────── */
+#scrim{position:fixed;inset:0;z-index:40;background:rgb(4 4 5/.58);backdrop-filter:blur(2px);display:none}
+#scrim.show{display:block}
+.modal{position:fixed;z-index:41;top:9vh;left:50%;transform:translateX(-50%);width:min(720px,93vw);
+  height:min(660px,78vh);background:var(--overlay);border-radius:var(--r-lg);box-shadow:var(--float);
+  display:none;grid-template-rows:auto auto 1fr auto;overflow:hidden}
+.modal.show{display:grid}
+.mh{padding:15px 18px 11px}
+.mh h2{font-size:var(--title);color:var(--bone);font-weight:600}
+.mh p{font-size:var(--meta);color:var(--mute);margin-top:4px;line-height:1.5;max-width:62ch}
+.mq{padding:0 18px 11px}
+.mq .search{height:34px;background:rgb(10 10 11/.9)}
+.mq .search input{font-size:var(--ui)}
+.mlist{min-height:0;overflow:auto;padding:0 11px 8px}
+.mgroup{padding:13px 7px 5px;display:flex;align-items:baseline;gap:9px;position:sticky;top:0;
+  background:var(--overlay);z-index:1}
+.mgroup .n{margin-left:auto;font-size:var(--micro);color:#44444c;font-variant-numeric:tabular-nums}
+.mgroup .why{font-size:var(--micro);color:var(--mute);text-transform:none;letter-spacing:0;font-family:Archivo}
+.srow{display:grid;grid-template-columns:15px 1fr;gap:10px;padding:8px 7px;border-radius:var(--r-md)}
+.srow:hover{background:color-mix(in srgb,var(--raise) 70%,transparent)}
+.srow[data-sel=true]{background:var(--raise)}
+.srow[data-cursor=true]{box-shadow:inset 0 0 0 1px #33333b}
+.srow .check{margin-top:2px}
+.srow .t{display:flex;align-items:baseline;gap:7px}
+.srow .nm{font-size:var(--ui);color:var(--text);font-weight:600}
+.srow[data-sel=true] .nm{color:var(--bone)}
+.srow .v{font-size:var(--micro);color:var(--mute);margin-left:auto;font-variant-numeric:tabular-nums}
+.srow .d{font-size:var(--meta);color:var(--mute);margin-top:2px;line-height:1.45;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.srow .tg{display:flex;gap:6px;margin-top:5px;flex-wrap:wrap;align-items:center}
+.more{margin:6px 7px 0;padding:8px;border-radius:var(--r-md);font-size:var(--meta);color:var(--mute);
+  text-align:center;background:rgb(23 23 26/.6)}
+.more:hover{color:var(--text)}
+.mf{border-top:1px solid var(--line-soft);padding:12px 18px;display:grid;
+  grid-template-columns:1fr auto;gap:14px;align-items:center;background:var(--panel)}
+.mf .meterwrap{display:flex;flex-direction:column;gap:5px;min-width:0}
+.mf .mline{display:flex;align-items:baseline;gap:8px;font-size:var(--meta);color:var(--dim)}
+.mf .mline b{color:var(--text);font-weight:600}
+.mf .acts{display:flex;gap:8px;align-items:center}
+.mf .pend{font-size:var(--meta);color:var(--mute)}
+.mf .pend b{color:var(--bone);font-weight:600}
+</style></head><body>
+
+<div id="win">
+  <div class="titlebar">
+    <div class="lights"><i></i><i></i><i></i></div>
+    <span class="where"><b>ltree path predicate</b></span>
+    <span class="sep">/</span><span class="where mono" style="font-size:var(--micro)">agent/ltree-predicate</span>
+    <div class="right"><div class="track" id="sim">
+      <button data-s="start" data-on="true">Before the first message</button>
+      <button data-s="slash">Calling one by name</button>
+      <button data-s="modal">Choosing them</button>
+      <button data-s="after">After confirming</button>
+    </div></div>
+  </div>
+
+  <div id="body">
+    <aside class="sidebar">
+      <div class="legend">acme/backend</div>
+      <div class="row" data-on="true"><span style="color:var(--bone)">ltree path predicate</span></div>
+      <div class="row">vault hand-over</div><div class="row">skills library</div>
+      <div class="legend">acme/web</div>
+      <div class="row">inspector tabs</div>
+      <div class="legend">Shared with you</div>
+      <div class="row">lisa — release 2.4</div>
+    </aside>
+
+    <section class="conv">
+      <div class="convscroll"><div class="thread" id="thread"></div></div>
+      <div class="composer" id="composer"></div>
+    </section>
+
+    <aside class="insp">
+      <div class="itabs">
+        <button data-on="true">Diff <span class="c">3</span></button><button>Files</button><button>Commit</button>
+      </div>
+      <div class="dlist">
+        <div class="dfile"><span class="p">crates/ft-server/src/api/sessions.rs</span><span class="s"><span class="a">+12</span> <span class="r">−4</span></span></div>
+        <div class="hunk"><span class="l r">-    state.db.session_of(owner, &id).await?</span><span class="l a">+    state.db.session_to_work_in(owner, &id).await?</span><span class="l">     // a mutation asks the Writer method</span></div>
+        <div class="dfile"><span class="p">crates/ft-server/src/api/repos.rs</span><span class="s"><span class="a">+9</span> <span class="r">−9</span></span></div>
+        <div class="hunk"><span class="l r">-    let sql = "SELECT * FROM repos";</span><span class="l a">+    let sql = format!(</span><span class="l a">+        "SELECT {COLUMNS} FROM repos r WHERE {visible}",</span><span class="l a">+        visible = filed_where("r", 1, Level::Viewer),</span><span class="l a">+    );</span></div>
+        <div class="dfile"><span class="p">docs/paths-and-ownership.md</span><span class="s"><span class="a">+34</span> <span class="r">−2</span></span></div>
+        <div class="hunk"><span class="l a">+**A query without the predicate.** `list_repos` returned every</span><span class="l a">+repository on the installation to everybody.</span></div>
+      </div>
+    </aside>
+  </div>
+
+  <div class="statusbar"><span id="sb"></span>
+    <span class="right"><span class="keycap">⌘⇧S</span><span>skills</span><span class="keycap">⌘\</span><span>inspector</span></span></div>
+</div>
+
+<div id="scrim"></div>
+<div class="modal" id="modal">
+  <div class="mh">
+    <h2>Skills for this session</h2>
+    <p>Each one keeps its description in the model's context on every turn, so this is a budget as much as a
+      choice. Nothing changes until you confirm.</p>
+  </div>
+  <div class="mq"><div class="search"><span style="color:var(--mute);font-size:11px">⌕</span>
+    <input id="mq" placeholder="Search 312 skills by name or description"><span class="keycap">esc</span></div></div>
+  <div class="mlist" id="mlist"></div>
+  <div class="mf" id="mf"></div>
+</div>
+
+<script src="data.js"></script>
+<script>
+const $=(s,r=document)=>r.querySelector(s),$$=(s,r=document)=>[...r.querySelectorAll(s)];
+const of=n=>SKILLS.find(s=>s.slug===n);
+const mono=n=>n.split("-").slice(0,2).map(w=>w[0]).join("").toUpperCase();
+const AGENT="ClaudeCode", B=AGENT_BUDGET[AGENT];
+
+const FROM={ "release-checklist":"acme/backend","rust-review":"acme/backend","sqlx-migrations":"acme/backend",
+             "react-rail":"acme/web","orval-contract":"acme/web" };
+const ALWAYS=["house-prose"];
+const DEFAULTS=[...Object.keys(FROM),...ALWAYS];
+
+let live=new Set(DEFAULTS), draft=new Set(DEFAULTS);
+let state="start", query="", showAll=false, cursor=0;
+const reach=s=>s.agents.includes(AGENT);
+const spend=set=>[...set].map(of).filter(reach).reduce((n,s)=>n+cost(s),0);
+
+/* ── conversation ─────────────────────────────────────────────── */
+function thread(){
+  if(state==="start") return `<div class="agent"><p>Ready. Two repositories are checked out —
+    <code>acme/backend</code> on <code>agent/ltree-predicate</code> and <code>acme/web</code> beside it.
+    Tell me what you want doing.</p></div>`;
+  const t=[`<div class="you">Every list in the product has to paste <code>filed_where</code> into its WHERE.
+    Find the ones that don't.</div>`,
+   `<div><div class="work">
+      <div class="w skill"><b>rust-review</b><span class="mono" style="color:var(--mute)">v12</span></div>
+      <div class="w">Grep <span class="mono">path &lt;@</span> <b>11 matches in 6 files</b></div>
+      <div class="w">Read <span class="mono">crates/ft-server/src/access.rs</span></div></div>
+    <div class="agent"><p>Four handlers build the predicate by hand. Three are reads and would return other
+      people's rows; the fourth is a mutation gated by a read, which is the one that matters — a viewer
+      given a look at a directory can end the sessions in it.</p></div></div>`];
+  if(state==="after"){
+    t.push(`<div class="sysline"><b>Skills changed</b><span class="add">added pdf-forms</span>
+      <span class="rem">removed react-rail</span><span style="margin-left:auto">in effect from your next message</span></div>`);
+    t.push(`<div class="you">Good. Now write it up for the docs, in the repository's voice.</div>`);
+    t.push(`<div><div class="work">
+        <div class="w skill"><b>house-prose</b><span class="mono" style="color:var(--mute)">v21</span></div>
+        <div class="w">Write <span class="mono">docs/paths-and-ownership.md</span> <b>+34 −2</b></div></div>
+      <div class="agent"><p>Added it under the mistakes section, in the same voice as the four already there —
+        what was done, what it cost, and the one grep that finds the next one.</p></div></div>`);
+  } else t.push(`<div class="you">Good. Now write it up for the docs, in the repository's voice.</div>`);
+  return t.join("");
+}
+
+/* ── composer ─────────────────────────────────────────────────── */
+function composer(){
+  const n=[...live].map(of).filter(reach).length;
+  const pending=[...draft].filter(s=>!live.has(s)).length+[...live].filter(s=>!draft.has(s)).length;
+  const used=spend(live),bars=12,lit=Math.round(used/B.tokens*bars);
+  const first=state==="start"?`<div class="firstline"><span style="color:var(--mute)">◆</span>
+      <div><b>Six skills are on</b> — five from acme/backend and acme/web, one you keep on everywhere.
+      <a href="#" id="review">Look before you send</a>.</div></div>`:"";
+  const slash=state==="slash"?`<div class="slash show">
+      <div class="hd">Skills matching “re”</div>
+      ${["release-checklist","rust-review","react-rail"].map((k,i)=>{const s=of(k);return `
+        <div class="o" data-on="${i===0}"><span class="mark" style="width:24px;height:24px;font-size:var(--micro)">${mono(s.name)}</span>
+          <div style="min-width:0"><div class="n mono">/${s.name}</div><div class="d">${s.desc}</div></div>
+          <span style="font-size:var(--micro);color:${live.has(k)?"var(--sage)":"var(--mute)"}">${live.has(k)?"on":"not on"}</span></div>`;}).join("")}
+      <div class="ft"><span><span class="keycap">⏎</span> use it in this message</span>
+        <span style="margin-left:auto">One that is off is turned on for the session</span></div></div>`:"";
+  return `${first}<div class="cbox">${slash}
+    <textarea rows="2" placeholder="Reply to Claude Code">${state==="slash"?"/re":state==="start"?"":"Write it up for docs/paths-and-ownership.md."}</textarea>
+    <div class="ctray">
+      <button class="skchip" id="chip"><span>◆</span><span class="n">${n}</span><span>skills</span>
+        ${pending?`<span style="color:var(--slate)">· ${pending} unconfirmed</span>`:""}</button>
+      <button class="control plain sm">Opus 4.6</button><button class="control plain sm">Auto</button>
+      <span class="right"><span class="ctxmeter" title="how full the context is">${Array.from({length:bars},(_,i)=>`<i class="${i<lit?"on":""}"></i>`).join("")}</span>
+        <span class="keycap">⏎</span><button class="send">Send</button></span>
+    </div></div>`;
+}
+
+/* ── the modal ────────────────────────────────────────────────── */
+function srow(s,i){
+  const on=draft.has(s.slug), was=live.has(s.slug), origin=FROM[s.slug];
+  return `<div class="srow" data-slug="${s.slug}" data-sel="${on}" data-cursor="${i===cursor}">
+    <span class="check" role="checkbox" aria-checked="${on}"></span>
+    <div style="min-width:0">
+      <div class="t"><span class="nm mono">${s.name}</span><span class="v">v${s.v}</span></div>
+      <div class="d">${s.desc}</div>
+      <div class="tg">
+        ${origin?`<span class="tag">${origin}</span>`:""}
+        ${ALWAYS.includes(s.slug)?'<span class="tag">always on for you</span>':""}
+        ${!origin&&!ALWAYS.includes(s.slug)&&s.owner.startsWith("d/")?`<span class="tag info">${s.ownerLabel}</span>`:""}
+        ${s.risk.map(r=>`<span class="tag warnish">${RISK_LABEL[r].short}</span>`).join("")}
+        <span class="tag num">${cost(s)} tok</span>
+        ${on&&!was?'<span class="tag good">turning on</span>':""}
+        ${!on&&was?'<span class="tag warnish">turning off</span>':""}
+      </div></div></div>`;
+}
+function modalGroups(){
+  const q=query.trim().toLowerCase();
+  const match=s=>!q||s.name.includes(q)||s.desc.toLowerCase().includes(q)||s.ownerLabel.toLowerCase().includes(q);
+  let rest=SKILLS.filter(match);
+  const out=[]; const take=(t,why,p)=>{const g=rest.filter(p);rest=rest.filter(s=>!p(s));
+    if(g.length)out.push({t,why,rows:g});};
+  /* Membership is where a skill comes from. Ticking one never moves it. */
+  take("Default here","from acme/backend and acme/web, and your own always-on",
+       s=>!!FROM[s.slug]||ALWAYS.includes(s.slug));
+  if(rest.length) out.push({t:"All skills",why:"",rows:rest,capped:!q&&!showAll});
+  return out;
+}
+function renderModal(){
+  let i=0,h="";
+  modalGroups().forEach(g=>{
+    const rows=g.capped?g.rows.slice(0,4):g.rows;
+    h+=`<div class="mgroup"><span class="legend">${g.t}</span>${g.why?`<span class="why">${g.why}</span>`:""}<span class="n">${g.rows.length}</span></div>`;
+    rows.forEach(s=>h+=srow(s,i++));
+    if(g.capped&&g.rows.length>4) h+=`<div class="more" id="showall">Show the other ${g.rows.length-4}, or search for one</div>`;
+  });
+  $("#mlist").innerHTML=h||`<div style="padding:40px 14px;text-align:center;color:var(--mute);font-size:var(--meta)">No skill matches “${query}”.</div>`;
+
+  const used=spend(draft),pct=Math.min(100,used/B.tokens*100),over=used>B.tokens;
+  const added=[...draft].filter(s=>!live.has(s)),gone=[...live].filter(s=>!draft.has(s));
+  const dirty=added.length||gone.length;
+  $("#mf").innerHTML=`
+    <div class="meterwrap">
+      <div class="mline"><span>Context</span><b class="num">${used.toLocaleString()}</b>
+        <span>of <span class="num">${B.tokens.toLocaleString()}</span> tokens</span>
+        <span style="margin-left:auto;font-size:var(--micro);color:var(--mute)">Claude Code</span></div>
+      <div class="meter ${over?"over":used>B.tokens*.8?"near":""}"><i style="width:${pct}%"></i></div>
+      <div class="pend">${dirty
+        ? `<b>${added.length?"+"+added.length:""}${added.length&&gone.length?" ":""}${gone.length?"−"+gone.length:""}</b> — in effect from your next message`
+        : `${draft.size} on, in step with the session`}</div>
+    </div>
+    <div class="acts">
+      ${dirty?'<button class="control plain" id="reset">Reset</button>':""}
+      <button class="control plain" id="cancel">Cancel</button>
+      <button class="control ${dirty&&!over?"go":""}" id="confirm" ${dirty&&!over?"":"disabled"}>
+        ${over?"Over budget":dirty?`Confirm ${draft.size} skills`:"Nothing to confirm"}</button>
+    </div>`;
+}
+
+function render(){ $("#thread").innerHTML=thread(); $("#composer").innerHTML=composer(); renderModal();
+  $("#sb").innerHTML=`<span class="num">${[...live].length}</span> skills on &nbsp;&nbsp; <span class="num">${spend(live).toLocaleString()}</span> of <span class="num">${B.tokens.toLocaleString()}</span> tokens of the skill budget`; }
+function openM(){$("#scrim").classList.add("show");$("#modal").classList.add("show");$("#mq").focus();renderModal();}
+function closeM(){$("#scrim").classList.remove("show");$("#modal").classList.remove("show");}
+
+function go(s){
+  state=s; $$("#sim button").forEach(b=>b.setAttribute("data-on",String(b.dataset.s===s)));
+  if(s==="modal"){draft=new Set(live);draft.add("pdf-forms");draft.delete("react-rail");showAll=false;render();openM();}
+  else if(s==="after"){live=new Set(live);live.add("pdf-forms");live.delete("react-rail");draft=new Set(live);closeM();render();}
+  else {draft=new Set(live);closeM();render();}
+}
+$$("#sim button").forEach(b=>b.onclick=()=>go(b.dataset.s));
+document.addEventListener("click",e=>{
+  const r=e.target.closest(".srow");
+  if(r){const s=r.dataset.slug;draft.has(s)?draft.delete(s):draft.add(s);renderModal();render();return;}
+  if(e.target.closest("#showall")){showAll=true;renderModal();return;}
+  if(e.target.closest("#confirm")){live=new Set(draft);go("after");return;}
+  if(e.target.closest("#reset")){draft=new Set(live);renderModal();render();return;}
+  if(e.target.closest("#cancel")||e.target.id==="scrim"){draft=new Set(live);closeM();render();return;}
+  if(e.target.closest("#chip")||e.target.closest("#review")){e.preventDefault();draft=new Set(live);openM();return;}
+});
+$("#mq").addEventListener("input",e=>{query=e.target.value;cursor=0;renderModal();});
+document.addEventListener("keydown",e=>{
+  if((e.metaKey||e.ctrlKey)&&e.shiftKey&&e.key.toLowerCase()==="s"){e.preventDefault();draft=new Set(live);openM();}
+  if(e.key==="Escape"){draft=new Set(live);closeM();render();}
+});
+const start=location.hash.slice(1);
+go(["start","slash","modal","after"].includes(start)?start:"start");
+</script></body></html>

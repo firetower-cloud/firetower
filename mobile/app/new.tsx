@@ -36,28 +36,16 @@ import * as Haptics from "expo-haptics";
 import { GitBranch, Plus, X } from "lucide-react-native";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useCreateSession } from "~/api/generated/sessions/sessions";
-import type { Agent, Share } from "~/api/generated/model";
+import type { Agent } from "~/api/generated/model";
 import { useAccounts, useAgents, useHosts, useRepos, why } from "~/data";
 import { leaveDraft } from "~/workspace/draft";
 import { takeConnected } from "~/workspace/connected";
 import { Field, Picker, Trigger, type Choice } from "~/ui/Picker";
-import { Segmented } from "~/ui/Segmented";
 import { color, size } from "~/design/tokens.generated";
 
 /** `auth refactor` → `agent/auth-refactor`, the way the web build suggests one. */
 const slug = (name: string) =>
   name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-
-const SHARES: [Share, string][] = [
-  ["yields", "Yields"],
-  ["equal", "Equal"],
-  ["takesMore", "Takes more"],
-];
-const SAYS: Record<Share, string> = {
-  yields: "Waits for the others.",
-  equal: "Takes its turn.",
-  takesMore: "Goes first.",
-};
 
 type Open = null | "repo" | "host" | "agent" | "account";
 
@@ -126,7 +114,6 @@ export default function NewWorkspace() {
   const [hostId, setHostId] = useState("");
   const [agent, setAgent] = useState("");
   const [accountId, setAccountId] = useState("");
-  const [share, setShare] = useState<Share>("equal");
   const [open, setOpen] = useState<Open>(null);
 
   /* The branch follows the name until somebody edits it, and then it stops —
@@ -265,13 +252,6 @@ export default function NewWorkspace() {
           />
         </Field>
 
-        <Field label="When the machine is busy">
-          <View className="gap-2">
-            <Segmented options={SHARES} value={share} onChange={setShare} />
-            <Text className="font-sans text-meta text-mute">{SAYS[share]}</Text>
-          </View>
-        </Field>
-
         {/* Said plainly, because it is the one thing about this form that
             surprises people who have used anything else. */}
         <View className="rounded-xl border border-line bg-panel px-4 py-3.5">
@@ -304,7 +284,6 @@ export default function NewWorkspace() {
                     hostId,
                     agent: agent as Agent,
                     accountId: accountId || undefined,
-                    share,
                     taskKey: seed.taskKey,
                     taskUrl: seed.taskUrl,
                     // Never a prompt. See the note at the top of this file.

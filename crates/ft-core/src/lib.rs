@@ -25,7 +25,10 @@ mod status;
 pub mod turn;
 
 pub use grants::{Level, SubjectKind};
-pub use ids::{DirectoryId, HostId, OrgId, RepoId, SessionId, TeamId, UserId, WorkspaceId};
+pub use ids::{
+    DirectoryId, HostId, OrgId, RepoId, SessionId, SkillId, SkillVersionId, TeamId, UserId,
+    WorkspaceId,
+};
 pub use path::{slug, ResourcePath};
 pub use session::{
     sanitize_branch, slugify, title_from, workspace_name, NewSession, Session, Share, Workspace,
@@ -938,6 +941,15 @@ pub enum AgentMode {
     NotNeeded,
 }
 
+/// How an agent is told where this session's skills are.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SkillsHome {
+    /// `skills/` inside the directory [`Agent::home_var`] already points at.
+    AgentHome,
+    /// A directory of its own, handed over on the command line.
+    AddedDirectory,
+}
+
 /// The model a session runs unless somebody changes it.
 ///
 /// The flagship, with the long context window. Sessions here are unattended and
@@ -1136,6 +1148,31 @@ impl Agent {
             Agent::Codex => Some("CODEX_HOME"),
             Agent::KimiCode => Some("KIMI_CODE_HOME"),
             Agent::ClaudeCode | Agent::Shell => None,
+        }
+    }
+
+    /// Where a session's own skills go, and how this agent is pointed at them.
+    ///
+    /// One shape for all three — *a directory of skill bundles belonging to one
+    /// session* — because a workspace holds several sessions, each with its own
+    /// agent and its own selection. Project scope was the obvious first answer
+    /// and is wrong for exactly that reason: `.claude/skills` beside the
+    /// checkouts is shared by every agent in the place.
+    ///
+    /// Verified against the real CLIs rather than their documentation:
+    ///
+    /// * **Claude Code** has no home of its own here, so the directory is named
+    ///   on the command line with `--add-dir`. A skill under
+    ///   `<root>/.claude/skills/<name>/` is loaded for that session and no
+    ///   other. `CLAUDE_CONFIG_DIR` would also work and is not used: it hides
+    ///   the host's own `~/.claude`, which is a bigger change than this needs.
+    /// * **Codex** and **Kimi** already get a home per session, so `skills/`
+    ///   inside it is per session for free.
+    pub fn skills_home(&self) -> Option<SkillsHome> {
+        match self {
+            Agent::ClaudeCode => Some(SkillsHome::AddedDirectory),
+            Agent::Codex | Agent::KimiCode => Some(SkillsHome::AgentHome),
+            Agent::Shell => None,
         }
     }
 

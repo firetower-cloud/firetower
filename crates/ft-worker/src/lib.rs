@@ -73,6 +73,7 @@ pub mod kimi;
 pub mod path;
 pub mod readiness;
 pub mod runtime;
+pub mod skills;
 pub mod store;
 pub mod structured;
 pub mod tmux;
@@ -977,6 +978,28 @@ impl Worker {
             ToWorker::Interrupt { session_id } => {
                 if let Err(e) = structured::tell(&session_id, &agentd::ToAgent::Interrupt).await {
                     tracing::warn!(session = %session_id, "interrupting: {e:#}");
+                }
+            }
+
+            // The whole selection, not a change to it — see the frame. What is
+            // already on disk under the same name is left where it is, so a
+            // skill the agent is part-way through reading is not pulled out
+            // from under it.
+            //
+            // Nothing is sent back and nothing restarts. Every agent here
+            // watches its own skills directory: Codex answers the next
+            // `skills/list` with the new set and pushes `skills/changed`, and
+            // Claude Code picks up a change inside a directory it is already
+            // watching. The person was told it takes effect from their next
+            // message, which is the honest promise either way.
+            ToWorker::SetSkills { session_id, skills } => {
+                match self.skills_for(&session_id, &skills).await {
+                    Ok(()) => tracing::info!(
+                        session = %session_id,
+                        count = skills.len(),
+                        "this session's skills were changed"
+                    ),
+                    Err(e) => tracing::warn!(session = %session_id, "changing its skills: {e:#}"),
                 }
             }
 
@@ -2065,7 +2088,25 @@ You are in the directory that holds them, not inside one of them.              P
             ));
         }
 
-        prepare_agent_home(&path, &id, spec.agent, &spec.agent_home, &mut env).await?;
+        prepare_agent_home(
+            &path,
+            &id,
+            spec.agent,
+            &spec.agent_home,
+            &mut env,
+            !spec.skills.is_empty(),
+        )
+        .await?;
+
+        // Always, even with nothing selected: the directory has to exist
+        // before the agent starts, or the first skill turned on mid-session
+        // lands somewhere nothing is watching.
+        if let Err(e) = crate::skills::apply(&path, &id, spec.agent, &spec.skills).await {
+            tracing::warn!(
+                "{}: writing this session's skills: {e:#}",
+                spec.agent.label()
+            );
+        }
 
         self.launch_agent(
             Launch {
@@ -2214,7 +2255,22 @@ You are in the directory that holds them, not inside one of them.              P
             ));
         }
 
-        prepare_agent_home(&path, &id, spec.agent, &spec.agent_home, &mut env).await?;
+        prepare_agent_home(
+            &path,
+            &id,
+            spec.agent,
+            &spec.agent_home,
+            &mut env,
+            !spec.skills.is_empty(),
+        )
+        .await?;
+
+        if let Err(e) = crate::skills::apply(&path, &id, spec.agent, &spec.skills).await {
+            tracing::warn!(
+                "{}: writing this session's skills: {e:#}",
+                spec.agent.label()
+            );
+        }
 
         // In order, and each one is allowed to fail on its own: a session that
         // came up with two repositories out of three is still a session worth
@@ -2295,6 +2351,17 @@ You are in the directory that holds them, not inside one of them.              P
     ///
     /// Read rather than recomputed: the directory is named by whoever started
     /// the session, so there is nothing to derive it from.
+    /// Put exactly this set of skills where this session's agent reads them.
+    async fn skills_for(
+        &self,
+        session_id: &SessionId,
+        skills: &[ft_proto::SkillBundle],
+    ) -> Result<()> {
+        let workspace = self.workspace_of(session_id).await?;
+        let (agent, _) = self.store.session_brief(session_id).await?;
+        crate::skills::apply(&workspace, session_id, agent, skills).await
+    }
+
     async fn workspace_of(&self, session_id: &SessionId) -> Result<PathBuf> {
         self.store
             .workspace_path(session_id)
@@ -3351,6 +3418,8 @@ async fn prepare_agent_home(
     agent: ft_core::Agent,
     files: &[(String, String)],
     env: &mut Vec<(String, String)>,
+    // Whether this session has skills to put in the same directory.
+    wanted: bool,
 ) -> Result<()> {
     let Some(variable) = agent.home_var() else {
         return Ok(());
@@ -3358,7 +3427,11 @@ async fn prepare_agent_home(
     let has_key = agent
         .api_key_var()
         .is_some_and(|key| env.iter().any(|(k, _)| k == key));
-    if files.is_empty() && !has_key {
+    // `wanted` is whether anything else needs this directory. Skills live
+    // inside it for the agents that have one, so a session with skills and an
+    // API key — no credential *file* at all — still needs it made and still
+    // needs the variable pointing at it.
+    if files.is_empty() && !has_key && !wanted {
         return Ok(());
     }
     let home = agentd::dir_for(path).join(format!("agent-home-{}", id.as_str()));
@@ -4570,6 +4643,7 @@ mod tests {
             workspace: id.as_str().to_string(),
             env: vec![],
             agent_home: vec![],
+            skills: vec![],
         }))
     }
 
@@ -4807,6 +4881,7 @@ mod tests {
                     workspace: id.as_str().to_string(),
                     env: vec![],
                     agent_home: vec![],
+                    skills: vec![],
                 })),
             ],
         )
@@ -4862,6 +4937,7 @@ mod tests {
                     workspace: first.as_str().to_string(),
                     env: vec![],
                     agent_home: vec![],
+                    skills: vec![],
                 })),
             ],
         )
@@ -4898,6 +4974,7 @@ mod tests {
                             share: ft_core::Share::Equal,
                             env: vec![],
                             agent_home: vec![],
+                            skills: vec![],
                             workspace_session: None,
                         }),
                     },
@@ -4960,6 +5037,7 @@ mod tests {
                     workspace: first.as_str().to_string(),
                     env: vec![],
                     agent_home: vec![],
+                    skills: vec![],
                 })),
             ],
         )
@@ -4990,6 +5068,7 @@ mod tests {
                     share: ft_core::Share::Equal,
                     env: vec![],
                     agent_home: vec![],
+                    skills: vec![],
                     workspace_session: None,
                 })),
             ],
@@ -5252,6 +5331,7 @@ mod account_home_tests {
             ft_core::Agent::Codex,
             &[("auth.json".into(), "token-a".into())],
             &mut env_a,
+            false,
         )
         .await
         .unwrap();
@@ -5261,6 +5341,7 @@ mod account_home_tests {
             ft_core::Agent::Codex,
             &[("auth.json".into(), "token-b".into())],
             &mut env_b,
+            false,
         )
         .await
         .unwrap();

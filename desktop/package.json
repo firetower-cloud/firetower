@@ -1,7 +1,7 @@
 {
   "name": "firetower-desktop",
   "private": true,
-  "version": "0.17.0",
+  "version": "0.18.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -23,6 +23,7 @@
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-search": "^0.16.0",
     "@xterm/xterm": "^6.0.0",
+    "fflate": "^0.8.3",
     "lucide-react": "^1.35.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",

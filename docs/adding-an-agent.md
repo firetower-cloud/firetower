@@ -233,6 +233,45 @@ a CLI too old for a name we send it, costs a session most of its window and
 reports nothing — so the Agents screen showing a host as behind is the only
 warning anybody gets.
 
+## Skills
+
+Two things to get right for every new agent, and neither comes for free. See
+[`skills.md`](skills.md) for what a skill is and where each agent reads one.
+
+### A skill in use shows as a skill
+
+Each agent signals "I am using a skill" differently. Claude Code calls a
+`Skill` tool. Codex runs `cat …/skills/<name>/SKILL.md` in a shell. Kimi opens
+a call titled `Skill` with no name and only fills in `rawInput.skill` at the
+end, and its final ACP update carries neither.
+
+- Run a real session that uses a skill and read the journal. Find where the
+  skill's name appears.
+- Teach `normalise::skill_reached_for` that shape, and have the agent's reader
+  emit `ItemKind::SkillUse` with the name under `skill`. Clients read that key
+  and nothing else; they do not get a per-agent rule.
+- If the name arrives after the item opens, the reader has to remember it
+  across updates, the way the ACP reader does.
+- Add a case to `every_agent_says_which_skill_it_reached_for`, taken from the
+  real journal.
+- Check the transcript: the skill shows as one `SkillUse` row with its name,
+  not as a shell command or a file read.
+
+### Skills reach the agent on the first turn and on every turn after
+
+- **First turn.** Set `skills_home`: `AgentHome` if the agent reads
+  `skills/` inside its relocated home, `AddedDirectory` if it is handed a
+  directory on the command line. Confirm the agent lists the selected skills
+  before the first message, not after a restart.
+- **Every turn.** The selection changes mid-session through `SetSkills`, and
+  the worker rewrites the directory. Find out whether the agent's *model*
+  sees that on its next turn. Claude Code re-injects the list before each
+  message; Codex watches the directory and re-lists. Kimi only refreshes its
+  `/skill:` menu, so `choose_skills` sends it a turn saying the set changed.
+  An agent that does neither needs the same treatment.
+- Verify it live: add a skill, remove one, then ask the agent which skills it
+  has. A refreshed menu in the client does not mean the model has the new set.
+
 ## Every client
 
 Desktop, web and mobile do not share components. Each needs the agent.
@@ -270,6 +309,8 @@ the real thing with a real account:
 - A turn completes and text streams back
 - A follow-up remembers the turn before it
 - Model, effort and mode change mid-session
+- A skill is listed on the first turn, shows as `SkillUse` when used, and a
+  mid-session change is reflected on the next turn
 - A tool call **approved** — and the side effect really happened
 - A tool call **denied** — and the side effect really did not
 - Cancellation reports interrupted rather than failed
