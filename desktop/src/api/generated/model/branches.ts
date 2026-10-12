@@ -8,5 +8,14 @@
 
 export interface Branches {
   branches: string[];
+  /**
+     * For an empty repository, the trunk it is going to have: the name
+     * recorded when it was connected, since the remote cannot say.
+     */
   defaultBranch: string;
+  /**
+     * No commits, so no branches either. The one in `default_branch` does not
+     * exist yet, and the first session is what creates it.
+     */
+  empty?: boolean;
 }

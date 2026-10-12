@@ -7660,7 +7660,12 @@
             }
           },
           "defaultBranch": {
-            "type": "string"
+            "type": "string",
+            "description": "For an empty repository, the trunk it is going to have: the name\nrecorded when it was connected, since the remote cannot say."
+          },
+          "empty": {
+            "type": "boolean",
+            "description": "No commits, so no branches either. The one in `default_branch` does not\nexist yet, and the first session is what creates it."
           }
         }
       },
@@ -7936,6 +7941,10 @@
               "null"
             ],
             "description": "Why this repository is not checked out, when it is not."
+          },
+          "unborn": {
+            "type": "boolean",
+            "description": "Whether the base branch does not exist yet. See\n[`WorkSummary::unborn`].\n\nWhat makes the one control say \"push `main`\" instead of \"open a pull\nrequest\" — there is nothing on the far end to open one against, and a\nbutton that could only be refused is worse than one that names the step\nit will actually take. False again once the trunk is there, which puts\nthe session back on the ordinary sequence with nothing to unwind."
           },
           "uncommitted": {
             "type": [
@@ -10446,12 +10455,19 @@
       },
       "NewRepo": {
         "type": "object",
-        "description": "Connect a repository. Nothing is cloned until a session needs it.\n\nNo default branch here on purpose. Connecting reaches for the remote anyway,\nand what it answers with is the truth — a branch named by the caller was\naccepted and then ignored, which is worse than not asking.",
+        "description": "Connect a repository. Nothing is cloned until a session needs it.\n\nConnecting reaches for the remote anyway, and what it answers with is the\ntruth — a branch named by the caller is not taken over it, because one that\nwas accepted and then ignored is worse than one never asked for.",
         "required": [
           "slug",
           "remote"
         ],
         "properties": {
+          "defaultBranch": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What the trunk is called, for a repository with no commits in it.\n\nOnly then. A repository with commits says so itself and is believed\nover anybody; an empty one cannot — `ls-remote` on one answers with\nnothing at all, not even the name of the branch it would have — so\nwithout this the first session invents `main` and a repository set up\nfor `master` quietly gets a second trunk. The picker knows the real\nname from the host's API and sends it here."
+          },
           "remote": {
             "type": "string",
             "description": "Anything git can clone: a URL, or a path for a local repository."
@@ -10980,7 +10996,11 @@
         "properties": {
           "defaultBranch": {
             "type": "string",
-            "description": "Read from the remote rather than assumed."
+            "description": "Read from the remote rather than assumed.\n\nFor a repository with no commits there is nothing to read: a guess at\n`main`, which whoever is connecting it can correct before saving."
+          },
+          "empty": {
+            "type": "boolean",
+            "description": "No commits in it yet.\n\nSaid rather than refused. There is nothing to branch from, so the first\nsession on it cuts a branch with no parent and its first push is what\ncreates the trunk — which is worth knowing while looking at the form,\nand is not a reason to decline to record a URL."
           },
           "onlyHere": {
             "type": "boolean",
@@ -14244,6 +14264,10 @@
           "pushed": {
             "type": "boolean",
             "description": "Whether this branch exists on the remote at all."
+          },
+          "unborn": {
+            "type": "boolean",
+            "description": "Whether the base branch does not exist yet.\n\nTrue for a session cut from a repository with no commits in it: there\nwas no trunk to branch from, so this branch is a root of its own and\nthe counts above are measured from nothing rather than from a base.\n\nAsked of the refs every time, so it stops being true the moment the\ntrunk exists — which is what pushing one of these sessions does. The\nalternative, remembering it, left whoever read it unable to tell a\ntrunk that had been created from one whose creation had failed.\n\nNote this is not the same question as \"did the base resolve\": a branch\ndeleted upstream and a mistyped base do not resolve either, and the\nworker only reads them as a root when the repository it cut from had no\nrefs at all. Everything else still fails loudly."
           },
           "uncommitted": {
             "type": "integer",

@@ -17,6 +17,12 @@ use std::sync::{
 
 struct Worker {
     ready: Arc<AtomicBool>,
+    /// What this worker says when asked to read a remote.
+    ///
+    /// `None` is "that is not a repository", which is what most tests here
+    /// want: they are about a host, and a repository that cannot be read is
+    /// one less thing happening. A test about repositories sets it.
+    probe: Option<ft_proto::RemoteInfo>,
 }
 #[async_trait::async_trait]
 impl Transport for Worker {
@@ -26,6 +32,7 @@ impl Transport for Worker {
     async fn connect(&self) -> anyhow::Result<Connection> {
         let (ours, theirs) = tokio::io::duplex(65536);
         let ready = self.ready.clone();
+        let probe = self.probe.clone();
         tokio::spawn(async move {
             let (r, w) = tokio::io::split(theirs);
             let mut codec = Codec::new(r, w);
@@ -59,7 +66,10 @@ impl Transport for Worker {
                     }),
                     ToWorker::ProbeRemote { req, .. } => Some(ToServer::RemoteProbed {
                         req,
-                        result: Err(ft_proto::ProbeFailure::NotARepository),
+                        result: match probe.clone() {
+                            Some(info) => Ok(info),
+                            None => Err(ft_proto::ProbeFailure::NotARepository),
+                        },
                     }),
                     _ => None,
                 };
@@ -97,6 +107,7 @@ async fn fixture() -> (
             host.id.clone(),
             Arc::new(Worker {
                 ready: ready.clone(),
+                probe: None,
             }),
         )
         .await;
@@ -209,7 +220,7 @@ async fn connecting_a_host_path_defers_validation_to_the_execution_machine() {
         .unwrap();
     state
         .fleet
-        .supervise(local.id.clone(), Arc::new(Worker { ready }))
+        .supervise(local.id.clone(), Arc::new(Worker { ready, probe: None }))
         .await;
     let remote = "/home/editor/media-app";
     // The local worker would reject this repository; it exists only on the VM
@@ -221,6 +232,7 @@ async fn connecting_a_host_path_defers_validation_to_the_execution_machine() {
             slug: "media-app".into(),
             remote: remote.into(),
             setup: None,
+            default_branch: None,
         }),
     )
     .await
@@ -961,4 +973,86 @@ async fn an_agent_is_only_updated_on_machines_somebody_administers() {
         ),
         Ok(_) => panic!("a member installed an agent onto somebody else's machine"),
     }
+}
+
+/// A repository with no commits in it.
+///
+/// Connecting one was refused outright — "has no commits yet, so there's
+/// nothing to branch from" — so no row was ever written and it never appeared
+/// in the list. That is the repository somebody most wants to put an agent on:
+/// they have just made it, and the agent is what will fill it.
+#[tokio::test]
+async fn an_empty_repository_is_connected_rather_than_refused() {
+    let (state, principal, host, ready, owner) = fixture().await;
+    let local = state
+        .db
+        .ensure_host("localhost", Compute::Local, &owner)
+        .await
+        .unwrap();
+    state
+        .fleet
+        .supervise(
+            local.id.clone(),
+            Arc::new(Worker {
+                ready,
+                // What `ls-remote` answers for a repository nobody has pushed
+                // to: no refs at all, and so no name for the trunk either —
+                // the `main` here is the worker's own fallback, not a fact.
+                probe: Some(ft_proto::RemoteInfo {
+                    default_branch: "main".into(),
+                    branches: vec![],
+                    empty: true,
+                }),
+            }),
+        )
+        .await;
+
+    let remote = "https://example.invalid/acme/fresh.git";
+    let Json(probed) = repos::probe_repo(
+        State(state.clone()),
+        Extension(principal.clone()),
+        Json(repos::ProbeRequest {
+            remote: remote.into(),
+        }),
+    )
+    .await
+    .expect("an empty repository is a state to report, not an error");
+    assert!(
+        probed.empty,
+        "and the form is told so it can say what happens"
+    );
+
+    let (status, Json(repo)) = repos::create_repo(
+        State(state.clone()),
+        Extension(principal.clone()),
+        Json(repos::NewRepo {
+            slug: "acme/fresh".into(),
+            remote: remote.into(),
+            setup: None,
+            // The host's own API knows what the trunk will be called even when
+            // the remote cannot say. The picker sends it for this case alone.
+            default_branch: Some("trunk".into()),
+        }),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(status, axum::http::StatusCode::CREATED);
+    assert_eq!(
+        repo.default_branch.as_deref(),
+        Some("trunk"),
+        "the name the host gave, not the probe's guess at main"
+    );
+
+    // The symptom, from the screen's point of view.
+    let Json(listed) = repos::list_repos(State(state.clone()), Extension(principal))
+        .await
+        .unwrap();
+    assert!(
+        listed.iter().any(|r| r.slug == "acme/fresh"),
+        "a connected repository is in the list"
+    );
+
+    state.fleet.stop_supervising(&local.id).await;
+    state.fleet.stop_supervising(&host.id).await;
 }

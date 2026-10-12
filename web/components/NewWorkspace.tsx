@@ -518,13 +518,26 @@ function RepoChip({
   // branch from the wrong place in one that calls it something else.
   const showing = base ?? info?.defaultBranch ?? "its default branch";
 
+  // A repository with no commits has no branches to choose between: the one
+  // named here does not exist yet, and this session's first push is what
+  // creates it. Said in the title, because a branch picker offering exactly
+  // one name otherwise looks like a list that failed to load.
+  const unborn = info?.empty === true;
+
   return (
     <span className="flex items-center rounded-md border border-line bg-panel text-meta text-dim">
       <span className="max-w-[200px] truncate py-1.5 pr-2 pl-2.5 font-mono text-meta text-bone">
         {slug}
       </span>
-      <label className="group relative flex items-center gap-1 border-l border-line py-1.5 pr-5 pl-2">
-        <span className="text-mute">⑂</span>
+      <label
+        title={
+          unborn
+            ? `${slug} has no commits yet, so ${showing} does not exist. This session creates it.`
+            : undefined
+        }
+        className="group relative flex items-center gap-1 border-l border-line py-1.5 pr-5 pl-2"
+      >
+        <span className="text-mute">{unborn ? "✦" : "⑂"}</span>
         <span className="max-w-[110px] truncate font-mono text-meta">{showing}</span>
         <span aria-hidden className="pointer-events-none absolute right-1.5 text-micro text-mute">
           ▾

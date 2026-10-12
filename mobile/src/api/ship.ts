@@ -66,6 +66,16 @@ export type Ship = {
   links: PullRequestLink[];
   /** How many repositories the next step touches. */
   count: number;
+  /**
+   * Whether pressing this creates the trunk instead of opening a pull request.
+   *
+   * True for the first session on a repository with no commits in it. There is
+   * no trunk on the far end to open a request against, so the sequence ends at
+   * the push — and the push is what creates one. Said here rather than worked
+   * out again by whoever draws the button, because the step it runs has to
+   * match the step it names.
+   */
+  seeds?: boolean;
 };
 
 export type PullRequestLink = { slug: string; url: string };
@@ -134,6 +144,53 @@ export function shipping(session: Session, work?: CheckoutWork[], failed?: boole
   const links: PullRequestLink[] = held
     .filter((c) => c.pullRequest)
     .map((c) => ({ slug: c.slug, url: c.pullRequest as string }));
+
+  // A repository whose trunk does not exist yet.
+  //
+  // Its own sequence, and a short one: commit, push, done. Every git host
+  // refuses a pull request into a branch that is not there, and the push is
+  // what creates it — from this session's own work, which is the whole of the
+  // repository's history at that point. `unborn` is the worker's current
+  // reading rather than a memory, so the moment the trunk exists this branch
+  // stops being taken and the ordinary ladder below runs instead.
+  //
+  // `every`, not `some`: a session holding an empty repository beside a full
+  // one still has a pull request to open, and one button has to name a step
+  // that covers all of them.
+  const trunk = trunkOf(held);
+  if (held.length > 0 && held.every((c) => c.unborn === true)) {
+    const dirty = held.filter((c) => (c.uncommitted ?? 0) > 0);
+    if (dirty.length > 0) {
+      return {
+        stage: "uncommitted",
+        label: name(`Commit & push ${trunk}`, dirty.length, held.length),
+        links,
+        count: dirty.length,
+        seeds: true,
+      };
+    }
+    // `commits` and not `ahead`: a push that created the branch and failed to
+    // create the trunk — a ruleset on it, somebody else pushing one first —
+    // leaves `ahead` at zero with the trunk still missing, and pressing again
+    // is what tries it again.
+    const carrying = held.filter((c) => (c.commits ?? 0) > 0);
+    if (carrying.length > 0) {
+      return {
+        stage: "unpushed",
+        label: name(`Push ${trunk}`, carrying.length, held.length),
+        links,
+        count: carrying.length,
+        seeds: true,
+      };
+    }
+    return {
+      stage: "clean",
+      label: "Nothing to commit",
+      blocked: `Nothing has changed yet. ${trunk} does not exist in this repository, and this session's first push is what creates it.`,
+      links,
+      count: 0,
+    };
+  }
 
   // In the order the sequence runs, because the earliest unfinished step is the
   // one to offer: committing before pushing before opening, even when another
@@ -268,8 +325,18 @@ const OPENS = "Commit & open PR";
  * Shown above the primary in the review sheet, so the whole sequence is written
  * out once even where the button itself is short.
  */
-export function sequence(stage: Stage): string | undefined {
-  switch (stage) {
+export function sequence(ship: Ship): string | undefined {
+  if (ship.seeds) {
+    switch (ship.stage) {
+      case "uncommitted":
+        return "Commits the files below and pushes them. This repository has no commits yet, so that push is what creates its trunk — there is nothing to open a pull request against.";
+      case "unpushed":
+        return "Pushes the branch. This repository has no commits yet, so that push is what creates its trunk.";
+      default:
+        return undefined;
+    }
+  }
+  switch (ship.stage) {
     case "uncommitted":
       return "Commits the files below, pushes the branch, and opens a pull request.";
     case "unpushed":
@@ -281,6 +348,18 @@ export function sequence(stage: Stage): string | undefined {
     default:
       return undefined;
   }
+}
+
+/**
+ * What the trunk is called, when every repository agrees on a name.
+ *
+ * They usually do — one session, one branch name, one base — and naming it is
+ * the difference between "Commit & push" and "Commit & push main". When they
+ * disagree there is no one name to use and the generic word is honest.
+ */
+function trunkOf(held: CheckoutWork[]): string {
+  const names = new Set(held.map((c) => c.base).filter(Boolean));
+  return names.size === 1 ? [...names][0] : "the trunk";
 }
 
 /**

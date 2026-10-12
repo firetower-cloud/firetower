@@ -2531,6 +2531,9 @@ pub(super) async fn session_work(
             // Absent, not zero, when the worker is too old to say — the
             // interface treats those differently on purpose.
             commits: read.and_then(|s| s.summary.commits),
+            // False when nobody could say, which is the ordinary state: a
+            // repository with a trunk is every repository but one.
+            unborn: read.is_some_and(|s| s.summary.unborn),
             pull_request: c.pull_request,
             pull_state: c.pull_state,
             // What the checkout already knew, else what the worker said about

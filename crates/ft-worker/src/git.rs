@@ -33,6 +33,61 @@ pub struct GitRoot {
 /// but an accent is the common case and this keeps it plain.
 const QUOTE_PATH: &str = "core.quotePath=false";
 
+/// The empty tree. Every git repository has it without being told, which is
+/// what makes it the thing to compare against when there is no commit to
+/// compare against — a branch that is its own root reads as all additions,
+/// which is what it is.
+const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+
+/// What a checkout was cut from.
+///
+/// A name on its own was enough until a repository with no commits in it could
+/// be worked on. There is no trunk in one, so the name is of a branch that does
+/// not exist yet, and every count and diff against it has to measure from
+/// nothing instead. That is a fact about how the worktree was cut, so it is
+/// carried with the name rather than guessed at each read: "this ref does not
+/// resolve" is *also* what a deleted branch and a mistyped base look like, and
+/// measuring those from nothing would report the whole repository as the work
+/// of one session.
+#[derive(Debug, Clone)]
+pub struct Base {
+    /// The branch the session was cut from, as it was recorded.
+    pub name: String,
+    /// Whether that branch had no commits — no trunk to cut from.
+    pub unborn: bool,
+}
+
+impl Base {
+    /// A base that exists, which is every ordinary session.
+    pub fn named(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            unborn: false,
+        }
+    }
+}
+
+/// What to measure a checkout against, once the refs have been asked.
+enum Against {
+    /// A ref that resolves here.
+    Ref(String),
+    /// Nothing at all: the branch is its own root, so there is no base commit
+    /// and the comparison is against the empty tree.
+    Root,
+}
+
+/// A worktree, as cut.
+#[derive(Debug)]
+pub struct Cut {
+    pub path: PathBuf,
+    /// The branch it is on, which is not always the one asked for: two sessions
+    /// from one prompt want the same name and only the first can have it.
+    pub branch: String,
+    /// Whether it was cut with no trunk to cut from, so the first commit on it
+    /// will be a root commit and the first push is what creates the trunk.
+    pub unborn: bool,
+}
+
 impl GitRoot {
     pub fn new(base: impl AsRef<Path>) -> Self {
         let base = base.as_ref();
@@ -244,14 +299,15 @@ impl GitRoot {
     /// the first one gets it and the rest are numbered. Keeping the clean name
     /// for the common case matters: this is what shows up on the pull request.
     ///
-    /// Returns the path and the branch actually used.
+    /// Returns where it landed, the branch actually used, and whether there was
+    /// a trunk to cut from at all.
     pub async fn add_worktree(
         &self,
         mirror: &Path,
         branch: &str,
         base: &str,
         workspace: &str,
-    ) -> Result<(PathBuf, String)> {
+    ) -> Result<Cut> {
         let dest = self.worktree_path(workspace);
         self.add_worktree_at(mirror, branch, base, &dest).await
     }
@@ -267,7 +323,7 @@ impl GitRoot {
         branch: &str,
         base: &str,
         dest: &Path,
-    ) -> Result<(PathBuf, String)> {
+    ) -> Result<Cut> {
         let dest = dest.to_path_buf();
         tokio::fs::create_dir_all(&self.worktrees).await?;
         if let Some(parent) = dest.parent() {
@@ -289,27 +345,8 @@ impl GitRoot {
 
         let dest = self.free_path(dest).await?;
 
-        // `origin/main` rather than `main`: the local ref is whatever the clone
-        // saw once, while the remote-tracking one is what the last fetch found.
-        let remote_base = format!("origin/{base}");
-        let base = if run(
-            &self.worktrees,
-            "git",
-            &[
-                "--git-dir",
-                mirror.to_str().unwrap(),
-                "rev-parse",
-                "--verify",
-                &remote_base,
-            ],
-        )
-        .await
-        .is_ok()
-        {
-            remote_base.as_str()
-        } else {
-            base
-        };
+        let (from, unborn) = self.cut_from(mirror, base).await?;
+        let from = from.as_str();
 
         // What git says is taken, rather than what git says when it refuses.
         // The retry below still reads the error text, because two sessions
@@ -342,16 +379,37 @@ impl GitRoot {
                     "-b",
                     &candidate,
                     dest.to_str().unwrap(),
-                    base,
+                    from,
                 ],
             )
             .await
             {
-                Ok(_) => return Ok((dest, candidate)),
+                Ok(_) => {
+                    // The scaffolding comes back out. Deleting the branch ref
+                    // while HEAD is a symbolic ref to it is what leaves the
+                    // worktree on a branch that does not exist yet — the state
+                    // `git worktree add --orphan` would have made — so the
+                    // agent's first commit is a root commit with nothing of
+                    // ours behind it.
+                    if unborn {
+                        run(
+                            &dest,
+                            "git",
+                            &["update-ref", "-d", &format!("refs/heads/{candidate}")],
+                        )
+                        .await
+                        .with_context(|| format!("leaving {candidate} unborn after cutting it"))?;
+                    }
+                    return Ok(Cut {
+                        path: dest,
+                        branch: candidate,
+                        unborn,
+                    });
+                }
                 Err(e) => {
                     if !name_is_taken(&e.to_string()) {
                         return Err(e)
-                            .with_context(|| format!("creating worktree {candidate} from {base}"));
+                            .with_context(|| format!("creating worktree {candidate} from {from}"));
                     }
                     last_error = Some(e);
                 }
@@ -367,6 +425,100 @@ impl GitRoot {
             }
             None => bail!("every name from {branch} onwards is already taken"),
         }
+    }
+
+    /// The commit-ish to cut a worktree from, and whether it is scaffolding.
+    ///
+    /// Ordinarily the base's remote-tracking ref — `origin/main` rather than
+    /// `main`, because the local ref is whatever the clone saw once while the
+    /// remote-tracking one is what the last fetch found.
+    ///
+    /// A repository with no commits in it has neither, and `git worktree add`
+    /// needs *something* to cut from. `--orphan` does exactly this and arrived
+    /// in git 2.42; the image this ships in carries 2.39 and a worker installed
+    /// on somebody's own machine can be older still, so it is done by hand: a
+    /// commit holding the empty tree, written into this mirror's object store
+    /// and never pushed anywhere. The caller cuts from it and then deletes the
+    /// branch ref, which leaves the worktree where `--orphan` would have.
+    ///
+    /// A base that simply is not here — a branch deleted upstream, a name
+    /// somebody mistyped — is handed back as written, so git refuses it by
+    /// name the way it always has. Only a repository with no refs at all gets
+    /// the root treatment, because only that one has no trunk to be wrong
+    /// about.
+    async fn cut_from(&self, mirror: &Path, base: &str) -> Result<(String, bool)> {
+        let tracking = format!("origin/{base}");
+        if self.resolves(mirror, &tracking).await {
+            return Ok((tracking, false));
+        }
+        if self.resolves(mirror, base).await {
+            return Ok((base.to_string(), false));
+        }
+        if !self.has_refs(mirror).await {
+            let seed = run(
+                &self.worktrees,
+                "git",
+                &[
+                    "--git-dir",
+                    mirror.to_str().unwrap(),
+                    // An identity is required even for a commit nothing will
+                    // ever read, and this container has none.
+                    "-c",
+                    &format!("user.name={}", UNATTRIBUTED.name),
+                    "-c",
+                    &format!("user.email={}", UNATTRIBUTED.email),
+                    "commit-tree",
+                    EMPTY_TREE,
+                    "-m",
+                    "scaffolding for a repository with no commits; deleted immediately",
+                ],
+            )
+            .await
+            .context("making something to cut an unborn branch from")?;
+            return Ok((seed.trim().to_string(), true));
+        }
+        Ok((base.to_string(), false))
+    }
+
+    /// Whether a ref or commit-ish is in this repository.
+    async fn resolves(&self, git_dir: &Path, what: &str) -> bool {
+        run(
+            &self.worktrees,
+            "git",
+            &[
+                "--git-dir",
+                git_dir.to_str().unwrap(),
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                what,
+            ],
+        )
+        .await
+        .is_ok()
+    }
+
+    /// Whether this mirror holds any ref at all.
+    ///
+    /// False for the mirror of a repository nobody has pushed to yet, which is
+    /// the one case with no trunk to cut from. True — the benefit of the doubt
+    /// — when git cannot be asked, so a mirror that cannot be read fails at
+    /// the worktree with git's own words rather than being treated as empty.
+    async fn has_refs(&self, mirror: &Path) -> bool {
+        run(
+            &self.worktrees,
+            "git",
+            &[
+                "--git-dir",
+                mirror.to_str().unwrap(),
+                "for-each-ref",
+                "--count=1",
+                "--format=%(refname)",
+            ],
+        )
+        .await
+        .map(|out| !out.trim().is_empty())
+        .unwrap_or(true)
     }
 
     /// A directory nothing is in, starting from the one asked for.
@@ -489,11 +641,11 @@ impl GitRoot {
     ///
     /// This is what makes ending a session a decision rather than a gamble:
     /// uncommitted files and unpushed commits are exactly what would be lost.
-    pub async fn summary(&self, dest: &Path, branch: &str, base: &str) -> Result<WorkSummary> {
+    pub async fn summary(&self, dest: &Path, branch: &str, base: &Base) -> Result<WorkSummary> {
         // The same stale-ref problem the diff has, and the same answer: counted
         // against the bare name, `ahead` and `commits` included everything
         // anyone else had merged since this mirror was made.
-        let base = &self.base_ref(dest, base).await;
+        let against = self.against(dest, base).await;
         let dirty = run(dest, "git", &["status", "--porcelain"]).await?;
         let uncommitted = dirty.lines().filter(|l| !l.trim().is_empty()).count() as u32;
 
@@ -505,31 +657,47 @@ impl GitRoot {
             .await
             .is_ok();
 
-        let range = if pushed {
-            "@{upstream}..HEAD".to_string()
+        // A branch with nothing on it yet is not a revision, so every range
+        // below would be read by git as a path that does not exist. Counted as
+        // the nothing it is instead, and `uncommitted` above still says what is
+        // in the workspace — which on a session this new is all of it.
+        let (ahead, commits) = if !born(dest).await {
+            (0, Some(0))
         } else {
-            // Never pushed: everything this session did is at risk.
-            format!("{base}..HEAD")
+            match &against {
+                Against::Ref(base) => {
+                    let range = if pushed {
+                        "@{upstream}..HEAD".to_string()
+                    } else {
+                        // Never pushed: everything this session did is at risk.
+                        format!("{base}..HEAD")
+                    };
+                    (
+                        count(dest, &range).await.unwrap_or(0),
+                        // Always against the base, whatever the push state.
+                        // `ahead` stops answering this the moment a branch is
+                        // pushed, and a pushed branch holding nothing is
+                        // exactly the case that looked ready to open a pull
+                        // request from and had nothing to open one for.
+                        count(dest, &format!("{base}..HEAD")).await,
+                    )
+                }
+                // No trunk to count against, so the whole branch is the count:
+                // every commit on it is one the base does not have, because
+                // there is no base.
+                Against::Root => {
+                    let range = if pushed {
+                        "@{upstream}..HEAD".to_string()
+                    } else {
+                        "HEAD".to_string()
+                    };
+                    (
+                        count(dest, &range).await.unwrap_or(0),
+                        count(dest, "HEAD").await,
+                    )
+                }
+            }
         };
-
-        let ahead = run(dest, "git", &["rev-list", "--count", &range])
-            .await
-            .ok()
-            .and_then(|c| c.trim().parse().ok())
-            .unwrap_or(0);
-
-        // Always against the base, whatever the push state. `ahead` stops
-        // answering this the moment a branch is pushed, and a pushed branch
-        // holding nothing is exactly the case that looked ready to open a pull
-        // request from and had nothing to open one for.
-        let commits = run(
-            dest,
-            "git",
-            &["rev-list", "--count", &format!("{base}..HEAD")],
-        )
-        .await
-        .ok()
-        .and_then(|c| c.trim().parse().ok());
 
         Ok(WorkSummary {
             branch: branch.to_string(),
@@ -537,6 +705,12 @@ impl GitRoot {
             ahead,
             pushed,
             commits,
+            // What the refs say now, not what was true when this was cut.
+            // Pushing one of these sessions is what creates the trunk, and from
+            // then on this is an ordinary branch with an ordinary base — so
+            // whoever is drawing a button gets a current answer rather than one
+            // it has to date itself.
+            unborn: matches!(against, Against::Root),
         })
     }
 
@@ -596,13 +770,38 @@ impl GitRoot {
     }
 
     /// Send the branch to the remote, so the work survives the workspace.
+    ///
+    /// For a session cut from a repository with no commits, this is also what
+    /// creates the trunk. Nothing else can: a pull request needs a branch to go
+    /// into, and a host whose repository is empty names its default branch
+    /// after the first ref it is given — so the trunk goes first, under the
+    /// name the session was cut against, and the branch follows it.
+    ///
+    /// That push is best effort. If a trunk appeared while this session was
+    /// running, git refuses it as not a fast-forward, which is the right answer
+    /// — the branch still goes up and the ordinary pull request is the way out.
     pub async fn push(
         &self,
         dest: &Path,
         branch: &str,
+        base: &Base,
         credential: Option<Credential>,
     ) -> Result<String> {
         let env = cred_env(credential).await?;
+
+        let mut created = None;
+        if base.unborn
+            && born(dest).await
+            && matches!(self.against(dest, base).await, Against::Root)
+        {
+            let trunk = format!("HEAD:refs/heads/{}", base.name);
+            match run_env(dest, "git", &["push", "origin", &trunk], &env.vars).await {
+                Ok(_) => created = Some(base.name.clone()),
+                Err(e) => {
+                    tracing::warn!(base = %base.name, "could not create the trunk: {e:#}");
+                }
+            }
+        }
 
         run_env(
             dest,
@@ -613,7 +812,10 @@ impl GitRoot {
         .await
         .with_context(|| format!("pushing {branch}"))?;
 
-        Ok(format!("pushed {branch}"))
+        Ok(match created {
+            Some(trunk) => format!("pushed {branch} and created {trunk}"),
+            None => format!("pushed {branch}"),
+        })
     }
 
     /// The base branch, as a ref that is actually current.
@@ -632,8 +834,13 @@ impl GitRoot {
     ///
     /// Falls back to the name as given, which is what a base that is not a
     /// remote branch — a local test fixture, a detached ref — needs.
-    async fn base_ref(&self, dest: &Path, base: &str) -> String {
-        let tracking = format!("refs/remotes/origin/{base}");
+    ///
+    /// And for a session cut from a repository with no commits, to nothing at
+    /// all. The name is asked for first even then: pushing one of these
+    /// sessions is what creates the trunk, so from the next read onwards there
+    /// is a real base here and the ordinary answer is the right one.
+    async fn against(&self, dest: &Path, base: &Base) -> Against {
+        let tracking = format!("refs/remotes/origin/{}", base.name);
         if run(
             dest,
             "git",
@@ -642,16 +849,27 @@ impl GitRoot {
         .await
         .is_ok()
         {
-            return tracking;
+            return Against::Ref(tracking);
         }
-        base.to_string()
+        if !base.unborn
+            || run(
+                dest,
+                "git",
+                &["rev-parse", "--verify", "--quiet", &base.name],
+            )
+            .await
+            .is_ok()
+        {
+            return Against::Ref(base.name.clone());
+        }
+        Against::Root
     }
 
     /// The unified diff of the work so far.
     ///
     /// Computed here rather than on the control plane: less traffic, and it
     /// works when the laptop has no clone of the repository at all.
-    pub async fn diff(&self, dest: &Path, base: &str) -> Result<String> {
+    pub async fn diff(&self, dest: &Path, base: &Base) -> Result<String> {
         self.diff_since(dest, base, ft_core::DiffSince::Base).await
     }
 
@@ -659,17 +877,29 @@ impl GitRoot {
     pub async fn diff_since(
         &self,
         dest: &Path,
-        base: &str,
+        base: &Base,
         since: ft_core::DiffSince,
     ) -> Result<String> {
         if since == ft_core::DiffSince::Head {
             // What is not committed yet: the working tree against HEAD, plus
             // the files git does not know about at all.
-            let out = run(dest, "git", &["-c", QUOTE_PATH, "diff", "HEAD"]).await?;
+            //
+            // Nothing committed means no HEAD to hold anything back, so all of
+            // it is in the untracked half.
+            let out = if born(dest).await {
+                run(dest, "git", &["-c", QUOTE_PATH, "diff", "HEAD"]).await?
+            } else {
+                String::new()
+            };
             let untracked = self.untracked_diff(dest).await.unwrap_or_default();
             return Ok(format!("{out}{untracked}"));
         }
-        let base = &self.base_ref(dest, base).await;
+        let base = &match self.against(dest, base).await {
+            Against::Ref(base) => base,
+            // No base to come from, so everything on the branch is an
+            // addition — which is what comparing against the empty tree says.
+            Against::Root => EMPTY_TREE.to_string(),
+        };
         // One comparison, from where the branch left the base to what is on
         // disk right now.
         //
@@ -709,18 +939,22 @@ impl GitRoot {
     pub async fn changed_since(
         &self,
         dest: &Path,
-        base: &str,
+        base: &Base,
         since: ft_core::DiffSince,
     ) -> Result<Vec<ft_core::FileDiff>> {
         let from = match since {
+            // The empty tree when there is no HEAD yet: nothing is committed,
+            // so nothing is being held back, and the untracked pass below is
+            // where every file in the workspace turns up.
+            ft_core::DiffSince::Head if !born(dest).await => EMPTY_TREE.to_string(),
             ft_core::DiffSince::Head => "HEAD".to_string(),
-            ft_core::DiffSince::Base => {
-                let base = &self.base_ref(dest, base).await;
-                run(dest, "git", &["merge-base", base, "HEAD"])
+            ft_core::DiffSince::Base => match self.against(dest, base).await {
+                Against::Ref(base) => run(dest, "git", &["merge-base", &base, "HEAD"])
                     .await
                     .map(|sha| sha.trim().to_string())
-                    .unwrap_or_else(|_| base.to_string())
-            }
+                    .unwrap_or(base),
+                Against::Root => EMPTY_TREE.to_string(),
+            },
         };
 
         let counts = run(
@@ -1183,6 +1417,25 @@ fn name_is_taken(error: &str) -> bool {
 /// A commit that happened is worth more than a commit refused for want of a
 /// name, and `.invalid` is reserved precisely so it can never be somebody's
 /// real address.
+/// Whether this checkout has a commit on it yet.
+///
+/// False on a branch cut from a repository with no commits and not committed
+/// to since. Worth asking rather than assuming: an unborn HEAD is not a
+/// revision, and git reads every range naming it as a path that is not there.
+async fn born(dest: &Path) -> bool {
+    run(dest, "git", &["rev-parse", "--verify", "--quiet", "HEAD"])
+        .await
+        .is_ok()
+}
+
+/// How many commits are in a range, or `None` when git would not say.
+async fn count(dest: &Path, range: &str) -> Option<u32> {
+    run(dest, "git", &["rev-list", "--count", range])
+        .await
+        .ok()
+        .and_then(|c| c.trim().parse().ok())
+}
+
 static UNATTRIBUTED: std::sync::LazyLock<ft_proto::Author> =
     std::sync::LazyLock::new(|| ft_proto::Author {
         name: "Firetower".to_string(),
@@ -1371,7 +1624,7 @@ mod tests {
         // This session: cut from current main, one new file of its own.
         std::fs::write(at.join("mine.py"), "print('hi')\n").unwrap();
 
-        let diff = git.diff(at, "main").await.unwrap();
+        let diff = git.diff(at, &Base::named("main")).await.unwrap();
 
         assert!(
             diff.contains("mine.py"),
@@ -1383,7 +1636,10 @@ mod tests {
         );
 
         // And the counts that sit beside it say the same thing.
-        let summary = git.summary(at, "agent/mine", "main").await.unwrap();
+        let summary = git
+            .summary(at, "agent/mine", &Base::named("main"))
+            .await
+            .unwrap();
         assert_eq!(
             summary.commits,
             Some(0),
@@ -1438,7 +1694,9 @@ mod tests {
             .await
             .unwrap();
 
-        let (dest, branch) = git
+        let Cut {
+            path: dest, branch, ..
+        } = git
             .add_worktree(&mirror, "agent/work", "main", "s_push")
             .await
             .unwrap();
@@ -1447,7 +1705,9 @@ mod tests {
             .await
             .unwrap();
         git.commit(&dest, "Add a file", &[], None).await.unwrap();
-        git.push(&dest, &branch, None).await.unwrap();
+        git.push(&dest, &branch, &Base::named("main"), None)
+            .await
+            .unwrap();
 
         // the branch reached the origin, which is what makes ending a session
         // safe rather than destructive
@@ -1456,7 +1716,10 @@ mod tests {
             .unwrap();
         assert!(branches.contains(&branch), "{branches:?}");
 
-        let after = git.summary(&dest, &branch, "main").await.unwrap();
+        let after = git
+            .summary(&dest, &branch, &Base::named("main"))
+            .await
+            .unwrap();
         assert_eq!(after.uncommitted, 0);
         assert_eq!(after.ahead, 0, "nothing should be left behind");
         assert!(after.pushed);
@@ -1577,13 +1840,13 @@ mod tests {
 
         // The first session is still running, so its worktree still holds the
         // branch — which is a different refusal from "the branch exists".
-        let (_, first) = git
+        let Cut { branch: first, .. } = git
             .add_worktree(&mirror, "agent/hello", "main", "s_first")
             .await
             .unwrap();
         assert_eq!(first, "agent/hello");
 
-        let (_, second) = git
+        let Cut { branch: second, .. } = git
             .add_worktree(&mirror, "agent/hello", "main", "s_second")
             .await
             .unwrap();
@@ -1668,7 +1931,7 @@ mod tests {
     }
 
     /// A real repository with one commit on `main`, to clone from.
-    async fn origin() -> (TempDir, String) {
+    pub(super) async fn origin() -> (TempDir, String) {
         origin_on_branch("main").await
     }
 
@@ -1699,6 +1962,29 @@ mod tests {
         run(&path, "git", &["add", "."]).await.unwrap();
         run(&path, "git", &["commit", "-m", "first"]).await.unwrap();
 
+        let remote = path.to_str().unwrap().to_string();
+        (dir, remote)
+    }
+
+    /// A remote nobody has pushed to: made, named, and holding nothing.
+    ///
+    /// `--bare`, because a push to a non-bare repository's checked-out branch
+    /// is refused — and the trunk these tests create is exactly that push.
+    pub(super) async fn empty_origin_on_branch(branch: &str) -> (TempDir, String) {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("origin.git");
+        run(
+            dir.path(),
+            "git",
+            &[
+                "init",
+                "--bare",
+                &format!("--initial-branch={branch}"),
+                path.to_str().unwrap(),
+            ],
+        )
+        .await
+        .unwrap();
         let remote = path.to_str().unwrap().to_string();
         (dir, remote)
     }
@@ -1742,7 +2028,11 @@ mod tests {
             .ensure_mirror(&remote, "acme/backend", None, None)
             .await
             .unwrap();
-        let (tree, branch_used) = git
+        let Cut {
+            path: tree,
+            branch: branch_used,
+            ..
+        } = git
             .add_worktree(&mirror, "agent/fix-retries", "main", "s_test")
             .await
             .unwrap();
@@ -1823,13 +2113,18 @@ mod tests {
             .await
             .unwrap();
 
-        let (tree, branch) = git
+        let Cut {
+            path: tree, branch, ..
+        } = git
             .add_worktree(&mirror, "agent/empty", "main", "s_empty")
             .await
             .unwrap();
 
         // Cut and left alone: identical to the base.
-        let fresh = git.summary(&tree, &branch, "main").await.unwrap();
+        let fresh = git
+            .summary(&tree, &branch, &Base::named("main"))
+            .await
+            .unwrap();
         assert_eq!(
             fresh.commits,
             Some(0),
@@ -1839,12 +2134,18 @@ mod tests {
 
         // A file, and then a commit holding it.
         tokio::fs::write(tree.join("new.txt"), "x").await.unwrap();
-        let dirty = git.summary(&tree, &branch, "main").await.unwrap();
+        let dirty = git
+            .summary(&tree, &branch, &Base::named("main"))
+            .await
+            .unwrap();
         assert_eq!(dirty.uncommitted, 1);
         assert_eq!(dirty.commits, Some(0), "uncommitted is not yet a commit");
 
         git.commit(&tree, "add a file", &[], None).await.unwrap();
-        let done = git.summary(&tree, &branch, "main").await.unwrap();
+        let done = git
+            .summary(&tree, &branch, &Base::named("main"))
+            .await
+            .unwrap();
         assert_eq!(done.commits, Some(1), "now there is something to open");
     }
 
@@ -1867,7 +2168,7 @@ mod tests {
             .await
             .unwrap();
 
-        let (path, branch) = git
+        let Cut { path, branch, .. } = git
             .add_worktree(&mirror, "agent/blocked", "main", "s_blocked")
             .await
             .expect("an occupied directory must not fail the session");
@@ -1900,11 +2201,11 @@ mod tests {
             "the mirror's own branches have to count as taken: {taken:?}"
         );
 
-        let (_, first) = git
+        let Cut { branch: first, .. } = git
             .add_worktree(&mirror, "agent/same", "main", "s_a")
             .await
             .unwrap();
-        let (_, second) = git
+        let Cut { branch: second, .. } = git
             .add_worktree(&mirror, "agent/same", "main", "s_b")
             .await
             .unwrap();
@@ -1924,11 +2225,11 @@ mod tests {
             .await
             .unwrap();
 
-        let (a, _) = git
+        let Cut { path: a, .. } = git
             .add_worktree(&mirror, "agent/one", "main", "s_one")
             .await
             .unwrap();
-        let (b, _) = git
+        let Cut { path: b, .. } = git
             .add_worktree(&mirror, "agent/two", "main", "s_two")
             .await
             .unwrap();
@@ -1953,11 +2254,11 @@ mod tests {
             .await
             .unwrap();
 
-        let (_, first) = git
+        let Cut { branch: first, .. } = git
             .add_worktree(&mirror, "agent/retries", "main", "s_one")
             .await
             .unwrap();
-        let (_, second) = git
+        let Cut { branch: second, .. } = git
             .add_worktree(&mirror, "agent/retries", "main", "s_two")
             .await
             .unwrap();
@@ -2009,13 +2310,13 @@ mod tests {
             .ensure_mirror(&remote, "acme/backend", None, None)
             .await
             .unwrap();
-        let (tree, _) = git
+        let Cut { path: tree, .. } = git
             .add_worktree(&mirror, "agent/edit", "main", "s_diff")
             .await
             .unwrap();
 
         assert_eq!(
-            git.diff(&tree, "main").await.unwrap(),
+            git.diff(&tree, &Base::named("main")).await.unwrap(),
             "",
             "nothing changed yet"
         );
@@ -2023,7 +2324,7 @@ mod tests {
         tokio::fs::write(tree.join("README.md"), "# fixture\nedited\n")
             .await
             .unwrap();
-        let diff = git.diff(&tree, "main").await.unwrap();
+        let diff = git.diff(&tree, &Base::named("main")).await.unwrap();
         assert!(diff.contains("+edited"), "{diff}");
     }
 
@@ -2036,7 +2337,7 @@ mod tests {
             .ensure_mirror(&remote, "acme/backend", None, None)
             .await
             .unwrap();
-        let (tree, _) = git
+        let Cut { path: tree, .. } = git
             .add_worktree(&mirror, "agent/commit", "main", "s_since")
             .await
             .unwrap();
@@ -2045,7 +2346,10 @@ mod tests {
             .await
             .unwrap();
         for since in [ft_core::DiffSince::Base, ft_core::DiffSince::Head] {
-            let diff = git.diff_since(&tree, "main", since).await.unwrap();
+            let diff = git
+                .diff_since(&tree, &Base::named("main"), since)
+                .await
+                .unwrap();
             assert!(diff.contains("+written by the agent"), "{since:?}: {diff}");
         }
 
@@ -2067,12 +2371,12 @@ mod tests {
         .unwrap();
 
         let branch = git
-            .diff_since(&tree, "main", ft_core::DiffSince::Base)
+            .diff_since(&tree, &Base::named("main"), ft_core::DiffSince::Base)
             .await
             .unwrap();
         assert!(branch.contains("+written by the agent"), "{branch}");
         let pending = git
-            .diff_since(&tree, "main", ft_core::DiffSince::Head)
+            .diff_since(&tree, &Base::named("main"), ft_core::DiffSince::Head)
             .await
             .unwrap();
         assert_eq!(pending, "", "committed, so nothing is pending");
@@ -2087,7 +2391,7 @@ mod tests {
             .ensure_mirror(&remote, "acme/backend", None, None)
             .await
             .unwrap();
-        let (tree, _) = git
+        let Cut { path: tree, .. } = git
             .add_worktree(&mirror, "agent/new-file", "main", "s_new")
             .await
             .unwrap();
@@ -2097,7 +2401,7 @@ mod tests {
             .await
             .unwrap();
 
-        let diff = git.diff(&tree, "main").await.unwrap();
+        let diff = git.diff(&tree, &Base::named("main")).await.unwrap();
         assert!(
             diff.contains("NOTES.md"),
             "a new file must not be invisible"
@@ -2116,7 +2420,7 @@ mod tests {
             .ensure_mirror(&remote, "acme/backend", None, None)
             .await
             .unwrap();
-        let (tree, _) = git
+        let Cut { path: tree, .. } = git
             .add_worktree(&mirror, "agent/twice", "main", "s_twice")
             .await
             .unwrap();
@@ -2135,7 +2439,7 @@ mod tests {
         .await
         .unwrap();
 
-        let diff = git.diff(&tree, "main").await.unwrap();
+        let diff = git.diff(&tree, &Base::named("main")).await.unwrap();
         let files = ft_core::split_diff(&diff, usize::MAX);
         let readme: Vec<_> = files.iter().filter(|f| f.path == "README.md").collect();
 
@@ -2167,7 +2471,7 @@ mod tests {
             .ensure_mirror(&remote, "acme/backend", None, None)
             .await
             .unwrap();
-        let (tree, _) = git
+        let Cut { path: tree, .. } = git
             .add_worktree(&mirror, "agent/media", "main", "s_media")
             .await
             .unwrap();
@@ -2188,7 +2492,7 @@ mod tests {
                 .unwrap();
         }
 
-        let diff = git.diff(&tree, "main").await.unwrap();
+        let diff = git.diff(&tree, &Base::named("main")).await.unwrap();
         let files = ft_core::split_diff(&diff, usize::MAX);
         let mut paths: Vec<String> = files.iter().map(|f| f.path.clone()).collect();
         paths.sort();
@@ -2289,7 +2593,7 @@ mod tests {
             .ensure_mirror(&remote, "acme/backend", None, None)
             .await
             .unwrap();
-        let (tree, _) = git
+        let Cut { path: tree, .. } = git
             .add_worktree(&mirror, "agent/names", "main", "s_names")
             .await
             .unwrap();
@@ -2315,13 +2619,13 @@ mod tests {
             .unwrap();
 
         let whole = ft_core::split_diff(
-            &git.diff_since(&tree, "main", ft_core::DiffSince::Base)
+            &git.diff_since(&tree, &Base::named("main"), ft_core::DiffSince::Base)
                 .await
                 .unwrap(),
             usize::MAX,
         );
         let names = git
-            .changed_since(&tree, "main", ft_core::DiffSince::Base)
+            .changed_since(&tree, &Base::named("main"), ft_core::DiffSince::Base)
             .await
             .unwrap();
 
@@ -2358,5 +2662,309 @@ mod tests {
         // same way the whole diff finds them, and counted by reading them.
         assert!(named("untracked.txt").fresh);
         assert_eq!(named("untracked.txt").added, 2);
+    }
+}
+
+/// A repository nobody has pushed to.
+///
+/// Every one of these used to be refused at the moment somebody connected it,
+/// and the refusal was right about the mechanics — `git worktree add -b x <dir>
+/// main` answers `fatal: invalid reference: main` — and wrong about what to do
+/// with them. A repository you have just made is the one you most want to put
+/// an agent on.
+#[cfg(test)]
+mod unborn_tests {
+    use super::tests::{empty_origin_on_branch, origin};
+    use super::*;
+    use tempfile::TempDir;
+
+    /// The cut itself: a branch with no parent, and nothing of ours left behind
+    /// in the mirror to have made it with.
+    #[tokio::test]
+    async fn a_repository_with_no_commits_is_still_cut_from() {
+        let (_origin, remote) = empty_origin_on_branch("main").await;
+        let home = TempDir::new().unwrap();
+        let git = GitRoot::new(home.path());
+        let (mirror, _) = git
+            .ensure_mirror(&remote, "acme/fresh", None, None)
+            .await
+            .unwrap();
+
+        let cut = git
+            .add_worktree(&mirror, "agent/first", "main", "s_fresh")
+            .await
+            .unwrap();
+
+        assert!(cut.unborn, "there was no trunk to cut from");
+        assert_eq!(
+            cut.branch, "agent/first",
+            "and it got the name it asked for"
+        );
+
+        // Unborn in git's own terms: HEAD names a branch that does not exist.
+        let head = run(&cut.path, "git", &["symbolic-ref", "HEAD"])
+            .await
+            .unwrap();
+        assert_eq!(head.trim(), "refs/heads/agent/first");
+        assert!(
+            run(&cut.path, "git", &["rev-parse", "--verify", "HEAD"])
+                .await
+                .is_err(),
+            "a branch with no commits has no HEAD to resolve"
+        );
+
+        // The commit that scaffolded this is unreachable, and no ref anywhere
+        // points at it. An `Initial commit` of ours in somebody else's history
+        // is the thing this whole approach exists to avoid.
+        let refs = run(
+            &mirror,
+            "git",
+            &["--git-dir", mirror.to_str().unwrap(), "for-each-ref"],
+        )
+        .await
+        .unwrap();
+        assert!(
+            refs.trim().is_empty(),
+            "no refs, scaffolding included: {refs}"
+        );
+    }
+
+    /// What the agent commits is the repository's first commit, not its second.
+    #[tokio::test]
+    async fn the_first_commit_has_no_parent() {
+        let (_origin, remote) = empty_origin_on_branch("main").await;
+        let home = TempDir::new().unwrap();
+        let git = GitRoot::new(home.path());
+        let (mirror, _) = git
+            .ensure_mirror(&remote, "acme/fresh", None, None)
+            .await
+            .unwrap();
+        let cut = git
+            .add_worktree(&mirror, "agent/first", "main", "s_fresh")
+            .await
+            .unwrap();
+
+        tokio::fs::write(cut.path.join("README.md"), "# fresh\n")
+            .await
+            .unwrap();
+        git.commit(&cut.path, "the first one", &[], None)
+            .await
+            .unwrap();
+
+        let parents = run(&cut.path, "git", &["log", "--format=%P"])
+            .await
+            .unwrap();
+        assert_eq!(
+            parents.trim(),
+            "",
+            "the first commit on an unborn branch is a root commit"
+        );
+    }
+
+    /// The numbers, which had no base to be counted against and so came out as
+    /// zero — and zero is what a finished session looks like.
+    #[tokio::test]
+    async fn work_with_no_base_is_counted_from_nothing() {
+        let (_origin, remote) = empty_origin_on_branch("main").await;
+        let home = TempDir::new().unwrap();
+        let git = GitRoot::new(home.path());
+        let (mirror, _) = git
+            .ensure_mirror(&remote, "acme/fresh", None, None)
+            .await
+            .unwrap();
+        let cut = git
+            .add_worktree(&mirror, "agent/first", "main", "s_fresh")
+            .await
+            .unwrap();
+        let base = Base {
+            name: "main".into(),
+            unborn: cut.unborn,
+        };
+
+        let fresh = git.summary(&cut.path, &cut.branch, &base).await.unwrap();
+        assert_eq!(fresh.commits, Some(0), "nothing committed yet");
+        assert_eq!(fresh.ahead, 0);
+        assert!(!fresh.pushed);
+        assert!(fresh.unborn, "and whoever draws this has to know why");
+
+        tokio::fs::write(cut.path.join("README.md"), "# fresh\n")
+            .await
+            .unwrap();
+        let dirty = git.summary(&cut.path, &cut.branch, &base).await.unwrap();
+        assert_eq!(dirty.uncommitted, 1, "an untracked file is still unsaved");
+
+        git.commit(&cut.path, "the first one", &[], None)
+            .await
+            .unwrap();
+        let done = git.summary(&cut.path, &cut.branch, &base).await.unwrap();
+        assert_eq!(done.commits, Some(1), "one commit the trunk does not have");
+        assert_eq!(done.ahead, 1, "and nothing holds it but this workspace");
+    }
+
+    /// The review sheet. Against nothing, every line is an addition.
+    #[tokio::test]
+    async fn a_diff_with_no_base_reads_as_all_additions() {
+        let (_origin, remote) = empty_origin_on_branch("main").await;
+        let home = TempDir::new().unwrap();
+        let git = GitRoot::new(home.path());
+        let (mirror, _) = git
+            .ensure_mirror(&remote, "acme/fresh", None, None)
+            .await
+            .unwrap();
+        let cut = git
+            .add_worktree(&mirror, "agent/first", "main", "s_fresh")
+            .await
+            .unwrap();
+        let base = Base {
+            name: "main".into(),
+            unborn: cut.unborn,
+        };
+
+        // Before the first commit there is no HEAD to hold anything back, and
+        // `git diff HEAD` answers `fatal: ambiguous argument` rather than a
+        // diff. The file is untracked, so the untracked pass is what finds it.
+        tokio::fs::write(cut.path.join("README.md"), "# fresh\n")
+            .await
+            .unwrap();
+        let since_head = git
+            .diff_since(&cut.path, &base, ft_core::DiffSince::Head)
+            .await
+            .unwrap();
+        assert!(since_head.contains("README.md"), "{since_head}");
+
+        git.commit(&cut.path, "the first one", &[], None)
+            .await
+            .unwrap();
+
+        let diff = git.diff(&cut.path, &base).await.unwrap();
+        assert!(diff.contains("README.md"), "{diff}");
+        assert!(diff.contains("+# fresh"), "{diff}");
+
+        let files = git
+            .changed_since(&cut.path, &base, ft_core::DiffSince::Base)
+            .await
+            .unwrap();
+        assert_eq!(files.len(), 1, "{files:?}");
+        assert_eq!(files[0].path, "README.md");
+        assert!(files[0].fresh, "a file the base never had is a new file");
+    }
+
+    /// Pushing is what creates the trunk, because nothing else can: a pull
+    /// request needs a branch to go into and this repository has none.
+    #[tokio::test]
+    async fn pushing_an_unborn_branch_creates_the_trunk() {
+        let (origin, remote) = empty_origin_on_branch("main").await;
+        let home = TempDir::new().unwrap();
+        let git = GitRoot::new(home.path());
+        let (mirror, _) = git
+            .ensure_mirror(&remote, "acme/fresh", None, None)
+            .await
+            .unwrap();
+        let cut = git
+            .add_worktree(&mirror, "agent/first", "main", "s_fresh")
+            .await
+            .unwrap();
+        let base = Base {
+            name: "main".into(),
+            unborn: cut.unborn,
+        };
+
+        tokio::fs::write(cut.path.join("README.md"), "# fresh\n")
+            .await
+            .unwrap();
+        git.commit(&cut.path, "the first one", &[], None)
+            .await
+            .unwrap();
+
+        let said = git.push(&cut.path, &cut.branch, &base, None).await.unwrap();
+        assert!(said.contains("created main"), "{said}");
+
+        let bare = origin.path().join("origin.git");
+        let refs = run(
+            &bare,
+            "git",
+            &[
+                "--git-dir",
+                bare.to_str().unwrap(),
+                "for-each-ref",
+                "--format=%(refname)",
+            ],
+        )
+        .await
+        .unwrap();
+        assert!(
+            refs.contains("refs/heads/main"),
+            "the trunk now exists: {refs}"
+        );
+        assert!(refs.contains("refs/heads/agent/first"), "{refs}");
+
+        // And from here it is an ordinary repository: the trunk resolves, so
+        // the branch is measured against it rather than against nothing.
+        let after = git.summary(&cut.path, &cut.branch, &base).await.unwrap();
+        assert!(after.pushed);
+        assert!(
+            !after.unborn,
+            "the trunk exists now, so this is an ordinary branch with a base"
+        );
+        assert_eq!(
+            after.commits,
+            Some(0),
+            "the trunk has the work, so there is nothing to review against it"
+        );
+    }
+
+    /// The guard.
+    ///
+    /// "This ref does not resolve" is also what a branch deleted upstream and a
+    /// mistyped base look like, and reading those as a root would report the
+    /// whole repository as the work of one session. Only a repository with no
+    /// refs at all gets that reading; every other base still fails by name.
+    #[tokio::test]
+    async fn a_base_that_is_merely_missing_still_fails() {
+        let (_origin, remote) = origin().await;
+        let home = TempDir::new().unwrap();
+        let git = GitRoot::new(home.path());
+        let (mirror, _) = git
+            .ensure_mirror(&remote, "acme/backend", None, None)
+            .await
+            .unwrap();
+
+        let refused = git
+            .add_worktree(&mirror, "agent/typo", "develop", "s_typo")
+            .await
+            .unwrap_err();
+        let said = format!("{refused:#}");
+        assert!(said.contains("develop"), "it says which base: {said}");
+    }
+
+    /// The same guard, one layer up: a diff against a base that is not here is
+    /// an error rather than a comparison with nothing.
+    #[tokio::test]
+    async fn a_diff_against_a_missing_base_is_not_a_diff_against_nothing() {
+        let (_origin, remote) = origin().await;
+        let home = TempDir::new().unwrap();
+        let git = GitRoot::new(home.path());
+        let (mirror, _) = git
+            .ensure_mirror(&remote, "acme/backend", None, None)
+            .await
+            .unwrap();
+        let cut = git
+            .add_worktree(&mirror, "agent/work", "main", "s_work")
+            .await
+            .unwrap();
+        assert!(!cut.unborn, "this repository has a trunk");
+
+        tokio::fs::write(cut.path.join("new.txt"), "x")
+            .await
+            .unwrap();
+        git.commit(&cut.path, "a change", &[], None).await.unwrap();
+
+        // As far as this mirror is concerned `develop` is a name and nothing
+        // else, and a comparison against it cannot be made.
+        let missing = Base::named("develop");
+        assert!(
+            git.diff(&cut.path, &missing).await.is_err(),
+            "a base that is not here is a failure, not every file in the repository"
+        );
     }
 }

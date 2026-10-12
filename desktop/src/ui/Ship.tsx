@@ -81,7 +81,12 @@ export function Ship({ session, branch, files }: { session: Session; branch?: st
       cache.invalidateQueries({ queryKey: [`/api/v1/sessions/${session.id}/diff`] }),
     ]);
 
-  const opening = ship.stage === "uncommitted" || ship.stage === "unpushed" || ship.stage === "pushed";
+  // Not for a session that is creating the trunk: there is no branch on the
+  // far end to open a request against, and every host refuses one. `shipping`
+  // has already said so in the label, and this is the sequence that label names.
+  const opening =
+    !ship.seeds &&
+    (ship.stage === "uncommitted" || ship.stage === "unpushed" || ship.stage === "pushed");
 
   const go = async () => {
     setTrouble(null);
@@ -91,7 +96,7 @@ export function Ship({ session, branch, files }: { session: Session; branch?: st
         await commit.mutateAsync({ id: session.id, data: { message: title.trim() || null, paths: keeping.map((f) => f.path) } });
       }
       if (ship.stage === "uncommitted" || ship.stage === "unpushed" || ship.stage === "open-behind") {
-        setStep(`Pushing ${branch ?? "the branch"}`);
+        setStep(ship.seeds ? "Pushing, and creating the trunk" : `Pushing ${branch ?? "the branch"}`);
         await push.mutateAsync({ id: session.id });
       }
       if (opening) {

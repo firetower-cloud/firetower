@@ -158,3 +158,61 @@ describe("what would be lost", () => {
     expect(atRisk([checkout({ uncommitted: 0, ahead: 0, pushed: true })])).toBe(false);
   });
 });
+
+/**
+ * A repository with no commits in it.
+ *
+ * There is no trunk, so there is nothing to open a pull request against — and
+ * a button promising one could only be refused by the host. The first session
+ * pushes instead, and that push is what creates the trunk.
+ */
+describe("the first session on an empty repository", () => {
+  const fresh = (over: Partial<CheckoutWork> = {}) =>
+    checkout({ unborn: true, pushed: false, ...over });
+
+  it("names the push rather than a pull request", () => {
+    const ship = shipping(session, [fresh({ uncommitted: 3 })]);
+    expect(ship.stage).toBe("uncommitted");
+    expect(ship.seeds).toBe(true);
+    expect(ship.label).toBe("Commit & push main");
+  });
+
+  it("names the trunk it is about to create", () => {
+    const ship = shipping(session, [fresh({ base: "trunk", ahead: 1, commits: 1 })]);
+    expect(ship.stage).toBe("unpushed");
+    expect(ship.seeds).toBe(true);
+    expect(ship.label).toBe("Push trunk");
+  });
+
+  /// A push that created the branch and not the trunk — a ruleset on it,
+  /// somebody else pushing one first — leaves `ahead` at zero with the trunk
+  /// still missing. Offering a pull request there is offering a refusal.
+  it("offers the push again when the trunk still is not there", () => {
+    const ship = shipping(session, [
+      checkout({ unborn: true, pushed: true, ahead: 0, commits: 2 }),
+    ]);
+    expect(ship.seeds).toBe(true);
+    expect(ship.label).toBe("Push main");
+  });
+
+  /// The trunk exists now — this session's push made it — so the ordinary
+  /// sequence is back, including the pull request for work done afterwards.
+  it("offers a pull request once the trunk is there", () => {
+    const ship = shipping(session, [checkout({ unborn: false, pushed: true, commits: 2 })]);
+    expect(ship.stage).toBe("pushed");
+    expect(ship.seeds).toBeFalsy();
+    expect(ship.label).toBe("Open pull request");
+  });
+
+  /// One empty repository beside a full one still has a request to open, and
+  /// the button has to name the step that covers both.
+  it("keeps the pull request when another repository has a trunk", () => {
+    const ship = shipping(session, [
+      fresh({ ahead: 1, commits: 1 }),
+      checkout({ path: "infra", slug: "acme/infra", ahead: 1, commits: 1, pushed: false }),
+    ]);
+    expect(ship.seeds).toBeFalsy();
+    expect(ship.stage).toBe("unpushed");
+    expect(ship.label).toBe("Push & open PR");
+  });
+});

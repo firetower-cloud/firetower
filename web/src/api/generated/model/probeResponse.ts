@@ -10,8 +10,22 @@
  * What we learned by actually reaching for the repository.
  */
 export interface ProbeResponse {
-  /** Read from the remote rather than assumed. */
+  /**
+     * Read from the remote rather than assumed.
+     *
+     * For a repository with no commits there is nothing to read: a guess at
+     * `main`, which whoever is connecting it can correct before saving.
+     */
   defaultBranch: string;
+  /**
+     * No commits in it yet.
+     *
+     * Said rather than refused. There is nothing to branch from, so the first
+     * session on it cuts a branch with no parent and its first push is what
+     * creates the trunk — which is worth knowing while looking at the form,
+     * and is not a reason to decline to record a URL.
+     */
+  empty?: boolean;
   /** True when only this machine could clone it — an ssh remote or a path. */
   onlyHere?: boolean;
   /** Derived from the remote, and editable before saving. */
