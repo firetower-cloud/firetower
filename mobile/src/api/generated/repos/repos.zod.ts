@@ -21,10 +21,11 @@ export const ListReposResponseItem = zod.object({
 export const ListReposResponse = zod.array(ListReposResponseItem)
 
 export const CreateRepoBody = zod.object({
+  "defaultBranch": zod.string().nullish().describe('What the trunk is called, for a repository with no commits in it.\n\nOnly then. A repository with commits says so itself and is believed\nover anybody; an empty one cannot — `ls-remote` on one answers with\nnothing at all, not even the name of the branch it would have — so\nwithout this the first session invents `main` and a repository set up\nfor `master` quietly gets a second trunk. The picker knows the real\nname from the host\'s API and sends it here.'),
   "remote": zod.string().describe('Anything git can clone: a URL, or a path for a local repository.'),
   "setup": zod.string().nullish().describe('Runs once per session, before the agent starts.'),
   "slug": zod.string().describe('`acme/backend`')
-}).describe('Connect a repository. Nothing is cloned until a session needs it.\n\nNo default branch here on purpose. Connecting reaches for the remote anyway,\nand what it answers with is the truth — a branch named by the caller was\naccepted and then ignored, which is worse than not asking.')
+}).describe('Connect a repository. Nothing is cloned until a session needs it.\n\nConnecting reaches for the remote anyway, and what it answers with is the\ntruth — a branch named by the caller is not taken over it, because one that\nwas accepted and then ignored is worse than one never asked for.')
 
 export const CreateRepoResponse = zod.object({
   "defaultBranch": zod.string().nullish().describe('The trunk, once something has read the remote.\n\nAbsent until then: a repository can be connected while no worker is\nreachable, and the first session to clone it fills this in.'),
@@ -48,7 +49,8 @@ export const ProbeRepoBody = zod.object({
 })
 
 export const ProbeRepoResponse = zod.object({
-  "defaultBranch": zod.string().describe('Read from the remote rather than assumed.'),
+  "defaultBranch": zod.string().describe('Read from the remote rather than assumed.\n\nFor a repository with no commits there is nothing to read: a guess at\n`main`, which whoever is connecting it can correct before saving.'),
+  "empty": zod.boolean().optional().describe('No commits in it yet.\n\nSaid rather than refused. There is nothing to branch from, so the first\nsession on it cuts a branch with no parent and its first push is what\ncreates the trunk — which is worth knowing while looking at the form,\nand is not a reason to decline to record a URL.'),
   "onlyHere": zod.boolean().optional().describe('True when only this machine could clone it — an ssh remote or a path.'),
   "slug": zod.string().describe('Derived from the remote, and editable before saving.')
 }).describe('What we learned by actually reaching for the repository.')
@@ -97,7 +99,8 @@ export const RepoBranchesParams = zod.object({
 
 export const RepoBranchesResponse = zod.object({
   "branches": zod.array(zod.string()),
-  "defaultBranch": zod.string()
+  "defaultBranch": zod.string().describe('For an empty repository, the trunk it is going to have: the name\nrecorded when it was connected, since the remote cannot say.'),
+  "empty": zod.boolean().optional().describe('No commits, so no branches either. The one in `default_branch` does not\nexist yet, and the first session is what creates it.')
 })
 
 /**

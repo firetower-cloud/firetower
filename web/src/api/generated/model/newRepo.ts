@@ -9,11 +9,23 @@
 /**
  * Connect a repository. Nothing is cloned until a session needs it.
  *
- * No default branch here on purpose. Connecting reaches for the remote anyway,
- * and what it answers with is the truth — a branch named by the caller was
- * accepted and then ignored, which is worse than not asking.
+ * Connecting reaches for the remote anyway, and what it answers with is the
+ * truth — a branch named by the caller is not taken over it, because one that
+ * was accepted and then ignored is worse than one never asked for.
  */
 export interface NewRepo {
+  /**
+     * What the trunk is called, for a repository with no commits in it.
+     *
+     * Only then. A repository with commits says so itself and is believed
+     * over anybody; an empty one cannot — `ls-remote` on one answers with
+     * nothing at all, not even the name of the branch it would have — so
+     * without this the first session invents `main` and a repository set up
+     * for `master` quietly gets a second trunk. The picker knows the real
+     * name from the host's API and sends it here.
+     * @nullable
+     */
+  defaultBranch?: string | null;
   /** Anything git can clone: a URL, or a path for a local repository. */
   remote: string;
   /**

@@ -99,10 +99,13 @@ export function Ship({
         await commit.mutateAsync({ id: session.id, data: { message: title || "Work in progress" } });
       }
       if (ship.stage === "uncommitted" || ship.stage === "unpushed" || ship.stage === "open-behind") {
-        setBusy("Pushing…");
+        setBusy(ship.seeds ? "Pushing, and creating the trunk…" : "Pushing…");
         await push.mutateAsync({ id: session.id });
       }
-      if (ship.stage !== "open-behind") {
+      // Not while the trunk is being created: this repository had no commits,
+      // so there is no branch on the far end to open a request against and
+      // every host refuses one. `shipping` says as much in the label.
+      if (ship.stage !== "open-behind" && !ship.seeds) {
         setBusy("Opening the pull request…");
         await open.mutateAsync({ id: session.id, data: { title, body } });
       }

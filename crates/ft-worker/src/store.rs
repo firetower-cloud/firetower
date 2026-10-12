@@ -31,6 +31,9 @@ pub struct Checkout {
     pub branch: String,
     /// Relative to the workspace. Empty means the checkout *is* the workspace.
     pub path: String,
+    /// Cut from a repository with no commits in it, so `base` names a branch
+    /// that does not exist yet. See the migration that added the column.
+    pub unborn: bool,
 }
 
 /// One thing that happened, as recorded.
@@ -359,13 +362,15 @@ impl Store {
         base: &str,
         branch: &str,
         path: &str,
+        unborn: bool,
     ) -> Result<()> {
         sqlx::query(
-            "INSERT INTO session_repos (session_id, position, slug, remote, base, branch, path)
-             VALUES (?, ?, ?, ?, ?, ?, ?)
+            "INSERT INTO session_repos (session_id, position, slug, remote, base, branch, path, unborn)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT (session_id, position) DO UPDATE SET
                 slug = excluded.slug, remote = excluded.remote,
-                base = excluded.base, branch = excluded.branch, path = excluded.path",
+                base = excluded.base, branch = excluded.branch, path = excluded.path,
+                unborn = excluded.unborn",
         )
         .bind(session_id.as_str())
         .bind(position)
@@ -374,6 +379,7 @@ impl Store {
         .bind(base)
         .bind(branch)
         .bind(path)
+        .bind(unborn)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -382,7 +388,7 @@ impl Store {
     /// Everything this session has checked out, in the order it was added.
     pub async fn checkouts_of(&self, session_id: &SessionId) -> Result<Vec<Checkout>> {
         let rows = sqlx::query(
-            "SELECT slug, remote, base, branch, path FROM session_repos
+            "SELECT slug, remote, base, branch, path, unborn FROM session_repos
              WHERE session_id = ? ORDER BY position",
         )
         .bind(session_id.as_str())
@@ -397,6 +403,7 @@ impl Store {
                 base: r.get("base"),
                 branch: r.get("branch"),
                 path: r.get("path"),
+                unborn: r.get("unborn"),
             })
             .collect())
     }

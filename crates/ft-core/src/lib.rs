@@ -1377,6 +1377,23 @@ pub struct WorkSummary {
     /// and must not be drawn as it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commits: Option<u32>,
+    /// Whether the base branch does not exist yet.
+    ///
+    /// True for a session cut from a repository with no commits in it: there
+    /// was no trunk to branch from, so this branch is a root of its own and
+    /// the counts above are measured from nothing rather than from a base.
+    ///
+    /// Asked of the refs every time, so it stops being true the moment the
+    /// trunk exists — which is what pushing one of these sessions does. The
+    /// alternative, remembering it, left whoever read it unable to tell a
+    /// trunk that had been created from one whose creation had failed.
+    ///
+    /// Note this is not the same question as "did the base resolve": a branch
+    /// deleted upstream and a mistyped base do not resolve either, and the
+    /// worker only reads them as a root when the repository it cut from had no
+    /// refs at all. Everything else still fails loudly.
+    #[serde(default)]
+    pub unborn: bool,
 }
 
 /// One checkout's summary, and which checkout it is.
@@ -1437,6 +1454,16 @@ pub struct CheckoutWork {
     /// [`WorkSummary::commits`]; `None` means the worker did not say.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commits: Option<u32>,
+    /// Whether the base branch does not exist yet. See
+    /// [`WorkSummary::unborn`].
+    ///
+    /// What makes the one control say "push `main`" instead of "open a pull
+    /// request" — there is nothing on the far end to open one against, and a
+    /// button that could only be refused is worse than one that names the step
+    /// it will actually take. False again once the trunk is there, which puts
+    /// the session back on the ordinary sequence with nothing to unwind.
+    #[serde(default)]
+    pub unborn: bool,
     /// Where its pull request is, once it has one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pull_request: Option<String>,

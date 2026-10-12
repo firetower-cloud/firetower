@@ -189,7 +189,14 @@ function Pick({
         // Each one is verified against the host before it's saved, so an
         // authorization that doesn't actually cover a repository is caught
         // here rather than when a session tries to clone it.
-        await create.mutateAsync({ data: { slug: repo.slug, remote: repo.remote } });
+        //
+        // The default branch goes with it. For a repository with no commits
+        // the remote cannot be asked — `ls-remote` on one answers with nothing
+        // at all — and this list, which comes from the host's own API, is the
+        // only place the name is known. The server uses it in that case only.
+        await create.mutateAsync({
+          data: { slug: repo.slug, remote: repo.remote, defaultBranch: repo.defaultBranch },
+        });
       } catch (e) {
         setFailure(e);
         setProgress(null);
@@ -319,7 +326,13 @@ function PasteRemote({ onBack, onClose }: { onBack: () => void; onClose: () => v
   const found = localPath ? undefined : probe.data;
 
   const save = async () => {
-    await create.mutateAsync({ data: { slug: found?.slug ?? "", remote: remote.trim() } });
+    await create.mutateAsync({
+      data: {
+        slug: found?.slug ?? "",
+        remote: remote.trim(),
+        defaultBranch: found?.defaultBranch,
+      },
+    });
     await queryClient.invalidateQueries({ queryKey: getListReposQueryKey() });
     onClose();
   };
@@ -363,9 +376,19 @@ function PasteRemote({ onBack, onClose }: { onBack: () => void; onClose: () => v
               <Icon of={Check} size={12} className="text-sage" />
               <span className="font-mono text-meta text-bone">{found.slug}</span>
               <span className="ml-auto font-mono text-meta text-slate">
-                branches from {found.defaultBranch}
+                {found.empty ? `will create ${found.defaultBranch}` : `branches from ${found.defaultBranch}`}
               </span>
             </div>
+            {/* Connecting one of these used to be refused outright. It is the
+                repository you most want an agent on — you have just made it —
+                and the only thing missing is a trunk, which the first session's
+                push creates. */}
+            {found.empty && (
+              <p className="mt-1.5 text-meta text-mute">
+                No commits yet. The first session starts from nothing and its push creates{" "}
+                <span className="font-mono">{found.defaultBranch}</span>.
+              </p>
+            )}
           </div>
         )}
       </div>

@@ -48,6 +48,17 @@ export interface CheckoutWork {
      */
   trouble?: string | null;
   /**
+     * Whether the base branch does not exist yet. See
+     * [`WorkSummary::unborn`].
+     *
+     * What makes the one control say "push `main`" instead of "open a pull
+     * request" — there is nothing on the far end to open one against, and a
+     * button that could only be refused is worse than one that names the step
+     * it will actually take. False again once the trunk is there, which puts
+     * the session back on the ordinary sequence with nothing to unwind.
+     */
+  unborn?: boolean;
+  /**
      * What is edited and not committed, or `None` when nobody could find out.
      *
      * **Absent is not zero, and the difference is the whole point of this

@@ -88,7 +88,7 @@ use tmux::Tmux;
 struct Located {
     dest: PathBuf,
     slug: String,
-    base: String,
+    base: git::Base,
 }
 
 pub struct Worker {
@@ -1481,11 +1481,12 @@ impl Worker {
             workspace.join(&repo.path)
         };
 
-        let (path, branch) = self
+        let cut = self
             .git
             .add_worktree_at(&mirror, &repo.branch, &repo.base, &name)
             .await
             .context("cutting the worktree")?;
+        let (path, branch) = (cut.path, cut.branch);
 
         // Where it actually landed, which is not always where it was asked to
         // go: a directory already in use is numbered rather than fatal, and the
@@ -1510,6 +1511,7 @@ impl Worker {
                 &repo.base,
                 &branch,
                 &at,
+                cut.unborn,
             )
             .await?;
         if position == 0 {
@@ -1985,6 +1987,7 @@ You are in the directory that holds them, not inside one of them.              P
                         &c.base,
                         &c.branch,
                         &c.path,
+                        c.unborn,
                     )
                     .await?;
             }
@@ -2390,17 +2393,36 @@ You are in the directory that holds them, not inside one of them.              P
     /// have had to number the branch and may have numbered it differently in
     /// each repository. Falls back to the session's own branch for a session
     /// recorded before checkouts were.
-    async fn checkout_refs(&self, session_id: &SessionId, at: &str) -> Result<(PathBuf, String)> {
+    async fn checkout_refs(
+        &self,
+        session_id: &SessionId,
+        at: &str,
+    ) -> Result<(PathBuf, String, git::Base)> {
         let dest = self.checkout_at(session_id, at).await?;
-        let branch = self
+        let recorded = self
             .store
             .checkouts_of(session_id)
             .await?
             .into_iter()
-            .find(|c| c.path == at)
-            .map(|c| c.branch);
+            .find(|c| c.path == at);
 
-        let branch = match branch {
+        let base = match &recorded {
+            Some(c) => git::Base {
+                name: c.base.clone(),
+                unborn: c.unborn,
+            },
+            // Recorded before checkouts were, and so before a repository with
+            // no commits could be worked on at all.
+            None => git::Base::named(
+                self.store
+                    .refs_of(session_id)
+                    .await?
+                    .map(|(_, base)| base)
+                    .unwrap_or_else(|| "HEAD".to_string()),
+            ),
+        };
+
+        let branch = match recorded.map(|c| c.branch) {
             Some(branch) => branch,
             None => self
                 .store
@@ -2408,7 +2430,7 @@ You are in the directory that holds them, not inside one of them.              P
                 .await?
                 .context("this session has no branch")?,
         };
-        Ok((dest, branch))
+        Ok((dest, branch, base))
     }
 
     /// A checkout and what to diff it against.
@@ -2416,17 +2438,27 @@ You are in the directory that holds them, not inside one of them.              P
         &self,
         session_id: &SessionId,
         at: &str,
-    ) -> Result<(PathBuf, String)> {
+    ) -> Result<(PathBuf, git::Base)> {
         let dest = self.checkout_at(session_id, at).await?;
-        let base = self
+        let base = match self
             .store
             .checkouts_of(session_id)
             .await?
             .into_iter()
             .find(|c| c.path == at)
-            .map(|c| c.base)
-            .or(self.store.refs_of(session_id).await?.map(|(_, base)| base))
-            .unwrap_or_else(|| "HEAD".to_string());
+        {
+            Some(c) => git::Base {
+                name: c.base,
+                unborn: c.unborn,
+            },
+            None => git::Base::named(
+                self.store
+                    .refs_of(session_id)
+                    .await?
+                    .map(|(_, base)| base)
+                    .unwrap_or_else(|| "HEAD".to_string()),
+            ),
+        };
         Ok((dest, base))
     }
 
@@ -2448,7 +2480,10 @@ You are in the directory that holds them, not inside one of them.              P
                         workspace.join(&c.path)
                     },
                     slug: c.slug,
-                    base: c.base,
+                    base: git::Base {
+                        name: c.base,
+                        unborn: c.unborn,
+                    },
                 })
                 .collect());
         }
@@ -2460,7 +2495,7 @@ You are in the directory that holds them, not inside one of them.              P
         Ok(vec![Located {
             dest: workspace.to_path_buf(),
             slug: self.store.repo_of(session_id).await?.unwrap_or_default(),
-            base,
+            base: git::Base::named(base),
         }])
     }
 
@@ -2527,8 +2562,8 @@ You are in the directory that holds them, not inside one of them.              P
             }
 
             ft_proto::Action::Push { checkout } => {
-                let (dest, branch) = self.checkout_refs(session_id, &checkout).await?;
-                self.git.push(&dest, &branch, credential).await
+                let (dest, branch, base) = self.checkout_refs(session_id, &checkout).await?;
+                self.git.push(&dest, &branch, &base, credential).await
             }
 
             ft_proto::Action::Attach { name, data } => {
@@ -2667,31 +2702,34 @@ You are in the directory that holds them, not inside one of them.              P
             // request for one unreadable worktree, the control plane called
             // that `HostUnreachable`, and the screen said the machine was gone.
             // One row carrying git's own sentence says what is true instead.
-            return Ok(vec![
-                match self.git.summary(&workspace, &branch, &base).await {
-                    Ok(summary) => ft_core::CheckoutSummary {
+            return Ok(vec![match self
+                .git
+                .summary(&workspace, &branch, &git::Base::named(&base))
+                .await
+            {
+                Ok(summary) => ft_core::CheckoutSummary {
+                    path: String::new(),
+                    slug,
+                    summary,
+                    trouble: None,
+                },
+                Err(e) => {
+                    tracing::warn!(session = %session_id, "summarising the workspace: {e:#}");
+                    ft_core::CheckoutSummary {
                         path: String::new(),
                         slug,
-                        summary,
-                        trouble: None,
-                    },
-                    Err(e) => {
-                        tracing::warn!(session = %session_id, "summarising the workspace: {e:#}");
-                        ft_core::CheckoutSummary {
-                            path: String::new(),
-                            slug,
-                            summary: ft_core::WorkSummary {
-                                branch,
-                                uncommitted: 0,
-                                ahead: 0,
-                                pushed: false,
-                                commits: None,
-                            },
-                            trouble: Some(format!("{e:#}")),
-                        }
+                        summary: ft_core::WorkSummary {
+                            branch,
+                            uncommitted: 0,
+                            ahead: 0,
+                            pushed: false,
+                            commits: None,
+                            unborn: false,
+                        },
+                        trouble: Some(format!("{e:#}")),
                     }
-                },
-            ]);
+                }
+            }]);
         }
 
         let mut out = Vec::new();
@@ -2701,7 +2739,11 @@ You are in the directory that holds them, not inside one of them.              P
             } else {
                 workspace.join(&c.path)
             };
-            match self.git.summary(&dest, &c.branch, &c.base).await {
+            let base = git::Base {
+                name: c.base.clone(),
+                unborn: c.unborn,
+            };
+            match self.git.summary(&dest, &c.branch, &base).await {
                 Ok(summary) => out.push(ft_core::CheckoutSummary {
                     path: c.path,
                     slug: c.slug,
@@ -2724,6 +2766,7 @@ You are in the directory that holds them, not inside one of them.              P
                             ahead: 0,
                             pushed: false,
                             commits: None,
+                            unborn: c.unborn,
                         },
                         trouble: Some(format!("{e:#}")),
                     });
@@ -4348,6 +4391,7 @@ mod tests {
                 "main",
                 "agent/test-3",
                 "sandbox-firetower",
+                false,
             )
             .await
             .unwrap();
@@ -4378,6 +4422,7 @@ mod tests {
                     &c.base,
                     &c.branch,
                     &c.path,
+                    c.unborn,
                 )
                 .await
                 .unwrap();
@@ -4486,6 +4531,7 @@ mod tests {
                 "main",
                 "agent/fix",
                 "backend",
+                false,
             )
             .await
             .unwrap();
@@ -5301,6 +5347,68 @@ mod tests {
         assert!(
             String::from_utf8_lossy(&output).contains("Pong"),
             "the frame after the bad one should still be served"
+        );
+    }
+
+    /// A repository with no commits in it, from this side of the wire.
+    ///
+    /// The cut is the part that was impossible: `git worktree add -b x <dir>
+    /// main` has no `main` to cut from and answers `fatal: invalid reference`.
+    /// What comes out of it is the flag every count and diff afterwards is
+    /// gated on, so this follows it from the frame to the summary.
+    #[tokio::test]
+    async fn a_workspace_can_be_cut_from_a_repository_with_no_commits() {
+        let dir = TempDir::new().unwrap();
+        let bare = dir.path().join("fresh.git");
+        tokio::process::Command::new("git")
+            .args([
+                "init",
+                "--bare",
+                "--initial-branch=main",
+                bare.to_str().unwrap(),
+            ])
+            .output()
+            .await
+            .unwrap();
+
+        let home = TempDir::new().unwrap();
+        let worker = std::sync::Arc::new(Worker::open(home.path()).await.unwrap());
+        let id = SessionId::new();
+        let out = exchange(
+            &worker,
+            vec![hello(), spec(bare.to_str().unwrap(), &id, None)],
+        )
+        .await;
+
+        assert!(
+            out.iter().any(|f| matches!(
+                f,
+                ToServer::Event {
+                    kind: EventKind::WorktreeAdded { .. },
+                    ..
+                }
+            )),
+            "it got as far as a worktree: {out:?}"
+        );
+
+        let checkouts = worker.store.checkouts_of(&id).await.unwrap();
+        assert_eq!(checkouts.len(), 1);
+        assert!(
+            checkouts[0].unborn,
+            "and it remembers there was no trunk to cut from"
+        );
+
+        let summaries = worker.summarize(&id).await.unwrap();
+        assert_eq!(summaries.len(), 1);
+        assert!(summaries[0].trouble.is_none(), "{:?}", summaries[0].trouble);
+        assert!(
+            summaries[0].summary.unborn,
+            "which is what makes the one button say push rather than open"
+        );
+        assert_eq!(
+            summaries[0].summary.commits,
+            Some(0),
+            "nothing committed yet, counted from nothing rather than refused"
         );
     }
 }

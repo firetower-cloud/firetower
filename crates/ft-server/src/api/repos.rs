@@ -327,9 +327,9 @@ pub(super) async fn remove_repo_env(
 
 /// Connect a repository. Nothing is cloned until a session needs it.
 ///
-/// No default branch here on purpose. Connecting reaches for the remote anyway,
-/// and what it answers with is the truth — a branch named by the caller was
-/// accepted and then ignored, which is worse than not asking.
+/// Connecting reaches for the remote anyway, and what it answers with is the
+/// truth — a branch named by the caller is not taken over it, because one that
+/// was accepted and then ignored is worse than one never asked for.
 #[derive(Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct NewRepo {
@@ -340,6 +340,16 @@ pub struct NewRepo {
     /// Runs once per session, before the agent starts.
     #[serde(default)]
     pub setup: Option<String>,
+    /// What the trunk is called, for a repository with no commits in it.
+    ///
+    /// Only then. A repository with commits says so itself and is believed
+    /// over anybody; an empty one cannot — `ls-remote` on one answers with
+    /// nothing at all, not even the name of the branch it would have — so
+    /// without this the first session invents `main` and a repository set up
+    /// for `master` quietly gets a second trunk. The picker knows the real
+    /// name from the host's API and sends it here.
+    #[serde(default)]
+    pub default_branch: Option<String>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -356,10 +366,21 @@ pub struct ProbeResponse {
     /// Derived from the remote, and editable before saving.
     pub slug: String,
     /// Read from the remote rather than assumed.
+    ///
+    /// For a repository with no commits there is nothing to read: a guess at
+    /// `main`, which whoever is connecting it can correct before saving.
     pub default_branch: String,
     /// True when only this machine could clone it — an ssh remote or a path.
     #[serde(default)]
     pub only_here: bool,
+    /// No commits in it yet.
+    ///
+    /// Said rather than refused. There is nothing to branch from, so the first
+    /// session on it cuts a branch with no parent and its first push is what
+    /// creates the trunk — which is worth knowing while looking at the form,
+    /// and is not a reason to decline to record a URL.
+    #[serde(default)]
+    pub empty: bool,
 }
 
 /// Whether a remote is a directory here rather than something reachable.
@@ -541,17 +562,11 @@ pub(super) async fn probe_repo(
         .map_err(|e| ApiError::new(ErrorCode::HostUnreachable, format!("{e:#}")))?
         .map_err(|f| probe_error(remote, f, &host))?;
 
-    if info.empty {
-        return Err(ApiError::new(
-            ErrorCode::RepoUnusable,
-            format!("{remote} has no commits yet, so there's nothing to branch from"),
-        ));
-    }
-
     Ok(Json(ProbeResponse {
         slug: slug_from_remote(remote),
         default_branch: info.default_branch,
         only_here: only_here(remote),
+        empty: info.empty,
     }))
 }
 
@@ -597,13 +612,20 @@ pub(super) async fn create_repo(
             .await
         {
             Ok(Ok(info)) => {
-                if info.empty {
-                    return Err(ApiError::new(
-                        ErrorCode::RepoUnusable,
-                        format!("{remote} has no commits yet, so there's nothing to branch from"),
-                    ));
-                }
-                trunk = Some(info.default_branch);
+                // An empty repository has no trunk to read, so the probe's
+                // answer is its own guess at `main`. Whoever is connecting it
+                // may know better — the picker has the name from the host's
+                // API — and is believed in that one case and no other.
+                trunk = Some(match info.empty {
+                    true => req
+                        .default_branch
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|b| !b.is_empty())
+                        .unwrap_or(&info.default_branch)
+                        .to_string(),
+                    false => info.default_branch,
+                });
             }
 
             // Facts about what was typed, and true from any machine.
@@ -691,16 +713,26 @@ pub(super) async fn repo_branches(
         .map_err(|f| probe_error(&repo.remote, f, &host))?;
 
     Ok(Json(Branches {
-        default_branch: info.default_branch,
+        default_branch: repo
+            .default_branch
+            .filter(|_| info.empty)
+            .unwrap_or(info.default_branch),
         branches: info.branches,
+        empty: info.empty,
     }))
 }
 
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Branches {
+    /// For an empty repository, the trunk it is going to have: the name
+    /// recorded when it was connected, since the remote cannot say.
     pub default_branch: String,
     pub branches: Vec<String>,
+    /// No commits, so no branches either. The one in `default_branch` does not
+    /// exist yet, and the first session is what creates it.
+    #[serde(default)]
+    pub empty: bool,
 }
 
 /// Disconnect a repository.
