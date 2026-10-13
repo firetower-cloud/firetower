@@ -161,9 +161,21 @@ pub(super) async fn rename_skill(
     {
         return Err(ApiError::new(
             ErrorCode::InvalidRequest,
-            "a description says what the skill does and when to use it, in under 1024 characters",
+            format!(
+                "a description says what the skill does and when to use it, in under {} characters",
+                crate::skills::BIGGEST_DESCRIPTION
+            ),
         ));
     }
+    // The same rule import is held to, for the same reason. This endpoint
+    // writes the description the listing renders into a system prompt, so
+    // leaving it out here would be a way to put a tag in one hop after the
+    // check that exists to stop it — import clean, then rename.
+    crate::skills::check_no_brackets(&serde_json::json!({
+        "name": body.name,
+        "description": body.description,
+    }))
+    .map_err(refused)?;
 
     state
         .skills

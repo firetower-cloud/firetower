@@ -69,6 +69,42 @@ const ONLY_CLAUDE = [
   "disallowed-tools", "model", "effort", "context", "agent", "background", "hooks", "paths", "shell",
 ];
 
+/**
+ * Tags that are the harness talking, not the skill.
+ *
+ * The frontmatter rule below is blunt because it can afford to be — a name
+ * and a description lose nothing by having no angle brackets in them. A body
+ * cannot: 15 of the 26 skills Anthropic and OpenAI ship have `<` or `>` in
+ * theirs, because `docx` has to quote `<w:r>`, `algorithmic-art` has to quote
+ * `<html>` and `skill-creator` has to write `<skill-name>`. Refusing those
+ * would refuse most of the real corpus to stop nothing.
+ *
+ * So the body is checked for the narrow thing instead: text shaped like the
+ * framing an agent uses to tell its own instructions from everything else.
+ * A skill is loaded into context on invocation, and a shared one is written by
+ * somebody other than whoever runs it, so a `<system-reminder>` in a body is
+ * an instruction with a forged return address. None of the 26 contain one.
+ */
+const HARNESS_TAGS = [
+  "system-reminder",
+  "function_calls",
+  "function_results",
+  "task-notification",
+  "command-name",
+  "command-message",
+  "user-prompt-submit-hook",
+  /* A forged tool call, which is the worst of these: it does not ask the model
+     to do something, it claims the harness already did. */
+  "invoke",
+];
+/* `antml:` is a whole namespace, so it matches on the prefix. A name has to
+   end where a tag's name ends — so `<invokes-the-api>` is prose and
+   `<invoke\n name=…>` is not. */
+const FORGED = new RegExp(
+  `</?\\s*(?:antml:[a-z_-]*|(?:${HARNESS_TAGS.join("|")})(?=[\\s>/]|$))`,
+  "i",
+);
+
 /** Junk that is in a folder because of the tools, not because of the skill. */
 const SKIP = /(^|\/)(\.git|node_modules|\.DS_Store|__pycache__|\.venv|\.idea|\.vscode)(\/|$)/;
 
@@ -82,6 +118,41 @@ const RESERVED = new Set([
 const MOST_FILES = 100;
 const BIGGEST_FILE = 2 * 1024 * 1024;
 const BIGGEST_VERSION = 25 * 1024 * 1024;
+/** Mirrors `BIGGEST_DESCRIPTION` on the server, which is what enforces it. */
+const BIGGEST_DESCRIPTION = 2048;
+
+/** Some bytes as text, or `undefined` if they are a font or an image. */
+function asText(bytes: Uint8Array): string | undefined {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes as unknown as ArrayBufferView);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * `text` with everything a reader sees as code taken out.
+ *
+ * A line whose backticks do not pair up is kept whole rather than treated as
+ * an open span: an unmatched backtick renders as a literal one, so reading it
+ * as code would be a way to hide a tag behind a single stray character.
+ */
+function outsideCode(text: string): string {
+  const out: string[] = [];
+  let fenced = false;
+  for (const line of text.split("\n")) {
+    const opens = line.trimStart();
+    if (opens.startsWith("```") || opens.startsWith("~~~")) {
+      fenced = !fenced;
+      continue;
+    }
+    if (fenced) continue;
+    const ticks = line.split("`").length - 1;
+    // Alternating: outside a span, inside, outside, …
+    out.push(ticks % 2 === 0 ? line.split("`").filter((_, i) => i % 2 === 0).join(" ") : line);
+  }
+  return out.join("\n");
+}
 
 /* ── reading a drop ──────────────────────────────────────────────────── */
 
@@ -279,9 +350,28 @@ async function bundle(root: string, raw: Raw[]): Promise<Found> {
     errors.push("`claude` and `anthropic` are reserved in a skill name.");
   if (!description.trim())
     errors.push("A description is what the model decides on, so it cannot be empty.");
-  if (description.length > 1024) errors.push("A description is at most 1024 characters.");
+  if (description.length > BIGGEST_DESCRIPTION)
+    errors.push(`A description is at most ${BIGGEST_DESCRIPTION} characters.`);
   if (JSON.stringify(frontmatter).match(/[<>]/))
     errors.push("`<` and `>` are not allowed in frontmatter — it is read as part of the system prompt.");
+  /* Every text file, not only SKILL.md: a `references/` file is opened into
+     the same context on the same turn. A tag inside a code span is one being
+     described rather than spoken, which is worth saying and not a refusal —
+     `claude-api` names `<system-reminder>` in three of its reference files,
+     one of them to explain that the pattern is forgeable. */
+  for (const f of raw) {
+    const text = asText(f.bytes);
+    if (text === undefined) continue;
+    const spoken = FORGED.exec(outsideCode(text));
+    if (spoken)
+      errors.push(
+        `${f.path} contains \`${spoken[0]}\`, which is how an agent frames its own messages. ` +
+          "A skill cannot speak as the harness. Write the name without the angle brackets, " +
+          "or put it in a code span if the point is to describe it.",
+      );
+    else if (FORGED.test(text))
+      warnings.push(`${f.path} mentions an agent's own framing in a code span. Read as code, not as an instruction.`);
+  }
   if (files.length > MOST_FILES) errors.push(`A skill holds at most ${MOST_FILES} files.`);
   if (bytes > BIGGEST_VERSION) errors.push(`A skill is at most ${BIGGEST_VERSION / 1024 / 1024} MB.`);
   for (const f of raw)
@@ -336,11 +426,18 @@ export const RISK_SAYS: Record<string, string> = {
 /**
  * Frontmatter and body, out of a SKILL.md.
  *
- * Deliberately not a YAML library. The standard allows a scalar, a list and a
- * one-level map at the top level, and that is all this reads — a full parser
- * would be one that disagrees with the server's about an edge case nobody
- * asked for. What it cannot read is kept verbatim in the file, which is what
- * the agent actually loads.
+ * Deliberately not a YAML library. The standard allows a scalar, a list, a
+ * one-level map and a block scalar at the top level, and that is all this
+ * reads — a full parser would be one that disagrees with the server's about an
+ * edge case nobody asked for. What it cannot read is kept verbatim in the
+ * file, which is what the agent actually loads.
+ *
+ * **Block scalars are not an edge case.** `description: >` is how a
+ * description long enough to be useful is actually written, and Anthropic's
+ * own skills write it that way. Read as a plain scalar it comes out as the
+ * one-character string `">"` — which loses the description silently and then
+ * trips the `<`/`>` rule below, reporting an injection risk for a character
+ * the author never wrote as content.
  *
  * `present` is what the file *said*, which is a different question from what
  * the skill is called. A file whose key is misspelled has no `name`, and that
@@ -356,11 +453,13 @@ export function split(text: string): {
   if (!m) return { frontmatter: {}, body: text.trim(), framed: false };
 
   const out: Record<string, unknown> = {};
+  const lines = m[1]!.split(/\r?\n/);
   let key: string | null = null;
   let map: Record<string, string> | null = null;
   let list: string[] | null = null;
 
-  for (const line of m[1]!.split(/\r?\n/)) {
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
     if (!line.trim() || line.trim().startsWith("#")) continue;
 
     // `  - item`, which is how the standard spells a list.
@@ -386,6 +485,44 @@ export function split(text: string): {
     map = null;
     list = null;
     const value = top[2]!.trim();
+
+    // `>`, `|`, and either with a chomp (`-`/`+`) or an explicit indent
+    // digit. Nothing that is content looks like this, so matching it cannot
+    // take a description away from somebody who meant to write one.
+    const block = /^([|>])((?:[1-9]|[+-])*)$/.exec(value);
+    if (block) {
+      const style = block[1]! as "|" | ">";
+      const marks = block[2]!;
+      const chomp = marks.includes("-") ? "strip" : marks.includes("+") ? "keep" : "clip";
+      // An indent indicator says how far in the block is; without one, the
+      // first non-empty line decides.
+      let indent = Number(/[1-9]/.exec(marks)?.[0] ?? 0);
+      const took: string[] = [];
+      let j = i + 1;
+      for (; j < lines.length; j++) {
+        const l = lines[j]!;
+        if (!l.trim()) {
+          took.push("");
+          continue;
+        }
+        const lead = l.length - l.trimStart().length;
+        if (!indent) {
+          if (lead === 0) break;
+          indent = lead;
+        }
+        if (lead < indent) break;
+        took.push(l.slice(indent));
+      }
+      // Whether a line ended the block or the frontmatter simply ran out.
+      // That is the difference between there being a line break after the
+      // last line and there not being one, which is what chomping acts on.
+      const ended = j < lines.length;
+      // `- 1`, because the loop's own `i++` steps onto the line that ended it.
+      i = j - 1;
+      out[key] = fold(took, style, chomp, ended);
+      continue;
+    }
+
     if (value === "") {
       // A list or a map — decided by the first indented line after it.
       map = {};
@@ -401,6 +538,55 @@ export function split(text: string): {
     }
   }
   return { frontmatter: out, body: text.slice(m[0].length).trim(), framed: true };
+}
+
+/**
+ * The lines of a block scalar, joined the way its style says.
+ *
+ * `|` keeps every break. `>` folds a single break into a space and a blank
+ * line into one break, and leaves a more-indented line alone — which is what
+ * makes a long `description: >` read as one paragraph. Chomping decides the
+ * trailing newlines: `-` drops them, `+` keeps them all, and the default
+ * keeps one *if the file had one* — a block that is the last thing before the
+ * closing `---` has no break after it to keep. Checked against libyaml.
+ *
+ * Every caller here trims, so the tail only matters for agreeing with a real
+ * YAML parser rather than for what ends up stored.
+ */
+function fold(
+  got: string[],
+  style: "|" | ">",
+  chomp: "strip" | "clip" | "keep",
+  ended: boolean,
+): string {
+  const kept = [...got];
+  let trailing = 0;
+  while (kept.length && !kept[kept.length - 1]!.trim()) {
+    kept.pop();
+    trailing++;
+  }
+  if (!kept.length) return "";
+  const breaks = trailing + (ended ? 1 : 0);
+
+  let text: string;
+  if (style === "|") {
+    text = kept.join("\n");
+  } else {
+    const joined: string[] = [];
+    for (const l of kept) {
+      const prev = joined[joined.length - 1];
+      const foldable =
+        prev !== undefined && prev.trim() !== "" && !/^\s/.test(prev) && !/^\s/.test(l) && l.trim() !== "";
+      if (foldable) joined[joined.length - 1] = `${prev} ${l.trim()}`;
+      else joined.push(l);
+    }
+    // A blank line between two folded runs is one break, not two.
+    text = joined.join("\n").replace(/\n{2,}/g, (run) => run.slice(1));
+  }
+
+  if (chomp === "keep") text += "\n".repeat(breaks);
+  else if (chomp === "clip" && breaks > 0) text += "\n";
+  return text;
 }
 
 /** Every field anything reads. Anything else is a typo or a private note. */
@@ -431,7 +617,41 @@ function editsBetween(a: string, b: string): number {
   return Math.min(2, row[b.length]!);
 }
 
-const unquote = (v: string) => v.trim().replace(/^["'](.*)["']$/s, "$1");
+/**
+ * A scalar with its quotes taken off and its escapes resolved.
+ *
+ * **The escapes are the point, not a nicety.** A double-quoted scalar may
+ * spell any character as `\uXXXX`, so `description: "\u003csystem-reminder\u003e"`
+ * holds no `<` for the rule below to find — and then the agent, which reads
+ * `SKILL.md` with a real YAML parser, renders the tag. Stripping the quotes
+ * without decoding what is inside them makes the rule advice rather than a
+ * check. A single-quoted scalar has one escape, `''` for a quote.
+ */
+const unquote = (v: string) => {
+  const t = v.trim();
+  const dq = /^"([\s\S]*)"$/.exec(t);
+  if (dq) return unescape(dq[1]!);
+  const sq = /^'([\s\S]*)'$/.exec(t);
+  if (sq) return sq[1]!.replace(/''/g, "'");
+  return t;
+};
+
+/** YAML's double-quoted escapes. Anything else is left as it was written. */
+function unescape(s: string): string {
+  return s.replace(
+    /\\(u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8}|x[0-9a-fA-F]{2}|.)/gs,
+    (all: string, esc: string) => {
+      if (esc[0] === "u" || esc[0] === "U" || esc[0] === "x")
+        return String.fromCodePoint(parseInt(esc.slice(1), 16));
+      const one: Record<string, string> = {
+        "0": "\0", a: "\x07", b: "\b", t: "\t", "\t": "\t", n: "\n", v: "\v",
+        f: "\f", r: "\r", e: "\x1b", " ": " ", '"': '"', "/": "/", "\\": "\\",
+        N: "", _: " ", L: " ", P: " ",
+      };
+      return one[esc] ?? all;
+    },
+  );
+}
 
 /** A shebang, which is the only evidence a dropped folder carries. */
 function looksExecutable(bytes: Uint8Array): boolean {
