@@ -6,29 +6,31 @@
  * only *named* in the message, because the agent has its own tools for reading
  * one and sending the bytes twice is waste. Both rules are the web build's.
  *
- * The pickers are drawn from what the agent reports it can change
- * (`session_controls`), not from a list kept here — a Codex session must not be
- * offered Opus. Choosing shows as chosen straight away (`remember`) because
- * Claude Code restates the model only at the start of the next turn, and the
- * server's answer overwrites it, so a refused request corrects itself.
+ * The settings behind the one control (`AgentPicker`) are drawn from what the
+ * agent reports it can change (`session_controls`), not from a list kept here —
+ * a Codex session must not be offered Opus. Choosing shows as chosen straight
+ * away (`remember`) because Claude Code restates the model only at the start of
+ * the next turn, and the server's answer overwrites it, so a refused request
+ * corrects itself.
  *
  * The meter is the agent's own report of its context window, off the last
  * finished turn. Adding up deltas here would drift.
  */
 import { useEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
-import { ArrowUp, Check, ChevronDown, Diamond, FileText, ImageOff, Loader2, Paperclip, Square, X } from "lucide-react";
+import { ArrowUp, Diamond, FileText, ImageOff, Loader2, Paperclip, Square, X } from "lucide-react";
 import { interruptible, type Conversation } from "~/api/conversation";
-import type { Attached, Choice, Control, ControlKind, Session } from "~/api/generated/model";
+import type { Attached, Control, ControlKind, Session } from "~/api/generated/model";
 import { useAttachFile, useInterruptSession, useListFiles, useSendTurn } from "~/api/generated/sessions/sessions";
 import { useChooseControl, useSessionControls } from "~/api/generated/conversation/conversation";
 import { takeDraft } from "~/workspace/draft";
 import { AccountLine, AccountNotice } from "~/ui/AccountSwitcher";
+import { AgentPicker } from "~/ui/AgentPicker";
 import { Mic } from "~/ui/voice/Mic";
 import { VoiceDialog } from "~/ui/voice/Dialogs";
 import { useVoice } from "~/ui/voice/useVoice";
 import { SkillPicker } from "~/ui/SkillPicker";
-import { useSessionSkillIds } from "~/data";
+import { useAgents, useSessionSkillIds } from "~/data";
 import { fromDefaults } from "~/skills";
 
 /**
@@ -160,6 +162,10 @@ export function Composer({
   const interrupt = useInterruptSession();
   const choose = useChooseControl();
   const acp = session.agent === "KimiCode";
+  /* Only for this agent's name. `ClaudeCode` is how it is stored and sent;
+     `Claude Code` is what this install calls it, and the menu is a place a
+     person reads. */
+  const agents = useAgents();
   const controls = useSessionControls(session.id, { query: { refetchInterval: acp ? 2000 : false } });
 
   // What a session can be asked to change is not known when it opens: an
@@ -387,6 +393,15 @@ export function Composer({
   };
 
   const offered: Control[] = controls.data ?? [];
+  /* What a picker shows. `chosen` is the optimistic note of what was just
+     clicked and an ACP session ignores it — `current` is what the agent has
+     actually confirmed, and until that arrives the label must not claim a
+     value that may yet be refused. The conversation's own model and mode are
+     the last resort, for a control the agent has not reported on yet. */
+  const shown = (c: Control) =>
+    (acp ? c.current : chosen[c.kind] ?? c.current) ??
+    (c.kind === "model" ? conversation.model : c.kind === "mode" ? conversation.mode : undefined) ??
+    undefined;
   const usage = conversation.usage;
   const full = usage?.contextUsed && usage?.contextWindow ? usage.contextUsed / usage.contextWindow : null;
 
@@ -527,15 +542,14 @@ export function Composer({
               <span>{skills.data.length === 1 ? "skill" : "skills"}</span>
             </button>
 
-            {offered.map((c) => (
-              <Picker
-                key={c.kind}
-                control={c}
-                disabled={acp && choose.isPending}
-                value={(acp ? c.current : chosen[c.kind] ?? c.current) ?? (c.kind === "model" ? conversation.model : c.kind === "mode" ? conversation.mode : undefined)}
-                onPick={(v) => set(c.kind, v)}
-              />
-            ))}
+            <AgentPicker
+              agent={session.agent}
+              agentLabel={agents.data.find((a) => a.kind === session.agent)?.label}
+              controls={offered}
+              valueOf={shown}
+              disabled={acp && choose.isPending}
+              onPick={set}
+            />
 
             {full !== null && (
               <span className="control shrink-0 gap-2 text-mute" title={`${Math.round(full * 100)}% of the context window used`}>
@@ -604,82 +618,6 @@ export function Composer({
           <AccountLine />
         </div>
       </div>
-    </div>
-  );
-}
-
-/**
- * What a caution looks like — and only one of the two gets a colour.
- *
- * `grants` is the fence coming down, which is brick: the signal this palette
- * already spends on destruction.
- *
- * `neverAsks` deliberately gets **nothing**. It was red, alongside
- * "Everything", and it does not widen anything — Claude Code's `dontAsk`
- * refuses what it may not do and Codex's `never` fails. Ember is the obvious
- * second tone and is the one colour that must not be borrowed: `STYLE.md` opens
- * with "ember is the only loud thing on screen… it stops answering [is
- * something waiting on you] the moment it answers anything else", and the same
- * file rules out inventing a fourth hue. So the distinction is carried by the
- * note under the label, which already says what happens, and the alarm stays
- * spent on the one option that earns it.
- */
-const CAUTION = { grants: "text-brick", neverAsks: undefined } as const;
-const toneOf = (c?: Choice["caution"]) => (c ? CAUTION[c] : undefined);
-
-function Picker({ control, value, onPick, disabled = false }: { control: Control; value?: string; onPick: (v: string) => void; disabled?: boolean }) {
-  const [open, setOpen] = useState(false);
-  const here = control.choices.find((c) => c.value === value);
-  return (
-    <div className="relative">
-      {/* `title`, because the label is what gets truncated: a model called
-          `claude-opus-4-1-20250805` has nowhere useful to break, and the
-          dropdown is the only other place it is written out in full. */}
-      <button
-        disabled={disabled}
-        onClick={() => setOpen(!open)}
-        title={here?.label ?? control.fallback}
-        className={`control max-w-[13rem] shrink-0 overflow-hidden hover:bg-raise ${
-          // Only what the agent may *do*, and only while it is in force. The
-          // menu warned while you chose and then went quiet, so a session
-          // running with the fence down read exactly like one inside it — and
-          // that is the state somebody comes back to, hours later.
-          here?.caution === "grants" ? "text-brick hover:text-brick" : "text-mute hover:text-bone"
-        }`}
-      >
-        <span className="truncate">{here?.label ?? control.fallback}</span>
-        <ChevronDown className="h-3 w-3 shrink-0" strokeWidth={2} />
-      </button>
-      {open && (
-        <>
-          <button className="fixed inset-0 z-20 cursor-default" onClick={() => setOpen(false)} />
-          {/* Capped and scrolling, because the list is the agent's and not
-              ours: Codex reports a dozen models with a sentence each, which
-              ran off the top of the window with the first few unreachable.
-              Every picker in the composer is this component, so the cap is
-              written once. `vh` as well as a fixed height — a short window is
-              exactly where an uncapped list does the most damage. */}
-          <div className="scroll-slim absolute bottom-full left-0 z-30 mb-1.5 max-h-[min(26rem,60vh)] w-[16rem] overflow-y-auto overflow-x-hidden rounded-lg border border-line bg-overlay p-1 shadow-(--shadow-float)">
-            {control.choices.map((c) => (
-              <button
-                key={c.value}
-                disabled={disabled}
-                onClick={() => {
-                  onPick(c.value);
-                  setOpen(false);
-                }}
-                className="flex w-full items-start gap-2.5 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-raise"
-              >
-                <Check className={`mt-0.5 h-3.5 w-3.5 shrink-0 ${c.value === value ? "text-bone" : "text-transparent"}`} strokeWidth={2} />
-                <span>
-                  <span className={`block text-ui ${toneOf(c.caution) ?? "text-bone"}`}>{c.label}</span>
-                  {c.note && <span className="block text-meta text-mute">{c.note}</span>}
-                </span>
-              </button>
-            ))}
-          </div>
-        </>
-      )}
     </div>
   );
 }
