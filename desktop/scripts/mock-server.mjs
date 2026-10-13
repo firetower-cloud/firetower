@@ -154,8 +154,8 @@ const CLAUDE_CONTROLS = [
       { label: "Auto", value: "auto", note: "Approves the ordinary, asks about the rest" },
       { label: "Ask everything", value: "default", note: "Nothing runs unasked" },
       { label: "Plan", value: "plan", note: "Explores and proposes, changes nothing" },
-      { label: "Accept edits", value: "acceptEdits", note: "Writes files without asking. Commands still ask", grave: true },
-      { label: "Never ask", value: "dontAsk", note: "Refuses anything not already allowed, rather than asking", grave: true },
+      { label: "Accept edits", value: "acceptEdits", note: "Writes files without asking. Commands still ask", caution: "grants" },
+      { label: "Never ask", value: "dontAsk", note: "Refuses anything not already allowed, rather than asking", caution: "neverAsks" },
     ],
   },
   {
