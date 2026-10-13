@@ -50,10 +50,49 @@ Errors:
 - `SKILL.md` present, exactly that spelling.
 - Folder kebab-case, matching `name`. 1–64 chars, `[a-z0-9-]`, no leading or
   trailing hyphen.
-- `description` present, under 1024 characters, says **what** and **when**.
+- `description` present, under 2,048 characters, says **what** and **when**.
+  Was 1,024 — a round number no real skill had been measured against, since
+  `claude-api`'s 1,068-character description only ever passed as the string
+  `"|-"`. The corpus median is 319, so this is headroom, not a target; the
+  aggregate guard is the per-agent budget in §3.
 - No `<` or `>` anywhere in the frontmatter. It goes into the system prompt;
   angle brackets are an injection route and Anthropic forbids them outright.
+  Checked on the *decoded* frontmatter, because a double-quoted scalar can
+  spell one as `\u003c` — a rule that only looks for the character is one
+  line away from being bypassed.
+- No harness framing **anywhere in the bundle**: `<system-reminder>`,
+  `<function_calls>`, a tag in the `antml:` namespace, a forged `<invoke>`, and
+  the rest of `FORGED_TAGS`. Checked in every UTF-8 file, not only `SKILL.md`
+  — a `references/` file is opened into the same context on the same turn, so
+  a forged frame there arrives exactly as it would from the body. Anything
+  that is not UTF-8 is a font or an image and is skipped.
+
+  Two things this is deliberately **not**. It is not a bracket ban: 15 of the
+  26 skills Anthropic and OpenAI ship have `<` or `>` in their bodies, because
+  `docx` has to quote `<w:r>` and `skill-creator` has to write `<skill-name>`.
+  And it is not triggered by a tag inside a code span or a fenced block, which
+  is a tag being *discussed* — `claude-api` names `<system-reminder>` in three
+  reference files, one of them to explain that the pattern is forgeable, and
+  refusing a skill for documenting the attack it defends against would be the
+  wrong trade. A line whose backticks do not pair up is read as prose, so a
+  single stray backtick is not a hiding place. The client additionally *warns*
+  on the code-span case; the server does not refuse it.
 - No `claude` or `anthropic` in the name — reserved.
+
+Both rules are asked of the bytes in the bundle, not of the `frontmatter` and
+`body` the client sends alongside them. Those are a parse the client did and
+could have done generously; the bytes are what is written onto a worker and
+read by the agent. `PATCH /skills/{id}` is held to the same bracket rule as
+import, since it writes the description the listing renders.
+
+Reading the file is `read_frontmatter` in `crates/ft-server/src/skills.rs`,
+mirrored by `split` in `desktop/src/skills.ts`. Neither is a YAML library, but
+both read **block scalars** — `description: >` is how a description long
+enough to be useful is written, and Anthropic's own `academy-guide`,
+`discernment-nudge` and `claude-api` write it that way. Read as a plain scalar
+it comes out as the string `">"`, which loses the description and then trips
+the bracket rule above for a character the author never wrote as content. The
+block-scalar and escape cases in both test suites were taken from libyaml.
 
 Warnings, never refusals:
 
