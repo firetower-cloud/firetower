@@ -16,6 +16,7 @@ import {
   runTone,
   showsDot,
   stepGlyph,
+  updatesRow,
   willWrite,
   wouldEnd,
 } from "./updates";
@@ -175,6 +176,38 @@ describe("the rail's dot", () => {
     expect(showsDot(status({ updateAvailable: false }))).toBe(false);
     expect(showsDot(status({ updateAvailable: false, activeRun: "upg_1" }))).toBe(true);
     expect(showsDot(undefined)).toBe(false);
+  });
+});
+
+describe("the rail's Updates row", () => {
+  const level = { updateAvailable: false } as const;
+
+  it("says it in words when the deployment is behind", () => {
+    expect(updatesRow(status(), false)).toEqual({ label: "Update available", loud: true, dot: false });
+  });
+
+  it("says it for this app's own build on a deployment that is level", () => {
+    expect(updatesRow(status(level), true)).toEqual({ label: "Update available", loud: true, dot: false });
+  });
+
+  it("keeps the quiet dot for a run already going", () => {
+    expect(updatesRow(status({ ...level, activeRun: "upg_1" }), false)).toEqual({
+      label: "Updates",
+      loud: false,
+      dot: true,
+    });
+  });
+
+  it("is loud rather than marked when both are true at once", () => {
+    expect(updatesRow(status({ activeRun: "upg_1" }), true)).toEqual({
+      label: "Update available",
+      loud: true,
+      dot: false,
+    });
+  });
+
+  it("says nothing before the first answer", () => {
+    expect(updatesRow(undefined, false)).toEqual({ label: "Updates", loud: false, dot: false });
   });
 });
 
