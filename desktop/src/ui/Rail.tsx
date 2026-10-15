@@ -17,7 +17,7 @@ import { GithubMark, Icon } from "~/components/ui";
 import { doing, group, shortRepo, type Repositories, type Workspace } from "~/api/workspaces";
 import { beatOf, elapsed, minutesSince } from "~/api/view";
 import type { Backend } from "~/fleet";
-import { useSessions, useUpdatesDot } from "~/data";
+import { useSessions, useUpdatesRow } from "~/data";
 import { isPersonal } from "~/filing";
 import { useMe } from "~/api/generated/auth/auth";
 import { navigate, usePathname } from "~/shims/next-navigation";
@@ -46,7 +46,7 @@ export function Rail({ backend }: { backend: Backend }) {
   const start = useStart();
   const { data: sessions, loading, error } = useSessions();
   const me = useMe();
-  const updates = useUpdatesDot();
+  const updates = useUpdatesRow();
   // The ages below are read off the clock, so the rail has to be told the clock
   // moved — nothing else re-renders a workspace that is quietly working.
   useNow();
@@ -120,7 +120,14 @@ export function Rail({ backend }: { backend: Backend }) {
       {!inConfig && (
         <div className="shrink-0 border-t border-line px-2 py-1.5">
           <NavLink href="/configuration" label="Configuration" icon={Settings2} on={false} />
-          <NavLink href="/updates" label="Updates" icon={CircleFadingArrowUp} on={path.startsWith("/updates")} dot={updates} />
+          <NavLink
+            href="/updates"
+            label={updates.label}
+            icon={CircleFadingArrowUp}
+            on={path.startsWith("/updates")}
+            dot={updates.dot}
+            loud={updates.loud}
+          />
           {import.meta.env.DEV && <NavLink href="/style" label="Style guide" icon={BookOpen} on={path.startsWith("/style")} />}
         </div>
       )}
@@ -178,12 +185,28 @@ function Settings({ path }: { path: string }) {
   );
 }
 
-function NavLink({ href, label, icon, on, dot }: { href: string; label: string; icon: LucideIcon; on: boolean; dot?: boolean }) {
+/**
+ * One row of nav, and the two ways it can ask to be read.
+ *
+ * `dot` is the quiet one: something changed over there. `loud` is for a row
+ * whose *label* has changed to say what it is — slate, which already means
+ * exactly this beside this row, and never ember, which answers the one
+ * question of whether somebody is waiting on you. The two are never both
+ * drawn: a row that says "Update available" in colour and then puts a mark
+ * after it is saying one thing twice.
+ *
+ * Being on the screen wins over both. You are already reading the news.
+ */
+function NavLink({ href, label, icon, on, dot, loud }: { href: string; label: string; icon: LucideIcon; on: boolean; dot?: boolean; loud?: boolean }) {
   return (
     <button
       onClick={() => navigate(href)}
       className={`flex h-8 items-center gap-2.5 rounded-md px-2.5 text-ui transition-colors duration-150 ${
-        on ? "bg-overlay text-bone shadow-(--shadow-raise)" : "text-dim hover:bg-raise/60 hover:text-text"
+        on
+          ? "bg-overlay text-bone shadow-(--shadow-raise)"
+          : loud
+            ? "text-slate hover:bg-raise/60"
+            : "text-dim hover:bg-raise/60 hover:text-text"
       }`}
     >
       <Icon of={icon} size={14} />

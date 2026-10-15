@@ -178,6 +178,27 @@ export function showsDot(status: UpdateStatus | undefined): boolean {
   return !!status && (status.updateAvailable || !!status.activeRun);
 }
 
+/**
+ * What the rail's Updates row says.
+ *
+ * Two release trains answer to one row: this app's own build, and the
+ * deployment it is pointed at. Either one being behind is something there is
+ * to take, and the row says so in words — a dot beside "Updates" was a thing
+ * you had to already be curious about, which is how a release sat unread until
+ * the next restart.
+ *
+ * A run already going keeps the quiet dot instead. It is worth knowing about
+ * and there is nothing in it to decide, and one row cannot be loud about two
+ * different things.
+ */
+export function updatesRow(
+  status: UpdateStatus | undefined,
+  newBuild: boolean,
+): { label: string; loud: boolean; dot: boolean } {
+  const loud = newBuild || !!status?.updateAvailable;
+  return { label: loud ? "Update available" : "Updates", loud, dot: !loud && showsDot(status) };
+}
+
 /** A diff, line by line, with what each line is. */
 export function diffLines(diff: string): { kind: "add" | "del" | "hunk" | "meta" | "same"; text: string }[] {
   return diff

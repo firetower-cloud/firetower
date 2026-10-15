@@ -424,7 +424,38 @@ const server = createServer(async (req, res) => {
     "/api/v1/agent-accounts": ACCOUNTS,
     "/api/v1/providers": [{ id: "github", label: "GitHub", connected: true, identity: "kevin" }],
     "/api/v1/trackers": [],
-    "/api/v1/updates": { current: "0.13.0", latest: "0.13.0", channel: "stable" },
+    /* `UpdateStatus`, as the screen and the rail actually read it. The old
+       three-field object here predated both and was the wrong shape, so the
+       Updates screen could not be opened against the mock at all. With
+       something out, so the rail's slate row and the upgrade buttons are
+       reachable without waiting for a release. */
+    "/api/v1/updates": {
+      current: "0.13.0",
+      latest: { version: "0.14.0", publishedAt: "2026-10-02T09:00:00Z", notesUrl: null, notes: null, cliMinimum: null },
+      checkedAt: "2026-10-02T09:12:00Z",
+      checkError: null,
+      updateAvailable: true,
+      activeRun: null,
+      controlPlane: {
+        version: "0.13.0",
+        upgradable: true,
+        mayUpgrade: true,
+        reason: null,
+        sessions: ["Ledger exports"],
+        updater: { configured: true, reachable: true, version: "0.13.0", apiVersion: 1, problem: null },
+      },
+      hosts: HOSTS.map((h) => ({
+        hostId: h.id,
+        name: h.name,
+        version: h.workerVersion,
+        online: h.state === "Online",
+        drained: h.drained,
+        upgradable: true,
+        mayUpgrade: true,
+        reason: null,
+        sessions: [],
+      })),
+    },
     "/api/v1/events": [],
   };
 
