@@ -25,6 +25,7 @@ pub mod reclaim;
 pub mod skills;
 pub mod sshkey;
 pub mod tasks;
+pub mod telemetry;
 pub mod trackers;
 pub mod transport;
 pub mod updates;
