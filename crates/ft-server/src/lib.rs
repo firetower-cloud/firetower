@@ -237,6 +237,11 @@ pub async fn run(config: Config) -> Result<()> {
     // whatever built up before there was anything to clear it.
     tokio::spawn(reclaim::watch(state.clone()));
     tokio::spawn(updates::runs::resume(state.clone()));
+    // One digest per completed day, into the outbox a client collects from.
+    // Hourly rather than at midnight: a control plane is restarted and
+    // occasionally off overnight, and "run at midnight" is a schedule that
+    // quietly skips days.
+    tokio::spawn(telemetry::watch(state.clone()));
 
     announce(&policy, admin.as_ref(), &ssh_identity, &config);
 

@@ -14,6 +14,12 @@ import { getMeQueryKey, useMe } from "@/src/api/generated/auth/auth";
 import { useRenameOrganization } from "@/src/api/generated/organization/organization";
 import { ApiError } from "@/src/api/http";
 import { useBootstrap } from "@/src/api/generated/meta/meta";
+import {
+  getPreviewQueryKey,
+  usePreview,
+  useSetTelemetrySettings,
+} from "@/src/api/generated/telemetry/telemetry";
+import { Checkbox } from "@/components/ui";
 import { Badge, Button, Input, Panel } from "@/components/ui";
 import { Trouble } from "./Shared";
 
@@ -26,6 +32,7 @@ export function Settings() {
     <div className="max-w-[44rem] space-y-4">
       <Name current={me?.organization?.name ?? ""} />
       <ThisServer />
+      <Telemetry />
     </div>
   );
 }
@@ -77,6 +84,110 @@ function Name({ current }: { current: string }) {
         </Button>
       </div>
       {rename.error ? <Trouble>{why(rename.error)}</Trouble> : null}
+    </Panel>
+  );
+}
+
+/**
+ * What this installation reports about itself, and the switch for it.
+ *
+ * Here rather than in the desktop app, and per organisation rather than per
+ * person: one switch for the whole install, so turning it off means off rather
+ * than off-for-me-but-not-my-colleagues. An administrator changes it; everybody
+ * else can read it, which is the point — somebody who cannot change a thing
+ * being collected about them should at least be able to see that it is.
+ *
+ * The whole panel is built from `/telemetry/preview`, deliberately. It answers
+ * the state, the destination, the backlog and the actual document in one
+ * request, so no two parts of this can disagree about what is being sent. It is
+ * also computed on demand rather than read out of the outbox, so it answers on
+ * an install where collection is off and there is nothing queued — which is
+ * exactly the state somebody deciding whether to turn it on is in.
+ */
+function Telemetry() {
+  const { data: me } = useMe();
+  const admin = me?.user.role === "admin";
+  const cache = useQueryClient();
+  const { data } = usePreview();
+  const set = useSetTelemetrySettings();
+  const [showing, setShowing] = useState(false);
+
+  const on = data?.enabled ?? true;
+
+  const toggle = (enabled: boolean) =>
+    set.mutate(
+      { data: { enabled } },
+      { onSuccess: () => void cache.invalidateQueries({ queryKey: getPreviewQueryKey() }) },
+    );
+
+  return (
+    <Panel>
+      <div className="border-b border-line px-4 py-3">
+        <h2 className="text-ui font-medium text-bone">Telemetry</h2>
+        <p className="mt-0.5 text-meta text-mute">
+          Daily counts about this installation, so we can tell how Firetower is actually used. On
+          unless you turn it off.
+        </p>
+      </div>
+
+      <div className="space-y-3 px-4 py-3.5">
+        <div className="flex items-start gap-2.5">
+          <Checkbox
+            checked={on}
+            onChange={toggle}
+            disabled={!admin || set.isPending}
+            label="Report daily usage counts"
+          />
+          <div className="min-w-0">
+            <p className="text-ui text-text">Report daily usage counts</p>
+            <p className="mt-0.5 text-meta text-mute">
+              {admin
+                ? "Turning this off also discards anything computed and not yet sent."
+                : "Only an administrator can change this."}
+            </p>
+          </div>
+        </div>
+
+        {/* Said plainly, because the honest list is short and reads better than
+            a reassurance would. */}
+        <p className="text-meta text-mute">
+          What goes: how many people used Firetower, how many workspaces and sessions ran, which
+          agents and trackers, how many machines, and which versions. What never goes: your code,
+          your prompts, repository or branch names, task titles, account names, and anything that
+          identifies an individual person — there is no per-person record in it at all.
+        </p>
+
+        <dl className="divide-y divide-line-soft border-t border-line-soft">
+          <Fact term="Goes to">
+            <span className="break-all font-mono text-meta text-bone">{data?.endpoint ?? "—"}</span>
+          </Fact>
+          <Fact term="Sent by">
+            <span className="text-meta text-mute">
+              The desktop app, next time somebody opens it. This server never connects out.
+            </span>
+          </Fact>
+          {on ? (
+            <Fact term="Waiting">
+              <span className="text-meta text-mute">
+                {data ? `${data.waiting} ${data.waiting === 1 ? "day" : "days"}` : "—"}
+              </span>
+            </Fact>
+          ) : null}
+        </dl>
+
+        <div>
+          <Button variant="quiet" onClick={() => setShowing(!showing)}>
+            {showing ? "Hide" : "Show exactly what is sent"}
+          </Button>
+          {showing ? (
+            <pre className="mt-2 max-h-80 overflow-auto rounded border border-line bg-ground p-3 font-mono text-meta text-dim">
+              {JSON.stringify(data?.example ?? {}, null, 2)}
+            </pre>
+          ) : null}
+        </div>
+      </div>
+
+      {set.error ? <Trouble>{why(set.error)}</Trouble> : null}
     </Panel>
   );
 }

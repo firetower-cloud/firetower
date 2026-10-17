@@ -18,6 +18,7 @@ import { Boundary } from "~/ui/Boundary";
 import { Gate } from "~/ui/Gate";
 import { navigate, usePathname } from "~/shims/next-navigation";
 import { offerUpdate, useBuild } from "~/update";
+import { startCourier } from "~/telemetry";
 import { islandState } from "~/island/state";
 import { useConfirm } from "~/ui/Confirm";
 
@@ -59,6 +60,11 @@ export function App() {
     const t = setTimeout(() => void offerUpdate(build, confirm), 4000);
     return () => clearTimeout(t);
   }, [build, confirm]);
+
+  /* Empty each server's telemetry outbox, in the background, forever. Nothing
+     on screen waits for it and nothing here decides what is in a digest — see
+     `~/telemetry`. */
+  useEffect(() => startCourier(), []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

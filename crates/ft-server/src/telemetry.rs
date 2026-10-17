@@ -93,6 +93,44 @@ pub const SCHEMA_VERSION: u32 = 1;
 /// held past this is one that would be rejected on arrival.
 pub const KEEP_UNDELIVERED_DAYS: i64 = 30;
 
+/// Where a digest goes.
+///
+/// Held here rather than compiled into the desktop app, and handed to the
+/// courier with the digests themselves. Three reasons, in order of how much
+/// they matter:
+///
+/// * **One source of truth.** The client is a courier; deciding the address is
+///   not its job, and a hostname duplicated into a shipped binary is one that
+///   cannot be corrected for anybody who has not updated.
+/// * **`/telemetry/preview` can say where, not only what.** A preview that
+///   showed the bytes but not the destination answers half the question an
+///   administrator is actually asking.
+/// * **It can be pointed somewhere else.** An organisation that wants its own
+///   collector, or none, sets the environment variable — the same escape hatch
+///   `FIRETOWER_UPDATE_FEED` already gives for the releases feed.
+///
+/// Not a secret and not authenticated: the endpoint is unauthenticated by
+/// necessity, because a key shipped inside an AGPL build is readable by anyone
+/// who downloads it.
+pub const ENDPOINT_ENV: &str = "FIRETOWER_TELEMETRY_ENDPOINT";
+
+const DEFAULT_ENDPOINT: &str = "https://telemetry.usefiretower.com/v1/digests";
+
+pub fn endpoint() -> String {
+    chosen_endpoint(std::env::var(ENDPOINT_ENV).ok())
+}
+
+/// The choice, apart from where the environment is read.
+///
+/// Split out so it can be tested without `set_var`, which is process-global
+/// and would race every other test running beside it.
+fn chosen_endpoint(from_env: Option<String>) -> String {
+    from_env
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| DEFAULT_ENDPOINT.to_string())
+}
+
 /// Install-wide settings, in the existing `settings` table.
 pub mod keys {
     /// `"false"` disables collection. Absent means enabled — this is opt-out,
@@ -104,8 +142,6 @@ pub mod keys {
     pub const SALT: &str = "telemetry.salt";
     /// The last desktop version seen collecting a digest.
     pub const COURIER: &str = "telemetry.courier";
-    /// When somebody was first told collection was on.
-    pub const DISCLOSED_AT: &str = "telemetry.disclosed_at";
 }
 
 // ── the payload ─────────────────────────────────────────────────────────────
@@ -253,6 +289,20 @@ pub async fn set_enabled(accounts: &Accounts, on: bool) -> Result<()> {
     accounts
         .set_setting(keys::ENABLED, if on { "true" } else { "false" })
         .await
+}
+
+/// Throw away everything not yet sent.
+///
+/// Called when somebody turns collection off. Without it, switching off would
+/// stop *new* digests while the ones already computed went out on the next
+/// client to connect — which is not what anybody means by off, and is the one
+/// behaviour that would make the setting a lie.
+pub async fn discard_undelivered(db: &Db) -> Result<u64> {
+    let done = sqlx::query("DELETE FROM telemetry_digests WHERE delivered_at IS NULL")
+        .execute(db.pool())
+        .await
+        .context("discarding undelivered digests")?;
+    Ok(done.rows_affected())
 }
 
 /// Remember which desktop version last collected a digest.
@@ -679,6 +729,68 @@ pub async fn prune(db: &Db, today: NaiveDate) -> Result<u64> {
     .await
     .context("pruning digests")?;
     Ok(done.rows_affected())
+}
+
+// ── the daily job ───────────────────────────────────────────────────────────
+
+/// How often to look for a day that needs a digest.
+///
+/// Hourly, not daily. A control plane is restarted, redeployed and occasionally
+/// off overnight, so "run at midnight" is a schedule that quietly skips days.
+/// Asking every hour whether anything is missing converges on the same answer
+/// and survives being switched off for a week.
+const SWEEP: std::time::Duration = std::time::Duration::from_secs(3600);
+
+/// Compute whatever days are missing, prune what is spent.
+///
+/// Returns how many digests were written, so the caller can say something
+/// useful in a log line rather than running silently.
+pub async fn sweep(db: &Db, accounts: &Accounts, today: NaiveDate) -> Result<usize> {
+    if !enabled(accounts).await? {
+        // Not merely "do not compute": anything already computed and not yet
+        // collected goes, because off has to mean off.
+        let dropped = discard_undelivered(db).await?;
+        if dropped > 0 {
+            tracing::info!("telemetry is off; discarded {dropped} undelivered digest(s)");
+        }
+        return Ok(0);
+    }
+
+    // Nothing to report until somebody has named the organisation. Before that
+    // the install is mid-setup and `installed` has no row to read.
+    if installed(db.pool()).await?.is_none() {
+        return Ok(0);
+    }
+
+    let mut wrote = 0;
+    for day in days_to_compute(db, today).await? {
+        let digest = build(db, accounts, day).await?;
+        record(db, &digest).await?;
+        wrote += 1;
+    }
+
+    prune(db, today).await?;
+    Ok(wrote)
+}
+
+/// The loop. Spawned at start-up.
+pub async fn watch(state: crate::AppState) {
+    let (db, accounts) = (state.db.clone(), state.accounts.clone());
+    // Not immediately. Start-up has migrations, a fleet reconnecting and a
+    // setup wizard possibly still unanswered; a sweep racing that is reading a
+    // database that is still settling.
+    tokio::time::sleep(std::time::Duration::from_secs(45)).await;
+    loop {
+        match sweep(&db, &accounts, Utc::now().date_naive()).await {
+            Ok(0) => {}
+            Ok(n) => tracing::info!("computed {n} telemetry digest(s)"),
+            // A warning, never a failure that stops anything. Telemetry is the
+            // least important thing this process does, and an install whose
+            // digests cannot be built should keep running agents.
+            Err(e) => tracing::warn!("computing telemetry digests: {e:#}"),
+        }
+        tokio::time::sleep(SWEEP).await;
+    }
 }
 
 #[cfg(test)]
@@ -1192,5 +1304,96 @@ mod tests {
         assert!(left
             .iter()
             .all(|p| p.day > DAY - Duration::days(KEEP_UNDELIVERED_DAYS)));
+    }
+
+    #[test]
+    fn the_endpoint_can_be_pointed_elsewhere() {
+        assert_eq!(chosen_endpoint(None), DEFAULT_ENDPOINT);
+        // Unset and set-to-nothing are the same intent, and a trailing newline
+        // from a shell is not part of a URL.
+        assert_eq!(chosen_endpoint(Some("   ".into())), DEFAULT_ENDPOINT);
+        assert_eq!(
+            chosen_endpoint(Some("  https://collector.acme.internal/v1  \n".into())),
+            "https://collector.acme.internal/v1"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_sweep_computes_the_days_that_are_missing() {
+        let (db, accounts, _org, _who) = harness().await;
+
+        let wrote = sweep(&db, &accounts, DAY).await.unwrap();
+        assert_eq!(
+            wrote as i64, KEEP_UNDELIVERED_DAYS,
+            "every day in the window, once"
+        );
+
+        // Idempotent: a second sweep has nothing left to do.
+        assert_eq!(sweep(&db, &accounts, DAY).await.unwrap(), 0);
+
+        let owed = undelivered(&db, 60).await.unwrap();
+        assert_eq!(owed.len() as i64, KEEP_UNDELIVERED_DAYS);
+        assert!(owed.iter().all(|p| p.day < DAY), "never today");
+        assert!(owed.windows(2).all(|w| w[0].day < w[1].day), "oldest first");
+    }
+
+    /// Off has to mean off, including for what was already computed.
+    #[tokio::test]
+    async fn turning_it_off_discards_what_was_not_yet_collected() {
+        let (db, accounts, _org, _who) = harness().await;
+        sweep(&db, &accounts, DAY).await.unwrap();
+        assert!(!undelivered(&db, 60).await.unwrap().is_empty());
+
+        set_enabled(&accounts, false).await.unwrap();
+        let wrote = sweep(&db, &accounts, DAY).await.unwrap();
+
+        assert_eq!(wrote, 0, "nothing new while off");
+        assert!(
+            undelivered(&db, 60).await.unwrap().is_empty(),
+            "a digest computed before the switch must not go out after it"
+        );
+    }
+
+    #[tokio::test]
+    async fn discarding_leaves_what_was_already_sent() {
+        let (db, accounts, _org, _who) = harness().await;
+        let a = build(&db, &accounts, DAY - Duration::days(1))
+            .await
+            .unwrap();
+        let b = build(&db, &accounts, DAY - Duration::days(2))
+            .await
+            .unwrap();
+        record(&db, &a).await.unwrap();
+        record(&db, &b).await.unwrap();
+        mark_delivered(&db, &[a.day]).await.unwrap();
+
+        assert_eq!(
+            discard_undelivered(&db).await.unwrap(),
+            1,
+            "only the one still owed"
+        );
+
+        // The delivered row is still there, so it is not computed and sent
+        // again on the next sweep.
+        let due = days_to_compute(&db, DAY).await.unwrap();
+        assert!(
+            !due.contains(&a.day),
+            "a day already sent is not owed again"
+        );
+        assert!(due.contains(&b.day), "a discarded day is owed again");
+    }
+
+    /// An install mid-setup has no organisation, and asking for one would be an
+    /// error rather than an empty answer.
+    #[tokio::test]
+    async fn an_unnamed_install_reports_nothing_rather_than_failing() {
+        let (db, _accounts, _org, _who) = harness().await;
+        sqlx::query("DELETE FROM installation")
+            .execute(db.pool())
+            .await
+            .unwrap();
+        let accounts = Accounts::new(db.pool().clone());
+
+        assert_eq!(sweep(&db, &accounts, DAY).await.unwrap(), 0);
     }
 }
