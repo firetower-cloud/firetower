@@ -16,6 +16,7 @@ export * from './setup/setup';
 export * from './skills/skills';
 export * from './stream/stream';
 export * from './tasks/tasks';
+export * from './telemetry/telemetry';
 export * from './trackers/trackers';
 export * from './updates/updates';
 export * from './voice/voice';

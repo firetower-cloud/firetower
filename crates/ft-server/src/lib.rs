@@ -25,6 +25,7 @@ pub mod reclaim;
 pub mod skills;
 pub mod sshkey;
 pub mod tasks;
+pub mod telemetry;
 pub mod trackers;
 pub mod transport;
 pub mod updates;
@@ -236,6 +237,28 @@ pub async fn run(config: Config) -> Result<()> {
     // whatever built up before there was anything to clear it.
     tokio::spawn(reclaim::watch(state.clone()));
     tokio::spawn(updates::runs::resume(state.clone()));
+    // One digest per completed day, into the outbox a client collects from.
+    // Hourly rather than at midnight: a control plane is restarted and
+    // occasionally off overnight, and "run at midnight" is a schedule that
+    // quietly skips days.
+    //
+    // **Not in development.** The endpoint always defaults to production —
+    // that is deliberate, so a real installation reports without being
+    // configured — which means a checkout on somebody's laptop would otherwise
+    // courier its test data to the real collector and count itself as another
+    // organisation. The headline number this exists to produce is "how many
+    // organisations use Firetower", and seeding it with every developer's
+    // scratch database is the one way to make it worthless.
+    //
+    // Only the automatic sweep is skipped. `/telemetry/preview` still answers,
+    // because it computes on demand, and turning telemetry on through the API
+    // still sweeps — so the whole path is exercisable on a laptop by somebody
+    // who means to, and never by somebody who merely ran the server.
+    if config.dev {
+        tracing::info!("telemetry: no automatic sweep in development");
+    } else {
+        tokio::spawn(telemetry::watch(state.clone()));
+    }
 
     announce(&policy, admin.as_ref(), &ssh_identity, &config);
 
