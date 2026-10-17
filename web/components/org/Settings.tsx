@@ -20,6 +20,7 @@ import {
   useSetTelemetrySettings,
 } from "@/src/api/generated/telemetry/telemetry";
 import { Checkbox } from "@/components/ui";
+import { Confirm, type Ask } from "@/components/Confirm";
 import { Badge, Button, Input, Panel } from "@/components/ui";
 import { Trouble } from "./Shared";
 
@@ -111,14 +112,52 @@ function Telemetry() {
   const { data } = usePreview();
   const set = useSetTelemetrySettings();
   const [showing, setShowing] = useState(false);
+  const [asking, setAsking] = useState<Ask | null>(null);
 
   const on = data?.enabled ?? true;
 
-  const toggle = (enabled: boolean) =>
-    set.mutate(
+  const save = (enabled: boolean) =>
+    set.mutateAsync(
       { data: { enabled } },
       { onSuccess: () => void cache.invalidateQueries({ queryKey: getPreviewQueryKey() }) },
     );
+
+  /**
+   * Turning it on is one click. Turning it off asks.
+   *
+   * Asymmetric on purpose, and the asymmetry is the whole point: it is the one
+   * direction worth a sentence, because somebody who has read what is actually
+   * collected usually leaves it on. The words typed out are so that it cannot
+   * be done by clicking twice in the same place.
+   *
+   * It still goes through. This is a question, not a wall — the body says what
+   * will happen, including the part that is not obvious from the label.
+   */
+  const toggle = (enabled: boolean) => {
+    if (enabled) {
+      void save(true);
+      return;
+    }
+    setAsking({
+      title: "Turn telemetry off?",
+      body: (
+        <>
+          <p>
+            Firetower is free to use and open source, and telemetry is crucial for our future
+            development. Are you sure you want to turn it off?
+          </p>
+          <p className="mt-3">
+            Nothing further will be collected, and anything already computed but not yet sent is
+            discarded. You can turn it back on here at any time.
+          </p>
+        </>
+      ),
+      action: "Turn it off",
+      tone: "danger",
+      confirmWith: "TURN IT OFF",
+      run: () => save(false),
+    });
+  };
 
   return (
     <Panel>
@@ -188,6 +227,7 @@ function Telemetry() {
       </div>
 
       {set.error ? <Trouble>{why(set.error)}</Trouble> : null}
+      <Confirm ask={asking} onClose={() => setAsking(null)} />
     </Panel>
   );
 }
