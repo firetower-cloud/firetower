@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.8.0](https://github.com/firetower-cloud/firetower/compare/mobile-v0.7.0...mobile-v0.8.0) (2026-10-17)
+
+
+### Features
+
+* support empty repositories ([f7c9f97](https://github.com/firetower-cloud/firetower/commit/f7c9f975ec67ff8c8ce17abc476cab649bfda881))
+* **telemetry:** opt-out daily usage reporting ([5a32494](https://github.com/firetower-cloud/firetower/commit/5a324947de49e54293e8d02e6707bdf1f35d8af5))
+* work on a repository that has no commits yet ([b0f68c8](https://github.com/firetower-cloud/firetower/commit/b0f68c8f29d16b0ddd2418db66dd719fe07a7aa1))
+
 ## [0.7.0](https://github.com/firetower-cloud/firetower/compare/mobile-v0.6.0...mobile-v0.7.0) (2026-10-11)
 
 

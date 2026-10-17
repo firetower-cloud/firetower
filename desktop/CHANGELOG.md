@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.20.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.19.0...desktop-v0.20.0) (2026-10-17)
+
+
+### Features
+
+* check for updates every 10 minutes and show availability on the ([a89642c](https://github.com/firetower-cloud/firetower/commit/a89642c84559fb1ba359a54fec2936693a9e85c0))
+* check for updates every 10 minutes and show availability on the ([2548a5b](https://github.com/firetower-cloud/firetower/commit/2548a5b93bcb338bcc044e790ac2c503a3330f2a))
+* consolidate composer settings into single nested control ([e1dfb24](https://github.com/firetower-cloud/firetower/commit/e1dfb24d7f62fa8fc748ad92a73300c4b529d7dc))
+* one control in the composer, not four ([33f2cd0](https://github.com/firetower-cloud/firetower/commit/33f2cd05aa11baaf224bb51dd347036c31df6190))
+* support empty repositories ([f7c9f97](https://github.com/firetower-cloud/firetower/commit/f7c9f975ec67ff8c8ce17abc476cab649bfda881))
+* **telemetry:** opt-out daily usage reporting ([5a32494](https://github.com/firetower-cloud/firetower/commit/5a324947de49e54293e8d02e6707bdf1f35d8af5))
+* **telemetry:** serve the outbox, add the switch, and carry digests ([65b1355](https://github.com/firetower-cloud/firetower/commit/65b1355b9251630489860589330519193efebb64))
+* work on a repository that has no commits yet ([b0f68c8](https://github.com/firetower-cloud/firetower/commit/b0f68c8f29d16b0ddd2418db66dd719fe07a7aa1))
+
+
+### Bug Fixes
+
+* **skills:** parse block scalars and close injection gaps ([4abe966](https://github.com/firetower-cloud/firetower/commit/4abe966345b5a1fe47fb162f461ed3c155202201))
+* **skills:** parse block scalars and close injection gaps ([cf1760d](https://github.com/firetower-cloud/firetower/commit/cf1760d8d9445b81f615ad2bcee85b6c31f44c0b))
+* the mock sends the caution field the client reads ([28a4142](https://github.com/firetower-cloud/firetower/commit/28a41423b83b1b5edb34efecc7dcdc640c5ed9b3))
+
 ## [0.19.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.18.0...desktop-v0.19.0) (2026-10-11)
 
 
