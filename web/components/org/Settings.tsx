@@ -19,7 +19,6 @@ import {
   usePreview,
   useSetTelemetrySettings,
 } from "@/src/api/generated/telemetry/telemetry";
-import { Checkbox } from "@/components/ui";
 import { Confirm, type Ask } from "@/components/Confirm";
 import { Badge, Button, Input, Panel } from "@/components/ui";
 import { Trouble } from "./Shared";
@@ -105,6 +104,29 @@ function Name({ current }: { current: string }) {
  * an install where collection is off and there is nothing queued — which is
  * exactly the state somebody deciding whether to turn it on is in.
  */
+/**
+ * What this installation reports about itself, and the switch for it.
+ *
+ * Here rather than in the desktop app, and per organisation rather than per
+ * person: one switch for the whole install, so turning it off means off rather
+ * than off-for-me-but-not-my-colleagues. An administrator changes it; everybody
+ * else can read it, which is the point — somebody who cannot change a thing
+ * being collected about them should at least be able to see that it is.
+ *
+ * The whole panel is built from `/telemetry/preview`, deliberately. It answers
+ * the state, the destination, the backlog and the actual document in one
+ * request, so no two parts of this can disagree about what is being sent. It is
+ * also computed on demand rather than read out of the outbox, so it answers on
+ * an install where collection is off and there is nothing queued — which is
+ * exactly the state somebody deciding whether to turn it on is in.
+ *
+ * **A button at the foot rather than a tick beside a label.** A checkbox is for
+ * a preference among several, read left to right and set on the way past. This
+ * is one decision about the whole panel above it, and it reads in the order it
+ * should be made: what is collected, where it goes, what is actually sent, and
+ * only then the button. Red in one direction and not the other, because only
+ * one direction is worth a second thought.
+ */
 function Telemetry() {
   const { data: me } = useMe();
   const admin = me?.user.role === "admin";
@@ -123,70 +145,47 @@ function Telemetry() {
     );
 
   /**
-   * Turning it on is one click. Turning it off asks.
+   * Turning it on is one click. Turning it off asks, and has to be typed.
    *
-   * Asymmetric on purpose, and the asymmetry is the whole point: it is the one
-   * direction worth a sentence, because somebody who has read what is actually
-   * collected usually leaves it on. The words typed out are so that it cannot
-   * be done by clicking twice in the same place.
+   * Asymmetric on purpose: it is the one direction worth a sentence, because
+   * somebody who has read what is actually collected — one click away, above —
+   * usually leaves it on. Typing the words is so it cannot be done by clicking
+   * twice in the same place.
    *
-   * It still goes through. This is a question, not a wall — the body says what
-   * will happen, including the part that is not obvious from the label.
+   * It still goes through. This is a question, not a wall.
+   *
+   * One sentence, and the asking is the whole of it. What turning it off
+   * actually does is said at the foot of the panel instead, where it is
+   * readable before the dialog is ever opened.
    */
-  const toggle = (enabled: boolean) => {
-    if (enabled) {
-      void save(true);
-      return;
-    }
+  const turnOff = () =>
     setAsking({
       title: "Turn telemetry off?",
       body: (
-        <>
-          <p>
-            Firetower is free to use and open source, and telemetry is crucial for our future
-            development. Are you sure you want to turn it off?
-          </p>
-          <p className="mt-3">
-            Nothing further will be collected, and anything already computed but not yet sent is
-            discarded. You can turn it back on here at any time.
-          </p>
-        </>
+        <p>
+          Firetower is free to use and open source, and telemetry is crucial for our future
+          development. Are you sure you want to turn it off?
+        </p>
       ),
       action: "Turn it off",
       tone: "danger",
       confirmWith: "TURN IT OFF",
       run: () => save(false),
     });
-  };
 
   return (
     <Panel>
-      <div className="border-b border-line px-4 py-3">
-        <h2 className="text-ui font-medium text-bone">Telemetry</h2>
-        <p className="mt-0.5 text-meta text-mute">
-          Daily counts about this installation, so we can tell how Firetower is actually used. On
-          unless you turn it off.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-line px-4 py-3">
+        <div className="min-w-0">
+          <h2 className="text-ui font-medium text-bone">Telemetry</h2>
+          <p className="mt-0.5 text-meta text-mute">
+            Daily counts about this installation, so we can tell how Firetower is actually used.
+          </p>
+        </div>
+        <Badge tone={on ? "sage" : "brick"}>{on ? "On" : "Off"}</Badge>
       </div>
 
       <div className="space-y-3 px-4 py-3.5">
-        <div className="flex items-start gap-2.5">
-          <Checkbox
-            checked={on}
-            onChange={toggle}
-            disabled={!admin || set.isPending}
-            label="Report daily usage counts"
-          />
-          <div className="min-w-0">
-            <p className="text-ui text-text">Report daily usage counts</p>
-            <p className="mt-0.5 text-meta text-mute">
-              {admin
-                ? "Turning this off also discards anything computed and not yet sent."
-                : "Only an administrator can change this."}
-            </p>
-          </div>
-        </div>
-
         {/* Said plainly, because the honest list is short and reads better than
             a reassurance would. */}
         <p className="text-meta text-mute">
@@ -227,6 +226,30 @@ function Telemetry() {
       </div>
 
       {set.error ? <Trouble>{why(set.error)}</Trouble> : null}
+
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-4 py-3">
+        <p className="min-w-0 text-meta text-mute">
+          {!admin
+            ? "Only an administrator can change this."
+            : on
+              ? "Turning it off also discards anything computed and not yet sent."
+              : "Nothing is being collected or sent."}
+        </p>
+        {on ? (
+          <Button variant="danger" disabled={!admin || set.isPending} onClick={turnOff}>
+            {set.isPending ? "Working…" : "Turn telemetry off"}
+          </Button>
+        ) : (
+          <Button
+            variant="primary"
+            disabled={!admin || set.isPending}
+            onClick={() => void save(true)}
+          >
+            {set.isPending ? "Working…" : "Turn telemetry on"}
+          </Button>
+        )}
+      </div>
+
       <Confirm ask={asking} onClose={() => setAsking(null)} />
     </Panel>
   );
