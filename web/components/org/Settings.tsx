@@ -186,13 +186,13 @@ function Telemetry() {
       </div>
 
       <div className="space-y-3 px-4 py-3.5">
-        {/* Said plainly, because the honest list is short and reads better than
-            a reassurance would. */}
-        <p className="text-meta text-mute">
-          What goes: how many people used Firetower, how many workspaces and sessions ran, which
-          agents and trackers, how many machines, and which versions. What never goes: your code,
-          your prompts, repository or branch names, task titles, account names, and anything that
-          identifies an individual person — there is no per-person record in it at all.
+        {/* Two sentences: the promise, then the reason. The exhaustive version
+            of both is one click away under "Show exactly what is sent", which
+            is the copy that cannot drift from the truth — it is the document. */}
+        <p className="text-ui leading-[1.6] text-dim">
+          We never send anything that could identify a person — no prompts, no task names, nothing
+          sensitive — and we never will. Telemetry tells us which versions people are running and
+          how usage is growing over time.
         </p>
 
         <dl className="divide-y divide-line-soft border-t border-line-soft">
