@@ -241,7 +241,24 @@ pub async fn run(config: Config) -> Result<()> {
     // Hourly rather than at midnight: a control plane is restarted and
     // occasionally off overnight, and "run at midnight" is a schedule that
     // quietly skips days.
-    tokio::spawn(telemetry::watch(state.clone()));
+    //
+    // **Not in development.** The endpoint always defaults to production —
+    // that is deliberate, so a real installation reports without being
+    // configured — which means a checkout on somebody's laptop would otherwise
+    // courier its test data to the real collector and count itself as another
+    // organisation. The headline number this exists to produce is "how many
+    // organisations use Firetower", and seeding it with every developer's
+    // scratch database is the one way to make it worthless.
+    //
+    // Only the automatic sweep is skipped. `/telemetry/preview` still answers,
+    // because it computes on demand, and turning telemetry on through the API
+    // still sweeps — so the whole path is exercisable on a laptop by somebody
+    // who means to, and never by somebody who merely ran the server.
+    if config.dev {
+        tracing::info!("telemetry: no automatic sweep in development");
+    } else {
+        tokio::spawn(telemetry::watch(state.clone()));
+    }
 
     announce(&policy, admin.as_ref(), &ssh_identity, &config);
 
