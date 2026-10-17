@@ -19,7 +19,8 @@ import {
 import { useMe } from "~/api/generated/auth/auth";
 import { useSetupState } from "~/api/generated/setup/setup";
 import { useGetUpdates } from "~/api/generated/updates/updates";
-import { showsDot } from "~/api/updates";
+import { updatesRow } from "~/api/updates";
+import { useBuild } from "~/update";
 import { useListTrackers, useListTrackerScopes } from "~/api/generated/trackers/trackers";
 import {
   getListSessionsQueryKey,
@@ -252,10 +253,18 @@ export function useGate(): { setup: boolean; locked: boolean; ready: boolean } {
   };
 }
 
-/** The dot on Updates in the rail. Asked rarely: the answer changes monthly. */
-export function useUpdatesDot(): boolean {
+/**
+ * What the rail's Updates row says, from both of the things that answer to it.
+ *
+ * The deployment, asked every ten minutes because the answer changes monthly,
+ * and this app's own build, which `src/update.ts` watches on the same beat.
+ * Neither one on its own is the question somebody glancing at the rail is
+ * asking, which is simply whether there is an update to take.
+ */
+export function useUpdatesRow(): { label: string; loud: boolean; dot: boolean } {
   const q = useGetUpdates({ query: { refetchInterval: 10 * 60_000, retry: false, staleTime: 60_000 } });
-  return showsDot(q.data);
+  const build = useBuild();
+  return updatesRow(q.data, !!build.newer);
 }
 
 /** Named agent connections — whose subscription a session runs on. */

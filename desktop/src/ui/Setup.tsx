@@ -48,6 +48,14 @@ export function Setup({ onDone }: { onDone: () => void }) {
       <Check className="h-6 w-6 text-sage" strokeWidth={2} />
       <h1 className="mt-3 text-display text-bone">{s.organization?.name ?? "This Firetower"} is set up</h1>
       <p className="mt-2 text-read text-dim">Connect GitHub and add a machine in Configuration when you are ready. Nothing else is needed to start.</p>
+      {/* Said here because this is the last screen before the app, and an
+          opt-out nobody was told about is not one. Short on purpose: the full
+          list, and the switch, are one click away where the setting lives. */}
+      <p className="mt-3 border-t border-line pt-3 text-meta text-mute">
+        Firetower reports daily usage counts so we can see how it is actually used — never your
+        code, your prompts or your repository names. An administrator can read exactly what is sent,
+        or turn it off, under Organisation → Settings.
+      </p>
       <button disabled={complete.isPending} onClick={() => complete.mutate(undefined as never, { onSuccess: () => { refresh(); onDone(); } })} className="control mt-5 w-full justify-center bg-bone font-medium text-ground hover:opacity-90 disabled:bg-raise disabled:text-mute">{complete.isPending ? "Finishing…" : "Open the dashboard"}</button>
     </Frame>
   );

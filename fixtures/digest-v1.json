@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "install_id": "08de96b5b9a81089ffe23c2f417d35dfd10af498b913863a2b34ff2d15c93756",
+  "day": "2026-10-14",
+  "install_age_days": 83,
+  "generated_at": "2026-10-15T00:07:12Z",
+  "versions": {
+    "control_plane": "0.45.0",
+    "courier_desktop": "0.19.0",
+    "workers": [
+      {
+        "version": "0.45.0",
+        "hosts": 3
+      },
+      {
+        "version": "0.44.1",
+        "hosts": 1
+      }
+    ]
+  },
+  "people": {
+    "registered": 12,
+    "active_today": 7,
+    "active_7d": 9,
+    "active_28d": 11,
+    "teams": 3,
+    "active_days_28d": {
+      "01-03": 4,
+      "04-10": 3,
+      "11-28": 4
+    }
+  },
+  "activity": {
+    "workspaces_active": 14,
+    "sessions_active": 23,
+    "sessions_by_agent": {
+      "claude-code": 18,
+      "codex": 5
+    },
+    "tasks_worked": 9,
+    "task_providers": {
+      "github": 8,
+      "linear": 1
+    }
+  },
+  "hosts": {
+    "count": 4
+  }
+}

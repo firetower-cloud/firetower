@@ -27,6 +27,7 @@ mod setup;
 mod skills;
 mod stream;
 mod tasks;
+mod telemetry;
 mod terminal;
 mod trackers;
 mod updates;
@@ -510,6 +511,13 @@ pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::with_openapi(ApiDoc::openapi())
         .routes(routes!(bootstrap))
         .routes(routes!(consumption::consumption))
+        .routes(routes!(telemetry::pending))
+        .routes(routes!(telemetry::delivered))
+        .routes(routes!(telemetry::preview))
+        .routes(routes!(
+            telemetry::telemetry_settings,
+            telemetry::set_telemetry_settings
+        ))
         .routes(routes!(auth::login))
         .routes(routes!(auth::logout))
         .routes(routes!(auth::me))

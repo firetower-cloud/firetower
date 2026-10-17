@@ -17,7 +17,8 @@ import { NewWorkspace } from "~/ui/NewWorkspace";
 import { Boundary } from "~/ui/Boundary";
 import { Gate } from "~/ui/Gate";
 import { navigate, usePathname } from "~/shims/next-navigation";
-import { offerUpdate } from "~/update";
+import { offerUpdate, useBuild } from "~/update";
+import { startCourier } from "~/telemetry";
 import { islandState } from "~/island/state";
 import { useConfirm } from "~/ui/Confirm";
 
@@ -45,13 +46,25 @@ export function App() {
   useEffect(() => onServers(() => setReal(servers())), []);
   const [palette, setPalette] = useState(false);
   const path = usePathname();
-  /* Once, after the window is up: is there a newer build. */
+  /* Is there a newer build: now, and every ten minutes after, so a window left
+     open for a fortnight does not learn about a release by being restarted.
+     Reading it here is what starts the watch for the whole app — the rail and
+     the Updates screen read the same answer. */
+  const build = useBuild();
   const confirm = useConfirm();
+  /* The first find of a run is offered, once, four seconds in: late enough not
+     to be the first thing that happens, early enough that nothing is in
+     flight. Every find after that is the rail's to say. */
   useEffect(() => {
-    const t = setTimeout(() => void offerUpdate(confirm), 4000);
+    if (!build.newer) return;
+    const t = setTimeout(() => void offerUpdate(build, confirm), 4000);
     return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [build, confirm]);
+
+  /* Empty each server's telemetry outbox, in the background, forever. Nothing
+     on screen waits for it and nothing here decides what is in a digest — see
+     `~/telemetry`. */
+  useEffect(() => startCourier(), []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

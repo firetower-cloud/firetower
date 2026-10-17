@@ -40,6 +40,8 @@ import {
 } from "~/api/generated/updates/updates";
 import { ACTIVE, canStart, countEnded, everythingUpgradable, needsChoice, willWrite, wouldEnd } from "~/api/updates";
 import { useBackendKey } from "~/backend";
+import { bridge } from "~/bridge";
+import { look, takeUpdate, useBuild } from "~/update";
 import { useConfirm } from "~/ui/Confirm";
 
 import { why } from "~/data";
@@ -50,25 +52,38 @@ export function Updates() {
   const runs = useListRuns({ query: { refetchInterval: 30_000 } });
   const check = useCheckUpdates();
   const backUp = useBackUpNow();
+  const build = useBuild();
   const [planning, setPlanning] = useState(false);
   const [opened, setOpened] = useState<string | null>(null);
   const refresh = () => Promise.all([cache.invalidateQueries({ queryKey: getGetUpdatesQueryKey() }), cache.invalidateQueries({ queryKey: getListRunsQueryKey() })]);
 
-  if (status.isPending) return <Page><p className="flex items-center gap-2 text-read text-mute"><Loader2 className="h-4 w-4 animate-spin" strokeWidth={2} />Asking what is running…</p></Page>;
-  if (status.error) return <Page><p className="text-read text-brick">{why(status.error)}</p></Page>;
+  /* The app's own section is drawn before the server is heard from, and still
+     drawn when it refuses. This app updates itself from GitHub without asking
+     any Firetower anything, so a deployment that is down is not a reason to
+     hide the one button on this screen that still works — and the rail sends
+     people here for that button. */
+  if (status.isPending) return <Page><ThisApp /><p className="mt-7 flex items-center gap-2 text-read text-mute"><Loader2 className="h-4 w-4 animate-spin" strokeWidth={2} />Asking what is running…</p></Page>;
+  if (status.error) return <Page><ThisApp /><p className="mt-7 text-read text-brick">{why(status.error)}</p></Page>;
 
   const s = status.data as UpdateStatus;
   const active = ((runs.data ?? []) as UpdateRun[]).find((r) => ACTIVE.includes(r.state));
   const mayMoveEverything = s.controlPlane.mayUpgrade ?? false;
   const behind = s.hosts.filter((h) => h.mayUpgrade);
+  const level = build.newer ? `${build.newer} is out for this app.` : "Up to date.";
 
   /* What the heading says is what this person can do something about. "A newer
      version is out" to somebody who cannot install it is a notice with no
      action behind it; what they can act on is a machine of theirs that is
-     behind what the deployment is already running. */
+     behind what the deployment is already running.
+
+     The deployment speaks first when it has something to say, because moving
+     it is the larger and rarer act — but when it has nothing, the heading is
+     this app's, and never "Up to date." over a section offering a new build.
+     The rail sends people here in slate for either one; a screen that then
+     said there was nothing to take would be the bug. */
   const headline = mayMoveEverything
     ? !s.updateAvailable
-      ? "Up to date."
+      ? level
       : s.latest?.version === s.current
         ? "Some machines are behind."
         : `${s.latest?.version ?? "A newer version"} is out.`
@@ -78,7 +93,7 @@ export function Updates() {
         : `${behind.length} machines are behind.`
       : s.updateAvailable
         ? `${s.latest?.version ?? "A newer version"} is out.`
-        : "Up to date.";
+        : level;
 
   return (
     <Page>
@@ -91,8 +106,12 @@ export function Updates() {
           </p>
           {s.checkError && <p className="mt-1 text-meta text-brick">{s.checkError}</p>}
         </div>
-        <button disabled={check.isPending} onClick={() => check.mutate(undefined as never, { onSuccess: refresh })} className="control border border-line bg-raise text-dim hover:bg-overlay disabled:text-mute"><Icon of={RefreshCw} size={12} />{check.isPending ? "Checking…" : "Check now"}</button>
+        {/* Both trains: the button is above the whole screen, and a check that
+            only moved half of it is one somebody presses twice. */}
+        <button disabled={check.isPending} onClick={() => { void look(); check.mutate(undefined as never, { onSuccess: refresh }); }} className="control border border-line bg-raise text-dim hover:bg-overlay disabled:text-mute"><Icon of={RefreshCw} size={12} />{check.isPending ? "Checking…" : "Check now"}</button>
       </div>
+
+      <ThisApp />
 
       <Label>The deployment</Label>
       <div className="overflow-hidden rounded-xl border border-line bg-panel">
@@ -160,6 +179,67 @@ export function Updates() {
 
       {planning && <Plan status={s} onClose={() => { setPlanning(false); refresh(); }} />}
     </Page>
+  );
+}
+
+/**
+ * This app's own build, which is not the deployment's.
+ *
+ * Two release trains that happen to share a screen. The Mac app updates itself
+ * from its own GitHub release and anybody may update their own copy; the
+ * deployment below is moved by a run and mostly by an administrator. Different
+ * version numbers, different permissions — so a section of its own rather than
+ * a fourth row in a list that would then have to explain which is which.
+ *
+ * First on the screen because it is the one thing here that is always the
+ * reader's own to do.
+ *
+ * Nothing in a browser tab: a tab has no build of its own to move.
+ */
+function ThisApp() {
+  const build = useBuild();
+  const [taking, setTaking] = useState(false);
+  const [trouble, setTrouble] = useState<string | null>(null);
+  if (!bridge.native) return null;
+
+  /* No confirmation. Nothing is lost — the servers and their tokens stay, and
+     what it ends is this window, which is the thing the button says. */
+  const go = () => {
+    setTrouble(null);
+    setTaking(true);
+    takeUpdate().catch((e) => {
+      setTrouble(why(e));
+      setTaking(false);
+    });
+  };
+
+  return (
+    <>
+      <Label>This app</Label>
+      <div className="overflow-hidden rounded-xl border border-line bg-panel">
+        <Row
+          name="Firetower for Mac"
+          note={build.newer ? "a newer build is out" : "up to date"}
+          version={build.version ?? "—"}
+          sessions={0}
+          said={null}
+          action={
+            build.newer ? (
+              <button disabled={taking} onClick={go} className="control bg-bone font-medium text-ground hover:opacity-90 disabled:bg-raise disabled:text-mute">
+                <Icon of={taking ? Loader2 : Download} size={12} className={taking ? "animate-spin" : undefined} />
+                {taking ? "Downloading…" : `Update to ${build.newer} and relaunch`}
+              </button>
+            ) : null
+          }
+        />
+      </div>
+      {trouble && (
+        <p className="mt-2 flex items-start gap-2 rounded-lg border border-line bg-ground px-3 py-2 text-micro leading-relaxed text-brick">
+          <Icon of={AlertTriangle} size={12} />
+          <span className="min-w-0 flex-1">{trouble} Try it again in a few minutes.</span>
+        </p>
+      )}
+    </>
   );
 }
 

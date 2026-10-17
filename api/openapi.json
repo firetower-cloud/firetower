@@ -6496,6 +6496,135 @@
         }
       }
     },
+    "/api/v1/telemetry/delivered": {
+      "post": {
+        "tags": [
+          "telemetry"
+        ],
+        "operationId": "delivered",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Delivered"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Acknowledged"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/telemetry/pending": {
+      "get": {
+        "tags": [
+          "telemetry"
+        ],
+        "operationId": "pending",
+        "parameters": [
+          {
+            "name": "courier",
+            "in": "query",
+            "description": "The client's own version, remembered so the digest can report the\ndistribution of desktops in use.\n\nTold to the server rather than added to the payload on the way past, so\nthat `/telemetry/preview` shows the whole document. A preview missing a\nfield the client would add is not a preview.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Outbox"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/telemetry/preview": {
+      "get": {
+        "tags": [
+          "telemetry"
+        ],
+        "operationId": "preview",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Preview"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/telemetry/settings": {
+      "get": {
+        "tags": [
+          "telemetry"
+        ],
+        "operationId": "telemetry_settings",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Settings"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "telemetry"
+        ],
+        "operationId": "set_telemetry_settings",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetSettings"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Settings"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/trackers": {
       "get": {
         "tags": [
@@ -7611,6 +7740,20 @@
           },
           "state": {
             "type": "string"
+          }
+        }
+      },
+      "Acknowledged": {
+        "type": "object",
+        "required": [
+          "acknowledged"
+        ],
+        "properties": {
+          "acknowledged": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How many were still owed and are now not. Fewer than asked for means\nanother client got there first, which is ordinary.",
+            "minimum": 0
           }
         }
       },
@@ -8986,6 +9129,22 @@
               "null"
             ],
             "description": "Absent means every workspace this person starts."
+          }
+        }
+      },
+      "Delivered": {
+        "type": "object",
+        "description": "Which days got through.",
+        "required": [
+          "days"
+        ],
+        "properties": {
+          "days": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "date"
+            }
           }
         }
       },
@@ -11241,6 +11400,27 @@
           }
         }
       },
+      "Outbox": {
+        "type": "object",
+        "description": "What is owed, and where it goes.",
+        "required": [
+          "endpoint",
+          "digests"
+        ],
+        "properties": {
+          "digests": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Pending"
+            },
+            "description": "Oldest first. Empty when telemetry is off, which is how the client is\ntold without being trusted to check."
+          },
+          "endpoint": {
+            "type": "string",
+            "description": "Where to post each payload.\n\nGiven by the server so there is one source of truth for the address and\nno hostname compiled into a shipped binary that cannot be corrected."
+          }
+        }
+      },
       "Page": {
         "type": "object",
         "required": [
@@ -11273,6 +11453,24 @@
             "format": "int32",
             "description": "How many there are in total, when the source will say.",
             "minimum": 0
+          }
+        }
+      },
+      "Pending": {
+        "type": "object",
+        "description": "A digest still owed, as the client will send it.",
+        "required": [
+          "day",
+          "payload"
+        ],
+        "properties": {
+          "day": {
+            "type": "string",
+            "format": "date"
+          },
+          "payload": {
+            "type": "object",
+            "description": "The bytes to post, verbatim.\n\nOpaque to the client on purpose. It is a courier: it carries the\nenvelope and does not open it, which is what keeps the whole payload\nthis server's to decide and `/telemetry/preview` honest about it."
           }
         }
       },
@@ -11399,6 +11597,33 @@
               "$ref": "#/components/schemas/Forwarded"
             },
             "description": "Ports already open on this machine for this session."
+          }
+        }
+      },
+      "Preview": {
+        "type": "object",
+        "description": "Exactly what would leave this install.",
+        "required": [
+          "enabled",
+          "endpoint",
+          "example",
+          "waiting"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "example": {
+            "type": "object",
+            "description": "The most recent completed day, computed now.\n\nComputed rather than read from the outbox so that it answers even on an\ninstall where collection is off and the outbox is therefore empty —\nwhich is the state somebody deciding whether to turn it on is in."
+          },
+          "waiting": {
+            "type": "integer",
+            "description": "How many days are waiting to be collected.",
+            "minimum": 0
           }
         }
       },
@@ -12823,6 +13048,17 @@
           }
         }
       },
+      "SetSettings": {
+        "type": "object",
+        "required": [
+          "enabled"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          }
+        }
+      },
       "SetShare": {
         "type": "object",
         "required": [
@@ -12843,6 +13079,17 @@
           "key": {
             "type": "string",
             "description": "The OpenAI key. Replaces whatever is there; the old one is not recoverable."
+          }
+        }
+      },
+      "Settings": {
+        "type": "object",
+        "required": [
+          "enabled"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
           }
         }
       },

@@ -161,8 +161,10 @@ release is published. The signing job runs in the `release` environment: a
 reviewer approves it before its secrets are readable. `latest.json` is also
 copied onto the rolling `desktop-latest` release, the one fixed address the
 app reads: GitHub's own `latest` is whichever package of this repository
-released most recently. The app checks it once after start and offers the
-update in a dialog. `desktop.yml` runs on pull requests and by hand
+released most recently. The app checks it after start and every ten minutes
+after that; the first find of a run is offered in a dialog, and after that it
+is the rail's Updates row — "Update available", in slate — and a section of
+the Updates screen, until somebody takes it. See `src/update.ts`. `desktop.yml` runs on pull requests and by hand
 (`gh workflow run desktop.yml`, then `gh run download`) and leaves the
 unsigned installers as artifacts, which is how a change is tried before it is
 released.

@@ -16,6 +16,7 @@ export * from './setup/setup.zod.ts';
 export * from './skills/skills.zod.ts';
 export * from './stream/stream.zod.ts';
 export * from './tasks/tasks.zod.ts';
+export * from './telemetry/telemetry.zod.ts';
 export * from './trackers/trackers.zod.ts';
 export * from './updates/updates.zod.ts';
 export * from './voice/voice.zod.ts';
