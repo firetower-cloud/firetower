@@ -19,6 +19,6 @@ export interface RemoteRepo {
   pushedAt?: string | null;
   /** The https URL, since a token authenticates over https. */
   remote: string;
-  /** `acme/backend` */
+  /** `acme/backend`, or `platform/infra/deploy` on a host with nested groups. */
   slug: string;
 }

@@ -250,3 +250,122 @@ describe("what only works if the tracker's own integration is on", () => {
     expect(needsIntegration([ref(), ticket()])).toBe(true);
   });
 });
+
+/**
+ * GitLab links, which did not parse at all before.
+ *
+ * Two assumptions baked into the old regex: that a project is exactly two path
+ * segments, and that the marker is `issues` or `pull`. A GitLab project can sit
+ * inside nested groups, its merge requests live under `merge_requests`, and it
+ * puts a bare `-` between the project and either — so every GitLab URL pasted
+ * into the ship sheet's reference box was silently ignored.
+ */
+describe("a GitLab link", () => {
+  it("reads an issue under nested groups", () => {
+    const ref = parseReference(
+      "https://git.acme.internal/platform/infra/deploy/-/issues/7",
+    );
+    expect(ref).toMatchObject({
+      source: "github",
+      key: "7",
+      repo: "platform/infra/deploy",
+      keyword: "Refs",
+    });
+  });
+
+  it("reads a merge request, and keeps GitLab's own sigil", () => {
+    const ref = parseReference(
+      "https://git.acme.internal/platform/infra/deploy/-/merge_requests/12",
+    );
+    // `!12` is what GitLab renders as a link in a description, so it is the
+    // form to write as well as the form to read.
+    expect(ref).toMatchObject({ key: "!12", repo: "platform/infra/deploy" });
+  });
+
+  /** Older GitLab links have no separator in them. */
+  it("reads one with no separator", () => {
+    expect(parseReference("https://git.acme.internal/acme/web/issues/7")).toMatchObject({
+      key: "7",
+      repo: "acme/web",
+    });
+  });
+
+  it("still reads GitHub's shape exactly as before", () => {
+    expect(parseReference("https://github.com/acme/web/issues/32")).toMatchObject({
+      source: "github",
+      key: "32",
+      repo: "acme/web",
+    });
+    expect(parseReference("https://github.com/acme/web/pull/32")).toMatchObject({
+      key: "32",
+      repo: "acme/web",
+    });
+  });
+});
+
+describe("a reference typed rather than pasted", () => {
+  it("takes a nested project", () => {
+    expect(parseReference("platform/infra/deploy#4")).toMatchObject({
+      key: "4",
+      repo: "platform/infra/deploy",
+    });
+  });
+
+  it("takes GitLab's merge-request notation", () => {
+    expect(parseReference("!9", "acme/web")).toMatchObject({ key: "!9", repo: "acme/web" });
+  });
+
+  it("still takes the two shapes it always did", () => {
+    expect(parseReference("#32", "acme/web")).toMatchObject({ key: "32", repo: "acme/web" });
+    expect(parseReference("acme/web#32")).toMatchObject({ key: "32", repo: "acme/web" });
+  });
+});
+
+/**
+ * An issue and a merge request at the same number are different things on
+ * GitLab, so they must not collapse into one reference — and the sigil must
+ * not be doubled on the way out.
+ */
+describe("an issue and a merge request at one number", () => {
+  it("are two references, not one", () => {
+    const issue = parseReference("https://git.acme.internal/acme/web/-/issues/1")!;
+    const merge = parseReference("https://git.acme.internal/acme/web/-/merge_requests/1")!;
+    expect(idOf(issue)).not.toBe(idOf(merge));
+  });
+
+  it("are written without a doubled sigil", () => {
+    const merge = parseReference("https://git.acme.internal/acme/web/-/merge_requests/1")!;
+    expect(label(merge, "acme/web")).toBe("!1");
+    expect(label(merge, "acme/other")).toBe("acme/web!1");
+
+    const issue = parseReference("https://git.acme.internal/acme/web/-/issues/1")!;
+    expect(label(issue, "acme/web")).toBe("#1");
+    expect(label(issue, "acme/other")).toBe("acme/web#1");
+  });
+
+  it("carries the merge request into a trailer GitLab reads", () => {
+    const merge = parseReference("https://git.acme.internal/acme/web/-/merge_requests/1")!;
+    expect(trailerFor([merge], "acme/web")).toContain("Refs !1");
+  });
+});
+
+describe("a session cut from a task", () => {
+  it("closes the issue it was cut for", () => {
+    const ref = fromTask("#32", "https://github.com/acme/web/issues/32", "acme/web");
+    expect(ref).toMatchObject({ keyword: "Closes", key: "32" });
+  });
+
+  /**
+   * A merge request is not something a trailer closes. `Closes !1` renders as
+   * a link and does nothing else, which is a promise nothing keeps.
+   */
+  it("only references a merge request", () => {
+    const ref = fromTask(
+      "!1",
+      "https://git.acme.internal/acme/web/-/merge_requests/1",
+      "acme/web",
+    );
+    expect(ref).toMatchObject({ keyword: "Refs", key: "!1" });
+    expect(trailerFor([ref!], "acme/web")).toBe("Refs !1");
+  });
+});

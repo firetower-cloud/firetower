@@ -30,16 +30,17 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use crate::providers::Provider;
+use crate::providers::Connection;
 
+mod gitea;
+mod gitlab;
 mod linear;
+pub use gitea::Gitea;
+pub use gitlab::GitLab;
 pub use linear::{
     identifier_of, split_identifier as linear_identifier, teams as linear_teams,
     viewer as linear_viewer, Linear, Team as LinearTeam,
 };
-
-/// Where a task came from. Its own id, so the interface can group by it.
-pub type SourceId = &'static str;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -158,8 +159,6 @@ const DEEPEST: u32 = 1_000;
 /// remembers the task it was cut for as a key and a URL and nothing else, so
 /// anything that wants to *say* what #32 is has to go and ask.
 pub trait Source {
-    fn id(&self) -> SourceId;
-
     /// One page, in the source's own order.
     fn list(
         &self,
@@ -181,14 +180,10 @@ pub trait Source {
 
 /// The git host, which is also a task tracker.
 pub struct GitHub<'a> {
-    pub provider: &'a Provider,
+    pub conn: &'a Connection,
 }
 
 impl Source for GitHub<'_> {
-    fn id(&self) -> SourceId {
-        "github"
-    }
-
     async fn list(&self, token: &str, ask: &Query) -> Result<Page> {
         let query = search_query(ask);
         let page = ask.page.max(1);
@@ -203,7 +198,7 @@ impl Source for GitHub<'_> {
         // five thousand an hour — which is a limit on clicking rather than on
         // data, and conditional requests do not spend it at all.
         let found: SearchResult = crate::oauth::client()?
-            .get(format!("{}/search/issues", self.provider.api_base))
+            .get(format!("{}/search/issues", self.conn.api_base))
             .bearer_auth(token)
             .header("accept", "application/vnd.github+json")
             .query(&[
@@ -226,7 +221,11 @@ impl Source for GitHub<'_> {
         let more = (seen as usize) < found.total_count.min(DEEPEST as usize);
 
         Ok(Page {
-            tasks: found.items.into_iter().map(Into::into).collect(),
+            tasks: found
+                .items
+                .into_iter()
+                .map(|i| task_from(i, &self.conn.id))
+                .collect(),
             total: Some(found.total_count.min(DEEPEST as usize) as u32),
             more,
             next: None,
@@ -243,7 +242,7 @@ impl Source for GitHub<'_> {
         let item: Item = crate::oauth::client()?
             .get(format!(
                 "{}/repos/{slug}/issues/{number}",
-                self.provider.api_base
+                self.conn.api_base
             ))
             .bearer_auth(token)
             .header("accept", "application/vnd.github+json")
@@ -256,7 +255,7 @@ impl Source for GitHub<'_> {
             .await
             .context("reading the issue GitHub sent")?;
 
-        Ok(item.into())
+        Ok(task_from(item, &self.conn.id))
     }
 }
 
@@ -378,51 +377,56 @@ struct Tag {
     color: Option<String>,
 }
 
-impl From<Item> for Task {
-    fn from(item: Item) -> Self {
-        let repo = item.repository_url.as_deref().and_then(slug_of);
-        let kind = if item.pull_request.is_some() {
-            TaskKind::PullRequest
-        } else {
-            TaskKind::Issue
-        };
+/// One search result as a task.
+///
+/// `source` is the *connection* id rather than the word "github": with a
+/// second GitHub connected, `github:acme/web#1` and `gh_work:acme/web#1` are
+/// different tasks on different hosts, and a key that could not tell them apart
+/// would send the second one's requests to the first one's API. The built-in
+/// host's id is still `github`, so every key already stored still reads.
+fn task_from(item: Item, source: &str) -> Task {
+    let repo = item.repository_url.as_deref().and_then(slug_of);
+    let kind = if item.pull_request.is_some() {
+        TaskKind::PullRequest
+    } else {
+        TaskKind::Issue
+    };
 
-        Task {
-            id: format!(
-                "github:{}#{}",
-                repo.as_deref().unwrap_or("unknown"),
-                item.number
-            ),
-            source: "github".into(),
-            key: format!("#{}", item.number),
-            title: item.title,
-            body: item.body,
-            url: item.html_url,
-            state: if item.state == "closed" {
-                TaskState::Closed
-            } else {
-                TaskState::Open
-            },
-            kind,
-            assignees: item
-                .assignees
-                .into_iter()
-                .map(|u| Person {
-                    login: u.login,
-                    avatar: u.avatar_url,
-                })
-                .collect(),
-            labels: item
-                .labels
-                .into_iter()
-                .map(|l| Label {
-                    name: l.name,
-                    colour: l.color,
-                })
-                .collect(),
-            updated_at: item.updated_at,
-            repo,
-        }
+    Task {
+        id: format!(
+            "{source}:{}#{}",
+            repo.as_deref().unwrap_or("unknown"),
+            item.number
+        ),
+        source: source.to_string(),
+        key: format!("#{}", item.number),
+        title: item.title,
+        body: item.body,
+        url: item.html_url,
+        state: if item.state == "closed" {
+            TaskState::Closed
+        } else {
+            TaskState::Open
+        },
+        kind,
+        assignees: item
+            .assignees
+            .into_iter()
+            .map(|u| Person {
+                login: u.login,
+                avatar: u.avatar_url,
+            })
+            .collect(),
+        labels: item
+            .labels
+            .into_iter()
+            .map(|l| Label {
+                name: l.name,
+                colour: l.color,
+            })
+            .collect(),
+        updated_at: item.updated_at,
+        repo,
     }
 }
 
@@ -581,7 +585,7 @@ mod tests {
         }))
         .unwrap();
 
-        let task: Task = item.into();
+        let task = task_from(item, "github");
         assert_eq!(task.id, "github:acme/web#5138");
         assert_eq!(task.key, "#5138");
         assert_eq!(task.kind, TaskKind::Issue);
@@ -604,6 +608,34 @@ mod tests {
         }))
         .unwrap();
 
-        assert_eq!(Task::from(item).kind, TaskKind::PullRequest);
+        assert_eq!(task_from(item, "github").kind, TaskKind::PullRequest);
+    }
+
+    /// A task key is scoped to the *connection*, not to the word "github".
+    /// With a personal and a work GitHub both connected, two issues at the same
+    /// number in same-named repositories are different things — and a key that
+    /// could not tell them apart would send the second one's requests to the
+    /// first one's API.
+    #[test]
+    fn a_second_host_of_the_same_kind_writes_its_own_keys() {
+        let item = || -> Item {
+            serde_json::from_value(serde_json::json!({
+                "number": 1,
+                "title": "x",
+                "html_url": "https://ghe.acme.com/acme/web/issues/1",
+                "state": "open",
+                "updated_at": "2026-08-29T12:00:00Z",
+                "repository_url": "https://ghe.acme.com/api/v3/repos/acme/web",
+            }))
+            .unwrap()
+        };
+
+        // The built-in host still writes what it always wrote, which is what
+        // every key already stored says.
+        assert_eq!(task_from(item(), "github").id, "github:acme/web#1");
+        assert_eq!(
+            task_from(item(), "github_01jwork").id,
+            "github_01jwork:acme/web#1"
+        );
     }
 }

@@ -9,6 +9,7 @@ import * as zod from 'zod';
 
 
 export const ListReposResponseItem = zod.object({
+  "connectionId": zod.string().nullish().describe('Which git host it was connected from.\n\nAbsent for a remote somebody pasted, and absent for every row that\npredates there being more than one host — in both cases the host is\nworked out from the remote\'s hostname when it is needed. It earns its\nkeep the moment two hosts share a hostname: with a personal and a work\naccount both on github.com, the remote alone cannot say which token\nopens this repository, and this can.'),
   "defaultBranch": zod.string().nullish().describe('The trunk, once something has read the remote.\n\nAbsent until then: a repository can be connected while no worker is\nreachable, and the first session to clone it fills this in.'),
   "env": zod.array(zod.string()).optional().describe('The names of the variables held for it, never the values.\n\nDerived per request from the vault rather than stored, so that a screen\ncan say what a session will bring without opening anything.'),
   "envFile": zod.string().nullish().describe('Where to write this repository\'s variables in the workspace.\n\nAbsent for most: the environment is enough for anything that reads\n`process.env`. Present — usually `.env` — for tooling that only reads\nfiles, and then it is written before setup runs and excluded from git.'),
@@ -22,12 +23,14 @@ export const ListReposResponse = zod.array(ListReposResponseItem)
 
 export const CreateRepoBody = zod.object({
   "defaultBranch": zod.string().nullish().describe('What the trunk is called, for a repository with no commits in it.\n\nOnly then. A repository with commits says so itself and is believed\nover anybody; an empty one cannot — `ls-remote` on one answers with\nnothing at all, not even the name of the branch it would have — so\nwithout this the first session invents `main` and a repository set up\nfor `master` quietly gets a second trunk. The picker knows the real\nname from the host\'s API and sends it here.'),
+  "provider": zod.string().nullish().describe('Which git host it came from, when the caller knows.\n\nThe picker does — it is listing one host\'s repositories — and saying so\nis what makes two accounts on one hostname work: `github.com` names two\nhosts then, and the remote alone cannot say which. Left off, the\nhostname is matched instead, which is what every existing client sends\nand what every existing row means.'),
   "remote": zod.string().describe('Anything git can clone: a URL, or a path for a local repository.'),
   "setup": zod.string().nullish().describe('Runs once per session, before the agent starts.'),
   "slug": zod.string().describe('`acme/backend`')
 }).describe('Connect a repository. Nothing is cloned until a session needs it.\n\nConnecting reaches for the remote anyway, and what it answers with is the\ntruth — a branch named by the caller is not taken over it, because one that\nwas accepted and then ignored is worse than one never asked for.')
 
 export const CreateRepoResponse = zod.object({
+  "connectionId": zod.string().nullish().describe('Which git host it was connected from.\n\nAbsent for a remote somebody pasted, and absent for every row that\npredates there being more than one host — in both cases the host is\nworked out from the remote\'s hostname when it is needed. It earns its\nkeep the moment two hosts share a hostname: with a personal and a work\naccount both on github.com, the remote alone cannot say which token\nopens this repository, and this can.'),
   "defaultBranch": zod.string().nullish().describe('The trunk, once something has read the remote.\n\nAbsent until then: a repository can be connected while no worker is\nreachable, and the first session to clone it fills this in.'),
   "env": zod.array(zod.string()).optional().describe('The names of the variables held for it, never the values.\n\nDerived per request from the vault rather than stored, so that a screen\ncan say what a session will bring without opening anything.'),
   "envFile": zod.string().nullish().describe('Where to write this repository\'s variables in the workspace.\n\nAbsent for most: the environment is enough for anything that reads\n`process.env`. Present — usually `.env` — for tooling that only reads\nfiles, and then it is written before setup runs and excluded from git.'),
@@ -77,6 +80,7 @@ export const UpdateRepoBody = zod.object({
 }).describe('Change what a repository does before an agent starts.\n\nBoth fields are optional, and absent means "leave it alone" rather than\n"clear it" — a form that edits one must not wipe the other.')
 
 export const UpdateRepoResponse = zod.object({
+  "connectionId": zod.string().nullish().describe('Which git host it was connected from.\n\nAbsent for a remote somebody pasted, and absent for every row that\npredates there being more than one host — in both cases the host is\nworked out from the remote\'s hostname when it is needed. It earns its\nkeep the moment two hosts share a hostname: with a personal and a work\naccount both on github.com, the remote alone cannot say which token\nopens this repository, and this can.'),
   "defaultBranch": zod.string().nullish().describe('The trunk, once something has read the remote.\n\nAbsent until then: a repository can be connected while no worker is\nreachable, and the first session to clone it fills this in.'),
   "env": zod.array(zod.string()).optional().describe('The names of the variables held for it, never the values.\n\nDerived per request from the vault rather than stored, so that a screen\ncan say what a session will bring without opening anything.'),
   "envFile": zod.string().nullish().describe('Where to write this repository\'s variables in the workspace.\n\nAbsent for most: the environment is enough for anything that reads\n`process.env`. Present — usually `.env` — for tooling that only reads\nfiles, and then it is written before setup runs and excluded from git.'),

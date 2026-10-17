@@ -155,8 +155,8 @@ export const SignAgentInBody = zod.object({
 }).describe('What a sign-in needs from the caller.')
 
 export const SignAgentInResponse = zod.object({
-  "userCode": zod.string().describe('The short code to type. Shown, not clicked.'),
-  "verificationUri": zod.string().describe('Where to type it.')
+  "userCode": zod.string().describe('The short code. Always shown, even where the link below carries it, so\nsomebody can check the page is showing the code they were given.'),
+  "verificationUri": zod.string().describe('Where to type it.\n\nThe host\'s page with the code already filled in, where the host offers\none — GitLab does, GitHub does not — and the bare page otherwise. The\ninterface opens this and does not need to know which it got.')
 }).describe('A device authorization waiting for someone to approve it in a browser.')
 
 /**

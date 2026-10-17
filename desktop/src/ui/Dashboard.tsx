@@ -10,12 +10,12 @@ import { useMemo, useState } from "react";
 import { CircleDashed, Plus } from "lucide-react";
 import { Signal } from "~/components/Signal";
 import { AgentMark } from "~/components/AgentMark";
-import { GithubMark, Icon } from "~/components/ui";
+import { HostMark, Icon } from "~/components/ui";
 import { doing, group, shortRepo, type Workspace } from "~/api/workspaces";
 import { elapsed, minutesSince, needsYou } from "~/api/view";
 import { useNow } from "~/ui/clock";
 import type { Backend } from "~/fleet";
-import { useSessions } from "~/data";
+import { useHostOf, useSessions } from "~/data";
 import { navigate } from "~/shims/next-navigation";
 import { useStart } from "~/start";
 import { useQueryClient } from "@tanstack/react-query";
@@ -32,6 +32,7 @@ const FILTERS: [Filter, string][] = [
 ];
 
 export function Dashboard({ backend }: { backend: Backend }) {
+  const hostOf = useHostOf();
   const start = useStart();
   const { data: sessions, loading, error } = useSessions();
   // Same reason as the rail's: the card ages come off the clock, and a session
@@ -178,7 +179,7 @@ export function Dashboard({ backend }: { backend: Backend }) {
                 {name === "no repository" ? (
                   <Icon of={CircleDashed} size={12} className="text-mute" />
                 ) : (
-                  <GithubMark size={11} className="text-mute" />
+                  <HostMark kind={hostOf(name)?.kind} size={11} className="text-mute" />
                 )}
                 <span className="font-mono text-micro text-dim">{name}</span>
                 <span className="ml-auto font-mono text-micro text-mute">{places.length}</span>

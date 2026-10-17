@@ -20,6 +20,7 @@ export const ErrorCode = {
   RepoNotConnected: 'RepoNotConnected',
   SessionEnded: 'SessionEnded',
   ProviderNotConfigured: 'ProviderNotConfigured',
+  ProviderBusy: 'ProviderBusy',
   ProviderNotConnected: 'ProviderNotConnected',
   RepoAccessDenied: 'RepoAccessDenied',
   RepoUnreachable: 'RepoUnreachable',

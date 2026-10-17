@@ -26,6 +26,17 @@ export interface NewRepo {
      * @nullable
      */
   defaultBranch?: string | null;
+  /**
+     * Which git host it came from, when the caller knows.
+     *
+     * The picker does — it is listing one host's repositories — and saying so
+     * is what makes two accounts on one hostname work: `github.com` names two
+     * hosts then, and the remote alone cannot say which. Left off, the
+     * hostname is matched instead, which is what every existing client sends
+     * and what every existing row means.
+     * @nullable
+     */
+  provider?: string | null;
   /** Anything git can clone: a URL, or a path for a local repository. */
   remote: string;
   /**

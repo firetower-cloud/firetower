@@ -5,20 +5,41 @@
  * The Firetower control plane: API, scheduling, and worker transports.
  * OpenAPI spec version: 0
  */
+import type { AuthMode } from './authMode';
 import type { PendingAuth } from './pendingAuth';
 
 /**
- * What the interface shows on the connect screen.
+ * What the interface shows on the connect screen, one per host.
+ *
+ * Still called a provider, and still served from `/api/v1/providers`, because
+ * three committed clients already read it under that name and a rename buys a
+ * word. The fields after `may_set_application` are the new ones; everything
+ * above it means what it always did.
  */
 export interface ProviderStatus {
   /**
+     * Where this application's access is reviewed. GitHub only.
+     * @nullable
+     */
+  accessPage?: string | null;
+  /** Where somebody registers an application, for a host that needs one. */
+  appPage: string;
+  auth: AuthMode;
+  /**
+     * Every way this kind can be connected, so the edit screen can offer them
+     * without knowing what Firetower knows about Gitea.
+     */
+  authModes: AuthMode[];
+  /** Where a person reads it in a browser. */
+  baseUrl: string;
+  /** The compiled-in host. Not removable, and its address is not editable. */
+  builtin: boolean;
+  /** What this host calls a request to merge a branch. */
+  changeNoun: string;
+  /**
      * The identifier being authorized against, when there is one.
      *
-     * Sent so the interface can link to the page on the host where this
-     * application's access is reviewed — the only place an organization that
-     * restricts third-party applications can be requested after the fact, and
-     * the address of it contains the client id. Public by design: a
-     * device-flow application has no paired secret.
+     * Public by design: a device-flow application has no paired secret.
      * @nullable
      */
   clientId?: string | null;
@@ -29,19 +50,44 @@ export interface ProviderStatus {
   configured: boolean;
   /** We hold a token for it. */
   connected: boolean;
+  /**
+     * The hostname in a clone URL. Shown under the label, because it is the
+     * only thing that tells two GitHubs apart.
+     */
+  gitHost: string;
   id: string;
+  /**
+     * Which software: `github`, `gitlab`, `gitea`. What decides the mark drawn
+     * beside the row and the dialect of everything underneath.
+     */
+  kind: string;
   label: string;
   /**
      * Whether the caller may register the application this whole installation
      * authorizes against.
      *
      * Sent rather than worked out by each client, the way `may_upgrade` is.
-     * The rule is the server's — one application, no owner, and whoever sets
-     * it decides what everybody here authorizes next — and a copy of it in
-     * three interfaces is three copies to keep in step. It was drawn for
-     * everybody once, so a member filled the field in and was refused by the
-     * time they pressed Save.
+     * The rule is the server's — one application per host, no owner, and
+     * whoever sets it decides what everybody here authorizes next — and a copy
+     * of it in three interfaces is three copies to keep in step.
      */
   maySetApplication: boolean;
   pending?: null | PendingAuth;
+  /**
+     * The application in use is the one Firetower ships, not one registered
+     * here.
+     *
+     * Drawn as a line offering to replace it, because there are two reasons
+     * somebody would want to: the approval screen carries our name and asks
+     * for broad access, and the shared application's 50-authorizations-an-hour
+     * ceiling is drawn on by every other installation using it.
+     */
+  sharedApplication: boolean;
+  /** Where somebody makes a token by hand, for a host that connects that way. */
+  tokenPage: string;
+  /**
+     * What the instance said it was, when one was last reached.
+     * @nullable
+     */
+  version?: string | null;
 }

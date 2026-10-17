@@ -25,6 +25,13 @@ import { Access } from "./GitHubAccess";
  * Pasting a URL still works and is one click away, but it isn't the front door:
  * you already told a git host which repositories are yours, and re-typing that
  * is work the product should be doing.
+ *
+ * **Which host, when there is more than one.** This used to read
+ * `providers[0]`, because there was one. Now a connected one is preferred over
+ * the first — somebody with a GitHub they have not authorized and a GitLab they
+ * have should land on the GitLab — and once two are connected the header asks.
+ * Adding and editing hosts is not here: that is install-wide, and the desktop's
+ * Integrations pane owns it.
  */
 export function ConnectRepo({ onClose }: { onClose: () => void }) {
   const [manual, setManual] = useState(false);
@@ -32,18 +39,48 @@ export function ConnectRepo({ onClose }: { onClose: () => void }) {
   const [widening, setWidening] = useState(false);
 
   const [started, setStarted] = useState(false);
+  /** Which host the person picked, when there is more than one to pick from. */
+  const [from, setFrom] = useState<string | null>(null);
 
   const { data: providers = [] } = useListProviders({
     // Polling is derived, not stored: the render that first sees `connected`
     // is the same one that stops asking.
-    query: { refetchInterval: (query) => (isAwaiting(query.state.data, started) ? 2000 : false) },
+    query: {
+      refetchInterval: (query) =>
+        isAwaiting(preferred(query.state.data ?? [], from), started) ? 2000 : false,
+    },
   });
 
-  const provider = providers[0];
+  const provider = preferred(providers, from);
   const connected = provider?.connected ?? false;
 
   return (
-    <Modal title="Connect a repository" onClose={onClose} wide>
+    <Modal
+      title="Connect a repository"
+      onClose={onClose}
+      wide
+      /* Only where it is a question. One host is not a choice, and a select
+         with one option is a control that does nothing. */
+      aside={
+        providers.length > 1 && !manual ? (
+          <label className="flex items-center gap-1.5">
+            <span className="text-meta text-mute">From</span>
+            <select
+              value={provider?.id ?? ""}
+              onChange={(e) => setFrom(e.target.value)}
+              className="rounded-md border border-line bg-ground px-2 py-1 text-ui text-bone focus:outline-none"
+            >
+              {providers.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.label}
+                  {p.connected ? "" : " — not connected"}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null
+      }
+    >
       {manual ? (
         <PasteRemote onBack={() => setManual(false)} onClose={onClose} />
       ) : widening && provider ? (
@@ -80,10 +117,26 @@ export function ConnectRepo({ onClose }: { onClose: () => void }) {
 /* ── authorize ─────────────────────────────────────────────────────── */
 
 /** Keep asking only while something is actually waiting to be approved. */
-function isAwaiting(providers: ProviderStatus[] | undefined, started: boolean) {
-  const provider = providers?.[0];
+function isAwaiting(provider: ProviderStatus | undefined, started: boolean) {
   if (!provider || provider.connected) return false;
   return started || provider.pending != null;
+}
+
+/**
+ * Which host to show first.
+ *
+ * One this person has already connected, then one that could be connected,
+ * then whatever is first. The old reading — entry zero — sent somebody with an
+ * unauthorized GitHub and a working GitLab to the GitHub every time.
+ */
+function preferred(providers: ProviderStatus[], chosen: string | null): ProviderStatus | undefined {
+  if (chosen) {
+    const named = providers.find((p) => p.id === chosen);
+    if (named) return named;
+  }
+  return (
+    providers.find((p) => p.connected) ?? providers.find((p) => p.configured) ?? providers[0]
+  );
 }
 
 function Authorize({
@@ -195,7 +248,15 @@ function Pick({
         // at all — and this list, which comes from the host's own API, is the
         // only place the name is known. The server uses it in that case only.
         await create.mutateAsync({
-          data: { slug: repo.slug, remote: repo.remote, defaultBranch: repo.defaultBranch },
+          data: {
+            slug: repo.slug,
+            remote: repo.remote,
+            defaultBranch: repo.defaultBranch,
+            // Which host it came from, written down rather than matched by
+            // hostname later: with two accounts on github.com the remote
+            // cannot say which token opens this repository.
+            provider: provider.id,
+          },
         });
       } catch (e) {
         setFailure(e);

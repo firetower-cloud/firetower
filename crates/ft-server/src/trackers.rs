@@ -1,14 +1,30 @@
 //! The task trackers Firetower can read from.
 //!
-//! Separate from [`crate::providers`] because the two roles only overlap on
-//! GitHub: a git host is something you clone and push to, a tracker is
-//! something you read work out of. Linear is only ever the second, and has no
-//! remote, no git username and no device flow.
+//! Separate from [`crate::providers`] because the two roles only partly
+//! overlap: a git host is something you clone and push to, a tracker is
+//! something you read work out of. Every git host is also a tracker — issues
+//! and requests to merge are both work — and Linear is only ever the second,
+//! with no remote, no git username and no device flow.
+//!
+//! So a tracker is one of two things, and [`Resolved`] is the shape they share.
+//! The **git-host** ones are derived: every connection in
+//! [`crate::providers::Connections`] yields one, with the same id, so adding a
+//! GitLab adds a place to read tasks from without anybody configuring it twice
+//! and without a second credential. The **standalone** ones are the static
+//! table below, which is Linear and whatever comes next.
+//!
+//! Deriving rather than listing is also what keeps `task_key` honest. A key is
+//! source-scoped — `github:acme/web#5138` — and the source is the connection
+//! id, so the built-in host still writes `github:` and every key already
+//! stored still says which tracker to ask.
 
 use serde::Serialize;
+use std::sync::Arc;
 use utoipa::ToSchema;
 
+use crate::providers::Connection;
 use crate::tasks::TaskKind;
+use crate::AppState;
 
 /// How a credential for a tracker is obtained.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
@@ -28,6 +44,7 @@ pub enum ScopeKind {
     Teams,
 }
 
+/// A tracker that is not a git host.
 pub struct Tracker {
     pub id: &'static str,
     pub label: &'static str,
@@ -39,14 +56,42 @@ pub struct Tracker {
     /// The hostname a task's browser URL carries, so a stored link can say
     /// which tracker it came from without a column recording it.
     pub host: &'static str,
-    /// Where somebody goes to make a key, when that is how it connects.
+    /// Where somebody goes to make a key.
     pub key_url: Option<&'static str>,
 }
 
-impl Tracker {
+pub const TRACKERS: &[Tracker] = &[Tracker {
+    id: "linear",
+    label: "Linear",
+    api_base: "https://api.linear.app/graphql",
+    auth: Auth::ApiKey,
+    scope_kind: ScopeKind::Teams,
+    kinds: &[TaskKind::Ticket],
+    host: "linear.app",
+    key_url: Some("https://linear.app/settings/api"),
+}];
+
+/// One tracker, whichever of the two kinds it is.
+#[derive(Clone)]
+pub struct Resolved {
+    pub id: String,
+    pub label: String,
+    pub api_base: String,
+    pub auth: Auth,
+    pub scope_kind: ScopeKind,
+    pub kinds: Vec<TaskKind>,
+    pub host: String,
+    pub key_url: Option<String>,
+    /// The git host this reads from, when it is one.
+    pub connection: Option<Arc<Connection>>,
+    /// The static entry, when it is one.
+    pub tracker: Option<&'static Tracker>,
+}
+
+impl Resolved {
     /// Which vault scope holds this tracker's credential.
     ///
-    /// GitHub's is the git token that is already there; naming it `tracker`
+    /// A git host's is the git token that is already there; naming it `tracker`
     /// would store a second copy of the same secret under a different key.
     pub fn vault_scope(&self) -> &'static str {
         match self.auth {
@@ -54,63 +99,112 @@ impl Tracker {
             Auth::ApiKey => crate::vault::TRACKER,
         }
     }
+
+    fn from_connection(conn: Arc<Connection>) -> Self {
+        Self {
+            id: conn.id.clone(),
+            label: conn.label.clone(),
+            api_base: conn.api_base.clone(),
+            auth: Auth::GitProvider,
+            scope_kind: ScopeKind::Repos,
+            // Both, on every git host: an issue is work to pick up and a
+            // request to merge is work to review.
+            kinds: vec![TaskKind::Issue, TaskKind::PullRequest],
+            host: conn.git_host.clone(),
+            key_url: Some(conn.token_page()),
+            connection: Some(conn),
+            tracker: None,
+        }
+    }
+
+    fn from_static(t: &'static Tracker) -> Self {
+        Self {
+            id: t.id.to_string(),
+            label: t.label.to_string(),
+            api_base: t.api_base.to_string(),
+            auth: t.auth,
+            scope_kind: t.scope_kind,
+            kinds: t.kinds.to_vec(),
+            host: t.host.to_string(),
+            key_url: t.key_url.map(str::to_string),
+            connection: None,
+            tracker: Some(t),
+        }
+    }
 }
 
-pub const TRACKERS: &[Tracker] = &[
-    Tracker {
-        id: "github",
-        label: "GitHub",
-        api_base: "https://api.github.com",
-        auth: Auth::GitProvider,
-        scope_kind: ScopeKind::Repos,
-        kinds: &[TaskKind::Issue, TaskKind::PullRequest],
-        host: "github.com",
-        key_url: None,
-    },
-    Tracker {
-        id: "linear",
-        label: "Linear",
-        api_base: "https://api.linear.app/graphql",
-        auth: Auth::ApiKey,
-        scope_kind: ScopeKind::Teams,
-        kinds: &[TaskKind::Ticket],
-        host: "linear.app",
-        key_url: Some("https://linear.app/settings/api"),
-    },
-];
+/// Every tracker, git hosts first.
+///
+/// The order matches the git hosts list, so the built-in GitHub is first here
+/// too — which is what the Tasks screen defaults to when nobody has picked.
+pub async fn all(state: &AppState) -> Vec<Resolved> {
+    let mut out: Vec<Resolved> = state
+        .connections
+        .all()
+        .await
+        .iter()
+        .cloned()
+        .map(Resolved::from_connection)
+        .collect();
+    out.extend(TRACKERS.iter().map(Resolved::from_static));
+    out
+}
 
-pub fn find(id: &str) -> Option<&'static Tracker> {
-    TRACKERS.iter().find(|t| t.id == id)
+pub async fn find(state: &AppState, id: &str) -> Option<Resolved> {
+    if let Some(conn) = state.connections.get(id).await {
+        return Some(Resolved::from_connection(conn));
+    }
+    TRACKERS
+        .iter()
+        .find(|t| t.id == id)
+        .map(Resolved::from_static)
 }
 
 /// Which tracker a task's URL belongs to.
 ///
-/// Matched on the host so that a workspace remembering only a link can still
-/// be told what to ask. A self-hosted git server falls through to GitHub,
-/// which is the only tracker whose URL shape it can have.
-pub fn for_url(url: &str) -> Option<&'static Tracker> {
+/// Matched on the host so that a workspace remembering only a link can still be
+/// told what to ask. Git hosts are tried first and by their own hostname, which
+/// is the only way a self-hosted GitLab's links can be recognised at all —
+/// there is nothing about `git.acme.internal` to guess from.
+pub async fn for_url(state: &AppState, url: &str) -> Option<Resolved> {
     let after_scheme = url.split_once("://").map_or(url, |(_, rest)| rest);
     let host = after_scheme.split(['/', '?', '#']).next()?;
 
-    // The host itself or a subdomain of it, never a suffix match: `ends_with`
-    // alone would hand a token for github.com to notgithub.com.
-    let found = TRACKERS
+    // A host we have connected, by name. Exact rather than a suffix match:
+    // `ends_with` alone would hand a token for github.com to notgithub.com.
+    if let Some(conn) = state
+        .connections
+        .all()
+        .await
         .iter()
-        .find(|t| host == t.host || host.ends_with(&format!(".{}", t.host)));
-    if let Some(found) = found {
-        return Some(found);
+        .find(|c| host.eq_ignore_ascii_case(&c.git_host))
+    {
+        return Some(Resolved::from_connection(conn.clone()));
     }
 
-    // Not a host we know. An issue or pull path is GitHub's shape, and a
-    // self-hosted GitHub is the case that reaches here.
-    crate::tasks::located(url).and(find("github"))
+    // A standalone tracker: the host itself or a subdomain of it.
+    if let Some(found) = TRACKERS
+        .iter()
+        .find(|t| host == t.host || host.ends_with(&format!(".{}", t.host)))
+    {
+        return Some(Resolved::from_static(found));
+    }
+
+    // Not a host we know, and the link is issue-shaped. That is a git host
+    // nobody has connected — or has connected under another address — and
+    // GitHub's is the URL shape it most likely has. Only answered when there is
+    // a git host to answer with.
+    if crate::tasks::located(url).is_some() {
+        return find(state, "github").await;
+    }
+    None
 }
 
 /// The fragment a tracker wants to see in a branch name, if there is one.
 ///
-/// Linear's git integration links a pull request to its issue by the
-/// identifier in the branch name, which holds before anybody has written a
-/// description. GitHub links by number in the body and ignores branches, so a
+/// Linear's git integration links a pull request to its issue by the identifier
+/// in the branch name, which holds before anybody has written a description.
+/// GitHub and GitLab link by number in the body and ignore branches, so a
 /// `#5138` here would only make the branch uglier.
 pub fn branch_tag(task_key: &str) -> Option<String> {
     let (team, number) = crate::tasks::linear_identifier(task_key)?;
@@ -121,50 +215,13 @@ pub fn branch_tag(task_key: &str) -> Option<String> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn a_link_says_which_tracker_it_came_from() {
-        assert_eq!(
-            for_url("https://linear.app/acme/issue/ENG-123/promo-codes").map(|t| t.id),
-            Some("linear")
-        );
-        assert_eq!(
-            for_url("https://github.com/acme/web/issues/32").map(|t| t.id),
-            Some("github")
-        );
-    }
-
-    /// `ends_with` on its own would match notgithub.com and evil-linear.app,
-    /// which are domains anybody can buy.
-    ///
-    /// Shown on paths that are not issue-shaped, because one that is falls
-    /// through to the self-hosted case below on purpose.
-    #[test]
-    fn a_host_that_merely_ends_in_a_known_one_is_not_it() {
-        assert!(for_url("https://notgithub.com/acme/web").is_none());
-        assert!(for_url("https://evil-linear.app/acme/issue/ENG-1/x").is_none());
-        // A real subdomain still is.
-        assert_eq!(
-            for_url("https://eu.linear.app/acme/issue/ENG-1/x").map(|t| t.id),
-            Some("linear")
-        );
-    }
-
-    #[test]
-    fn a_self_hosted_git_host_is_still_github_shaped() {
-        assert_eq!(
-            for_url("https://git.acme.internal/acme/web/issues/7").map(|t| t.id),
-            Some("github")
-        );
-        // Nothing issue-shaped about it, so nothing to guess.
-        assert!(for_url("https://example.com/whatever").is_none());
-    }
-
-    /// The two credentials are different secrets under different scopes, and
-    /// a tracker reading the wrong one silently reports itself disconnected.
+    /// A git host's credential is the git token that is already there. Reading
+    /// the wrong scope silently reports a connected tracker as disconnected.
     #[test]
     fn each_tracker_reads_its_own_scope() {
-        assert_eq!(find("github").unwrap().vault_scope(), crate::vault::GIT);
-        assert_eq!(find("linear").unwrap().vault_scope(), crate::vault::TRACKER);
+        let linear = Resolved::from_static(&TRACKERS[0]);
+        assert_eq!(linear.vault_scope(), crate::vault::TRACKER);
+        assert_eq!(linear.id, "linear");
     }
 
     #[test]

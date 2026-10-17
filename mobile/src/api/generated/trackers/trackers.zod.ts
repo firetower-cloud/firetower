@@ -10,9 +10,11 @@ import * as zod from 'zod';
 
 export const ListTrackersResponseItem = zod.object({
   "auth": zod.enum(['gitProvider', 'apiKey']).describe('How a credential for a tracker is obtained.'),
+  "changeNoun": zod.string().describe('What this tracker calls a request to merge a branch, in the singular.\n\nCarried for the same reason `ProviderStatus` carries it: the screen\nlists what a tracker can return, and rendering the enum gave\n"issue, pullRequest" — camelCase on screen, and the wrong word entirely\non a GitLab.'),
   "connected": zod.boolean().describe('We hold a credential for it.'),
   "id": zod.string(),
   "keyUrl": zod.string().nullish().describe('Where somebody goes to make a key, when that is how it connects.'),
+  "kind": zod.string().describe('Which software this reads from: `github`, `gitlab`, `gitea`, or the\ntracker\'s own id for one that is not a git host.\n\nCarried because the id is no longer the kind. A tracker derived from a\ngit host takes that host\'s id — `gh_01j…` for a second GitHub — and a\nscreen keyed on the id to choose a logo drew nothing for it.'),
   "kinds": zod.array(zod.enum(['issue', 'pullRequest', 'ticket']).describe('What sort of thing it is.\n\nThe one field the Issues/PRs toggle reads, and the reason "filter by kind"\nis a query parameter rather than a migration when a second source lands.')).describe('What this tracker can return, so the kind toggle offers no more.'),
   "label": zod.string(),
   "path": zod.string().nullish().describe('Where that key is filed, and so who else it answers for. Set only\nalongside `secret`: the two describe the same shareable thing.'),

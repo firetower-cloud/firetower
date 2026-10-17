@@ -5,7 +5,12 @@
  * checkout's state to one stage — uncommitted → unpushed → pushed → open — and
  * one honest label for the button. This draws that, then runs the sequence the
  * web's ShipSheet runs: commit the kept files with the title as the message,
- * push, and open the pull request with the body and its issue trailer.
+ * push, and open the request with the body and its issue trailer.
+ *
+ * **What the request is called comes from the host.** GitLab says merge
+ * request, GitHub and Gitea say pull request, and the word reaches the button,
+ * the sequence above it and the link out — so it is read once from the git host
+ * this session's repository is on and passed to `shipping`.
  *
  * The title and body come from `describe_session` — the run's own proposal —
  * and are a draft to edit, not a box to fill. Nothing acts on them until the
@@ -29,19 +34,23 @@ import { awaiting, done, shipping } from "~/api/ship";
 import { idOf, label as refLabel, parseReference, withTrailer, type Reference } from "~/api/issues";
 import type { Changed } from "~/ui/Inspector";
 
-import { why } from "~/data";
+import { useHostOf, why } from "~/data";
 import { openExternal } from "~/open";
 
 export function Ship({ session, branch, files }: { session: Session; branch?: string; files: Changed[] }) {
   const cache = useQueryClient();
+  const hostOf = useHostOf();
+  const host = hostOf(session.repo);
+  const noun = host?.changeNoun ?? "pull request";
 
   const { data: work, isError: workFailed } = useSessionWork(session.id, {
     query: {
       // Faster while a request is open and its merge is what changes next.
-      refetchInterval: (q) => (q.state.data && awaiting(shipping(session, q.state.data)) ? 5_000 : 30_000),
+      refetchInterval: (q) =>
+        q.state.data && awaiting(shipping(session, q.state.data, false, noun)) ? 5_000 : 30_000,
     },
   });
-  const ship = shipping(session, work, workFailed);
+  const ship = shipping(session, work, workFailed, noun);
 
   const describe = useDescribeSession();
   const commit = useCommitSession();
@@ -125,9 +134,9 @@ export function Ship({ session, branch, files }: { session: Session; branch?: st
 
       {done(ship) ? (
         <div className="mt-4 rounded-lg border border-line bg-ground px-3 py-3">
-          <p className="flex items-center gap-2 text-ui text-sage"><GitPullRequest className="h-4 w-4" strokeWidth={1.75} />{ship.stage === "merged" ? "Merged." : ship.stage === "closed" ? "Closed without merging." : "The pull request is open."}</p>
+          <p className="flex items-center gap-2 text-ui text-sage"><GitPullRequest className="h-4 w-4" strokeWidth={1.75} />{ship.stage === "merged" ? "Merged." : ship.stage === "closed" ? "Closed without merging." : `The ${noun} is open.`}</p>
           {ship.links.map((l) => (
-            <a key={l.url} href={l.url} target="_blank" rel="noreferrer" className="control mt-2 w-full justify-center border border-line bg-raise text-bone hover:bg-overlay">Open it on GitHub</a>
+            <a key={l.url} href={l.url} target="_blank" rel="noreferrer" className="control mt-2 w-full justify-center border border-line bg-raise text-bone hover:bg-overlay">Open it on {hostOf(l.slug)?.label ?? host?.label ?? "the host"}</a>
           ))}
         </div>
       ) : (

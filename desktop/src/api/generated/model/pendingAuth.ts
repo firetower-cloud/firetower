@@ -10,8 +10,17 @@
  * A device authorization waiting for someone to approve it in a browser.
  */
 export interface PendingAuth {
-  /** The short code to type. Shown, not clicked. */
+  /**
+     * The short code. Always shown, even where the link below carries it, so
+     * somebody can check the page is showing the code they were given.
+     */
   userCode: string;
-  /** Where to type it. */
+  /**
+     * Where to type it.
+     *
+     * The host's page with the code already filled in, where the host offers
+     * one — GitLab does, GitHub does not — and the bare page otherwise. The
+     * interface opens this and does not need to know which it got.
+     */
   verificationUri: string;
 }

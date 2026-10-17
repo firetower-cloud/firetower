@@ -2,13 +2,15 @@
  * What you could work on.
  *
  * One tracker at a time, because `/tasks` answers for one source per request
- * and the two page differently — GitHub by number with a total, Linear by
+ * and they page differently — a git host by number with a total, Linear by
  * cursor with none. Merging them into one list would mean inventing a paging
  * scheme neither side has.
  *
- * Which tracker is a mark rather than a word: the GitHub and Linear logos are
- * the thing people already scan for, and two glyphs fit where "GitHub |
- * Linear" would push the filters onto a second row.
+ * Which tracker is a mark rather than a word: the logos are the thing people
+ * already scan for, and the glyphs fit where "GitHub | GitLab | Linear" would
+ * push the filters onto a second row. The mark comes from the tracker's *kind*
+ * rather than its id — a second GitHub is its own tracker with an id of its
+ * own, and the two are told apart by the label on hover.
  *
  * The chips and the box are sent, not applied here. Every one of them is a
  * query parameter the source reads in its own dialect, so what comes back is
@@ -26,7 +28,7 @@ import {
   Ticket,
   User,
 } from "lucide-react";
-import { GithubMark, Icon, Input, LinearMark, Select } from "~/components/ui";
+import { GiteaMark, GitLabMark, GithubMark, Icon, Input, LinearMark, Select } from "~/components/ui";
 import { elapsed, minutesSince } from "~/api/view";
 import type { Backend } from "~/fleet";
 import { useTasks, useTrackers, useTrackerScopes } from "~/data";
@@ -44,9 +46,11 @@ const KIND_LABEL: Record<TaskKind, string> = {
   ticket: "Tickets",
 };
 
-/** The mark for a tracker, by id. Anything unrecognised keeps the page working. */
+/** The mark for a tracker, by kind. Anything unrecognised keeps the page working. */
 const MARK: Record<string, (p: { size?: number; className?: string }) => React.ReactNode> = {
   github: GithubMark,
+  gitlab: GitLabMark,
+  gitea: GiteaMark,
   linear: LinearMark,
 };
 
@@ -364,7 +368,7 @@ function Sources({
   return (
     <div className="inline-flex shrink-0 items-center gap-0.5 rounded-md bg-ground p-0.5">
       {trackers.map((t) => {
-        const Mark = MARK[t.id];
+        const Mark = MARK[t.kind];
         const on = t.id === value;
         return (
           <button

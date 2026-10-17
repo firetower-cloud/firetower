@@ -15,7 +15,29 @@ export function Rows<T>({ feed, empty, children }: { feed: { data: T[]; loading:
   return <>{children}</>;
 }
 
-export function Section({ title, note, action, children }: { title: string; note?: string; action?: React.ReactNode; children: React.ReactNode }) {
+export function Section({
+  title,
+  note,
+  action,
+  controls,
+  children,
+}: {
+  title: string;
+  note?: string;
+  /** Top right, beside the heading. For one button, not for a toolbar. */
+  action?: React.ReactNode;
+  /**
+   * A row under the heading and above the card, aligned left.
+   *
+   * Where controls that *operate on the list* belong — a filter, a search, the
+   * picker that chooses what the list is showing. Pushed to the right by
+   * `action` they read as page furniture and sit as far from the rows they
+   * govern as the layout allows; under the title they read as the controls
+   * for what is directly beneath them, which is what they are.
+   */
+  controls?: React.ReactNode;
+  children: React.ReactNode;
+}) {
   return (
     <section className="mt-7 first:mt-0">
       <div className="flex items-center gap-3">
@@ -25,6 +47,7 @@ export function Section({ title, note, action, children }: { title: string; note
         </div>
         {action && <div className="ml-auto shrink-0">{action}</div>}
       </div>
+      {controls && <div className="mt-2.5 flex items-center gap-1.5">{controls}</div>}
       <div className="mt-2.5 divide-y divide-line-soft overflow-hidden rounded-xl border border-line bg-panel">{children}</div>
     </section>
   );
@@ -103,5 +126,30 @@ export function ManageOnTheWeb({ url, may }: { url: string; may: boolean }) {
       Manage on the web
       <ExternalLink className="h-3 w-3" strokeWidth={1.75} />
     </a>
+  );
+}
+
+/**
+ * `**like this**` → bold.
+ *
+ * The steps come from the server, where the line that catches people out is
+ * marked — GitHub's device-flow checkbox, GitLab's Confidential one, Gitea's
+ * `user` scope. A step that reads as prose when the whole point is *do not
+ * miss this* has lost the thing it was written for.
+ *
+ * Here rather than beside either screen that draws them: the host list draws
+ * the steps for registering an application and the connect panel draws the
+ * ones for making a token, and the connect panel is imported *by* the host
+ * list — so keeping this next to either one would be a cycle.
+ */
+export function bold(text: string): React.ReactNode[] {
+  return text.split(/\*\*(.+?)\*\*/g).map((part, i) =>
+    i % 2 === 1 ? (
+      <strong key={i} className="font-medium text-dim">
+        {part}
+      </strong>
+    ) : (
+      <span key={i}>{part}</span>
+    ),
   );
 }

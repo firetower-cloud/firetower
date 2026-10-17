@@ -4,9 +4,13 @@ Tasks are read from a tracker as you look at them. Nothing is copied into
 Firetower: the one durable fact is which task a workspace was cut from, kept on
 the workspace as a key and a URL.
 
-GitHub and Linear are both trackers. GitHub is also a git host, and its tracker
-credential is the git token from **Configuration → Repositories** — there is
-nothing separate to connect. Linear is a tracker only.
+**Every git host is a tracker.** An issue is work to pick up and a request to
+merge is work to review, so each one in **Configuration → Git hosts** appears
+in the trackers list too — with the same credential, which is the git token
+already there. Adding a GitLab adds a place to read work from with nothing more
+to connect. See [Git hosts](git-hosts.md).
+
+Linear is a tracker only: no remote, no git username, no device flow.
 
 ## Connecting Linear
 
@@ -65,6 +69,15 @@ same thing wherever the pull request opens.
 
 None of this does anything unless Linear's own GitHub integration is installed
 for that repository at Linear's end. The sheet says so rather than assuming it.
+
+## Dialects
+
+GitHub takes one search string and the query box is passed to it verbatim.
+GitLab takes structured parameters and a plain search term, so the chips become
+fields and the qualifiers people already type are read where they mean the same
+thing — `is:open`, `assignee:ana`, `label:bug`, plus GitLab's own `state:` and
+`labels:`. Gitea takes one free-text term and no qualifiers. In all three the
+line under the controls shows what was actually sent.
 
 ## Rate limits
 

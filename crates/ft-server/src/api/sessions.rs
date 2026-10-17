@@ -9,9 +9,7 @@ use super::repos::is_local_path;
 use super::{credential_for, ApiError, ApiResult, ErrorCode};
 use crate::auth::Principal;
 use crate::oauth;
-use crate::providers;
-use crate::tasks::{self, Source};
-use crate::vault;
+use crate::tasks;
 use crate::vault::Key;
 use crate::AppState;
 use axum::{
@@ -2037,8 +2035,8 @@ pub(super) async fn commit_session(
 /// commit authored with the wrong address is at best confusing and at worst
 /// refused by the host at push time.
 async fn author_for(state: &AppState, remote: &str, owner: &str) -> Option<ft_proto::Author> {
-    let provider = providers::for_remote(remote)?;
-    super::providers::identity_for(state, provider, owner).await
+    let conn = super::connection_for_remote_pub(state, remote, owner).await?;
+    super::providers::identity_for(state, &conn, owner).await
 }
 
 /// Whether a path is inside a checkout, and what it is called from there.
@@ -2109,21 +2107,18 @@ pub(crate) async fn refresh_pull_state(state: &AppState, session: &Session, owne
         if checked.is_some_and(|at| now - at < PULL_STATE_MAX_AGE) {
             continue;
         }
-        let Some(provider) = crate::providers::for_remote(&url) else {
+        // Which host, out of the link. A merge request's address is on the
+        // GitLab that issued it, so the hostname is the whole of the answer —
+        // and a host that has since been removed means there is nothing to ask.
+        let Some(conn) = super::connection_for_remote_pub(state, &url, owner).await else {
             continue;
         };
-        let Ok(Some(token)) = state
-            .vault
-            .get(
-                crate::vault::Key::of(vault::GIT, provider.id, owner),
-                "checking a pull request",
-            )
-            .await
+        let Some(token) = super::git_token(state, &conn, owner, "checking a pull request").await
         else {
             continue;
         };
 
-        match oauth::pull_request_state(provider, &token, &url).await {
+        match oauth::pull_request_state(&conn, &token, &url).await {
             Ok(went) => {
                 if let Err(e) = state
                     .db
@@ -2293,31 +2288,25 @@ async fn tracked(state: &AppState, session: &Session) -> Option<ft_proto::Tracke
 /// all the same, and asking that repository's host about a `linear.app` URL
 /// gets a shrug.
 async fn read_task(state: &AppState, session: &Session, url: &str) -> anyhow::Result<tasks::Task> {
-    let tracker =
-        crate::trackers::for_url(url).ok_or_else(|| anyhow::anyhow!("nothing tracks {url}"))?;
+    let tracker = crate::trackers::for_url(state, url)
+        .await
+        .ok_or_else(|| anyhow::anyhow!("nothing tracks {url}"))?;
     // Whose key, resolved rather than assumed: a team that shares one Linear
     // workspace key files it into a directory, and a session started by anybody
     // there has to find it. See `tasks::whose`.
-    let holder = super::tasks::whose(state, tracker, session.owner.as_str())
+    let holder = super::tasks::whose(state, &tracker, session.owner.as_str())
         .await
         .map_err(|e| anyhow::anyhow!("{e:?}"))?;
-    let credential = state
-        .vault
-        .get(
-            Key::of(tracker.vault_scope(), tracker.id, &holder),
-            "reading the issue a session was started from",
-        )
-        .await?
-        .ok_or_else(|| anyhow::anyhow!("{} is not connected", tracker.label))?;
+    let credential = super::tasks::credential_held_by(
+        state,
+        &tracker,
+        &holder,
+        "reading the issue a session was started from",
+    )
+    .await
+    .map_err(|e| anyhow::anyhow!("{e:?}"))?;
 
-    match tracker.id {
-        "linear" => tasks::Linear { tracker }.one(&credential, url).await,
-        _ => {
-            let provider = providers::find(tracker.id)
-                .ok_or_else(|| anyhow::anyhow!("no git host called {}", tracker.id))?;
-            tasks::GitHub { provider }.one(&credential, url).await
-        }
-    }
+    super::tasks::one_from(&tracker, &credential, url).await
 }
 
 /// Check another repository into a session that is already running.
@@ -2882,21 +2871,21 @@ async fn open_one(
         .map_err(|e| format!("{e:#}"))?
         .ok_or_else(|| format!("{slug} isn't connected any more"))?;
 
-    let provider = providers::for_remote(&repo.remote)
-        .ok_or_else(|| format!("{slug} isn't on a host Firetower can open pull requests on"))?;
-
-    let token = state
-        .vault
-        .get(
-            Key::of(vault::GIT, provider.id, owner),
-            &format!("opening a pull request for {}", repo.slug),
-        )
+    let conn = super::connection_for_repo(state, &repo, owner)
         .await
-        .map_err(|e| format!("{e:#}"))?
-        .ok_or_else(|| format!("authorize {} first", provider.label))?;
+        .ok_or_else(|| format!("{slug} isn't on a host Firetower can open requests on"))?;
+
+    let token = super::git_token(
+        state,
+        &conn,
+        owner,
+        &format!("opening a {} for {}", conn.kind.change_noun, repo.slug),
+    )
+    .await
+    .ok_or_else(|| format!("authorize {} first", conn.label))?;
 
     oauth::open_pull_request(
-        provider,
+        &conn,
         &token,
         oauth::Opening {
             slug: &repo.slug,
@@ -2924,18 +2913,14 @@ async fn link_up(
         .any_repo_for(slug)
         .await?
         .ok_or_else(|| anyhow::anyhow!("{slug} isn't connected"))?;
-    let provider = providers::for_remote(&repo.remote)
-        .ok_or_else(|| anyhow::anyhow!("no provider for {slug}"))?;
-    let token = state
-        .vault
-        .get(
-            Key::of(vault::GIT, provider.id, owner),
-            "cross-linking a pull request",
-        )
-        .await?
+    let conn = super::connection_for_repo(state, &repo, owner)
+        .await
+        .ok_or_else(|| anyhow::anyhow!("no git host for {slug}"))?;
+    let token = super::git_token(state, &conn, owner, "cross-linking a request")
+        .await
         .ok_or_else(|| anyhow::anyhow!("not authorized"))?;
 
-    oauth::amend_pull_request(provider, &token, url, body).await
+    oauth::amend_pull_request(&conn, &token, url, body).await
 }
 
 #[derive(Debug, Deserialize, ToSchema)]

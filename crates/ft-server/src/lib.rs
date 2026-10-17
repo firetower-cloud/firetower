@@ -58,6 +58,20 @@ pub struct AppState {
     pub pending: Arc<tokio::sync::RwLock<std::collections::HashMap<String, api::Pending>>>,
     /// Organisations, users, sessions and settings.
     pub accounts: accounts::Accounts,
+    /// Every git host this Firetower can authorize against.
+    ///
+    /// Cached, because the answer is wanted per repository and per push and it
+    /// changes only when somebody adds a host. See
+    /// [`providers::Connections`] for why the whole list is replaced rather
+    /// than mutated.
+    pub connections: providers::Connections,
+    /// One token renewal at a time, per person per host.
+    ///
+    /// In memory like `pending`, and for a sharper reason: a refresh token is
+    /// single-use, so two requests that both renew leave one holding a token
+    /// the host revoked. This is the queue that stops that — see
+    /// [`oauth::grant::Renewals`].
+    pub renewals: oauth::Renewals,
     /// Teams, directories and grants — who may see what.
     pub access: access::Access,
     /// The skill library, and what each session is reading from it.
@@ -205,6 +219,11 @@ pub async fn run(config: Config) -> Result<()> {
     let names = preview::Names::from_vault(&vault);
     let db_pool = db.pool().clone();
 
+    // Read once at start-up rather than per request. The migration guarantees
+    // at least the built-in GitHub is there, so a failure here is a database
+    // that cannot be read at all — which is worth refusing to start over.
+    let connections = providers::Connections::opened(db_pool.clone()).await?;
+
     let state = AppState {
         db,
         fleet,
@@ -213,7 +232,9 @@ pub async fn run(config: Config) -> Result<()> {
         key_source,
         home: config.home.clone(),
         pending: Default::default(),
+        renewals: Default::default(),
         accounts: accounts.clone(),
+        connections,
         access: access::Access::new(db_pool.clone()),
         skills: skills::Skills::new(db_pool.clone()),
         forwards: Default::default(),

@@ -3,7 +3,7 @@
  *
  * Each repository a session holds goes through exactly one sequence:
  *
- *     changes on disk → committed → pushed → pull request open
+ *     changes on disk → committed → pushed → request open
  *
  * A session holds any number of them, and they are rarely at the same point —
  * you change the API and the client, commit both, and one push fails. So this
@@ -92,8 +92,27 @@ export type PullRequestLink = { slug: string; url: string };
  * file list beside it read "Nothing has changed." Both were the same absence
  * standing in for two opposite facts.
  */
-export function shipping(session: Session, work?: CheckoutWork[], failed?: boolean): Ship {
+export function shipping(
+  session: Session,
+  work?: CheckoutWork[],
+  failed?: boolean,
+  /**
+   * What the host this session's repository is on calls a request to merge a
+   * branch. `pull request` on GitHub and Gitea, `merge request` on GitLab.
+   *
+   * Defaulted rather than required, because every caller that has not been
+   * taught to ask yet is on GitHub by construction — and a label that says
+   * "pull request" on a GitLab is wrong in a way somebody notices, while one
+   * that says it on a GitHub is simply right.
+   */
+  noun: string = "pull request",
+): Ship {
   const held = work ?? [];
+  const Noun = noun.charAt(0).toUpperCase() + noun.slice(1);
+  /* `PR` on GitHub, `MR` on GitLab. The short form is the button in the session
+     header, where there is no room for the long one. */
+  const SHORT = noun === "merge request" ? "MR" : "PR";
+  const opens = `Commit & open ${SHORT}`;
 
   if (session.checkouts?.length === 0 && !session.repo) {
     return {
@@ -115,7 +134,7 @@ export function shipping(session: Session, work?: CheckoutWork[], failed?: boole
     };
   }
   if (!work) {
-    return { stage: "clean", label: OPENS, blocked: "Looking…", links: [], count: 0 };
+    return { stage: "clean", label: opens, blocked: "Looking…", links: [], count: 0 };
   }
 
   // A checkout nobody could read makes the whole session unknown rather than
@@ -199,7 +218,7 @@ export function shipping(session: Session, work?: CheckoutWork[], failed?: boole
   if (uncommitted.length > 0) {
     return {
       stage: "uncommitted",
-      label: name(OPENS, uncommitted.length, held.length),
+      label: name(opens, uncommitted.length, held.length),
       links,
       count: uncommitted.length,
     };
@@ -209,14 +228,14 @@ export function shipping(session: Session, work?: CheckoutWork[], failed?: boole
   if (unpushed.length > 0) {
     // Pushing to a branch a request is already open on amends that request
     // rather than opening a second one. Same verb, different outcome, so it is
-    // a different stage — the label has to stop promising a pull request that
-    // is already there.
+    // a different stage — the label has to stop promising a request that is
+    // already there.
     const amending = unpushed.every((c) => c.pullRequest);
     return amending
       ? {
           stage: "open-behind",
           label: `${name("Push", unpushed.length, held.length)} — updates the ${
-            unpushed.length === 1 ? "PR" : "PRs"
+            unpushed.length === 1 ? SHORT : `${SHORT}s`
           }`,
           url: single(unpushed),
           links,
@@ -224,7 +243,7 @@ export function shipping(session: Session, work?: CheckoutWork[], failed?: boole
         }
       : {
           stage: "unpushed",
-          label: name("Push & open PR", unpushed.length, held.length),
+          label: name(`Push & open ${SHORT}`, unpushed.length, held.length),
           links,
           count: unpushed.length,
         };
@@ -238,7 +257,7 @@ export function shipping(session: Session, work?: CheckoutWork[], failed?: boole
   if (toOpen.length > 0) {
     return {
       stage: "pushed",
-      label: toOpen.length === 1 ? "Open pull request" : `Open ${toOpen.length} pull requests`,
+      label: toOpen.length === 1 ? `Open ${noun}` : `Open ${toOpen.length} ${noun}s`,
       links,
       count: toOpen.length,
     };
@@ -274,8 +293,7 @@ export function shipping(session: Session, work?: CheckoutWork[], failed?: boole
     // stage renders it as a link out rather than as the primary control.
     return {
       stage: "open",
-      label:
-        links.length === 1 ? "Pull request open" : `${links.length} pull requests open`,
+      label: links.length === 1 ? `${Noun} open` : `${links.length} ${noun}s open`,
       url: single(held),
       links,
       count: links.length,
@@ -290,7 +308,7 @@ export function shipping(session: Session, work?: CheckoutWork[], failed?: boole
     stage: "clean",
     label: "Nothing to commit",
     blocked: held.some((c) => c.pushed === true)
-      ? "This branch has no commits of its own, so there is nothing to open a pull request for."
+      ? `This branch has no commits of its own, so there is nothing to open a ${noun} for.`
       : "Nothing has changed yet.",
     links,
     count: 0,
@@ -309,27 +327,22 @@ function carries(c: CheckoutWork): boolean {
 }
 
 /**
- * The first step's label, which is three steps.
- *
- * One press commits, pushes and opens a pull request — so a button reading
- * "Commit & push" was describing two thirds of what it does, and the tab that
- * opened on the request came as a surprise. Abbreviated because this same
- * string is the button in the session header, where there is no room for the
- * long form; [`sequence`] carries that.
- */
-const OPENS = "Commit & open PR";
-
-/**
  * The long form, for somewhere with room to say it.
  *
  * Shown above the primary in the review sheet, so the whole sequence is written
  * out once even where the button itself is short.
+ *
+ * The first step's label is three steps: one press commits, pushes and opens a
+ * request — so a button reading "Commit & push" was describing two thirds of
+ * what it does, and the tab that opened on the request came as a surprise. The
+ * button is abbreviated because it is also the one in the session header, where
+ * there is no room; this is what carries the whole of it.
  */
-export function sequence(ship: Ship): string | undefined {
+export function sequence(ship: Ship, noun: string = "pull request"): string | undefined {
   if (ship.seeds) {
     switch (ship.stage) {
       case "uncommitted":
-        return "Commits the files below and pushes them. This repository has no commits yet, so that push is what creates its trunk — there is nothing to open a pull request against.";
+        return `Commits the files below and pushes them. This repository has no commits yet, so that push is what creates its trunk — there is nothing to open a ${noun} against.`;
       case "unpushed":
         return "Pushes the branch. This repository has no commits yet, so that push is what creates its trunk.";
       default:
@@ -338,13 +351,13 @@ export function sequence(ship: Ship): string | undefined {
   }
   switch (ship.stage) {
     case "uncommitted":
-      return "Commits the files below, pushes the branch, and opens a pull request.";
+      return `Commits the files below, pushes the branch, and opens a ${noun}.`;
     case "unpushed":
-      return "Pushes the branch and opens a pull request.";
+      return `Pushes the branch and opens a ${noun}.`;
     case "pushed":
-      return "Opens a pull request for what is already pushed.";
+      return `Opens a ${noun} for what is already pushed.`;
     case "open-behind":
-      return "Pushes onto the branch, which amends the pull request already open.";
+      return `Pushes onto the branch, which amends the ${noun} already open.`;
     default:
       return undefined;
   }

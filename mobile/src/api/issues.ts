@@ -65,9 +65,16 @@ export type Reference = {
   url?: string;
 };
 
-/** How a reference is identified, so the same issue cannot be added twice. */
+/**
+ * How a reference is identified, so the same issue cannot be added twice.
+ *
+ * The key carries its own sigil where the host has one, so an issue `1` and a
+ * merge request `!1` in the same project are two references rather than one.
+ */
 export function idOf(ref: Pick<Reference, "source" | "key" | "repo">): string {
-  return ref.source === "linear" ? `linear:${ref.key}` : `${ref.repo ?? ""}#${ref.key}`;
+  if (ref.source === "linear") return `linear:${ref.key}`;
+  const sigil = ref.key.startsWith("!") ? "" : "#";
+  return `${ref.repo ?? ""}${sigil}${ref.key}`;
 }
 
 /**
@@ -98,27 +105,41 @@ export function parseReference(text: string, within?: string): Reference | null 
     };
   }
 
-  // A GitHub URL, from the browser. The host is skipped rather than matched,
-  // so a self-hosted git server works without being named.
+  // A git host's URL, from the browser. The host is skipped rather than
+  // matched, so a self-hosted server works without being named.
+  //
+  // Three things vary and all three are ordinary:
+  //
+  //   * **How many path segments the project has.** A GitLab project can sit
+  //     inside nested groups — `platform/infra/deploy` — so "exactly two" was
+  //     wrong, and every GitLab link pasted here simply did not parse.
+  //   * **GitLab's `/-/` separator**, which is not part of the path.
+  //   * **What the marker is called**: `merge_requests` as well as `pull`.
+  //
+  // The project part is lazy so it stops at the first marker rather than
+  // swallowing it.
   const link = trimmed.match(
-    /^(?:https?:\/\/)?[^/\s]+\/([^/\s]+)\/([^/\s]+)\/(?:issues|pull|pulls)\/(\d+)/,
+    /^(?:https?:\/\/)?[^/\s]+\/(.+?)\/(?:-\/)?(?:issues|pull|pulls|merge_requests)\/(\d+)/,
   );
   if (link) {
     return {
       source: "github",
-      key: link[3],
-      repo: `${link[1]}/${link[2]}`,
+      // `!` for a merge request, which is what GitLab renders as a link and
+      // what its own interface shows. `#` for everything else.
+      key: /\/merge_requests\//.test(trimmed) ? `!${link[2]}` : link[2],
+      repo: link[1],
       keyword: "Refs",
       url: trimmed.startsWith("http") ? trimmed.split(/[?#]/)[0] : undefined,
     };
   }
 
-  // `acme/web#32`, or `#32`.
-  const hash = trimmed.match(/^(?:([\w.-]+\/[\w.-]+))?#(\d+)$/);
+  // `acme/web#32`, `platform/infra/deploy#32`, `#32` — and `!7`, which is how
+  // a GitLab merge request is written and linked.
+  const hash = trimmed.match(/^(?:([\w.-]+(?:\/[\w.-]+)+))?([#!])(\d+)$/);
   if (hash) {
     return {
       source: "github",
-      key: hash[2],
+      key: hash[2] === "!" ? `!${hash[3]}` : hash[3],
       repo: hash[1] ?? within,
       keyword: "Refs",
     };
@@ -141,10 +162,18 @@ export function parseReference(text: string, within?: string): Reference | null 
   return null;
 }
 
-/** `#32`, or `acme/web#32` when it is somewhere else. `ENG-123` as it is. */
+/**
+ * `#32`, or `acme/web#32` when it is somewhere else. `ENG-123` as it is.
+ *
+ * A key already carrying its own sigil — `!7`, a GitLab merge request — keeps
+ * it rather than being given a second one.
+ */
 export function label(ref: Reference, within?: string): string {
   if (ref.source === "linear") return ref.key;
-  return !ref.repo || ref.repo === within ? `#${ref.key}` : `${ref.repo}#${ref.key}`;
+  const sigil = ref.key.startsWith("!") ? "" : "#";
+  return !ref.repo || ref.repo === within
+    ? `${sigil}${ref.key}`
+    : `${ref.repo}${sigil}${ref.key}`;
 }
 
 /**
@@ -215,7 +244,15 @@ export function fromTask(
   const found =
     (taskUrl ? parseReference(taskUrl, within) : null) ??
     (taskKey ? parseReference(taskKey, within) : null);
-  return found && { ...found, keyword: "Closes", url: found.url ?? taskUrl ?? undefined };
+  if (!found) return null;
+  return {
+    ...found,
+    // A merge request is not something a trailer closes. `Closes !1` would
+    // render as a link and do nothing else, which is a promise nothing keeps —
+    // so a session cut from one references it instead.
+    keyword: found.key.startsWith("!") ? "Refs" : "Closes",
+    url: found.url ?? taskUrl ?? undefined,
+  };
 }
 
 /**

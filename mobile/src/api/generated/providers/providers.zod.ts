@@ -8,21 +8,126 @@
 import * as zod from 'zod';
 
 
-export const ListProvidersResponseItem = zod.object({
-  "clientId": zod.string().nullish().describe('The identifier being authorized against, when there is one.\n\nSent so the interface can link to the page on the host where this\napplication\'s access is reviewed — the only place an organization that\nrestricts third-party applications can be requested after the fact, and\nthe address of it contains the client id. Public by design: a\ndevice-flow application has no paired secret.'),
-  "configured": zod.boolean().describe('False when nobody has registered an application for this build, which is\na setup problem rather than something the person using it did wrong.'),
-  "connected": zod.boolean().describe('We hold a token for it.'),
+/**
+ * @summary What kinds of host can be added.
+ */
+export const ListKindsResponseItem = zod.object({
+  "appPage": zod.string().describe('Where somebody registers an application on the hosted instance, and how.\n\nRelative to whatever address is being added, so the add screen can link\nstraight at it once it knows where the host is.'),
+  "appSteps": zod.array(zod.string()),
+  "authModes": zod.array(zod.enum(['device', 'token']).describe('How a person gets a token for a host.\n\nA property of the *instance*, not of the kind, which is the thing that\nsurprised us: Gitea has no device flow at all, and GitLab only grew one in\n17.9 — so an operator with a 16.x instance and an operator with a 17.11 one\nneed different screens for the same software.')),
+  "changeNoun": zod.string(),
+  "hostedBaseUrl": zod.string().nullish().describe('The hosted instance\'s address, when there is one to offer as a default.'),
   "id": zod.string(),
   "label": zod.string(),
-  "maySetApplication": zod.boolean().describe('Whether the caller may register the application this whole installation\nauthorizes against.\n\nSent rather than worked out by each client, the way `may_upgrade` is.\nThe rule is the server\'s — one application, no owner, and whoever sets\nit decides what everybody here authorizes next — and a copy of it in\nthree interfaces is three copies to keep in step. It was drawn for\neverybody once, so a member filled the field in and was refused by the\ntime they pressed Save.'),
+  "selfHosted": zod.boolean().describe('Whether this kind needs an address typed in, which is every kind with no\nhosted instance and every self-hosted one of the others.'),
+  "selfHostedLabel": zod.string().describe('What it is called when somebody runs it themselves — `GitHub Enterprise\nServer`, `Gitea or Forgejo`.\n\nThe add screen lists the hosted and the self-hosted forms as separate\nthings to pick, because they are separate products to the person\npicking, and a list that collapsed them would never tell anybody that\ntheir Enterprise install or their Forgejo was supported at all.'),
+  "tokenSteps": zod.array(zod.string()).describe('How to make a token by hand. Empty where the link does it for you.')
+}).describe('What can be added, for the kind picker on the add screen.')
+export const ListKindsResponse = zod.array(ListKindsResponseItem)
+
+/**
+ * Built-in first, which is load-bearing rather than cosmetic: a desktop or
+ * mobile build older than this change reads the first entry and ignores the
+ * rest, so the first entry has to be the host it was already using.
+ * @summary Every git host, and whether this person has connected it.
+ */
+export const ListProvidersResponseItem = zod.object({
+  "accessPage": zod.string().nullish().describe('Where this application\'s access is reviewed. GitHub only.'),
+  "appPage": zod.string().describe('Where somebody registers an application, for a host that needs one.'),
+  "auth": zod.enum(['device', 'token']).describe('How a person gets a token for a host.\n\nA property of the *instance*, not of the kind, which is the thing that\nsurprised us: Gitea has no device flow at all, and GitLab only grew one in\n17.9 — so an operator with a 16.x instance and an operator with a 17.11 one\nneed different screens for the same software.'),
+  "authModes": zod.array(zod.enum(['device', 'token']).describe('How a person gets a token for a host.\n\nA property of the *instance*, not of the kind, which is the thing that\nsurprised us: Gitea has no device flow at all, and GitLab only grew one in\n17.9 — so an operator with a 16.x instance and an operator with a 17.11 one\nneed different screens for the same software.')).describe('Every way this kind can be connected, so the edit screen can offer them\nwithout knowing what Firetower knows about Gitea.'),
+  "baseUrl": zod.string().describe('Where a person reads it in a browser.'),
+  "builtin": zod.boolean().describe('The compiled-in host. Not removable, and its address is not editable.'),
+  "changeNoun": zod.string().describe('What this host calls a request to merge a branch.'),
+  "clientId": zod.string().nullish().describe('The identifier being authorized against, when there is one.\n\nPublic by design: a device-flow application has no paired secret.'),
+  "configured": zod.boolean().describe('False when nobody has registered an application for this build, which is\na setup problem rather than something the person using it did wrong.'),
+  "connected": zod.boolean().describe('We hold a token for it.'),
+  "gitHost": zod.string().describe('The hostname in a clone URL. Shown under the label, because it is the\nonly thing that tells two GitHubs apart.'),
+  "id": zod.string(),
+  "kind": zod.string().describe('Which software: `github`, `gitlab`, `gitea`. What decides the mark drawn\nbeside the row and the dialect of everything underneath.'),
+  "label": zod.string(),
+  "maySetApplication": zod.boolean().describe('Whether the caller may register the application this whole installation\nauthorizes against.\n\nSent rather than worked out by each client, the way `may_upgrade` is.\nThe rule is the server\'s — one application per host, no owner, and\nwhoever sets it decides what everybody here authorizes next — and a copy\nof it in three interfaces is three copies to keep in step.'),
   "pending": zod.union([zod.null(),zod.object({
-  "userCode": zod.string().describe('The short code to type. Shown, not clicked.'),
-  "verificationUri": zod.string().describe('Where to type it.')
-}).describe('Set while an authorization is in flight.')]).optional()
-}).describe('What the interface shows on the connect screen.')
+  "userCode": zod.string().describe('The short code. Always shown, even where the link below carries it, so\nsomebody can check the page is showing the code they were given.'),
+  "verificationUri": zod.string().describe('Where to type it.\n\nThe host\'s page with the code already filled in, where the host offers\none — GitLab does, GitHub does not — and the bare page otherwise. The\ninterface opens this and does not need to know which it got.')
+}).describe('Set while an authorization is in flight.')]).optional(),
+  "sharedApplication": zod.boolean().describe('The application in use is the one Firetower ships, not one registered\nhere.\n\nDrawn as a line offering to replace it, because there are two reasons\nsomebody would want to: the approval screen carries our name and asks\nfor broad access, and the shared application\'s 50-authorizations-an-hour\nceiling is drawn on by every other installation using it.'),
+  "tokenPage": zod.string().describe('Where somebody makes a token by hand, for a host that connects that way.'),
+  "version": zod.string().nullish().describe('What the instance said it was, when one was last reached.')
+}).describe('What the interface shows on the connect screen, one per host.\n\nStill called a provider, and still served from `/api/v1/providers`, because\nthree committed clients already read it under that name and a rename buys a\nword. The fields after `may_set_application` are the new ones; everything\nabove it means what it always did.')
 export const ListProvidersResponse = zod.array(ListProvidersResponseItem)
 
 /**
+ * **The installation's, so this is an administrator's.** The address and the
+ * application decide what everybody here authorizes against next, which is the
+ * same reason `set_client_id` is closed.
+ *
+ * Reached before it is saved, and *not* refused when it cannot be: a control
+ * plane that is temporarily off the network it shares with somebody's GitLab
+ * should still be able to record where it is. What the probe buys is the
+ * version, and therefore an honest answer about whether the browser flow is
+ * available.
+ * @summary Add a git host.
+ */
+export const CreateProviderBody = zod.object({
+  "auth": zod.union([zod.null(),zod.enum(['device', 'token']).describe('How people will connect it. The kind\'s first supported mode by default.')]).optional(),
+  "baseUrl": zod.string().nullish().describe('Where it is. Left off for a kind with a hosted instance, which means\nthat one.'),
+  "clientId": zod.string().nullish().describe('The application to authorize against, for the browser flow.'),
+  "kind": zod.string(),
+  "label": zod.string().describe('What everybody here will see it called.')
+}).describe('A git host to add.')
+
+export const CreateProviderResponse = zod.object({
+  "accessPage": zod.string().nullish().describe('Where this application\'s access is reviewed. GitHub only.'),
+  "appPage": zod.string().describe('Where somebody registers an application, for a host that needs one.'),
+  "auth": zod.enum(['device', 'token']).describe('How a person gets a token for a host.\n\nA property of the *instance*, not of the kind, which is the thing that\nsurprised us: Gitea has no device flow at all, and GitLab only grew one in\n17.9 — so an operator with a 16.x instance and an operator with a 17.11 one\nneed different screens for the same software.'),
+  "authModes": zod.array(zod.enum(['device', 'token']).describe('How a person gets a token for a host.\n\nA property of the *instance*, not of the kind, which is the thing that\nsurprised us: Gitea has no device flow at all, and GitLab only grew one in\n17.9 — so an operator with a 16.x instance and an operator with a 17.11 one\nneed different screens for the same software.')).describe('Every way this kind can be connected, so the edit screen can offer them\nwithout knowing what Firetower knows about Gitea.'),
+  "baseUrl": zod.string().describe('Where a person reads it in a browser.'),
+  "builtin": zod.boolean().describe('The compiled-in host. Not removable, and its address is not editable.'),
+  "changeNoun": zod.string().describe('What this host calls a request to merge a branch.'),
+  "clientId": zod.string().nullish().describe('The identifier being authorized against, when there is one.\n\nPublic by design: a device-flow application has no paired secret.'),
+  "configured": zod.boolean().describe('False when nobody has registered an application for this build, which is\na setup problem rather than something the person using it did wrong.'),
+  "connected": zod.boolean().describe('We hold a token for it.'),
+  "gitHost": zod.string().describe('The hostname in a clone URL. Shown under the label, because it is the\nonly thing that tells two GitHubs apart.'),
+  "id": zod.string(),
+  "kind": zod.string().describe('Which software: `github`, `gitlab`, `gitea`. What decides the mark drawn\nbeside the row and the dialect of everything underneath.'),
+  "label": zod.string(),
+  "maySetApplication": zod.boolean().describe('Whether the caller may register the application this whole installation\nauthorizes against.\n\nSent rather than worked out by each client, the way `may_upgrade` is.\nThe rule is the server\'s — one application per host, no owner, and\nwhoever sets it decides what everybody here authorizes next — and a copy\nof it in three interfaces is three copies to keep in step.'),
+  "pending": zod.union([zod.null(),zod.object({
+  "userCode": zod.string().describe('The short code. Always shown, even where the link below carries it, so\nsomebody can check the page is showing the code they were given.'),
+  "verificationUri": zod.string().describe('Where to type it.\n\nThe host\'s page with the code already filled in, where the host offers\none — GitLab does, GitHub does not — and the bare page otherwise. The\ninterface opens this and does not need to know which it got.')
+}).describe('Set while an authorization is in flight.')]).optional(),
+  "sharedApplication": zod.boolean().describe('The application in use is the one Firetower ships, not one registered\nhere.\n\nDrawn as a line offering to replace it, because there are two reasons\nsomebody would want to: the approval screen carries our name and asks\nfor broad access, and the shared application\'s 50-authorizations-an-hour\nceiling is drawn on by every other installation using it.'),
+  "tokenPage": zod.string().describe('Where somebody makes a token by hand, for a host that connects that way.'),
+  "version": zod.string().nullish().describe('What the instance said it was, when one was last reached.')
+}).describe('What the interface shows on the connect screen, one per host.\n\nStill called a provider, and still served from `/api/v1/providers`, because\nthree committed clients already read it under that name and a rename buys a\nword. The fields after `may_set_application` are the new ones; everything\nabove it means what it always did.')
+
+/**
+ * Run before one is saved. An address that cannot be reached is still savable
+ * — a laptop off the VPN is not a reason to refuse to record a URL — but what
+ * was found is worth putting on screen either way.
+ * @summary Reach a host and say what is there.
+ */
+export const ProbeProviderBody = zod.object({
+  "baseUrl": zod.string().describe('What somebody typed. A bare hostname is fine.'),
+  "kind": zod.string().nullish().describe('`gitlab`, `gitea`, `github` — only when the caller already knows.\n\nLeft off, and the kind is worked out from what answers. **Which is the\npoint**: the add screen used to make somebody pick between three logos\nbefore typing anything, and that is a question the address itself\nanswers. It also does not scale — three buttons already crowd the row,\nand a fourth and fifth kind would wrap it.')
+}).describe('An address to reach before a git host is saved.')
+
+export const ProbeProviderResponse = zod.object({
+  "apiBase": zod.string(),
+  "authModes": zod.array(zod.enum(['device', 'token']).describe('How a person gets a token for a host.\n\nA property of the *instance*, not of the kind, which is the thing that\nsurprised us: Gitea has no device flow at all, and GitLab only grew one in\n17.9 — so an operator with a 16.x instance and an operator with a 17.11 one\nneed different screens for the same software.')).describe('Which ways of connecting are actually available here.\n\nThe whole reason this endpoint exists. GitLab grew a device flow in\n17.9, so on a 16.x instance the browser option has to be absent rather\nthan present-and-doomed — otherwise somebody registers an application,\npresses Connect, and is told their client id was rejected.'),
+  "baseUrl": zod.string().describe('The address as it will be stored, so the form can show what it made of\nwhat was typed.'),
+  "gitHost": zod.string(),
+  "kind": zod.string().describe('What answered: `github`, `gitlab`, `gitea`.'),
+  "kindLabel": zod.string().describe('What that kind is called, for the sentence the screen writes.'),
+  "note": zod.string().nullish().describe('Why a way of connecting is missing, when one is.'),
+  "suggestedLabel": zod.string().describe('A name to prefill, so the common case is one field and a press.\n\nThe kind for the hosted instances — a second GitHub account is just\n"GitHub" until somebody renames it — and the hostname for everything\nelse, which is the thing that tells two of a kind apart.'),
+  "version": zod.string().nullish().describe('What it said it was, when it would say.')
+}).describe('What was at the other end.')
+
+/**
+ * The host stays. It is the installation's and somebody else here may be using
+ * it; removing it is [`delete_provider`].
  * @summary Sign out: forget the token and stop any authorization still waiting.
  */
 export const DisconnectProviderParams = zod.object({
@@ -30,6 +135,41 @@ export const DisconnectProviderParams = zod.object({
 })
 
 export const DisconnectProviderResponse = zod.void()
+
+export const UpdateProviderParams = zod.object({
+  "id": zod.string().describe('Provider id')
+})
+
+export const UpdateProviderBody = zod.object({
+  "auth": zod.union([zod.null(),zod.enum(['device', 'token']).describe('How a person gets a token for a host.\n\nA property of the *instance*, not of the kind, which is the thing that\nsurprised us: Gitea has no device flow at all, and GitLab only grew one in\n17.9 — so an operator with a 16.x instance and an operator with a 17.11 one\nneed different screens for the same software.')]).optional(),
+  "clientId": zod.string().nullish().describe('An empty string clears it, which is how somebody takes an application\nback off a host they would rather everybody connected with a token.'),
+  "label": zod.string().nullish()
+}).describe('What may be changed about a host after it exists.\n\nNot the address. A host whose address moves is a different host — the\nrepositories cloned from the old one still point at it, and the tokens\nissued by it are still for it — so moving one is removing it and adding the\nnew one, which is at least honest about what happens to everything that\nreferred to it.')
+
+export const UpdateProviderResponse = zod.object({
+  "accessPage": zod.string().nullish().describe('Where this application\'s access is reviewed. GitHub only.'),
+  "appPage": zod.string().describe('Where somebody registers an application, for a host that needs one.'),
+  "auth": zod.enum(['device', 'token']).describe('How a person gets a token for a host.\n\nA property of the *instance*, not of the kind, which is the thing that\nsurprised us: Gitea has no device flow at all, and GitLab only grew one in\n17.9 — so an operator with a 16.x instance and an operator with a 17.11 one\nneed different screens for the same software.'),
+  "authModes": zod.array(zod.enum(['device', 'token']).describe('How a person gets a token for a host.\n\nA property of the *instance*, not of the kind, which is the thing that\nsurprised us: Gitea has no device flow at all, and GitLab only grew one in\n17.9 — so an operator with a 16.x instance and an operator with a 17.11 one\nneed different screens for the same software.')).describe('Every way this kind can be connected, so the edit screen can offer them\nwithout knowing what Firetower knows about Gitea.'),
+  "baseUrl": zod.string().describe('Where a person reads it in a browser.'),
+  "builtin": zod.boolean().describe('The compiled-in host. Not removable, and its address is not editable.'),
+  "changeNoun": zod.string().describe('What this host calls a request to merge a branch.'),
+  "clientId": zod.string().nullish().describe('The identifier being authorized against, when there is one.\n\nPublic by design: a device-flow application has no paired secret.'),
+  "configured": zod.boolean().describe('False when nobody has registered an application for this build, which is\na setup problem rather than something the person using it did wrong.'),
+  "connected": zod.boolean().describe('We hold a token for it.'),
+  "gitHost": zod.string().describe('The hostname in a clone URL. Shown under the label, because it is the\nonly thing that tells two GitHubs apart.'),
+  "id": zod.string(),
+  "kind": zod.string().describe('Which software: `github`, `gitlab`, `gitea`. What decides the mark drawn\nbeside the row and the dialect of everything underneath.'),
+  "label": zod.string(),
+  "maySetApplication": zod.boolean().describe('Whether the caller may register the application this whole installation\nauthorizes against.\n\nSent rather than worked out by each client, the way `may_upgrade` is.\nThe rule is the server\'s — one application per host, no owner, and\nwhoever sets it decides what everybody here authorizes next — and a copy\nof it in three interfaces is three copies to keep in step.'),
+  "pending": zod.union([zod.null(),zod.object({
+  "userCode": zod.string().describe('The short code. Always shown, even where the link below carries it, so\nsomebody can check the page is showing the code they were given.'),
+  "verificationUri": zod.string().describe('Where to type it.\n\nThe host\'s page with the code already filled in, where the host offers\none — GitLab does, GitHub does not — and the bare page otherwise. The\ninterface opens this and does not need to know which it got.')
+}).describe('Set while an authorization is in flight.')]).optional(),
+  "sharedApplication": zod.boolean().describe('The application in use is the one Firetower ships, not one registered\nhere.\n\nDrawn as a line offering to replace it, because there are two reasons\nsomebody would want to: the approval screen carries our name and asks\nfor broad access, and the shared application\'s 50-authorizations-an-hour\nceiling is drawn on by every other installation using it.'),
+  "tokenPage": zod.string().describe('Where somebody makes a token by hand, for a host that connects that way.'),
+  "version": zod.string().nullish().describe('What the instance said it was, when one was last reached.')
+}).describe('What the interface shows on the connect screen, one per host.\n\nStill called a provider, and still served from `/api/v1/providers`, because\nthree committed clients already read it under that name and a rename buys a\nword. The fields after `may_set_application` are the new ones; everything\nabove it means what it always did.')
 
 /**
  * Returns immediately with the code to show. The waiting happens here rather
@@ -50,8 +190,8 @@ export const AuthorizeProviderParams = zod.object({
 })
 
 export const AuthorizeProviderResponse = zod.object({
-  "userCode": zod.string().describe('The short code to type. Shown, not clicked.'),
-  "verificationUri": zod.string().describe('Where to type it.')
+  "userCode": zod.string().describe('The short code. Always shown, even where the link below carries it, so\nsomebody can check the page is showing the code they were given.'),
+  "verificationUri": zod.string().describe('Where to type it.\n\nThe host\'s page with the code already filled in, where the host offers\none — GitLab does, GitHub does not — and the bare page otherwise. The\ninterface opens this and does not need to know which it got.')
 }).describe('A device authorization waiting for someone to approve it in a browser.')
 
 /**
@@ -67,6 +207,9 @@ export const AuthorizeProviderResponse = zod.object({
  * That is also why this was worth closing. Anyone at all could point the
  * whole installation at an application they controlled, and the next person
  * to connect would authorize it.
+ *
+ * Kept beside [`update_provider`], which can do this and more, because three
+ * committed clients call this path and a removed endpoint is a broken app.
  * @summary Register an application to authorize against.
  */
 export const SetClientIdParams = zod.object({
@@ -78,6 +221,29 @@ export const SetClientIdBody = zod.object({
 }).describe('The client id for a git host, supplied by whoever is setting this up.')
 
 export const SetClientIdResponse = zod.void()
+
+/**
+ * **Any of them, including the one that ships.** It was exempt, which left a
+ * row in the list with no Remove and no reason visible from outside this
+ * crate — and an installation that does not use GitHub could never be rid of
+ * it. The exemption was protecting an id rather than a user: re-adding gave a
+ * fresh one and stranded whatever referred to the old. `Connections::create`
+ * reuses the well-known id for a kind's hosted instance, so removing it is
+ * reversible and the special case is gone.
+ *
+ * Every token anybody held for it goes with it — they are that host's and
+ * useless anywhere else. Repositories cloned from it are left alone and fall
+ * back to being matched by hostname, which means they keep working if another
+ * host at the same address is still connected and stop finding a token if not.
+ * That is the right way round: a row pointing at a real remote is worth more
+ * than a tidy database.
+ * @summary Remove a git host.
+ */
+export const DeleteProviderParams = zod.object({
+  "id": zod.string().describe('Provider id')
+})
+
+export const DeleteProviderResponse = zod.void()
 
 /**
  * @summary Who this person's commits are authored as on this host.
@@ -130,7 +296,27 @@ export const ListProviderReposResponseItem = zod.object({
   "private": zod.boolean(),
   "pushedAt": zod.string().nullish().describe('Most recently pushed first is the order people actually want.'),
   "remote": zod.string().describe('The https URL, since a token authenticates over https.'),
-  "slug": zod.string().describe('`acme/backend`')
+  "slug": zod.string().describe('`acme/backend`, or `platform/infra/deploy` on a host with nested groups.')
 }).describe('A repository the authorized account can see.')
 export const ListProviderReposResponse = zod.array(ListProviderReposResponseItem)
+
+/**
+ * Tried before it is kept, like a tracker's key: a token that does not work
+ * stored anyway is an empty repository picker on another screen with nothing
+ * saying why. And the answer to the attempt is the account it belongs to,
+ * which is the identity its commits will carry and the username its pushes
+ * will use — so one request does the check and fills both in.
+ * @summary Connect a host with a token, for the hosts that connect that way.
+ */
+export const SetProviderTokenParams = zod.object({
+  "id": zod.string().describe('Provider id')
+})
+
+export const SetProviderTokenBody = zod.object({
+  "token": zod.string()
+}).describe('A token somebody made on the host and pasted here.')
+
+export const SetProviderTokenResponse = zod.object({
+  "account": zod.string()
+}).describe('Who the token turned out to belong to, so the screen can say.')
 

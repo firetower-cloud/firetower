@@ -24,8 +24,14 @@ export interface SetupState {
      */
   completed: boolean;
   /**
-     * No GitHub application is configured. Not a blocker — it is skippable,
-     * and pasting a repository URL works without one.
+     * No git host can be authorized yet. Not a blocker — it is skippable, and
+     * pasting a repository URL works without one.
+     *
+     * Still called `needs_github`, and still true of GitHub specifically in
+     * the ordinary case, because three committed clients read the field under
+     * that name. What it means now is "nothing here can be connected": a host
+     * connected by token needs nothing registered, so adding a GitLab or a
+     * Gitea answers it too.
      */
   needsGithub: boolean;
   /** Nobody has named the organisation yet. */

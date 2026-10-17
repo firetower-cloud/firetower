@@ -35,7 +35,7 @@ mod voice;
 
 // `providers` on its own is the module below, which is this crate's git-host
 // screen rather than the git hosts themselves.
-use crate::oauth::RemoteRepo;
+use crate::oauth::{Grant, RemoteRepo};
 use crate::providers::{PendingAuth, ProviderStatus};
 use crate::vault;
 use crate::AppState;
@@ -76,6 +76,12 @@ pub enum ErrorCode {
     SessionEnded,
     /// This build has no registered application for that git host.
     ProviderNotConfigured,
+    /// The git host's application has had too many authorizations this hour.
+    ///
+    /// Its own code because the interface answers it differently: nothing is
+    /// misconfigured and nothing is unreachable, so the screen offers the two
+    /// ways round it rather than a correction or a retry.
+    ProviderBusy,
     /// Nobody has authorized that git host yet.
     ProviderNotConnected,
     /// We reached the repository's host and were refused.
@@ -132,6 +138,7 @@ impl ErrorCode {
             | Self::ProviderNotConnected
             | Self::RepoAccessDenied
             | Self::ActionFailed => StatusCode::CONFLICT,
+            Self::ProviderBusy => StatusCode::TOO_MANY_REQUESTS,
             Self::Internal => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -214,6 +221,71 @@ async fn bootstrap(State(state): State<AppState>) -> Json<Bootstrap> {
     })
 }
 
+/// Which git host a repository is on.
+///
+/// The row first, the remote's hostname second. Both are needed and neither is
+/// redundant: a repository picked from a host has its id written down and is
+/// unambiguous, while one whose remote was pasted has no row and has to be
+/// matched on the hostname — which is also every row written before there was
+/// more than one host.
+///
+/// The row is what makes two accounts on one hostname work. With a personal and
+/// a work GitHub both connected, `github.com` names two hosts and the remote
+/// alone cannot say which token opens this repository.
+pub(crate) async fn connection_for_repo(
+    state: &AppState,
+    repo: &ft_core::Repo,
+    owner: &str,
+) -> Option<std::sync::Arc<crate::providers::Connection>> {
+    if let Some(id) = repo.connection_id.as_deref() {
+        // A host that has since been removed falls through rather than failing.
+        // The remote is still a real address and may still be reachable by
+        // another host at the same name.
+        if let Some(conn) = state.connections.get(id).await {
+            return Some(conn);
+        }
+    }
+    connection_for_remote(state, &repo.remote, owner).await
+}
+
+/// Which git host a bare remote is on, preferring one this person can use.
+///
+/// Where two hosts share a hostname and there is no row to disambiguate, the
+/// one they hold a token for is the better guess by a wide margin — the other
+/// answer is a credential that opens nothing. Where they hold tokens for both,
+/// the first in the list wins, which is the built-in one.
+/// The same, reachable from the submodules that need it by name.
+pub(crate) async fn connection_for_remote_pub(
+    state: &AppState,
+    remote: &str,
+    owner: &str,
+) -> Option<std::sync::Arc<crate::providers::Connection>> {
+    connection_for_remote(state, remote, owner).await
+}
+
+async fn connection_for_remote(
+    state: &AppState,
+    remote: &str,
+    owner: &str,
+) -> Option<std::sync::Arc<crate::providers::Connection>> {
+    let candidates = state.connections.all_for_remote(remote).await;
+    if candidates.len() <= 1 {
+        return candidates.into_iter().next();
+    }
+
+    for conn in &candidates {
+        if state
+            .vault
+            .holds(crate::vault::Key::of(vault::GIT, &conn.id, owner))
+            .await
+            .unwrap_or(false)
+        {
+            return Some(conn.clone());
+        }
+    }
+    candidates.into_iter().next()
+}
+
 /// The token that applies to a remote, if we hold one.
 ///
 /// A remote we have no token for isn't an error: local paths and self-hosted
@@ -230,18 +302,107 @@ async fn credential_for(
     owner: &str,
     why: &str,
 ) -> Option<Credential> {
-    let provider = crate::providers::for_remote(remote)?;
-    let secret = state
-        .vault
-        .get(crate::vault::Key::of(vault::GIT, provider.id, owner), why)
-        .await
-        // A credential that will not open is a real failure, but not this
-        // caller's to report: it is logged where it happens, and here it means
-        // the same as having none.
-        .ok()
-        .flatten()?;
+    let conn = connection_for_remote(state, remote, owner).await?;
+    credential_on(state, &conn, owner, why).await
+}
+
+/// The same, for a repository that knows which host it is on.
+pub(crate) async fn credential_for_repo(
+    state: &AppState,
+    repo: &ft_core::Repo,
+    owner: &str,
+    why: &str,
+) -> Option<Credential> {
+    let conn = connection_for_repo(state, repo, owner).await?;
+    credential_on(state, &conn, owner, why).await
+}
+
+/// This person's working token for one host, renewed if it was about to lapse.
+///
+/// **Everything that reads a git token goes through here.** A GitLab access
+/// token lasts two hours and the figure cannot be changed, so "read the vault
+/// and use what is in it" is only correct for the first two hours after
+/// somebody signs in. What is in the vault is a [`Grant`] — usually just the
+/// token, and on GitLab a token with a refresh token and an expiry beside it.
+///
+/// `None` means we hold nothing for this person on this host, which is not an
+/// error: a local path or a host nobody has authorized works off whatever
+/// credentials the worker already has.
+///
+/// A renewal that *fails* also answers `None`, and logs why. The alternative is
+/// every caller growing a second error path for a case whose only remedy is the
+/// one the connect screen already offers.
+pub(crate) async fn git_token(
+    state: &AppState,
+    conn: &crate::providers::Connection,
+    owner: &str,
+    why: &str,
+) -> Option<zeroize::Zeroizing<String>> {
+    let key = || crate::vault::Key::of(vault::GIT, &conn.id, owner);
+    let held = Grant::parse(&state.vault.get(key(), why).await.ok().flatten()?);
+
+    if !held.stale(chrono::Utc::now()) {
+        return Some(zeroize::Zeroizing::new(held.access));
+    }
+
+    // Past here we are spending a single-use refresh token, so only one task
+    // per person per host may be in flight — and whoever waited has to look
+    // again rather than renew the grant it arrived with, because the one that
+    // went first has already replaced it.
+    let _queued = state.renewals.at(&format!("{}:{owner}", conn.id)).await;
+    let held = Grant::parse(&state.vault.get(key(), "renewing the authorization").await.ok().flatten()?);
+    if !held.stale(chrono::Utc::now()) {
+        return Some(zeroize::Zeroizing::new(held.access));
+    }
+
+    let (Some(refresh), Some(client_id)) = (held.refresh.as_deref(), conn.client_id()) else {
+        // Expired with nothing to renew it: a token somebody pasted with an end
+        // date on it, or one stored before grants were kept whole. Handing it
+        // over anyway is right — the host is the authority on whether it still
+        // works, and our copy of the expiry may be the thing that is wrong.
+        return Some(zeroize::Zeroizing::new(held.access));
+    };
+
+    match crate::oauth::grant::renew(conn, &client_id, refresh).await {
+        Ok(fresh) => {
+            if let Err(e) = state
+                .vault
+                .put(
+                    key(),
+                    &fresh.to_stored(),
+                    &format!("{} renewed the authorization", conn.label),
+                )
+                .await
+            {
+                // The host has already rotated the refresh token, so the one in
+                // the vault is now spent and this person will have to sign in
+                // again. Worth a loud line: it is the only failure here that
+                // loses a credential rather than just failing a request.
+                tracing::error!("storing the renewed {} token: {e:#}", conn.label);
+            }
+            Some(zeroize::Zeroizing::new(fresh.access))
+        }
+        Err(e) => {
+            tracing::warn!("renewing the {} authorization: {e:#}", conn.label);
+            None
+        }
+    }
+}
+
+/// This person's token for one host, as git wants it.
+async fn credential_on(
+    state: &AppState,
+    conn: &crate::providers::Connection,
+    owner: &str,
+    why: &str,
+) -> Option<Credential> {
+    let secret = git_token(state, conn, owner, why).await?;
+
     Some(Credential {
-        username: provider.git_username.to_string(),
+        // All three hosts read the token out of the password and ignore this,
+        // which was checked against a real Gitea rather than assumed — see
+        // `Kind::git_username`.
+        username: conn.kind.git_username.to_string(),
         secret: secret.to_string(),
     })
 }
@@ -272,6 +433,8 @@ async fn credential_for(
         ft_core::HostState,
         ProviderStatus,
         PendingAuth,
+        crate::providers::AuthMode,
+        crate::providers::KindInfo,
         ft_core::controls::Control,
         ft_core::controls::Choice,
         ft_core::controls::ControlKind,
@@ -415,15 +578,25 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(secrets::list_secrets))
         .routes(routes!(secrets::replace_secret, secrets::remove_secret))
         .routes(routes!(secrets::reveal_secret))
-        .routes(routes!(providers::list_providers))
+        .routes(routes!(
+            providers::list_providers,
+            providers::create_provider
+        ))
+        .routes(routes!(providers::list_kinds))
+        .routes(routes!(providers::probe_provider))
         .routes(routes!(providers::set_client_id))
+        .routes(routes!(providers::set_provider_token))
+        .routes(routes!(providers::delete_provider))
         .routes(routes!(
             providers::get_identity,
             providers::set_identity,
             providers::clear_identity
         ))
         .routes(routes!(providers::authorize_provider))
-        .routes(routes!(providers::disconnect_provider))
+        .routes(routes!(
+            providers::disconnect_provider,
+            providers::update_provider
+        ))
         .routes(routes!(providers::list_provider_repos))
         .routes(routes!(sessions::list_sessions, sessions::create_session))
         .routes(routes!(sessions::end_all_sessions))

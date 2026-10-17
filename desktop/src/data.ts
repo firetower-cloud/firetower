@@ -29,7 +29,17 @@ import {
 } from "~/api/generated/sessions/sessions";
 import { useMemo } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import type { DiffSince, FileDiff, ListTasksParams, Page, Repo, Session, Task, TaskScope } from "~/api/generated/model";
+import type {
+  DiffSince,
+  FileDiff,
+  ListTasksParams,
+  Page,
+  ProviderStatus,
+  Repo,
+  Session,
+  Task,
+  TaskScope,
+} from "~/api/generated/model";
 
 /** Everything a screen needs to know about where its data came from. */
 export type Feed<T> = { data: T; loading: boolean; error: string | null };
@@ -150,6 +160,54 @@ export function useTasks(ask: ListTasksParams, enabled = true): Tasks {
 export function useRepos(): Feed<Repo[]> {
   const q = useListRepos();
   return { data: q.data ?? [], loading: q.isPending, error: q.error ? why(q.error) : null };
+}
+
+/**
+ * Which git host a repository is on, for whatever is drawn beside its name.
+ *
+ * Every row that shows a repository used to draw GitHub's logo, in thirteen
+ * places, because there was one git host and it was GitHub. Now a slug can be a
+ * GitLab project, so the mark and the word for a merge request both have to be
+ * looked up — and they are looked up by slug, because a slug is all most of
+ * those rows have.
+ *
+ * Two readings, in order: the host the repository was connected from, which is
+ * written on the row; then the hostname of its remote, which is what answers
+ * for every repository connected before there was more than one host. The same
+ * two readings the server does, for the same reason.
+ */
+export function useHostOf(): (slug?: string | null) => ProviderStatus | undefined {
+  const repos = useListRepos();
+  const providers = useListProviders();
+
+  return useMemo(() => {
+    const hosts = providers.data ?? [];
+    const byId = new Map(hosts.map((h) => [h.id, h]));
+    const byHostname = new Map<string, ProviderStatus>();
+    // First wins, and the list is built-in-first — so with two accounts on
+    // github.com and no row to say which, the answer is the one that was
+    // already there.
+    for (const host of hosts) {
+      if (!byHostname.has(host.gitHost)) byHostname.set(host.gitHost, host);
+    }
+
+    const bySlug = new Map<string, ProviderStatus>();
+    for (const repo of repos.data ?? []) {
+      const found =
+        (repo.connectionId ? byId.get(repo.connectionId) : undefined) ??
+        byHostname.get(hostnameOf(repo.remote));
+      if (found) bySlug.set(repo.slug, found);
+    }
+
+    return (slug?: string | null) => (slug ? bySlug.get(slug) : undefined);
+  }, [repos.data, providers.data]);
+}
+
+/** The hostname out of a clone URL, in either of git's two shapes. */
+function hostnameOf(remote: string): string {
+  const afterScheme = remote.includes("://") ? remote.split("://")[1]! : remote;
+  const afterUser = afterScheme.includes("@") ? afterScheme.split("@").slice(1).join("@") : afterScheme;
+  return (afterUser.split(/[/:]/)[0] ?? "").toLowerCase();
 }
 
 export function useHosts() {

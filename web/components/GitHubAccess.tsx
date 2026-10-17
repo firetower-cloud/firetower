@@ -49,8 +49,26 @@ export function ownersOf(repos: RemoteRepo[]): string[] {
  * an organization that restricts third-party applications stays dark until an
  * owner approves the request, and this is the page the request is made and
  * tracked on.
+ *
+ * **The server's answer wins, and its silence is not the same as its absence.**
+ * `accessPage` is built where the host's address is known, which is the only
+ * place it can be right: an Enterprise install's settings live on its own
+ * hostname. GitLab and Gitea have no such page at all, and the server says so
+ * with `null` — so `null` means *draw nothing*, while `undefined` means a
+ * control plane older than the field, which can only be a github.com one.
  */
-export function accessUrl(clientId: string | null | undefined): string | null {
+export function accessUrl(
+  clientId: string | null | undefined,
+  accessPage?: string | null,
+): string | null {
+  // Said outright: there is no such page on this host.
+  if (accessPage === null) return null;
+
+  const given = accessPage?.trim();
+  if (given) return given;
+
+  // Not said at all — an older control plane, which has only ever had
+  // github.com.
   const id = clientId?.trim();
   return id ? `https://github.com/settings/connections/applications/${id}` : null;
 }
@@ -247,7 +265,7 @@ export function Access({
     );
   }
 
-  const settings = accessUrl(provider.clientId);
+  const settings = accessUrl(provider.clientId, provider.accessPage);
 
   return (
     <>

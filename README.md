@@ -83,8 +83,20 @@ Everything after that happens in the desktop app: adding workers, connecting rep
 | | |
 | --- | --- |
 | [Getting started](https://usefiretower.com/docs) | The short path from nothing to a running session |
+| [Git hosts](docs/git-hosts.md) | GitHub, GitLab and Gitea — including ones you host yourself |
 | [Teams and directories](docs/teams-and-directories.md) | Who can see what, and what sharing something does |
 | [Paths and ownership](docs/paths-and-ownership.md) | The same subject, for whoever is writing the next feature |
+
+## Supported git hosts
+
+| | |
+| --- | --- |
+| GitHub | Supported — github.com needs nothing registered; Enterprise Server too |
+| GitLab | Supported — gitlab.com needs nothing registered; self-managed too |
+| Gitea | Supported — and Forgejo, which answers the same API |
+
+Any number of them, including more than one of the same kind: a personal GitHub
+and a work one, or two GitLabs. See [Git hosts](docs/git-hosts.md).
 
 ## Supported agents
 

@@ -9,10 +9,11 @@
  *
  * ## Nothing is authorized here
  *
- * The control plane already holds this person's git token — they connected
- * GitHub once, on a desk, and `/providers/github/repos` is the list that came
- * with it. So connecting a repository is a `POST /repos` with a slug and a
- * remote off that list, and there is deliberately no device flow on the phone:
+ * The control plane already holds this person's git token — they connected a
+ * git host once, on a desk, and `/providers/{id}/repos` is the list that came
+ * with it. So connecting a repository is a `POST /repos` with a slug, a remote
+ * and the host they came off, and there is deliberately no device flow on the
+ * phone:
  * a code to type into a browser on another device, from a device that *is* the
  * browser, is the worst place to run that flow and the desktop already runs it
  * well. A phone with no connected account is told so, and told where it is
@@ -55,9 +56,11 @@ export default function Repos() {
   const cache = useQueryClient();
   const { pick } = useLocalSearchParams<{ pick?: string }>();
 
-  /* Whichever git host this person has authorized. One today; the shape is
-     the contract's, so a second one is a row in that list rather than a
-     branch here. */
+  /* Whichever git host this person has authorized, in the order the server
+     sends them — built-in first. With two connected this takes the first and
+     does not ask: picking between hosts is a thing you do while *setting up*,
+     and this screen exists to get somebody from a phone to a running session.
+     Adding one is a desk job and stays one. */
   const providers = useProviders();
   const host = providers.data.find((p) => p.connected);
   /**
@@ -113,7 +116,14 @@ export default function Repos() {
     for (const repo of offered.data.filter((r) => chosen.includes(r.slug))) {
       try {
         const added = await create.mutateAsync({
-          data: { slug: repo.slug, remote: repo.remote },
+          data: {
+            slug: repo.slug,
+            remote: repo.remote,
+            // Which host it came off. The list was asked of one, so this is
+            // not a guess — and with two accounts on one hostname the remote
+            // alone cannot say which token opens it.
+            provider: host?.id,
+          },
         });
         made.push(added.id);
       } catch (e) {
@@ -208,7 +218,7 @@ export default function Repos() {
         ) : !host && !settable ? (
           <Empty
             title="No git host is set up"
-            detail="Nobody has registered a GitHub application on this Firetower, so there is nothing to authorize against yet. An administrator adds the client id in the web console or the desktop app — the connect-a-repository screen there asks for one and says where to get it."
+            detail="No git host on this Firetower can be connected yet. An administrator adds one in the web console or the desktop app — a host people authorize in a browser needs an OAuth client id, and one they connect with a token of their own needs nothing registered at all."
           />
         ) : !host ? (
           <Empty

@@ -859,6 +859,12 @@ impl Db {
     /// and carry two different setup scripts. Returning the other person's row
     /// is what the old `(org_id, remote)` constraint forced, and is the whole
     /// of how repositories became everybody's.
+    /// `connection` is which git host it came from, and `None` is a real
+    /// answer rather than a missing one: a remote somebody pasted has no host
+    /// row behind it, and matching it by hostname at the moment it is used is
+    /// both what happened before this column existed and the right thing to
+    /// keep doing.
+    #[allow(clippy::too_many_arguments)]
     pub async fn ensure_repo(
         &self,
         slug: &str,
@@ -866,15 +872,16 @@ impl Db {
         default_branch: Option<&str>,
         setup: Option<&str>,
         added_by: &str,
+        connection: Option<&str>,
     ) -> Result<Repo> {
         if let Some(existing) = self.repo_of_remote(remote, added_by).await? {
             return Ok(existing);
         }
         sqlx::query(
-            "INSERT INTO repos (id, org_id, added_by, path, slug, remote, default_branch, setup, created_at)
+            "INSERT INTO repos (id, org_id, added_by, path, slug, remote, default_branch, setup, created_at, connection_id)
              VALUES ($1, $2, $3,
                      ('u.' || (SELECT slug FROM principals WHERE id = $3))::ltree,
-                     $4, $5, $6, $7, $8)",
+                     $4, $5, $6, $7, $8, $9)",
         )
         .bind(RepoId::new().as_str())
         // Theirs, and filed under their own name. The path is built from the
@@ -887,6 +894,7 @@ impl Db {
         .bind(default_branch)
         .bind(setup)
         .bind(chrono::Utc::now())
+        .bind(connection)
         .execute(&self.pool)
         .await?;
 
@@ -2502,6 +2510,7 @@ fn repo_from_row(r: sqlx::postgres::PgRow) -> Repo {
         path: ResourcePath::from(r.get::<String, _>("path")),
         slug: r.get("slug"),
         remote: r.get("remote"),
+        connection_id: r.try_get("connection_id").ok().flatten(),
         default_branch: r.get("default_branch"),
         setup: r.get("setup"),
         env_file: r.get("env_file"),
@@ -4154,6 +4163,7 @@ mod tests {
                 Some("main"),
                 None,
                 owner.as_str(),
+                None,
             )
             .await
             .unwrap();
@@ -4164,6 +4174,7 @@ mod tests {
                 Some("main"),
                 None,
                 owner.as_str(),
+                None,
             )
             .await
             .unwrap();
@@ -4197,7 +4208,14 @@ mod tests {
             .id;
 
         let theirs = db
-            .ensure_repo("acme/backend", "git@x:acme/backend", None, None, &admin)
+            .ensure_repo(
+                "acme/backend",
+                "git@x:acme/backend",
+                None,
+                None,
+                &admin,
+                None,
+            )
             .await
             .unwrap();
 
@@ -4217,6 +4235,7 @@ mod tests {
                 None,
                 None,
                 ana.as_str(),
+                None,
             )
             .await
             .unwrap();

@@ -27,10 +27,17 @@ import type {
 
 import type {
   ApiError,
+  Authorized,
   ClientId,
   GitIdentity,
+  KindInfo,
+  NewProvider,
   PendingAuth,
+  ProbeProvider,
+  ProbedProvider,
+  ProviderChanges,
   ProviderStatus,
+  ProviderToken,
   RemoteRepo,
   SetIdentity
 } from '../model';
@@ -57,6 +64,123 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   return result;
 };
 
+export const getListKindsUrl = () => {
+
+
+
+
+  return `/api/v1/provider-kinds`
+}
+
+/**
+ * @summary What kinds of host can be added.
+ */
+export const listKinds = async ( options?: Parameters<typeof http>[1]): Promise<KindInfo[]> => {
+
+  return http<KindInfo[]>(getListKindsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListKindsQueryKey = () => {
+    return [
+    `/api/v1/provider-kinds`
+    ] as const;
+    }
+
+
+export const getListKindsQueryOptions = <TData = Awaited<ReturnType<typeof listKinds>>, TError = unknown>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listKinds>>, TError, TData>>, request?: SecondParameter<typeof http>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListKindsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listKinds>>> = ({ signal }) => listKinds({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listKinds>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListKindsQueryResult = NonNullable<Awaited<ReturnType<typeof listKinds>>>
+export type ListKindsQueryError = unknown
+
+
+export function useListKinds<TData = Awaited<ReturnType<typeof listKinds>>, TError = unknown>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listKinds>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listKinds>>,
+          TError,
+          Awaited<ReturnType<typeof listKinds>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListKinds<TData = Awaited<ReturnType<typeof listKinds>>, TError = unknown>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listKinds>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listKinds>>,
+          TError,
+          Awaited<ReturnType<typeof listKinds>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListKinds<TData = Awaited<ReturnType<typeof listKinds>>, TError = unknown>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listKinds>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary What kinds of host can be added.
+ */
+
+export function useListKinds<TData = Awaited<ReturnType<typeof listKinds>>, TError = unknown>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listKinds>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListKindsQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+/**
+ * @summary What kinds of host can be added.
+ */
+export const useSetListKindsQueryData = () => {
+  const queryClient = useQueryClient();
+  return (updater: Awaited<ReturnType<typeof listKinds>> | undefined | ((old: Awaited<ReturnType<typeof listKinds>> | undefined) => Awaited<ReturnType<typeof listKinds>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof listKinds>>>({ exact: $exactMatch, queryKey: getListKindsQueryKey() }, updater);
+  };
+}
+
+/**
+ * @summary What kinds of host can be added.
+ */
+export const useGetListKindsQueryData = () => {
+  const queryClient = useQueryClient();
+  return () =>
+    queryClient.getQueryData<Awaited<ReturnType<typeof listKinds>>>(getListKindsQueryKey());
+}
+
+
 export const getListProvidersUrl = () => {
 
 
@@ -65,6 +189,12 @@ export const getListProvidersUrl = () => {
   return `/api/v1/providers`
 }
 
+/**
+ * Built-in first, which is load-bearing rather than cosmetic: a desktop or
+ * mobile build older than this change reads the first entry and ignores the
+ * rest, so the first entry has to be the host it was already using.
+ * @summary Every git host, and whether this person has connected it.
+ */
 export const listProviders = async ( options?: Parameters<typeof http>[1]): Promise<ProviderStatus[]> => {
 
   return http<ProviderStatus[]>(getListProvidersUrl(),
@@ -133,6 +263,9 @@ export function useListProviders<TData = Awaited<ReturnType<typeof listProviders
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listProviders>>, TError, TData>>, request?: SecondParameter<typeof http>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Every git host, and whether this person has connected it.
+ */
 
 export function useListProviders<TData = Awaited<ReturnType<typeof listProviders>>, TError = unknown>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listProviders>>, TError, TData>>, request?: SecondParameter<typeof http>}
@@ -148,6 +281,9 @@ export function useListProviders<TData = Awaited<ReturnType<typeof listProviders
 
 
 
+/**
+ * @summary Every git host, and whether this person has connected it.
+ */
 export const useSetListProvidersQueryData = () => {
   const queryClient = useQueryClient();
   return (updater: Awaited<ReturnType<typeof listProviders>> | undefined | ((old: Awaited<ReturnType<typeof listProviders>> | undefined) => Awaited<ReturnType<typeof listProviders>> | undefined), $exactMatch: boolean = true) => {
@@ -155,6 +291,9 @@ export const useSetListProvidersQueryData = () => {
   };
 }
 
+/**
+ * @summary Every git host, and whether this person has connected it.
+ */
 export const useGetListProvidersQueryData = () => {
   const queryClient = useQueryClient();
   return () =>
@@ -162,7 +301,193 @@ export const useGetListProvidersQueryData = () => {
 }
 
 
-export const getDisconnectProviderUrl = (id: string,) => {
+export const getCreateProviderUrl = () => {
+
+
+
+
+  return `/api/v1/providers`
+}
+
+/**
+ * **The installation's, so this is an administrator's.** The address and the
+ * application decide what everybody here authorizes against next, which is the
+ * same reason `set_client_id` is closed.
+ *
+ * Reached before it is saved, and *not* refused when it cannot be: a control
+ * plane that is temporarily off the network it shares with somebody's GitLab
+ * should still be able to record where it is. What the probe buys is the
+ * version, and therefore an honest answer about whether the browser flow is
+ * available.
+ * @summary Add a git host.
+ */
+export const createProvider = async (newProvider: NewProvider, options?: Parameters<typeof http>[1]): Promise<ProviderStatus> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return http<ProviderStatus>(getCreateProviderUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(newProvider)
+  }
+);}
+
+
+
+
+
+export const getCreateProviderMutationKey = () => ['createProvider'] as const;
+
+export const getCreateProviderMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createProvider>>, TError,CreateProviderMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof createProvider>>, TError,CreateProviderMutationVariables, TContext> => {
+
+const mutationKey = getCreateProviderMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createProvider>>, CreateProviderMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  createProvider(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateProviderMutationResult = NonNullable<Awaited<ReturnType<typeof createProvider>>>
+    export type CreateProviderMutationBody = NewProvider
+    export type CreateProviderMutationError = ApiError
+    export type CreateProviderMutationVariables = {data: NewProvider}
+
+    /**
+ * @summary Add a git host.
+ */
+export const useCreateProvider = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createProvider>>, TError,CreateProviderMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createProvider>>,
+        TError,
+        CreateProviderMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateProviderMutationOptions(options), queryClient);
+    }
+    export const getProbeProviderUrl = () => {
+
+
+
+
+  return `/api/v1/providers/probe`
+}
+
+/**
+ * Run before one is saved. An address that cannot be reached is still savable
+ * — a laptop off the VPN is not a reason to refuse to record a URL — but what
+ * was found is worth putting on screen either way.
+ * @summary Reach a host and say what is there.
+ */
+export const probeProvider = async (probeProviderBody: ProbeProvider, options?: Parameters<typeof http>[1]): Promise<ProbedProvider> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return http<ProbedProvider>(getProbeProviderUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(probeProviderBody)
+  }
+);}
+
+
+
+
+
+export const getProbeProviderMutationKey = () => ['probeProvider'] as const;
+
+export const getProbeProviderMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof probeProvider>>, TError,ProbeProviderMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof probeProvider>>, TError,ProbeProviderMutationVariables, TContext> => {
+
+const mutationKey = getProbeProviderMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof probeProvider>>, ProbeProviderMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  probeProvider(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ProbeProviderMutationResult = NonNullable<Awaited<ReturnType<typeof probeProvider>>>
+    export type ProbeProviderMutationBody = ProbeProvider
+    export type ProbeProviderMutationError = ApiError
+    export type ProbeProviderMutationVariables = {data: ProbeProvider}
+
+    /**
+ * @summary Reach a host and say what is there.
+ */
+export const useProbeProvider = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof probeProvider>>, TError,ProbeProviderMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof probeProvider>>,
+        TError,
+        ProbeProviderMutationVariables,
+        TContext
+      > => {
+      return useMutation(getProbeProviderMutationOptions(options), queryClient);
+    }
+    export const getDisconnectProviderUrl = (id: string,) => {
 
 
 
@@ -171,6 +496,8 @@ export const getDisconnectProviderUrl = (id: string,) => {
 }
 
 /**
+ * The host stays. It is the installation's and somebody else here may be using
+ * it; removing it is [`delete_provider`].
  * @summary Sign out: forget the token and stop any authorization still waiting.
  */
 export const disconnectProvider = async (id: string, options?: Parameters<typeof http>[1]): Promise<void> => {
@@ -234,6 +561,88 @@ export const useDisconnectProvider = <TError = ApiError,
         TContext
       > => {
       return useMutation(getDisconnectProviderMutationOptions(options), queryClient);
+    }
+    export const getUpdateProviderUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/providers/${id}`
+}
+
+export const updateProvider = async (id: string,
+    providerChanges: ProviderChanges, options?: Parameters<typeof http>[1]): Promise<ProviderStatus> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return http<ProviderStatus>(getUpdateProviderUrl(id),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(providerChanges)
+  }
+);}
+
+
+
+
+
+export const getUpdateProviderMutationKey = () => ['updateProvider'] as const;
+
+export const getUpdateProviderMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateProvider>>, TError,UpdateProviderMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateProvider>>, TError,UpdateProviderMutationVariables, TContext> => {
+
+const mutationKey = getUpdateProviderMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateProvider>>, UpdateProviderMutationVariables> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  updateProvider(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateProviderMutationResult = NonNullable<Awaited<ReturnType<typeof updateProvider>>>
+    export type UpdateProviderMutationBody = ProviderChanges
+    export type UpdateProviderMutationError = ApiError
+    export type UpdateProviderMutationVariables = {id: string;data: ProviderChanges}
+
+    export const useUpdateProvider = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateProvider>>, TError,UpdateProviderMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof updateProvider>>,
+        TError,
+        UpdateProviderMutationVariables,
+        TContext
+      > => {
+      return useMutation(getUpdateProviderMutationOptions(options), queryClient);
     }
     export const getAuthorizeProviderUrl = (id: string,) => {
 
@@ -340,6 +749,9 @@ export const useAuthorizeProvider = <TError = ApiError,
  * That is also why this was worth closing. Anyone at all could point the
  * whole installation at an application they controlled, and the next person
  * to connect would authorize it.
+ *
+ * Kept beside [`update_provider`], which can do this and more, because three
+ * committed clients call this path and a removed endpoint is a broken app.
  * @summary Register an application to authorize against.
  */
 export const setClientId = async (id: string,
@@ -418,6 +830,93 @@ export const useSetClientId = <TError = ApiError,
         TContext
       > => {
       return useMutation(getSetClientIdMutationOptions(options), queryClient);
+    }
+    export const getDeleteProviderUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/providers/${id}/connection`
+}
+
+/**
+ * **Any of them, including the one that ships.** It was exempt, which left a
+ * row in the list with no Remove and no reason visible from outside this
+ * crate — and an installation that does not use GitHub could never be rid of
+ * it. The exemption was protecting an id rather than a user: re-adding gave a
+ * fresh one and stranded whatever referred to the old. `Connections::create`
+ * reuses the well-known id for a kind's hosted instance, so removing it is
+ * reversible and the special case is gone.
+ *
+ * Every token anybody held for it goes with it — they are that host's and
+ * useless anywhere else. Repositories cloned from it are left alone and fall
+ * back to being matched by hostname, which means they keep working if another
+ * host at the same address is still connected and stop finding a token if not.
+ * That is the right way round: a row pointing at a real remote is worth more
+ * than a tidy database.
+ * @summary Remove a git host.
+ */
+export const deleteProvider = async (id: string, options?: Parameters<typeof http>[1]): Promise<void> => {
+
+  return http<void>(getDeleteProviderUrl(id),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDeleteProviderMutationKey = () => ['deleteProvider'] as const;
+
+export const getDeleteProviderMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteProvider>>, TError,DeleteProviderMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteProvider>>, TError,DeleteProviderMutationVariables, TContext> => {
+
+const mutationKey = getDeleteProviderMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteProvider>>, DeleteProviderMutationVariables> = (props) => {
+          const {id} = props ?? {};
+
+          return  deleteProvider(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteProviderMutationResult = NonNullable<Awaited<ReturnType<typeof deleteProvider>>>
+
+    export type DeleteProviderMutationError = ApiError
+    export type DeleteProviderMutationVariables = {id: string}
+
+    /**
+ * @summary Remove a git host.
+ */
+export const useDeleteProvider = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteProvider>>, TError,DeleteProviderMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof deleteProvider>>,
+        TError,
+        DeleteProviderMutationVariables,
+        TContext
+      > => {
+      return useMutation(getDeleteProviderMutationOptions(options), queryClient);
     }
     export const getGetIdentityUrl = (id: string,) => {
 
@@ -817,3 +1316,96 @@ export const useGetListProviderReposQueryData = () => {
 }
 
 
+export const getSetProviderTokenUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/providers/${id}/token`
+}
+
+/**
+ * Tried before it is kept, like a tracker's key: a token that does not work
+ * stored anyway is an empty repository picker on another screen with nothing
+ * saying why. And the answer to the attempt is the account it belongs to,
+ * which is the identity its commits will carry and the username its pushes
+ * will use — so one request does the check and fills both in.
+ * @summary Connect a host with a token, for the hosts that connect that way.
+ */
+export const setProviderToken = async (id: string,
+    providerToken: ProviderToken, options?: Parameters<typeof http>[1]): Promise<Authorized> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return http<Authorized>(getSetProviderTokenUrl(id),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(providerToken)
+  }
+);}
+
+
+
+
+
+export const getSetProviderTokenMutationKey = () => ['setProviderToken'] as const;
+
+export const getSetProviderTokenMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setProviderToken>>, TError,SetProviderTokenMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof setProviderToken>>, TError,SetProviderTokenMutationVariables, TContext> => {
+
+const mutationKey = getSetProviderTokenMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setProviderToken>>, SetProviderTokenMutationVariables> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  setProviderToken(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SetProviderTokenMutationResult = NonNullable<Awaited<ReturnType<typeof setProviderToken>>>
+    export type SetProviderTokenMutationBody = ProviderToken
+    export type SetProviderTokenMutationError = ApiError
+    export type SetProviderTokenMutationVariables = {id: string;data: ProviderToken}
+
+    /**
+ * @summary Connect a host with a token, for the hosts that connect that way.
+ */
+export const useSetProviderToken = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setProviderToken>>, TError,SetProviderTokenMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof setProviderToken>>,
+        TError,
+        SetProviderTokenMutationVariables,
+        TContext
+      > => {
+      return useMutation(getSetProviderTokenMutationOptions(options), queryClient);
+    }

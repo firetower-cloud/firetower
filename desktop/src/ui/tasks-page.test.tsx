@@ -21,6 +21,8 @@ import type { ListTasksParams, Page, Task, TrackerStatus } from "~/api/generated
 const github = (connected: boolean): TrackerStatus => ({
   id: "github",
   label: "GitHub",
+  kind: "github",
+  changeNoun: "pull request",
   connected,
   auth: "gitProvider",
   scopeKind: "repos",
@@ -31,6 +33,8 @@ const github = (connected: boolean): TrackerStatus => ({
 const linear = (connected: boolean): TrackerStatus => ({
   id: "linear",
   label: "Linear",
+  kind: "linear",
+  changeNoun: "pull request",
   connected,
   auth: "apiKey",
   scopeKind: "teams",
@@ -226,5 +230,32 @@ describe("paging", () => {
     );
     expect(many).toContain("Page 1");
     expect(many).toContain("Next");
+  });
+});
+
+/**
+ * A tracker derived from a git host takes that host's id, so a second GitHub is
+ * `gh_01j…` rather than `github` — and the mark is chosen by `kind`, not by id.
+ * Keyed on the id, the toggle drew the first letter of the label instead of a
+ * logo for every host but the built-in one.
+ */
+describe("a tracker whose id is not its kind", () => {
+  const selfHosted: TrackerStatus = {
+    id: "gitlab_01jzz",
+    label: "GitLab (internal)",
+    kind: "gitlab",
+    changeNoun: "merge request",
+    connected: true,
+    auth: "gitProvider",
+    scopeKind: "repos",
+    kinds: ["issue", "pullRequest"],
+    keyUrl: "https://git.acme.internal/-/user_settings/personal_access_tokens",
+  };
+
+  it("is drawn with its kind's mark rather than a letter", () => {
+    const html = draw([github(true), selfHosted]);
+    // The fallback is `label[0]`, which for this label would be a bare "G".
+    expect(html).not.toContain(">G<");
+    expect(html).toContain("GitLab (internal)");
   });
 });

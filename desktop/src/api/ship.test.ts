@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { shipping, done, awaiting, ready, atRisk } from "./ship";
+import { shipping, sequence, done, awaiting, ready, atRisk } from "./ship";
 import type { CheckoutWork, Session } from "./generated/model";
 
 const session = { id: "s_1", repo: "acme/web", checkouts: [] } as unknown as Session;
@@ -214,5 +214,89 @@ describe("the first session on an empty repository", () => {
     expect(ship.seeds).toBeFalsy();
     expect(ship.stage).toBe("unpushed");
     expect(ship.label).toBe("Push & open PR");
+  });
+});
+
+/**
+ * What a host calls a request to merge a branch reaches the button, the
+ * sequence above it, and the line that says one is open.
+ *
+ * GitLab says merge request. "Open pull request" on a GitLab is the kind of
+ * wrongness that makes somebody distrust everything else on the panel — and
+ * the abbreviation matters as much as the long form, because the short one is
+ * the button in the session header where there is no room for either.
+ *
+ * The default is the whole of the backward-compatibility story here: every
+ * assertion above this block passes the noun not at all.
+ */
+describe("the word the host uses for a change", () => {
+  const MR = "merge request";
+
+  it("names a merge request on GitLab", () => {
+    const ship = shipping(session, [checkout({ pushed: true, commits: 2 })], false, MR);
+    expect(ship.stage).toBe("pushed");
+    expect(ship.label).toBe("Open merge request");
+  });
+
+  it("abbreviates it the way GitLab does", () => {
+    const ship = shipping(session, [checkout({ uncommitted: 3, pushed: false })], false, MR);
+    expect(ship.stage).toBe("uncommitted");
+    expect(ship.label).toBe("Commit & open MR");
+  });
+
+  it("pluralises it", () => {
+    const ship = shipping(
+      session,
+      [
+        checkout({ pushed: true, commits: 1 }),
+        checkout({ path: "infra", slug: "acme/infra", pushed: true, commits: 1 }),
+      ],
+      false,
+      MR,
+    );
+    expect(ship.label).toBe("Open 2 merge requests");
+  });
+
+  it("says one is open in the host's own word", () => {
+    const ship = shipping(
+      session,
+      [checkout({ pullRequest: "https://git.acme.internal/acme/web/-/merge_requests/1" })],
+      false,
+      MR,
+    );
+    expect(ship.stage).toBe("open");
+    expect(ship.label).toBe("Merge request open");
+  });
+
+  it("amends the one already open rather than promising another", () => {
+    const ship = shipping(
+      session,
+      [
+        checkout({
+          ahead: 1,
+          pushed: false,
+          pullRequest: "https://git.acme.internal/acme/web/-/merge_requests/1",
+        }),
+      ],
+      false,
+      MR,
+    );
+    expect(ship.stage).toBe("open-behind");
+    expect(ship.label).toContain("updates the MR");
+  });
+
+  /** Said with no noun, which is every caller that has not been taught yet. */
+  it("still says pull request when nobody asked", () => {
+    expect(shipping(session, [checkout({ pushed: true, commits: 2 })]).label).toBe(
+      "Open pull request",
+    );
+    expect(sequence(shipping(session, [checkout({ uncommitted: 1, pushed: false })]))).toContain(
+      "opens a pull request",
+    );
+  });
+
+  it("writes the sequence out in the host's word", () => {
+    const ship = shipping(session, [checkout({ uncommitted: 1, pushed: false })], false, MR);
+    expect(sequence(ship, MR)).toContain("opens a merge request");
   });
 });

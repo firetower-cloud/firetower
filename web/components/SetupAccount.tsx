@@ -12,6 +12,14 @@ import { ApiError, rememberToken } from "@/src/api/http";
  * Replacing a password that came from a file, naming the organisation, and —
  * optionally, and skippably — registering a GitHub application. Everything
  * after this is the tour, which asks for nothing.
+ *
+ * **The git-host step is GitHub's and stays GitHub's.** Firetower reaches
+ * GitLab and Gitea too, and any number of each, but adding one means saying
+ * where it is — and a host is the installation's, which puts it on the desktop
+ * beside machines and the vault rather than in a first-boot wizard here. See
+ * `docs/which-surface.md`. What is left here is the one host that exists before
+ * anybody has added anything, and the only thing it needs before it can be
+ * authorized.
  */
 
 /* ── replacing the password ────────────────────────────────────────── */
@@ -210,6 +218,12 @@ export function StepGitHub({
         URL and the machine&apos;s own git credentials are used — which works, and
         is why this is skippable.
       </p>
+      <p className="mt-2 max-w-[56ch] text-meta leading-[1.6] text-mute">
+        GitLab and Gitea — including ones you host yourself, and more than one of
+        any of them — are added in the app, under Configuration &rarr;
+        Integrations. They need an address rather than an application, so they
+        are not something this screen can ask for.
+      </p>
 
       <div className="mt-6 max-w-[420px]">
         <ClientIdForm onDone={onNext} />
@@ -242,6 +256,9 @@ export function ClientIdForm({ onDone }: { onDone: () => void }) {
     event.preventDefault();
     setFailed(null);
     save.mutate(
+      // The built-in host, whose id is the literal string `github` — which is
+      // what every key already written against it is under, and why the
+      // connections migration kept it rather than generating one.
       { id: "github", data: { clientId: value } },
       {
         onSuccess: () => onDone(),
