@@ -69,7 +69,10 @@ export function StatusBar({ session, branch, onCommit }: { session: Session; bra
       {/* The machine. */}
       {where && (
         <button
-          onClick={() => navigate("/configuration")}
+          /* The pane, not the section: `/configuration` alone falls back to
+             the first one, which is Repositories — and this button's own
+             tooltip promises Compute. */
+          onClick={() => navigate("/configuration/machines")}
           onMouseEnter={() => (hover.current = setTimeout(() => setCard(true), 450))}
           onMouseLeave={() => {
             clearTimeout(hover.current);

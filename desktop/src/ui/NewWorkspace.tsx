@@ -19,7 +19,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, Cpu, GitBranch, Plus, Search, Server, X } from "lucide-react";
-import { GithubMark, Icon } from "~/components/ui";
+import { HostMark, Icon } from "~/components/ui";
 import { AgentMark } from "~/components/AgentMark";
 import { canRun, resolve, type Where } from "~/components/WhereItRuns";
 import { Readout, isReady } from "~/components/HostReadiness";
@@ -28,7 +28,7 @@ import { machineLabel, machines } from "~/api/environments";
 import type { Agent } from "~/api/generated/model";
 import { useCreateSession } from "~/api/generated/sessions/sessions";
 import { usable } from "~/api/accounts";
-import { useAccounts, useAgents, useHosts, useRepos } from "~/data";
+import { useAccounts, useAgents, useHostOf, useHosts, useRepos } from "~/data";
 import { ConnectAccount } from "~/ui/config/ConnectAccount";
 import type { Backend } from "~/fleet";
 import { navigate } from "~/shims/next-navigation";
@@ -60,6 +60,7 @@ export function NewWorkspace({
   seed?: Seed;
   onClose: () => void;
 }) {
+  const hostOf = useHostOf();
   const { data: repos, loading: findingRepos } = useRepos();
   const { data: hosts } = useHosts();
   const { data: agents } = useAgents();
@@ -261,7 +262,7 @@ export function NewWorkspace({
                         )}
                         {offered.map((r) => (
                           <button key={r.id} onClick={() => take(r)} className="row w-full">
-                            <GithubMark size={12} className="shrink-0 text-mute" />
+                            <HostMark kind={hostOf(r.slug)?.kind} size={12} className="shrink-0 text-mute" />
                             <span className="truncate font-mono text-ui text-text">{r.slug}</span>
                           </button>
                         ))}
@@ -446,11 +447,12 @@ function Chip({
   onBase: (base: string) => void;
   onRemove: () => void;
 }) {
+  const hostOf = useHostOf();
   const [editing, setEditing] = useState(false);
 
   return (
     <span className="flex items-center gap-1.5 rounded-lg border border-line bg-ground py-1 pr-1 pl-2.5">
-      <GithubMark size={12} className="shrink-0 text-mute" />
+      <HostMark kind={hostOf(checkout.slug)?.kind} size={12} className="shrink-0 text-mute" />
       <span className="font-mono text-ui text-bone">{checkout.slug}</span>
 
       {editing ? (

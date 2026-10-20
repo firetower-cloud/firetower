@@ -9,9 +9,7 @@ use super::repos::is_local_path;
 use super::{credential_for, ApiError, ApiResult, ErrorCode};
 use crate::auth::Principal;
 use crate::oauth;
-use crate::providers;
-use crate::tasks::{self, Source};
-use crate::vault;
+use crate::tasks;
 use crate::vault::Key;
 use crate::AppState;
 use axum::{
@@ -1639,9 +1637,11 @@ async fn act(
     // Only the remote needs one, and only some of these touch it. A bare agent
     // has no remote at all.
     let credential = match session.repo.as_deref() {
-        Some(slug) => match state.db.any_repo_for(slug).await? {
-            // The session's owner, not whoever asked. It is their branch and
-            // their token that has to be able to push it.
+        Some(slug) => match state.db.repo_for(slug, session.owner.as_str()).await? {
+            // The session's owner, not whoever asked — for *which row* as well
+            // as for the token. Their row names the host they are actually on;
+            // the oldest row of that slug may be somebody else's, on another.
+            // See `Db::repo_for`.
             Some(repo) => {
                 credential_for(
                     state,
@@ -1810,32 +1810,45 @@ pub(super) async fn stop_session(
     .await
 }
 
-/// Push every branch, so the work outlives the workspace.
+/// What to act on, when a session holds more than one repository.
+#[derive(Debug, Default, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Only {
+    /// Which checkout, by its path inside the workspace. Absent means all.
+    #[serde(default)]
+    pub checkout: Option<String>,
+}
+
+/// Push a branch, so the work outlives the workspace.
 ///
-/// Each repository is pushed to its own remote. One that has nothing new is
-/// skipped rather than refused: it is a repository this change did not touch.
+/// Every repository, or the one named. Each is pushed to its own remote, and
+/// one that has nothing new is skipped rather than refused: it is a repository
+/// this change did not touch.
 #[utoipa::path(
     post, path = "/api/v1/sessions/{id}/push", tag = "sessions",
     params(("id" = String, Path, description = "Session id")),
+    request_body = Option<Only>,
     responses((status = 200, body = Done), (status = 404, body = ApiError), (status = 409, body = ApiError)),
 )]
 pub(super) async fn push_session(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
     Path(id): Path<String>,
+    body: Option<Json<Only>>,
 ) -> ApiResult<Json<Done>> {
     let id = SessionId::from_stored(id);
     let (session, _) = speaking_context(&state, &principal, &id).await?;
+    let only = body.and_then(|Json(o)| o.checkout);
 
     let mut done = Vec::new();
     let mut refused = Vec::new();
-    for c in known_checkouts(&session) {
+    for c in checkouts_for(&session, only.as_deref()) {
         // Per checkout, not per session: a session can hold repositories on
         // different remotes, and the token that opens one opens neither the
         // other nor a self-hosted git that needs none. The session's owner
         // rather than whoever pressed the button — it is their branch going up
         // under their name.
-        let credential = match state.db.any_repo_for(&c.slug).await? {
+        let credential = match state.db.repo_for(&c.slug, session.owner.as_str()).await? {
             Some(repo) => {
                 credential_for(
                     &state,
@@ -1896,6 +1909,16 @@ pub struct Commit {
     /// Which files to include. Empty means everything that changed.
     #[serde(default)]
     pub paths: Vec<String>,
+    /// Which checkout, by its path inside the workspace. Absent means all.
+    ///
+    /// `paths` already sorts itself between repositories — `within` gives each
+    /// checkout its own share — so this is not needed to commit the right
+    /// files. It is here so that *one* repository can be committed while
+    /// another is left alone, which the paths alone cannot express: a
+    /// repository with none of the named paths is skipped either way, but a
+    /// repository with all of its files kept had no way to be excluded.
+    #[serde(default)]
+    pub checkout: Option<String>,
 }
 
 /// Commit the work, or the part of it somebody kept.
@@ -1933,7 +1956,7 @@ pub(super) async fn commit_session(
     // One message for all of them: a change that spans two repositories is one
     // piece of work, and two commits saying the same sentence is the honest
     // record of it.
-    let held = known_checkouts(&session);
+    let held = checkouts_for(&session, req.checkout.as_deref());
 
     // The session's owner, not whoever pressed the button — the work is
     // theirs. Resolved per checkout below, because two checkouts can be on two
@@ -1983,7 +2006,7 @@ pub(super) async fn commit_session(
                 // By the remote, so two checkouts on two hosts each get the
                 // identity that host expects. `Held` carries the slug, and
                 // the remote is what `for_remote` matches on.
-                author: match state.db.any_repo_for(&c.slug).await? {
+                author: match state.db.repo_for(&c.slug, &owner).await? {
                     Some(repo) => author_for(&state, &repo.remote, &owner).await,
                     None => None,
                 },
@@ -2037,8 +2060,8 @@ pub(super) async fn commit_session(
 /// commit authored with the wrong address is at best confusing and at worst
 /// refused by the host at push time.
 async fn author_for(state: &AppState, remote: &str, owner: &str) -> Option<ft_proto::Author> {
-    let provider = providers::for_remote(remote)?;
-    super::providers::identity_for(state, provider, owner).await
+    let conn = super::connection_for_remote_pub(state, remote, owner).await?;
+    super::providers::identity_for(state, &conn, owner).await
 }
 
 /// Whether a path is inside a checkout, and what it is called from there.
@@ -2051,6 +2074,53 @@ fn within(checkout: &str, path: &str) -> Option<String> {
     path.strip_prefix(checkout)
         .and_then(|rest| rest.strip_prefix('/'))
         .map(str::to_string)
+}
+
+#[cfg(test)]
+mod checkout_scope_tests {
+    use super::*;
+
+    fn held(path: &str, slug: &str) -> Held {
+        Held {
+            path: path.to_string(),
+            slug: slug.to_string(),
+            branch: "agent/x".into(),
+            base: "main".into(),
+            pull_request: None,
+            pull_state: None,
+            trouble: None,
+        }
+    }
+
+    fn two() -> Vec<Held> {
+        vec![held("infra", "a/b"), held("project", "c/d")]
+    }
+
+    /// **Absent means every repository, which is what it has always meant.**
+    ///
+    /// The whole point of the addition is that it is opt-in: every client that
+    /// has not been taught sends no `checkout` and must keep acting on the
+    /// session, or an upgrade would quietly start pushing one repository out
+    /// of three.
+    #[test]
+    fn naming_no_checkout_still_means_all_of_them() {
+        assert_eq!(only_at(two(), None).len(), 2);
+    }
+
+    #[test]
+    fn naming_one_acts_on_that_one_only() {
+        let only = only_at(two(), Some("project"));
+        assert_eq!(only.len(), 1);
+        assert_eq!(only[0].slug, "c/d");
+    }
+
+    /// A path that is not a checkout of this session selects nothing rather
+    /// than falling back to all of them — the caller named something, and
+    /// doing more than was asked is the worse failure.
+    #[test]
+    fn naming_something_else_acts_on_nothing() {
+        assert!(only_at(two(), Some("elsewhere")).is_empty());
+    }
 }
 
 /// Whether a refusal means "there was nothing here", which is not a failure.
@@ -2109,21 +2179,18 @@ pub(crate) async fn refresh_pull_state(state: &AppState, session: &Session, owne
         if checked.is_some_and(|at| now - at < PULL_STATE_MAX_AGE) {
             continue;
         }
-        let Some(provider) = crate::providers::for_remote(&url) else {
+        // Which host, out of the link. A merge request's address is on the
+        // GitLab that issued it, so the hostname is the whole of the answer —
+        // and a host that has since been removed means there is nothing to ask.
+        let Some(conn) = super::connection_for_remote_pub(state, &url, owner).await else {
             continue;
         };
-        let Ok(Some(token)) = state
-            .vault
-            .get(
-                crate::vault::Key::of(vault::GIT, provider.id, owner),
-                "checking a pull request",
-            )
-            .await
+        let Some(token) = super::git_token(state, &conn, owner, "checking a pull request").await
         else {
             continue;
         };
 
-        match oauth::pull_request_state(provider, &token, &url).await {
+        match oauth::pull_request_state(&conn, &token, &url).await {
             Ok(went) => {
                 if let Err(e) = state
                     .db
@@ -2293,31 +2360,25 @@ async fn tracked(state: &AppState, session: &Session) -> Option<ft_proto::Tracke
 /// all the same, and asking that repository's host about a `linear.app` URL
 /// gets a shrug.
 async fn read_task(state: &AppState, session: &Session, url: &str) -> anyhow::Result<tasks::Task> {
-    let tracker =
-        crate::trackers::for_url(url).ok_or_else(|| anyhow::anyhow!("nothing tracks {url}"))?;
+    let tracker = crate::trackers::for_url(state, url)
+        .await
+        .ok_or_else(|| anyhow::anyhow!("nothing tracks {url}"))?;
     // Whose key, resolved rather than assumed: a team that shares one Linear
     // workspace key files it into a directory, and a session started by anybody
     // there has to find it. See `tasks::whose`.
-    let holder = super::tasks::whose(state, tracker, session.owner.as_str())
+    let holder = super::tasks::whose(state, &tracker, session.owner.as_str())
         .await
         .map_err(|e| anyhow::anyhow!("{e:?}"))?;
-    let credential = state
-        .vault
-        .get(
-            Key::of(tracker.vault_scope(), tracker.id, &holder),
-            "reading the issue a session was started from",
-        )
-        .await?
-        .ok_or_else(|| anyhow::anyhow!("{} is not connected", tracker.label))?;
+    let credential = super::tasks::credential_held_by(
+        state,
+        &tracker,
+        &holder,
+        "reading the issue a session was started from",
+    )
+    .await
+    .map_err(|e| anyhow::anyhow!("{e:?}"))?;
 
-    match tracker.id {
-        "linear" => tasks::Linear { tracker }.one(&credential, url).await,
-        _ => {
-            let provider = providers::find(tracker.id)
-                .ok_or_else(|| anyhow::anyhow!("no git host called {}", tracker.id))?;
-            tasks::GitHub { provider }.one(&credential, url).await
-        }
-    }
+    super::tasks::one_from(&tracker, &credential, url).await
 }
 
 /// Check another repository into a session that is already running.
@@ -2570,6 +2631,26 @@ fn owner(principal: &Principal) -> Result<&str, ApiError> {
 /// From the checkouts when there are any, and from the session's own columns
 /// when there are not — which is every session made before a session could hold
 /// more than one.
+/// Which checkouts an action is for: the one named, or all of them.
+///
+/// **Absent means every one, which is what it has always meant.** The sheet
+/// used to act on the whole session and nothing else was possible — one
+/// button, one file list and one error for however many repositories a session
+/// held, so a rejected push on the second named a branch with no repository
+/// beside it. Naming one is the addition; leaving it off is the old behaviour
+/// exactly, which is what every client that has not been taught sends.
+fn checkouts_for(session: &Session, only: Option<&str>) -> Vec<Held> {
+    only_at(known_checkouts(session), only)
+}
+
+/// The filter on its own, so it can be tested without building a session.
+fn only_at(held: Vec<Held>, only: Option<&str>) -> Vec<Held> {
+    match only {
+        Some(at) => held.into_iter().filter(|c| c.path == at).collect(),
+        None => held,
+    }
+}
+
 fn known_checkouts(session: &Session) -> Vec<Held> {
     if !session.checkouts.is_empty() {
         return session
@@ -2778,7 +2859,7 @@ pub(super) async fn open_pull_request(
     // Not one pull request spanning two repositories, because no git host has
     // such an object. Two that point at each other is what the platform can
     // represent, and what a reviewer will actually see.
-    let held = known_checkouts(&session);
+    let held = checkouts_for(&session, req.checkout.as_deref());
     if held.is_empty() {
         return Err(ApiError::new(
             ErrorCode::InvalidRequest,
@@ -2790,10 +2871,28 @@ pub(super) async fn open_pull_request(
     let mut refused: Vec<String> = Vec::new();
 
     for c in &held {
-        // Already open. Pushing again amends it, so there is nothing to do.
+        // **Still open, not merely once opened.**
+        //
+        // Pushing to a request that is open amends it, so there is nothing to
+        // do and handing back its URL is the whole answer. A request that has
+        // been *merged or closed* is finished: the commits made since are not
+        // in it and never will be, and skipping on the strength of a URL that
+        // is no longer live left the button saying "open a new one" and the
+        // server quietly handing back the old one — pressed, it opened the
+        // browser at a merged request and created nothing.
+        //
+        // `None` is unknown rather than finished — nothing has read the host
+        // yet — and is treated as live, because the cost of being wrong that
+        // way is a no-op and the other way is a duplicate request.
+        let spent = matches!(
+            c.pull_state,
+            Some(ft_core::session::PullState::Merged) | Some(ft_core::session::PullState::Closed)
+        );
         if let Some(url) = &c.pull_request {
-            opened.push((c.slug.clone(), url.clone()));
-            continue;
+            if !spent {
+                opened.push((c.slug.clone(), url.clone()));
+                continue;
+            }
         }
 
         match open_one(
@@ -2877,26 +2976,26 @@ async fn open_one(
 ) -> Result<String, String> {
     let repo = state
         .db
-        .any_repo_for(slug)
+        .repo_for(slug, owner)
         .await
         .map_err(|e| format!("{e:#}"))?
         .ok_or_else(|| format!("{slug} isn't connected any more"))?;
 
-    let provider = providers::for_remote(&repo.remote)
-        .ok_or_else(|| format!("{slug} isn't on a host Firetower can open pull requests on"))?;
-
-    let token = state
-        .vault
-        .get(
-            Key::of(vault::GIT, provider.id, owner),
-            &format!("opening a pull request for {}", repo.slug),
-        )
+    let conn = super::connection_for_repo(state, &repo, owner)
         .await
-        .map_err(|e| format!("{e:#}"))?
-        .ok_or_else(|| format!("authorize {} first", provider.label))?;
+        .ok_or_else(|| format!("{slug} isn't on a host Firetower can open requests on"))?;
+
+    let token = super::git_token(
+        state,
+        &conn,
+        owner,
+        &format!("opening a {} for {}", conn.kind.change_noun, repo.slug),
+    )
+    .await
+    .ok_or_else(|| format!("authorize {} first", conn.label))?;
 
     oauth::open_pull_request(
-        provider,
+        &conn,
         &token,
         oauth::Opening {
             slug: &repo.slug,
@@ -2921,21 +3020,17 @@ async fn link_up(
 ) -> anyhow::Result<()> {
     let repo = state
         .db
-        .any_repo_for(slug)
+        .repo_for(slug, owner)
         .await?
         .ok_or_else(|| anyhow::anyhow!("{slug} isn't connected"))?;
-    let provider = providers::for_remote(&repo.remote)
-        .ok_or_else(|| anyhow::anyhow!("no provider for {slug}"))?;
-    let token = state
-        .vault
-        .get(
-            Key::of(vault::GIT, provider.id, owner),
-            "cross-linking a pull request",
-        )
-        .await?
+    let conn = super::connection_for_repo(state, &repo, owner)
+        .await
+        .ok_or_else(|| anyhow::anyhow!("no git host for {slug}"))?;
+    let token = super::git_token(state, &conn, owner, "cross-linking a request")
+        .await
         .ok_or_else(|| anyhow::anyhow!("not authorized"))?;
 
-    oauth::amend_pull_request(provider, &token, url, body).await
+    oauth::amend_pull_request(&conn, &token, url, body).await
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -2948,6 +3043,13 @@ pub struct NewPullRequest {
     /// Open it as a draft.
     #[serde(default)]
     pub draft: bool,
+    /// Which checkout, by its path inside the workspace. Absent means all.
+    ///
+    /// Opening for one rather than for the session matters where the others
+    /// are not ready: a repository whose push was rejected would otherwise
+    /// hold back the one beside it that is finished.
+    #[serde(default)]
+    pub checkout: Option<String>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]

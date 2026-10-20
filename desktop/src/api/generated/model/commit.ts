@@ -8,6 +8,18 @@
 
 export interface Commit {
   /**
+     * Which checkout, by its path inside the workspace. Absent means all.
+     *
+     * `paths` already sorts itself between repositories — `within` gives each
+     * checkout its own share — so this is not needed to commit the right
+     * files. It is here so that *one* repository can be committed while
+     * another is left alone, which the paths alone cannot express: a
+     * repository with none of the named paths is skipped either way, but a
+     * repository with all of its files kept had no way to be excluded.
+     * @nullable
+     */
+  checkout?: string | null;
+  /**
      * The commit message. Falls back to what the agent proposed.
      * @nullable
      */

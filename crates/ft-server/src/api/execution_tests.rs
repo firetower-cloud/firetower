@@ -116,11 +116,15 @@ async fn fixture() -> (
         crate::vault::crypto::RootKey::generate(),
     ));
     let names = crate::preview::Names::from_vault(&vault);
+    let connections = crate::providers::Connections::opened(db.pool().clone())
+        .await
+        .unwrap();
     let state = AppState {
         updates: crate::updates::Updates::new(db.pool().clone()),
         policy: crate::auth::Policy::open(),
         access: crate::access::Access::new(db.pool().clone()),
         skills: crate::skills::Skills::new(db.pool().clone()),
+        connections,
         db,
         accounts,
         fleet,
@@ -129,6 +133,7 @@ async fn fixture() -> (
         key_source: "test".into(),
         home: std::env::temp_dir(),
         pending: Default::default(),
+        renewals: Default::default(),
         forwards: Default::default(),
         previews: Default::default(),
         public_url: "http://localhost".into(),
@@ -229,6 +234,7 @@ async fn connecting_a_host_path_defers_validation_to_the_execution_machine() {
         State(state.clone()),
         Extension(principal),
         Json(repos::NewRepo {
+            provider: None,
             slug: "media-app".into(),
             remote: remote.into(),
             setup: None,
@@ -447,6 +453,7 @@ async fn a_viewer_may_look_and_may_not_steer() {
             State(state.clone()),
             Extension(viewer.clone()),
             Path(id.as_str().to_string()),
+            None,
         )
         .await
         .map(|_| ()),
@@ -684,6 +691,7 @@ async fn a_writer_may_work_in_the_place_and_not_speak_for_its_owner() {
             State(state.clone()),
             Extension(writer.clone()),
             Path(id.as_str().to_string()),
+            None,
         )
         .await
         .map(|_| ()),
@@ -1026,6 +1034,7 @@ async fn an_empty_repository_is_connected_rather_than_refused() {
         State(state.clone()),
         Extension(principal.clone()),
         Json(repos::NewRepo {
+            provider: None,
             slug: "acme/fresh".into(),
             remote: remote.into(),
             setup: None,

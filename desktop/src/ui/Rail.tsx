@@ -13,11 +13,11 @@ import { BookOpen, ChevronLeft, CircleDashed, CircleFadingArrowUp, LayoutList, L
 import type { LucideIcon } from "lucide-react";
 import { AgentMark } from "~/components/AgentMark";
 import { Blocks } from "~/island/Blocks";
-import { GithubMark, Icon } from "~/components/ui";
+import { HostMark, Icon } from "~/components/ui";
 import { doing, group, shortRepo, type Repositories, type Workspace } from "~/api/workspaces";
 import { beatOf, elapsed, minutesSince } from "~/api/view";
 import type { Backend } from "~/fleet";
-import { useSessions, useUpdatesRow } from "~/data";
+import { useHostOf, useSessions, useUpdatesRow } from "~/data";
 import { isPersonal } from "~/filing";
 import { useMe } from "~/api/generated/auth/auth";
 import { navigate, usePathname } from "~/shims/next-navigation";
@@ -348,6 +348,7 @@ function Where({ place }: { place: Workspace }) {
 
 /** One section's worth: a heading per repository, with its workspaces under it. */
 function Repos({ repos, path }: { repos: Repositories; path: string }) {
+  const hostOf = useHostOf();
   return (
     <>
       {repos.groups.map(([repo, places]) => (
@@ -356,7 +357,7 @@ function Repos({ repos, path }: { repos: Repositories; path: string }) {
             {repo === "no repository" ? (
               <Icon of={CircleDashed} size={12} className="text-mute" />
             ) : (
-              <GithubMark size={12} className="text-dim" />
+              <HostMark kind={hostOf(repo)?.kind} size={12} className="text-dim" />
             )}
             <span className="min-w-0 flex-1 truncate text-ui font-medium text-bone">
               {shortRepo(repo)}

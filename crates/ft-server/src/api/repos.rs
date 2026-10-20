@@ -7,7 +7,7 @@
 use super::{credential_for, ApiError, ApiResult, ErrorCode};
 use crate::auth::Principal;
 use crate::vault::Key;
-use crate::{providers, AppState};
+use crate::AppState;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -350,6 +350,15 @@ pub struct NewRepo {
     /// name from the host's API and sends it here.
     #[serde(default)]
     pub default_branch: Option<String>,
+    /// Which git host it came from, when the caller knows.
+    ///
+    /// The picker does — it is listing one host's repositories — and saying so
+    /// is what makes two accounts on one hostname work: `github.com` names two
+    /// hosts then, and the remote alone cannot say which. Left off, the
+    /// hostname is matched instead, which is what every existing client sends
+    /// and what every existing row means.
+    #[serde(default)]
+    pub provider: Option<String>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -421,30 +430,58 @@ pub(super) fn only_here(remote: &str) -> bool {
 
 /// `https://host/acme/backend.git` and `git@host:acme/backend.git` both give
 /// `acme/backend`; a path gives its last component.
-fn slug_from_remote(remote: &str) -> String {
+///
+/// **`nested` is not cosmetic.** GitLab projects live inside groups that nest,
+/// so `platform/infra/deploy` is one project three levels down — and GitLab
+/// addresses a project by its *whole* path. Reading only the last two segments
+/// gave `infra/deploy`, which names nothing: every call made with it came back
+/// 404, from opening a merge request to reading an issue, and none of them said
+/// why. The picker was never affected because it sends the slug the host gave
+/// it; this is the paste path, and it was wrong on its own.
+fn slug_from_remote(remote: &str, nested: bool) -> String {
     let trimmed = remote.trim().trim_end_matches('/').trim_end_matches(".git");
 
     if trimmed.starts_with('/') || trimmed.starts_with('.') || trimmed.starts_with('~') {
         return trimmed.rsplit('/').next().unwrap_or(trimmed).to_string();
     }
 
-    let path = trimmed
+    // Past the scheme, then past the hostname. The scp-like form puts the path
+    // after a `:` instead, and a URL's own `:` — a port — is before the first
+    // `/`, so the two are told apart by looking at the host part only.
+    let after_scheme = trimmed
         .split_once("://")
         .map(|(_, rest)| rest)
-        .unwrap_or(trimmed)
-        .split_once(':')
-        .map(|(_, rest)| rest)
         .unwrap_or(trimmed);
+    let path = match after_scheme.split_once('/') {
+        // A URL: everything after the hostname.
+        Some((_, path)) if trimmed.contains("://") => path,
+        // `git@host:acme/backend`.
+        _ => after_scheme
+            .split_once(':')
+            .map(|(_, rest)| rest)
+            .unwrap_or(after_scheme),
+    };
 
     let parts: Vec<&str> = path.split('/').filter(|p| !p.is_empty()).collect();
     match parts.as_slice() {
-        [.., owner, name] if parts.len() >= 2 && owner.contains('.') && parts.len() == 2 => {
-            name.to_string()
-        }
-        [.., owner, name] => format!("{owner}/{name}"),
-        [name] => name.to_string(),
         [] => trimmed.to_string(),
+        [name] => name.to_string(),
+        // Every segment, for a host where a project can be three deep.
+        _ if nested => parts.join("/"),
+        [.., owner, name] => format!("{owner}/{name}"),
     }
+}
+
+/// Whether a remote is on a host where a project path can be more than two
+/// segments.
+///
+/// Answered from the host when there is one. A remote on nothing we know keeps
+/// the two-segment reading, which is right for GitHub, right for Gitea, and the
+/// only safe guess for a git server nobody has told us about.
+async fn nested_groups(state: &AppState, remote: &str, owner: &str) -> bool {
+    super::connection_for_remote_pub(state, remote, owner)
+        .await
+        .is_some_and(|c| c.kind.nested_groups)
 }
 
 /// Turn a refusal into something worth reading.
@@ -458,14 +495,24 @@ fn asked(host: &ft_core::Host) -> String {
     }
 }
 
-fn probe_error(remote: &str, failure: ProbeFailure, host: &ft_core::Host) -> ApiError {
+/// `on` is the git host this remote belongs to, when it belongs to one.
+///
+/// Passed in rather than looked up, because looking one up is now a question
+/// for the registry and this function is called from paths that have the answer
+/// already — and "authorize GitLab (internal) first" is only useful when it
+/// names the host the person is actually looking at.
+fn probe_error(
+    remote: &str,
+    failure: ProbeFailure,
+    host: &ft_core::Host,
+    on: Option<&str>,
+) -> ApiError {
     match failure {
         ProbeFailure::Denied => ApiError::new(
             ErrorCode::RepoAccessDenied,
-            match providers::for_remote(remote) {
-                Some(p) => format!(
-                    "{} refused access. If it's private, authorize {} first.",
-                    remote, p.label
+            match on {
+                Some(label) => format!(
+                    "{remote} refused access. If it's private, authorize {label} first."
                 ),
                 None => format!(
                     "{remote} refused access. Firetower uses the git credentials \
@@ -545,6 +592,13 @@ pub(super) async fn probe_repo(
         ));
     }
 
+    // Which git host this is on, if any — needed twice below, for how to read
+    // the path and for whose name to put in a refusal.
+    let on = super::connection_for_remote_pub(&state, remote, asking)
+        .await
+        .map(|c| c.label.clone());
+    let nested = nested_groups(&state, remote, asking).await;
+
     let host = local_host(&state).await.ok_or_else(|| {
         ApiError::new(
             ErrorCode::HostUnreachable,
@@ -560,10 +614,10 @@ pub(super) async fn probe_repo(
         )
         .await
         .map_err(|e| ApiError::new(ErrorCode::HostUnreachable, format!("{e:#}")))?
-        .map_err(|f| probe_error(remote, f, &host))?;
+        .map_err(|f| probe_error(remote, f, &host, on.as_deref()))?;
 
     Ok(Json(ProbeResponse {
-        slug: slug_from_remote(remote),
+        slug: slug_from_remote(remote, nested),
         default_branch: info.default_branch,
         only_here: only_here(remote),
         empty: info.empty,
@@ -598,6 +652,8 @@ pub(super) async fn create_repo(
     // actually matters.
     let mut trunk = None;
 
+    let on = super::connection_for_remote_pub(&state, remote, asking).await;
+
     // A filesystem path belongs to the execution host selected at launch.
     // The control plane may be in a container or on another machine entirely.
     // Defer reading its default branch until that worker can check it.
@@ -630,7 +686,12 @@ pub(super) async fn create_repo(
 
             // Facts about what was typed, and true from any machine.
             Ok(Err(f @ (ProbeFailure::NotARepository | ProbeFailure::Denied))) => {
-                return Err(probe_error(remote, f, &host))
+                return Err(probe_error(
+                    remote,
+                    f,
+                    &host,
+                    on.as_ref().map(|c| c.label.as_str()),
+                ))
             }
 
             // Facts about this machine right now — a network that is down, a
@@ -646,8 +707,22 @@ pub(super) async fn create_repo(
     }
 
     let slug = match req.slug.trim() {
-        "" => slug_from_remote(remote),
+        "" => slug_from_remote(remote, on.as_ref().is_some_and(|c| c.kind.nested_groups)),
         given => given.to_string(),
+    };
+
+    // Which host it came from, written down. The picker names one; a pasted
+    // remote is matched on its hostname here and the answer kept, so the row
+    // stays right afterwards even if a second host at the same address is added
+    // later.
+    let connection = match req
+        .provider
+        .as_deref()
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+    {
+        Some(named) => state.connections.get(named).await.map(|c| c.id.clone()),
+        None => on.as_ref().map(|c| c.id.clone()),
     };
 
     let repo = state
@@ -661,6 +736,7 @@ pub(super) async fn create_repo(
             // authentication off there is nobody to own one, and a repository
             // with no owner is the state this whole change exists to remove.
             owner(&principal)?,
+            connection.as_deref(),
         )
         .await?;
 
@@ -689,6 +765,8 @@ pub(super) async fn repo_branches(
         .await?
         .ok_or_else(|| ApiError::not_found("repository"))?;
 
+    let on = super::connection_for_repo(&state, &repo, asking).await;
+
     let host = local_host(&state).await.ok_or_else(|| {
         ApiError::new(
             ErrorCode::HostUnreachable,
@@ -700,9 +778,9 @@ pub(super) async fn repo_branches(
         .probe(
             &host.id,
             &repo.remote,
-            credential_for(
+            super::credential_for_repo(
                 &state,
-                &repo.remote,
+                &repo,
                 asking,
                 &format!("listing branches of {}", repo.slug),
             )
@@ -710,7 +788,14 @@ pub(super) async fn repo_branches(
         )
         .await
         .map_err(|e| ApiError::new(ErrorCode::HostUnreachable, format!("{e:#}")))?
-        .map_err(|f| probe_error(&repo.remote, f, &host))?;
+        .map_err(|f| {
+            probe_error(
+                &repo.remote,
+                f,
+                &host,
+                on.as_ref().map(|c| c.label.as_str()),
+            )
+        })?;
 
     Ok(Json(Branches {
         default_branch: repo
@@ -795,9 +880,43 @@ mod tests {
             ("ssh://git@git.example.com/acme/backend.git", "acme/backend"),
             ("/Users/kevin/code/backend", "backend"),
             ("/Users/kevin/code/backend/", "backend"),
+            // A port in the URL is not the scp form's colon.
+            (
+                "https://git.example.com:8443/acme/backend.git",
+                "acme/backend",
+            ),
         ] {
-            assert_eq!(slug_from_remote(remote), expected, "{remote}");
+            assert_eq!(slug_from_remote(remote, false), expected, "{remote}");
         }
+    }
+
+    /// GitLab addresses a project by its whole path, and groups nest. Read two
+    /// segments deep this came out as `infra/deploy` — a project that does not
+    /// exist — and every call made with it was a 404 with nothing saying why:
+    /// opening a merge request, reading an issue, asking what became of one.
+    #[test]
+    fn a_nested_project_keeps_every_segment_of_its_path() {
+        for (remote, expected) in [
+            (
+                "https://git.acme.internal/platform/infra/deploy.git",
+                "platform/infra/deploy",
+            ),
+            (
+                "git@git.acme.internal:platform/infra/deploy.git",
+                "platform/infra/deploy",
+            ),
+            // Two segments is still two segments.
+            ("https://git.acme.internal/acme/web.git", "acme/web"),
+        ] {
+            assert_eq!(slug_from_remote(remote, true), expected, "{remote}");
+        }
+
+        // And a host with no nesting keeps the old reading, which is what makes
+        // this safe to switch on per host rather than everywhere.
+        assert_eq!(
+            slug_from_remote("https://github.com/acme/web.git", false),
+            "acme/web"
+        );
     }
 
     fn somewhere(name: &str, compute: ft_core::Compute) -> ft_core::Host {
@@ -825,8 +944,23 @@ mod tests {
             "https://github.com/acme/private.git",
             ProbeFailure::Denied,
             &somewhere("localhost", ft_core::Compute::Local),
+            Some("GitHub"),
         );
-        assert!(e.message.contains("authorize"), "{}", e.message);
+        assert!(e.message.contains("authorize GitHub"), "{}", e.message);
+
+        // The host's own label, not the kind's: with two GitLabs connected,
+        // "authorize GitLab first" does not say which one.
+        let named = probe_error(
+            "https://git.acme.internal/acme/private.git",
+            ProbeFailure::Denied,
+            &somewhere("localhost", ft_core::Compute::Local),
+            Some("GitLab (internal)"),
+        );
+        assert!(
+            named.message.contains("GitLab (internal)"),
+            "{}",
+            named.message
+        );
     }
 
     #[test]
@@ -835,6 +969,7 @@ mod tests {
             "/Users/kevin/code/backend",
             ProbeFailure::Denied,
             &somewhere("localhost", ft_core::Compute::Local),
+            None,
         );
         assert!(e.message.contains("ls-remote"), "{}", e.message);
     }
@@ -857,6 +992,7 @@ mod tests {
                     host_key: None,
                 },
             ),
+            None,
         );
         assert!(e.message.contains("fire-01"), "{}", e.message);
 
@@ -864,6 +1000,7 @@ mod tests {
             "https://github.com/acme/thing.git",
             ProbeFailure::Unreachable,
             &somewhere("localhost", ft_core::Compute::Local),
+            None,
         );
         assert!(here.message.contains("this machine"), "{}", here.message);
     }

@@ -84,6 +84,20 @@ Everything after that happens in the desktop app: adding workers, connecting rep
 | --- | --- |
 | [Getting started](https://usefiretower.com/docs) | The short path from nothing to a running session |
 
+## Supported git hosts
+
+| | |
+| --- | --- |
+| GitHub | Supported |
+| GitHub Enterprise Server | Supported |
+| GitLab | Supported |
+| GitLab self-managed | Supported |
+| Gitea | Supported |
+| Forgejo | Supported |
+
+Any number of them, including more than one of the same kind: a personal GitHub
+and a work one, or two GitLabs. See [Git hosts](docs/git-hosts.md).
+
 ## Supported agents
 
 | | |

@@ -26,7 +26,8 @@ import { paneAt } from "~/ui/config/panes";
 import { Section } from "~/ui/config/bits";
 import { Machines } from "~/ui/config/Machines";
 import { Repos } from "~/ui/config/Repos";
-import { Integrations } from "~/ui/config/Integrations";
+import { GitHosts } from "~/ui/config/GitHosts";
+import { Trackers } from "~/ui/config/Trackers";
 import { Agents } from "~/ui/config/Agents";
 import { Skills } from "~/ui/config/Skills";
 import { Secrets } from "~/ui/config/Secrets";
@@ -49,10 +50,12 @@ export function Configuration({ backend, onForgot }: { backend: Backend; onForgo
 
 function Pane({ at, backend, onForgot }: { at: string; backend: Backend; onForgot: () => void }) {
   switch (at) {
-    case "integrations":
-      return <Integrations live />;
     case "repositories":
       return <Repos live />;
+    case "git-hosts":
+      return <GitHosts live />;
+    case "trackers":
+      return <Trackers live />;
     case "machines":
       return <Machines live />;
     case "agents":

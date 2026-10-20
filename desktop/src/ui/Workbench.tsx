@@ -15,9 +15,9 @@ import { Signal } from "~/components/Signal";
 import { AgentMark } from "~/components/AgentMark";
 import { group, placeOf } from "~/api/workspaces";
 import type { Backend } from "~/fleet";
-import { useSession, useSessions } from "~/data";
+import { useHostOf, useSession, useSessions } from "~/data";
 import { navigate } from "~/shims/next-navigation";
-import { GithubMark } from "~/components/ui";
+import { HostMark } from "~/components/ui";
 import { Chat } from "~/ui/Chat";
 import { FileTab } from "~/ui/FileTab";
 import { ImageTab } from "~/ui/ImageTab";
@@ -51,6 +51,7 @@ const TERM_DEFAULT = 256;
 type Side = "diff" | "files" | "ship";
 
 export function Workbench({ backend, workspace }: { backend: Backend; workspace: string }) {
+  const hostOf = useHostOf();
   const { data: sessions } = useSessions();
   const opened = useSession(workspace);
   const [side, setSide] = useState<Side>("diff");
@@ -358,7 +359,7 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
             title="Repositories in this workspace"
             className={`control max-w-[13rem] ${repos ? "bg-overlay text-bone" : "text-mute hover:bg-raise hover:text-bone"}`}
           >
-            <GithubMark size={12} className={checkouts.some((c) => c.trouble) ? "text-brick" : ""} />
+            <HostMark kind={hostOf(checkouts[0]?.slug)?.kind} size={12} className={checkouts.some((c) => c.trouble) ? "text-brick" : ""} />
             <span className="min-w-0 truncate font-mono text-meta">
               {checkouts[0]?.slug ?? "No repository"}
             </span>

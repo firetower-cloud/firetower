@@ -50,6 +50,7 @@ import type {
   NewForward,
   NewPullRequest,
   NewSession,
+  Only,
   Placed,
   Ports,
   PreviewAddress,
@@ -2933,18 +2934,34 @@ export const useOpenPullRequest = <TError = ApiError,
 }
 
 /**
- * Each repository is pushed to its own remote. One that has nothing new is
- * skipped rather than refused: it is a repository this change did not touch.
- * @summary Push every branch, so the work outlives the workspace.
+ * Every repository, or the one named. Each is pushed to its own remote, and
+ * one that has nothing new is skipped rather than refused: it is a repository
+ * this change did not touch.
+ * @summary Push a branch, so the work outlives the workspace.
  */
-export const pushSession = async (id: string, options?: Parameters<typeof http>[1]): Promise<Done> => {
+export const pushSession = async (id: string,
+    nullOnly?: null | Only, options?: Parameters<typeof http>[1]): Promise<Done> => {
 
-  return http<Done>(getPushSessionUrl(id),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return http<Done>(getPushSessionUrl(id),
   {
     ...options,
-    method: 'POST'
-
-
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(nullOnly)
   }
 );}
 
@@ -2969,9 +2986,9 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof pushSession>>, PushSessionMutationVariables> = (props) => {
-          const {id} = props ?? {};
+          const {id,data} = props ?? {};
 
-          return  pushSession(id,requestOptions)
+          return  pushSession(id,data,requestOptions)
         }
 
 
@@ -2982,12 +2999,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
   return  { mutationFn, ...mutationOptions }}
 
     export type PushSessionMutationResult = NonNullable<Awaited<ReturnType<typeof pushSession>>>
-
+    export type PushSessionMutationBody = null | Only | undefined
     export type PushSessionMutationError = ApiError
-    export type PushSessionMutationVariables = {id: string}
+    export type PushSessionMutationVariables = {id: string;data?: null | Only}
 
     /**
- * @summary Push every branch, so the work outlives the workspace.
+ * @summary Push a branch, so the work outlives the workspace.
  */
 export const usePushSession = <TError = ApiError,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof pushSession>>, TError,PushSessionMutationVariables, TContext>, request?: SecondParameter<typeof http>}

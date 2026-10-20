@@ -90,4 +90,38 @@ describe("where access is reviewed on the host", () => {
     expect(accessUrl(undefined)).toBeNull();
     expect(accessUrl("  ")).toBeNull();
   });
+
+  /**
+   * The server knows the host's address and this does not. An Enterprise
+   * install's settings are on its own hostname, so a link assembled here
+   * against github.com sends somebody to a page about a different account.
+   */
+  it("prefers the address the server built", () => {
+    expect(
+      accessUrl("Ov23liEXAMPLE", "https://ghe.acme.com/settings/connections/applications/Ov23liEXAMPLE"),
+    ).toBe("https://ghe.acme.com/settings/connections/applications/Ov23liEXAMPLE");
+  });
+
+  /**
+   * GitLab and Gitea have no such page, so the server says `null` — and a link
+   * built against github.com for a GitLab goes somewhere that has never
+   * existed. The client id is still set, which is exactly the case a
+   * truthiness check gets wrong.
+   */
+  it("is nothing when the server says there is no such page", () => {
+    expect(accessUrl("abc", null)).toBeNull();
+  });
+
+  /**
+   * Not sent at all is a control plane older than the field, and every one of
+   * those has exactly one host: github.com.
+   */
+  it("still assembles one for a control plane that does not send it", () => {
+    expect(accessUrl("abc", undefined)).toBe(
+      "https://github.com/settings/connections/applications/abc",
+    );
+    expect(accessUrl("abc")).toBe(
+      "https://github.com/settings/connections/applications/abc",
+    );
+  });
 });

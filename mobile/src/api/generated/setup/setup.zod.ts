@@ -10,7 +10,7 @@ import * as zod from 'zod';
 
 export const SetupStateResponse = zod.object({
   "completed": zod.boolean().describe('Somebody has been through onboarding, however much they skipped.\n\nOnce true it stays true: the steps after the organisation exist to point\nsomewhere, and a tour that reappears every time this page is opened is a\ntour nobody finishes twice. Connecting GitHub later is asked for on the\nscreen that needs it, where there is no skipping it.'),
-  "needsGithub": zod.boolean().describe('No GitHub application is configured. Not a blocker — it is skippable,\nand pasting a repository URL works without one.'),
+  "needsGithub": zod.boolean().describe('No git host can be authorized yet. Not a blocker — it is skippable, and\npasting a repository URL works without one.\n\nStill called `needs_github`, and still true of GitHub specifically in\nthe ordinary case, because three committed clients read the field under\nthat name. What it means now is "nothing here can be connected": a host\nconnected by token needs nothing registered, so adding a GitLab or a\nGitea answers it too.'),
   "needsOrganization": zod.boolean().describe('Nobody has named the organisation yet.'),
   "needsPassword": zod.boolean().describe('The signed-in account\'s password was chosen by somebody else and has\nto be replaced. The only step of setting up that is not about the\ninstall — it is raised for anybody invited or reset, long after.'),
   "organization": zod.union([zod.null(),zod.object({

@@ -41,7 +41,8 @@ import {
   X,
 } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { GithubMark, Icon } from "~/components/ui";
+import { HostMark, Icon } from "~/components/ui";
+import { useHostOf } from "~/data";
 import { Markdown } from "~/components/Markdown";
 import { editFrom } from "~/components/EditCard";
 import { stepLines } from "~/components/Steps";
@@ -859,6 +860,7 @@ function Plan({ steps }: { steps: PlanStep[] }) {
  * somebody needs to read.
  */
 function CheckingIn({ sessionId, run }: { sessionId: string; run: Run }) {
+  const hostOf = useHostOf();
   const over = settled(run);
   const bad = refused(run);
   const good = landed(run);
@@ -923,7 +925,7 @@ function CheckingIn({ sessionId, run }: { sessionId: string; run: Run }) {
                 <span className="h-1.5 w-1.5 rounded-full bg-line" />
               )}
             </span>
-            <GithubMark size={12} className={`mt-1 ${r.state === "failed" ? "text-brick" : "text-mute"}`} />
+            <HostMark kind={hostOf(r.slug)?.kind} size={12} className={`mt-1 ${r.state === "failed" ? "text-brick" : "text-mute"}`} />
             <span className="min-w-0 flex-1">
               <span className={`block truncate font-mono ${r.state === "failed" ? "text-brick" : r.state === "waiting" ? "text-mute" : "text-text"}`}>
                 {r.slug}

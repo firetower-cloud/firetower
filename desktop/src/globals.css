@@ -81,6 +81,16 @@
   --color-kind-store: #bd79a1;
   --color-kind-prose: #9a9aa4;
 
+  /* Git hosts, as the one place a brand colour is allowed in.
+     The *mark* is tinted and the control around it is not: on a near-black
+     ground three saturated buttons become the loudest thing in the product,
+     on a screen somebody sees once. A coloured glyph does the work a logo is
+     there to do — being found without being read — and leaves the palette
+     alone. GitHub's is white because its mark has no colour of its own. */
+  --color-host-github: #f4f4f5;
+  --color-host-gitlab: #fc6d26;
+  --color-host-gitea: #609926;
+
   --font-sans: var(--font-archivo), ui-sans-serif, system-ui, sans-serif;
   --font-narrow: var(--font-archivo-narrow), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-jetbrains), ui-monospace, "SF Mono", monospace;

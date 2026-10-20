@@ -13,9 +13,9 @@ use serde::Deserialize;
 use crate::api::{ApiError, ApiResult, ErrorCode};
 use crate::auth::Principal;
 use crate::tasks::{self, Source, TaskKind, TaskState};
-use crate::trackers::{self, Tracker};
+use crate::trackers::{self, Resolved};
 use crate::vault::Key;
-use crate::{providers, AppState};
+use crate::AppState;
 
 /// Whose tasks. The same shape every handler here uses.
 fn owner(principal: &Principal) -> Result<&str, ApiError> {
@@ -35,21 +35,46 @@ fn owner(principal: &Principal) -> Result<&str, ApiError> {
 pub(super) async fn credential_for(
     state: &AppState,
     principal: &Principal,
-    tracker: &Tracker,
+    tracker: &Resolved,
     why: &str,
 ) -> Result<zeroize::Zeroizing<String>, ApiError> {
     let me = owner(principal)?;
     let holder = whose(state, tracker, me).await?;
+    credential_held_by(state, tracker, &holder, why).await
+}
+
+/// The same, for a caller that has already worked out whose key answers.
+///
+/// **A git host's credential is renewed on the way out, a tracker's is not.**
+/// They come from the same vault scope — a GitLab reads work with the token it
+/// pushes with, which is the point of not storing a second copy — but only one
+/// of them expires: GitLab mints a two-hour token and Linear's API key has no
+/// end date. So a git host goes through `api::git_token`, which renews it, and
+/// everything else is read straight.
+pub(super) async fn credential_held_by(
+    state: &AppState,
+    tracker: &Resolved,
+    holder: &str,
+    why: &str,
+) -> Result<zeroize::Zeroizing<String>, ApiError> {
+    let missing = || {
+        ApiError::new(
+            ErrorCode::ProviderNotConnected,
+            format!("{} hasn't been connected yet", tracker.label),
+        )
+    };
+
+    if let Some(conn) = tracker.connection.as_deref() {
+        return super::git_token(state, conn, holder, why)
+            .await
+            .ok_or_else(missing);
+    }
+
     state
         .vault
-        .get(Key::of(tracker.vault_scope(), tracker.id, &holder), why)
+        .get(Key::of(tracker.vault_scope(), &tracker.id, holder), why)
         .await?
-        .ok_or_else(|| {
-            ApiError::new(
-                ErrorCode::ProviderNotConnected,
-                format!("{} hasn't been connected yet", tracker.label),
-            )
-        })
+        .ok_or_else(missing)
 }
 
 /// Whose key answers for this person: their own, or one filed where they work.
@@ -65,14 +90,14 @@ pub(super) async fn credential_for(
 /// through to whatever the directories they work in hold.
 pub(super) async fn whose(
     state: &AppState,
-    tracker: &Tracker,
+    tracker: &Resolved,
     me: &str,
 ) -> Result<String, ApiError> {
     Ok(state
         .vault
         .owner_for(
             tracker.vault_scope(),
-            tracker.id,
+            &tracker.id,
             me,
             crate::access::Level::Viewer,
         )
@@ -83,35 +108,37 @@ pub(super) async fn whose(
 /// One page from whichever tracker was asked for.
 ///
 /// A `match` rather than a boxed trait object: [`Source`] returns an opaque
-/// future per implementation, and two arms are cheaper than the indirection
+/// future per implementation, and four arms are cheaper than the indirection
 /// that would make it object-safe.
-async fn list_from(
-    tracker: &'static Tracker,
+pub(super) async fn list_from(
+    tracker: &Resolved,
     credential: &str,
     query: &tasks::Query,
 ) -> anyhow::Result<tasks::Page> {
-    match tracker.id {
-        "linear" => tasks::Linear { tracker }.list(credential, query).await,
-        _ => {
-            let provider = providers::find(tracker.id)
-                .ok_or_else(|| anyhow::anyhow!("no git host called {}", tracker.id))?;
-            tasks::GitHub { provider }.list(credential, query).await
-        }
+    match (&tracker.connection, tracker.tracker) {
+        (Some(conn), _) => match conn.kind.id {
+            "gitlab" => tasks::GitLab { conn }.list(credential, query).await,
+            "gitea" => tasks::Gitea { conn }.list(credential, query).await,
+            _ => tasks::GitHub { conn }.list(credential, query).await,
+        },
+        (None, Some(tracker)) => tasks::Linear { tracker }.list(credential, query).await,
+        (None, None) => anyhow::bail!("{} reads from nowhere", tracker.label),
     }
 }
 
-async fn one_from(
-    tracker: &'static Tracker,
+pub(super) async fn one_from(
+    tracker: &Resolved,
     credential: &str,
     url: &str,
 ) -> anyhow::Result<tasks::Task> {
-    match tracker.id {
-        "linear" => tasks::Linear { tracker }.one(credential, url).await,
-        _ => {
-            let provider = providers::find(tracker.id)
-                .ok_or_else(|| anyhow::anyhow!("no git host called {}", tracker.id))?;
-            tasks::GitHub { provider }.one(credential, url).await
-        }
+    match (&tracker.connection, tracker.tracker) {
+        (Some(conn), _) => match conn.kind.id {
+            "gitlab" => tasks::GitLab { conn }.one(credential, url).await,
+            "gitea" => tasks::Gitea { conn }.one(credential, url).await,
+            _ => tasks::GitHub { conn }.one(credential, url).await,
+        },
+        (None, Some(tracker)) => tasks::Linear { tracker }.one(credential, url).await,
+        (None, None) => anyhow::bail!("{} reads from nowhere", tracker.label),
     }
 }
 
@@ -174,11 +201,16 @@ pub(super) async fn list_tasks(
     Extension(principal): Extension<Principal>,
     Params(ask): Params<Listing>,
 ) -> ApiResult<Json<tasks::Page>> {
+    // The built-in git host by default, which is what it has always been. With
+    // a second host connected the screen names one; with none named this is the
+    // first in the list, and the list is built-in-first.
     let id = ask.source.as_deref().unwrap_or("github");
-    let tracker = trackers::find(id).ok_or_else(|| ApiError::not_found("source"))?;
+    let tracker = trackers::find(&state, id)
+        .await
+        .ok_or_else(|| ApiError::not_found("source"))?;
 
     let credential =
-        credential_for(&state, &principal, tracker, "listing tasks to work on").await?;
+        credential_for(&state, &principal, &tracker, "listing tasks to work on").await?;
 
     // Scoped to what this Firetower is connected to unless somebody narrows it
     // further. A task list that answers about repositories you have never heard
@@ -207,7 +239,7 @@ pub(super) async fn list_tasks(
         cursor: ask.cursor,
     };
 
-    list_from(tracker, &credential, &query)
+    list_from(&tracker, &credential, &query)
         .await
         .map(Json)
         .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e:#}")))
@@ -252,14 +284,14 @@ pub(super) async fn get_task(
     // The link says which tracker it came from, so a caller holding only a
     // stored URL does not have to have recorded that separately.
     let tracker = match ask.source.as_deref() {
-        Some(id) => trackers::find(id),
-        None => trackers::for_url(&ask.url),
+        Some(id) => trackers::find(&state, id).await,
+        None => trackers::for_url(&state, &ask.url).await,
     }
     .ok_or_else(|| ApiError::not_found("source"))?;
 
-    let credential = credential_for(&state, &principal, tracker, "reading a task").await?;
+    let credential = credential_for(&state, &principal, &tracker, "reading a task").await?;
 
-    one_from(tracker, &credential, &ask.url)
+    one_from(&tracker, &credential, &ask.url)
         .await
         .map(Json)
         .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e:#}")))

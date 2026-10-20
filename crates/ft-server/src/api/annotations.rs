@@ -405,12 +405,16 @@ mod database_tests {
             crate::vault::crypto::RootKey::generate(),
         ));
         let names = crate::preview::Names::from_vault(&vault);
+        let connections = crate::providers::Connections::opened(db.pool().clone())
+            .await
+            .unwrap();
         (
             AppState {
                 skills: crate::skills::Skills::new(db.pool().clone()),
                 updates: crate::updates::Updates::new(db.pool().clone()),
                 policy: crate::auth::Policy::open(),
                 access: crate::access::Access::new(db.pool().clone()),
+                connections,
                 db,
                 accounts,
                 fleet,
@@ -419,6 +423,7 @@ mod database_tests {
                 key_source: "test".into(),
                 home: std::env::temp_dir(),
                 pending: Default::default(),
+                renewals: Default::default(),
                 forwards: Default::default(),
                 previews: Default::default(),
                 public_url: "http://localhost:3000".into(),

@@ -29,7 +29,6 @@
  * access with no way to reconsider.
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   ChevronDown,
@@ -130,6 +129,8 @@ const KINDS: Record<FiledKind, string> = {
  * the screen is broken; showing them a control the server refuses teaches them
  * the same. Saying what is true and offering nothing to change is neither.
  */
+import { Pop } from "~/ui/Pop";
+
 export function WhoCanAccess({
   kind,
   id,
@@ -1236,88 +1237,6 @@ function Where({
           </div>
         ))}
     </>
-  );
-}
-
-/**
- * A menu that gets out of the sheet.
- *
- * The rows live in an `overflow-y-auto` column inside an `overflow-hidden`
- * card, and a clipping ancestor clips whatever its descendants' `z-index` say
- * — the last row's level menu came out cut in half, and no stacking would have
- * saved it. So it is not a descendant: it goes into `document.body` at
- * coordinates read off the button, and flips above when the room below has run
- * out.
- *
- * The price of coordinates is that they stop being true. Anything that could
- * move the button underneath it — a scroll, a resize — closes it rather than
- * leaving a menu pointing at nothing.
- */
-function Pop({
-  anchor,
-  onClose,
-  children,
-}: {
-  anchor: HTMLElement;
-  onClose: () => void;
-  children: React.ReactNode;
-}) {
-  const box = useRef<HTMLDivElement>(null);
-  const [at, setAt] = useState<{ top: number; left: number } | null>(null);
-
-  // Measured rather than guessed, so the flip keeps working when the menu is
-  // four rows instead of three.
-  useLayoutEffect(() => {
-    const el = box.current;
-    if (!el) return;
-    const to = anchor.getBoundingClientRect();
-    setAt({
-      top:
-        window.innerHeight - to.bottom - 8 < el.offsetHeight
-          ? to.top - el.offsetHeight - 4
-          : to.bottom + 4,
-      left: Math.max(8, to.right - el.offsetWidth),
-    });
-  }, [anchor]);
-
-  useEffect(() => {
-    const away = (e: MouseEvent) => {
-      const t = e.target as Node;
-      // Not the button, which toggles itself: closing here first would let its
-      // own click reopen what it meant to shut.
-      if (!box.current?.contains(t) && !anchor.contains(t)) onClose();
-    };
-    // Captured at the document, which runs before the sheet's own Escape on the
-    // window — otherwise dismissing this menu threw the whole sheet away.
-    const key = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      e.stopPropagation();
-      onClose();
-    };
-    document.addEventListener("mousedown", away);
-    document.addEventListener("keydown", key, true);
-    window.addEventListener("scroll", onClose, true);
-    window.addEventListener("resize", onClose);
-    return () => {
-      document.removeEventListener("mousedown", away);
-      document.removeEventListener("keydown", key, true);
-      window.removeEventListener("scroll", onClose, true);
-      window.removeEventListener("resize", onClose);
-    };
-  }, [anchor, onClose]);
-
-  return createPortal(
-    <div
-      ref={box}
-      role="menu"
-      style={{ position: "fixed", top: at?.top ?? -9999, left: at?.left ?? -9999 }}
-      className={`z-[70] w-44 overflow-hidden rounded-lg border border-line bg-panel shadow-(--shadow-float) ${
-        at ? "" : "invisible"
-      }`}
-    >
-      {children}
-    </div>,
-    document.body,
   );
 }
 

@@ -1,10 +1,12 @@
 //! Connecting a task tracker that is not a git host.
 //!
-//! GitHub arrives already connected — its tracker credential is the git token
-//! from [`super::providers`]. Linear has no device flow and no repositories, so
-//! it connects by a key somebody makes in Linear and pastes here. The key is
-//! tried before it is stored: one that does not work is a thing to say now,
-//! not on the next screen.
+//! Every git host arrives already connected — its tracker credential is the git
+//! token from [`super::providers`], and the list below is derived from the hosts
+//! so that adding a GitLab adds a place to read work from without anybody
+//! configuring it twice. Linear has no device flow and no repositories, so it
+//! connects by a key somebody makes in Linear and pastes here. The key is tried
+//! before it is stored: one that does not work is a thing to say now, not on the
+//! next screen.
 
 use axum::{
     extract::{Path, State},
@@ -35,6 +37,27 @@ fn owner(principal: &Principal) -> Result<&str, ApiError> {
 pub struct TrackerStatus {
     pub id: String,
     pub label: String,
+    /// Which software this reads from: `github`, `gitlab`, `gitea`, or the
+    /// tracker's own id for one that is not a git host.
+    ///
+    /// Carried because the id is no longer the kind. A tracker derived from a
+    /// git host takes that host's id — `gh_01j…` for a second GitHub — and a
+    /// screen keyed on the id to choose a logo drew nothing for it.
+    pub kind: String,
+    /// What this tracker calls a request to merge a branch, in the singular.
+    ///
+    /// Carried for the same reason `ProviderStatus` carries it: the screen
+    /// lists what a tracker can return, and rendering the enum gave
+    /// "issue, pullRequest" — camelCase on screen, and the wrong word entirely
+    /// on a GitLab.
+    pub change_noun: String,
+    /// Where it reads from — `github.com`, `git.acme.internal`.
+    ///
+    /// Carried for the same reason `kind` is: the id stopped being the kind,
+    /// and the label is chosen by whoever added the host. Two GitLabs render
+    /// with the same mark and may be named anything, so the address is the
+    /// only thing on a picker row that reliably tells them apart.
+    pub host: String,
     /// We hold a credential for it.
     pub connected: bool,
     pub auth: Auth,
@@ -77,12 +100,12 @@ pub(super) async fn list_trackers(
     let owner = owner(&principal)?;
 
     let mut out = Vec::new();
-    for t in trackers::TRACKERS {
+    for t in trackers::all(&state).await {
         // Whose key answers here — theirs, or one filed where they work. The
         // same resolution the reads do, so the screen cannot say "not
         // connected" about a key a session would happily have used.
-        let holder = super::tasks::whose(&state, t, owner).await?;
-        let key = Key::of(t.vault_scope(), t.id, &holder);
+        let holder = super::tasks::whose(&state, &t, owner).await?;
+        let key = Key::of(t.vault_scope(), &t.id, &holder);
         let held = state.vault.holds(key).await?;
         // Only for the kind that can be shared: `path` and `secret` describe
         // the same thing, so a git token's whereabouts is nobody's business but
@@ -100,14 +123,13 @@ pub(super) async fn list_trackers(
         };
 
         out.push(TrackerStatus {
-            id: t.id.to_string(),
-            label: t.label.to_string(),
+            host: t.host.clone(),
             // Whether one is held, never the value: this only renders a screen.
             connected: held,
             auth: t.auth,
             scope_kind: t.scope_kind,
-            kinds: t.kinds.to_vec(),
-            key_url: t.key_url.map(str::to_string),
+            kinds: t.kinds.clone(),
+            key_url: t.key_url.clone(),
             // Only an API key is a thing a team shares. A git host's credential
             // is a token that pushes commits, and a commit has to be
             // attributable to a person — so that one stays personal and is
@@ -115,6 +137,18 @@ pub(super) async fn list_trackers(
             secret: (held && t.auth == Auth::ApiKey)
                 .then(|| format!("{}/{}/{}", t.vault_scope(), t.id, holder)),
             path: filed.map(|p| p.as_str().to_string()),
+            kind: t
+                .connection
+                .as_ref()
+                .map(|c| c.kind.id.to_string())
+                .unwrap_or_else(|| t.id.clone()),
+            change_noun: t
+                .connection
+                .as_ref()
+                .map(|c| c.kind.change_noun.to_string())
+                .unwrap_or_else(|| "pull request".into()),
+            id: t.id,
+            label: t.label,
         });
     }
     Ok(Json(out))
@@ -152,7 +186,9 @@ pub(super) async fn set_tracker_key(
     Path(id): Path<String>,
     Json(request): Json<TrackerKey>,
 ) -> ApiResult<Json<Connected>> {
-    let tracker = trackers::find(&id).ok_or_else(|| ApiError::not_found("tracker"))?;
+    let tracker = trackers::find(&state, &id)
+        .await
+        .ok_or_else(|| ApiError::not_found("tracker"))?;
     let owner = owner(&principal)?;
 
     if tracker.auth != Auth::ApiKey {
@@ -172,14 +208,17 @@ pub(super) async fn set_tracker_key(
 
     // Tried before it is kept. A key that does not work stored anyway is an
     // empty task list on another screen with nothing saying why.
-    let account = linear_viewer(tracker, key)
+    let statically = tracker
+        .tracker
+        .ok_or_else(|| ApiError::new(ErrorCode::InvalidRequest, "that tracker takes no key"))?;
+    let account = linear_viewer(statically, key)
         .await
         .map_err(|e| ApiError::new(ErrorCode::ProviderNotConnected, format!("{e:#}")))?;
 
     state
         .vault
         .put(
-            Key::of(tracker.vault_scope(), tracker.id, owner),
+            Key::of(tracker.vault_scope(), &tracker.id, owner),
             key,
             &format!("{} connected with a key", tracker.label),
         )
@@ -200,19 +239,24 @@ pub(super) async fn disconnect_tracker(
     Extension(principal): Extension<Principal>,
     Path(id): Path<String>,
 ) -> ApiResult<StatusCode> {
-    let tracker = trackers::find(&id).ok_or_else(|| ApiError::not_found("tracker"))?;
+    let tracker = trackers::find(&state, &id)
+        .await
+        .ok_or_else(|| ApiError::not_found("tracker"))?;
 
     if tracker.auth != Auth::ApiKey {
         return Err(ApiError::new(
             ErrorCode::InvalidRequest,
-            format!("disconnect {} from the git host instead", tracker.label),
+            format!(
+                "sign out of {} on the git hosts list instead",
+                tracker.label
+            ),
         ));
     }
 
     state
         .vault
         .forget(
-            Key::of(tracker.vault_scope(), tracker.id, owner(&principal)?),
+            Key::of(tracker.vault_scope(), &tracker.id, owner(&principal)?),
             "disconnected the tracker",
         )
         .await?;
@@ -234,7 +278,9 @@ pub(super) async fn list_tracker_scopes(
     Extension(principal): Extension<Principal>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Vec<TaskScope>>> {
-    let tracker = trackers::find(&id).ok_or_else(|| ApiError::not_found("tracker"))?;
+    let tracker = trackers::find(&state, &id)
+        .await
+        .ok_or_else(|| ApiError::not_found("tracker"))?;
 
     match tracker.scope_kind {
         // The repositories this Firetower is connected to, not everything the
@@ -252,16 +298,16 @@ pub(super) async fn list_tracker_scopes(
                 })
                 .collect(),
         )),
-        ScopeKind::Teams if tracker.id == "linear" => {
+        ScopeKind::Teams if tracker.tracker.is_some_and(|t| t.id == "linear") => {
             let credential = super::tasks::credential_for(
                 &state,
                 &principal,
-                tracker,
+                &tracker,
                 "listing teams to pick from",
             )
             .await?;
 
-            linear_teams(tracker, &credential)
+            linear_teams(tracker.tracker.expect("checked in the guard"), &credential)
                 .await
                 .map(|teams| {
                     Json(

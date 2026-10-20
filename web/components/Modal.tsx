@@ -48,12 +48,21 @@ export function Modal({
    * the card.
    */
   floor,
+  /**
+   * A control in the header, beside the title.
+   *
+   * For a question the whole sheet is scoped by rather than a step within it —
+   * which git host the repository picker is listing, and nothing else so far.
+   * It sits in the header because changing it changes the body entirely.
+   */
+  aside,
 }: {
   title: string;
   onClose: () => void;
   children: React.ReactNode;
   wide?: boolean;
   floor?: React.ReactNode;
+  aside?: React.ReactNode;
 }) {
   useEffect(() => {
     const k = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -81,9 +90,10 @@ export function Modal({
         <div className="shrink-0 border-b border-line pt-[env(safe-area-inset-top)]">
         <div className="flex items-center gap-3 px-5 py-3">
           <span className="eyebrow">{title}</span>
+          {aside && <div className="ml-auto shrink-0">{aside}</div>}
           <button
             onClick={onClose}
-            className="-mr-3 ml-auto grid h-11 w-11 place-items-center rounded-sm text-mute transition-colors hover:bg-raise hover:text-bone sm:-mr-1 sm:h-auto sm:w-auto sm:p-1"
+            className={`-mr-3 grid h-11 w-11 place-items-center rounded-sm text-mute transition-colors hover:bg-raise hover:text-bone sm:-mr-1 sm:h-auto sm:w-auto sm:p-1 ${aside ? "" : "ml-auto"}`}
             aria-label="Close"
           >
             <Icon of={X} size={14} />

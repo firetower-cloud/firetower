@@ -464,6 +464,26 @@ impl Vault {
         Ok(())
     }
 
+    /// Forget every copy of one secret, whoever holds it.
+    ///
+    /// For the one event where a credential stops being a credential for
+    /// everybody at once: the git host it belonged to has been removed, so
+    /// every token anybody held for it is now a string that opens nothing. The
+    /// log keeps one entry per row, because each was somebody's.
+    pub async fn forget_all(&self, scope: &str, name: &str, reason: &str) -> Result<()> {
+        let owners: Vec<String> =
+            sqlx::query_scalar("SELECT owner FROM secrets WHERE scope = $1 AND name = $2")
+                .bind(scope)
+                .bind(name)
+                .fetch_all(&self.pool)
+                .await?;
+
+        for owner in owners {
+            self.forget(Key::of(scope, name, &owner), reason).await?;
+        }
+        Ok(())
+    }
+
     /// What this person may see, for a screen. Names only.
     ///
     /// Filtered by the same predicate as everything else

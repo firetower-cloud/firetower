@@ -30,8 +30,14 @@ pub struct SetupState {
     pub needs_password: bool,
     /// Nobody has named the organisation yet.
     pub needs_organization: bool,
-    /// No GitHub application is configured. Not a blocker — it is skippable,
-    /// and pasting a repository URL works without one.
+    /// No git host can be authorized yet. Not a blocker — it is skippable, and
+    /// pasting a repository URL works without one.
+    ///
+    /// Still called `needs_github`, and still true of GitHub specifically in
+    /// the ordinary case, because three committed clients read the field under
+    /// that name. What it means now is "nothing here can be connected": a host
+    /// connected by token needs nothing registered, so adding a GitLab or a
+    /// Gitea answers it too.
     pub needs_github: bool,
     /// Where a person reaches this Firetower in a browser.
     ///
@@ -73,9 +79,7 @@ pub(super) async fn setup_state(
     Ok(Json(SetupState {
         needs_password: principal.must_change_password(),
         needs_organization: organization.is_none(),
-        needs_github: crate::providers::client_id(&state.accounts, "github")
-            .await
-            .is_none(),
+        needs_github: !state.connections.all().await.iter().any(|c| c.configured()),
         completed: state.accounts.onboarded().await?,
         public_url: state.public_url.to_string(),
         organization,

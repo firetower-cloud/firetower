@@ -73,6 +73,24 @@ export function Inspector({
   );
   /* The tree marks what is not committed yet — the editor's sense of "changed". */
   const changed = useMemo(() => new Map(pending.data.map((d) => [d.at, d.fresh === true])), [pending.data]);
+  /**
+   * **What the Commit sheet acts on, which is not what the Diff tab shows.**
+   *
+   * Two different questions, and they had one answer between them. The Diff
+   * tab asks what this branch changed — `since=Base` — and is right to. The
+   * sheet asks what is not committed yet, and was handed the branch diff
+   * instead.
+   *
+   * On a rename that is half staged the two disagree completely: the branch
+   * diff lists the *added* file, already committed, while the working tree's
+   * only change is the *deletion* of the old one. So the sheet listed a file
+   * with nothing to commit, hid the one thing there was, and committing it
+   * did nothing — leaving the count at one however many times it was pressed.
+   */
+  const uncommitted: Changed[] = useMemo(
+    () => pending.data.map((d) => ({ path: d.path, at: d.at, added: d.added, removed: d.removed, patch: d.patch, fresh: d.fresh, truncated: d.truncated })),
+    [pending.data],
+  );
   /* The pane that scrolls. The diff draws only the rows in it, so the list
      inside has to be able to ask where it has got to. */
   const scroller = useRef<HTMLDivElement>(null);
@@ -99,7 +117,7 @@ export function Inspector({
       <div ref={scroller} className="scroll-slim min-h-0 flex-1 overflow-y-auto">
         {shown === "diff" && <DiffList session={session} files={files} loading={diff.loading} error={diff.error} onOpenFile={onOpenFile} scroller={scroller} />}
         {shown === "files" && <LiveTree sessionId={session.id} changed={changed} onOpenFile={onOpenFile} />}
-        {shown === "ship" && <Ship session={session} branch={branch} files={files} />}
+        {shown === "ship" && <Ship session={session} branch={branch} files={uncommitted} />}
       </div>
     </aside>
   );

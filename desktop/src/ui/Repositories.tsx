@@ -22,7 +22,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, GitBranch, Loader2, Plus, Search } from "lucide-react";
-import { GithubMark } from "~/components/ui";
+import { HostMark } from "~/components/ui";
 import type { Checkout, CheckoutWork, Session } from "~/api/generated/model";
 import {
   addRepo,
@@ -32,7 +32,7 @@ import {
   useSessionWork,
 } from "~/api/generated/sessions/sessions";
 import { beginCheckout, howItIsDoing, markCheckout } from "~/api/checkouts";
-import { useRepos, why } from "~/data";
+import { useHostOf, useRepos, why } from "~/data";
 import { openExternal } from "~/open";
 
 export function Repositories({
@@ -46,6 +46,7 @@ export function Repositories({
   onClose: () => void;
 }) {
   const cache = useQueryClient();
+  const hostOf = useHostOf();
   const repos = useRepos();
   const ended = session.status === "Ended";
   const checkouts = useMemo(() => session.checkouts ?? [], [session.checkouts]);
@@ -225,7 +226,7 @@ export function Repositories({
                           <path d="M1.5 5.2 4 7.5 8.5 2.5" strokeLinecap="round" strokeLinejoin="round" />
                         </svg>
                       </span>
-                      <GithubMark size={12} className="text-mute" />
+                      <HostMark kind={hostOf(r.slug)?.kind} size={12} className="text-mute" />
                       <span className="min-w-0 flex-1 truncate font-mono text-ui text-text">{r.slug}</span>
                     </button>
                     {running ? (
@@ -372,6 +373,7 @@ function Base({
 
 /** One checked-out repository: where it is, what branch, and how it is doing. */
 function Row({ checkout, work, ended }: { checkout: Checkout; work?: CheckoutWork; ended: boolean }) {
+  const hostOf = useHostOf();
   /* Its own trouble beats the workspace's: a repository the host could not
      reach is not a workspace that failed, and saying which one is missing is
      the whole reason the list exists. */
@@ -382,7 +384,7 @@ function Row({ checkout, work, ended }: { checkout: Checkout; work?: CheckoutWor
   return (
     <li>
       <div className="flex items-start gap-2.5 px-3.5 py-1.5">
-        <GithubMark size={12} className={`mt-1 ${trouble ? "text-brick" : "text-mute"}`} />
+        <HostMark kind={hostOf(checkout.slug)?.kind} size={12} className={`mt-1 ${trouble ? "text-brick" : "text-mute"}`} />
         <span className="min-w-0 flex-1">
           <span className="flex items-baseline gap-2">
             <span className="min-w-0 truncate font-mono text-ui text-bone">{checkout.slug}</span>

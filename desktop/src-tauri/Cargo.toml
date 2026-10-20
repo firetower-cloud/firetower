@@ -47,7 +47,7 @@ windows = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Dw
 # one, so the Mac build does not link a tray implementation it can never use.
 # Unlike `macos-private-api` above, nothing in `build.rs` reads this one, so
 # it is safe to vary by target.
-tauri = { version = "2", features = ["tray-icon"] }
+tauri = { version = "2", features = ["macos-private-api", "tray-icon"] }
 
 [profile.dev]
 incremental = true

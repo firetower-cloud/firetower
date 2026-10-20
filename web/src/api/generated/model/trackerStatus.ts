@@ -11,14 +11,41 @@ import type { TaskKind } from './taskKind';
 
 export interface TrackerStatus {
   auth: Auth;
+  /**
+     * What this tracker calls a request to merge a branch, in the singular.
+     *
+     * Carried for the same reason `ProviderStatus` carries it: the screen
+     * lists what a tracker can return, and rendering the enum gave
+     * "issue, pullRequest" — camelCase on screen, and the wrong word entirely
+     * on a GitLab.
+     */
+  changeNoun: string;
   /** We hold a credential for it. */
   connected: boolean;
+  /**
+     * Where it reads from — `github.com`, `git.acme.internal`.
+     *
+     * Carried for the same reason `kind` is: the id stopped being the kind,
+     * and the label is chosen by whoever added the host. Two GitLabs render
+     * with the same mark and may be named anything, so the address is the
+     * only thing on a picker row that reliably tells them apart.
+     */
+  host: string;
   id: string;
   /**
      * Where somebody goes to make a key, when that is how it connects.
      * @nullable
      */
   keyUrl?: string | null;
+  /**
+     * Which software this reads from: `github`, `gitlab`, `gitea`, or the
+     * tracker's own id for one that is not a git host.
+     *
+     * Carried because the id is no longer the kind. A tracker derived from a
+     * git host takes that host's id — `gh_01j…` for a second GitHub — and a
+     * screen keyed on the id to choose a logo drew nothing for it.
+     */
+  kind: string;
   /** What this tracker can return, so the kind toggle offers no more. */
   kinds: TaskKind[];
   label: string;

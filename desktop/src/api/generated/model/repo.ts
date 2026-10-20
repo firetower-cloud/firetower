@@ -13,6 +13,18 @@ import type { ResourcePath } from './resourcePath.ts';
  */
 export interface Repo {
   /**
+     * Which git host it was connected from.
+     *
+     * Absent for a remote somebody pasted, and absent for every row that
+     * predates there being more than one host — in both cases the host is
+     * worked out from the remote's hostname when it is needed. It earns its
+     * keep the moment two hosts share a hostname: with a personal and a work
+     * account both on github.com, the remote alone cannot say which token
+     * opens this repository, and this can.
+     * @nullable
+     */
+  connectionId?: string | null;
+  /**
      * The trunk, once something has read the remote.
      *
      * Absent until then: a repository can be connected while no worker is

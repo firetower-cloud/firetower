@@ -15,7 +15,7 @@ use anyhow::{bail, Context, Result};
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
 
-use super::{Label, Page, Person, Query, Source, SourceId, Task, TaskKind, TaskState};
+use super::{Label, Page, Person, Query, Source, Task, TaskKind, TaskState};
 use crate::trackers::Tracker;
 
 /// The states Linear calls a state, grouped the two ways a person asks.
@@ -42,10 +42,6 @@ pub struct Linear<'a> {
 }
 
 impl Source for Linear<'_> {
-    fn id(&self) -> SourceId {
-        "linear"
-    }
-
     async fn list(&self, key: &str, ask: &Query) -> Result<Page> {
         // Linear has no pull requests. Asking for them asks for nothing rather
         // than for everything.
