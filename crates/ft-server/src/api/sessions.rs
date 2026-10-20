@@ -1637,9 +1637,11 @@ async fn act(
     // Only the remote needs one, and only some of these touch it. A bare agent
     // has no remote at all.
     let credential = match session.repo.as_deref() {
-        Some(slug) => match state.db.any_repo_for(slug).await? {
-            // The session's owner, not whoever asked. It is their branch and
-            // their token that has to be able to push it.
+        Some(slug) => match state.db.repo_for(slug, session.owner.as_str()).await? {
+            // The session's owner, not whoever asked — for *which row* as well
+            // as for the token. Their row names the host they are actually on;
+            // the oldest row of that slug may be somebody else's, on another.
+            // See `Db::repo_for`.
             Some(repo) => {
                 credential_for(
                     state,
@@ -1833,7 +1835,7 @@ pub(super) async fn push_session(
         // other nor a self-hosted git that needs none. The session's owner
         // rather than whoever pressed the button — it is their branch going up
         // under their name.
-        let credential = match state.db.any_repo_for(&c.slug).await? {
+        let credential = match state.db.repo_for(&c.slug, session.owner.as_str()).await? {
             Some(repo) => {
                 credential_for(
                     &state,
@@ -1981,7 +1983,7 @@ pub(super) async fn commit_session(
                 // By the remote, so two checkouts on two hosts each get the
                 // identity that host expects. `Held` carries the slug, and
                 // the remote is what `for_remote` matches on.
-                author: match state.db.any_repo_for(&c.slug).await? {
+                author: match state.db.repo_for(&c.slug, &owner).await? {
                     Some(repo) => author_for(&state, &repo.remote, &owner).await,
                     None => None,
                 },
@@ -2779,10 +2781,28 @@ pub(super) async fn open_pull_request(
     let mut refused: Vec<String> = Vec::new();
 
     for c in &held {
-        // Already open. Pushing again amends it, so there is nothing to do.
+        // **Still open, not merely once opened.**
+        //
+        // Pushing to a request that is open amends it, so there is nothing to
+        // do and handing back its URL is the whole answer. A request that has
+        // been *merged or closed* is finished: the commits made since are not
+        // in it and never will be, and skipping on the strength of a URL that
+        // is no longer live left the button saying "open a new one" and the
+        // server quietly handing back the old one — pressed, it opened the
+        // browser at a merged request and created nothing.
+        //
+        // `None` is unknown rather than finished — nothing has read the host
+        // yet — and is treated as live, because the cost of being wrong that
+        // way is a no-op and the other way is a duplicate request.
+        let spent = matches!(
+            c.pull_state,
+            Some(ft_core::session::PullState::Merged) | Some(ft_core::session::PullState::Closed)
+        );
         if let Some(url) = &c.pull_request {
-            opened.push((c.slug.clone(), url.clone()));
-            continue;
+            if !spent {
+                opened.push((c.slug.clone(), url.clone()));
+                continue;
+            }
         }
 
         match open_one(
@@ -2866,7 +2886,7 @@ async fn open_one(
 ) -> Result<String, String> {
     let repo = state
         .db
-        .any_repo_for(slug)
+        .repo_for(slug, owner)
         .await
         .map_err(|e| format!("{e:#}"))?
         .ok_or_else(|| format!("{slug} isn't connected any more"))?;
@@ -2910,7 +2930,7 @@ async fn link_up(
 ) -> anyhow::Result<()> {
     let repo = state
         .db
-        .any_repo_for(slug)
+        .repo_for(slug, owner)
         .await?
         .ok_or_else(|| anyhow::anyhow!("{slug} isn't connected"))?;
     let conn = super::connection_for_repo(state, &repo, owner)

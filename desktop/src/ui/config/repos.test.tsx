@@ -155,10 +155,10 @@ describe("the empty state", () => {
     expect(html).not.toContain("Connect a git host");
 
     // The import list, for the host that is actually connected.
-    expect(html).toContain("Available on GitLab (internal)");
+    expect(html).toContain("Available to import on GitLab (internal)");
     expect(html).toContain("platform/infra/deploy");
     // And the empty upper list says so plainly rather than vanishing.
-    expect(html).toContain("Nothing connected yet");
+    expect(html).toContain("Nothing imported yet");
   });
 
   /**
@@ -201,11 +201,11 @@ describe("the two lists", () => {
       },
     });
 
-    expect(html).toContain("Connected");
-    expect(html).toContain("Available on GitHub");
+    expect(html).toContain("Imported");
+    expect(html).toContain("Available to import on GitHub");
     expect(html).toContain("acme/api");
     expect(html).toContain("1 not imported");
-    // `acme/web` is drawn once — in Connected — not twice.
+    // `acme/web` is drawn once — in Imported — not twice.
     expect(html.match(/acme\/web/g)?.length).toBe(1);
   });
 
@@ -234,7 +234,7 @@ describe("the two lists", () => {
       repos: [repo("acme/web", "https://github.com/acme/web.git")],
       available: { github: [offered("acme/web", "https://github.com/acme/web.git")] },
     });
-    expect(html).toContain("Everything GitHub can see is imported");
+    expect(html).toContain("Everything on GitHub is imported");
     expect(html).not.toContain("Pick a git host to start from");
   });
 
@@ -287,13 +287,95 @@ describe("the controls", () => {
     expect(html).toContain("Repositories");
   });
 
-  /** Importing one repository by address is still reachable. */
-  it("keeps a way to paste a remote", () => {
-    const html = draw({
+  /**
+   * Pasting a remote is not a control on the populated screen. It is a
+   * different job from the two the lists are for — importing one address by
+   * hand rather than picking from what a host can see — and it was the odd
+   * one out in a row of filters.
+   *
+   * It stays on the empty state, which is where somebody with no host and a
+   * URL in hand actually is.
+   */
+  it("does not offer pasting a remote beside the filters", () => {
+    const populated = draw({
       hosts: [gitlab({ connected: true })],
       repos: [repo("acme/web", "https://git.acme.internal/acme/web.git")],
       available: { gitlab_01j: [] },
     });
-    expect(html).toContain("Paste a remote");
+    expect(populated).not.toContain("Paste a remote");
+
+    const empty = draw({ hosts: [gitlab({ connected: false })], repos: [] });
+    expect(empty).toContain("paste a URL");
+  });
+});
+
+/**
+ * All hosts at once, which is what the screen opens on.
+ *
+ * The diagnosis this came from: the picker governed only the lower list. The
+ * upper one showed every repository from every host and ignored it entirely,
+ * so the single control that looked page-wide was the only one that was not.
+ */
+describe("across every host", () => {
+  const two = () => [
+    host({ id: "github", label: "GitHub", connected: true }),
+    gitlab({ connected: true }),
+  ];
+
+  it("offers what every connected host can see, not just the first", () => {
+    const html = draw({
+      hosts: two(),
+      repos: [],
+      available: {
+        github: [offered("acme/api", "https://github.com/acme/api.git")],
+        gitlab_01j: [offered("platform/infra/deploy", "https://git.acme.internal/platform/infra/deploy.git")],
+      },
+    });
+
+    expect(html).toContain("All hosts");
+    expect(html).toContain("acme/api");
+    expect(html).toContain("platform/infra/deploy");
+    // Counted across the set rather than per host.
+    expect(html).toContain("2 across 2 hosts");
+  });
+
+  /**
+   * Two hosts can both hold an `acme/web`. Without the host beside the row the
+   * two are identical, and Import on either is a coin toss.
+   */
+  it("says which host a row is on when there is more than one", () => {
+    const html = draw({
+      hosts: two(),
+      repos: [],
+      available: {
+        github: [offered("acme/web", "https://github.com/acme/web.git")],
+        gitlab_01j: [offered("acme/web", "https://git.acme.internal/acme/web.git")],
+      },
+    });
+    expect(html).toContain("github.com");
+    expect(html).toContain("git.acme.internal");
+    expect(html.match(/acme\/web/g)?.length).toBe(2);
+  });
+
+  /**
+   * The upper list, which is the half that used to ignore the picker.
+   *
+   * Only the default is provable here — a static render cannot open the menu
+   * and pick a host, so the narrowing itself is not covered. What this pins
+   * is that "All hosts" means all of them in *both* lists rather than only
+   * the lower one.
+   */
+  it("shows imported repositories from every host at once", () => {
+    const html = draw({
+      hosts: two(),
+      repos: [
+        repo("acme/web", "https://github.com/acme/web.git"),
+        repo("platform/infra/deploy", "https://git.acme.internal/platform/infra/deploy.git"),
+      ],
+      available: { github: [], gitlab_01j: [] },
+    });
+    expect(html).toContain("acme/web");
+    expect(html).toContain("platform/infra/deploy");
+    expect(html).toContain("Imported");
   });
 });

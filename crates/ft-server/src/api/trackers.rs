@@ -51,6 +51,13 @@ pub struct TrackerStatus {
     /// "issue, pullRequest" — camelCase on screen, and the wrong word entirely
     /// on a GitLab.
     pub change_noun: String,
+    /// Where it reads from — `github.com`, `git.acme.internal`.
+    ///
+    /// Carried for the same reason `kind` is: the id stopped being the kind,
+    /// and the label is chosen by whoever added the host. Two GitLabs render
+    /// with the same mark and may be named anything, so the address is the
+    /// only thing on a picker row that reliably tells them apart.
+    pub host: String,
     /// We hold a credential for it.
     pub connected: bool,
     pub auth: Auth,
@@ -116,6 +123,7 @@ pub(super) async fn list_trackers(
         };
 
         out.push(TrackerStatus {
+            host: t.host.clone(),
             // Whether one is held, never the value: this only renders a screen.
             connected: held,
             auth: t.auth,

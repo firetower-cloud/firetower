@@ -1107,19 +1107,40 @@ impl Db {
         Ok(row.map(repo_from_row))
     }
 
-    /// Any row for a remote, for the one thing that is the same on all of them.
+    /// The row for a slug that answers for *this* person, falling back to any.
     ///
     /// Several people can have connected the same codebase, and their rows
     /// differ in everything a person chose — the setup script, the variables,
-    /// who owns it. They do not differ in the remote, which is what the push
-    /// and pull-request paths want: the URL, to pick a provider, so the
-    /// *session owner's* token can be found for it. Deterministic so that two
-    /// identical calls cannot disagree.
-    pub async fn any_repo_for(&self, slug: &str) -> Result<Option<Repo>> {
+    /// who owns it. An earlier version of this took the oldest row of the slug
+    /// and said in as many words that they "do not differ in the remote".
+    ///
+    /// **They differ in the remote the moment two hosts hold the same slug.**
+    /// `acme/web` on github.com and `acme/web` on a GitLab somebody runs is
+    /// the ordinary shape of a migration, and the oldest row is then somebody
+    /// else's, on the other host. Everything downstream is chosen from that
+    /// row: `credential_for` picks the provider from its *remote*, so a push
+    /// to GitLab went out with a GitHub token and a 403; `connection_for_repo`
+    /// reads its `connection_id`, so "open a request" tried a GitHub pull
+    /// request for a branch that only exists on GitLab, and the sheet called
+    /// it a pull request on a GitLab job. The asker's own token was always the
+    /// one used — nobody ever acted as anybody else — but every message named
+    /// a host their session had nothing to do with.
+    ///
+    /// Theirs first, then the oldest, in one query. The fallback is still
+    /// wanted: a session can outlive the row it was cut from, and another
+    /// person's row for the same slug carries the same remote in every case
+    /// but this one.
+    pub async fn repo_for(&self, slug: &str, person: &str) -> Result<Option<Repo>> {
         let row = sqlx::query(&format!(
-            "SELECT {REPO_COLUMNS} FROM repos r WHERE r.slug = $1 ORDER BY r.created_at LIMIT 1"
+            "SELECT {REPO_COLUMNS} FROM repos r
+              WHERE r.slug = $1
+              ORDER BY (r.path <@ ('u.' || (SELECT slug FROM principals WHERE id = $2))::ltree)
+                           DESC,
+                       r.created_at
+              LIMIT 1"
         ))
         .bind(slug)
+        .bind(person)
         .fetch_optional(&self.pool)
         .await?;
         Ok(row.map(repo_from_row))
@@ -1790,7 +1811,12 @@ impl Db {
         url: &str,
     ) -> Result<()> {
         sqlx::query(
-            "UPDATE workspace_repos SET pull_request = $1
+            // **And forget what became of the last one.** This is only ever
+            // called having just opened a request, so whatever `pull_state`
+            // held describes a different request — leaving a `merged` behind
+            // would mark the new one merged the moment it was created, and it
+            // would stay that way until the poller next ran.
+            "UPDATE workspace_repos SET pull_request = $1, pull_state = NULL
               WHERE workspace_id = (SELECT workspace_id FROM sessions WHERE id = $2)
                 AND path = $3",
         )
@@ -2718,6 +2744,148 @@ mod tests {
         .await
         .unwrap();
         "s_w".to_string()
+    }
+
+    /// **Two hosts, one slug — whose row answers.**
+    ///
+    /// The report, and the shape of a migration: `acme/web` lived on
+    /// github.com, the team moved it to a GitLab they run, and the two rows
+    /// now differ in the remote and in the host they name.
+    ///
+    /// The lookup this replaced took the *oldest* row of the slug and ignored
+    /// who was asking. Everything downstream is chosen from the row it
+    /// returns: the credential comes from its remote, the connection from its
+    /// `connection_id`, the noun on the ship sheet from that connection. So
+    /// Bob, working on GitLab, pushed with a GitHub token and was told to
+    /// authorize a host his session had nothing to do with.
+    /// Opening a request forgets what became of the last one.
+    ///
+    /// Reported on a Gitea session: a request was opened, merged, and more
+    /// work followed. The next request recorded against that checkout
+    /// inherited `merged` from the one before it, so a brand-new request was
+    /// drawn as already merged until the poller next ran.
+    #[tokio::test]
+    async fn recording_a_request_clears_the_last_one_s_outcome() {
+        let (db, who) = db_with_user().await;
+        let session = SessionId::from_stored(a_session(&db, &who).await);
+
+        sqlx::query(
+            "INSERT INTO workspace_repos (workspace_id, path, slug, branch, base, position)
+             VALUES ('w_w', 'infra', 'acme/web', 'agent/x', 'main', 0)",
+        )
+        .execute(db.pool())
+        .await
+        .unwrap();
+
+        db.set_checkout_pull_request(&session, "infra", "https://host/acme/web/pulls/1")
+            .await
+            .unwrap();
+        db.set_checkout_pull_state(
+            &ft_core::WorkspaceId::from_stored("w_w".to_string()),
+            "infra",
+            ft_core::session::PullState::Merged,
+        )
+        .await
+        .unwrap();
+
+        // The next one is a different request, whatever happened to the last.
+        db.set_checkout_pull_request(&session, "infra", "https://host/acme/web/pulls/2")
+            .await
+            .unwrap();
+
+        let (url, state): (Option<String>, Option<String>) = sqlx::query_as(
+            "SELECT pull_request, pull_state FROM workspace_repos
+              WHERE workspace_id = 'w_w' AND path = 'infra'",
+        )
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+
+        assert_eq!(url.as_deref(), Some("https://host/acme/web/pulls/2"));
+        assert_eq!(state, None, "a new request is not merged");
+    }
+
+    #[tokio::test]
+    async fn the_row_for_a_slug_is_the_asker_s_own() {
+        let (db, ana) = db_with_user().await;
+        let org = ft_core::OrgId::from_stored(db.org().await.unwrap());
+        let accounts = crate::accounts::Accounts::new(db.pool().clone());
+        let bob = accounts
+            .create_user(&org, "bob", "bob@example.com", "member")
+            .await
+            .unwrap()
+            .0
+            .id
+            .as_str()
+            .to_string();
+
+        // The GitLab they moved to. `github` is already there — a migration
+        // seeds it — and this is the second host that makes the slug
+        // ambiguous.
+        sqlx::query(
+            "INSERT INTO git_connections
+                 (id, kind, label, base_url, api_base, git_host, auth, builtin, position)
+             VALUES ('gitlab_lab', 'gitlab', 'GitLab (ours)',
+                     'https://git.acme.internal', 'https://git.acme.internal/api/v4',
+                     'git.acme.internal', 'token', false, 9)",
+        )
+        .execute(db.pool())
+        .await
+        .unwrap();
+
+        // Ana connected it first, on github.com.
+        let hers = db
+            .ensure_repo(
+                "acme/web",
+                "https://github.com/acme/web.git",
+                Some("main"),
+                None,
+                &ana,
+                Some("github"),
+            )
+            .await
+            .unwrap();
+
+        // Bob connected the same slug afterwards, on the GitLab they moved to.
+        let his = db
+            .ensure_repo(
+                "acme/web",
+                "https://git.acme.internal/acme/web.git",
+                Some("main"),
+                None,
+                &bob,
+                Some("gitlab_lab"),
+            )
+            .await
+            .unwrap();
+        assert_ne!(hers.id, his.id, "two rows, one slug");
+
+        // Each is answered with their own, which is the whole fix: Bob's row
+        // names GitLab, so his push is credentialed for GitLab.
+        let for_bob = db.repo_for("acme/web", &bob).await.unwrap().unwrap();
+        assert_eq!(for_bob.id, his.id);
+        assert_eq!(for_bob.remote, "https://git.acme.internal/acme/web.git");
+        assert_eq!(for_bob.connection_id.as_deref(), Some("gitlab_lab"));
+
+        let for_ana = db.repo_for("acme/web", &ana).await.unwrap().unwrap();
+        assert_eq!(for_ana.id, hers.id);
+        assert_eq!(for_ana.connection_id.as_deref(), Some("github"));
+
+        // And somebody with no row of their own still gets one rather than
+        // nothing — a session can outlive the row it was cut from, and every
+        // other slug really does share a remote.
+        let carol = accounts
+            .create_user(&org, "carol", "carol@example.com", "member")
+            .await
+            .unwrap()
+            .0
+            .id;
+        let fallback = db
+            .repo_for("acme/web", carol.as_str())
+            .await
+            .unwrap()
+            .expect("falls back rather than refusing");
+        assert_eq!(fallback.id, hers.id, "the oldest, deterministically");
     }
 
     #[tokio::test]

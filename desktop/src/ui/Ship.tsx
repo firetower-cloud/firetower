@@ -18,7 +18,7 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { GitBranch, GitPullRequest, Loader2, RefreshCw } from "lucide-react";
+import { ExternalLink, GitBranch, GitPullRequest, Loader2, RefreshCw } from "lucide-react";
 import type { Session } from "~/api/generated/model";
 import {
   getGetSessionQueryKey,
@@ -42,6 +42,8 @@ export function Ship({ session, branch, files }: { session: Session; branch?: st
   const hostOf = useHostOf();
   const host = hostOf(session.repo);
   const noun = host?.changeNoun ?? "pull request";
+  /* Sentence-initial, for the lines that start with it. */
+  const Noun = noun.charAt(0).toUpperCase() + noun.slice(1);
 
   const { data: work, isError: workFailed } = useSessionWork(session.id, {
     query: {
@@ -141,6 +143,43 @@ export function Ship({ session, branch, files }: { session: Session; branch?: st
         </div>
       ) : (
         <>
+          {/* **The request that is already out, while there is still work to
+              do.** `ship.links` was only drawn under `done`, so a branch with
+              a request open and an uncommitted file showed no sign of it —
+              the sheet read as though nothing had ever been opened, which is
+              exactly what it was reported as. Quiet, because the button below
+              is still the thing to press; present, because "there is already
+              one of these" changes what that button means. */}
+          {ship.links.length > 0 && (
+            <div className="mt-3 space-y-1">
+              {ship.links.map((l) => (
+                <a
+                  key={l.url}
+                  href={l.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center gap-2 text-meta text-mute hover:text-bone"
+                >
+                  <GitPullRequest className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
+                  <span className="truncate">
+                    {/* What became of it, not merely that it exists. "Already
+                        opened" over a button reading "open a new one" is two
+                        lines disagreeing about the same request — and the one
+                        that resolves it is the state. */}
+                    {l.state === "merged"
+                      ? `${Noun} merged — these commits need a new one`
+                      : l.state === "closed"
+                        ? `${Noun} closed without merging`
+                        : ship.stage === "open-behind"
+                          ? `The ${noun} is open — pushing updates it`
+                          : `The ${noun} is open`}
+                  </span>
+                  <ExternalLink className="h-3 w-3 shrink-0" strokeWidth={1.75} />
+                </a>
+              ))}
+            </div>
+          )}
+
           {ship.stage === "unknown" && <p className="mt-3 text-meta text-kind-data">{ship.blocked}</p>}
 
           {(ship.stage === "uncommitted" || opening) && (

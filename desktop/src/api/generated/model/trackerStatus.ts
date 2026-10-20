@@ -22,6 +22,15 @@ export interface TrackerStatus {
   changeNoun: string;
   /** We hold a credential for it. */
   connected: boolean;
+  /**
+     * Where it reads from — `github.com`, `git.acme.internal`.
+     *
+     * Carried for the same reason `kind` is: the id stopped being the kind,
+     * and the label is chosen by whoever added the host. Two GitLabs render
+     * with the same mark and may be named anything, so the address is the
+     * only thing on a picker row that reliably tells them apart.
+     */
+  host: string;
   id: string;
   /**
      * Where somebody goes to make a key, when that is how it connects.

@@ -78,7 +78,19 @@ export type Ship = {
   seeds?: boolean;
 };
 
-export type PullRequestLink = { slug: string; url: string };
+/**
+ * A request that exists, and what became of it.
+ *
+ * `state` is carried because whoever draws the link has to say *which* of the
+ * three it is. Without it the sheet said "Pull request already opened" over a
+ * button offering to open a *new* one — two lines contradicting each other
+ * about the same request, where the truth was that the old one had merged.
+ */
+export type PullRequestLink = {
+  slug: string;
+  url: string;
+  state?: CheckoutWork["pullState"];
+};
 
 /**
  * Read the state, and say what to offer.
@@ -152,7 +164,7 @@ export function shipping(
         "Firetower could not read what is in this workspace.",
       links: held
         .filter((c) => c.pullRequest)
-        .map((c) => ({ slug: c.slug, url: c.pullRequest as string })),
+        .map((c) => ({ slug: c.slug, url: c.pullRequest as string, state: c.pullState })),
       count: unreadable.length,
     };
   }
@@ -162,7 +174,7 @@ export function shipping(
   // on one repository and have a request open on another.
   const links: PullRequestLink[] = held
     .filter((c) => c.pullRequest)
-    .map((c) => ({ slug: c.slug, url: c.pullRequest as string }));
+    .map((c) => ({ slug: c.slug, url: c.pullRequest as string, state: c.pullState }));
 
   // A repository whose trunk does not exist yet.
   //
@@ -216,9 +228,33 @@ export function shipping(
   // repository is further along.
   const uncommitted = held.filter((c) => (c.uncommitted ?? 0) > 0);
   if (uncommitted.length > 0) {
+    /* **A request that already exists is not one to open.**
+     *
+     * The stage is still `uncommitted` — unsaved work comes first however the
+     * request ended, which is its own rule and tested as one. What was wrong
+     * was the *label*: it said "Commit & open PR" at a branch that already had
+     * one, so pressing it committed, pushed, and then opened the browser at a
+     * request that had been there all along. The step below this one already
+     * drew the distinction — `Push — updates the PR` — and this one did not.
+     *
+     * Which of the two it is depends on whether that request is still open:
+     * pushing to an open one amends it, while a merged or closed one is
+     * finished and these commits need a new request of their own.
+     */
+    const over = (c: CheckoutWork) => c.pullState === "merged" || c.pullState === "closed";
+    const amends =
+      uncommitted.every((c) => c.pullRequest) && uncommitted.every((c) => !over(c));
+    const spent = uncommitted.every((c) => c.pullRequest && over(c));
+
+    const verb = amends
+      ? `Commit & push — updates the ${uncommitted.length === 1 ? SHORT : `${SHORT}s`}`
+      : spent
+        ? `Commit & open a new ${SHORT}`
+        : opens;
+
     return {
       stage: "uncommitted",
-      label: name(opens, uncommitted.length, held.length),
+      label: name(verb, uncommitted.length, held.length),
       links,
       count: uncommitted.length,
     };

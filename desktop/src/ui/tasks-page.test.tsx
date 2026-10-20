@@ -11,7 +11,8 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { TasksPage } from "./TasksPage";
+import { paneFor, pickable, SourceRows, TasksPage } from "./TasksPage";
+import { paneAt, FIRST } from "~/ui/config/panes";
 import { StartProvider } from "~/start";
 import { getListTasksQueryKey } from "~/api/generated/tasks/tasks";
 import { getListTrackersQueryKey } from "~/api/generated/trackers/trackers";
@@ -21,6 +22,7 @@ import type { ListTasksParams, Page, Task, TrackerStatus } from "~/api/generated
 const github = (connected: boolean): TrackerStatus => ({
   id: "github",
   label: "GitHub",
+  host: "github.com",
   kind: "github",
   changeNoun: "pull request",
   connected,
@@ -33,6 +35,7 @@ const github = (connected: boolean): TrackerStatus => ({
 const linear = (connected: boolean): TrackerStatus => ({
   id: "linear",
   label: "Linear",
+  host: "linear.app",
   kind: "linear",
   changeNoun: "pull request",
   connected,
@@ -178,12 +181,31 @@ describe("a tracker with no credential", () => {
     expect(html).toContain("Connect Linear");
   });
 
-  /** Both marks stay on screen: picking the unconnected one is how you get to
-      the prompt that connects it. */
-  it("still offers a tracker it cannot read", () => {
-    const html = draw([github(true), linear(false)]);
-    expect(html).toContain('aria-label="Linear"');
-    expect(html).toContain("Linear — not connected");
+  /**
+   * **The picker offers only what can answer.**
+   *
+   * This used to be the opposite, and the old reasoning was sound while there
+   * were two trackers: listing the unconnected one greyed was how somebody
+   * reached the prompt that connects it. It stopped being sound once every
+   * git host became a tracker — a fresh install offers six, four of them
+   * saying "not connected", so the control that picks what you are reading is
+   * mostly things you cannot read. Connecting was never done from this menu
+   * anyway; it is Git hosts or Trackers, which is where `paneFor` sends you.
+   */
+  it("offers only the trackers that can answer", () => {
+    const offered = pickable([github(true), linear(false)]);
+    expect(offered.map((t) => t.id)).toEqual(["github"]);
+    expect(pickable([github(false), linear(false)])).toEqual([]);
+  });
+
+  /**
+   * With nothing connected the menu is empty, so the panel under the list is
+   * the only way through — it must still name the tracker and offer it.
+   */
+  it("still offers a way in when nothing is connected at all", () => {
+    const html = draw([github(false), linear(false)]);
+    expect(html).toContain("isn&#x27;t connected yet");
+    expect(html).toContain("Connect GitHub");
   });
 });
 
@@ -243,6 +265,7 @@ describe("a tracker whose id is not its kind", () => {
   const selfHosted: TrackerStatus = {
     id: "gitlab_01jzz",
     label: "GitLab (internal)",
+    host: "git.acme.internal",
     kind: "gitlab",
     changeNoun: "merge request",
     connected: true,
@@ -253,9 +276,78 @@ describe("a tracker whose id is not its kind", () => {
   };
 
   it("is drawn with its kind's mark rather than a letter", () => {
-    const html = draw([github(true), selfHosted]);
+    const html = renderToStaticMarkup(
+      <SourceRows trackers={[github(true), selfHosted]} value="github" onPick={() => {}} />,
+    );
     // The fallback is `label[0]`, which for this label would be a bare "G".
     expect(html).not.toContain(">G<");
     expect(html).toContain("GitLab (internal)");
+  });
+
+  /**
+   * And the address beside it, which is the reason the strip of marks had to
+   * go: two GitLabs render the same mark and may be named anything, so the
+   * host is the only thing on the row that tells them apart.
+   */
+  it("says where each one reads from", () => {
+    const second: TrackerStatus = { ...selfHosted, id: "gitlab_02", label: "GitLab (ops)", host: "git.ops.internal" };
+    const html = renderToStaticMarkup(
+      <SourceRows trackers={[selfHosted, second]} value="gitlab_01jzz" onPick={() => {}} />,
+    );
+    expect(html).toContain("git.acme.internal");
+    expect(html).toContain("git.ops.internal");
+  });
+});
+
+/**
+ * Where "Connect <tracker>" actually goes.
+ *
+ * The report: pressing it landed on Repositories. It navigated to
+ * `/configuration` with no pane, and `paneAt` falls back to the *first* one —
+ * which became Repositories when Integrations was split in two. So the button
+ * that exists to connect GitHub opened a list of repositories that does not
+ * mention GitHub.
+ *
+ * Asserted through `paneAt` rather than against a string, so this fails if the
+ * panes are ever renamed or reordered again rather than passing against a path
+ * that no longer resolves.
+ */
+describe("the way to connect a tracker that is not connected", () => {
+  it("opens the pane that can actually connect it", () => {
+    // A git host shares the token that pushes commits: Git hosts.
+    expect(paneAt(paneFor({ auth: "gitProvider" }))).toBe("git-hosts");
+    // An API key is its own credential: Trackers.
+    expect(paneAt(paneFor({ auth: "apiKey" }))).toBe("trackers");
+  });
+
+  it("does not fall back to whichever pane happens to be first", () => {
+    for (const auth of ["gitProvider", "apiKey"] as const) {
+      const pane = paneAt(paneFor({ auth }));
+      expect(pane).not.toBe(FIRST);
+      // And it is a pane that exists, not a path that silently falls back.
+      expect(paneFor({ auth })).toContain(pane);
+    }
+  });
+});
+
+/**
+ * `keyUrl` is set for every tracker — Linear's API key page, and a git host's
+ * personal-access-token page — so a button hung off it alone said "Make a key"
+ * beside GitHub. That is Linear's word for Linear's flow, and the wrong
+ * instruction besides: a git host is connected in a browser from Git hosts,
+ * and a pasted token is the fallback offered *there*, with its scopes spelled
+ * out. Two buttons, the second contradicting the first.
+ */
+describe("the prompt for a tracker that is not connected", () => {
+  it("does not tell a git host to make a key", () => {
+    const html = draw([github(false)]);
+    expect(html).toContain("Connect GitHub");
+    expect(html).not.toContain("Make a key");
+  });
+
+  it("still does for one that genuinely reads with a key", () => {
+    const html = draw([linear(false)]);
+    expect(html).toContain("Make a key");
+    expect(html).toContain("https://linear.app/settings/api");
   });
 });

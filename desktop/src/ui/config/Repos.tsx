@@ -17,12 +17,20 @@
  * Adding, renaming and removing a host is still an administrator's job and
  * still lives under Git hosts; this is the half everybody does.
  *
- * The lower list is fetched for the *selected* host only. Three connected
- * hosts would otherwise be three requests for up to three hundred projects
- * each, on open, for a list nobody is reading yet.
+ * **One filter, governing both lists, and "All hosts" is the default.** It
+ * used to govern only the lower one: the upper list showed every repository
+ * from every host and ignored the picker entirely, so the single control that
+ * looked page-wide was the only one that was not. Narrowing to a host now
+ * narrows what you have imported *and* what you could import, which is what
+ * the control looked like it did all along.
+ *
+ * Across all hosts the lower list is one request per connected host, run
+ * together and cached per host. That is three requests on a three-host
+ * install, which is the price of the default being the true answer rather
+ * than whichever host happened to sort first.
  */
 import { useMemo, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueries, useQueryClient } from "@tanstack/react-query";
 import {
   Check,
   ChevronDown,
@@ -48,7 +56,7 @@ import {
 } from "~/api/generated/repos/repos";
 import {
   getListProvidersQueryKey,
-  useListProviderRepos,
+  getListProviderReposQueryOptions,
 } from "~/api/generated/providers/providers";
 import { useHostOf, useProviders, useRepos, why } from "~/data";
 import { navigate } from "~/shims/next-navigation";
@@ -61,6 +69,14 @@ import { useConfirm } from "~/ui/Confirm";
 /** `paste` is not a host — it is the way in for a remote no host can list. */
 const PASTE = "paste";
 
+/**
+ * Every connected host at once, and what the screen opens on.
+ *
+ * A sentinel rather than `null`, because `null` already means "the hosts have
+ * not arrived yet" and the two want opposite things on screen.
+ */
+const ALL = "all";
+
 export function Repos({ live }: { live: boolean }) {
   const repos = useRepos();
   const providers = useProviders();
@@ -71,24 +87,34 @@ export function Repos({ live }: { live: boolean }) {
     [providers.data],
   );
 
-  /* Which host the lower list is showing. Null until the hosts have arrived,
-     then the first connected one — the list is built-in-first, so that is the
-     host somebody has been using. */
-  const [from, setFrom] = useState<string | null>(null);
-  const chosen =
-    from === PASTE
-      ? null
-      : connectedHosts.find((p) => p.id === from) ?? connectedHosts[0] ?? null;
+  /* What both lists are showing. Everything, until somebody narrows it. */
+  const [from, setFrom] = useState<string>(ALL);
+  const pasting = from === PASTE;
+  /* `null` means every host rather than none — `showing` below is the list it
+     resolves to, and that is what the two lists are actually built from. */
+  const chosen = pasting ? null : (connectedHosts.find((p) => p.id === from) ?? null);
+  const showing = useMemo(
+    () => (chosen ? [chosen] : connectedHosts),
+    [chosen, connectedHosts],
+  );
 
   const [q, setQ] = useState("");
   const [open, setOpen] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
-  const pasting = from === PASTE;
 
   const needle = q.trim().toLowerCase();
+  /* **The upper list obeys the filter too.** This is the half that used to
+     ignore it: `hostOf` resolves which host a repository came from, so
+     narrowing to one hides the rest rather than leaving them on screen under
+     a control that claims to have excluded them. */
   const mine = useMemo(
-    () => repos.data.filter((r) => !needle || r.slug.toLowerCase().includes(needle)),
-    [repos.data, needle],
+    () =>
+      repos.data.filter(
+        (r) =>
+          (!needle || r.slug.toLowerCase().includes(needle)) &&
+          (!chosen || hostOf(r.slug)?.id === chosen.id),
+      ),
+    [repos.data, needle, chosen, hostOf],
   );
 
   /* **No host to import from** — not "no repositories imported yet". The
@@ -115,6 +141,17 @@ export function Repos({ live }: { live: boolean }) {
   return (
     <Section
       title="Repositories"
+      action={
+        live ? (
+          <button
+            onClick={() => setAdding(true)}
+            className="control border border-line bg-raise text-ui text-bone hover:bg-overlay"
+          >
+            <Plus className="h-3.5 w-3.5 text-mute" strokeWidth={2} />
+            Add a host
+          </button>
+        ) : null
+      }
       controls={
         live && !bare ? (
           <>
@@ -123,7 +160,6 @@ export function Repos({ live }: { live: boolean }) {
               chosen={chosen}
               pasting={pasting}
               onPick={setFrom}
-              onAddHost={() => setAdding(true)}
             />
             <label className="flex items-center gap-1.5 rounded-md border border-line bg-raise px-2 py-1">
               <Search className="h-3.5 w-3.5 shrink-0 text-mute" strokeWidth={1.75} />
@@ -134,17 +170,6 @@ export function Repos({ live }: { live: boolean }) {
                 className="w-32 bg-transparent text-ui text-bone placeholder:text-mute focus:outline-none"
               />
             </label>
-            {/* Importing one repository by address is a different job from
-                adding a host, so it is its own control rather than a row in a
-                menu of hosts. Quiet, because it is the uncommon way in. */}
-            {!pasting && (
-              <button
-                onClick={() => setFrom(PASTE)}
-                className="ml-1 text-meta text-mute underline decoration-line underline-offset-2 hover:text-bone"
-              >
-                Paste a remote
-              </button>
-            )}
           </>
         ) : null
       }
@@ -155,14 +180,20 @@ export function Repos({ live }: { live: boolean }) {
       ) : (
         <div className="px-3.5 py-3">
           {pasting ? (
-            <Paste onDone={() => setFrom(null)} onCancel={() => setFrom(null)} />
+            <Paste onDone={() => setFrom(ALL)} onCancel={() => setFrom(ALL)} />
           ) : (
             <>
-              <Eyebrow label="Connected" count={`${repos.data.length}`} />
+              <Eyebrow label="Imported" count={`${mine.length}`} />
               <div className="overflow-hidden rounded-lg border border-line">
                 {repos.loading && <Quiet>Reading your repositories…</Quiet>}
                 {!repos.loading && mine.length === 0 && (
-                  <Quiet>{needle ? "Nothing connected matches that." : "Nothing connected yet."}</Quiet>
+                  <Quiet>
+                    {needle
+                      ? "Nothing imported matches that."
+                      : chosen
+                        ? `Nothing imported from ${chosen.label} yet.`
+                        : "Nothing imported yet."}
+                  </Quiet>
                 )}
                 {mine.map((r) => (
                   <div key={r.id} className="border-b border-line-soft last:border-b-0">
@@ -184,8 +215,14 @@ export function Repos({ live }: { live: boolean }) {
                 ))}
               </div>
 
-              {chosen && (
-                <Available host={chosen} connected={repos.data} needle={needle} live={live} />
+              {showing.length > 0 && (
+                <Available
+                  hosts={showing}
+                  named={!chosen && connectedHosts.length > 1}
+                  connected={repos.data}
+                  needle={needle}
+                  live={live}
+                />
               )}
             </>
           )}
@@ -219,36 +256,69 @@ function Quiet({ children }: { children: React.ReactNode }) {
  * `acme/web`, and the remote is the thing that is actually the same repository.
  */
 function Available({
-  host,
+  hosts,
+  named,
   connected,
   needle,
   live,
 }: {
-  host: ProviderStatus;
+  /** Every host the list is drawn from — one, or all the connected ones. */
+  hosts: ProviderStatus[];
+  /** Whether to say which host each row is on. Only worth it across several. */
+  named: boolean;
   connected: Repo[];
   needle: string;
   live: boolean;
 }) {
   const cache = useQueryClient();
-  const offered = useListProviderRepos(host.id);
   const create = useCreateRepo();
   const [taking, setTaking] = useState<string | null>(null);
   const [failed, setFailed] = useState<Record<string, string>>({});
+
+  /* **One query per host, declared together.** `useQueries` rather than a
+     component per host because the rows have to interleave: sorted by what
+     was pushed most recently across the whole set, not host by host. Each
+     keeps its own cache entry, so narrowing to one host afterwards is free
+     and re-widening does not re-ask. */
+  const answers = useQueries({
+    queries: hosts.map((h) => getListProviderReposQueryOptions(h.id)),
+  });
+
+  const pending = answers.some((a) => a.isPending);
+  /* A host that will not answer is named rather than folded into a count:
+     "everything is imported" and "GitLab did not reply" look identical on a
+     screen that only shows what came back. */
+  const broken = answers
+    .map((a, i) => (a.error ? { host: hosts[i], why: why(a.error) } : null))
+    .filter((x): x is { host: ProviderStatus; why: string } => x !== null);
 
   const held = useMemo(
     () => new Set(connected.map((r) => r.remote.replace(/\.git$/, ""))),
     [connected],
   );
-  const all = ((offered.data ?? []) as RemoteRepo[]).filter(
-    (r) => !held.has(r.remote.replace(/\.git$/, "")),
-  );
+
+  /* Flattened with the host each row came from, because the Import call needs
+     it: a repository is recorded against the host that offered it rather than
+     matched by hostname later, which is the only thing that works when two
+     accounts share one hostname. */
+  const all = useMemo(() => {
+    const rows = answers.flatMap((a, i) =>
+      ((a.data ?? []) as RemoteRepo[]).map((r) => ({ repo: r, host: hosts[i] })),
+    );
+    return rows
+      .filter(({ repo }) => !held.has(repo.remote.replace(/\.git$/, "")))
+      .sort((a, b) => (b.repo.pushedAt ?? "").localeCompare(a.repo.pushedAt ?? ""));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [answers.map((a) => a.dataUpdatedAt).join(), hosts, held]);
+
   const shown = needle
-    ? all.filter((r) => r.slug.toLowerCase().includes(needle))
+    ? all.filter(({ repo }) => repo.slug.toLowerCase().includes(needle))
     : all;
 
-  const take = async (r: RemoteRepo) => {
-    setTaking(r.slug);
-    setFailed((was) => ({ ...was, [r.slug]: "" }));
+  const take = async (r: RemoteRepo, host: ProviderStatus) => {
+    const at = `${host.id}:${r.slug}`;
+    setTaking(at);
+    setFailed((was) => ({ ...was, [at]: "" }));
     try {
       await create.mutateAsync({
         data: {
@@ -263,48 +333,69 @@ function Available({
       });
       await cache.invalidateQueries({ queryKey: getListReposQueryKey() });
     } catch (e) {
-      setFailed((was) => ({ ...was, [r.slug]: why(e) }));
+      setFailed((was) => ({ ...was, [at]: why(e) }));
     }
     setTaking(null);
   };
 
+  const where = hosts.length === 1 ? ` on ${hosts[0].label}` : "";
+
   return (
     <>
       <Eyebrow
-        label={`Available on ${host.label}`}
-        count={offered.isPending ? undefined : `${all.length} not imported`}
+        label={`Available to import${where}`}
+        count={
+          pending
+            ? undefined
+            : named
+              ? `${all.length} across ${hosts.length} hosts`
+              : `${all.length} not imported`
+        }
       />
       <div className="overflow-hidden rounded-lg border border-line">
-        {offered.isPending && (
+        {pending && (
           <p className="flex items-center gap-2 px-3 py-3 text-ui text-mute">
             <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={2} />
-            Asking {host.label}…
+            {hosts.length === 1 ? `Asking ${hosts[0].label}…` : "Asking your hosts…"}
           </p>
         )}
-        {offered.error && <p className="px-3 py-3 text-ui text-brick">{why(offered.error)}</p>}
-        {!offered.isPending && !offered.error && shown.length === 0 && (
+        {broken.map(({ host, why: reason }) => (
+          <p key={host.id} className="px-3 py-2 text-meta text-brick">
+            {host.label}: {reason}
+          </p>
+        ))}
+        {!pending && broken.length === 0 && shown.length === 0 && (
           <Quiet>
             {needle
-              ? `Nothing on ${host.label} matches that.`
-              : `Everything ${host.label} can see is imported.`}
+              ? `Nothing available${where} matches that.`
+              : `Everything${where} is imported.`}
           </Quiet>
         )}
-        {shown.slice(0, 80).map((r) => (
-          <div key={r.remote} className="border-b border-line-soft last:border-b-0">
+        {shown.slice(0, 80).map(({ repo: r, host }) => (
+          <div key={`${host.id}:${r.remote}`} className="border-b border-line-soft last:border-b-0">
             <div className="flex items-center gap-2.5 px-3 py-2">
               <HostMark kind={host.kind} size={13} className="shrink-0 text-mute" />
               <span className="min-w-0 flex-1 truncate font-mono text-ui text-text">{r.slug}</span>
+              {/* **Which host, across several.** Two hosts can both hold an
+                  `acme/web`, and without this the two rows are identical. */}
+              {named && (
+                <span className="hidden shrink-0 truncate font-mono text-micro text-mute sm:block">
+                  {host.gitHost}
+                </span>
+              )}
               {r.private && <Lock className="h-3 w-3 shrink-0 text-mute" strokeWidth={2} />}
               <span className="font-mono text-micro text-mute">{ago(r.pushedAt)}</span>
               <button
                 disabled={!live || taking !== null}
-                onClick={() => void take(r)}
+                onClick={() => void take(r, host)}
                 className="control shrink-0 border border-line bg-raise text-bone hover:bg-overlay disabled:text-mute"
               >
-                {taking === r.slug ? "Importing…" : "Import"}
+                {taking === `${host.id}:${r.slug}` ? "Importing…" : "Import"}
               </button>
             </div>
-            {failed[r.slug] && <p className="px-3 pb-2 text-meta text-brick">{failed[r.slug]}</p>}
+            {failed[`${host.id}:${r.slug}`] && (
+              <p className="px-3 pb-2 text-meta text-brick">{failed[`${host.id}:${r.slug}`]}</p>
+            )}
           </div>
         ))}
         {shown.length > 80 && (
@@ -329,35 +420,36 @@ function ago(at?: string | null): string {
   return `${Math.round(mins / (60 * 24 * 365))}y`;
 }
 
-/* ── Which host the lower list is showing ──────────────────────────────── */
+/* ── Which host both lists are showing ────────────────────────────────── */
 
 /**
- * Which host the lower list is showing.
+ * The filter over both lists, or all hosts at once.
  *
- * **Connected hosts only.** It used to list every host and disable the rows
+ * **"All hosts" is the default and the first row.** The screen's question is
+ * "what have I got", and on a three-host install the answer is not whichever
+ * host sorted first — which is what this used to open on.
+ *
+ * **Connected hosts only.** It once listed every host and disabled the rows
  * for the ones nobody had signed into, each with a small Connect beside it.
- * Three things were wrong with that: the rows that could not be picked
- * outnumbered the ones that could on a fresh install, clicking the obvious
- * part of such a row did nothing at all, and "a host you cannot choose" is not
- * an answer to the question this control asks — which is *whose repositories
- * am I looking at*. Signing a host in belongs on the Git hosts screen, and the
- * empty state already offers it when nothing is connected.
+ * The rows that could not be picked outnumbered the ones that could on a
+ * fresh install, clicking the obvious part of such a row did nothing at all,
+ * and "a host you cannot choose" is not an answer to *whose repositories am
+ * I looking at*. Signing one in belongs on Git hosts, and the empty state
+ * already offers it when nothing is connected.
  *
- * The last row adds a host, and opens the same dialog as the Git hosts screen
- * rather than a second one that would drift away from it.
+ * Adding a host is a button beside the heading rather than the last row here:
+ * it is not something the list can be filtered to.
  */
 function HostPicker({
   hosts,
   chosen,
   pasting,
   onPick,
-  onAddHost,
 }: {
   hosts: ProviderStatus[];
   chosen: ProviderStatus | null;
   pasting: boolean;
   onPick: (id: string) => void;
-  onAddHost: () => void;
 }) {
   const [open, setOpen] = useState<HTMLElement | null>(null);
 
@@ -375,40 +467,43 @@ function HostPicker({
             {chosen.label}
           </>
         ) : (
-          <>No host connected</>
+          <>All hosts</>
         )}
         <ChevronDown className="h-3.5 w-3.5 text-mute" strokeWidth={2} />
       </button>
 
       {/* Into `document.body` — the pane is a scroll container and the card
-          below it clips, so an absolutely positioned menu is one row away from
-          coming out cut in half. See `Pop`. */}
+          below it clips, so an absolutely positioned menu is one row away
+          from coming out cut in half. See `Pop`. */}
       {open && (
         <Pop anchor={open} onClose={() => setOpen(null)}>
           <div className="w-[19rem]">
+            <button
+              onClick={() => { onPick(ALL); setOpen(null); }}
+              className="flex w-full items-center gap-2.5 border-b border-line-soft px-3 py-2 text-left hover:bg-raise/60"
+            >
+              <span className="min-w-0 flex-1 text-ui text-bone">All hosts</span>
+              <span className="shrink-0 font-mono text-micro text-mute">{hosts.length}</span>
+              {!chosen && !pasting && (
+                <Check className="h-3.5 w-3.5 shrink-0 text-sage" strokeWidth={2} />
+              )}
+            </button>
             {hosts.map((h) => (
               <button
                 key={h.id}
                 onClick={() => { onPick(h.id); setOpen(null); }}
-                className="flex w-full items-center gap-2.5 border-b border-line-soft px-3 py-2 text-left hover:bg-raise/60"
+                className="flex w-full items-center gap-2.5 border-b border-line-soft px-3 py-2 text-left last:border-b-0 hover:bg-raise/60"
               >
                 <HostMark kind={h.kind} size={13} brand />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-ui text-bone">{h.label}</span>
                   <span className="block truncate font-mono text-micro text-mute">{h.gitHost}</span>
                 </span>
-                {chosen?.id === h.id && !pasting && (
+                {chosen?.id === h.id && (
                   <Check className="h-3.5 w-3.5 shrink-0 text-sage" strokeWidth={2} />
                 )}
               </button>
             ))}
-            <button
-              onClick={() => { setOpen(null); onAddHost(); }}
-              className="flex w-full items-center gap-2.5 px-3 py-2 text-left hover:bg-raise/60"
-            >
-              <Plus className="h-3.5 w-3.5 shrink-0 text-mute" strokeWidth={2} />
-              <span className="text-ui text-text">Add a host</span>
-            </button>
           </div>
         </Pop>
       )}

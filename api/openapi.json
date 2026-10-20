@@ -14012,6 +14012,7 @@
           "label",
           "kind",
           "changeNoun",
+          "host",
           "connected",
           "auth",
           "scopeKind",
@@ -14028,6 +14029,10 @@
           "connected": {
             "type": "boolean",
             "description": "We hold a credential for it."
+          },
+          "host": {
+            "type": "string",
+            "description": "Where it reads from — `github.com`, `git.acme.internal`.\n\nCarried for the same reason `kind` is: the id stopped being the kind,\nand the label is chosen by whoever added the host. Two GitLabs render\nwith the same mark and may be named anything, so the address is the\nonly thing on a picker row that reliably tells them apart."
           },
           "id": {
             "type": "string"

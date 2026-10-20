@@ -71,6 +71,60 @@ describe("what became of the pull request", () => {
     ]);
     expect(ship.stage).toBe("uncommitted");
   });
+
+  /**
+   * **The label must not offer to open what is already open.**
+   *
+   * Reported on a Gitea session: the branch had a request, the sheet said
+   * "Commit & open PR", and pressing it committed, pushed and then opened the
+   * browser at the request that had been there all along. The step below this
+   * one already drew the distinction — `Push — updates the PR` — and this one
+   * did not. The stage stays `uncommitted` either way; only the promise changes.
+   */
+  it("says it will update an open request rather than open one", () => {
+    const ship = shipping(session, [
+      checkout({ uncommitted: 1, pullRequest: "https://github.com/acme/web/pull/1" }),
+    ]);
+    expect(ship.stage).toBe("uncommitted");
+    expect(ship.label).toContain("updates the PR");
+    expect(ship.label).not.toContain("open PR");
+    // And the link is carried, so what is drawn can say which request.
+    expect(ship.links).toHaveLength(1);
+  });
+
+  /** A merged request is finished; these commits need one of their own. */
+  it("offers a new request once the old one is merged", () => {
+    const ship = shipping(session, [
+      checkout({
+        uncommitted: 1,
+        pullRequest: "https://github.com/acme/web/pull/1",
+        pullState: "merged",
+      }),
+    ]);
+    expect(ship.label).toContain("new PR");
+    expect(ship.links).toHaveLength(1);
+    /* **The link carries what became of it.** Without this the sheet drew
+       "already opened" above a button offering to open a new one — two lines
+       disagreeing about one request, where the state is what settles it. */
+    expect(ship.links[0].state).toBe("merged");
+  });
+
+  /** With nothing opened yet the old wording is still the right one. */
+  it("still offers to open the first one", () => {
+    const ship = shipping(session, [checkout({ uncommitted: 1 })]);
+    expect(ship.label).toContain("Commit & open PR");
+  });
+
+  /** On a GitLab the short form follows the host's noun. */
+  it("uses the host's own short form", () => {
+    const ship = shipping(
+      session,
+      [checkout({ uncommitted: 1, pullRequest: "https://gl/x/-/merge_requests/1" })],
+      false,
+      "merge request",
+    );
+    expect(ship.label).toContain("updates the MR");
+  });
 });
 
 describe("whether to keep asking the git host", () => {

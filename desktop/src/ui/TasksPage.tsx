@@ -21,6 +21,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
   ArrowRight,
+  Check,
+  ChevronDown,
   CircleDot,
   ExternalLink,
   GitPullRequest,
@@ -34,8 +36,26 @@ import type { Backend } from "~/fleet";
 import { useTasks, useTrackers, useTrackerScopes } from "~/data";
 import { useStart } from "~/start";
 import { navigate } from "~/shims/next-navigation";
+import { Pop } from "~/ui/Pop";
 import { getListTasksQueryKey } from "~/api/generated/tasks/tasks";
 import type { ListTasksParams, TaskKind, TaskState, TrackerStatus } from "~/api/generated/model";
+
+/**
+ * Where somebody goes to connect this tracker.
+ *
+ * **Not `/configuration` on its own.** That used to be right: there was one
+ * Integrations pane and it held both halves. Splitting it into Git hosts and
+ * Trackers left this link pointing at nothing in particular, and the fallback
+ * in `paneAt` is the *first* pane — Repositories — so pressing "Connect
+ * GitHub" landed on a list of repositories with no mention of GitHub on it.
+ *
+ * Which half depends on how the tracker authorizes, not on what it is called:
+ * a git host shares the token that pushes commits and is connected on Git
+ * hosts, while an API key is its own credential and lives under Trackers.
+ */
+export function paneFor(tracker: Pick<TrackerStatus, "auth">): string {
+  return tracker.auth === "apiKey" ? "/configuration/trackers" : "/configuration/git-hosts";
+}
 
 const KIND = { issue: CircleDot, pullRequest: GitPullRequest, ticket: Ticket };
 
@@ -53,6 +73,25 @@ const MARK: Record<string, (p: { size?: number; className?: string }) => React.R
   gitea: GiteaMark,
   linear: LinearMark,
 };
+
+/**
+ * Which trackers the picker offers: the ones that can actually answer.
+ *
+ * **Not every tracker.** It used to list them all, with the unconnected ones
+ * greyed, on the reasoning that picking one was how somebody reached the
+ * prompt that connects it. That held when there were two. With a git host for
+ * every row it does not: a fresh install shows six entries of which four say
+ * "not connected", so the control that chooses what you are reading is mostly
+ * made of things you cannot read — and the answer to "connect this" was never
+ * here anyway, it is Git hosts or Trackers.
+ *
+ * Connecting is still reachable with nothing connected at all: `source` falls
+ * back to the first tracker either way, and the panel under the list offers
+ * it by name. That is the path, rather than a menu of dead rows.
+ */
+export function pickable(trackers: TrackerStatus[]): TrackerStatus[] {
+  return trackers.filter((t) => t.connected);
+}
 
 export function TasksPage({ backend }: { backend: Backend }) {
   const start = useStart();
@@ -131,14 +170,17 @@ export function TasksPage({ backend }: { backend: Backend }) {
           {/* Which tracker, and what to narrow it to. */}
           <div className="flex items-center gap-2 border-b border-line px-2.5 py-2">
             <Sources
-              trackers={trackers}
+              trackers={pickable(trackers)}
               value={source?.id}
               onPick={(id) => {
                 setPicked(id);
                 setKind(null);
               }}
             />
-            <span className="flex-1" />
+            {/* Beside the source rather than across the row from it: "which
+                tracker" and "which part of it" are one question asked twice,
+                and the refresh is the only thing here that acts rather than
+                narrows. */}
             {connected && tracker.data.length > 0 && (
               <Select
                 value={scope}
@@ -150,6 +192,7 @@ export function TasksPage({ backend }: { backend: Backend }) {
                 className="h-7 max-w-[220px] text-meta"
               />
             )}
+            <span className="flex-1" />
             <button
               onClick={refresh}
               aria-label="Read the tracker again"
@@ -226,13 +269,21 @@ export function TasksPage({ backend }: { backend: Backend }) {
               </p>
               <div className="mt-3 flex items-center justify-center gap-2">
                 <button
-                  onClick={() => navigate("/configuration")}
+                  onClick={() => navigate(paneFor(source))}
                   className="control border border-line bg-raise px-3 text-text hover:bg-overlay hover:text-bone"
                 >
                   Connect {source.label}
                   <Icon of={ArrowRight} size={12} />
                 </button>
-                {source.keyUrl && (
+                {/* **Only where a key is the thing to make.** `keyUrl` is set
+                    for every tracker — Linear's API key page, and a git host's
+                    personal-access-token page — so this drew "Make a key" next
+                    to GitHub, which is Linear's word for Linear's flow and the
+                    wrong instruction besides: a git host here is connected in
+                    a browser on the Git hosts screen, and a token is the
+                    fallback offered there with the scopes spelled out. Two
+                    buttons where the second contradicts the first. */}
+                {source.auth === "apiKey" && source.keyUrl && (
                   <a
                     href={source.keyUrl}
                     target="_blank"
@@ -349,10 +400,20 @@ export function TasksPage({ backend }: { backend: Backend }) {
 }
 
 /**
- * Which tracker, as marks.
+ * Which tracker the page is reading.
  *
- * A tracker with no credential is still offered — dimmed, and picking it is
- * how somebody reaches the prompt that connects it. Hiding it instead would
+ * **A dropdown, not a strip of marks.** A row of round icons was a fine
+ * control for "GitHub or Linear" and is not one for six: every git host is a
+ * tracker now, so two GitLabs render as the same mark with no way to tell
+ * them apart, the dot that means "not connected" is a few pixels, and the
+ * strip shared one line with four other controls. The name is the thing that
+ * distinguishes them, so the control has to show the name.
+ *
+ * Deliberately the same shape as the host picker on Repositories, so the two
+ * screens teach each other rather than each having to be learned.
+ *
+ * A tracker nobody has connected stays on the list, greyed, because picking
+ * it is how somebody reaches the prompt that connects it. Hiding it would
  * mean a Linear user with an empty page and nothing to click.
  */
 function Sources({
@@ -364,33 +425,81 @@ function Sources({
   value?: string;
   onPick: (id: string) => void;
 }) {
+  const [open, setOpen] = useState<HTMLElement | null>(null);
   if (trackers.length < 2) return null;
+
+  const on = trackers.find((t) => t.id === value);
+  const Mark = on ? MARK[on.kind] : undefined;
+
   return (
-    <div className="inline-flex shrink-0 items-center gap-0.5 rounded-md bg-ground p-0.5">
+    <div className="shrink-0">
+      <button
+        type="button"
+        onClick={(e) => setOpen(open ? null : e.currentTarget)}
+        className="flex h-7 items-center gap-1.5 rounded-md border border-line bg-ground px-2.5 text-ui text-bone hover:bg-raise"
+      >
+        {Mark && <Mark size={14} />}
+        <span className="max-w-[12rem] truncate">{on?.label ?? "Pick a tracker"}</span>
+        <Icon of={ChevronDown} size={12} />
+      </button>
+
+      {open && (
+        <Pop anchor={open} onClose={() => setOpen(null)}>
+          <SourceRows
+            trackers={trackers}
+            value={value}
+            onPick={(id) => { onPick(id); setOpen(null); }}
+          />
+        </Pop>
+      )}
+    </div>
+  );
+}
+
+/**
+ * What the picker offers, as its own component.
+ *
+ * Split out because `Pop` draws into `document.body` on a click, and a static
+ * render can open nothing — so with the rows inline, the two guarantees worth
+ * pinning became untestable the moment the strip became a menu: that a
+ * tracker nobody has connected is still *on* the list, and that a tracker
+ * whose id is not its kind gets its kind's mark rather than the first letter
+ * of a label.
+ */
+export function SourceRows({
+  trackers,
+  value,
+  onPick,
+}: {
+  trackers: TrackerStatus[];
+  value?: string;
+  onPick: (id: string) => void;
+}) {
+  return (
+    <div className="w-[17rem]">
       {trackers.map((t) => {
-        const Mark = MARK[t.kind];
-        const on = t.id === value;
+        const M = MARK[t.kind];
         return (
           <button
             key={t.id}
             type="button"
             onClick={() => onPick(t.id)}
             aria-label={t.label}
-            aria-pressed={on}
-            title={t.connected ? t.label : `${t.label} — not connected`}
-            className={`relative grid h-7 w-8 place-items-center rounded-sm transition-colors duration-150 ${
-              on ? "bg-overlay text-bone" : "text-mute hover:text-dim"
-            }`}
+            className="flex w-full items-center gap-2.5 border-b border-line-soft px-3 py-2 text-left last:border-b-0 hover:bg-raise/60"
           >
-            {/* 16 rather than the 14 an icon takes: Linear's mark is four
-                bands with gaps between them, and at 14 on a 2x screen the gaps
-                fall under a pixel and it reads as a filled circle. */}
-            {Mark ? <Mark size={16} /> : <span className="text-micro">{t.label[0]}</span>}
-            {/* A tracker you have not connected says so quietly, rather than
-                by being missing from a row of two. */}
-            {!t.connected && (
-              <span className="absolute right-1 top-1 h-1 w-1 rounded-full bg-mute" />
-            )}
+            {M ? <M size={15} /> : <span className="text-micro">{t.label[0]}</span>}
+            <span className="min-w-0 flex-1">
+              <span className={`block truncate text-ui ${t.connected ? "text-bone" : "text-mute"}`}>
+                {t.label}
+              </span>
+              {/* The address, because two GitLabs differ by nothing else — and
+                  "not connected" where that is the fact worth knowing before
+                  picking it. */}
+              <span className="block truncate font-mono text-micro text-mute">
+                {t.connected ? t.host : "not connected"}
+              </span>
+            </span>
+            {t.id === value && <Icon of={Check} size={14} className="shrink-0 text-sage" />}
           </button>
         );
       })}
