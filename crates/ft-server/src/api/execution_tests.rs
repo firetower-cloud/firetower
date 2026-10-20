@@ -453,6 +453,7 @@ async fn a_viewer_may_look_and_may_not_steer() {
             State(state.clone()),
             Extension(viewer.clone()),
             Path(id.as_str().to_string()),
+            None,
         )
         .await
         .map(|_| ()),
@@ -690,6 +691,7 @@ async fn a_writer_may_work_in_the_place_and_not_speak_for_its_owner() {
             State(state.clone()),
             Extension(writer.clone()),
             Path(id.as_str().to_string()),
+            None,
         )
         .await
         .map(|_| ()),

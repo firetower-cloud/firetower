@@ -5059,8 +5059,8 @@
         "tags": [
           "sessions"
         ],
-        "summary": "Push every branch, so the work outlives the workspace.",
-        "description": "Each repository is pushed to its own remote. One that has nothing new is\nskipped rather than refused: it is a repository this change did not touch.",
+        "summary": "Push a branch, so the work outlives the workspace.",
+        "description": "Every repository, or the one named. Each is pushed to its own remote, and\none that has nothing new is skipped rather than refused: it is a repository\nthis change did not touch.",
         "operationId": "push_session",
         "parameters": [
           {
@@ -5073,6 +5073,22 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/Only"
+                  }
+                ]
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "",
@@ -8695,6 +8711,13 @@
       "Commit": {
         "type": "object",
         "properties": {
+          "checkout": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Which checkout, by its path inside the workspace. Absent means all.\n\n`paths` already sorts itself between repositories — `within` gives each\ncheckout its own share — so this is not needed to commit the right\nfiles. It is here so that *one* repository can be committed while\nanother is left alone, which the paths alone cannot express: a\nrepository with none of the named paths is skipped either way, but a\nrepository with all of its files kept had no way to be excluded."
+          },
           "message": {
             "type": [
               "string",
@@ -11073,6 +11096,13 @@
             ],
             "description": "Falls back to what the agent proposed, then to the session's prompt."
           },
+          "checkout": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Which checkout, by its path inside the workspace. Absent means all.\n\nOpening for one rather than for the session matters where the others\nare not ready: a repository whose push was rejected would otherwise\nhold back the one beside it that is finished."
+          },
           "draft": {
             "type": "boolean",
             "description": "Open it as a draft."
@@ -11367,6 +11397,19 @@
           "then": {
             "type": "string",
             "description": "Switched off, or removed for good."
+          }
+        }
+      },
+      "Only": {
+        "type": "object",
+        "description": "What to act on, when a session holds more than one repository.",
+        "properties": {
+          "checkout": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Which checkout, by its path inside the workspace. Absent means all."
           }
         }
       },

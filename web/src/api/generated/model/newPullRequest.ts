@@ -12,6 +12,15 @@ export interface NewPullRequest {
      * @nullable
      */
   body?: string | null;
+  /**
+     * Which checkout, by its path inside the workspace. Absent means all.
+     *
+     * Opening for one rather than for the session matters where the others
+     * are not ready: a repository whose push was rejected would otherwise
+     * hold back the one beside it that is finished.
+     * @nullable
+     */
+  checkout?: string | null;
   /** Open it as a draft. */
   draft?: boolean;
   /**

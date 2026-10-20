@@ -1810,26 +1810,39 @@ pub(super) async fn stop_session(
     .await
 }
 
-/// Push every branch, so the work outlives the workspace.
+/// What to act on, when a session holds more than one repository.
+#[derive(Debug, Default, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Only {
+    /// Which checkout, by its path inside the workspace. Absent means all.
+    #[serde(default)]
+    pub checkout: Option<String>,
+}
+
+/// Push a branch, so the work outlives the workspace.
 ///
-/// Each repository is pushed to its own remote. One that has nothing new is
-/// skipped rather than refused: it is a repository this change did not touch.
+/// Every repository, or the one named. Each is pushed to its own remote, and
+/// one that has nothing new is skipped rather than refused: it is a repository
+/// this change did not touch.
 #[utoipa::path(
     post, path = "/api/v1/sessions/{id}/push", tag = "sessions",
     params(("id" = String, Path, description = "Session id")),
+    request_body = Option<Only>,
     responses((status = 200, body = Done), (status = 404, body = ApiError), (status = 409, body = ApiError)),
 )]
 pub(super) async fn push_session(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
     Path(id): Path<String>,
+    body: Option<Json<Only>>,
 ) -> ApiResult<Json<Done>> {
     let id = SessionId::from_stored(id);
     let (session, _) = speaking_context(&state, &principal, &id).await?;
+    let only = body.and_then(|Json(o)| o.checkout);
 
     let mut done = Vec::new();
     let mut refused = Vec::new();
-    for c in known_checkouts(&session) {
+    for c in checkouts_for(&session, only.as_deref()) {
         // Per checkout, not per session: a session can hold repositories on
         // different remotes, and the token that opens one opens neither the
         // other nor a self-hosted git that needs none. The session's owner
@@ -1896,6 +1909,16 @@ pub struct Commit {
     /// Which files to include. Empty means everything that changed.
     #[serde(default)]
     pub paths: Vec<String>,
+    /// Which checkout, by its path inside the workspace. Absent means all.
+    ///
+    /// `paths` already sorts itself between repositories — `within` gives each
+    /// checkout its own share — so this is not needed to commit the right
+    /// files. It is here so that *one* repository can be committed while
+    /// another is left alone, which the paths alone cannot express: a
+    /// repository with none of the named paths is skipped either way, but a
+    /// repository with all of its files kept had no way to be excluded.
+    #[serde(default)]
+    pub checkout: Option<String>,
 }
 
 /// Commit the work, or the part of it somebody kept.
@@ -1933,7 +1956,7 @@ pub(super) async fn commit_session(
     // One message for all of them: a change that spans two repositories is one
     // piece of work, and two commits saying the same sentence is the honest
     // record of it.
-    let held = known_checkouts(&session);
+    let held = checkouts_for(&session, req.checkout.as_deref());
 
     // The session's owner, not whoever pressed the button — the work is
     // theirs. Resolved per checkout below, because two checkouts can be on two
@@ -2051,6 +2074,53 @@ fn within(checkout: &str, path: &str) -> Option<String> {
     path.strip_prefix(checkout)
         .and_then(|rest| rest.strip_prefix('/'))
         .map(str::to_string)
+}
+
+#[cfg(test)]
+mod checkout_scope_tests {
+    use super::*;
+
+    fn held(path: &str, slug: &str) -> Held {
+        Held {
+            path: path.to_string(),
+            slug: slug.to_string(),
+            branch: "agent/x".into(),
+            base: "main".into(),
+            pull_request: None,
+            pull_state: None,
+            trouble: None,
+        }
+    }
+
+    fn two() -> Vec<Held> {
+        vec![held("infra", "a/b"), held("project", "c/d")]
+    }
+
+    /// **Absent means every repository, which is what it has always meant.**
+    ///
+    /// The whole point of the addition is that it is opt-in: every client that
+    /// has not been taught sends no `checkout` and must keep acting on the
+    /// session, or an upgrade would quietly start pushing one repository out
+    /// of three.
+    #[test]
+    fn naming_no_checkout_still_means_all_of_them() {
+        assert_eq!(only_at(two(), None).len(), 2);
+    }
+
+    #[test]
+    fn naming_one_acts_on_that_one_only() {
+        let only = only_at(two(), Some("project"));
+        assert_eq!(only.len(), 1);
+        assert_eq!(only[0].slug, "c/d");
+    }
+
+    /// A path that is not a checkout of this session selects nothing rather
+    /// than falling back to all of them — the caller named something, and
+    /// doing more than was asked is the worse failure.
+    #[test]
+    fn naming_something_else_acts_on_nothing() {
+        assert!(only_at(two(), Some("elsewhere")).is_empty());
+    }
 }
 
 /// Whether a refusal means "there was nothing here", which is not a failure.
@@ -2561,6 +2631,26 @@ fn owner(principal: &Principal) -> Result<&str, ApiError> {
 /// From the checkouts when there are any, and from the session's own columns
 /// when there are not — which is every session made before a session could hold
 /// more than one.
+/// Which checkouts an action is for: the one named, or all of them.
+///
+/// **Absent means every one, which is what it has always meant.** The sheet
+/// used to act on the whole session and nothing else was possible — one
+/// button, one file list and one error for however many repositories a session
+/// held, so a rejected push on the second named a branch with no repository
+/// beside it. Naming one is the addition; leaving it off is the old behaviour
+/// exactly, which is what every client that has not been taught sends.
+fn checkouts_for(session: &Session, only: Option<&str>) -> Vec<Held> {
+    only_at(known_checkouts(session), only)
+}
+
+/// The filter on its own, so it can be tested without building a session.
+fn only_at(held: Vec<Held>, only: Option<&str>) -> Vec<Held> {
+    match only {
+        Some(at) => held.into_iter().filter(|c| c.path == at).collect(),
+        None => held,
+    }
+}
+
 fn known_checkouts(session: &Session) -> Vec<Held> {
     if !session.checkouts.is_empty() {
         return session
@@ -2769,7 +2859,7 @@ pub(super) async fn open_pull_request(
     // Not one pull request spanning two repositories, because no git host has
     // such an object. Two that point at each other is what the platform can
     // represent, and what a reviewer will actually see.
-    let held = known_checkouts(&session);
+    let held = checkouts_for(&session, req.checkout.as_deref());
     if held.is_empty() {
         return Err(ApiError::new(
             ErrorCode::InvalidRequest,
@@ -2953,6 +3043,13 @@ pub struct NewPullRequest {
     /// Open it as a draft.
     #[serde(default)]
     pub draft: bool,
+    /// Which checkout, by its path inside the workspace. Absent means all.
+    ///
+    /// Opening for one rather than for the session matters where the others
+    /// are not ready: a repository whose push was rejected would otherwise
+    /// hold back the one beside it that is finished.
+    #[serde(default)]
+    pub checkout: Option<String>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]

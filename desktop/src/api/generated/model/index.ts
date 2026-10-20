@@ -147,6 +147,7 @@ export * from './newSkill.ts';
 export * from './newTeam.ts';
 export * from './newUser.ts';
 export * from './offboarding.ts';
+export * from './only.ts';
 export * from './organization.ts';
 export * from './organizationName.ts';
 export * from './orgId.ts';

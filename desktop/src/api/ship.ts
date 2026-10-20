@@ -13,6 +13,7 @@
  */
 
 import type { CheckoutWork, Session } from "./generated/model";
+import { withTrailer, type Reference } from "./issues";
 
 export type Stage =
   /** Nothing has changed anywhere, so there is nothing to do. */
@@ -469,4 +470,159 @@ export function atRisk(work?: CheckoutWork[]): boolean {
       (c) => c.uncommitted == null || c.uncommitted > 0 || (c.ahead ?? 0) > 0,
     )
   );
+}
+
+/* ── One repository's share of the sheet ───────────────────────────────── */
+
+/**
+ * A file, as the sheet needs it. Structural rather than imported, so this file
+ * stays free of the inspector's types.
+ */
+export type ShipFile = { path: string; added: number; removed: number };
+
+/** One repository: its stage, its branch, and the files that belong to it. */
+export type Berth<F extends ShipFile = ShipFile> = {
+  checkout: CheckoutWork;
+  /** The stage for *this* repository, not the session's worst. */
+  ship: Ship;
+  files: F[];
+};
+
+/**
+ * Whether a path belongs to a checkout, and what it is called inside it.
+ *
+ * The mirror of the server's `within`. The diff prefixes a file with its
+ * repository's directory **only when the session holds more than one** — so
+ * with a single checkout the paths arrive bare, and a prefix test would reject
+ * every one of them. That asymmetry has bitten before: it is what once made a
+ * single-repo commit silently keep no files at all.
+ */
+export function within(checkout: string, path: string, single: boolean): string | null {
+  if (single || !checkout) return path;
+  if (!path.startsWith(`${checkout}/`)) return null;
+  return path.slice(checkout.length + 1);
+}
+
+/**
+ * The sheet, split per repository.
+ *
+ * Each berth's stage is computed by running the same ladder over that one
+ * checkout, so there is one definition of "what step is this at" rather than
+ * two that can disagree. The session-wide `shipping()` stays for the button at
+ * the foot, which still answers "what would shipping everything do".
+ *
+ * **Why this exists.** One stage for a session is a lie the moment two
+ * repositories are at different steps: one pushed and one rejected reduced to
+ * a single label that described neither, and a failure named a branch with no
+ * repository beside it.
+ */
+export function berths<F extends ShipFile>(
+  session: Session,
+  work: CheckoutWork[] | undefined,
+  files: F[],
+  failed: boolean | undefined,
+  nounOf: (slug: string) => string,
+): Berth<F>[] {
+  const held = work ?? [];
+  const single = held.length <= 1;
+  return held.map((c) => ({
+    checkout: c,
+    ship: shipping(session, [c], failed, nounOf(c.slug)),
+    files: files.filter((f) => within(c.path ?? "", f.path, single) !== null),
+  }));
+}
+
+/* ── The file list, when it is long ────────────────────────────────────── */
+
+/** Files that share a directory, and what that directory is called. */
+export type Grouped<F extends ShipFile = ShipFile> = {
+  /** Relative to the checkout. `""` is the repository root. */
+  dir: string;
+  files: F[];
+};
+
+/**
+ * Files gathered by the directory they are in.
+ *
+ * **Eighty-one flat rows is the worst shape for the job the list actually
+ * does**, which is nearly always scanning for the one file that should not be
+ * there — a lockfile, a scratch note, a stray `.env`. Sorted alphabetically,
+ * the first rows on screen are whatever sorts first, which is reliably the
+ * least interesting part of the change.
+ *
+ * Capping with "show all" does not fix that: the cap shows the same
+ * uninformative head. Grouping does, because a large diff is rarely spread
+ * evenly — it clusters, and six directories with counts carry the shape of it
+ * in six lines.
+ *
+ * Order is by size, biggest first, because the big group is the change and the
+ * single stray file at the root is the thing worth noticing. Ties fall back to
+ * the name so the list cannot reshuffle between renders.
+ */
+export function byDirectory<F extends ShipFile>(
+  files: F[],
+  checkout: string,
+  single: boolean,
+): Grouped<F>[] {
+  const groups = new Map<string, F[]>();
+  for (const f of files) {
+    const inside = within(checkout, f.path, single);
+    if (inside === null) continue;
+    const cut = inside.lastIndexOf("/");
+    const dir = cut === -1 ? "" : inside.slice(0, cut);
+    const at = groups.get(dir);
+    if (at) at.push(f);
+    else groups.set(dir, [f]);
+  }
+  return [...groups.entries()]
+    .map(([dir, files]) => ({ dir, files }))
+    .sort((a, b) => b.files.length - a.files.length || a.dir.localeCompare(b.dir));
+}
+
+/** What a row should say, with the directory already carried by its group. */
+export function leafOf(path: string): string {
+  const cut = path.lastIndexOf("/");
+  return cut === -1 ? path : path.slice(cut + 1);
+}
+
+/**
+ * A path too long for its column, shortened in the **middle**.
+ *
+ * The end is where the filename is, and the filename is what identifies the
+ * file — so cutting there, which is what a plain truncation does, removes the
+ * only part that was worth reading. `api-gateway/src/common/generated/for-y…`
+ * names nothing.
+ */
+export function middled(path: string, max = 44): string {
+  if (path.length <= max) return path;
+  const leaf = leafOf(path);
+  if (leaf.length + 2 >= max) return `…${leaf.slice(-(max - 1))}`;
+  return `${path.slice(0, max - leaf.length - 2)}…/${leaf}`;
+}
+
+/* ── What one repository's request says ────────────────────────────────── */
+
+/** The words a request carries, before they are aimed at a repository. */
+export type Said = { title: string; body: string; refs: Reference[]; draft: boolean };
+
+/**
+ * One repository's request, as it will be sent.
+ *
+ * **The trailer is built against the repository the request opens in**, which
+ * is the whole reason `withTrailer` takes a slug. A closing keyword only
+ * closes an issue in its own repository, so a bare `#42` belonging to the API
+ * repository has to come out as `Refs acme/api#42` in the web one —
+ * qualified, and downgraded because it cannot close across a boundary.
+ *
+ * The bug this exists to stop: the sheet built the body **once**, with the
+ * session's primary repository, and the server broadcast it to every checkout.
+ * So `Closes #42` went into both requests, and merging the second closed
+ * whatever `#42` happened to be in *that* repository — something unrelated.
+ */
+export function requestFor(said: Said, slug: string) {
+  return {
+    title: said.title.trim() || null,
+    body: withTrailer(said.body, said.refs, slug),
+    draft: said.draft,
+  };
 }

@@ -147,6 +147,7 @@ export * from './newSkill';
 export * from './newTeam';
 export * from './newUser';
 export * from './offboarding';
+export * from './only';
 export * from './organization';
 export * from './organizationName';
 export * from './orgId';

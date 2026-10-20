@@ -499,6 +499,7 @@ export const CommitSessionParams = zod.object({
 })
 
 export const CommitSessionBody = zod.object({
+  "checkout": zod.string().nullish().describe('Which checkout, by its path inside the workspace. Absent means all.\n\n`paths` already sorts itself between repositories — `within` gives each\ncheckout its own share — so this is not needed to commit the right\nfiles. It is here so that *one* repository can be committed while\nanother is left alone, which the paths alone cannot express: a\nrepository with none of the named paths is skipped either way, but a\nrepository with all of its files kept had no way to be excluded.'),
   "message": zod.string().nullish().describe('The commit message. Falls back to what the agent proposed.'),
   "paths": zod.array(zod.string()).optional().describe('Which files to include. Empty means everything that changed.')
 })
@@ -1003,6 +1004,7 @@ export const OpenPullRequestParams = zod.object({
 
 export const OpenPullRequestBody = zod.object({
   "body": zod.string().nullish().describe('Falls back to what the agent proposed, then to the session\'s prompt.'),
+  "checkout": zod.string().nullish().describe('Which checkout, by its path inside the workspace. Absent means all.\n\nOpening for one rather than for the session matters where the others\nare not ready: a repository whose push was rejected would otherwise\nhold back the one beside it that is finished.'),
   "draft": zod.boolean().optional().describe('Open it as a draft.'),
   "title": zod.string().nullish().describe('Written by whoever opens it, or what the agent proposed.')
 })
@@ -1012,13 +1014,18 @@ export const OpenPullRequestResponse = zod.object({
 })
 
 /**
- * Each repository is pushed to its own remote. One that has nothing new is
- * skipped rather than refused: it is a repository this change did not touch.
- * @summary Push every branch, so the work outlives the workspace.
+ * Every repository, or the one named. Each is pushed to its own remote, and
+ * one that has nothing new is skipped rather than refused: it is a repository
+ * this change did not touch.
+ * @summary Push a branch, so the work outlives the workspace.
  */
 export const PushSessionParams = zod.object({
   "id": zod.string().describe('Session id')
 })
+
+export const PushSessionBody = zod.union([zod.null(),zod.object({
+  "checkout": zod.string().nullish().describe('Which checkout, by its path inside the workspace. Absent means all.')
+}).describe('What to act on, when a session holds more than one repository.')])
 
 export const PushSessionResponse = zod.object({
   "detail": zod.string()
