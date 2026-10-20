@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.46.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.45.0...firetower-v0.46.0) (2026-10-20)
+
+
+### Features
+
+* support empty repositories ([f7c9f97](https://github.com/firetower-cloud/firetower/commit/f7c9f975ec67ff8c8ce17abc476cab649bfda881))
+* **telemetry:** ask before it is switched off, and make it typed ([4a145e7](https://github.com/firetower-cloud/firetower/commit/4a145e7aaa1022678a808f6c7b25f3f549884df4))
+* **telemetry:** compute a daily digest into an outbox ([f63dc8d](https://github.com/firetower-cloud/firetower/commit/f63dc8d346a6f262b09095bf61be1806ad898f40))
+* **telemetry:** opt-out daily usage reporting ([5a32494](https://github.com/firetower-cloud/firetower/commit/5a324947de49e54293e8d02e6707bdf1f35d8af5))
+* **telemetry:** serve the outbox, add the switch, and carry digests ([65b1355](https://github.com/firetower-cloud/firetower/commit/65b1355b9251630489860589330519193efebb64))
+* work on a repository that has no commits yet ([b0f68c8](https://github.com/firetower-cloud/firetower/commit/b0f68c8f29d16b0ddd2418db66dd719fe07a7aa1))
+
+
+### Bug Fixes
+
+* **skills:** parse block scalars and close injection gaps ([4abe966](https://github.com/firetower-cloud/firetower/commit/4abe966345b5a1fe47fb162f461ed3c155202201))
+* **skills:** parse block scalars and close injection gaps ([cf1760d](https://github.com/firetower-cloud/firetower/commit/cf1760d8d9445b81f615ad2bcee85b6c31f44c0b))
+* **telemetry:** no automatic sweep in development ([a1ce6c4](https://github.com/firetower-cloud/firetower/commit/a1ce6c481baccb8f5cc6305f37b0a1d5ee78661a))
+
 ## [0.45.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.44.0...firetower-v0.45.0) (2026-10-11)
 
 
