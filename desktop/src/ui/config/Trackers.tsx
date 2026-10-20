@@ -11,7 +11,7 @@
  * configured again, so there is nothing to connect here and the row says where
  * it is done. Linear is a tracker only, and takes a key of its own.
  */
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Check, Unlink } from "lucide-react";
 import { HostMark, Icon, LinearMark } from "~/components/ui";
@@ -28,13 +28,28 @@ import { WhoCanAccess } from "~/ui/Sharing";
 
 export function Trackers({ live }: { live: boolean }) {
   const trackers = useTrackers();
+
+  /**
+   * Connected trackers first, as on the git hosts list.
+   *
+   * Every git host is a tracker, so this list is as long as that one and grows
+   * with it — and the rows that answer "what can the tasks screen read" were
+   * sorted below the rows that cannot. The server's order is the install's and
+   * stays as it is on the wire; this sorts the drawing only, and stably, so
+   * trackers in the same state keep that order between them.
+   */
+  const rows = useMemo(
+    () => [...trackers.data].sort((a, b) => Number(b.connected) - Number(a.connected)),
+    [trackers.data],
+  );
+
   return (
     <Section
       title="Trackers"
       note="Where the tasks list reads from. Every git host is one. An API key can belong to a directory, so one key answers for a team."
     >
       <Rows feed={trackers} empty="No tracker is available on this server.">
-        {trackers.data.map((t) => (
+        {rows.map((t) => (
           <Tracker key={t.id} t={t} live={live} />
         ))}
       </Rows>

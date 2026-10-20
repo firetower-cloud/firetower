@@ -26,7 +26,7 @@
  * all; this is where hosts are added, renamed and removed. Trackers are their
  * own pane — see `Trackers`.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Check, Link2, Loader2, MoreHorizontal, Plus, X } from "lucide-react";
 import { HostMark, Icon } from "~/components/ui";
@@ -59,6 +59,33 @@ export function GitHosts({ live }: { live: boolean }) {
      one host's — and with no host yet there would be no row to read it from. */
   const mayAdd = providers.data.some((p) => p.maySetApplication);
 
+  /**
+   * Connected hosts first.
+   *
+   * The server's order is the install's — built-in first, then whatever was
+   * added — and that order is load-bearing on the wire, because a client that
+   * predates this table reads the first entry. It is not load-bearing *here*:
+   * the question this screen answers is "what am I signed in to", and the rows
+   * that answer it were sorted below the ones that do not.
+   *
+   * Sorted for the drawing only, and stably, so two connected hosts keep the
+   * install's order between them.
+   */
+  const rows = useMemo(
+    () => [...providers.data].sort((a, b) => Number(b.connected) - Number(a.connected)),
+    [providers.data],
+  );
+
+  /**
+   * The host somebody just added, which should ask to be connected.
+   *
+   * Adding one and being returned to a list where it sits unconnected, looking
+   * like the two above it that were never touched, is a dead stop in the
+   * middle of a job — the reason to add a host is to use it. The row starts
+   * its own flow once, and only for the host that was named.
+   */
+  const [fresh, setFresh] = useState<string | null>(null);
+
   return (
     <>
       <Section
@@ -73,10 +100,18 @@ export function GitHosts({ live }: { live: boolean }) {
         }
       >
         <Rows feed={providers} empty="Nothing to connect to on this server.">
-          {providers.data.map((p) => <Provider key={p.id} p={p} live={live} />)}
+          {rows.map((p) => (
+            <Provider
+              key={p.id}
+              p={p}
+              live={live}
+              connectNow={p.id === fresh}
+              onConnected={() => setFresh(null)}
+            />
+          ))}
         </Rows>
       </Section>
-      {adding && <AddHost onClose={() => setAdding(false)} />}
+      {adding && <AddHost onClose={() => setAdding(false)} onAdded={setFresh} />}
     </>
   );
 }
@@ -119,7 +154,18 @@ export function actionsFor(p: ProviderStatus): RowActions {
   return { primary, menu };
 }
 
-function Provider({ p, live }: { p: ProviderStatus; live: boolean }) {
+function Provider({
+  p,
+  live,
+  connectNow = false,
+  onConnected,
+}: {
+  p: ProviderStatus;
+  live: boolean;
+  /** This host was just added, so offer to connect it without being asked. */
+  connectNow?: boolean;
+  onConnected?: () => void;
+}) {
   const confirm = useConfirm();
   const cache = useQueryClient();
   const disconnect = useDisconnectProvider();
@@ -129,6 +175,17 @@ function Provider({ p, live }: { p: ProviderStatus; live: boolean }) {
   const [editing, setEditing] = useState(false);
   const [menu, setMenu] = useState<HTMLElement | null>(null);
   const refresh = () => cache.invalidateQueries({ queryKey: getListProvidersQueryKey() });
+
+  /* **Added, so connect it.** Once, and only while it is still unconnected —
+     a re-render after the token lands must not start a second authorization.
+     `connect.start()` is the same call the Connect button makes, so a host
+     with no device flow gets the paste box and one with it gets the code. */
+  useEffect(() => {
+    if (!connectNow || !live || p.connected || !p.configured) return;
+    onConnected?.();
+    connect.start();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connectNow, live, p.connected, p.configured]);
 
   /* **The address, and only the address, in monospace.** What was here before
      was four facts of very different importance flattened into one mono
@@ -337,7 +394,14 @@ function MenuItem({
  * row that was picked — and a second copy of it is a second place for those to
  * drift out of step.
  */
-export function AddHost({ onClose }: { onClose: () => void }) {
+export function AddHost({
+  onClose,
+  onAdded,
+}: {
+  onClose: () => void;
+  /** The id of the host that was created, so the list can offer to connect it. */
+  onAdded?: (id: string) => void;
+}) {
   const kinds = useListKinds();
   const [picked, setPicked] = useState<Choice | null>(null);
 
@@ -357,7 +421,7 @@ export function AddHost({ onClose }: { onClose: () => void }) {
         </div>
 
         {picked ? (
-          <Where choice={picked} onClose={onClose} />
+          <Where choice={picked} onClose={onClose} onAdded={onAdded} />
         ) : (
           <Which kinds={kinds.data ?? []} loading={kinds.isPending} onPick={setPicked} />
         )}
@@ -459,7 +523,15 @@ export function firstWayIn(probed: Pick<ProbedProvider, "authModes">): AuthMode 
  * A hosted instance needs no address — it is one field and a press. Anything
  * self-hosted asks where, then confirms what answered.
  */
-function Where({ choice, onClose }: { choice: Choice; onClose: () => void }) {
+function Where({
+  choice,
+  onClose,
+  onAdded,
+}: {
+  choice: Choice;
+  onClose: () => void;
+  onAdded?: (id: string) => void;
+}) {
   const cache = useQueryClient();
   const kinds = useListKinds();
   const kind = (kinds.data ?? []).find((k) => k.id === (choice.kind as string));
@@ -519,11 +591,15 @@ function Where({ choice, onClose }: { choice: Choice; onClose: () => void }) {
         },
       },
       {
-        onSuccess: async () => {
+        onSuccess: async (made) => {
           await Promise.all([
             cache.invalidateQueries({ queryKey: getListProvidersQueryKey() }),
             cache.invalidateQueries({ queryKey: getListTrackersQueryKey() }),
           ]);
+          // Named before the dialog goes, so the row it belongs to can pick
+          // the job up where this left off rather than leaving somebody on a
+          // list with a new host on it and nothing suggesting what is next.
+          onAdded?.(made.id);
           onClose();
         },
       },

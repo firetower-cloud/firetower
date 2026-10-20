@@ -251,3 +251,36 @@ describe("which way in a new host opens on", () => {
     expect(firstWayIn({ authModes: ["token"] })).toBe("token");
   });
 });
+
+/**
+ * What the list answers is "what am I signed in to", and the rows that answer
+ * it were sorted below the ones that do not — the server's order is the
+ * install's, built-in first, which is load-bearing on the wire but not here.
+ */
+describe("the order of the list", () => {
+  it("puts connected hosts first", () => {
+    const html = draw([
+      github({ id: "github", label: "GitHub", connected: false }),
+      gitlab({ id: "gl_lab", label: "GitLab (lab)", connected: true }),
+    ]);
+    expect(html.indexOf("GitLab (lab)")).toBeLessThan(html.indexOf("GitHub"));
+  });
+
+  /** Two connected hosts keep the install's order between them. */
+  it("is stable among the connected ones", () => {
+    const html = draw([
+      github({ id: "github", label: "GitHub", connected: true }),
+      gitlab({ id: "gl_lab", label: "GitLab (lab)", connected: true }),
+    ]);
+    expect(html.indexOf("GitHub")).toBeLessThan(html.indexOf("GitLab (lab)"));
+  });
+
+  /** And among the unconnected ones. */
+  it("is stable among the rest", () => {
+    const html = draw([
+      github({ id: "github", label: "GitHub", connected: false }),
+      gitlab({ id: "gl_lab", label: "GitLab (lab)", connected: false }),
+    ]);
+    expect(html.indexOf("GitHub")).toBeLessThan(html.indexOf("GitLab (lab)"));
+  });
+});

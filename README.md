@@ -88,9 +88,12 @@ Everything after that happens in the desktop app: adding workers, connecting rep
 
 | | |
 | --- | --- |
-| GitHub | Supported — github.com needs nothing registered; Enterprise Server too |
-| GitLab | Supported — gitlab.com needs nothing registered; self-managed too |
-| Gitea | Supported — and Forgejo, which answers the same API |
+| GitHub | Supported |
+| GitHub Enterprise Server | Supported |
+| GitLab | Supported |
+| GitLab self-managed | Supported |
+| Gitea | Supported |
+| Forgejo | Supported |
 
 Any number of them, including more than one of the same kind: a personal GitHub
 and a work one, or two GitLabs. See [Git hosts](docs/git-hosts.md).
