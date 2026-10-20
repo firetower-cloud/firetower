@@ -731,15 +731,12 @@ pub(super) async fn create_provider(
 
     // Whether this address is entitled to the application Firetower ships,
     // which is what makes the browser flow usable with nothing registered.
-    let shipped_applies = state
-        .connections
-        .would_be_builtin(kind, &base_url)
-        .await
+    let shipped_applies = state.connections.would_be_builtin(kind, &base_url).await
         && !kind.client_id.trim().is_empty();
 
-    let auth = req.auth.unwrap_or_else(|| {
-        default_auth(&available, req.client_id.as_deref(), shipped_applies)
-    });
+    let auth = req
+        .auth
+        .unwrap_or_else(|| default_auth(&available, req.client_id.as_deref(), shipped_applies));
     if !kind.auth.contains(&auth) {
         return Err(ApiError::new(
             ErrorCode::InvalidRequest,
@@ -1361,7 +1358,10 @@ mod tests {
             AuthMode::Token
         );
         // Gitea has no device flow at any version, and ships no application.
-        assert_eq!(default_auth(&[AuthMode::Token], None, false), AuthMode::Token);
+        assert_eq!(
+            default_auth(&[AuthMode::Token], None, false),
+            AuthMode::Token
+        );
     }
 
     #[test]

@@ -351,7 +351,14 @@ pub(crate) async fn git_token(
     // again rather than renew the grant it arrived with, because the one that
     // went first has already replaced it.
     let _queued = state.renewals.at(&format!("{}:{owner}", conn.id)).await;
-    let held = Grant::parse(&state.vault.get(key(), "renewing the authorization").await.ok().flatten()?);
+    let held = Grant::parse(
+        &state
+            .vault
+            .get(key(), "renewing the authorization")
+            .await
+            .ok()
+            .flatten()?,
+    );
     if !held.stale(chrono::Utc::now()) {
         return Some(zeroize::Zeroizing::new(held.access));
     }

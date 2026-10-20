@@ -1491,10 +1491,16 @@ mod tests {
         let gitea = kind("gitea").unwrap();
         let steps = gitea.token_steps.join(" ");
 
-        assert!(!gitea.token_steps.is_empty(), "Gitea cannot pre-tick scopes");
+        assert!(
+            !gitea.token_steps.is_empty(),
+            "Gitea cannot pre-tick scopes"
+        );
         assert!(steps.contains("Manage Access Tokens"), "{steps}");
         // The three scopes, each named and each marked.
-        assert!(steps.contains("**user**"), "the one people miss, marked: {steps}");
+        assert!(
+            steps.contains("**user**"),
+            "the one people miss, marked: {steps}"
+        );
         assert!(steps.contains("**repository**"), "{steps}");
         assert!(steps.contains("**issue**"), "{steps}");
         // "Read" against "Read and Write" is what decides whether a push works.

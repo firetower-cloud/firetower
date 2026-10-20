@@ -69,7 +69,9 @@ impl Grant {
 
     /// Whether anything here would let us get a fresh token.
     pub fn renewable(&self) -> bool {
-        self.refresh.as_deref().is_some_and(|r| !r.trim().is_empty())
+        self.refresh
+            .as_deref()
+            .is_some_and(|r| !r.trim().is_empty())
     }
 
     /// How it goes into the vault.
@@ -217,9 +219,7 @@ pub(super) fn read(body: &str) -> Result<Grant> {
 /// vault afterwards rather than renewing the grant it arrived with. The caller
 /// does that — see `api::git_token`.
 #[derive(Clone, Default)]
-pub struct Renewals(
-    std::sync::Arc<tokio::sync::Mutex<std::collections::HashMap<String, Gate>>>,
-);
+pub struct Renewals(std::sync::Arc<tokio::sync::Mutex<std::collections::HashMap<String, Gate>>>);
 
 type Gate = std::sync::Arc<tokio::sync::Mutex<()>>;
 
@@ -316,7 +316,10 @@ mod tests {
             expires_at: Some(now + Duration::seconds(MARGIN / 2)),
             ..fresh.clone()
         };
-        assert!(nearly.stale(now), "a token that expires mid-request is spent");
+        assert!(
+            nearly.stale(now),
+            "a token that expires mid-request is spent"
+        );
 
         let gone = Grant {
             expires_at: Some(now - Duration::minutes(1)),
@@ -437,23 +440,32 @@ mod tests {
         let held = renewals.at("gitlab:ana").await;
 
         assert!(
-            tokio::time::timeout(std::time::Duration::from_millis(50), renewals.at("gitlab:ana"))
-                .await
-                .is_err(),
+            tokio::time::timeout(
+                std::time::Duration::from_millis(50),
+                renewals.at("gitlab:ana")
+            )
+            .await
+            .is_err(),
             "the same key has to wait"
         );
         assert!(
-            tokio::time::timeout(std::time::Duration::from_millis(50), renewals.at("gitlab:bob"))
-                .await
-                .is_ok(),
+            tokio::time::timeout(
+                std::time::Duration::from_millis(50),
+                renewals.at("gitlab:bob")
+            )
+            .await
+            .is_ok(),
             "another person's is a different queue"
         );
 
         drop(held);
         assert!(
-            tokio::time::timeout(std::time::Duration::from_millis(50), renewals.at("gitlab:ana"))
-                .await
-                .is_ok(),
+            tokio::time::timeout(
+                std::time::Duration::from_millis(50),
+                renewals.at("gitlab:ana")
+            )
+            .await
+            .is_ok(),
             "and it is released when the renewal finishes"
         );
     }

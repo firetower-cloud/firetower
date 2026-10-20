@@ -251,8 +251,7 @@ pub async fn poll(conn: &Connection, client_id: &str, device_code: &str) -> Resu
         return Ok(Poll::Approved(approved));
     }
 
-    let body: Refused =
-        serde_json::from_str(&raw).context("reading the authorization response")?;
+    let body: Refused = serde_json::from_str(&raw).context("reading the authorization response")?;
 
     Ok(match body.error.as_deref() {
         Some("authorization_pending") => Poll::Pending,
