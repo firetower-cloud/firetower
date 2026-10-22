@@ -1,0 +1,15 @@
+Running on firetower-cursor-api34
+ > Flow cursor-agent-task
+Assert that "Answer the agent" is visible... COMPLETED
+Tap on id: composer... COMPLETED
+Input text Use one generalPurpose Task subagent to read README.md and return MOBILE TASK followed by its exact line. Read only; no shell, edits or commits.... COMPLETED
+Tap on id: send... COMPLETED
+Assert that "(?s).*MOBILE TASK.*Playwright Cursor ACP smoke test.*" is visible... COMPLETED
+Assert that "(?s).*Handed it back.*" is visible... COMPLETED
+Take screenshot cursor-agent-mobile-task... COMPLETED
+Tap on id: composer... COMPLETED
+Input text Call exactly one Task with subagent_type explore. Do not retry with another type or use fallback tools. Return MOBILE ERROR and the exact rejection.... COMPLETED
+Tap on id: send... COMPLETED
+Assert that "(?s).*MOBILE ERROR.*Invalid arguments:.*Invalid enum value.*explore.*" is visible... COMPLETED
+Assert that "(?s).*Handed it back.*" is visible... COMPLETED
+Take screenshot cursor-agent-mobile-error... COMPLETED

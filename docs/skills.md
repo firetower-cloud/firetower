@@ -108,14 +108,26 @@ Warnings, never refusals:
 
 ## 2. Where each agent reads one from
 
-One shape for all three: **a directory of skill bundles belonging to one
-session.** Two of them already have a per-session home for exactly this reason.
+One shape for all of them: **a directory of skill bundles belonging to one
+session.** Most already have a per-session home for exactly this reason.
 
 | Agent | Per-session root | How | Verified |
 | --- | --- | --- | --- |
 | Claude Code 2.1.273 | `<root>/.claude/skills/<name>/` | `--add-dir <root>` | Yes. The `init` frame listed it. Symlinked bundles load. |
 | Codex 0.156.1 | `$CODEX_HOME/skills/<name>/` | already per session | Yes. `skills/list` returns `scope: "user"`. |
 | Kimi Code 2.1.1 | `$KIMI_CODE_HOME/skills/<name>/` | already per session | No. Read out of the binary; `session/new` needs an account. |
+| Cursor Agent 2026.09.28-64d2043 | `$HOME/.cursor/skills/<name>/` | already per session — Cursor's home *is* `HOME` | Partly. Read out of the binary: it scans `<config>/skills` for `.cursor`, `.claude`, `.codex`, `.grok` and `.agents` under both the project root and `homedir()`, and its ACP session lists them as commands. Not yet confirmed against a signed-in session. |
+
+**Cursor reads five of these, including other agents' names.** `.claude/skills`
+and `.codex/skills` are on its list, so a checkout that has them gets them
+whether Firetower put them there or not — and the project root is shared by
+every session in a workspace. `.cursor/skills` under the relocated home is the
+one place that is this session's alone.
+
+**Cursor caches the list.** `loadCommandsAndSkills` memoises on first use, so
+the `/`-menu it advertises over ACP is the set that existed when the session
+opened. Whether the *model* re-reads the directory on a later turn is the
+thing to check live; the menu is not evidence either way.
 
 One capability method on `Agent`, beside `home_var`. Never a `kind ===
 "ClaudeCode"` in a client.

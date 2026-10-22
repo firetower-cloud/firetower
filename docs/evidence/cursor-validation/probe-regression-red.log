@@ -1,0 +1,41 @@
+   Compiling ft-core v0.43.0 (/Users/salimlaimeche/.codex/worktrees/cursor-acp/firetower/crates/ft-core)
+   Compiling ft-proto v0.43.0 (/Users/salimlaimeche/.codex/worktrees/cursor-acp/firetower/crates/ft-proto)
+   Compiling ft-worker v0.43.0 (/Users/salimlaimeche/.codex/worktrees/cursor-acp/firetower/crates/ft-worker)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 31.55s
+     Running unittests src/lib.rs (/private/tmp/firetower-cursor-mac-target/debug/deps/ft_worker-d35cf1d91c66db78)
+
+running 1 test
+test agents::tests::probe_children_cannot_read_the_control_plane ... FAILED
+
+failures:
+
+---- agents::tests::probe_children_cannot_read_the_control_plane stdout ----
+
+thread 'agents::tests::probe_children_cannot_read_the_control_plane' panicked at crates/ft-worker/src/agents.rs:171:13:
+version probe: 
+running 1 test
+test agents::tests::probe_children_cannot_read_the_control_plane ... FAILED
+
+failures:
+
+failures:
+    agents::tests::probe_children_cannot_read_the_control_plane
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 247 filtered out; finished in 0.44s
+
+
+thread 'agents::tests::probe_children_cannot_read_the_control_plane' panicked at crates/ft-worker/src/agents.rs:152:13:
+assertion `left == right` failed: the probe consumed a control-plane frame
+  left: ""
+ right: "control-plane-frame\n"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    agents::tests::probe_children_cannot_read_the_control_plane
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 247 filtered out; finished in 0.46s
+
+error: test failed, to rerun pass `-p ft-worker --lib`

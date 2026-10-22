@@ -23,6 +23,9 @@ export function AgentMark({ agent, size = 14, tone }: { agent: Agent; size?: num
     case "KimiCode":
       return <Svg width={size} height={size} viewBox="0 0 16 16"><Path d="M4 3v10M12 3L5 8l7 5" fill="none" stroke={tone} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" /></Svg>;
 
+    case "CursorAgent":
+      return <Svg width={size} height={size} viewBox="0 0 16 16"><Path d="M8 1.5 14 5v6l-6 3.5L2 11V5L8 1.5Zm0 2.3L4 6.1v3.8l4 2.3 4-2.3V6.1L8 3.8Z" fill={tone} /></Svg>;
+
     case "Codex":
       return (
         <Svg width={size} height={size} viewBox="0 0 2406 2406">

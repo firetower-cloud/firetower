@@ -278,6 +278,13 @@ pub struct AcpNormaliser {
     requests: BTreeSet<String>,
     configuration_requests: BTreeSet<String>,
     configuration: Vec<(String, Control)>,
+    /// Cursor's delegated calls, and how each one ended.
+    ///
+    /// Keyed by `toolCallId`. A `Task:`-titled tool call opens one; the call's
+    /// own `completed`/`failed` records the outcome, and `cursor/task` — which
+    /// arrives separately and may arrive late — closes it. Drained on `finish`
+    /// so a turn that ends without one still resolves every task it opened.
+    cursor_tasks: BTreeMap<String, Option<ItemStatus>>,
     /// How full the context is, from `usage_update`.
     ///
     /// `(used, size)`. A gauge and not a bill: `used` is what is in the window
@@ -526,6 +533,7 @@ impl AcpNormaliser {
                 self.session = None;
                 self.configuration.clear();
                 self.configuration_requests.clear();
+                self.cursor_tasks.clear();
             }
             Record::Ready { session } => self.session = Some(session),
             Record::Failed { detail } => {
@@ -618,6 +626,29 @@ impl AcpNormaliser {
                                 .into(),
                             args: message["params"].clone(),
                         });
+                    }
+                } else if message["method"] == "cursor/task" {
+                    let params = &message["params"];
+                    if let Some(call) = params["toolCallId"].as_str() {
+                        if let Some(status) = self.cursor_tasks.remove(call) {
+                            let task = TaskId::new(call);
+                            if let Some(agent) = params["agentId"].as_str() {
+                                events.push(TurnEvent::TaskProgress {
+                                    task: task.clone(),
+                                    detail: format!("Cursor subagent {agent}"),
+                                });
+                            }
+                            events.push(TurnEvent::TaskCompleted {
+                                task,
+                                status: status.unwrap_or(ItemStatus::Completed),
+                                summary: params["description"].as_str().map(str::to_owned),
+                            });
+                        } else {
+                            events.push(TurnEvent::Raw {
+                                source: RawSource::Acp,
+                                payload: message,
+                            });
+                        }
                     }
                 } else if message["method"] == "session/update" {
                     if self.session.as_deref() == message["params"]["sessionId"].as_str() {
@@ -757,13 +788,23 @@ impl AcpNormaliser {
                 let reached = self.reaching_for.get(&item).cloned();
 
                 if self.items.insert(item.clone()) {
-                    let kind = match update["kind"].as_str() {
-                        _ if reached.is_some() || is_a_skill(update) => ItemKind::SkillUse,
-                        Some("read") => ItemKind::FileRead,
-                        Some("edit" | "delete" | "move") => ItemKind::FileChange,
-                        Some("execute") => ItemKind::CommandExecution,
-                        Some("search" | "fetch") => ItemKind::WebSearch,
-                        _ => ItemKind::Unknown,
+                    // A delegated call first: `Task:` is structural, and a
+                    // subagent reading a skill of its own would otherwise be
+                    // filed as the skill rather than as the task that opened it.
+                    let delegated = update["title"]
+                        .as_str()
+                        .is_some_and(|title| title.starts_with("Task:"));
+                    let kind = if delegated {
+                        ItemKind::SubagentCall
+                    } else {
+                        match update["kind"].as_str() {
+                            _ if reached.is_some() || is_a_skill(update) => ItemKind::SkillUse,
+                            Some("read") => ItemKind::FileRead,
+                            Some("edit" | "delete" | "move") => ItemKind::FileChange,
+                            Some("execute") => ItemKind::CommandExecution,
+                            Some("search" | "fetch") => ItemKind::WebSearch,
+                            _ => ItemKind::Unknown,
+                        }
                     };
                     events.push(TurnEvent::ItemStarted {
                         item: item.clone(),
@@ -773,6 +814,15 @@ impl AcpNormaliser {
                             .or_else(|| update["title"].as_str().map(str::to_owned)),
                         task: None,
                     });
+                    if delegated {
+                        self.cursor_tasks.insert(id.to_owned(), None);
+                        events.push(TurnEvent::TaskStarted {
+                            task: TaskId::new(id),
+                            item: item.clone(),
+                            description: update["title"].as_str().unwrap_or("Task").to_owned(),
+                            agent: Some("Cursor subagent".into()),
+                        });
+                    }
                 }
                 // The same one key every other reader writes.
                 let mut data = update.clone();
@@ -814,6 +864,13 @@ impl AcpNormaliser {
                     }
                 }
                 if let Some(status @ ("completed" | "failed")) = update["status"].as_str() {
+                    if let Some(task) = self.cursor_tasks.get_mut(id) {
+                        *task = Some(if status == "failed" {
+                            ItemStatus::Failed
+                        } else {
+                            ItemStatus::Completed
+                        });
+                    }
                     self.items.remove(&item);
                     events.push(TurnEvent::ItemCompleted {
                         item,
@@ -839,6 +896,17 @@ impl AcpNormaliser {
         spent: Option<Usage>,
         events: &mut Vec<TurnEvent>,
     ) {
+        // Any delegated call still open when the turn ends is resolved here.
+        // `cursor/task` is the notification that would have closed it, and a
+        // turn can finish without one — an unresolved task would otherwise sit
+        // in the transcript as work that never came back.
+        for (call, outcome) in std::mem::take(&mut self.cursor_tasks) {
+            events.push(TurnEvent::TaskCompleted {
+                task: TaskId::new(call),
+                status: outcome.unwrap_or(ItemStatus::Failed),
+                summary: None,
+            });
+        }
         for req in std::mem::take(&mut self.requests) {
             events.push(TurnEvent::RequestResolved {
                 req: RequestId::new(req),

@@ -49,7 +49,7 @@ jobs:
             glob: |
               desktop/src-tauri/target/release/bundle/nsis/*.exe
               desktop/src-tauri/target/release/bundle/msi/*.msi
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ github.repository == 'firetower-cloud/firetower' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && matrix.os || (matrix.platform == 'mac' && 'macos-latest' || 'windows-2022') }}
     defaults:
       run:
         working-directory: desktop

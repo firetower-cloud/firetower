@@ -1,0 +1,3 @@
+Before permission run: mobile-approved.txt absent; mobile-denied.txt absent.
+After actual Allow: mobile-approved.txt = MOBILE APPROVED (exact).
+After actual Deny and cancellation: mobile-denied.txt absent; approved contents unchanged.

@@ -1,0 +1,42 @@
+Running on firetower-cursor-api34
+ > Flow cursor-agent
+Launch app "com.usefiretower.app"... COMPLETED
+Assert that "Connect to a Firetower" is visible... COMPLETED
+Tap on id: address... COMPLETED
+Input text ${ADDRESS}... COMPLETED
+Tap on "Connect"... COMPLETED
+Assert that "Sign in" is visible... COMPLETED
+Tap on id: username... COMPLETED
+Input text ${USER}... COMPLETED
+Tap on id: password... COMPLETED
+Input text ${PASS}... COMPLETED
+Hide Keyboard... COMPLETED
+Tap on "Sign in"... COMPLETED
+Assert that "Inbox" is visible... COMPLETED
+Tap on id: new-workspace... COMPLETED
+Assert that "New workspace" is visible... COMPLETED
+Tap on id: workspace-name... COMPLETED
+Input text ${WORKSPACE_NAME}... COMPLETED
+Hide Keyboard... COMPLETED
+Tap on "Choose a repository"... COMPLETED
+Tap on "firetower-cursor-pw-repo"... COMPLETED
+Press Back key... COMPLETED
+Tap on "Choose a machine"... COMPLETED
+Tap on "localhost"... COMPLETED
+Tap on "Choose an agent"... COMPLETED
+Tap on "Cursor Agent"... COMPLETED
+Tap on "Choose an account"... COMPLETED
+Tap on "Cursor Playwright"... COMPLETED
+Tap on "Start the workspace"... COMPLETED
+Assert that "Answer the agent" is visible... COMPLETED
+Tap on id: composer... COMPLETED
+Input text Read README.md and reply with its exact one-line content. Do not edit any files.... COMPLETED
+Tap on id: send... COMPLETED
+Assert that "(?s).*Playwright Cursor ACP smoke test.*" is visible... COMPLETED
+Take screenshot cursor-agent-mobile-turn... COMPLETED
+Tap on id: composer... COMPLETED
+Input text What was the exact README line you just returned? Reply with MOBILE FOLLOWUP followed by that line.... COMPLETED
+Tap on id: send... COMPLETED
+Assert that "(?s).*MOBILE FOLLOWUP.*Playwright Cursor ACP smoke test.*" is visible... COMPLETED
+Take screenshot cursor-agent-mobile-followup... COMPLETED
+MAESTRO_EXIT=0

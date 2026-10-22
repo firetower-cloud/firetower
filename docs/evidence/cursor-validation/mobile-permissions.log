@@ -1,0 +1,34 @@
+Running on firetower-cursor-api34
+ > Flow cursor-agent-permissions
+Assert that id: composer is visible... COMPLETED
+Tap on id: composer... COMPLETED
+Erase 1000 characters... COMPLETED
+Input text Use only Shell to run: printf "MOBILE APPROVED" > firetower-cursor-pw-repo/mobile-approved.txt . Do not use Edit File or any fallback and do not commit.... COMPLETED
+Hide Keyboard... COMPLETED
+Tap on id: send... COMPLETED
+Assert that "Allow" is visible... COMPLETED
+Assert that "(?s).*printf.*MOBILE APPROVED.*" is visible... COMPLETED
+Take screenshot cursor-agent-mobile-pending... COMPLETED
+Tap on "Allow"... COMPLETED
+Assert that "(?s).*Handed it back.*" is visible... COMPLETED
+Take screenshot cursor-agent-mobile-approved... COMPLETED
+Tap on id: composer... COMPLETED
+Erase 1000 characters... COMPLETED
+Input text Use only Shell to run: printf "MUST NOT EXIST" > firetower-cursor-pw-repo/mobile-denied.txt . On denial stop with no retry, fallback or file edit. Do not commit.... COMPLETED
+Hide Keyboard... COMPLETED
+Tap on id: send... COMPLETED
+Assert that "No" is visible... COMPLETED
+Tap on "No"... COMPLETED
+Assert that "(?s).*Handed it back.*" is visible... COMPLETED
+Assert that "Allow" is not visible... COMPLETED
+Take screenshot cursor-agent-mobile-denied... COMPLETED
+Tap on id: composer... COMPLETED
+Erase 1000 characters... COMPLETED
+Input text Use only Shell to run: sleep 30 . This is a disposable cancellation test. Do not change files.... COMPLETED
+Hide Keyboard... COMPLETED
+Tap on id: send... COMPLETED
+Assert that "Allow" is visible... COMPLETED
+Tap on id: stop... COMPLETED
+Assert that "(?s).*Handed it back.*" is visible... COMPLETED
+Assert that "Allow" is not visible... COMPLETED
+Take screenshot cursor-agent-mobile-cancelled... COMPLETED

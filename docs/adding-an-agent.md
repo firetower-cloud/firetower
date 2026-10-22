@@ -233,6 +233,47 @@ a CLI too old for a name we send it, costs a session most of its window and
 reports nothing — so the Agents screen showing a host as behind is the only
 warning anybody gets.
 
+## Cursor Agent, and what it does not report
+
+Written after merging Cursor, because three of its answers are different from
+every other agent's and two of them are silent failures.
+
+- **Its home is `HOME`.** There is no `CURSOR_HOME`. Relocating `HOME` works,
+  and the credential path then depends on the platform that reads it:
+  `~/.cursor/auth.json` on macOS, `$XDG_CONFIG_HOME/cursor/auth.json` on
+  Linux, `%APPDATA%\Cursor\auth.json` on Windows. The path is chosen on the
+  *server* and written on the *worker*, so it cannot be a `cfg!`. A symlink in
+  the session home — `cursor` → `.cursor` — plus `XDG_CONFIG_HOME=$HOME` makes
+  both resolve to one file. That symlink is load-bearing: without it a Linux
+  worker reads no credential and reports "Not logged in" with the file present.
+- **Every invocation needs its environment, probes included.** The launcher
+  reaches for the macOS Keychain unless `AGENT_CLI_CREDENTIAL_STORE=file` is
+  set, and a worker's keychain is locked — one started by launchd or sshd has
+  no unlocked login keychain at all. `cursor-agent --version` then exits 1
+  with nothing on stdout, which every caller reads as "not on the path": the
+  install landed in a directory called `unknown` and the Agents screen said
+  the agent was missing from the host it had just been installed on. That is
+  what `Agent::env` is for, and why it is applied in `agents::probe`,
+  `readiness::check` and `runtime::install` and not only at launch.
+- **It reports no usage at all.** Its ACP adapter builds prompt responses from
+  `stopReason` alone — no `result.usage`, no `usage_update`. Its `/usage` is a
+  terminal screen drawn from Cursor's dashboard service, and the protocol
+  never sees it. So a Cursor turn is unbilled, which `Ran::Unknown` and
+  "reported no tokens" already say honestly.
+- **Its advertised command list is not only its own.** `available_commands_update`
+  carries one built-in, `copy-request-id`, plus every slash command *and skill*
+  it found in the project and the home. An unrecognised slash command is passed
+  to the model rather than refused, so "the list mentions `usage`" is not
+  evidence that asking is free — a skill of that name would turn the metering
+  probe into a real, billed, unjournalled prompt after every reply. This is why
+  metering is gated on `Agent::answers_usage_command` and not on the
+  advertisement alone.
+
+The general lesson, which is the reason this section exists: **an agent's
+capability answers belong in `ft-core` and have to reach every place that runs
+it.** Two of the three failures above were a correct value applied in one of
+the five places an agent gets started.
+
 ## Skills
 
 Two things to get right for every new agent, and neither comes for free. See

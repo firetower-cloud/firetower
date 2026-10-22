@@ -32,7 +32,7 @@ jobs:
     # changelogs, nothing a build would catch. `branches-ignore` above filters
     # the *target* branch, so this is the check that actually skips it.
     if: ${{ !startsWith(github.head_ref, 'release-please--') }}
-    runs-on: depot-ubuntu-22.04
+    runs-on: ${{ github.repository == 'firetower-cloud/firetower' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'depot-ubuntu-22.04' || 'ubuntu-22.04' }}
     services:
       postgres:
         image: postgres:17-alpine
@@ -55,6 +55,8 @@ jobs:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
+      - name: worker session test prerequisites
+        run: sudo apt-get update && sudo apt-get install -y tmux
       - run: cargo fmt --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       # The worker's tests commit in throwaway repositories, and a runner has
@@ -76,7 +78,7 @@ jobs:
     # changelogs, nothing a build would catch. `branches-ignore` above filters
     # the *target* branch, so this is the check that actually skips it.
     if: ${{ !startsWith(github.head_ref, 'release-please--') }}
-    runs-on: depot-ubuntu-22.04
+    runs-on: ${{ github.repository == 'firetower-cloud/firetower' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'depot-ubuntu-22.04' || 'ubuntu-22.04' }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
@@ -135,7 +137,7 @@ jobs:
     # changelogs, nothing a build would catch. `branches-ignore` above filters
     # the *target* branch, so this is the check that actually skips it.
     if: ${{ !startsWith(github.head_ref, 'release-please--') }}
-    runs-on: depot-ubuntu-22.04
+    runs-on: ${{ github.repository == 'firetower-cloud/firetower' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'depot-ubuntu-22.04' || 'ubuntu-22.04' }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3
@@ -146,3 +148,16 @@ jobs:
           push: false
           cache-from: type=gha,scope=firetower
           cache-to: type=gha,mode=max,scope=firetower-pr
+
+  native-macos:
+    if: ${{ !startsWith(github.head_ref, 'release-please--') }}
+    runs-on: ${{ github.repository == 'firetower-cloud/firetower' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'depot-macos-latest' || 'macos-latest' }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - run: brew install tmux
+      - run: |
+          git config --global user.name firetower
+          git config --global user.email ci@firetower.cloud
+      - run: cargo test -p ft-worker --lib --locked

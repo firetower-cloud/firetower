@@ -47,13 +47,13 @@ pub const CODEX_TAG_PREFIX: &str = "rust-v";
 
 /// Where to ask what the newest published version of one agent is.
 ///
-/// `None` for an agent Firetower does not fetch — there is nothing to be behind.
+/// `None` for shell and pinned Cursor releases: neither has a supported latest feed.
 pub fn newest_url(kind: Agent) -> Option<String> {
     match kind {
         Agent::ClaudeCode => Some(format!("{CLAUDE_RELEASES}/latest")),
         Agent::KimiCode => Some(format!("{KIMI_RELEASES}/latest")),
         Agent::Codex => Some(CODEX_RELEASE_LIST.to_string()),
-        Agent::Shell => None,
+        Agent::Shell | Agent::CursorAgent => None,
     }
 }
 
@@ -115,9 +115,10 @@ mod tests {
 
     /// Only the agents Firetower fetches have somewhere to ask.
     #[test]
-    fn a_shell_has_no_publisher() {
+    fn only_agents_with_supported_latest_feeds_are_polled() {
         assert!(newest_url(Agent::Shell).is_none());
-        for kind in Agent::all() {
+        assert!(newest_url(Agent::CursorAgent).is_none());
+        for kind in [Agent::ClaudeCode, Agent::Codex, Agent::KimiCode] {
             assert!(newest_url(kind).is_some(), "{kind:?}");
         }
     }

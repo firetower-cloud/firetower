@@ -1,0 +1,3 @@
+Real Cursor CLI 2026.09.28-64d2043; macOS arm64; --version; disposable pipe; no credential output.
+stdin=inherited pipe; observed pipe flags=[0, 4]; exit=0; version=2026.09.28-64d2043
+stdin=null; observed pipe flags=[0]; exit=0; version=2026.09.28-64d2043
