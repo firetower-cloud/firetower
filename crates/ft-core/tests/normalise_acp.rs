@@ -627,3 +627,66 @@ fn a_turn_that_never_reached_a_model_is_not_reported_as_finished() {
     let (status, _) = turn(&mut reader, 4, None);
     assert_eq!(status, TurnStatus::Completed);
 }
+
+/// Cursor says nothing about what a turn cost, so no row is written for it.
+///
+/// Not a gap in this parser. Verified against `cursor-agent 2026.09.28-64d2043`:
+/// its ACP adapter resolves a prompt with `{"stopReason":"end_turn"}` and never
+/// sends `usage_update`, so there is neither a bill nor a context gauge to
+/// carry. The word "usage" does not occur in that adapter at all.
+///
+/// Kimi is the near miss worth contrasting. It reports no bill either, and its
+/// *first* turn is unbilled for the same reason — see the test below, where the
+/// gauge arrives a message after the reply. But from the second turn on it
+/// carries a `usage_update`, so `spent` returns a `Usage` holding only the
+/// window, a `consumption_events` row is written, and `tokens_known` marks the
+/// zeros as unknown rather than free. That row is what makes a Kimi session
+/// visible on the usage page and countable in `sessions_by_agent`.
+///
+/// Cursor never reaches that branch, on any turn. So a Cursor turn is absent
+/// rather than unreported: no tokens, no turn count, and nothing in the
+/// telemetry digest. Anything that changes that has to begin by giving this
+/// turn a row.
+#[test]
+fn a_cursor_turn_reports_no_usage_at_all_so_nothing_is_billed() {
+    let mut reader = AcpNormaliser::default();
+    let records = [
+        Record::Started {
+            epoch: "run1".into(),
+        },
+        Record::Ready {
+            session: "s".into(),
+        },
+        Record::Sent {
+            message: json!({"id":3,"method":"session/prompt","params":{"sessionId":"s","prompt":[{"type":"text","text":"hello"}]}}),
+        },
+        Record::Received {
+            message: json!({"method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Hi"}}}}),
+            replay: false,
+        },
+        // Exactly what Cursor's adapter builds, and all of it.
+        Record::Received {
+            message: json!({"id":3,"result":{"stopReason":"end_turn"}}),
+            replay: false,
+        },
+    ];
+    let mut events = Vec::new();
+    for record in records {
+        events.extend(reader.push(&serde_json::to_string(&record).unwrap()));
+    }
+
+    let completed = events
+        .iter()
+        .find_map(|e| match e {
+            TurnEvent::TurnCompleted { usage, status, .. } => Some((usage, status)),
+            _ => None,
+        })
+        .expect("the turn completed");
+    assert_eq!(*completed.1, TurnStatus::Completed);
+    assert!(
+        completed.0.is_none(),
+        "a turn with no bill and no gauge must carry no usage, or a row of \
+         zeros would report Cursor working for free: {:?}",
+        completed.0
+    );
+}
