@@ -212,6 +212,45 @@ administrator. The symptom is a flat *forbidden* on the approval page, which
 reads like a Firetower fault and is not one. Connecting with a token of your own
 works, and is the answer.
 
+## The token in a workspace
+
+Firetower uses your token for the things it does on your behalf — cloning,
+pushing a branch, opening a request — and hands it to git over a socket that
+exists only while the command runs, so it is never written to a config entry or
+a reflog. That is `askpass`, and it is why a workspace can push without a
+credential sitting anywhere on the machine.
+
+**An agent reaching for `gh` is the exception**, because `gh` reads a token from
+`GH_TOKEN` or from the operating system's own credential store and offers
+nothing in between. The credential store is not available: a workspace is a
+tmux pane descended from an sshd, which on macOS puts it in the `Background`
+security session, where the login keychain refuses every request because it
+would have to show an unlock prompt and there is no screen to show it on. `gh`
+is then holding no token, calls the API anonymously, and reports the 401 as
+*"the token is invalid"* — which sends people to `gh auth login`, which cannot
+help, because the token was never the problem.
+
+So a session on a GitHub host starts with **`GH_TOKEN`** set from the vault,
+and `GH_HOST` as well when the host is an Enterprise instance rather than
+github.com. Nothing is written to disk; it is in the session's environment and
+goes when the session does.
+
+Three things follow from it:
+
+* **Only GitHub.** A GitLab or Gitea token in `GH_TOKEN` authenticates nothing
+  and blames GitHub for it, so other kinds are handed nothing and `glab` and
+  `tea` read their own variables.
+* **A repository that sets `GH_TOKEN` itself wins.** Somebody who pinned a bot
+  account, or a token with scopes Firetower's does not carry, meant it — ours
+  is the default and not an override.
+* **The scopes are whatever the token has.** The browser flow asks for `repo`
+  and `workflow`, so `gh run` works; a token pasted by hand has whatever
+  scopes whoever pasted it chose.
+
+One thing it cannot do: `GH_HOST` carries a hostname and no scheme, so an
+Enterprise instance served over plain HTTP is one `gh` cannot be pointed at.
+Cloning and pushing are unaffected.
+
 ## Signing out, and removing
 
 They are different things with different blast radiuses.

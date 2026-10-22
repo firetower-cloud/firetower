@@ -691,7 +691,10 @@ pub(super) async fn create_session(
     // One environment per process, so a session spanning two git hosts gets
     // the first checkout's identity for anything the agent commits by hand.
     // Firetower's own commits stay per checkout.
-    if let Some(remote) = repos.first().map(|(r, _)| r.remote.clone()) {
+    if let Some((remote, slug)) = repos
+        .first()
+        .map(|(r, _)| (r.remote.clone(), r.slug.clone()))
+    {
         if let Some(author) = author_for(&state, &remote, &owner).await {
             for (name, value) in [
                 ("GIT_AUTHOR_NAME", &author.name),
@@ -703,6 +706,21 @@ pub(super) async fn create_session(
                 env.push((name.to_string(), value.clone()));
             }
         }
+
+        // And the same identity's token, for `gh`. The first checkout again,
+        // for the same reason: one environment per process, and `gh` reads one
+        // token.
+        //
+        // A repository that sets `GH_TOKEN` itself has said something more
+        // specific than we know — a bot account, or scopes ours does not carry
+        // — so ours is the default and not an override. That is the opposite of
+        // the rule for the agent's own token above, on purpose: that one
+        // protects the agent's ability to start at all, and this one is a
+        // convenience that whoever configured the repository may outrank.
+        add_absent(
+            &mut env,
+            gh_env(&state, &remote, &owner, &format!("starting {id} on {slug}")).await,
+        );
     }
 
     let mut specs = Vec::new();
@@ -2064,6 +2082,94 @@ async fn author_for(state: &AppState, remote: &str, owner: &str) -> Option<ft_pr
     super::providers::identity_for(state, &conn, owner).await
 }
 
+/// What the `gh` command line needs to reach GitHub from inside a workspace.
+///
+/// **Why this is needed at all**, when `gh` has its own `auth login`: it keeps
+/// the token it obtains in the operating system's credential store, and a
+/// workspace is not a desktop session. On macOS the worker's tmux server is
+/// started over ssh, which leaves every pane it ever opens in the `Background`
+/// security session, and the login keychain answers anything that asks there
+/// with `errSecInteractionNotAllowed` — it would have to show an unlock prompt,
+/// and there is no screen to show it on. `gh` is then holding no token at all,
+/// calls the API anonymously, and reports the 401 it gets back as *"the token
+/// is invalid"* (cli/cli#14171, cli/cli#13317). So the agent is advised to run
+/// `gh auth login`, which cannot help it: the token was never the problem, and
+/// the person who could answer the prompt is not in the room. Firetower is
+/// already holding a GitHub token for this person. Handing it over is the fix.
+///
+/// **Why the environment, when [`askpass`] went to such lengths to avoid it.**
+/// Because `gh` reads a token from `GH_TOKEN` or from its own credential store
+/// and offers nothing in between — there is no socket to point it at, the way
+/// there is for git. The exposure this adds is the one `askpass` already
+/// concedes it cannot close: an agent running as you, in its own workspace, can
+/// reach the credential either way. What stays true is that nothing durable is
+/// written — no file, no config entry, no history.
+///
+/// [`askpass`]: ../../../ft_worker/askpass/index.html
+///
+/// **GitHub only.** A GitLab or Gitea token in `GH_TOKEN` is a puzzling 401,
+/// and those hosts' own tools read their own variables.
+pub(super) async fn gh_env(
+    state: &AppState,
+    remote: &str,
+    owner: &str,
+    why: &str,
+) -> Vec<(String, String)> {
+    let Some(conn) = super::connection_for_remote_pub(state, remote, owner).await else {
+        return Vec::new();
+    };
+    // The kind gate, and deliberately the only one — ahead of the token rather
+    // than after it. A host `gh` will never be pointed at must not have its
+    // credential *read*, because every read is a line in the vault's log
+    // saying what it was for, and "for gh" is not true of a GitLab token.
+    if conn.kind.id != GITHUB_KIND {
+        return Vec::new();
+    }
+    // Through `git_token` rather than the vault directly, so a token close to
+    // lapsing is renewed here exactly as it is for a push.
+    let Some(token) = super::git_token(state, &conn, owner, why).await else {
+        return Vec::new();
+    };
+
+    // Out of its zeroizing wrapper, as the agent's own token and a repository's
+    // variables already are by this point: from here it goes into a frame, over
+    // a pipe, and into a tmux environment.
+    gh_vars(&conn.git_host, &token)
+}
+
+/// The kind id of the one host whose command line this reaches.
+const GITHUB_KIND: &str = "github";
+
+/// Which variables a GitHub token becomes.
+///
+/// Split from [`gh_env`] because this is the part with a decision in it that an
+/// `AppState` — and so a database — is not needed to check. Whether `gh` is
+/// handed anything at all is the caller's question, not this one's.
+fn gh_vars(git_host: &str, token: &str) -> Vec<(String, String)> {
+    let mut out = vec![("GH_TOKEN".to_string(), token.to_string())];
+    // `gh` already defaults to github.com. Naming it anyway is noise, and the
+    // variable exists for the case that actually needs it: an Enterprise
+    // checkout, where `gh` would otherwise talk to the wrong GitHub entirely.
+    if git_host != "github.com" {
+        out.push(("GH_HOST".to_string(), git_host.to_string()));
+    }
+    out
+}
+
+/// Add what is missing and leave what is already there.
+///
+/// The opposite of the `retain`-then-`push` used for everything Firetower
+/// insists on, and deliberately: see the call site for whose variable outranks
+/// whose.
+fn add_absent(env: &mut Vec<(String, String)>, vars: Vec<(String, String)>) {
+    for (name, value) in vars {
+        if env.iter().any(|(existing, _)| *existing == name) {
+            continue;
+        }
+        env.push((name, value));
+    }
+}
+
 /// Whether a path is inside a checkout, and what it is called from there.
 ///
 /// The empty checkout is the workspace, so everything is inside it.
@@ -3212,6 +3318,73 @@ pub(super) async fn continue_with_account(
     let (_, Json(next)) =
         start_another_agent(state.clone(), owner.to_string(), workspace, req).await?;
     Ok(next.id)
+}
+
+/// What a workspace's `gh` is handed, and what it is not.
+#[cfg(test)]
+mod gh_tests {
+    use super::{add_absent, gh_vars};
+
+    fn names(vars: &[(String, String)]) -> Vec<&str> {
+        vars.iter().map(|(n, _)| n.as_str()).collect()
+    }
+
+    /// github.com needs the token and nothing else — `gh` already points there.
+    #[test]
+    fn github_dot_com_gets_a_token_and_no_host() {
+        let vars = gh_vars("github.com", "gho_x");
+
+        assert_eq!(names(&vars), ["GH_TOKEN"]);
+        assert_eq!(vars[0].1, "gho_x");
+    }
+
+    /// Enterprise is the case `GH_HOST` exists for: without it `gh` would
+    /// authenticate against github.com with a token github.com never issued,
+    /// and the 401 would name the wrong host.
+    #[test]
+    fn enterprise_is_named_as_well() {
+        let vars = gh_vars("github.acme.example", "gho_y");
+
+        assert_eq!(names(&vars), ["GH_TOKEN", "GH_HOST"]);
+        assert_eq!(vars[1].1, "github.acme.example");
+    }
+
+    /// Ours is the default. A repository that set the variable itself meant it.
+    #[test]
+    fn a_repositorys_own_token_outranks_ours() {
+        let mut env = vec![("GH_TOKEN".to_string(), "theirs".to_string())];
+
+        add_absent(&mut env, gh_vars("github.com", "ours"));
+
+        assert_eq!(env, [("GH_TOKEN".to_string(), "theirs".to_string())]);
+    }
+
+    /// …but only the variable they actually set. Pinning a token for a bot
+    /// account must not also strand an Enterprise session on github.com.
+    #[test]
+    fn outranking_the_token_still_leaves_the_host_set() {
+        let mut env = vec![("GH_TOKEN".to_string(), "theirs".to_string())];
+
+        add_absent(&mut env, gh_vars("github.acme.example", "ours"));
+
+        assert_eq!(
+            env,
+            [
+                ("GH_TOKEN".to_string(), "theirs".to_string()),
+                ("GH_HOST".to_string(), "github.acme.example".to_string()),
+            ]
+        );
+    }
+
+    /// Nothing set means ours lands, which is the whole point of the change.
+    #[test]
+    fn an_empty_environment_gets_ours() {
+        let mut env = Vec::new();
+
+        add_absent(&mut env, gh_vars("github.com", "ours"));
+
+        assert_eq!(env, [("GH_TOKEN".to_string(), "ours".to_string())]);
+    }
 }
 
 #[cfg(test)]
