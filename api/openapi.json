@@ -11456,7 +11456,7 @@
             "items": {
               "$ref": "#/components/schemas/Pending"
             },
-            "description": "Oldest first. Empty when telemetry is off, which is how the client is\ntold without being trusted to check."
+            "description": "Newest first — see `telemetry::undelivered` for why that end leads.\nEmpty when telemetry is off, which is how the client is told without\nbeing trusted to check."
           },
           "endpoint": {
             "type": "string",

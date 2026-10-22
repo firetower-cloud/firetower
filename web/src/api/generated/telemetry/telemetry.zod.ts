@@ -30,7 +30,7 @@ export const PendingResponse = zod.object({
   "payload": zod.looseObject({
 
 }).describe('The bytes to post, verbatim.\n\nOpaque to the client on purpose. It is a courier: it carries the\nenvelope and does not open it, which is what keeps the whole payload\nthis server\'s to decide and `/telemetry/preview` honest about it.')
-}).describe('A digest still owed, as the client will send it.')).describe('Oldest first. Empty when telemetry is off, which is how the client is\ntold without being trusted to check.'),
+}).describe('A digest still owed, as the client will send it.')).describe('Newest first — see `telemetry::undelivered` for why that end leads.\nEmpty when telemetry is off, which is how the client is told without\nbeing trusted to check.'),
   "endpoint": zod.string().describe('Where to post each payload.\n\nGiven by the server so there is one source of truth for the address and\nno hostname compiled into a shipped binary that cannot be corrected.')
 }).describe('What is owed, and where it goes.')
 
