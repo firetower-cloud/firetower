@@ -53,6 +53,47 @@ const outbox = (...days: string[]) => ({
   digests: days.map(digest),
 });
 
+/**
+ * A control plane that actually marks days delivered, and serves at most
+ * `batch` of them at a time.
+ *
+ * `wire` above answers every `/pending` with the same outbox, which is what a
+ * server looks like when an acknowledgement never lands. This is what one looks
+ * like when it works, and it is the only way to test that a round drains.
+ */
+function statefulWire(days: string[], batch: number) {
+  let owed = [...days];
+  const calls: Call[] = [];
+
+  const fetchMock = vi.fn(async (input: URL | string, init?: RequestInit) => {
+    const url = String(input);
+    calls.push({
+      url,
+      method: init?.method ?? "GET",
+      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+    });
+
+    if (url.includes("/telemetry/pending")) {
+      return {
+        ok: true,
+        json: async () => ({
+          endpoint: "https://telemetry.test/v1/digests",
+          digests: owed.slice(0, batch).map(digest),
+        }),
+      } as Response;
+    }
+    if (url.includes("/telemetry/delivered")) {
+      const sent = (init?.body ? JSON.parse(String(init.body)) : { days: [] }) as { days: string[] };
+      owed = owed.filter((d) => !sent.days.includes(d));
+      return { ok: true } as Response;
+    }
+    return { ok: true, status: 200 } as Response;
+  });
+
+  vi.stubGlobal("fetch", fetchMock);
+  return { calls, owed: () => owed };
+}
+
 afterEach(() => vi.unstubAllGlobals());
 
 describe("the courier", () => {
@@ -106,8 +147,9 @@ describe("the courier", () => {
     expect(acked(calls)).toBeUndefined();
   });
 
-  /// The backlog stays a contiguous tail rather than a sequence with holes in
-  /// it, and a gateway that is down is asked once rather than fourteen times.
+  /// What stays owed is a contiguous run of the oldest days rather than a
+  /// sequence with holes in it, and a gateway that is down is asked once
+  /// rather than once for every day in the window.
   it("stops at the first transient failure and acknowledges only the prefix", async () => {
     const calls = wire(outbox("2026-10-12", "2026-10-13", "2026-10-14"), [200, 503, 200]);
     await __test.carry(server);
@@ -132,6 +174,54 @@ describe("the courier", () => {
 
     const sent = posted(calls)[0];
     expect(sent.body).toEqual({ day: "2026-10-14", schema_version: 1 });
+  });
+
+  /// The regression guard for three days of a dashboard that would not move.
+  ///
+  /// A round used to deliver one batch and return, so a backlog longer than a
+  /// batch needed as many restarts as it had batches — and because the server
+  /// led with the oldest day, the batches that did get through were all days
+  /// the dashboard already had. Nothing reported a problem and nothing visibly
+  /// changed, which is the worst pair of properties a delivery path can have.
+  it("empties an outbox that is longer than one batch", async () => {
+    const owed = ["2026-10-20", "2026-10-19", "2026-10-18", "2026-10-17", "2026-10-16"];
+    const plane = statefulWire(owed, 2);
+
+    await __test.carry(server);
+
+    expect(plane.owed(), "the outbox must be empty when a round returns").toEqual([]);
+    expect(posted(plane.calls).map((c) => (c.body as { day: string }).day)).toEqual(owed);
+  });
+
+  /// Whichever end the server leads with is the end that gets through when a
+  /// round is cut short, so the newest day must not be last.
+  it("delivers the newest day first, so a truncated round still moves the dashboard", async () => {
+    const calls = wire(outbox("2026-10-21", "2026-10-20", "2026-10-19"), [200, 503]);
+    await __test.carry(server);
+
+    expect(acked(calls)?.days).toEqual(["2026-10-21"]);
+  });
+
+  /// A lost acknowledgement leaves the day owed on purpose. What must not
+  /// happen is this round asking again, being handed the same batch, and
+  /// posting it for as long as the app stays open.
+  it("stops rather than re-posting when an acknowledgement is lost", async () => {
+    const calls = wire(outbox("2026-10-20", "2026-10-19"), [200, 200]);
+    const live = globalThis.fetch as unknown as (
+      input: URL | string,
+      init?: RequestInit,
+    ) => Promise<Response>;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: URL | string, init?: RequestInit) => {
+        if (String(input).includes("/telemetry/delivered")) throw new Error("ack lost");
+        return live(input, init);
+      }),
+    );
+
+    await __test.carry(server);
+
+    expect(posted(calls), "each digest posted once, not once per batch").toHaveLength(2);
   });
 });
 

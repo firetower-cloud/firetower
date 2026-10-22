@@ -306,9 +306,18 @@ pub async fn discard_undelivered(db: &Db) -> Result<u64> {
 }
 
 /// Remember which desktop version last collected a digest.
+///
+/// Written only when it changes. Every collection passes its version, so an
+/// unconditional upsert is one write per poll per desktop — for a value that
+/// moves when somebody updates the app, which is to say almost never. A read
+/// on the common path instead of a write is what lets the courier's interval be
+/// shortened without the server paying for it.
 pub async fn note_courier(accounts: &Accounts, version: &str) -> Result<()> {
     let version = version.trim();
     if version.is_empty() || version.len() > 64 {
+        return Ok(());
+    }
+    if accounts.setting(keys::COURIER).await?.as_deref() == Some(version) {
         return Ok(());
     }
     accounts.set_setting(keys::COURIER, version).await
@@ -650,12 +659,27 @@ pub async fn record(db: &Db, digest: &Digest) -> Result<()> {
     Ok(())
 }
 
-/// What is still owed, oldest first.
+/// What is still owed, **newest first**.
+///
+/// Newest rather than oldest, because the order is what a truncated round
+/// delivers. A courier sends until something fails transiently and then stops,
+/// and a batch is bounded — so whichever end of the window leads is the end
+/// that gets through. Yesterday is the day every question on the dashboard is
+/// about, and a month of backfill ahead of it means the one number anybody
+/// reads arrives last, or on a bad week not at all.
+///
+/// The backlog therefore drains from the front, and what stays owed is a
+/// contiguous run of the oldest days — the same property the old ordering had,
+/// pointing the other way, and the reason nothing is left with holes in it.
+///
+/// Delivery order is not otherwise meaningful: the gateway keys on
+/// `(install_id, day)`, so days arriving out of order is an upsert each time
+/// and not a sequence it has to reassemble.
 pub async fn undelivered(db: &Db, limit: i64) -> Result<Vec<Pending>> {
     let rows = sqlx::query(
         "SELECT day, payload FROM telemetry_digests
           WHERE delivered_at IS NULL
-          ORDER BY day
+          ORDER BY day DESC
           LIMIT $1",
     )
     .bind(limit.clamp(1, 60))
@@ -716,18 +740,32 @@ pub async fn days_to_compute(db: &Db, today: NaiveDate) -> Result<Vec<NaiveDate>
         .collect())
 }
 
-/// Drop what is no longer worth keeping: anything delivered, and anything too
-/// old for the gateway to accept.
+/// Drop what is no longer worth keeping: anything too old for the gateway to
+/// accept, and nothing else.
+///
+/// ## Why a delivered row is kept rather than dropped
+///
+/// It is the record of what has already been sent, and `days_to_compute` reads
+/// it as exactly that: a day is due when there is no row for it. Deleting a row
+/// because it was delivered therefore erases the memory of having delivered it,
+/// and the next sweep rebuilds the day and owes it again — `record` clears
+/// `delivered_at` on conflict, so the rebuild arrives undelivered.
+///
+/// That loop is not harmless. `/telemetry/pending` serves a bounded batch, so a
+/// window that regenerates itself keeps refilling the queue ahead of the newest
+/// day, and it refilled faster than any courier drained it. The most recent
+/// day, which is the only one anybody looks at, is starved behind a backlog
+/// that never empties.
+///
+/// So age is the only reason to delete. A row costs a few hundred bytes and the
+/// window holds thirty of them; the correctness of "which days are done" is
+/// worth more than the thirty rows.
 pub async fn prune(db: &Db, today: NaiveDate) -> Result<u64> {
-    let done = sqlx::query(
-        "DELETE FROM telemetry_digests
-          WHERE delivered_at IS NOT NULL
-             OR day < $1",
-    )
-    .bind(today - Duration::days(KEEP_UNDELIVERED_DAYS))
-    .execute(db.pool())
-    .await
-    .context("pruning digests")?;
+    let done = sqlx::query("DELETE FROM telemetry_digests WHERE day < $1")
+        .bind(today - Duration::days(KEEP_UNDELIVERED_DAYS))
+        .execute(db.pool())
+        .await
+        .context("pruning digests")?;
     Ok(done.rows_affected())
 }
 
@@ -1334,7 +1372,16 @@ mod tests {
         let owed = undelivered(&db, 60).await.unwrap();
         assert_eq!(owed.len() as i64, KEEP_UNDELIVERED_DAYS);
         assert!(owed.iter().all(|p| p.day < DAY), "never today");
-        assert!(owed.windows(2).all(|w| w[0].day < w[1].day), "oldest first");
+        assert!(
+            owed.windows(2).all(|w| w[0].day > w[1].day),
+            "newest first: whichever end leads is the end a truncated round \
+             delivers, and yesterday is the day anybody is asking about"
+        );
+        assert_eq!(
+            owed.first().map(|p| p.day),
+            Some(DAY - Duration::days(1)),
+            "yesterday goes out first"
+        );
     }
 
     /// Off has to mean off, including for what was already computed.
@@ -1381,6 +1428,124 @@ mod tests {
             "a day already sent is not owed again"
         );
         assert!(due.contains(&b.day), "a discarded day is owed again");
+    }
+
+    /// Every poll reports a version, and the version moves when somebody
+    /// updates the app — so writing it per poll is a write per poll for a value
+    /// that almost never changes. This is what keeps the courier's interval
+    /// cheap to shorten.
+    #[tokio::test]
+    async fn the_courier_version_is_written_only_when_it_changes() {
+        let (db, accounts, _org, _who) = harness().await;
+
+        note_courier(&accounts, "0.46.0").await.unwrap();
+
+        // Backdated, so a needless rewrite is unmistakable rather than a
+        // question about the clock's resolution.
+        let backdated = "2020-01-01T00:00:00Z".parse::<DateTime<Utc>>().unwrap();
+        sqlx::query("UPDATE settings SET updated_at = $1 WHERE key = $2")
+            .bind(backdated)
+            .bind(keys::COURIER)
+            .execute(db.pool())
+            .await
+            .unwrap();
+
+        // The same version again, as every subsequent poll reports it.
+        note_courier(&accounts, "0.46.0").await.unwrap();
+
+        let touched: DateTime<Utc> =
+            sqlx::query_scalar("SELECT updated_at FROM settings WHERE key = $1")
+                .bind(keys::COURIER)
+                .fetch_one(db.pool())
+                .await
+                .unwrap();
+        assert_eq!(
+            touched, backdated,
+            "an unchanged courier version must not be rewritten"
+        );
+
+        // An upgrade is the case this exists to record, and it still lands.
+        note_courier(&accounts, "0.47.0").await.unwrap();
+        assert_eq!(
+            accounts.setting(keys::COURIER).await.unwrap().as_deref(),
+            Some("0.47.0")
+        );
+    }
+
+    /// The regression guard for a sweep that never settled.
+    ///
+    /// `prune` used to delete delivered rows, and `days_to_compute` reads the
+    /// absence of a row as "this day is due" — so pruning a delivered day
+    /// erased the record of having delivered it and the next sweep built it
+    /// again, undelivered. With an hourly sweep refilling the window and a
+    /// bounded batch serving it, the newest day could sit behind a backlog that
+    /// regenerated faster than a courier drained it.
+    ///
+    /// Two sweeps, because one was never enough to show it: the first prunes
+    /// and the second is the one that used to rebuild what the first forgot.
+    #[tokio::test]
+    async fn a_day_already_delivered_is_never_owed_again() {
+        let (db, accounts, _org, _who) = harness().await;
+
+        sweep(&db, &accounts, DAY).await.unwrap();
+        let owed: Vec<NaiveDate> = undelivered(&db, 60)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|p| p.day)
+            .collect();
+        assert_eq!(owed.len() as i64, KEEP_UNDELIVERED_DAYS);
+
+        // The courier gets there and acknowledges the lot.
+        mark_delivered(&db, &owed).await.unwrap();
+        assert!(undelivered(&db, 60).await.unwrap().is_empty());
+
+        for round in 1..=2 {
+            let wrote = sweep(&db, &accounts, DAY).await.unwrap();
+            assert_eq!(
+                wrote, 0,
+                "sweep {round} rebuilt a day that had already been delivered"
+            );
+            assert!(
+                undelivered(&db, 60).await.unwrap().is_empty(),
+                "sweep {round} put a delivered day back in the outbox"
+            );
+        }
+
+        // And the record of having sent them is what makes that true, so it
+        // has to survive the prune that runs at the end of every sweep.
+        assert!(
+            days_to_compute(&db, DAY).await.unwrap().is_empty(),
+            "nothing is due: every day in the window has been sent"
+        );
+    }
+
+    /// Age is the only reason a row is dropped, and it is still a reason.
+    #[tokio::test]
+    async fn a_day_past_the_window_goes_whether_it_was_delivered_or_not() {
+        let (db, accounts, _org, _who) = harness().await;
+
+        for (back, delivered) in [(90, true), (91, false)] {
+            let d = build(&db, &accounts, DAY - Duration::days(back))
+                .await
+                .unwrap();
+            record(&db, &d).await.unwrap();
+            if delivered {
+                mark_delivered(&db, &[d.day]).await.unwrap();
+            }
+        }
+
+        assert_eq!(
+            prune(&db, DAY).await.unwrap(),
+            2,
+            "both are past the window"
+        );
+
+        let kept: i64 = sqlx::query_scalar("SELECT count(*) FROM telemetry_digests")
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+        assert_eq!(kept, 0);
     }
 
     /// An install mid-setup has no organisation, and asking for one would be an

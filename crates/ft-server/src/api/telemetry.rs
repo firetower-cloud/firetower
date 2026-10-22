@@ -72,8 +72,9 @@ pub struct Outbox {
     /// Given by the server so there is one source of truth for the address and
     /// no hostname compiled into a shipped binary that cannot be corrected.
     pub endpoint: String,
-    /// Oldest first. Empty when telemetry is off, which is how the client is
-    /// told without being trusted to check.
+    /// Newest first — see `telemetry::undelivered` for why that end leads.
+    /// Empty when telemetry is off, which is how the client is told without
+    /// being trusted to check.
     pub digests: Vec<telemetry::Pending>,
 }
 
@@ -106,10 +107,17 @@ pub async fn pending(
 
     Ok(Json(Outbox {
         endpoint: telemetry::endpoint(),
-        // A fortnight at a time. An install returning from a long time offline
-        // delivers its backlog over a few collections rather than one request
-        // carrying a month of documents.
-        digests: telemetry::undelivered(&state.db, 14).await?,
+        // The whole window, because the whole window is the most that can ever
+        // be owed: `KEEP_UNDELIVERED_DAYS` bounds what is computed and `prune`
+        // drops anything past it. A fortnight was the number here, and it was
+        // the wrong kind of caution — a digest is a few hundred bytes, so the
+        // cap saved nothing measurable, while any backlog longer than the cap
+        // needed several rounds to clear and left the newest day until last.
+        //
+        // The per-request body limit this might otherwise argue with is the
+        // gateway's, and that is per POST: the client posts one digest at a
+        // time, so the size of this batch never reaches it.
+        digests: telemetry::undelivered(&state.db, telemetry::KEEP_UNDELIVERED_DAYS).await?,
     }))
 }
 

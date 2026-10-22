@@ -12,8 +12,9 @@ import type { Pending } from './pending';
  */
 export interface Outbox {
   /**
-     * Oldest first. Empty when telemetry is off, which is how the client is
-     * told without being trusted to check.
+     * Newest first — see `telemetry::undelivered` for why that end leads.
+     * Empty when telemetry is off, which is how the client is told without
+     * being trusted to check.
      */
   digests: Pending[];
   /**
