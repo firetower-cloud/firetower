@@ -1065,3 +1065,113 @@ async fn an_empty_repository_is_connected_rather_than_refused() {
     state.fleet.stop_supervising(&local.id).await;
     state.fleet.stop_supervising(&host.id).await;
 }
+
+// ── What a workspace's `gh` is handed ───────────────────────────────────
+//
+// `gh_vars` is checked without a database in `sessions::gh_tests`. These are
+// the three lookups in front of it, which that test cannot reach and which are
+// where this would go wrong in a way nobody would notice until a workspace
+// started: that a remote finds its connection, that the connection's *kind*
+// decides whether `gh` is handed anything at all, and that the token comes
+// back out of the vault under the right person's name.
+
+/// Both shapes of remote, because `host_of` parses them differently and only
+/// one of them is what a clone URL copied out of GitHub looks like.
+#[tokio::test]
+async fn a_github_remote_is_handed_its_vault_token() {
+    let (state, _, _, _, owner) = fixture().await;
+    state
+        .vault
+        .put(
+            crate::vault::Key::of(crate::vault::GIT, "github", &owner),
+            "gho_from_the_vault",
+            "test",
+        )
+        .await
+        .unwrap();
+
+    for remote in [
+        "git@github.com:acme/backend.git",
+        "https://github.com/acme/backend.git",
+    ] {
+        let env = super::sessions::gh_env(&state, remote, &owner, "test").await;
+
+        assert_eq!(
+            env,
+            [("GH_TOKEN".to_string(), "gho_from_the_vault".to_string())],
+            "{remote}"
+        );
+    }
+}
+
+/// The kind gate, against a real GitLab row rather than a string. A GitLab
+/// token in `GH_TOKEN` authenticates nothing and blames GitHub for it.
+#[tokio::test]
+async fn a_gitlab_remote_is_handed_nothing_even_holding_a_token() {
+    let (state, _, _, _, owner) = fixture().await;
+    state
+        .vault
+        .put(
+            crate::vault::Key::of(crate::vault::GIT, "gitlab", &owner),
+            "glpat_from_the_vault",
+            "test",
+        )
+        .await
+        .unwrap();
+
+    let env =
+        super::sessions::gh_env(&state, "git@gitlab.com:acme/backend.git", &owner, "test").await;
+
+    assert!(env.is_empty(), "{env:?}");
+}
+
+/// Holding nothing is not an error — it is a workspace whose `gh` is no worse
+/// off than it was before any of this existed.
+#[tokio::test]
+async fn holding_no_token_hands_nothing_over() {
+    let (state, _, _, _, owner) = fixture().await;
+
+    let env =
+        super::sessions::gh_env(&state, "git@github.com:acme/backend.git", &owner, "test").await;
+
+    assert!(env.is_empty(), "{env:?}");
+}
+
+/// A remote on a host nobody connected resolves to no connection at all, which
+/// is the ordinary case for a local path or somebody's private git server.
+#[tokio::test]
+async fn a_remote_on_no_connected_host_hands_nothing_over() {
+    let (state, _, _, _, owner) = fixture().await;
+
+    let env =
+        super::sessions::gh_env(&state, "git@git.example.invalid:acme/x.git", &owner, "test").await;
+
+    assert!(env.is_empty(), "{env:?}");
+}
+
+/// The vault is per person, and so is this. Handing one person's token to
+/// another person's session is the failure the vault's own key shape exists to
+/// prevent, so it is worth asserting on the way out as well as on the way in.
+#[tokio::test]
+async fn one_persons_token_is_not_handed_to_another() {
+    let (state, _, _, _, owner) = fixture().await;
+    state
+        .vault
+        .put(
+            crate::vault::Key::of(crate::vault::GIT, "github", &owner),
+            "gho_mine",
+            "test",
+        )
+        .await
+        .unwrap();
+
+    let env = super::sessions::gh_env(
+        &state,
+        "git@github.com:acme/backend.git",
+        "somebody-else",
+        "test",
+    )
+    .await;
+
+    assert!(env.is_empty(), "{env:?}");
+}
