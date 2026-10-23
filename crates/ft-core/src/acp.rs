@@ -240,6 +240,34 @@ fn pair(now: Option<u64>, before: Option<u64>) -> Option<u64> {
     Some(now?.saturating_sub(before.unwrap_or(0)))
 }
 
+/// The model an ACP model option names, where it names one.
+///
+/// Two agents spell this differently and only one of them spells it as a model.
+/// Kimi's options are bare identifiers — `kimi-code/kimi-for-coding` — and pass
+/// through untouched. Cursor's carry the settings they run under:
+///
+/// ```text
+/// grok-4.7[context=256k,reasoning_effort=high,fast=true]
+/// claude-opus-5[thinking=true,context=300k,effort=high,fast=false]
+/// default[]
+/// ```
+///
+/// The bracket is configuration, not identity. Kept, it would put one row per
+/// combination of settings somebody happened to try on a page whose question is
+/// "which models did the work" — and the full string is unreadable at the width
+/// a table gives it.
+///
+/// `default` is the odd one. It is Cursor's **Auto**: no model chosen, the agent
+/// picking per turn. Reporting it would file a setting under a column of models,
+/// and inventing the model it resolved to is not available — Cursor names the
+/// real one only on hooks it does not fire outside its own terminal. So it names
+/// nothing, and `record_consumption` falls back to the agent, which is the true
+/// statement rather than a guess.
+fn model_named(value: &str) -> Option<&str> {
+    let name = value.split_once('[').map_or(value, |(name, _)| name).trim();
+    (!name.is_empty() && name != "default").then_some(name)
+}
+
 /// Preserve the agent's option IDs, including the distinction between one-off
 /// and persistent approval. Unsupported decisions cancel rather than allow.
 pub fn permission_outcome(options: &Value, decision: &Decision) -> Value {
@@ -349,6 +377,7 @@ impl AcpNormaliser {
             .iter()
             .find(|(_, c)| c.kind == ControlKind::Model)
             .and_then(|(_, c)| c.current.as_deref())
+            .and_then(model_named)
     }
 
     /// How full the context is, as the agent last said.

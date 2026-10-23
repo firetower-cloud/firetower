@@ -6032,6 +6032,13 @@ mod tests {
 #[serde(rename_all = "camelCase")]
 pub enum Dimension {
     Task,
+    /// Which agent did the work.
+    ///
+    /// Distinct from the model and worth its own cut: one agent runs several
+    /// models, and an agent that reports no model at all — Cursor on Auto —
+    /// is invisible under `Model` while being exactly the thing somebody is
+    /// trying to count when they ask what the fleet is running.
+    Agent,
     Model,
     Person,
     Repository,
@@ -6046,6 +6053,7 @@ impl Dimension {
     fn columns(self) -> (&'static str, &'static str) {
         match self {
             Self::Task => ("c.task_key", "t.title"),
+            Self::Agent => ("c.agent", "c.agent"),
             Self::Model => ("c.model", "c.model"),
             Self::Person => ("c.ran_as", "p.name"),
             Self::Repository => ("c.repo_remote", "c.repo_remote"),
@@ -6456,7 +6464,7 @@ impl Db {
         match by {
             Dimension::Task => "workspaces",
             Dimension::Person => "tasks",
-            Dimension::Model | Dimension::Subscription => "people",
+            Dimension::Agent | Dimension::Model | Dimension::Subscription => "people",
             Dimension::Repository | Dimension::Directory => "tasks",
             Dimension::Workspace => "turns",
         }
@@ -6593,7 +6601,7 @@ impl Db {
         match by {
             Dimension::Task => "c.workspace_id",
             Dimension::Person => "c.task_key",
-            Dimension::Model | Dimension::Subscription => "c.ran_as",
+            Dimension::Agent | Dimension::Model | Dimension::Subscription => "c.ran_as",
             Dimension::Repository | Dimension::Directory => "c.task_key",
             // A turn is a session and a turn id together, which is why this
             // returns an expression rather than a column name.

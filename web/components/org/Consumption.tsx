@@ -30,7 +30,7 @@ import { useListAccounts } from "@/src/api/generated/accounts/accounts";
 import { useListColleagues, useListTeams } from "@/src/api/generated/access/access";
 import type { Account, ByModel, Direction, Group, Limit, Sort, Totals } from "@/src/api/generated/model";
 import { Choose, Icon, PageHead, useAnchor } from "@/components/ui";
-import { AGENT_SHORT } from "@/components/AgentMark";
+import { AGENT_LABEL, AGENT_SHORT } from "@/components/AgentMark";
 import { untilText } from "@/src/filing";
 
 /* ── the vocabulary ───────────────────────────────────────────────────── */
@@ -44,6 +44,7 @@ type RangeKey = keyof typeof RANGES;
 
 const GROUPS = {
   task: "task",
+  agent: "agent",
   model: "model",
   person: "person",
   repository: "repository",
@@ -83,6 +84,7 @@ const SORTS: { value: Sort; field: string; up: string; down: string; starts: Dir
 const BREADTH: Record<GroupKey, string> = {
   task: "workspaces",
   person: "tasks",
+  agent: "people",
   model: "people",
   subscription: "people",
   repository: "tasks",
@@ -1518,7 +1520,7 @@ function Line({
   // a child as long as its parent reads as equal to it.
   const span = nested ? 68 : 100;
   const width = Math.min(span, Math.max(4, (g.tokens / scale) * span));
-  const head = g.name ?? unnamed(g, by);
+  const head = g.name ? named(g.name) : unnamed(g, by);
   const show = (e: { clientX: number; clientY: number }) =>
     onTip({ x: e.clientX, y: e.clientY, head, models: g.models });
 
@@ -1552,7 +1554,7 @@ function Line({
             />
           )}
           <span className={`truncate ${nested ? "text-ui text-text" : "text-body"} ${g.name ? "text-bone" : "italic text-dim"}`}>
-            {g.name ?? unnamed(g, by)}
+            {g.name ? named(g.name) : unnamed(g, by)}
           </span>
         </div>
         {!nested && (
@@ -1584,6 +1586,21 @@ function unnamed(g: Group, by: GroupKey) {
   if (by === "task") return g.key ? "Title unavailable" : "No task assigned";
   if (by === "subscription") return "No subscription";
   return g.key ?? "Unknown";
+}
+
+/**
+ * An agent is stored as its variant and read as its name.
+ *
+ * `CursorAgent` is how the column spells it and `Cursor Agent` is what this
+ * install calls it, the same distinction the composer already makes.
+ *
+ * Applied to the model column too, and not only to the agent one. A turn whose
+ * agent named no model is billed to the agent instead — which is what Cursor on
+ * Auto does on every turn — so the variant turns up under models as well, and
+ * there is no model called `CursorAgent` for this to collide with.
+ */
+function named(name: string) {
+  return AGENT_LABEL[name as keyof typeof AGENT_LABEL] ?? name;
 }
 
 /* ── controls ─────────────────────────────────────────────────────────── */

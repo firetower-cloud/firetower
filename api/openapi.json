@@ -9221,6 +9221,7 @@
         "description": "Which way to cut the ledger.\n\nAn enum rather than a string from the query, because these become SQL. The\nshape of every one is the same — a key to group on and a name to draw — so\nadding the next dimension is two lines here and nothing anywhere else.",
         "enum": [
           "task",
+          "agent",
           "model",
           "person",
           "repository",

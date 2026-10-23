@@ -18,6 +18,7 @@ export type Dimension = typeof Dimension[keyof typeof Dimension];
 
 export const Dimension = {
   task: 'task',
+  agent: 'agent',
   model: 'model',
   person: 'person',
   repository: 'repository',

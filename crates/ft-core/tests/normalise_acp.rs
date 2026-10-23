@@ -706,3 +706,49 @@ fn a_cursor_turn_is_recorded_even_though_nothing_was_reported() {
         "Cursor sends no gauge either, on any turn",
     );
 }
+
+/// A model option names a model, or it names nothing.
+///
+/// Cursor's options carry the settings they run under, and one of them is not a
+/// model at all. Both were landing in the usage page's model column verbatim:
+/// `default[]` as though "Auto" were something a model is called, and a real
+/// model as one row per combination of settings anybody had tried.
+#[test]
+fn a_cursor_model_option_is_read_as_the_model_and_not_its_settings() {
+    let picked = |value: &str| {
+        let mut reader = AcpNormaliser::default();
+        let options = json!([{
+            "id":"model","category":"model","name":"Model","type":"select",
+            "currentValue":value,
+            "options":[{"value":"default[]","name":"Auto"},
+                       {"value":"grok-4.7[context=256k,fast=true]","name":"grok-4.7"}]}]);
+        for record in [
+            Record::Started { epoch: "e".into() },
+            Record::Sent {
+                message: json!({"id":2,"method":"session/load","params":{"sessionId":"s"}}),
+            },
+            Record::Received {
+                message: json!({"id":2,"result":{"configOptions":options}}),
+                replay: true,
+            },
+            Record::Ready {
+                session: "s".into(),
+            },
+        ] {
+            reader.push(&serde_json::to_string(&record).unwrap());
+        }
+        reader.model().map(str::to_owned)
+    };
+
+    assert_eq!(
+        picked("grok-4.7[context=256k,fast=true]").as_deref(),
+        Some("grok-4.7"),
+        "the bracket is how the model is configured, not what it is called",
+    );
+    assert_eq!(
+        picked("default[]"),
+        None,
+        "Auto names no model; the row falls back to the agent rather than \
+         filing a setting under a column of models",
+    );
+}
