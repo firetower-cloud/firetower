@@ -107,7 +107,7 @@ and a work one, or two GitLabs. See [Git hosts](docs/git-hosts.md).
 | OpenCode | Looking for contributions |
 | Grok| Looking for contributions |
 | Cursor Agent | Supported |
-| Kimi | Experimental (ACP) |
+| Kimi | Supported |
 | Hermes | Looking for contributions |
 
 ## Licence

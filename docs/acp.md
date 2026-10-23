@@ -1,4 +1,4 @@
-# ACP agents (experimental)
+# ACP agents
 
 ## Connect Cursor Agent
 
