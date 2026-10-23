@@ -38,11 +38,13 @@ pub fn added_dir(workspace: &Path, id: &SessionId) -> PathBuf {
 /// `None` for an agent that has no way to read them, which is only the shell.
 pub fn root(workspace: &Path, id: &SessionId, agent: Agent) -> Option<PathBuf> {
     match agent.skills_home()? {
-        // `skills/` inside the home the agent is already given per session.
-        SkillsHome::AgentHome => Some(
+        // Inside the home the agent is already given per session, at whatever
+        // path that agent reads — `skills/` for Codex and Kimi,
+        // `.cursor/skills/` for Cursor.
+        SkillsHome::AgentHome(under) => Some(
             agentd::dir_for(workspace)
                 .join(format!("agent-home-{}", id.as_str()))
-                .join("skills"),
+                .join(under),
         ),
         // Claude Code reads `<added>/.claude/skills/<name>/`.
         SkillsHome::AddedDirectory => Some(added_dir(workspace, id).join(".claude").join("skills")),

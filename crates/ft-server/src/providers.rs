@@ -557,6 +557,10 @@ pub fn api_base_for(kind: &'static Kind, base_url: &str) -> String {
 pub struct PendingAuth {
     /// The short code. Always shown, even where the link below carries it, so
     /// somebody can check the page is showing the code they were given.
+    ///
+    /// Empty where there is no code to check: an agent login that is link-only
+    /// — Cursor approves in the browser and hands the credential back — has
+    /// nothing to type, and a client reads an empty string as "show the link".
     pub user_code: String,
     /// Where to type it.
     ///

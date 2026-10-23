@@ -5,8 +5,25 @@ use std::{ffi::OsStr, path::Path, time::Duration};
 use tokio::process::Command;
 
 async fn output(program: &str, args: &[&str], path: &OsStr) -> Option<String> {
+    output_with_env(program, args, path, &[]).await
+}
+
+async fn output_with_env(
+    program: &str,
+    args: &[&str],
+    path: &OsStr,
+    env: &[(&str, &str)],
+) -> Option<String> {
     let mut command = Command::new(program);
-    command.args(args).env("PATH", path).kill_on_drop(true);
+    // What the agent needs to answer at all — see `Agent::env`.
+    command.envs(env.iter().copied());
+    // The daemon's stdin carries frames. A CLI probe may temporarily put its
+    // inherited stdin in nonblocking mode; give it no access to that pipe.
+    command
+        .args(args)
+        .env("PATH", path)
+        .stdin(std::process::Stdio::null())
+        .kill_on_drop(true);
     let result = tokio::time::timeout(Duration::from_secs(3), command.output())
         .await
         .ok()?
@@ -33,7 +50,20 @@ async fn tool(
     remedy: &str,
     path: &OsStr,
 ) -> Requirement {
-    let found = output(program, args, path).await;
+    tool_with_env(name, program, args, required, remedy, path, &[]).await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn tool_with_env(
+    name: &str,
+    program: &str,
+    args: &[&str],
+    required: bool,
+    remedy: &str,
+    path: &OsStr,
+    env: &[(&str, &str)],
+) -> Requirement {
+    let found = output_with_env(program, args, path, env).await;
     Requirement {
         name: name.into(),
         available: found.is_some(),
@@ -123,8 +153,8 @@ async fn check_with_path(root: &Path, agent: Option<Agent>, path: &OsStr) -> Rea
         ),
     });
     if let Some(agent) = agent {
-        checks.push(tool(agent.label(), agent.command(), &["--version"], true,
-            "Install this agent on the machine, or let Firetower fetch it: the readiness panel offers Install, and `firetower-worker agents add` does the same by hand.", path).await);
+        checks.push(tool_with_env(agent.label(), agent.command(), &["--version"], true,
+            "Install this agent on the machine, or let Firetower fetch it: the readiness panel offers Install, and `firetower-worker agents add` does the same by hand.", path, agent.env()).await);
         // Answering `--version` is the whole of what the check above proves,
         // and for Codex that is not enough to run a session.
         if agent == Agent::Codex {

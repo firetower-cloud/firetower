@@ -48,7 +48,7 @@ export const ListProvidersResponseItem = zod.object({
   "label": zod.string(),
   "maySetApplication": zod.boolean().describe('Whether the caller may register the application this whole installation\nauthorizes against.\n\nSent rather than worked out by each client, the way `may_upgrade` is.\nThe rule is the server\'s — one application per host, no owner, and\nwhoever sets it decides what everybody here authorizes next — and a copy\nof it in three interfaces is three copies to keep in step.'),
   "pending": zod.union([zod.null(),zod.object({
-  "userCode": zod.string().describe('The short code. Always shown, even where the link below carries it, so\nsomebody can check the page is showing the code they were given.'),
+  "userCode": zod.string().describe('The short code. Always shown, even where the link below carries it, so\nsomebody can check the page is showing the code they were given.\n\nEmpty where there is no code to check: an agent login that is link-only\n— Cursor approves in the browser and hands the credential back — has\nnothing to type, and a client reads an empty string as "show the link".'),
   "verificationUri": zod.string().describe('Where to type it.\n\nThe host\'s page with the code already filled in, where the host offers\none — GitLab does, GitHub does not — and the bare page otherwise. The\ninterface opens this and does not need to know which it got.')
 }).describe('Set while an authorization is in flight.')]).optional(),
   "sharedApplication": zod.boolean().describe('The application in use is the one Firetower ships, not one registered\nhere.\n\nDrawn as a line offering to replace it, because there are two reasons\nsomebody would want to: the approval screen carries our name and asks\nfor broad access, and the shared application\'s 50-authorizations-an-hour\nceiling is drawn on by every other installation using it.'),
@@ -94,7 +94,7 @@ export const CreateProviderResponse = zod.object({
   "label": zod.string(),
   "maySetApplication": zod.boolean().describe('Whether the caller may register the application this whole installation\nauthorizes against.\n\nSent rather than worked out by each client, the way `may_upgrade` is.\nThe rule is the server\'s — one application per host, no owner, and\nwhoever sets it decides what everybody here authorizes next — and a copy\nof it in three interfaces is three copies to keep in step.'),
   "pending": zod.union([zod.null(),zod.object({
-  "userCode": zod.string().describe('The short code. Always shown, even where the link below carries it, so\nsomebody can check the page is showing the code they were given.'),
+  "userCode": zod.string().describe('The short code. Always shown, even where the link below carries it, so\nsomebody can check the page is showing the code they were given.\n\nEmpty where there is no code to check: an agent login that is link-only\n— Cursor approves in the browser and hands the credential back — has\nnothing to type, and a client reads an empty string as "show the link".'),
   "verificationUri": zod.string().describe('Where to type it.\n\nThe host\'s page with the code already filled in, where the host offers\none — GitLab does, GitHub does not — and the bare page otherwise. The\ninterface opens this and does not need to know which it got.')
 }).describe('Set while an authorization is in flight.')]).optional(),
   "sharedApplication": zod.boolean().describe('The application in use is the one Firetower ships, not one registered\nhere.\n\nDrawn as a line offering to replace it, because there are two reasons\nsomebody would want to: the approval screen carries our name and asks\nfor broad access, and the shared application\'s 50-authorizations-an-hour\nceiling is drawn on by every other installation using it.'),
@@ -163,7 +163,7 @@ export const UpdateProviderResponse = zod.object({
   "label": zod.string(),
   "maySetApplication": zod.boolean().describe('Whether the caller may register the application this whole installation\nauthorizes against.\n\nSent rather than worked out by each client, the way `may_upgrade` is.\nThe rule is the server\'s — one application per host, no owner, and\nwhoever sets it decides what everybody here authorizes next — and a copy\nof it in three interfaces is three copies to keep in step.'),
   "pending": zod.union([zod.null(),zod.object({
-  "userCode": zod.string().describe('The short code. Always shown, even where the link below carries it, so\nsomebody can check the page is showing the code they were given.'),
+  "userCode": zod.string().describe('The short code. Always shown, even where the link below carries it, so\nsomebody can check the page is showing the code they were given.\n\nEmpty where there is no code to check: an agent login that is link-only\n— Cursor approves in the browser and hands the credential back — has\nnothing to type, and a client reads an empty string as "show the link".'),
   "verificationUri": zod.string().describe('Where to type it.\n\nThe host\'s page with the code already filled in, where the host offers\none — GitLab does, GitHub does not — and the bare page otherwise. The\ninterface opens this and does not need to know which it got.')
 }).describe('Set while an authorization is in flight.')]).optional(),
   "sharedApplication": zod.boolean().describe('The application in use is the one Firetower ships, not one registered\nhere.\n\nDrawn as a line offering to replace it, because there are two reasons\nsomebody would want to: the approval screen carries our name and asks\nfor broad access, and the shared application\'s 50-authorizations-an-hour\nceiling is drawn on by every other installation using it.'),
@@ -190,7 +190,7 @@ export const AuthorizeProviderParams = zod.object({
 })
 
 export const AuthorizeProviderResponse = zod.object({
-  "userCode": zod.string().describe('The short code. Always shown, even where the link below carries it, so\nsomebody can check the page is showing the code they were given.'),
+  "userCode": zod.string().describe('The short code. Always shown, even where the link below carries it, so\nsomebody can check the page is showing the code they were given.\n\nEmpty where there is no code to check: an agent login that is link-only\n— Cursor approves in the browser and hands the credential back — has\nnothing to type, and a client reads an empty string as "show the link".'),
   "verificationUri": zod.string().describe('Where to type it.\n\nThe host\'s page with the code already filled in, where the host offers\none — GitLab does, GitHub does not — and the bare page otherwise. The\ninterface opens this and does not need to know which it got.')
 }).describe('A device authorization waiting for someone to approve it in a browser.')
 

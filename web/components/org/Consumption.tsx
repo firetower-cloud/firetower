@@ -30,7 +30,7 @@ import { useListAccounts } from "@/src/api/generated/accounts/accounts";
 import { useListColleagues, useListTeams } from "@/src/api/generated/access/access";
 import type { Account, ByModel, Direction, Group, Limit, Sort, Totals } from "@/src/api/generated/model";
 import { Choose, Icon, PageHead, useAnchor } from "@/components/ui";
-import { AGENT_SHORT } from "@/components/AgentMark";
+import { AGENT_LABEL, AGENT_SHORT } from "@/components/AgentMark";
 import { untilText } from "@/src/filing";
 
 /* ── the vocabulary ───────────────────────────────────────────────────── */
@@ -44,6 +44,7 @@ type RangeKey = keyof typeof RANGES;
 
 const GROUPS = {
   task: "task",
+  agent: "agent",
   model: "model",
   person: "person",
   repository: "repository",
@@ -83,6 +84,7 @@ const SORTS: { value: Sort; field: string; up: string; down: string; starts: Dir
 const BREADTH: Record<GroupKey, string> = {
   task: "workspaces",
   person: "tasks",
+  agent: "people",
   model: "people",
   subscription: "people",
   repository: "tasks",
@@ -437,6 +439,32 @@ export function Consumption() {
                 note={t ? "Ran an agent in this period." : ""}
               />
             </div>
+
+            {/* Said once, plainly, rather than left for somebody to notice the
+                numbers are short. These turns ran and are counted as turns;
+                what they spent is the thing nobody told us.
+
+                It earns its place back because an agent now exists that reports
+                nothing on any turn, rather than only on its first. Cursor sends
+                neither a bill nor a context gauge, so without this line its
+                work appears in every count on this page and in none of the
+                totals, with nothing saying why.
+
+                No agent is named. Which of them report is a moving fact — the
+                hooks that would carry Cursor's tokens are a gap its own team
+                has said it means to close — and a sentence that names one goes
+                stale facing the person it misleads. There is no agent grouping
+                to send anybody to either, so this line is the whole of what
+                the page says about it. */}
+            {t && t.unreportedTurns > 0 && (
+              <p className="mt-5 max-w-[68ch] text-ui text-mute">
+                <span className="text-dim">
+                  {plural(t.unreportedTurns, "turn")} above {t.unreportedTurns === 1 ? "has" : "have"} no
+                  tokens counted.
+                </span>{" "}
+                Their agent reported none, so they are in the turn count and not in the totals.
+              </p>
+            )}
           </>
         )}
       </section>
@@ -1492,7 +1520,7 @@ function Line({
   // a child as long as its parent reads as equal to it.
   const span = nested ? 68 : 100;
   const width = Math.min(span, Math.max(4, (g.tokens / scale) * span));
-  const head = g.name ?? unnamed(g, by);
+  const head = g.name ? named(g.name) : unnamed(g, by);
   const show = (e: { clientX: number; clientY: number }) =>
     onTip({ x: e.clientX, y: e.clientY, head, models: g.models });
 
@@ -1526,7 +1554,7 @@ function Line({
             />
           )}
           <span className={`truncate ${nested ? "text-ui text-text" : "text-body"} ${g.name ? "text-bone" : "italic text-dim"}`}>
-            {g.name ?? unnamed(g, by)}
+            {g.name ? named(g.name) : unnamed(g, by)}
           </span>
         </div>
         {!nested && (
@@ -1558,6 +1586,21 @@ function unnamed(g: Group, by: GroupKey) {
   if (by === "task") return g.key ? "Title unavailable" : "No task assigned";
   if (by === "subscription") return "No subscription";
   return g.key ?? "Unknown";
+}
+
+/**
+ * An agent is stored as its variant and read as its name.
+ *
+ * `CursorAgent` is how the column spells it and `Cursor Agent` is what this
+ * install calls it, the same distinction the composer already makes.
+ *
+ * Applied to the model column too, and not only to the agent one. A turn whose
+ * agent named no model is billed to the agent instead — which is what Cursor on
+ * Auto does on every turn — so the variant turns up under models as well, and
+ * there is no model called `CursorAgent` for this to collide with.
+ */
+function named(name: string) {
+  return AGENT_LABEL[name as keyof typeof AGENT_LABEL] ?? name;
 }
 
 /* ── controls ─────────────────────────────────────────────────────────── */

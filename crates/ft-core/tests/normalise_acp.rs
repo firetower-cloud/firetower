@@ -127,6 +127,59 @@ fn a_prompt_streams_and_only_its_own_response_completes_it() {
 }
 
 #[test]
+fn cursor_task_is_a_subagent_with_identity_and_completion() {
+    use ft_core::turn::{ItemKind, ItemStatus};
+    let mut reader = AcpNormaliser::default();
+    let records = [
+        Record::Started {
+            epoch: "cursor".into(),
+        },
+        Record::Ready {
+            session: "s".into(),
+        },
+        Record::Sent {
+            message: json!({"id":4,"method":"session/prompt","params":{"sessionId":"s","prompt":[{"type":"text","text":"delegate"}]}}),
+        },
+        Record::Received {
+            message: json!({"method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"tool_call","toolCallId":"call-1","title":"Task: inspect","kind":"other","status":"pending","rawInput":{"prompt":"inspect"}}}}),
+            replay: false,
+        },
+        Record::Received {
+            message: json!({"method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"tool_call_update","toolCallId":"call-1","status":"completed"}}}),
+            replay: false,
+        },
+        Record::Received {
+            message: json!({"method":"cursor/task","params":{"toolCallId":"call-1","description":"inspected","agentId":"agent-42","durationMs":123}}),
+            replay: false,
+        },
+    ];
+    let events: Vec<_> = records
+        .iter()
+        .flat_map(|record| reader.push(&serde_json::to_string(record).unwrap()))
+        .collect();
+    assert!(events.iter().any(|e| matches!(
+        e,
+        TurnEvent::ItemStarted {
+            kind: ItemKind::SubagentCall,
+            ..
+        }
+    )));
+    assert!(events
+        .iter()
+        .any(|e| matches!(e, TurnEvent::TaskStarted { task, .. } if task.as_str() == "call-1")));
+    assert!(events.iter().any(
+        |e| matches!(e, TurnEvent::TaskProgress { detail, .. } if detail.contains("agent-42"))
+    ));
+    assert!(events.iter().any(|e| matches!(
+        e,
+        TurnEvent::TaskCompleted {
+            status: ItemStatus::Completed,
+            ..
+        }
+    )));
+}
+
+#[test]
 fn permissions_use_the_offered_ids_and_never_upgrade_a_one_off_allow() {
     use ft_core::{acp::permission_outcome, turn::Decision};
     let options = json!([{"kind":"allow_always","optionId":"forever"},{"kind":"reject_once","optionId":"no"}]);
@@ -293,13 +346,22 @@ fn a_kimi_turn_reports_a_context_gauge_and_no_bill() {
     let (usage, status) = ended[0];
     assert_eq!(*status, TurnStatus::Completed);
 
-    // And the turn itself is billed nothing at all — not zero tokens, nothing.
-    // The gauge is a message later than the reply that ends the turn, so the
-    // first turn of a connection has neither a bill nor a gauge to carry, and
-    // inventing one of either would be the page's first wrong number.
-    assert!(
-        usage.is_none(),
-        "a turn whose agent said nothing about tokens reports nothing: {usage:?}",
+    // The turn is recorded, and what it is recorded with is nothing: no tokens
+    // and — on this first turn — not even a gauge, because `usage_update` is a
+    // message later than the reply that ends it.
+    //
+    // A row rather than silence. The zeros are disowned downstream by
+    // `tokens_known`, so the page can say the turn happened and that nobody
+    // said what it cost, which are two different facts and both true.
+    let usage = usage.as_ref().expect("a turn that happened is recorded");
+    assert_eq!(
+        (usage.input_tokens, usage.output_tokens),
+        (0, 0),
+        "nothing was reported, so nothing is claimed",
+    );
+    assert_eq!(
+        usage.context_used, None,
+        "the gauge arrives after this reply, so this turn carries none",
     );
 }
 
@@ -573,4 +635,120 @@ fn a_turn_that_never_reached_a_model_is_not_reported_as_finished() {
     // failure would be a far worse bug than the one being fixed.
     let (status, _) = turn(&mut reader, 4, None);
     assert_eq!(status, TurnStatus::Completed);
+}
+
+/// Cursor says nothing about what a turn cost, and the turn is recorded anyway.
+///
+/// Not a gap in this parser. Verified against `cursor-agent 2026.09.28-64d2043`
+/// by driving a real ACP turn with a real account: its adapter answers a
+/// finished prompt with `{"stopReason":"end_turn"}`, sends no `usage_update`,
+/// and the string `usage` does not occur in that adapter at all. Its hooks
+/// carry no tokens either — `afterAgentResponse` and `stop`, the only two that
+/// would, are the two Cursor does not fire outside its own terminal.
+///
+/// So there is nothing to bill, and that is exactly why the row matters. It was
+/// once gated on the agent having sent a context gauge, which every other ACP
+/// agent happens to send and Cursor never does — so Cursor's turns were dropped
+/// whole: no tokens, no turn count, no session count, absent from the usage
+/// page and from the telemetry digest together. Absent and free are different
+/// claims, and neither of them was true.
+///
+/// What is asserted here is the honest middle: the turn is recorded, and it is
+/// recorded as nothing. `tokens_known` is what says which of the two it is.
+#[test]
+fn a_cursor_turn_is_recorded_even_though_nothing_was_reported() {
+    let mut reader = AcpNormaliser::default();
+    let records = [
+        Record::Started {
+            epoch: "run1".into(),
+        },
+        Record::Ready {
+            session: "s".into(),
+        },
+        Record::Sent {
+            message: json!({"id":3,"method":"session/prompt","params":{"sessionId":"s","prompt":[{"type":"text","text":"hello"}]}}),
+        },
+        Record::Received {
+            message: json!({"method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Hi"}}}}),
+            replay: false,
+        },
+        // Exactly what Cursor's adapter builds, and all of it.
+        Record::Received {
+            message: json!({"id":3,"result":{"stopReason":"end_turn"}}),
+            replay: false,
+        },
+    ];
+    let mut events = Vec::new();
+    for record in records {
+        events.extend(reader.push(&serde_json::to_string(&record).unwrap()));
+    }
+
+    let (usage, status) = events
+        .iter()
+        .find_map(|e| match e {
+            TurnEvent::TurnCompleted { usage, status, .. } => Some((usage, status)),
+            _ => None,
+        })
+        .expect("the turn completed");
+    assert_eq!(*status, TurnStatus::Completed);
+
+    let usage = usage.as_ref().expect(
+        "a Cursor turn must still be recorded, or the agent is absent from the \
+         usage page and the telemetry digest rather than merely unreported",
+    );
+    assert_eq!(
+        (usage.input_tokens, usage.output_tokens),
+        (0, 0),
+        "Cursor reported no tokens, so none are claimed",
+    );
+    assert_eq!(
+        usage.context_used, None,
+        "Cursor sends no gauge either, on any turn",
+    );
+}
+
+/// A model option names a model, or it names nothing.
+///
+/// Cursor's options carry the settings they run under, and one of them is not a
+/// model at all. Both were landing in the usage page's model column verbatim:
+/// `default[]` as though "Auto" were something a model is called, and a real
+/// model as one row per combination of settings anybody had tried.
+#[test]
+fn a_cursor_model_option_is_read_as_the_model_and_not_its_settings() {
+    let picked = |value: &str| {
+        let mut reader = AcpNormaliser::default();
+        let options = json!([{
+            "id":"model","category":"model","name":"Model","type":"select",
+            "currentValue":value,
+            "options":[{"value":"default[]","name":"Auto"},
+                       {"value":"grok-4.7[context=256k,fast=true]","name":"grok-4.7"}]}]);
+        for record in [
+            Record::Started { epoch: "e".into() },
+            Record::Sent {
+                message: json!({"id":2,"method":"session/load","params":{"sessionId":"s"}}),
+            },
+            Record::Received {
+                message: json!({"id":2,"result":{"configOptions":options}}),
+                replay: true,
+            },
+            Record::Ready {
+                session: "s".into(),
+            },
+        ] {
+            reader.push(&serde_json::to_string(&record).unwrap());
+        }
+        reader.model().map(str::to_owned)
+    };
+
+    assert_eq!(
+        picked("grok-4.7[context=256k,fast=true]").as_deref(),
+        Some("grok-4.7"),
+        "the bracket is how the model is configured, not what it is called",
+    );
+    assert_eq!(
+        picked("default[]"),
+        None,
+        "Auto names no model; the row falls back to the agent rather than \
+         filing a setting under a column of models",
+    );
 }

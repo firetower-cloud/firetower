@@ -178,6 +178,8 @@ enum Command {
         session: String,
         #[arg(long)]
         workspace: std::path::PathBuf,
+        #[arg(long, default_value = "KimiCode")]
+        agent: String,
     },
     /// Answer the agent's permission prompts. Run by the agent, never by hand.
     ///
@@ -256,8 +258,13 @@ async fn main() -> Result<()> {
             ft_worker::entry::run_agent(&session, workspace, &agent).await
         }
 
-        Some(Command::AcpRun { session, workspace }) => {
-            return ft_worker::acp::run(&session, &workspace).await;
+        Some(Command::AcpRun {
+            session,
+            workspace,
+            agent,
+        }) => {
+            let kind = ft_core::Agent::from_name(&agent).context("unknown ACP agent")?;
+            return ft_worker::acp::run(&session, &workspace, kind).await;
         }
         Some(Command::McpApprove { session, workspace }) => {
             // No tracing anywhere near this: stdout carries the protocol, and

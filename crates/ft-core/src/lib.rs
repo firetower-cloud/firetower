@@ -64,6 +64,7 @@ pub enum Agent {
     ClaudeCode,
     Codex,
     KimiCode,
+    CursorAgent,
     /// A plain shell. Not offered — see [`Agent::all`].
     Shell,
 }
@@ -82,8 +83,13 @@ impl Agent {
     /// network, and a session row that already says `Shell` still decodes.
     ///
     /// [`Shell`]: Agent::Shell
-    pub fn all() -> [Agent; 3] {
-        [Agent::ClaudeCode, Agent::Codex, Agent::KimiCode]
+    pub fn all() -> [Agent; 4] {
+        [
+            Agent::ClaudeCode,
+            Agent::Codex,
+            Agent::KimiCode,
+            Agent::CursorAgent,
+        ]
     }
 
     /// What it's called in the interface.
@@ -92,6 +98,7 @@ impl Agent {
             Agent::ClaudeCode => "Claude Code",
             Agent::Codex => "Codex",
             Agent::KimiCode => "Kimi Code",
+            Agent::CursorAgent => "Cursor Agent",
             Agent::Shell => "Shell",
         }
     }
@@ -107,6 +114,7 @@ impl Agent {
             Agent::ClaudeCode => "claude",
             Agent::Codex => "codex",
             Agent::KimiCode => "kimi",
+            Agent::CursorAgent => "cursor-agent",
             Agent::Shell => "bash",
         }
     }
@@ -118,7 +126,7 @@ impl Agent {
     /// one, and fetching it would be absurd.
     pub fn installable(&self) -> bool {
         match self {
-            Agent::ClaudeCode | Agent::Codex | Agent::KimiCode => true,
+            Agent::ClaudeCode | Agent::Codex | Agent::KimiCode | Agent::CursorAgent => true,
             Agent::Shell => false,
         }
     }
@@ -242,6 +250,7 @@ impl Agent {
             // in `thread/start` here, which is why this is so short.
             Agent::Codex => Some(vec![self.command().to_string(), "app-server".to_string()]),
             Agent::KimiCode => Some(vec!["kimi".into(), "acp".into()]),
+            Agent::CursorAgent => Some(vec!["cursor-agent".into(), "acp".into()]),
             Agent::Shell => None,
         }
     }
@@ -267,7 +276,7 @@ impl Agent {
                 }
             }
             Agent::Codex => crate::codex::opening(cwd, preferred),
-            Agent::KimiCode => {
+            Agent::KimiCode | Agent::CursorAgent => {
                 if prompt.trim().is_empty() {
                     Vec::new()
                 } else {
@@ -291,11 +300,12 @@ impl Agent {
     /// [`all`](Agent::all) must not turn an old row into an error.
     ///
     /// [`Shell`]: Agent::Shell
-    pub fn every() -> [Agent; 4] {
+    pub fn every() -> [Agent; 5] {
         [
             Agent::ClaudeCode,
             Agent::Codex,
             Agent::KimiCode,
+            Agent::CursorAgent,
             Agent::Shell,
         ]
     }
@@ -944,8 +954,13 @@ pub enum AgentMode {
 /// How an agent is told where this session's skills are.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SkillsHome {
-    /// `skills/` inside the directory [`Agent::home_var`] already points at.
-    AgentHome,
+    /// A path inside the directory [`Agent::home_var`] already points at.
+    ///
+    /// Carries the path rather than assuming `skills/`, because an agent that
+    /// reads a home is not thereby an agent that reads the same place in it:
+    /// Codex and Kimi take `skills/`, Cursor takes `.cursor/skills/`. One
+    /// concept with the path named, rather than a variant per agent.
+    AgentHome(&'static str),
     /// A directory of its own, handed over on the command line.
     AddedDirectory,
 }
@@ -1081,7 +1096,7 @@ impl Agent {
     pub fn auth_status_command(&self) -> Option<&'static [&'static str]> {
         match self {
             Agent::ClaudeCode => Some(&["auth", "status"]),
-            Agent::Codex | Agent::KimiCode | Agent::Shell => None,
+            Agent::Codex | Agent::KimiCode | Agent::CursorAgent | Agent::Shell => None,
         }
     }
 
@@ -1094,7 +1109,7 @@ impl Agent {
     pub fn token_setup(&self) -> Option<(&'static str, &'static str)> {
         match self {
             Agent::ClaudeCode => Some(("claude setup-token", "CLAUDE_CODE_OAUTH_TOKEN")),
-            Agent::Codex | Agent::KimiCode | Agent::Shell => None,
+            Agent::Codex | Agent::KimiCode | Agent::CursorAgent | Agent::Shell => None,
         }
     }
 
@@ -1105,12 +1120,67 @@ impl Agent {
     /// command that prints a credential, so the only way to get one is to let a
     /// machine ask for it and approve that from a browser.
     ///
-    /// Separate from [`speaks_a_protocol`](Agent::speaks_a_protocol) because
+    /// Cursor's browser link has no short code; this predicate also covers
+    /// that worker-mediated login flow. Separate from
+    /// [`speaks_a_protocol`](Agent::speaks_a_protocol) because
     /// they answer different questions. Signing in is worth offering before
     /// there is a driver to use it — it is the longer half of the setup, and
     /// nothing about it depends on being able to start a session yet.
     pub fn signs_in_with_a_code(&self) -> bool {
-        matches!(self, Agent::Codex | Agent::KimiCode)
+        matches!(self, Agent::Codex | Agent::KimiCode | Agent::CursorAgent)
+    }
+
+    /// Environment this agent needs *every* time it is run, probes included.
+    ///
+    /// Not the session's environment — that carries the home, the skills and
+    /// the person's settings. This is the fixed part without which the CLI
+    /// does not behave, and it belongs here because the places that run an
+    /// agent are not one place: a session launch, a login, a `--version`, an
+    /// auth-status question and a readiness check.
+    ///
+    /// Cursor is why this exists. Its launcher reaches for the macOS Keychain
+    /// unless told to use a file, and a worker's keychain is locked — one
+    /// started by launchd or sshd has no unlocked login keychain at all. So
+    /// `cursor-agent --version` exits 1 with "Your macOS login keychain is
+    /// locked" and prints nothing on stdout, which read as "not on the path":
+    /// the binary installed into a directory named `unknown`, and the Agents
+    /// screen reported it missing from the host it had just been put on.
+    ///
+    /// `NO_OPEN_BROWSER` belongs to the same set. Nothing Firetower runs is
+    /// sitting in front of a browser, and a CLI that opens one on a worker is
+    /// opening it on somebody else's machine.
+    pub fn env(&self) -> &'static [(&'static str, &'static str)] {
+        match self {
+            Agent::CursorAgent => &[
+                ("AGENT_CLI_CREDENTIAL_STORE", "file"),
+                ("NO_OPEN_BROWSER", "1"),
+            ],
+            Agent::ClaudeCode | Agent::Codex | Agent::KimiCode | Agent::Shell => &[],
+        }
+    }
+
+    /// Whether `/usage` is this agent's own bookkeeping command.
+    ///
+    /// Gates the metering probe in `ft_worker::acp`. The advertised command
+    /// list is not enough on its own, because not every agent's list is only
+    /// its own built-ins: Kimi advertises what it answers itself, while Cursor
+    /// advertises `copy-request-id` plus **every slash command and skill it
+    /// found in the project and the home**. So a skill somebody named `usage`
+    /// would look exactly like Kimi's built-in, and the probe would stop being
+    /// bookkeeping and become a real prompt — Cursor passes an unrecognised
+    /// slash command to the model — billed, unjournalled, after every reply.
+    ///
+    /// Verified against `cursor-agent 2026.09.28-64d2043`: its ACP adapter
+    /// reports no usage of any kind. `/usage` there is a terminal screen drawn
+    /// from the dashboard service, and the protocol never sees it.
+    ///
+    /// So this answers "is `/usage` a question we may ask silently", and only
+    /// an agent that documents one says yes.
+    pub fn answers_usage_command(&self) -> bool {
+        match self {
+            Agent::KimiCode => true,
+            Agent::ClaudeCode | Agent::Codex | Agent::CursorAgent | Agent::Shell => false,
+        }
     }
 
     /// The file this agent keeps its credential in, for the ones that use a
@@ -1135,6 +1205,7 @@ impl Agent {
     pub fn credential_file(&self) -> Option<&'static str> {
         match self {
             Agent::Codex => Some("auth.json"),
+            Agent::CursorAgent => Some(".cursor/auth.json"),
             Agent::ClaudeCode | Agent::KimiCode | Agent::Shell => None,
         }
     }
@@ -1147,6 +1218,7 @@ impl Agent {
         match self {
             Agent::Codex => Some("CODEX_HOME"),
             Agent::KimiCode => Some("KIMI_CODE_HOME"),
+            Agent::CursorAgent => Some("HOME"),
             Agent::ClaudeCode | Agent::Shell => None,
         }
     }
@@ -1168,10 +1240,17 @@ impl Agent {
     ///   the host's own `~/.claude`, which is a bigger change than this needs.
     /// * **Codex** and **Kimi** already get a home per session, so `skills/`
     ///   inside it is per session for free.
+    /// * **Cursor Agent** scans a fixed table of `<config>/skills` directories
+    ///   — `.cursor`, `.claude`, `.codex`, `.grok`, `.agents` — under both the
+    ///   project root and the home directory. The project root is somebody's
+    ///   checkout and is shared by every session in the workspace, so the home
+    ///   is the one that is per session; `.cursor/skills` is its own name among
+    ///   those five rather than a borrowed one.
     pub fn skills_home(&self) -> Option<SkillsHome> {
         match self {
             Agent::ClaudeCode => Some(SkillsHome::AddedDirectory),
-            Agent::Codex | Agent::KimiCode => Some(SkillsHome::AgentHome),
+            Agent::Codex | Agent::KimiCode => Some(SkillsHome::AgentHome("skills")),
+            Agent::CursorAgent => Some(SkillsHome::AgentHome(".cursor/skills")),
             Agent::Shell => None,
         }
     }
@@ -1181,7 +1260,7 @@ impl Agent {
         match self {
             Agent::ClaudeCode => Some("ANTHROPIC_API_KEY"),
             Agent::Codex => Some("OPENAI_API_KEY"),
-            Agent::KimiCode | Agent::Shell => None,
+            Agent::KimiCode | Agent::CursorAgent | Agent::Shell => None,
         }
     }
 
@@ -1224,7 +1303,7 @@ impl Agent {
             }),
             // Not because they don't have one, but because nobody has worked
             // out what it wants. An unanswered first run costs a keypress.
-            Agent::Codex | Agent::KimiCode | Agent::Shell => None,
+            Agent::Codex | Agent::KimiCode | Agent::CursorAgent | Agent::Shell => None,
         }
     }
 
@@ -1260,7 +1339,7 @@ impl Agent {
             ],
             // No hooks. See `status_for` — nothing will move these off
             // `Working` and the interface should admit that.
-            Agent::Codex | Agent::KimiCode | Agent::Shell => &[],
+            Agent::Codex | Agent::KimiCode | Agent::CursorAgent | Agent::Shell => &[],
         }
     }
 
@@ -1268,7 +1347,7 @@ impl Agent {
     pub fn hooks_file(&self) -> Option<&'static str> {
         match self {
             Agent::ClaudeCode => Some(".claude/settings.json"),
-            Agent::Codex | Agent::KimiCode | Agent::Shell => None,
+            Agent::Codex | Agent::KimiCode | Agent::CursorAgent | Agent::Shell => None,
         }
     }
 }
@@ -1776,6 +1855,28 @@ mod launch_tests {
             assert!(agent.speaks_a_protocol(), "{agent:?} cannot be driven");
         }
         assert!(!Agent::Shell.speaks_a_protocol());
+    }
+
+    /// Only an agent whose `/usage` is its own may be asked one silently.
+    ///
+    /// Cursor is the case this exists for. It advertises the slash commands
+    /// and skills it found on disk next to its single built-in, so "the list
+    /// mentions `usage`" is not evidence that asking is free there — a skill
+    /// of that name would make the probe a real prompt after every reply.
+    #[test]
+    fn only_an_agent_whose_usage_command_is_its_own_is_metered() {
+        assert!(Agent::KimiCode.answers_usage_command());
+        for agent in [
+            Agent::ClaudeCode,
+            Agent::Codex,
+            Agent::CursorAgent,
+            Agent::Shell,
+        ] {
+            assert!(
+                !agent.answers_usage_command(),
+                "{agent:?} would be asked `/usage` without documenting one"
+            );
+        }
     }
 }
 
