@@ -45,16 +45,44 @@ pub const CODEX_RELEASE_LIST: &str =
 /// The prefix Codex tags its CLI releases with.
 pub const CODEX_TAG_PREFIX: &str = "rust-v";
 
+/// Cursor's own installer, which is where its current build is written down.
+///
+/// There is no feed to ask. `downloads.cursor.com/lab/latest` is a 403, and
+/// nothing else answers with a version — Cursor pins a build inside the script
+/// at this address and republishes the script. So the thing every one of their
+/// users already runs is also the only statement of what is current, and
+/// reading it is reading what they publish.
+pub const CURSOR_INSTALLER: &str = "https://cursor.com/install";
+
 /// Where to ask what the newest published version of one agent is.
 ///
-/// `None` for an agent Firetower does not fetch — there is nothing to be behind.
+/// `None` only for the shell, which has no publisher to ask.
 pub fn newest_url(kind: Agent) -> Option<String> {
     match kind {
         Agent::ClaudeCode => Some(format!("{CLAUDE_RELEASES}/latest")),
         Agent::KimiCode => Some(format!("{KIMI_RELEASES}/latest")),
         Agent::Codex => Some(CODEX_RELEASE_LIST.to_string()),
+        Agent::CursorAgent => Some(CURSOR_INSTALLER.to_string()),
         Agent::Shell => None,
     }
+}
+
+/// The build Cursor's installer fetches, out of the script itself.
+///
+/// The script contains exactly one versioned URL, of the shape
+/// `downloads.cursor.com/lab/<build>/${OS}/${ARCH}/agent-cli-package.tar.gz`,
+/// and `<build>` is the answer. Read rather than guessed: the placeholders are
+/// the script's own shell variables, so the segment after the build is skipped
+/// and only the build is taken.
+///
+/// Strict about the shape for the reason `read_version` is: this address
+/// answering with an HTML error page must not become a version every host is
+/// then told it is behind.
+pub fn cursor_build_in(script: &str) -> Option<String> {
+    const AT: &str = "downloads.cursor.com/lab/";
+    let at = script.find(AT)? + AT.len();
+    let build = script[at..].split('/').next()?;
+    (looks_like_a_version(build) && !build.contains('$')).then(|| build.to_string())
 }
 
 /// The version inside whatever a binary printed.
@@ -115,10 +143,24 @@ mod tests {
 
     /// Only the agents Firetower fetches have somewhere to ask.
     #[test]
-    fn a_shell_has_no_publisher() {
+    fn only_agents_with_supported_latest_feeds_are_polled() {
         assert!(newest_url(Agent::Shell).is_none());
         for kind in Agent::all() {
             assert!(newest_url(kind).is_some(), "{kind:?}");
         }
+    }
+
+    /// Cursor's installer names its build, and nothing else is read as one.
+    #[test]
+    fn the_cursor_build_is_read_out_of_the_installer_and_not_invented() {
+        let script = "#!/usr/bin/env bash\nURL=\"https://downloads.cursor.com/lab/2026.10.22-27dcf5f/${OS}/${ARCH}/agent-cli-package.tar.gz\"\n";
+        assert_eq!(
+            cursor_build_in(script).as_deref(),
+            Some("2026.10.22-27dcf5f")
+        );
+        // An error page is not a version, however much of it there is.
+        assert!(cursor_build_in("<!DOCTYPE html><html>not a script</html>").is_none());
+        // Nor is the script's own placeholder, if the shape ever moves.
+        assert!(cursor_build_in("downloads.cursor.com/lab/${VERSION}/x").is_none());
     }
 }

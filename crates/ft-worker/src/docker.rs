@@ -66,7 +66,9 @@ async fn run(command: &mut Command) -> std::io::Result<Option<std::process::Outp
     // Nulled, not inherited. `tokio`'s `output()` leaves stdin alone, and on
     // the handshake path this process's stdin is the frame pipe from the
     // control plane — see the same reasoning in `runtime::install`.
-    command.stdin(std::process::Stdio::null());
+    command
+        .stdin(std::process::Stdio::null())
+        .kill_on_drop(true);
 
     match tokio::time::timeout(PATIENCE, command.output()).await {
         Ok(result) => result.map(Some),

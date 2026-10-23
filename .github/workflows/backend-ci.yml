@@ -55,6 +55,8 @@ jobs:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
+      - name: worker session test prerequisites
+        run: sudo apt-get update && sudo apt-get install -y tmux
       - run: cargo fmt --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       # The worker's tests commit in throwaway repositories, and a runner has
@@ -146,3 +148,16 @@ jobs:
           push: false
           cache-from: type=gha,scope=firetower
           cache-to: type=gha,mode=max,scope=firetower-pr
+
+  native-macos:
+    if: ${{ !startsWith(github.head_ref, 'release-please--') }}
+    runs-on: depot-macos-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - run: brew install tmux
+      - run: |
+          git config --global user.name firetower
+          git config --global user.email ci@firetower.cloud
+      - run: cargo test -p ft-worker --lib --locked

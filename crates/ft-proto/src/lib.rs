@@ -52,7 +52,16 @@ use serde::{Deserialize, Serialize};
 ///      worker older than this would start an agent with none of them and
 ///      silently ignore every later change, which reads as the feature being
 ///      broken rather than as a worker needing an upgrade.
-pub const PROTOCOL_VERSION: u32 = 19;
+/// 20 — Cursor Agent and its account/login frames require a Cursor-aware
+///      worker. An older one cannot install it, cannot carry the credential a
+///      browser login produced, and would answer a Cursor session by failing
+///      to launch anything.
+/// 21 — a path can leave a workspace as one zip. `ReadArchive` is a frame an
+///      older worker cannot read, so "download as zip" against one would fail
+///      the connection rather than the request — and the whole point of the
+///      feature is work leaving a workspace that has no repository to push
+///      from, which is exactly when nobody has a second way to get it out.
+pub const PROTOCOL_VERSION: u32 = 21;
 
 mod codec;
 pub use codec::{Codec, CodecError, FrameReader, FrameWriter};
@@ -1110,7 +1119,6 @@ pub enum ToServer {
     Pong,
 }
 
-/// A device code somebody has to approve before Codex is signed in.
 /// One quota window of a plan, on its way to `agent_account_limits`.
 ///
 /// Per cent to a tenth, and unix seconds: a provider that reports a ratio and
@@ -1123,14 +1131,16 @@ pub struct LimitWindow {
     pub resets_at: Option<i64>,
 }
 
+/// Browser sign-in details, with a code for providers that use device codes.
 ///
-/// The two things worth showing and nothing else: this is what a person reads
-/// off a screen and types somewhere else.
+/// The code is empty for a provider whose flow is link-only — Cursor opens a
+/// browser and approves there — so a client shows the link alone rather than
+/// an empty box somebody is meant to read a code out of.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoginPending {
-    /// The short code. Shown, not clicked.
+    /// The short code to type, or empty for Cursor's link-only flow.
     pub user_code: String,
-    /// Where to type it.
+    /// The verification link to open.
     pub verification_url: String,
 }
 

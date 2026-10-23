@@ -108,8 +108,8 @@ and a work one, or two GitLabs. See [Git hosts](docs/git-hosts.md).
 | Codex | Supported |
 | OpenCode | Looking for contributions |
 | Grok| Looking for contributions |
-| Cursor | Looking for contributions |
-| Kimi | Experimental (ACP) |
+| Cursor Agent | Supported |
+| Kimi | Supported |
 | Hermes | Looking for contributions |
 
 ## Licence
@@ -120,4 +120,4 @@ We chose the AGPL mainly so that an outside company can't take the community's w
 
 None of that is aimed at you. Use Firetower, run it on your own servers, fork it and change it — for yourself, your team or your company — however you want.
 
-For experimental Kimi Code support, see [Kimi through ACP](docs/acp.md).
+Cursor Agent and Kimi Code are driven over ACP — see [ACP agents](docs/acp.md) to connect either.

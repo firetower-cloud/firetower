@@ -20,7 +20,7 @@ pub async fn probe(state: &Path) -> Vec<AgentPresence> {
 async fn probe_on(path: &std::ffi::OsStr) -> Vec<AgentPresence> {
     let mut out = Vec::new();
     for kind in Agent::all() {
-        let version = version_of(kind.command(), path).await;
+        let version = version_of(kind.command(), path, kind.env()).await;
         let installed = version.is_some();
 
         // Only worth asking if it's there at all.
@@ -51,7 +51,7 @@ pub async fn present(state: &Path, kind: Agent) -> bool {
 }
 
 async fn present_on(path: &std::ffi::OsStr, kind: Agent) -> bool {
-    version_of(kind.command(), path).await.is_some()
+    version_of(kind.command(), path, kind.env()).await.is_some()
 }
 
 /// Whether an agent is signed in, and as whom.
@@ -68,6 +68,10 @@ async fn signed_in(kind: Agent, path: &std::ffi::OsStr) -> (Option<bool>, Option
         Command::new(kind.command())
             .args(args)
             .env("PATH", path)
+            .envs(kind.env().iter().copied())
+            // Tokio output inherits stdin: here it is the control-plane pipe.
+            // A probe must neither read frames nor change its shared fd flags.
+            .stdin(std::process::Stdio::null())
             .kill_on_drop(true)
             .output(),
     )
@@ -104,12 +108,18 @@ async fn signed_in(kind: Agent, path: &std::ffi::OsStr) -> (Option<bool>, Option
 /// Deliberately does not say whether the agent is *authenticated*: none of
 /// these offer a non-interactive way to ask, and inferring it from their
 /// credential files means depending on a format that is theirs to change.
-async fn version_of(program: &str, path: &std::ffi::OsStr) -> Option<String> {
+async fn version_of(program: &str, path: &std::ffi::OsStr, env: &[(&str, &str)]) -> Option<String> {
     let output = tokio::time::timeout(
         std::time::Duration::from_secs(3),
         Command::new(program)
             .arg("--version")
             .env("PATH", path)
+            // What the agent needs to answer at all — see `Agent::env`.
+            // Without it Cursor asks a locked keychain and says nothing.
+            .envs(env.iter().copied())
+            // Tokio output inherits stdin: here it is the control-plane pipe.
+            // A probe must neither read frames nor change its shared fd flags.
+            .stdin(std::process::Stdio::null())
             .kill_on_drop(true)
             .output(),
     )
@@ -129,10 +139,80 @@ async fn version_of(program: &str, path: &std::ffi::OsStr) -> Option<String> {
 mod tests {
     use super::*;
 
+    /// Probe children must not read the daemon's control-plane pipe. Run the
+    /// probe in a separate test process so its real stdin is safely disposable.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn probe_children_cannot_read_the_control_plane() {
+        use std::io::{BufRead, Write};
+        use std::os::unix::fs::PermissionsExt;
+        use std::process::{Command as Process, Stdio};
+
+        const CHILD: &str = "FIRETOWER_PROBE_STDIN_TEST";
+        const FRAME: &str = "control-plane-frame\n";
+        if let Some(mode) = std::env::var_os(CHILD) {
+            let path = std::env::var_os("FIRETOWER_PROBE_TEST_PATH").unwrap();
+            if mode == "version" {
+                assert_eq!(
+                    version_of("claude", &path, &[]).await.as_deref(),
+                    Some("1.0.0")
+                );
+            } else if mode == "readiness" {
+                let root = tempfile::tempdir().unwrap();
+                let result = crate::readiness::check(root.path(), Some(Agent::ClaudeCode)).await;
+                assert!(result
+                    .checks
+                    .iter()
+                    .any(|c| c.name == "Claude Code" && c.available));
+            } else {
+                assert_eq!(signed_in(Agent::ClaudeCode, &path).await.0, Some(true));
+            }
+            let mut untouched = String::new();
+            std::io::stdin().lock().read_line(&mut untouched).unwrap();
+            assert_eq!(untouched, FRAME, "the probe consumed a control-plane frame");
+            return;
+        }
+
+        let bin = tempfile::tempdir().unwrap();
+        let exe = bin.path().join("claude");
+        std::fs::write(&exe, "#!/bin/sh\nread -r ignored\nif [ \"$1\" = --version ]; then echo 1.0.0; else echo '{\"loggedIn\":true}'; fi\n").unwrap();
+        std::fs::set_permissions(exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+        for mode in ["version", "auth", "readiness"] {
+            let mut child = Process::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "agents::tests::probe_children_cannot_read_the_control_plane",
+                    "--nocapture",
+                ])
+                .env(CHILD, mode)
+                .env("FIRETOWER_PROBE_TEST_PATH", bin.path())
+                .env("PATH", bin.path())
+                .env("SHELL", "")
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap();
+            child
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(FRAME.as_bytes())
+                .unwrap();
+            let output = child.wait_with_output().unwrap();
+            assert!(
+                output.status.success(),
+                "{mode} probe: {}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    }
+
     #[tokio::test]
     async fn a_missing_binary_is_an_answer_not_a_failure() {
         let path = std::env::var_os("PATH").unwrap_or_default();
-        assert!(version_of("firetower-definitely-not-installed", &path)
+        assert!(version_of("firetower-definitely-not-installed", &path, &[])
             .await
             .is_none());
     }

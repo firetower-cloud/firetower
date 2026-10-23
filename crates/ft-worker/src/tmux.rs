@@ -160,6 +160,24 @@ impl Tmux {
             .unwrap_or(false)
     }
 
+    /// Check existence without treating a failed tmux probe as proof of
+    /// absence. Watcher EOF may indicate an agent exit, but only a known
+    /// `has-session` miss is enough evidence to close its conversation.
+    pub(crate) async fn checked_exists(&self) -> Result<bool> {
+        let output = Command::new("tmux")
+            .args(["has-session", "-t", &self.name])
+            .output()
+            .await
+            .context("checking the tmux session")?;
+
+        checked_exists_output(
+            &self.name,
+            output.status.success(),
+            output.status.code(),
+            &String::from_utf8_lossy(&output.stderr),
+        )
+    }
+
     /// Everything on screen and above it.
     ///
     /// Sent when you open a session, so a long-running agent shows its history
@@ -243,6 +261,35 @@ fn quote(text: &str) -> String {
     format!("'{}'", text.replace('\'', r"'\''"))
 }
 
+fn checked_exists_output(
+    name: &str,
+    success: bool,
+    exit_code: Option<i32>,
+    stderr: &str,
+) -> Result<bool> {
+    if success {
+        return Ok(true);
+    }
+
+    let stderr = stderr.trim();
+    if exit_code == Some(1)
+        && (stderr == format!("can't find session: {name}")
+            || stderr.starts_with("no server running on "))
+    {
+        return Ok(false);
+    }
+
+    anyhow::bail!(
+        "checking {}: {}",
+        name,
+        if stderr.is_empty() {
+            "tmux has-session failed without a diagnostic"
+        } else {
+            stderr
+        }
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -251,6 +298,47 @@ mod tests {
     /// Unique per test, so a failure never leaves a name that breaks the next run.
     fn unique(tag: &str) -> Tmux {
         Tmux::for_session(&format!("test-{tag}-{}", std::process::id()))
+    }
+
+    #[test]
+    fn checked_presence_only_treats_known_tmux_misses_as_absent() {
+        assert!(checked_exists_output("firetower-s_test", true, Some(0), "").unwrap());
+        assert!(!checked_exists_output(
+            "firetower-s_test",
+            false,
+            Some(1),
+            "can't find session: firetower-s_test\n"
+        )
+        .unwrap());
+        assert!(!checked_exists_output(
+            "firetower-s_test",
+            false,
+            Some(1),
+            "no server running on /tmp/tmux-501/default\n"
+        )
+        .unwrap());
+        assert!(checked_exists_output(
+            "firetower-s_test",
+            false,
+            Some(1),
+            "failed to connect to server: resource temporarily unavailable\n"
+        )
+        .is_err());
+        assert!(checked_exists_output("firetower-s_test", false, Some(1), "").is_err());
+        assert!(checked_exists_output(
+            "firetower-s_test",
+            false,
+            Some(2),
+            "can't find session: firetower-s_test"
+        )
+        .is_err());
+        assert!(checked_exists_output(
+            "firetower-s_test",
+            false,
+            None,
+            "can't find session: firetower-s_test"
+        )
+        .is_err());
     }
 
     /// The one tmux drops.

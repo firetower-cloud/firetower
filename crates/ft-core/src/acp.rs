@@ -240,6 +240,34 @@ fn pair(now: Option<u64>, before: Option<u64>) -> Option<u64> {
     Some(now?.saturating_sub(before.unwrap_or(0)))
 }
 
+/// The model an ACP model option names, where it names one.
+///
+/// Two agents spell this differently and only one of them spells it as a model.
+/// Kimi's options are bare identifiers — `kimi-code/kimi-for-coding` — and pass
+/// through untouched. Cursor's carry the settings they run under:
+///
+/// ```text
+/// grok-4.7[context=256k,reasoning_effort=high,fast=true]
+/// claude-opus-5[thinking=true,context=300k,effort=high,fast=false]
+/// default[]
+/// ```
+///
+/// The bracket is configuration, not identity. Kept, it would put one row per
+/// combination of settings somebody happened to try on a page whose question is
+/// "which models did the work" — and the full string is unreadable at the width
+/// a table gives it.
+///
+/// `default` is the odd one. It is Cursor's **Auto**: no model chosen, the agent
+/// picking per turn. Reporting it would file a setting under a column of models,
+/// and inventing the model it resolved to is not available — Cursor names the
+/// real one only on hooks it does not fire outside its own terminal. So it names
+/// nothing, and `record_consumption` falls back to the agent, which is the true
+/// statement rather than a guess.
+fn model_named(value: &str) -> Option<&str> {
+    let name = value.split_once('[').map_or(value, |(name, _)| name).trim();
+    (!name.is_empty() && name != "default").then_some(name)
+}
+
 /// Preserve the agent's option IDs, including the distinction between one-off
 /// and persistent approval. Unsupported decisions cancel rather than allow.
 pub fn permission_outcome(options: &Value, decision: &Decision) -> Value {
@@ -278,6 +306,13 @@ pub struct AcpNormaliser {
     requests: BTreeSet<String>,
     configuration_requests: BTreeSet<String>,
     configuration: Vec<(String, Control)>,
+    /// Cursor's delegated calls, and how each one ended.
+    ///
+    /// Keyed by `toolCallId`. A `Task:`-titled tool call opens one; the call's
+    /// own `completed`/`failed` records the outcome, and `cursor/task` — which
+    /// arrives separately and may arrive late — closes it. Drained on `finish`
+    /// so a turn that ends without one still resolves every task it opened.
+    cursor_tasks: BTreeMap<String, Option<ItemStatus>>,
     /// How full the context is, from `usage_update`.
     ///
     /// `(used, size)`. A gauge and not a bill: `used` is what is in the window
@@ -342,6 +377,7 @@ impl AcpNormaliser {
             .iter()
             .find(|(_, c)| c.kind == ControlKind::Model)
             .and_then(|(_, c)| c.current.as_deref())
+            .and_then(model_named)
     }
 
     /// How full the context is, as the agent last said.
@@ -393,10 +429,21 @@ impl AcpNormaliser {
                 self.charged = (input, output);
                 return Some(delta);
             }
-            // Nothing billable was reported. A turn still carries how full the
-            // window is, which is what the conversation view draws, and no
-            // consumption row is written from it.
-            return (used.is_some()).then(|| Usage {
+            // Nothing billable was reported. The turn still happened, so it is
+            // still written: zeros that `tokens_known` disowns, which is the
+            // difference between "we were not told" and "it was free".
+            //
+            // **Not gated on the gauge.** It was, and the gate was invisible
+            // for as long as every ACP agent happened to report one. Cursor
+            // reports neither a bill nor a gauge — verified against
+            // `cursor-agent 2026.09.28-64d2043`, whose ACP adapter answers a
+            // finished prompt with `stopReason` alone — so gating here dropped
+            // its turns entirely: no tokens, and no turn or session count
+            // either, which took Cursor off the usage page and out of the
+            // telemetry digest at the same time. That is the invisibility this
+            // branch exists to prevent, so it cannot depend on a field the
+            // agent may never send.
+            return Some(Usage {
                 context_used: used,
                 context_window: size,
                 ..Default::default()
@@ -526,6 +573,7 @@ impl AcpNormaliser {
                 self.session = None;
                 self.configuration.clear();
                 self.configuration_requests.clear();
+                self.cursor_tasks.clear();
             }
             Record::Ready { session } => self.session = Some(session),
             Record::Failed { detail } => {
@@ -618,6 +666,29 @@ impl AcpNormaliser {
                                 .into(),
                             args: message["params"].clone(),
                         });
+                    }
+                } else if message["method"] == "cursor/task" {
+                    let params = &message["params"];
+                    if let Some(call) = params["toolCallId"].as_str() {
+                        if let Some(status) = self.cursor_tasks.remove(call) {
+                            let task = TaskId::new(call);
+                            if let Some(agent) = params["agentId"].as_str() {
+                                events.push(TurnEvent::TaskProgress {
+                                    task: task.clone(),
+                                    detail: format!("Cursor subagent {agent}"),
+                                });
+                            }
+                            events.push(TurnEvent::TaskCompleted {
+                                task,
+                                status: status.unwrap_or(ItemStatus::Completed),
+                                summary: params["description"].as_str().map(str::to_owned),
+                            });
+                        } else {
+                            events.push(TurnEvent::Raw {
+                                source: RawSource::Acp,
+                                payload: message,
+                            });
+                        }
                     }
                 } else if message["method"] == "session/update" {
                     if self.session.as_deref() == message["params"]["sessionId"].as_str() {
@@ -757,13 +828,23 @@ impl AcpNormaliser {
                 let reached = self.reaching_for.get(&item).cloned();
 
                 if self.items.insert(item.clone()) {
-                    let kind = match update["kind"].as_str() {
-                        _ if reached.is_some() || is_a_skill(update) => ItemKind::SkillUse,
-                        Some("read") => ItemKind::FileRead,
-                        Some("edit" | "delete" | "move") => ItemKind::FileChange,
-                        Some("execute") => ItemKind::CommandExecution,
-                        Some("search" | "fetch") => ItemKind::WebSearch,
-                        _ => ItemKind::Unknown,
+                    // A delegated call first: `Task:` is structural, and a
+                    // subagent reading a skill of its own would otherwise be
+                    // filed as the skill rather than as the task that opened it.
+                    let delegated = update["title"]
+                        .as_str()
+                        .is_some_and(|title| title.starts_with("Task:"));
+                    let kind = if delegated {
+                        ItemKind::SubagentCall
+                    } else {
+                        match update["kind"].as_str() {
+                            _ if reached.is_some() || is_a_skill(update) => ItemKind::SkillUse,
+                            Some("read") => ItemKind::FileRead,
+                            Some("edit" | "delete" | "move") => ItemKind::FileChange,
+                            Some("execute") => ItemKind::CommandExecution,
+                            Some("search" | "fetch") => ItemKind::WebSearch,
+                            _ => ItemKind::Unknown,
+                        }
                     };
                     events.push(TurnEvent::ItemStarted {
                         item: item.clone(),
@@ -773,6 +854,15 @@ impl AcpNormaliser {
                             .or_else(|| update["title"].as_str().map(str::to_owned)),
                         task: None,
                     });
+                    if delegated {
+                        self.cursor_tasks.insert(id.to_owned(), None);
+                        events.push(TurnEvent::TaskStarted {
+                            task: TaskId::new(id),
+                            item: item.clone(),
+                            description: update["title"].as_str().unwrap_or("Task").to_owned(),
+                            agent: Some("Cursor subagent".into()),
+                        });
+                    }
                 }
                 // The same one key every other reader writes.
                 let mut data = update.clone();
@@ -814,6 +904,13 @@ impl AcpNormaliser {
                     }
                 }
                 if let Some(status @ ("completed" | "failed")) = update["status"].as_str() {
+                    if let Some(task) = self.cursor_tasks.get_mut(id) {
+                        *task = Some(if status == "failed" {
+                            ItemStatus::Failed
+                        } else {
+                            ItemStatus::Completed
+                        });
+                    }
                     self.items.remove(&item);
                     events.push(TurnEvent::ItemCompleted {
                         item,
@@ -839,6 +936,17 @@ impl AcpNormaliser {
         spent: Option<Usage>,
         events: &mut Vec<TurnEvent>,
     ) {
+        // Any delegated call still open when the turn ends is resolved here.
+        // `cursor/task` is the notification that would have closed it, and a
+        // turn can finish without one — an unresolved task would otherwise sit
+        // in the transcript as work that never came back.
+        for (call, outcome) in std::mem::take(&mut self.cursor_tasks) {
+            events.push(TurnEvent::TaskCompleted {
+                task: TaskId::new(call),
+                status: outcome.unwrap_or(ItemStatus::Failed),
+                summary: None,
+            });
+        }
         for req in std::mem::take(&mut self.requests) {
             events.push(TurnEvent::RequestResolved {
                 req: RequestId::new(req),
