@@ -3905,6 +3905,61 @@
         }
       }
     },
+    "/api/v1/sessions/{id}/archive": {
+      "get": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "A path out of the workspace as one zip.",
+        "description": "Separate from [`download_file`] rather than a flag on it, because the two\ndiffer in everything a caller cares about: what may be asked for (a\ndirectory, which a read refuses), what comes back (`application/zip` under a\nname that ends in `.zip`), and how long it takes before the first byte.",
+        "operationId": "download_archive",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "description": "File or directory, relative to the workspace. Omit for the whole workspace.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The zip"
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/sessions/{id}/attach": {
       "post": {
         "tags": [

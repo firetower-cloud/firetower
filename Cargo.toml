@@ -119,6 +119,12 @@ semver = "1"
 dotenvy = "0.15"
 tempfile = "3"
 thiserror = "2"
+# Downloading a directory out of a workspace, as one file somebody can open.
+# A pure-Rust zip rather than shelling out: `zip` is absent from a minimal
+# container, and a worker is a binary dropped onto whatever server somebody
+# already has. `deflate` only — the other backends are for reading archives
+# Firetower never produces.
+zip = { version = "9", default-features = false, features = ["deflate"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 ulid = { version = "1", features = ["serde"] }

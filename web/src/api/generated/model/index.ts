@@ -75,6 +75,7 @@ export * from './directoryName';
 export * from './dockerState';
 export * from './dockerStatus';
 export * from './done';
+export * from './downloadArchiveParams';
 export * from './downloadFileParams';
 export * from './drain';
 export * from './dropException';

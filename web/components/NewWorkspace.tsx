@@ -221,7 +221,16 @@ export function NewWorkspace({
         />
       </Row>
 
-      <Row label="Repository" hint={checkouts.length > 1 ? "One branch, cut in each" : undefined}>
+      <Row
+        label="Repository"
+        hint={
+          checkouts.length > 1
+            ? "One branch, cut in each"
+            : checkouts.length === 0
+              ? "Optional"
+              : undefined
+        }
+      >
         <div className="flex flex-wrap items-center gap-1.5">
           {checkouts.map((c) => (
             <RepoChip

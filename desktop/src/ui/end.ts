@@ -26,12 +26,26 @@ export function useEndWorkspace() {
       unpushed > 0 && `${unpushed} unpushed commit${unpushed === 1 ? "" : "s"}`,
     ].filter(Boolean);
 
+    /* **A bare agent is the dangerous case, not the safe one.**
+     *
+     * Everywhere else this question has a floor under it: whatever is lost,
+     * the branch stays on the machine and the commits on it are still there.
+     * A workspace with nothing checked out has no such floor — git never saw
+     * the directory, so every file the agent made goes with it, and there is
+     * no branch to promise anybody.
+     *
+     * It read as the *mildest* of the three answers, because no checkout
+     * means nothing uncommitted to count. So it is asked separately. */
+    const bare = !place.branch && place.runs.every((r) => (r.checkouts ?? []).length === 0);
+
     const ok = await confirm({
       title: `End "${place.name}"?`,
       body:
         `${agents === 1 ? "The agent stops" : `${agents} agents stop`}. ` +
-        (losing.length ? `${losing.join(" and ")} on ${place.branch ?? "its branch"} would be lost. ` : work === null ? "What is uncommitted there could not be read and would be lost. " : "Nothing uncommitted is in it. ") +
-        "The branch stays on the machine.",
+        (bare
+          ? "Nothing is checked out here, so every file in this workspace is deleted with it. Download anything worth keeping first."
+          : (losing.length ? `${losing.join(" and ")} on ${place.branch ?? "its branch"} would be lost. ` : work === null ? "What is uncommitted there could not be read and would be lost. " : "Nothing uncommitted is in it. ") +
+            "The branch stays on the machine."),
       action: "End workspace",
       tone: "danger",
     });

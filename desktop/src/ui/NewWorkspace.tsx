@@ -110,7 +110,11 @@ export function NewWorkspace({
   // The same readout the panel shows, for this machine and this agent, so a
   // missing agent is an Install button here and not a refusal after Start.
   const readiness = useHostReadiness(host?.id ?? "", { agent: kind }, { query: { enabled: !!host && !!kind, retry: false, staleTime: 5000 } });
-  const ready = !!name.trim() && checkouts.length > 0 && !!host && !!kind && !!account && isReady(readiness.data) && !create.isPending;
+  /* **A repository is not required.** With none, this is a bare agent: a
+     directory on the machine with an agent waiting in it and nothing checked
+     out. The name is, because it is all such a workspace has to be listed
+     under — there is no branch to fall back on. */
+  const ready = !!name.trim() && !!host && !!kind && !!account && isReady(readiness.data) && !create.isPending;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -133,7 +137,8 @@ export function NewWorkspace({
           repos: checkouts.map((c) => ({ repoId: c.id, base: c.base })),
           agent: kind,
           accountId: account.id,
-          branch: shown.trim() || undefined,
+          // Nothing to cut a branch from, and the field above is not drawn.
+          branch: checkouts.length ? shown.trim() || undefined : undefined,
           hostId: host?.id,
         },
       },
@@ -207,7 +212,13 @@ export function NewWorkspace({
 
           <Field
             label="Repository"
-            hint={checkouts.length > 1 ? "One branch, cut in each" : undefined}
+            hint={
+              checkouts.length > 1
+                ? "One branch, cut in each"
+                : checkouts.length === 0
+                  ? "Optional"
+                  : undefined
+            }
           >
             <div className="flex flex-wrap items-center gap-1.5">
               {checkouts.map((c) => (

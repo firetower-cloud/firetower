@@ -1476,6 +1476,107 @@ pub(super) async fn download_file(
         .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e:#}")))
 }
 
+/// A path out of the workspace as one zip.
+///
+/// Separate from [`download_file`] rather than a flag on it, because the two
+/// differ in everything a caller cares about: what may be asked for (a
+/// directory, which a read refuses), what comes back (`application/zip` under a
+/// name that ends in `.zip`), and how long it takes before the first byte.
+#[utoipa::path(
+    get, path = "/api/v1/sessions/{id}/archive", tag = "sessions",
+    params(
+        ("id" = String, Path, description = "Session id"),
+        ("path" = Option<String>, Query, description = "File or directory, relative to the workspace. Omit for the whole workspace."),
+    ),
+    responses((status = 200, description = "The zip"), (status = 404, body = ApiError), (status = 409, body = ApiError)),
+)]
+pub(super) async fn download_archive(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(id): Path<String>,
+    Query(req): Query<FilePath>,
+) -> Result<axum::response::Response, ApiError> {
+    let id = SessionId::from_stored(id);
+    let (session, host) = session_context(&state, &principal, &id).await?;
+
+    // Empty is the workspace itself, which is the one download that answers
+    // "everything the agent made" — and the reason a bare workspace is a place
+    // work can leave from at all. `download_file` has no such case: there is no
+    // file at the root of a directory.
+    let path = req.path.unwrap_or_default();
+    let path = path.trim();
+
+    let (size, chunks) = state
+        .fleet
+        .read_archive(&host, &id, path)
+        .await
+        .map_err(|e| ApiError::new(ErrorCode::HostUnreachable, format!("{e:#}")))?
+        .map_err(|refused| ApiError::new(ErrorCode::InvalidRequest, refused))?;
+
+    // What the saved file is called. The last part of the path, or the
+    // workspace's own name when the whole thing was asked for — `download.zip`
+    // is what somebody finds in their downloads folder a week later and cannot
+    // identify.
+    let leaf = path.rsplit('/').find(|part| !part.is_empty());
+    let name = match leaf {
+        Some(part) => part.to_string(),
+        None => {
+            let named = session.name.trim();
+            if named.is_empty() {
+                session.id.as_str().to_string()
+            } else {
+                named.to_string()
+            }
+        }
+    };
+    let name = format!("{}.zip", sanitise(&name));
+
+    use futures::StreamExt;
+    let body = axum::body::Body::from_stream(
+        tokio_stream::wrappers::ReceiverStream::new(chunks).map(Ok::<_, std::io::Error>),
+    );
+
+    axum::response::Response::builder()
+        .header(axum::http::header::CONTENT_TYPE, "application/zip")
+        .header(axum::http::header::CONTENT_LENGTH, size)
+        .header(
+            axum::http::header::CONTENT_DISPOSITION,
+            format!("attachment; filename=\"{name}\""),
+        )
+        .body(body)
+        .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e:#}")))
+}
+
+/// A workspace name as a filename.
+///
+/// Workspace names are free text — `Fix the 50% bug / round two` is a name
+/// somebody will have — and a `/` in a `content-disposition` is a path, a `"`
+/// ends the quoting early, and a control character is not a filename anywhere.
+/// Runs of anything else become one `-`, so the result still reads as the name
+/// it came from.
+fn sanitise(name: &str) -> String {
+    let mut out = String::new();
+    let mut gap = false;
+    for ch in name.chars() {
+        if ch.is_alphanumeric() || ch == '.' || ch == '_' || ch == '-' {
+            if gap && !out.is_empty() {
+                out.push('-');
+            }
+            gap = false;
+            out.push(ch);
+        } else {
+            gap = true;
+        }
+    }
+    // Leading dots are how a download arrives invisible on a unix machine.
+    let trimmed = out.trim_matches('.').to_string();
+    if trimmed.is_empty() {
+        "workspace".to_string()
+    } else {
+        trimmed
+    }
+}
+
 #[derive(Debug, Deserialize, utoipa::IntoParams)]
 pub(super) struct FileQuery {
     /// What somebody typed.
@@ -2633,11 +2734,18 @@ pub(super) async fn session_work(
     let id = SessionId::from_stored(id);
     let (session, host) = session_context(&state, &principal, &id).await?;
 
+    // A bare agent has nothing checked out, so there is nothing unsaved *in a
+    // repository* — and that is an answer, not a refusal. This used to be a
+    // `400`, which every caller had to catch, and the one that matters caught
+    // it as "could not be read": ending a bare workspace warned that
+    // uncommitted work might be lost, naming no repository and no branch,
+    // about a directory git had never seen.
+    //
+    // An empty list says the true thing instead. What a bare workspace *does*
+    // hold is files, and those are nobody's to summarise here — the file
+    // browser lists them and the download endpoint hands them over.
     if session.checkouts.is_empty() && session.repo.is_none() {
-        return Err(ApiError::new(
-            ErrorCode::InvalidRequest,
-            "this session has no repository, so there is nothing to summarise",
-        ));
+        return Ok(Json(Vec::new()));
     }
 
     // Before the checkouts are read back, so what this returns is the answer
@@ -3389,7 +3497,7 @@ mod gh_tests {
 
 #[cfg(test)]
 mod tests {
-    use super::{asked_for, nothing_to_do, within};
+    use super::{asked_for, nothing_to_do, sanitise, within};
 
     /// Ending a filtered list must end that list and nothing beside it.
     #[test]
@@ -3465,5 +3573,28 @@ mod tests {
         assert!(nothing_to_do("nothing to commit, working tree clean"));
         assert!(nothing_to_do("Everything up-to-date"));
         assert!(!nothing_to_do("permission denied (publickey)"));
+    }
+
+    /// A workspace name becomes a filename a header can carry.
+    #[test]
+    fn an_archive_is_named_after_the_workspace_safely() {
+        // The ordinary case keeps reading like the name it came from.
+        assert_eq!(sanitise("auth refactor"), "auth-refactor");
+        assert_eq!(sanitise("ledger-v2.1"), "ledger-v2.1");
+
+        // A slash would make the filename a path, and a quote would end the
+        // `content-disposition` early — both are names somebody will have.
+        assert_eq!(
+            sanitise("Fix the 50% bug / round two"),
+            "Fix-the-50-bug-round-two"
+        );
+        assert_eq!(sanitise("say \"hello\""), "say-hello");
+
+        // Leading dots are how a download arrives invisible.
+        assert_eq!(sanitise("...hidden"), "hidden");
+
+        // And a name with nothing usable in it still has to produce a filename.
+        assert_eq!(sanitise("///"), "workspace");
+        assert_eq!(sanitise(""), "workspace");
     }
 }

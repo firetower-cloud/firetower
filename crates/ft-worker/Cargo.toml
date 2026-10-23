@@ -28,6 +28,8 @@ tempfile.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+# a directory leaves the workspace as one zip
+zip.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

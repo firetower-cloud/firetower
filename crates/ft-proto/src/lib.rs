@@ -306,6 +306,27 @@ pub enum ToWorker {
         session_id: SessionId,
         path: String,
     },
+    /// Send a path back as one zip, in pieces.
+    ///
+    /// A directory cannot travel down [`ToWorker::ReadFile`] — there is no
+    /// single stream of bytes to send — and this is the answer to that: the
+    /// worker builds the archive and streams it, so the whole of a workspace
+    /// can leave as one file somebody can open.
+    ///
+    /// A file is allowed too, and makes an archive holding one entry. That is
+    /// not pointless: it is how a 90 MB log becomes a 2 MB download.
+    ///
+    /// Answered with the same [`ToServer::FileOpened`] and
+    /// [`ToServer::FileChunk`] a read is, because the shape of "how big, then
+    /// the bytes" is the same and the control plane already knows it. The size
+    /// is the finished archive's, which is why the worker builds the whole
+    /// thing before it answers.
+    ReadArchive {
+        req: ReqId,
+        session_id: SessionId,
+        /// Relative to the workspace. Empty means the workspace itself.
+        path: String,
+    },
     /// Open a TCP connection to a port this session is serving on.
     ///
     /// A port and nothing else. Never a host: the worker connects to

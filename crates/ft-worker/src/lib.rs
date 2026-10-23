@@ -48,7 +48,36 @@ const CHUNK: usize = 32 * 1024;
 
 /// The most that comes down this pipe. Above it, the answer is a message
 /// naming a better tool rather than a minute of stuttering terminals.
-const MAX_DOWNLOAD: u64 = 100 * 1_048_576;
+///
+/// **Ten gigabytes, because the work people do here is not all source code.**
+/// It was a hundred megabytes, which is a reasonable ceiling for a file out of
+/// a repository and an absurd one for what a workspace with no repository in
+/// it usually holds — a render, a capture, a dataset. One take of video goes
+/// past the old limit, so the download that mattered most was the one that
+/// could not happen.
+///
+/// What it costs is time rather than memory. Every hop is bounded: the worker
+/// reads [`CHUNK`] at a time into a frame, the lanes out of here are bounded
+/// channels, and the control plane holds four chunks. Nothing on the path
+/// grows with the size of the file, so the honest reason for a limit at all is
+/// that base64 over an SSH tunnel is a third slower than the wire, and
+/// somebody should be told that before they wait twenty minutes rather than
+/// after.
+const MAX_DOWNLOAD: u64 = 10 * 1024 * 1_048_576;
+
+/// The most an archive may hold, measured before compression.
+///
+/// Larger than [`MAX_DOWNLOAD`] on purpose, and it has to stay that way: this
+/// counts what went *in*, and what comes out is the only thing that travels. A
+/// directory of logs deflates by ten to one, so capping the input at the
+/// output's limit would refuse downloads that would have been comfortable.
+/// Video does not deflate and is refused by the size of the result instead.
+///
+/// It is also the guard on the *walk*. Checked as the walk goes rather than
+/// afterwards, so a request for something absurd stops early instead of being
+/// discovered once the worker has written the lot to its temporary file —
+/// which is the difference between a refusal and filling somebody's disk.
+const MAX_ARCHIVE: u64 = 20 * 1024 * 1_048_576;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{mpsc, Mutex};
 
@@ -1036,6 +1065,14 @@ impl Worker {
                 self.read_file(&req, &session_id, &path, out).await?;
             }
 
+            ToWorker::ReadArchive {
+                req,
+                session_id,
+                path,
+            } => {
+                self.read_archive(&req, &session_id, &path, out).await?;
+            }
+
             ToWorker::RunAction {
                 req,
                 session_id,
@@ -1244,6 +1281,223 @@ impl Worker {
         }
     }
 
+    /// Send a path back as one zip.
+    ///
+    /// The archive is built to a temporary file first, and only then answered
+    /// for. That costs a write of whatever is being downloaded, and it buys the
+    /// one thing the control plane cannot do without: a size. It has to put
+    /// `content-length` on a response before it has a body, and a zip's size is
+    /// not knowable until the last entry is deflated — so either this is staged
+    /// or every download becomes chunked, untracked by a progress bar and
+    /// unresumable. The temporary file is deleted when `staged` drops, whether
+    /// this returned or failed.
+    async fn read_archive(
+        &self,
+        req: &str,
+        session_id: &SessionId,
+        path: &str,
+        out: &Out,
+    ) -> Result<()> {
+        let built = self.build_archive(session_id, path).await;
+
+        let (staged, size) = match built {
+            Ok(pair) => pair,
+            Err(e) => {
+                out.send(ToServer::FileOpened {
+                    req: req.to_string(),
+                    result: Err(format!("{e:#}")),
+                })
+                .await?;
+                return Ok(());
+            }
+        };
+
+        out.send(ToServer::FileOpened {
+            req: req.to_string(),
+            result: Ok(size),
+        })
+        .await?;
+
+        let mut file = tokio::fs::File::open(staged.path())
+            .await
+            .context("reading the archive back")?;
+
+        use tokio::io::AsyncReadExt;
+        let mut buffer = vec![0u8; CHUNK];
+        loop {
+            let read = file
+                .read(&mut buffer)
+                .await
+                .context("reading the archive")?;
+            if read == 0 {
+                out.send(ToServer::FileChunk {
+                    req: req.to_string(),
+                    data: String::new(),
+                    last: true,
+                })
+                .await?;
+                return Ok(());
+            }
+
+            out.send(ToServer::FileChunk {
+                req: req.to_string(),
+                data: ft_proto::encode(&buffer[..read]),
+                last: false,
+            })
+            .await?;
+        }
+    }
+
+    /// Zip a path into a temporary file, and say how big it came out.
+    ///
+    /// Blocking, on a blocking thread: `zip` is synchronous, and deflating a
+    /// directory is the kind of work that must not sit on the runtime that is
+    /// also carrying every terminal on this machine.
+    async fn build_archive(
+        &self,
+        session_id: &SessionId,
+        path: &str,
+    ) -> Result<(tempfile::NamedTempFile, u64)> {
+        let workspace = self.workspace_of(session_id).await?;
+        let target = inside(&workspace, path)?;
+
+        let meta = tokio::fs::symlink_metadata(&target)
+            .await
+            .with_context(|| format!("looking at {path}"))?;
+
+        // Shown, never followed — the same rule the listing goes by. A link to
+        // `/` would otherwise make this an archive of the whole machine.
+        if meta.file_type().is_symlink() {
+            anyhow::bail!("{path} is a link. Archive what it points at instead");
+        }
+
+        // What the entries are named relative to. For a directory it is the
+        // directory, so the zip opens as a folder rather than as a pile; for a
+        // single file it is the file's parent, so the archive holds the file
+        // and not a chain of empty directories.
+        let root = if meta.is_dir() {
+            target.clone()
+        } else {
+            target.parent().unwrap_or(&workspace).to_path_buf()
+        };
+
+        tokio::task::spawn_blocking(move || Self::zip_into(&target, &root))
+            .await
+            .context("building the archive")?
+    }
+
+    /// The synchronous half: walk, deflate, and stop if it gets absurd.
+    ///
+    /// Nothing recursive. A workspace can hold a symlink loop and `node_modules`
+    /// nested deeper than anybody means, and the limit below is what keeps a
+    /// download request from becoming the machine's whole afternoon.
+    fn zip_into(target: &Path, root: &Path) -> Result<(tempfile::NamedTempFile, u64)> {
+        use std::io::Write;
+        use zip::write::SimpleFileOptions;
+
+        let staged = tempfile::NamedTempFile::new().context("making room for the archive")?;
+        let mut zipped = zip::ZipWriter::new(std::io::BufWriter::new(
+            staged.reopen().context("opening the archive")?,
+        ));
+        let options =
+            SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+
+        // Breadth-first, so a cap falls on the deepest corners rather than on
+        // the second half of the alphabet — the same reason `walk` does it.
+        let mut queue = std::collections::VecDeque::new();
+        let mut raw: u64 = 0;
+
+        if target.is_dir() {
+            queue.push_back(target.to_path_buf());
+        } else {
+            raw += Self::zip_one(&mut zipped, target, root, &options)?;
+        }
+
+        while let Some(dir) = queue.pop_front() {
+            let mut entries: Vec<_> = std::fs::read_dir(&dir)
+                .with_context(|| format!("reading {}", dir.display()))?
+                .filter_map(std::result::Result::ok)
+                .collect();
+            // The order a person scanning the archive expects, rather than
+            // whatever the filesystem hands back.
+            entries.sort_by_key(std::fs::DirEntry::file_name);
+
+            for entry in entries {
+                let kind = entry.file_type().context("looking at an entry")?;
+                // Skipped, not followed. One link pointing upwards is how an
+                // archive of a directory becomes an archive of the disk.
+                if kind.is_symlink() {
+                    continue;
+                }
+                if kind.is_dir() {
+                    queue.push_back(entry.path());
+                    continue;
+                }
+                raw += Self::zip_one(&mut zipped, &entry.path(), root, &options)?;
+                if raw > MAX_ARCHIVE {
+                    anyhow::bail!(
+                        "that is over {} of files. Narrow it to a sub-directory, or \
+                         take it off the machine with `scp` or a command in the shell tab",
+                        readable(MAX_ARCHIVE),
+                    );
+                }
+            }
+        }
+
+        let mut done = zipped.finish().context("finishing the archive")?;
+        done.flush().context("flushing the archive")?;
+        drop(done);
+
+        let size = staged
+            .path()
+            .metadata()
+            .context("measuring the archive")?
+            .len();
+
+        // What actually has to travel, against the same ceiling a plain
+        // download has. A directory of logs deflates to nothing and is fine at
+        // any size `MAX_ARCHIVE` allows; a directory of video does not deflate
+        // and is refused here, which is the only place the true answer is
+        // known. Refused *after* the write, because there was no way to know
+        // before it — and a refusal that names the size beats a download that
+        // takes an hour.
+        if size > MAX_DOWNLOAD {
+            anyhow::bail!(
+                "that comes to {} zipped, and the limit is {}. Narrow it to a \
+                 sub-directory, or take it off the machine with `scp` or a command in \
+                 the shell tab",
+                readable(size),
+                readable(MAX_DOWNLOAD),
+            );
+        }
+
+        Ok((staged, size))
+    }
+
+    /// One file into the archive, named relative to `root`. Returns its size.
+    fn zip_one(
+        zipped: &mut zip::ZipWriter<std::io::BufWriter<std::fs::File>>,
+        file: &Path,
+        root: &Path,
+        options: &zip::write::SimpleFileOptions,
+    ) -> Result<u64> {
+        let name = file
+            .strip_prefix(root)
+            .unwrap_or(file)
+            .to_string_lossy()
+            // Zip paths are `/` separated whatever made them, so an archive
+            // built on Windows still opens as folders everywhere else.
+            .replace('\\', "/");
+
+        let mut source = std::fs::File::open(file).with_context(|| format!("reading {name}"))?;
+        zipped
+            .start_file(name.clone(), *options)
+            .with_context(|| format!("adding {name}"))?;
+        let copied =
+            std::io::copy(&mut source, zipped).with_context(|| format!("adding {name}"))?;
+        Ok(copied)
+    }
+
     /// Everything that can refuse a download, before a byte is sent.
     async fn open_for_reading(
         &self,
@@ -1261,14 +1515,14 @@ impl Worker {
             anyhow::bail!("{path} is a link. Open it where it points, or use the shell");
         }
         if meta.is_dir() {
-            anyhow::bail!("{path} is a directory. Downloading one isn't a thing yet");
+            anyhow::bail!("{path} is a directory. Download it as a zip instead");
         }
         if meta.len() > MAX_DOWNLOAD {
             anyhow::bail!(
-                "{path} is {}. Anything over {} MB has to come off the machine another \
+                "{path} is {}. Anything over {} has to come off the machine another \
                  way — `scp`, `docker cp`, or a command in the shell tab",
                 readable(meta.len()),
-                MAX_DOWNLOAD / 1_048_576,
+                readable(MAX_DOWNLOAD),
             );
         }
 
@@ -3181,21 +3435,13 @@ fn takes_a_while(frame: &ToWorker) -> bool {
             // channel is full the loop blocks inside its own send and stops
             // reading — so nothing else on this machine is answered until the
             // last chunk of somebody's download has been handed over.
-            | ToWorker::ReadFile { .. } // Unbounded for the same reason, and slow on top of it: a hundred
-                                        // megabytes leaves at a chunk a time. On the loop, once the
-                                        // channel is full the loop blocks inside the send and stops
-                                        // reading — so nothing else on this machine is answered until the
-                                        // last chunk of somebody's download has been handed over.
-                                        // Unbounded for the same reason, and slow on top of it: a hundred
-                                        // megabytes leaves at a chunk a time. On the loop, nothing else on
-                                        // this machine is read or answered until the last one — so a
-                                        // download made every other session's terminal stop, and the
-                                        // control plane's heartbeat go unanswered.
-                                        // Unbounded for the same reason, and slow on top of it: a hundred
-                                        // megabytes leaves at a chunk a time. On the loop, nothing else on
-                                        // this machine is read or answered until the last one — so a
-                                        // download made every other session's terminal stop, and the
-                                        // control plane's heartbeat go unanswered.
+            | ToWorker::ReadFile { .. }
+            // Everything that is true of a download, plus a walk of a
+            // directory and a deflate of everything in it before the first
+            // byte exists. The build is handed to a blocking thread, but the
+            // waiting for it still has to happen somewhere that is not the
+            // loop every other session on this machine is read from.
+            | ToWorker::ReadArchive { .. }
     )
 }
 
@@ -4547,6 +4793,205 @@ mod tests {
             trouble.contains("not a git repository"),
             "it should carry what git actually said, got: {trouble}"
         );
+    }
+
+    /// A directory leaves the workspace as one zip, with its tree intact.
+    ///
+    /// The three things that have to hold, because each was a way for the
+    /// first version of this to be useless: the entries are named *relative to
+    /// the directory asked for* rather than carrying the worker's absolute
+    /// paths, the nesting survives, and a symlink is skipped rather than
+    /// followed — one pointing at `/` would make this an archive of the
+    /// machine.
+    #[tokio::test]
+    async fn a_directory_comes_back_as_a_zip() {
+        let home = TempDir::new().unwrap();
+        let worker = std::sync::Arc::new(Worker::open(home.path()).await.unwrap());
+        let session = recorded(&worker, "Something to download").await;
+
+        let workspace = home.path().join("workspace");
+        tokio::fs::create_dir_all(workspace.join("out/clips"))
+            .await
+            .unwrap();
+        worker
+            .store
+            .record_workspace(&session, workspace.to_str().unwrap(), session.as_str())
+            .await
+            .unwrap();
+
+        tokio::fs::write(workspace.join("out/notes.txt"), b"keep me")
+            .await
+            .unwrap();
+        tokio::fs::write(workspace.join("out/clips/one.mp4"), vec![b'v'; 4096])
+            .await
+            .unwrap();
+        // Outside what was asked for, so it must not be in the archive.
+        tokio::fs::write(workspace.join("elsewhere.txt"), b"not this")
+            .await
+            .unwrap();
+
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("/", workspace.join("out/root")).unwrap();
+
+        let out = exchange(
+            &worker,
+            vec![
+                hello(),
+                ToWorker::ReadArchive {
+                    req: "a1".into(),
+                    session_id: session.clone(),
+                    path: "out".into(),
+                },
+            ],
+        )
+        .await;
+
+        let size = out
+            .iter()
+            .find_map(|f| match f {
+                ToServer::FileOpened { result, .. } => Some(result.clone()),
+                _ => None,
+            })
+            .expect("it should answer with a size before any bytes");
+        let size = size.expect("building the archive should not refuse");
+        assert!(size > 0, "an archive of two files is not empty");
+
+        let mut bytes = Vec::new();
+        for frame in &out {
+            if let ToServer::FileChunk { data, .. } = frame {
+                bytes.extend_from_slice(&ft_proto::decode(data).expect("chunks are base64"));
+            }
+        }
+        assert_eq!(bytes.len() as u64, size, "the size must describe the body");
+
+        let read = zip::ZipArchive::new(std::io::Cursor::new(bytes)).expect("it should be a zip");
+        let mut names: Vec<String> = read
+            .file_names()
+            .map(|name| name.expect("every name we write is utf-8").to_string())
+            .collect();
+        names.sort();
+
+        assert_eq!(
+            names,
+            vec!["clips/one.mp4".to_string(), "notes.txt".to_string()],
+            "named relative to the directory asked for, nesting kept, link skipped \
+             and nothing from outside it"
+        );
+
+        cleanup(&session).await;
+    }
+
+    /// Asking for a file gets an archive holding exactly that file.
+    ///
+    /// Allowed because it is how a large log becomes a small download, and the
+    /// interface offers it beside the plain download for every file. The entry
+    /// is named after the file and not after the chain of directories above
+    /// it, which is what it would be if the root were the workspace.
+    #[tokio::test]
+    async fn a_single_file_can_be_zipped_on_its_own() {
+        let home = TempDir::new().unwrap();
+        let worker = std::sync::Arc::new(Worker::open(home.path()).await.unwrap());
+        let session = recorded(&worker, "One file").await;
+
+        let workspace = home.path().join("workspace");
+        tokio::fs::create_dir_all(workspace.join("deep/down"))
+            .await
+            .unwrap();
+        worker
+            .store
+            .record_workspace(&session, workspace.to_str().unwrap(), session.as_str())
+            .await
+            .unwrap();
+        tokio::fs::write(workspace.join("deep/down/agent.log"), vec![b'a'; 100_000])
+            .await
+            .unwrap();
+
+        let out = exchange(
+            &worker,
+            vec![
+                hello(),
+                ToWorker::ReadArchive {
+                    req: "a2".into(),
+                    session_id: session.clone(),
+                    path: "deep/down/agent.log".into(),
+                },
+            ],
+        )
+        .await;
+
+        let mut bytes = Vec::new();
+        for frame in &out {
+            if let ToServer::FileChunk { data, .. } = frame {
+                bytes.extend_from_slice(&ft_proto::decode(data).expect("chunks are base64"));
+            }
+        }
+
+        let zipped = bytes.len();
+        let read = zip::ZipArchive::new(std::io::Cursor::new(bytes)).expect("it should be a zip");
+        let names: Vec<String> = read
+            .file_names()
+            .map(|name| name.expect("every name we write is utf-8").to_string())
+            .collect();
+        assert_eq!(
+            names,
+            vec!["agent.log".to_string()],
+            "the file, not the path to it"
+        );
+        // A hundred thousand identical bytes is the easiest thing there is to
+        // deflate, so this also proves the entries are actually compressed.
+        assert!(
+            zipped < 100_000,
+            "it should be smaller than what went in, got {zipped}"
+        );
+
+        cleanup(&session).await;
+    }
+
+    /// A path that climbs out is refused, and refused *before* a size.
+    ///
+    /// The same rule as every other read, asked again here because this one
+    /// walks a tree: `../..` as a directory would archive somebody's home.
+    #[tokio::test]
+    async fn an_archive_cannot_climb_out_of_the_workspace() {
+        let home = TempDir::new().unwrap();
+        let worker = std::sync::Arc::new(Worker::open(home.path()).await.unwrap());
+        let session = recorded(&worker, "Nope").await;
+
+        let workspace = home.path().join("workspace");
+        tokio::fs::create_dir_all(&workspace).await.unwrap();
+        worker
+            .store
+            .record_workspace(&session, workspace.to_str().unwrap(), session.as_str())
+            .await
+            .unwrap();
+
+        let out = exchange(
+            &worker,
+            vec![
+                hello(),
+                ToWorker::ReadArchive {
+                    req: "a3".into(),
+                    session_id: session.clone(),
+                    path: "../..".into(),
+                },
+            ],
+        )
+        .await;
+
+        let answer = out
+            .iter()
+            .find_map(|f| match f {
+                ToServer::FileOpened { result, .. } => Some(result.clone()),
+                _ => None,
+            })
+            .expect("it should still answer");
+        assert!(answer.is_err(), "climbing out must be refused");
+        assert!(
+            !out.iter().any(|f| matches!(f, ToServer::FileChunk { .. })),
+            "and not a byte should follow a refusal"
+        );
+
+        cleanup(&session).await;
     }
 
     /// Drive a worker over an in-memory pipe, the way the control plane does.

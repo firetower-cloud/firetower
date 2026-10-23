@@ -12,6 +12,8 @@ It lets you orchestrate your favorite coding agents on your local computer or an
 
 Give it a server you can SSH into and a repository, describe some work, and it picks a host, cuts a branch, makes a worktree, starts tmux, launches the agent, and keeps it running.
 
+A repository is optional. Leave it out and you get a workspace with nothing checked out — a directory on the machine and an agent waiting in it — for the work that was never going to be a pull request. Files come back out of it as a download, and you can check a repository in later if it turns into one.
+
 And yes, it works with your own subscription (Claude Code, Codex, etc.).
 
 [![Read the documentation](https://img.shields.io/badge/Read_the_documentation-FF4F00?style=for-the-badge&logo=readthedocs&logoColor=white&labelColor=FF4F00)](https://usefiretower.com/docs) [![Join the community](https://img.shields.io/badge/Join_the_community-5865F2?style=for-the-badge&logo=discord&logoColor=white&labelColor=5865F2)](https://discord.gg/uVa8wsYym)
@@ -64,7 +66,7 @@ You drive it from the desktop app on macOS and Windows, or from your phone on iO
 
 The control plane can run on your local computer or a remote server. It allows you to orchestrate the agent, manage your repositories, your secrets, and user accounts.
 
-The workers can run locally or on any remote server as well. Their only job is to pull a repository, start a task into a new worktree, and run the coding agent.
+The workers can run locally or on any remote server as well. Their only job is to pull a repository, start a task into a new worktree, and run the coding agent — or, with no repository asked for, to make the directory and start the agent in it.
 
 The control plane and the worker communicate entirely through SSH, and you can close and reopen the connection at any time.
 
