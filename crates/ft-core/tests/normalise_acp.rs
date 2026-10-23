@@ -346,13 +346,22 @@ fn a_kimi_turn_reports_a_context_gauge_and_no_bill() {
     let (usage, status) = ended[0];
     assert_eq!(*status, TurnStatus::Completed);
 
-    // And the turn itself is billed nothing at all — not zero tokens, nothing.
-    // The gauge is a message later than the reply that ends the turn, so the
-    // first turn of a connection has neither a bill nor a gauge to carry, and
-    // inventing one of either would be the page's first wrong number.
-    assert!(
-        usage.is_none(),
-        "a turn whose agent said nothing about tokens reports nothing: {usage:?}",
+    // The turn is recorded, and what it is recorded with is nothing: no tokens
+    // and — on this first turn — not even a gauge, because `usage_update` is a
+    // message later than the reply that ends it.
+    //
+    // A row rather than silence. The zeros are disowned downstream by
+    // `tokens_known`, so the page can say the turn happened and that nobody
+    // said what it cost, which are two different facts and both true.
+    let usage = usage.as_ref().expect("a turn that happened is recorded");
+    assert_eq!(
+        (usage.input_tokens, usage.output_tokens),
+        (0, 0),
+        "nothing was reported, so nothing is claimed",
+    );
+    assert_eq!(
+        usage.context_used, None,
+        "the gauge arrives after this reply, so this turn carries none",
     );
 }
 
@@ -628,27 +637,26 @@ fn a_turn_that_never_reached_a_model_is_not_reported_as_finished() {
     assert_eq!(status, TurnStatus::Completed);
 }
 
-/// Cursor says nothing about what a turn cost, so no row is written for it.
+/// Cursor says nothing about what a turn cost, and the turn is recorded anyway.
 ///
-/// Not a gap in this parser. Verified against `cursor-agent 2026.09.28-64d2043`:
-/// its ACP adapter resolves a prompt with `{"stopReason":"end_turn"}` and never
-/// sends `usage_update`, so there is neither a bill nor a context gauge to
-/// carry. The word "usage" does not occur in that adapter at all.
+/// Not a gap in this parser. Verified against `cursor-agent 2026.09.28-64d2043`
+/// by driving a real ACP turn with a real account: its adapter answers a
+/// finished prompt with `{"stopReason":"end_turn"}`, sends no `usage_update`,
+/// and the string `usage` does not occur in that adapter at all. Its hooks
+/// carry no tokens either — `afterAgentResponse` and `stop`, the only two that
+/// would, are the two Cursor does not fire outside its own terminal.
 ///
-/// Kimi is the near miss worth contrasting. It reports no bill either, and its
-/// *first* turn is unbilled for the same reason — see the test below, where the
-/// gauge arrives a message after the reply. But from the second turn on it
-/// carries a `usage_update`, so `spent` returns a `Usage` holding only the
-/// window, a `consumption_events` row is written, and `tokens_known` marks the
-/// zeros as unknown rather than free. That row is what makes a Kimi session
-/// visible on the usage page and countable in `sessions_by_agent`.
+/// So there is nothing to bill, and that is exactly why the row matters. It was
+/// once gated on the agent having sent a context gauge, which every other ACP
+/// agent happens to send and Cursor never does — so Cursor's turns were dropped
+/// whole: no tokens, no turn count, no session count, absent from the usage
+/// page and from the telemetry digest together. Absent and free are different
+/// claims, and neither of them was true.
 ///
-/// Cursor never reaches that branch, on any turn. So a Cursor turn is absent
-/// rather than unreported: no tokens, no turn count, and nothing in the
-/// telemetry digest. Anything that changes that has to begin by giving this
-/// turn a row.
+/// What is asserted here is the honest middle: the turn is recorded, and it is
+/// recorded as nothing. `tokens_known` is what says which of the two it is.
 #[test]
-fn a_cursor_turn_reports_no_usage_at_all_so_nothing_is_billed() {
+fn a_cursor_turn_is_recorded_even_though_nothing_was_reported() {
     let mut reader = AcpNormaliser::default();
     let records = [
         Record::Started {
@@ -675,18 +683,26 @@ fn a_cursor_turn_reports_no_usage_at_all_so_nothing_is_billed() {
         events.extend(reader.push(&serde_json::to_string(&record).unwrap()));
     }
 
-    let completed = events
+    let (usage, status) = events
         .iter()
         .find_map(|e| match e {
             TurnEvent::TurnCompleted { usage, status, .. } => Some((usage, status)),
             _ => None,
         })
         .expect("the turn completed");
-    assert_eq!(*completed.1, TurnStatus::Completed);
-    assert!(
-        completed.0.is_none(),
-        "a turn with no bill and no gauge must carry no usage, or a row of \
-         zeros would report Cursor working for free: {:?}",
-        completed.0
+    assert_eq!(*status, TurnStatus::Completed);
+
+    let usage = usage.as_ref().expect(
+        "a Cursor turn must still be recorded, or the agent is absent from the \
+         usage page and the telemetry digest rather than merely unreported",
+    );
+    assert_eq!(
+        (usage.input_tokens, usage.output_tokens),
+        (0, 0),
+        "Cursor reported no tokens, so none are claimed",
+    );
+    assert_eq!(
+        usage.context_used, None,
+        "Cursor sends no gauge either, on any turn",
     );
 }

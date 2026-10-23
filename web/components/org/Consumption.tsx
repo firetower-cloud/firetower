@@ -437,6 +437,32 @@ export function Consumption() {
                 note={t ? "Ran an agent in this period." : ""}
               />
             </div>
+
+            {/* Said once, plainly, rather than left for somebody to notice the
+                numbers are short. These turns ran and are counted as turns;
+                what they spent is the thing nobody told us.
+
+                It earns its place back because an agent now exists that reports
+                nothing on any turn, rather than only on its first. Cursor sends
+                neither a bill nor a context gauge, so without this line its
+                work appears in every count on this page and in none of the
+                totals, with nothing saying why.
+
+                No agent is named. Which of them report is a moving fact — the
+                hooks that would carry Cursor's tokens are a gap its own team
+                has said it means to close — and a sentence that names one goes
+                stale facing the person it misleads. There is no agent grouping
+                to send anybody to either, so this line is the whole of what
+                the page says about it. */}
+            {t && t.unreportedTurns > 0 && (
+              <p className="mt-5 max-w-[68ch] text-ui text-mute">
+                <span className="text-dim">
+                  {plural(t.unreportedTurns, "turn")} above {t.unreportedTurns === 1 ? "has" : "have"} no
+                  tokens counted.
+                </span>{" "}
+                Their agent reported none, so they are in the turn count and not in the totals.
+              </p>
+            )}
           </>
         )}
       </section>

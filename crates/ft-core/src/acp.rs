@@ -400,10 +400,21 @@ impl AcpNormaliser {
                 self.charged = (input, output);
                 return Some(delta);
             }
-            // Nothing billable was reported. A turn still carries how full the
-            // window is, which is what the conversation view draws, and no
-            // consumption row is written from it.
-            return (used.is_some()).then(|| Usage {
+            // Nothing billable was reported. The turn still happened, so it is
+            // still written: zeros that `tokens_known` disowns, which is the
+            // difference between "we were not told" and "it was free".
+            //
+            // **Not gated on the gauge.** It was, and the gate was invisible
+            // for as long as every ACP agent happened to report one. Cursor
+            // reports neither a bill nor a gauge — verified against
+            // `cursor-agent 2026.09.28-64d2043`, whose ACP adapter answers a
+            // finished prompt with `stopReason` alone — so gating here dropped
+            // its turns entirely: no tokens, and no turn or session count
+            // either, which took Cursor off the usage page and out of the
+            // telemetry digest at the same time. That is the invisibility this
+            // branch exists to prevent, so it cannot depend on a field the
+            // agent may never send.
+            return Some(Usage {
                 context_used: used,
                 context_window: size,
                 ..Default::default()
