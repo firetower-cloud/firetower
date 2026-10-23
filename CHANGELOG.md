@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.47.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.46.0...firetower-v0.47.0) (2026-10-23)
+
+
+### Features
+
+* Cursor Agent through ACP, onto current main ([934a113](https://github.com/firetower-cloud/firetower/commit/934a113bf1240a301a2ff050ef63776190e0006f))
+* cut the ledger by agent, and stop filing a setting under models ([49819a6](https://github.com/firetower-cloud/firetower/commit/49819a6bf674bb99a4004223414137319ef54e2d))
+* hand the vault's GitHub token to gh in a workspace ([5cb3d14](https://github.com/firetower-cloud/firetower/commit/5cb3d148767921ed07d6d55abbe579045cf0283e))
+* hand the vault's GitHub token to gh in a workspace ([14d8908](https://github.com/firetower-cloud/firetower/commit/14d8908032b9a7bdb56cbeeab39e41cab687130a))
+* let Cursor say it is out of date, and be updated like the others ([e76a112](https://github.com/firetower-cloud/firetower/commit/e76a11266c5f6dba0bbbead376f29009a04441d8))
+* workspaces without a repository ([a08e09a](https://github.com/firetower-cloud/firetower/commit/a08e09adadd94a2abb2cf9e31e2dfd7ea1bfd2f0))
+
+
+### Bug Fixes
+
+* Cursor's own mark, not a hexagon that belonged to nobody ([1bd751b](https://github.com/firetower-cloud/firetower/commit/1bd751b21febfa431549311dfe043be79d3515b3))
+* record an ACP turn that reported nothing, not only one with a gauge ([c339ebb](https://github.com/firetower-cloud/firetower/commit/c339ebb8e8f4a5f4fdca011b73b02e9ee92ad11e))
+* **telemetry:** deliver the newest day first, and let the outbox settle ([015082f](https://github.com/firetower-cloud/firetower/commit/015082fd9533c933b96d045affca618b29c76d64))
+* **telemetry:** deliver the newest day first, and let the outbox settle ([95cf579](https://github.com/firetower-cloud/firetower/commit/95cf57990253a129a50ef3d21423ed3ab73fada3))
+
 ## [0.46.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.45.0...firetower-v0.46.0) (2026-10-20)
 
 

@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.21.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.20.0...desktop-v0.21.0) (2026-10-23)
+
+
+### Features
+
+* Cursor Agent through ACP, onto current main ([934a113](https://github.com/firetower-cloud/firetower/commit/934a113bf1240a301a2ff050ef63776190e0006f))
+* cut the ledger by agent, and stop filing a setting under models ([49819a6](https://github.com/firetower-cloud/firetower/commit/49819a6bf674bb99a4004223414137319ef54e2d))
+* workspaces without a repository ([a08e09a](https://github.com/firetower-cloud/firetower/commit/a08e09adadd94a2abb2cf9e31e2dfd7ea1bfd2f0))
+
+
+### Bug Fixes
+
+* Cursor's own mark, not a hexagon that belonged to nobody ([1bd751b](https://github.com/firetower-cloud/firetower/commit/1bd751b21febfa431549311dfe043be79d3515b3))
+* **telemetry:** deliver the newest day first, and let the outbox settle ([015082f](https://github.com/firetower-cloud/firetower/commit/015082fd9533c933b96d045affca618b29c76d64))
+* **telemetry:** deliver the newest day first, and let the outbox settle ([95cf579](https://github.com/firetower-cloud/firetower/commit/95cf57990253a129a50ef3d21423ed3ab73fada3))
+
 ## [0.20.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.19.0...desktop-v0.20.0) (2026-10-20)
 
 
