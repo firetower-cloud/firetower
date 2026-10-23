@@ -29,18 +29,21 @@ pub struct Feeds {
     claude: String,
     codex: String,
     kimi: String,
+    cursor: String,
 }
 
 impl Feeds {
     pub const CLAUDE_ENV: &'static str = "FIRETOWER_AGENT_FEED_CLAUDE_CODE";
     pub const CODEX_ENV: &'static str = "FIRETOWER_AGENT_FEED_CODEX";
     pub const KIMI_ENV: &'static str = "FIRETOWER_AGENT_FEED_KIMI_CODE";
+    pub const CURSOR_ENV: &'static str = "FIRETOWER_AGENT_FEED_CURSOR_AGENT";
 
     pub fn from_env() -> Self {
         Self {
             claude: from_env_or(Self::CLAUDE_ENV, Agent::ClaudeCode),
             codex: from_env_or(Self::CODEX_ENV, Agent::Codex),
             kimi: from_env_or(Self::KIMI_ENV, Agent::KimiCode),
+            cursor: from_env_or(Self::CURSOR_ENV, Agent::CursorAgent),
         }
     }
 
@@ -49,8 +52,9 @@ impl Feeds {
             Agent::ClaudeCode => Some(&self.claude),
             Agent::Codex => Some(&self.codex),
             Agent::KimiCode => Some(&self.kimi),
-            // Shell has no publisher; Cursor uses verified pinned archives.
-            Agent::Shell | Agent::CursorAgent => None,
+            Agent::CursorAgent => Some(&self.cursor),
+            // Shell has no publisher to ask.
+            Agent::Shell => None,
         }
     }
 }
@@ -133,6 +137,13 @@ async fn newest(http: &reqwest::Client, kind: Agent, url: &str) -> Result<String
             let body: serde_json::Value =
                 response.json().await.context("reading the release list")?;
             pick_codex(&body)
+        }
+        // Cursor publishes no feed at all, so its installer is the feed: a
+        // shell script with the current build written into one URL.
+        Agent::CursorAgent => {
+            let said = response.text().await.context("reading the installer")?;
+            ft_core::releases::cursor_build_in(&said)
+                .with_context(|| format!("no Cursor build in the installer: {said:.60}"))
         }
         // The others answer with the version itself, which is what their own
         // installers read.
@@ -289,6 +300,7 @@ mod tests {
             claude: "http://127.0.0.1:1/latest".into(),
             codex: from_env_or("FIRETOWER_AGENT_FEED_NOT_SET_ANYWHERE", Agent::Codex),
             kimi: from_env_or("FIRETOWER_AGENT_FEED_NOT_SET_ANYWHERE", Agent::KimiCode),
+            cursor: from_env_or("FIRETOWER_AGENT_FEED_NOT_SET_ANYWHERE", Agent::CursorAgent),
         };
         assert_eq!(
             feeds.url(Agent::ClaudeCode),
@@ -301,6 +313,10 @@ mod tests {
         assert!(feeds
             .url(Agent::KimiCode)
             .is_some_and(|u| u.starts_with(ft_core::releases::KIMI_RELEASES)));
+        assert_eq!(
+            feeds.url(Agent::CursorAgent),
+            Some(ft_core::releases::CURSOR_INSTALLER)
+        );
         assert_eq!(feeds.url(Agent::Shell), None);
     }
 

@@ -21,7 +21,36 @@ pub fn parse(raw: &str) -> Option<Version> {
         .strip_prefix(TAG_PREFIX)
         .or_else(|| raw.strip_prefix('v'))
         .unwrap_or(raw);
-    Version::parse(bare).ok()
+    Version::parse(&unpadded(bare)).ok()
+}
+
+/// A version with its zero-padding taken off, so semver will read it.
+///
+/// Semver forbids a leading zero in a numeric identifier, and Cursor dates its
+/// builds — `2026.09.28-64d2043`. That is not a semver version, so it did not
+/// parse, so every Cursor host compared as up to date against every newer
+/// build: the Agents screen knew what was published and could not say anybody
+/// was behind it.
+///
+/// Only the dotted numeric part is touched, and only where the whole component
+/// is digits. `0` is left alone — it is a legal identifier, and Codex's
+/// `0.164.0` goes through unchanged. Anything that is not a plain number,
+/// including the build hash after the hyphen, is passed on as it came.
+fn unpadded(bare: &str) -> String {
+    let (numbers, rest) = match bare.find(['-', '+']) {
+        Some(at) => bare.split_at(at),
+        None => (bare, ""),
+    };
+    let numbers = numbers
+        .split('.')
+        .map(|part| match part.chars().all(|c| c.is_ascii_digit()) {
+            true => part.trim_start_matches('0'),
+            false => part,
+        })
+        .map(|part| if part.is_empty() { "0" } else { part })
+        .collect::<Vec<_>>()
+        .join(".");
+    format!("{numbers}{rest}")
 }
 
 /// The tag a version was released under.
@@ -39,6 +68,21 @@ pub fn is_newer(latest: &Version, current: &Version) -> bool {
 
 #[cfg(test)]
 mod tests {
+    /// Cursor dates its builds and pads the month, which is not semver.
+    #[test]
+    fn a_zero_padded_build_is_read_and_ordered() {
+        let old = super::parse("2026.09.28-64d2043").expect("a padded build parses");
+        let new = super::parse("2026.10.22-27dcf5f").expect("a padded build parses");
+        assert!(super::is_newer(&new, &old), "October is after September");
+        // Everything else is untouched.
+        assert_eq!(super::parse("0.164.0").unwrap().to_string(), "0.164.0");
+        assert_eq!(super::parse("2.1.273").unwrap().to_string(), "2.1.273");
+        assert_eq!(
+            super::parse("firetower-v1.2.3").unwrap().to_string(),
+            "1.2.3"
+        );
+    }
+
     use super::*;
 
     #[test]

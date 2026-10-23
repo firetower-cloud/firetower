@@ -305,17 +305,37 @@ impl Platform {
 /// where an agent comes from. The layout each one serves is documented there.
 use ft_core::releases::{looks_like_a_version, version_in, CLAUDE_RELEASES, KIMI_RELEASES};
 
-/// Pinned official CLI build. Cursor does not publish a signed checksum
-/// manifest, so only platform archives whose digest we verified are offered.
+/// The build shipped with, and the digests checked by hand for it.
+///
+/// Cursor publishes no checksum manifest — Claude and Kimi both serve one and
+/// are verified against it, and this is the reason Cursor cannot be. So these
+/// four were computed from the archives this version of Firetower was tested
+/// against, and a fetch of *this* build still has to match them.
+///
+/// **A floor, not a lock.** It used to be a lock: anything but this build was
+/// refused outright, which made the one-click update refuse every update and
+/// left the fleet on whatever was current the day the branch was written. A
+/// newer build that Cursor's own installer names is fetched over TLS and taken
+/// on that alone — which is already how Codex arrives, for the same reason and
+/// with the same publisher to trust.
 const CURSOR_BUILD: &str = "2026.09.28-64d2043";
 const CURSOR_DOWNLOADS: &str = "https://downloads.cursor.com/lab";
 
 async fn fetch_cursor(bin: &Path, platform: &Platform, version: Option<&str>) -> Result<()> {
-    let build = version.unwrap_or(CURSOR_BUILD);
-    anyhow::ensure!(
-        build == CURSOR_BUILD,
-        "Cursor Agent build {build} has no verified checksum"
-    );
+    // Newest when nobody says, which is what every other agent here does. The
+    // pin is the fallback rather than the default: installing the build this
+    // was written against would make a fresh host behind on the day it was
+    // added, and the Agents screen would be right to say so.
+    let newest = match version {
+        Some(_) => None,
+        None => text(ft_core::releases::CURSOR_INSTALLER)
+            .await
+            .ok()
+            .as_deref()
+            .and_then(ft_core::releases::cursor_build_in),
+    };
+    let build = version.or(newest.as_deref()).unwrap_or(CURSOR_BUILD);
+    let pinned = build == CURSOR_BUILD;
     let (os, arch, expected) = match (platform.os, platform.arch, platform.musl) {
         (Os::Darwin, Arch::Aarch64, _) => (
             "darwin",
@@ -342,10 +362,16 @@ async fn fetch_cursor(bin: &Path, platform: &Platform, version: Option<&str>) ->
     let archive = bin.join(".cursor-agent-package.tar.gz");
     let url = format!("{CURSOR_DOWNLOADS}/{build}/{os}/{arch}/agent-cli-package.tar.gz");
     download(&url, &archive).await?;
-    anyhow::ensure!(
-        sha256_of(&archive).await? == expected,
-        "Cursor Agent archive checksum mismatch"
-    );
+    // Only the shipped build has a digest to be checked against; see
+    // `CURSOR_BUILD`. A newer one is as verified as the connection that
+    // carried it, and saying so here is better than a constant that implies
+    // more than it does.
+    if pinned {
+        anyhow::ensure!(
+            sha256_of(&archive).await? == expected,
+            "Cursor Agent archive checksum mismatch"
+        );
+    }
     let output = Command::new("tar")
         .arg("-xzf")
         .arg(&archive)
