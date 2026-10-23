@@ -167,6 +167,27 @@ turns, a harmless tool action with approval and rejection, cancellation,
 reconnect and agent restart. Inspect both the authenticated conversation API
 and the UI. A handshake or fixture run is not a substitute for live acceptance.
 
+Two live harnesses exist, and neither runs in CI — both need a real signed-in
+Cursor account and are driven by hand:
+
+- **Desktop**, `desktop/e2e/cursor-live.mjs`. Run it against the Vite
+  renderer, server and worker from one checkout, with an isolated Firetower
+  home and database. `FIRETOWER_E2E_PASSWORD` is that server's administrator
+  password. With no other variable it checks installation only.
+  `FIRETOWER_E2E_CONNECT=1` starts the provider sign-in and prints a
+  short-lived approval URL to open in a browser signed in to the intended
+  account. `FIRETOWER_E2E_RUN=1` with `FIRETOWER_E2E_REPOSITORY` pointing at a
+  disposable local repository containing a one-line `README.md` creates a
+  workspace, sends a read-only prompt and waits for the line and an idle
+  state; `FIRETOWER_E2E_FOLLOWUP=1` adds the second prompt and a page reload.
+  Screenshots are written outside the checkout.
+- **Mobile**, `mobile/e2e/cursor-agent.yaml` and its
+  `-permissions` and `-task` companions, driven by Maestro against a
+  development build with `adb reverse` onto an isolated control plane.
+
+Use a fresh backend for a first-user run; both harnesses expect to be the
+first thing that touches the database.
+
 Upgrade workers and clients with the control plane: the worker protocol version
 is 20 because older workers cannot deserialize the new agent variant, its
 configuration command, or a sign-in that names which agent it is for. It was
