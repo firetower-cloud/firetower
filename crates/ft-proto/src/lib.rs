@@ -56,7 +56,12 @@ use serde::{Deserialize, Serialize};
 ///      worker. An older one cannot install it, cannot carry the credential a
 ///      browser login produced, and would answer a Cursor session by failing
 ///      to launch anything.
-pub const PROTOCOL_VERSION: u32 = 20;
+/// 21 — a path can leave a workspace as one zip. `ReadArchive` is a frame an
+///      older worker cannot read, so "download as zip" against one would fail
+///      the connection rather than the request — and the whole point of the
+///      feature is work leaving a workspace that has no repository to push
+///      from, which is exactly when nobody has a second way to get it out.
+pub const PROTOCOL_VERSION: u32 = 21;
 
 mod codec;
 pub use codec::{Codec, CodecError, FrameReader, FrameWriter};
@@ -308,6 +313,27 @@ pub enum ToWorker {
     ReadFile {
         req: ReqId,
         session_id: SessionId,
+        path: String,
+    },
+    /// Send a path back as one zip, in pieces.
+    ///
+    /// A directory cannot travel down [`ToWorker::ReadFile`] — there is no
+    /// single stream of bytes to send — and this is the answer to that: the
+    /// worker builds the archive and streams it, so the whole of a workspace
+    /// can leave as one file somebody can open.
+    ///
+    /// A file is allowed too, and makes an archive holding one entry. That is
+    /// not pointless: it is how a 90 MB log becomes a 2 MB download.
+    ///
+    /// Answered with the same [`ToServer::FileOpened`] and
+    /// [`ToServer::FileChunk`] a read is, because the shape of "how big, then
+    /// the bytes" is the same and the control plane already knows it. The size
+    /// is the finished archive's, which is why the worker builds the whole
+    /// thing before it answers.
+    ReadArchive {
+        req: ReqId,
+        session_id: SessionId,
+        /// Relative to the workspace. Empty means the workspace itself.
         path: String,
     },
     /// Open a TCP connection to a port this session is serving on.

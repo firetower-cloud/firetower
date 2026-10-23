@@ -3619,6 +3619,60 @@ impl Fleet {
         session_id: &SessionId,
         path: &str,
     ) -> Result<Result<(u64, mpsc::Receiver<Vec<u8>>), String>> {
+        // A worker opens a file and measures it in one syscall, so anything
+        // past this is the machine being unreachable rather than busy.
+        let patience = std::time::Duration::from_secs(20);
+        self.read_stream(host_id, patience, |req| ToWorker::ReadFile {
+            req,
+            session_id: session_id.clone(),
+            path: path.to_string(),
+        })
+        .await
+    }
+
+    /// A path as one zip, as a stream of pieces.
+    ///
+    /// The same shape as [`Fleet::read_file`] and deliberately so — the control
+    /// plane's side of "how big, then the bytes" does not care which of the two
+    /// it asked for.
+    pub async fn read_archive(
+        &self,
+        host_id: &HostId,
+        session_id: &SessionId,
+        path: &str,
+    ) -> Result<Result<(u64, mpsc::Receiver<Vec<u8>>), String>> {
+        // **Half an hour, not seconds.** A zip's size is not known until the
+        // last entry is deflated, so the worker has to build the whole archive
+        // before it can answer at all, and this waits out the whole of that.
+        //
+        // Sized against what is now allowed rather than against what feels
+        // long: `MAX_ARCHIVE` is twenty gigabytes of input, and deflating that
+        // on a machine that is also running agents is not a five-minute job.
+        // Erring short is the worse mistake — it reports a working host as one
+        // that "didn't answer in time" and abandons an archive it is still
+        // building, so the next attempt starts from nothing and fails the same
+        // way. Erring long costs one idle entry in `probes`.
+        let patience = std::time::Duration::from_secs(1800);
+        self.read_stream(host_id, patience, |req| ToWorker::ReadArchive {
+            req,
+            session_id: session_id.clone(),
+            path: path.to_string(),
+        })
+        .await
+    }
+
+    /// The half the two reads share: ask, wait for a size, hand back the body.
+    ///
+    /// One function because the bookkeeping is the delicate part — a probe
+    /// registered before the send, removed again on every path that will never
+    /// see a chunk — and two copies of it is how one of them comes to leak a
+    /// probe per failed download.
+    async fn read_stream(
+        &self,
+        host_id: &HostId,
+        patience: std::time::Duration,
+        frame: impl FnOnce(String) -> ToWorker,
+    ) -> Result<Result<(u64, mpsc::Receiver<Vec<u8>>), String>> {
         let req = ulid::Ulid::new().to_string();
         let (opened, wait) = oneshot::channel();
         // Shallow on purpose: this is what makes the worker wait for a slow
@@ -3636,23 +3690,14 @@ impl Fleet {
             },
         );
 
-        let sent = self
-            .send(
-                host_id,
-                ToWorker::ReadFile {
-                    req: req.clone(),
-                    session_id: session_id.clone(),
-                    path: path.to_string(),
-                },
-            )
-            .await;
+        let sent = self.send(host_id, frame(req.clone())).await;
 
         if let Err(e) = sent {
             self.probes.write().await.remove(&req);
             return Err(e);
         }
 
-        match tokio::time::timeout(std::time::Duration::from_secs(20), wait).await {
+        match tokio::time::timeout(patience, wait).await {
             Ok(Ok(Ok(size))) => Ok(Ok((size, body))),
             Ok(Ok(Err(refused))) => {
                 self.probes.write().await.remove(&req);

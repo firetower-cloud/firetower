@@ -11,7 +11,7 @@
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ChevronRight, FileCode2, FileDiff, FolderTree, MessageSquarePlus, PanelRightClose, Ship as ShipIcon } from "lucide-react";
+import { ChevronRight, FileCode2, FileDiff, FolderDown, FolderTree, Loader2, MessageSquarePlus, PanelRightClose, Ship as ShipIcon } from "lucide-react";
 import { useListFiles } from "~/api/generated/sessions/sessions";
 import type { FileEntry, Session } from "~/api/generated/model";
 import { sendTurn } from "~/api/generated/sessions/sessions";
@@ -21,6 +21,8 @@ import { fromPatch } from "~/patch";
 import { why } from "~/data";
 import { Ship } from "~/ui/Ship";
 import { FileGlyph } from "~/ui/FileGlyph";
+import { ContextMenu, useMenu } from "~/ui/ContextMenu";
+import { downloadArchive, downloadFile, type SavePhase } from "~/api/download";
 
 const TABS = [
   { id: "diff", label: "Diff", icon: FileDiff },
@@ -28,7 +30,42 @@ const TABS = [
   { id: "ship", label: "Commit", icon: ShipIcon },
 ] as const;
 
-type TabId = (typeof TABS)[number]["id"];
+export type TabId = (typeof TABS)[number]["id"];
+
+/**
+ * Which tabs this workspace has.
+ *
+ * **Diff and Commit are about a repository, not about the workspace.** With
+ * nothing checked out the diff is empty by construction and the server refuses
+ * a commit outright, so both are panels that can only ever say nothing — drawn
+ * beside the one tab that has the work in it. A bare agent is left with Files,
+ * which is the whole of what it has.
+ *
+ * Both come back the moment a repository is checked in, because this reads the
+ * checkouts and those arrive with the session the list is already polling.
+ *
+ * `ship` additionally wants `mayAct`: committing goes out under the session
+ * owner's git identity, so it is the owner's and not the workspace's.
+ */
+export function tabsFor(hasRepo: boolean, mayAct: boolean): typeof TABS[number][] {
+  return TABS.filter((t) => {
+    if (t.id === "diff") return hasRepo;
+    if (t.id === "ship") return hasRepo && mayAct;
+    return true;
+  });
+}
+
+/**
+ * The tab to draw, given the one that was remembered.
+ *
+ * A tab is remembered across sessions, so somebody last on Commit in their own
+ * workspace must not open somebody else's to an empty panel — nor a bare
+ * workspace to a tab that is not drawn. Falling back to the first one still
+ * standing keeps `TABS` the only place the order is written down.
+ */
+export function shownTab(tabs: readonly { id: TabId }[], remembered: TabId): TabId {
+  return tabs.some((t) => t.id === remembered) ? remembered : (tabs[0]?.id ?? "files");
+}
 
 export function Inspector({
   session,
@@ -55,10 +92,18 @@ export function Inspector({
      their own agent to push from. The diff and the file tree are what watching
      the work means; this tab is not part of it. */
   const mayAct = session.maySpeak !== false;
-  const tabs = useMemo(() => (mayAct ? TABS : TABS.filter((t) => t.id !== "ship")), [mayAct]);
-  /* A tab is remembered across sessions, so somebody who was last on Commit in
-     their own workspace must not open somebody else's to an empty panel. */
-  const shown: TabId = tab === "ship" && !mayAct ? "diff" : tab;
+  /* **Nothing checked out, so there is nothing to diff and nothing to commit.**
+     Both tabs are about a repository rather than about the workspace: the diff
+     of no checkouts is empty by construction, and the server refuses a commit
+     on a bare agent outright. Drawn anyway they are two panels that can only
+     ever say nothing, next to the one tab that has the work in it.
+
+     Read off `checkouts` rather than `repo`, because that is what the rest of
+     this panel acts on — and it is what comes back when a repository is
+     checked in later, which is why the tabs reappear on their own. */
+  const hasRepo = (session.checkouts ?? []).length > 0;
+  const tabs = useMemo(() => tabsFor(hasRepo, mayAct), [hasRepo, mayAct]);
+  const shown: TabId = shownTab(tabs, tab);
 
   const diff = useDiff(session);
   /* Names only: the tree marks each file added or modified and reads nothing
@@ -388,9 +433,40 @@ function LiveTree({ sessionId, changed, onOpenFile }: { sessionId: string; chang
   useEffect(() => {
     if (key) cache.invalidateQueries({ queryKey: [`/api/v1/sessions/${sessionId}/files`] });
   }, [key, sessionId, cache]);
+  /* **The whole workspace, which no row can offer.**
+   *
+   * Every other download hangs off a right-click on the thing being
+   * downloaded, and the root has no row to right-click. It is also the one
+   * somebody wants most often: a workspace with no repository in it is
+   * deleted when the work ends, and "everything the agent made" is the
+   * question being asked when that is about to happen. */
+  const [phase, setPhase] = useState<SavePhase | null>(null);
+  const [trouble, setTrouble] = useState<string | null>(null);
+  const saveAll = () => {
+    setTrouble(null);
+    void downloadArchive(sessionId, "", setPhase)
+      .catch((e: unknown) => setTrouble(why(e)))
+      .finally(() => setPhase(null));
+  };
+
   return (
     <div className="py-1.5">
       <Directory sessionId={sessionId} path="" depth={0} changed={changed} marked={marked} onOpenFile={onOpenFile} />
+      <button
+        onClick={saveAll}
+        disabled={!!phase}
+        className="mt-1.5 flex w-full items-center gap-2 border-t border-line px-3 py-2 text-left text-meta text-mute transition-colors hover:bg-raise hover:text-bone disabled:hover:bg-transparent"
+      >
+        {phase ? (
+          <Saving phase={phase} size={3.5} />
+        ) : (
+          <>
+            <FolderDown className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
+            Download the whole workspace
+          </>
+        )}
+      </button>
+      {trouble && <p className="px-3 pb-2 text-micro text-brick">{trouble}</p>}
     </div>
   );
 }
@@ -417,21 +493,88 @@ function Entry({ sessionId, entry, path, depth, changed, marked, onOpenFile }: {
   const [open, setOpen] = useState(false);
   const touched = entry.directory ? marked.has(path) : changed.has(path);
   const fresh = !entry.directory && changed.get(path) === true;
+  const menu = useMenu<null>();
+  const [phase, setPhase] = useState<SavePhase | null>(null);
+  const [trouble, setTrouble] = useState<string | null>(null);
+
+  /* **Where work leaves the machine.**
+   *
+   * A directory has only the zip: there is no single stream of bytes to send,
+   * which is why the one option is the one option rather than a nicety. A file
+   * has both — itself, and itself zipped, which is how a 90 MB log becomes a
+   * small download.
+   *
+   * A link is neither. The worker will not follow one, so both would refuse;
+   * offering a control the server declines reads as a broken button. */
+  const save = (as: "file" | "zip") => {
+    setTrouble(null);
+    const done =
+      as === "file"
+        ? downloadFile(sessionId, path, setPhase)
+        : downloadArchive(sessionId, path, setPhase);
+    void done.catch((e: unknown) => setTrouble(why(e))).finally(() => setPhase(null));
+  };
+
   return (
     <>
+      {menu.open && (
+        <ContextMenu
+          at={menu.open.at}
+          onClose={menu.close}
+          items={[
+            ...(entry.directory || entry.link
+              ? []
+              : [{ label: "Download file", disabled: !!phase, onPick: () => save("file") }]),
+            { label: "Download as zip", disabled: !!phase || entry.link, onPick: () => save("zip") },
+          ]}
+        />
+      )}
       <button
         onClick={() => (entry.directory ? setOpen(!open) : onOpenFile(path))}
         onDoubleClick={() => !entry.directory && onOpenFile(path, true)}
+        onContextMenu={(e) => menu.show(e, null)}
         style={{ paddingLeft: `${0.75 + depth * 0.85}rem` }}
         className="flex h-7 w-full items-center gap-1.5 pr-3 text-left transition-colors hover:bg-raise/60"
       >
         {entry.directory ? <ChevronRight className={`h-3 w-3 shrink-0 text-mute transition-transform duration-150 ${open ? "rotate-90" : ""}`} strokeWidth={2} /> : <span className="w-3 shrink-0" />}
         <FileGlyph name={entry.name} directory={entry.directory} open={open} tone={touched && !entry.directory ? "text-sage" : undefined} />
         <span className={`min-w-0 flex-1 truncate font-mono text-ui ${entry.directory ? "text-dim" : touched ? "text-sage" : "text-text"}`}>{entry.name}{entry.link ? " →" : ""}</span>
-        {touched && <span className={`shrink-0 font-mono text-micro ${entry.directory ? "text-mute" : "text-sage"}`}>{entry.directory ? "•" : fresh ? "A" : "M"}</span>}
+        {phase && <Saving phase={phase} />}
+        {touched && !phase && <span className={`shrink-0 font-mono text-micro ${entry.directory ? "text-mute" : "text-sage"}`}>{entry.directory ? "•" : fresh ? "A" : "M"}</span>}
       </button>
+      {/* Beside the row rather than in a toast: a refusal here names a size or
+          a path, and it belongs next to the thing it is about. */}
+      {trouble && (
+        <p
+          style={{ paddingLeft: `${1.6 + depth * 0.85}rem` }}
+          className="py-1 pr-3 text-micro text-brick"
+        >
+          {trouble}
+        </p>
+      )}
       {entry.directory && open && <Directory sessionId={sessionId} path={path} depth={depth + 1} changed={changed} marked={marked} onOpenFile={onOpenFile} />}
     </>
+  );
+}
+
+/**
+ * What a download is doing, as a word and a turning thing.
+ *
+ * Compressing first and downloading second, because on anything big the first
+ * is the long one: the worker deflates the whole archive before the control
+ * plane can answer at all. One spinner labelled "Downloading…" for that whole
+ * time is a progress indicator that is wrong for most of its life, and
+ * indistinguishable from a stall for the rest.
+ */
+function Saving({ phase, size = 3 }: { phase: SavePhase; size?: 3 | 3.5 }) {
+  return (
+    <span className="flex shrink-0 items-center gap-1 font-mono text-micro text-mute">
+      <Loader2
+        className={`${size === 3 ? "h-3 w-3" : "h-3.5 w-3.5"} shrink-0 animate-spin`}
+        strokeWidth={2}
+      />
+      {phase === "compressing" ? "Compressing…" : "Downloading…"}
+    </span>
   );
 }
 

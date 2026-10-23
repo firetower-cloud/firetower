@@ -145,7 +145,11 @@ export default function NewWorkspace() {
     [agent, accounts],
   );
 
-  const ready = name.trim().length > 0 && picked.length > 0 && !!hostId
+  /* **A repository is not required.** With none, this is a bare agent: a
+     directory on the machine with an agent waiting in it. Everything else
+     still is: a name, because it is all such a workspace has to be listed
+     under, and an agent that this host can actually start. */
+  const ready = name.trim().length > 0 && !!hostId
     && !!agentView?.supported && !!agentOnHost?.installed
     && (!agentView.needsCredential || (!!account?.enabled && account.state === "connected" && account.credentialSet))
     && !create.isPending;
@@ -182,7 +186,7 @@ export default function NewWorkspace() {
           />
         </Field>
 
-        <Field label="Repositories" hint="One or more">
+        <Field label="Repositories" hint={picked.length ? "One or more" : "Optional"}>
           <View className="gap-2">
             {chosenRepos.map((r) => (
               <View
@@ -218,6 +222,7 @@ export default function NewWorkspace() {
           </View>
         </Field>
 
+        {picked.length > 0 && (
         <Field label="Branch" hint="Cut from the base above">
           <TextInput
             value={branchValue}
@@ -234,6 +239,7 @@ export default function NewWorkspace() {
             style={{ fontSize: size.ui, fontFamily: "JetBrainsMono_400Regular", minHeight: 48 }}
           />
         </Field>
+        )}
 
         <Field label="Where it runs">
           <View className="gap-2">
@@ -286,7 +292,8 @@ export default function NewWorkspace() {
                 const made = await create.mutateAsync({
                   data: {
                     name: name.trim(),
-                    branch: branchValue,
+                    // Nothing to cut a branch from, and the field is not drawn.
+                    branch: picked.length ? branchValue : undefined,
                     repos: picked.map((repoId) => ({ repoId })),
                     hostId,
                     agent: agent as Agent,

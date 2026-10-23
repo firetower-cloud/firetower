@@ -21,6 +21,19 @@ tauri-plugin-opener = "2"
 tauri-plugin-window-state = "2"
 tauri-plugin-process = "2"
 tauri-plugin-updater = "2"
+# The native save sheet. Asked for from `save_download` rather than from the
+# renderer, so it needs no entry in `capabilities/` — see the note there.
+tauri-plugin-dialog = "2"
+# Downloading a file or a zip out of a workspace. The fetch happens here and
+# not in the renderer so that a hundred megabytes never crosses the IPC bridge
+# or sits in the webview's heap; it streams from the control plane to the path
+# somebody picked. Already in the tree under the updater plugin — declared
+# because a transitive dependency is not an API you are allowed to call.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "charset", "http2"] }
+# Waiting for the save sheet without blocking the runtime the window is drawn
+# on, and writing a download to disk as it arrives rather than holding ten
+# gigabytes of it in memory first. Declared for the same reason `reqwest` is.
+tokio = { version = "1", features = ["rt", "fs", "io-util"] }
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

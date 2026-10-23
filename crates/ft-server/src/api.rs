@@ -625,6 +625,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(sessions::list_files))
         .routes(routes!(sessions::find_files))
         .routes(routes!(sessions::download_file))
+        .routes(routes!(sessions::download_archive))
         .routes(routes!(forwards::list_forwards, forwards::create_forward))
         .routes(routes!(forwards::delete_forward))
         .routes(routes!(forwards::preview_address))

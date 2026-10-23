@@ -35,6 +35,7 @@ import type {
   Conversation,
   DestroySessionParams,
   Done,
+  DownloadArchiveParams,
   DownloadFileParams,
   EndAll,
   EndedAll,
@@ -1113,7 +1114,145 @@ export const useAnswerRequest = <TError = ApiError,
       > => {
       return useMutation(getAnswerRequestMutationOptions(options), queryClient);
     }
-    export const getAttachFileUrl = (id: string,) => {
+    export const getDownloadArchiveUrl = (id: string,
+    params?: DownloadArchiveParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/v1/sessions/${id}/archive?${stringifiedParams}` : `/api/v1/sessions/${id}/archive`
+}
+
+/**
+ * Separate from [`download_file`] rather than a flag on it, because the two
+ * differ in everything a caller cares about: what may be asked for (a
+ * directory, which a read refuses), what comes back (`application/zip` under a
+ * name that ends in `.zip`), and how long it takes before the first byte.
+ * @summary A path out of the workspace as one zip.
+ */
+export const downloadArchive = async (id: string,
+    params?: DownloadArchiveParams, options?: Parameters<typeof http>[1]): Promise<void> => {
+
+  return http<void>(getDownloadArchiveUrl(id,params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getDownloadArchiveQueryKey = (id: string,
+    params?: DownloadArchiveParams,) => {
+    return [
+    `/api/v1/sessions/${id}/archive`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getDownloadArchiveQueryOptions = <TData = Awaited<ReturnType<typeof downloadArchive>>, TError = ApiError>(id: string,
+    params?: DownloadArchiveParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof downloadArchive>>, TError, TData>>, request?: SecondParameter<typeof http>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getDownloadArchiveQueryKey(id,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof downloadArchive>>> = ({ signal }) => downloadArchive(id,params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof downloadArchive>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type DownloadArchiveQueryResult = NonNullable<Awaited<ReturnType<typeof downloadArchive>>>
+export type DownloadArchiveQueryError = ApiError
+
+
+export function useDownloadArchive<TData = Awaited<ReturnType<typeof downloadArchive>>, TError = ApiError>(
+ id: string,
+    params: undefined |  DownloadArchiveParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof downloadArchive>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof downloadArchive>>,
+          TError,
+          Awaited<ReturnType<typeof downloadArchive>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useDownloadArchive<TData = Awaited<ReturnType<typeof downloadArchive>>, TError = ApiError>(
+ id: string,
+    params?: DownloadArchiveParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof downloadArchive>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof downloadArchive>>,
+          TError,
+          Awaited<ReturnType<typeof downloadArchive>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useDownloadArchive<TData = Awaited<ReturnType<typeof downloadArchive>>, TError = ApiError>(
+ id: string,
+    params?: DownloadArchiveParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof downloadArchive>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary A path out of the workspace as one zip.
+ */
+
+export function useDownloadArchive<TData = Awaited<ReturnType<typeof downloadArchive>>, TError = ApiError>(
+ id: string,
+    params?: DownloadArchiveParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof downloadArchive>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getDownloadArchiveQueryOptions(id,params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+/**
+ * @summary A path out of the workspace as one zip.
+ */
+export const useSetDownloadArchiveQueryData = () => {
+  const queryClient = useQueryClient();
+  return (id: string,
+    params: DownloadArchiveParams | undefined,updater: Awaited<ReturnType<typeof downloadArchive>> | undefined | ((old: Awaited<ReturnType<typeof downloadArchive>> | undefined) => Awaited<ReturnType<typeof downloadArchive>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof downloadArchive>>>({ exact: $exactMatch, queryKey: getDownloadArchiveQueryKey(id,params) }, updater);
+  };
+}
+
+/**
+ * @summary A path out of the workspace as one zip.
+ */
+export const useGetDownloadArchiveQueryData = () => {
+  const queryClient = useQueryClient();
+  return (id: string,
+    params?: DownloadArchiveParams,) =>
+    queryClient.getQueryData<Awaited<ReturnType<typeof downloadArchive>>>(getDownloadArchiveQueryKey(id,params));
+}
+
+
+export const getAttachFileUrl = (id: string,) => {
 
 
 

@@ -469,6 +469,23 @@ export const AnswerRequestResponse = zod.object({
 })
 
 /**
+ * Separate from [`download_file`] rather than a flag on it, because the two
+ * differ in everything a caller cares about: what may be asked for (a
+ * directory, which a read refuses), what comes back (`application/zip` under a
+ * name that ends in `.zip`), and how long it takes before the first byte.
+ * @summary A path out of the workspace as one zip.
+ */
+export const DownloadArchiveParams = zod.object({
+  "id": zod.string().describe('Session id')
+})
+
+export const DownloadArchiveQueryParams = zod.object({
+  "path": zod.string().optional().describe('File or directory, relative to the workspace. Omit for the whole workspace.')
+})
+
+export const DownloadArchiveResponse = zod.unknown()
+
+/**
  * For everything that is not a picture. A picture goes inside the message,
  * because the model looks at it; anything else is better as a file the agent
  * can read, grep, unzip or edit with the tools it already has — and it costs

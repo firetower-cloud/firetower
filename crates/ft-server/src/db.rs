@@ -1771,7 +1771,14 @@ impl Db {
     }
 
     /// Add one to a session that is already running.
+    ///
+    /// In one transaction, because the row and the caption below have to agree:
+    /// a checkout that landed while the caption stayed empty is the stranded
+    /// state this function exists to avoid, and two separate writes are how you
+    /// get one.
     pub async fn add_checkout(&self, id: &SessionId, c: &Checkout) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+
         // `position` is an INT4, so `MAX(position) + 1` is one too. Reading it
         // as an i64 made sqlx refuse the row, which is what adding a repository
         // to a running session did instead of working.
@@ -1780,7 +1787,7 @@ impl Db {
               WHERE workspace_id = (SELECT workspace_id FROM sessions WHERE id = $1)",
         )
         .bind(id.as_str())
-        .fetch_one(&self.pool)
+        .fetch_one(&mut *tx)
         .await?;
 
         sqlx::query(
@@ -1798,8 +1805,36 @@ impl Db {
         .bind(&c.path)
         .bind(c.trouble.as_deref())
         .bind(c.pull_request.as_deref())
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
+
+        // **The caption, when this is the first thing checked out here.**
+        //
+        // A bare agent is a workspace with all three of these null, and they
+        // are what `Session::repo`, `::branch` and `::base` are read from — so
+        // leaving them null after a repository arrives is not merely a cosmetic
+        // miss. `run_action` refuses to commit or push while `repo` is none,
+        // and the credential for the remote is looked up from it, so the agent
+        // would check out a repository, change it, and have no way to send the
+        // work anywhere. The rail files it under "no repository" for the same
+        // reason.
+        //
+        // `repo IS NULL` rather than `position = 0`: what matters is that the
+        // caption is unset, and a workspace that already names a repository
+        // must keep naming its *first* one when a second is added beside it.
+        sqlx::query(
+            "UPDATE workspaces SET repo = $1, branch = $2, base = $3, updated_at = now()
+              WHERE id = (SELECT workspace_id FROM sessions WHERE id = $4)
+                AND repo IS NULL",
+        )
+        .bind(&c.slug)
+        .bind(&c.branch)
+        .bind(&c.base)
+        .bind(id.as_str())
+        .execute(&mut *tx)
+        .await?;
+
+        tx.commit().await?;
         Ok(())
     }
 
@@ -4094,6 +4129,120 @@ mod tests {
         assert_eq!(session.repo, None);
         assert_eq!(session.branch, None);
         assert_eq!(session.base, None);
+    }
+
+    /// A bare agent that gains a repository has to become an ordinary session.
+    ///
+    /// It half-worked, which was worse than not working: the checkout landed in
+    /// `workspace_repos` and nothing filled in the caption on `workspaces`, so
+    /// `Session::repo` stayed none. The diff and the pull request read the
+    /// checkouts and were fine; `run_action` reads `repo` and refused every
+    /// commit and push with "this session has no repository", about a
+    /// repository that was checked out on disk. The work had nowhere to go.
+    #[tokio::test]
+    async fn adding_a_repository_to_a_bare_agent_names_it() {
+        let (db, owner) = db_with_user().await;
+        let host = db
+            .ensure_host("localhost", Compute::Local, owner.as_str())
+            .await
+            .unwrap();
+        let id = SessionId::new();
+
+        db.insert_session(
+            &id,
+            &host.id,
+            &owner,
+            None,
+            "Poke around",
+            "have a look",
+            None,
+            None,
+            "Shell",
+            WorkspaceSize::Medium,
+            ft_core::Share::Equal,
+            &ft_core::Step::plan(false, false),
+            None,
+        )
+        .await
+        .unwrap();
+
+        db.add_checkout(
+            &id,
+            &Checkout {
+                repo_id: None,
+                slug: "acme/backend".into(),
+                base: "main".into(),
+                branch: "agent/hello".into(),
+                path: "backend".into(),
+                trouble: None,
+                pull_request: None,
+                pull_state: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        let session = db.session(&id).await.unwrap().unwrap();
+        assert_eq!(session.checkouts.len(), 1);
+        // The three that decide whether this session may commit, push and be
+        // filed under its repository in the rail.
+        assert_eq!(session.repo.as_deref(), Some("acme/backend"));
+        assert_eq!(session.branch.as_deref(), Some("agent/hello"));
+        assert_eq!(session.base.as_deref(), Some("main"));
+    }
+
+    /// And the second one does not take the caption off the first.
+    ///
+    /// The backfill is for a workspace that names nothing. A session that
+    /// already names `acme/backend` keeps naming it when the API it calls is
+    /// checked out beside it — otherwise adding a repository would quietly
+    /// re-file the workspace under whichever one went in last.
+    #[tokio::test]
+    async fn a_second_repository_leaves_the_caption_on_the_first() {
+        let (db, owner) = db_with_user().await;
+        let host = db
+            .ensure_host("localhost", Compute::Local, owner.as_str())
+            .await
+            .unwrap();
+        let id = SessionId::new();
+
+        db.insert_session(
+            &id,
+            &host.id,
+            &owner,
+            Some("acme/backend"),
+            "Fix",
+            "fix",
+            Some("agent/hello"),
+            Some("main"),
+            "ClaudeCode",
+            WorkspaceSize::Medium,
+            ft_core::Share::Equal,
+            &ft_core::Step::plan(true, false),
+            None,
+        )
+        .await
+        .unwrap();
+
+        db.add_checkout(
+            &id,
+            &Checkout {
+                repo_id: None,
+                slug: "acme/web".into(),
+                base: "trunk".into(),
+                branch: "agent/hello".into(),
+                path: "web".into(),
+                trouble: None,
+                pull_request: None,
+                pull_state: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        let session = db.session(&id).await.unwrap().unwrap();
+        assert_eq!(session.repo.as_deref(), Some("acme/backend"));
+        assert_eq!(session.base.as_deref(), Some("main"));
     }
 
     /// A choice is the person's, so it is kept against the session and not

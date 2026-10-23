@@ -75,6 +75,7 @@ export * from './directoryName.ts';
 export * from './dockerState.ts';
 export * from './dockerStatus.ts';
 export * from './done.ts';
+export * from './downloadArchiveParams.ts';
 export * from './downloadFileParams.ts';
 export * from './drain.ts';
 export * from './dropException.ts';

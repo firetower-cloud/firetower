@@ -100,6 +100,136 @@ fn close<R: Runtime>(window: WebviewWindow<R>) {
     let _ = window.close();
 }
 
+/// Save something out of a workspace, asking where first.
+///
+/// The fetch is here rather than in the renderer, which already has the token
+/// and could do it in three lines. Two reasons it is worth the crossing:
+///
+///   * a webview has no filesystem. The renderer could hold the bytes and have
+///     nowhere to put them — and the usual fix, granting the `fs` plugin a
+///     write scope, hands *every* page in the window the ability to write to
+///     the disk for the sake of one button;
+///   * a hundred megabytes must not cross the IPC bridge. Command arguments
+///     are serialised, so a zip passed through as bytes is copied, encoded and
+///     held twice over before anything reaches a file.
+///
+/// So the renderer sends a URL and gets back where it landed. `None` means the
+/// sheet was dismissed, which is not an error and must not be drawn as one.
+#[tauri::command]
+async fn save_download<R: Runtime>(
+    app: tauri::AppHandle<R>,
+    url: String,
+    token: Option<String>,
+    suggested: String,
+    on_phase: tauri::ipc::Channel<&str>,
+) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+
+    // Asked before the request, so a dismissed sheet costs nothing. The other
+    // order would download a zip somebody then declined to keep.
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.dialog()
+        .file()
+        .set_file_name(&suggested)
+        .save_file(move |picked| {
+            let _ = tx.send(picked);
+        });
+
+    let picked = tokio::task::spawn_blocking(move || rx.recv().ok().flatten())
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let Some(path) = picked else {
+        return Ok(None);
+    };
+    let path = path
+        .into_path()
+        .map_err(|e| format!("that isn't somewhere this can write: {e}"))?;
+
+    let client = reqwest::Client::new();
+    let mut request = client.get(&url);
+    if let Some(token) = token {
+        request = request.bearer_auth(token);
+    }
+
+    let answer = request
+        .send()
+        .await
+        .map_err(|e| format!("couldn't reach Firetower: {e}"))?;
+
+    // The control plane answers a refusal as JSON with a message in it, and
+    // writing that to disk under a `.zip` is the worst of both: no error, and a
+    // file that will not open. Read it out and say it instead.
+    if !answer.status().is_success() {
+        let status = answer.status();
+        let body = answer.text().await.unwrap_or_default();
+        let said = serde_json::from_str::<serde_json::Value>(&body)
+            .ok()
+            .and_then(|v| {
+                v.get("message")
+                    .and_then(|m| m.as_str())
+                    .map(str::to_string)
+            });
+        return Err(said.unwrap_or_else(|| format!("Firetower answered {status}")));
+    }
+
+    // **Headers are the boundary between the two phases.**
+    //
+    // The archive endpoint cannot answer until the worker has finished
+    // deflating — it owes the response a `content-length`, and a zip's size is
+    // not known until the last entry is written. So the moment the headers
+    // land is precisely the moment compressing stopped and bytes started, and
+    // the renderer can say so without anybody guessing.
+    //
+    // After the status check, so a refusal never flashes "Downloading…" on its
+    // way to being an error. A plain file has no first phase; its caller seeds
+    // `downloading` itself and this confirms what it already said.
+    let _ = on_phase.send("downloading");
+
+    if let Err(e) = stream_to(&path, answer).await {
+        // **A half-written file is worse than no file.** It is a `.zip` that
+        // will not open or a video that will not play, sitting under the name
+        // somebody asked for and dated now — so the next person to look finds
+        // something that appears to be the download and is not.
+        let _ = std::fs::remove_file(&path);
+        return Err(e);
+    }
+
+    Ok(Some(path.to_string_lossy().to_string()))
+}
+
+/// Write a response to a path as it arrives.
+///
+/// Streamed rather than buffered because the ceiling is ten gigabytes now.
+/// `bytes()` would hold the whole download in this process before a byte
+/// reached the disk, which at the old hundred-megabyte limit was merely rude
+/// and at this one is the app being killed for memory halfway through a
+/// render somebody waited twenty minutes for.
+async fn stream_to(path: &std::path::Path, mut answer: reqwest::Response) -> Result<(), String> {
+    use tokio::io::AsyncWriteExt;
+
+    let mut file = tokio::fs::File::create(path)
+        .await
+        .map_err(|e| format!("couldn't create that file: {e}"))?;
+
+    while let Some(chunk) = answer
+        .chunk()
+        .await
+        .map_err(|e| format!("the download stopped early: {e}"))?
+    {
+        file.write_all(&chunk)
+            .await
+            .map_err(|e| format!("couldn't write that file: {e}"))?;
+    }
+
+    // Explicitly, and checked. Dropping a `File` flushes on a best-effort
+    // basis and throws the error away, which for the last chunk of a ten
+    // gigabyte download is the one error worth having.
+    file.flush()
+        .await
+        .map_err(|e| format!("couldn't finish writing that file: {e}"))
+}
+
 #[tauri::command]
 fn zoom<R: Runtime>(window: WebviewWindow<R>) {
     let maximized = window.is_maximized().unwrap_or(false);
@@ -128,6 +258,8 @@ fn main() {
         // A new build is offered from the GitHub release; the renderer asks.
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        // A file or a directory leaves a workspace through the save sheet.
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let window = app.get_webview_window("main").expect("main window");
 
@@ -174,6 +306,7 @@ fn main() {
             minimize,
             zoom,
             close,
+            save_download,
             secret_get,
             secret_set,
             secret_delete,
