@@ -188,12 +188,28 @@ Cursor account and are driven by hand:
 Use a fresh backend for a first-user run; both harnesses expect to be the
 first thing that touches the database.
 
-Upgrade workers and clients with the control plane: the worker protocol version
-is 20 because older workers cannot deserialize the new agent variant, its
-configuration command, or a sign-in that names which agent it is for. It was
-written as 19 while this branch was open; main took 19 for travelling skills
-first, so Cursor follows at 20.
-The released desktop client also rejects ACP conversation frames under its old
-schema, leaving a session apparently working after the agent has replied. For
-this prototype, build the desktop client from the same branch; installing the
-server alone is not enough.
+## Releasing it
+
+The worker protocol version is **20**: an older worker cannot deserialize the
+new agent variant, its configuration command, or a sign-in that names which
+agent it is for. It was written as 19 while this branch was open; main took 19
+for travelling skills first, so Cursor follows at 20.
+
+**A worker that is behind is refused, not broken.** The control plane compares
+on `Hello` and answers a mismatch with `protocol_mismatch` — what each side
+speaks, and the command to reinstall the worker. Nothing half-works, and
+nobody has to guess why.
+
+**One tag ships all of it.** `release.yml` builds the image, both desktop
+platforms, mobile and the worker from a single release-please run, so a normal
+release is already in step. The way to get a split is to deploy the server
+image by hand without cutting one.
+
+**An already-installed client is the part that lags**, because it upgrades on
+its own schedule rather than with the server. The effect is smaller than it
+was once thought: the generated zod schemas are written but never imported, so
+they are not a runtime gate, and `AgentMark` falls back for an agent it does
+not know. An old client shown somebody else's Cursor session degrades — an
+unnamed agent, a mark it has no case for — rather than refusing frames. That
+is worth confirming on a real old build before a release rather than taking
+from here; it is reasoning about the clients, not a run against them.
