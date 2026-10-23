@@ -28,11 +28,12 @@ skill ever fires. Everything else is free until it is needed.
 
 ### Frontmatter
 
-Portable across all three agents: `name`, `description`, `license`,
+Portable across every agent: `name`, `description`, `license`,
 `compatibility`, `metadata`, `allowed-tools`. Everything else belongs to one
 agent — Claude Code has a dozen more (`when_to_use`, `arguments`, `model`,
 `hooks`, `context: fork`, …), Codex reads `agents/openai.yaml`, Kimi has
-`type: flow`.
+`type: flow`. Cursor adds none of its own, and reads four other agents'
+directories besides its own — see the table below.
 
 **Firetower stores the folder verbatim and interprets six fields.** Anything
 agent-specific is preserved byte for byte and labelled in the interface as
