@@ -304,19 +304,36 @@ function Tile({
 }) {
   return (
     <div className="group/tile relative">
-      <button onClick={onOpen} onContextMenu={(e) => onMenu(e, artifact)} className="block w-full text-left">
-      <span className="block group-hover/tile:[&>span]:border-mute">
-        <ArtifactShot artifact={artifact} />
-      </span>
-      <span className="mt-2 block truncate text-ui text-bone">{artifact.title}</span>
-      <span className="mt-0.5 flex items-center gap-1.5 text-micro text-mute">
-        <span className="font-mono">v{artifact.version}</span>
-        <span>·</span>
-        <span className="truncate">
-          {artifact.mine ? (artifact.fromWorkspaceName ?? "no workspace") : (artifact.path?.split("/")[1] ?? "shared")}
+      {/* One card around the picture and its name.
+          The house habit is a border round the bytes and nothing round the
+          sentence — which is right in a transcript, where a card would
+          compete with the conversation. A library is the other case: the
+          tile *is* the object, there is one kind of them, and the card is
+          what says where one ends and the next begins. */}
+      <button
+        onClick={onOpen}
+        onContextMenu={(e) => onMenu(e, artifact)}
+        className="block w-full overflow-hidden rounded-lg border border-line bg-panel text-left transition-colors hover:border-mute"
+      >
+        <ArtifactShot artifact={artifact} framed={false} />
+        <span className="flex items-center gap-2.5 border-t border-line-soft px-3 py-2.5">
+          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md border border-line bg-raise">
+            <Shapes className="h-4 w-4 text-mute" strokeWidth={1.75} />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-ui text-bone">{artifact.title}</span>
+            <span className="mt-0.5 flex items-center gap-1.5 text-micro text-mute">
+              <span className="font-mono">v{artifact.version}</span>
+              <span>·</span>
+              <span className="truncate">
+                {artifact.mine
+                  ? (artifact.fromWorkspaceName ?? "no workspace")
+                  : (artifact.path?.split("/")[1] ?? "shared")}
+              </span>
+              <span className="ml-auto shrink-0">{elapsed(minutesSince(artifact.updatedAt))}</span>
+            </span>
+          </span>
         </span>
-        <span className="ml-auto shrink-0">{elapsed(minutesSince(artifact.updatedAt))}</span>
-      </span>
       </button>
       {/* On the thumbnail, above the shield, and only once the pointer is
           here — a control on every tile all the time is six controls

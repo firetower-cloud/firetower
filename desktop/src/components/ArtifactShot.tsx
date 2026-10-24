@@ -29,11 +29,14 @@ export function ArtifactShot({
   artifact,
   ratio = 16 / 10,
   className = "",
+  framed = true,
 }: {
   artifact: Artifact;
   /** Width over height. The crop keeps this shape at every size. */
   ratio?: number;
   className?: string;
+  /** Its own border and corners. Off when something around it draws them. */
+  framed?: boolean;
 }) {
   const box = useRef<HTMLSpanElement>(null);
   const [width, setWidth] = useState(0);
@@ -51,7 +54,9 @@ export function ArtifactShot({
     <span
       ref={box}
       style={{ aspectRatio: String(ratio) }}
-      className={`relative block w-full overflow-hidden rounded-md border border-line bg-white transition-colors ${className}`}
+      className={`relative block w-full overflow-hidden bg-white transition-colors ${
+        framed ? "rounded-md border border-line" : ""
+      } ${className}`}
     >
       {/* Nothing until the width is known: mounting at scale 0 would load the
           page once and lay it out again a frame later. */}
