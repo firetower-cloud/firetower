@@ -60,6 +60,7 @@ import { AccountSwitcher } from "~/ui/AccountSwitcher";
 import { Annotate, type Anchor } from "~/ui/Annotate";
 import { markPaths, resolvePath } from "~/paths";
 import { ImagesFrom } from "~/components/WorkspaceImage";
+import { ArtifactShot } from "~/components/ArtifactShot";
 import { AddAgent } from "~/ui/AddAgent";
 
 const DID: Partial<Record<ItemKind, string>> = {
@@ -711,22 +712,9 @@ function ArtifactCard({ artifact, onOpen }: { artifact: ArtifactModel; onOpen: (
       <button
         onClick={() => onOpen(artifact.id, artifact.title)}
         title="Open it beside the conversation"
-        className="group/art block w-full overflow-hidden rounded-md border border-line transition-colors hover:border-mute"
+        className="group/art block w-full"
       >
-        <div className="relative h-[148px] overflow-hidden bg-white">
-          <iframe
-            src={artifact.url}
-            title={artifact.title}
-            tabIndex={-1}
-            aria-hidden
-            scrolling="no"
-            style={{ width: 1180, height: 740, transform: "scale(0.355)", transformOrigin: "0 0" }}
-            className="pointer-events-none absolute inset-0 border-0"
-          />
-          {/* Above the frame, so the wheel never reaches the inner document —
-              see the note in ArtifactsPage. This doubles as the hover veil. */}
-          <span className="absolute inset-0 z-10 bg-gradient-to-b from-transparent to-ground/40 opacity-0 transition-opacity group-hover/art:opacity-100" />
-        </div>
+        <ArtifactShot artifact={artifact} className="group-hover/art:border-mute" />
       </button>
       <div className="mt-1.5 flex items-baseline gap-2">
         <span className="text-ui font-medium text-bone">{artifact.title}</span>

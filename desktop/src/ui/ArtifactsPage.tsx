@@ -37,6 +37,7 @@ import type { Artifact } from "~/api/generated/model";
 import { elapsed, minutesSince } from "~/api/view";
 import { ArtifactTab } from "~/ui/ArtifactTab";
 import { why } from "~/data";
+import { ArtifactShot } from "~/components/ArtifactShot";
 
 type Scope = "all" | "mine" | "shared";
 type Sort = "recent" | "name";
@@ -150,13 +151,13 @@ export function ArtifactsPage() {
     },
   ];
 
-  if (isPending) return <Empty>Looking…</Empty>;
-  if (error) return <Empty>{why(error) ?? "Could not read your artifacts."}</Empty>;
+  if (isPending) return <Empty title="Looking…">Reading what you have published.</Empty>;
+  if (error)
+    return <Empty title="That did not load.">{why(error) ?? "Could not read your artifacts."}</Empty>;
   if (everything.length === 0)
     return (
-      <Empty>
-        Nothing published yet. Ask an agent to show you something — a mock-up, a page, a chart — and
-        it appears here.
+      <Empty title="No artifacts yet">
+        Ask your agent to create an artifact and it will appear in this section.
       </Empty>
     );
 
@@ -250,12 +251,20 @@ export function ArtifactsPage() {
 
       <div className="scroll-slim min-h-0 flex-1 overflow-y-auto">
         {showing.length === 0 ? (
-          <Empty>
+          <Empty
+            title={
+              query.trim()
+                ? "Nothing matches"
+                : scope === "shared"
+                  ? "Nothing shared yet"
+                  : "Nothing of your own"
+            }
+          >
             {query.trim()
-              ? `Nothing matching “${query.trim()}”.`
+              ? `No artifact is called “${query.trim()}”.`
               : scope === "shared"
-                ? "Nothing filed into a directory. Move one with the share control to let a team reach it."
-                : "Nothing at your own root."}
+                ? "Move one into a directory with the share control and everybody there can reach it."
+                : "Everything here is filed in a directory rather than at your own root."}
           </Empty>
         ) : look === "grid" ? (
           <div className="grid grid-cols-[repeat(auto-fill,minmax(14rem,1fr))] gap-4 p-4">
@@ -284,41 +293,6 @@ export function ArtifactsPage() {
   );
 }
 
-/** The artifact itself, scaled. No screenshot service and no headless browser. */
-function Shot({ artifact, w, h }: { artifact: Artifact; w: number; h: number }) {
-  const page = 1180;
-  return (
-    <span
-      className="relative block overflow-hidden rounded-md border border-line bg-white transition-colors"
-      style={{ height: h }}
-    >
-      <iframe
-        src={artifact.url}
-        title=""
-        tabIndex={-1}
-        aria-hidden
-        scrolling="no"
-        style={{
-          width: page,
-          height: (page * h) / w,
-          transform: `scale(${w / page})`,
-          transformOrigin: "0 0",
-        }}
-        className="pointer-events-none absolute inset-0 border-0"
-      />
-      {/* A pane over the frame, and it is load-bearing.
-          `pointer-events: none` on an `iframe` stops clicks but does not
-          reliably stop the wheel in WKWebView — the event reaches the inner
-          document and scrolls *that*, so scrolling a grid of thumbnails
-          scrolled the thumbnails instead of the grid. A sibling above it in
-          z-order catches the wheel first, and clicks land on the button this
-          sits inside. `scrolling="no"` is belt and braces for the engines
-          that still honour it. */}
-      <span className="absolute inset-0 z-10" aria-hidden />
-    </span>
-  );
-}
-
 function Tile({
   artifact,
   onOpen,
@@ -332,7 +306,7 @@ function Tile({
     <div className="group/tile relative">
       <button onClick={onOpen} onContextMenu={(e) => onMenu(e, artifact)} className="block w-full text-left">
       <span className="block group-hover/tile:[&>span]:border-mute">
-        <Shot artifact={artifact} w={224} h={140} />
+        <ArtifactShot artifact={artifact} />
       </span>
       <span className="mt-2 block truncate text-ui text-bone">{artifact.title}</span>
       <span className="mt-0.5 flex items-center gap-1.5 text-micro text-mute">
@@ -373,7 +347,9 @@ function Line({
       onContextMenu={(e) => onMenu(e, artifact)}
       className="group/line flex w-full items-center gap-3 rounded-md px-2 py-2 text-left transition-colors hover:bg-raise/60"
     >
-      <Shot artifact={artifact} w={84} h={48} />
+      <span className="block w-[84px] shrink-0">
+        <ArtifactShot artifact={artifact} />
+      </span>
       <span className="min-w-0 flex-1">
         <span className="block truncate text-ui text-text">{artifact.title}</span>
         <span className="mt-0.5 flex items-center gap-1.5 text-micro text-mute">
@@ -401,10 +377,27 @@ function Line({
   );
 }
 
-function Empty({ children }: { children: React.ReactNode }) {
+/**
+ * The first thing anybody sees here, and for a while the only thing.
+ *
+ * A sentence of grey text floating in the middle of a dark window reads as a
+ * screen that failed to load. It gets the glyph the rail uses for this
+ * section, a line that says what the screen is, and a line that says how to
+ * make something appear — which is the only question somebody has while
+ * looking at it.
+ */
+function Empty({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="grid flex-1 place-items-center py-20">
-      <p className="max-w-[34ch] text-center text-meta text-mute">{children}</p>
+    <div className="grid flex-1 place-items-center px-6 py-24">
+      <div className="flex flex-col items-center text-center">
+        {/* The same shape as the rail entry, at the size the mark uses when
+            it is the subject rather than a row's label. */}
+        <span className="grid h-14 w-14 place-items-center rounded-xl border border-line bg-raise shadow-(--shadow-raise)">
+          <Shapes className="h-6 w-6 text-dim" strokeWidth={1.5} />
+        </span>
+        <p className="mt-5 text-title font-medium text-bone">{title}</p>
+        <p className="mt-2 max-w-[42ch] text-ui leading-relaxed text-mute">{children}</p>
+      </div>
     </div>
   );
 }
