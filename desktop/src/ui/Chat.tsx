@@ -234,15 +234,24 @@ export function Chat({
    * is written once the card stops where it started instead of following
    * later edits down the page.
    *
-   * An artifact with no line — published before the column existed, or whose
-   * line is outside the window of exchanges loaded — falls to the end rather
-   * than vanishing. */
+   * Three places a card can go, and getting this wrong is what kept it at the
+   * bottom even once the line was right. The transcript is a *window* — this
+   * session loads from line 6007 while the artifact was published at 5141 —
+   * so "no row matches" has two very different meanings:
+   *
+   *   - **inside the window**: after the row the conversation had reached;
+   *   - **before the window**: above the transcript, because it happened
+   *     before everything on screen. Sending that case to the end put the
+   *     oldest artifact under the newest message;
+   *   - **no line at all** (published before this column existed): the end,
+   *     which is the only honest answer when the position is unknown. */
   const mineHere = useMemo(
     () => artifacts.filter((a) => a.fromSessionId === session.id),
     [artifacts, session.id],
   );
   const placed = useMemo(() => {
     const at = new Map<number, typeof mineHere>();
+    const before: typeof mineHere = [];
     const loose: typeof mineHere = [];
 
     /* The highest log line each row covers, so a card lands after the row the
@@ -252,18 +261,27 @@ export function Chat({
       return inRow.reduce((high, it) => Math.max(high, it.lineNo ?? 0), 0);
     });
 
+    const known = reach.filter((r) => r > 0);
+    const earliest = known.length > 0 ? Math.min(...known) : 0;
+
     for (const a of mineHere) {
       const line = a.firstSeenLine ?? 0;
+      if (line <= 0) {
+        loose.push(a);
+        continue;
+      }
+      if (earliest > 0 && line < earliest) {
+        before.push(a);
+        continue;
+      }
       let found = -1;
-      if (line > 0) {
-        for (let i = 0; i < reach.length; i++) {
-          if (reach[i] > 0 && reach[i] <= line) found = i;
-        }
+      for (let i = 0; i < reach.length; i++) {
+        if (reach[i] > 0 && reach[i] <= line) found = i;
       }
       if (found >= 0) at.set(found, [...(at.get(found) ?? []), a]);
       else loose.push(a);
     }
-    return { at, loose };
+    return { at, before, loose };
   }, [mineHere, rows]);
 
   /* Subagents that have not reported. The turn can end with these still
@@ -428,6 +446,12 @@ export function Chat({
               <Loader2 className="h-3.5 w-3.5 animate-spin text-mute" strokeWidth={2} />
             </div>
           )}
+
+          {/* Published before anything on screen. Above the transcript, not
+              below it — the window is the last few exchanges, and an artifact
+              older than all of them is not the newest thing that happened. */}
+          {onOpenArtifact &&
+            placed.before.map((a) => <ArtifactCard key={a.id} artifact={a} onOpen={onOpenArtifact} />)}
 
           <ol className="mt-9 space-y-7">
             {rows.map((row, i) => (
