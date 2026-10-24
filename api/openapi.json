@@ -604,6 +604,69 @@
         }
       }
     },
+    "/api/v1/artifacts/{id}": {
+      "patch": {
+        "tags": [
+          "artifacts"
+        ],
+        "summary": "Rename an artifact.",
+        "description": "The title is what a person calls it. The slug — the folder the agent writes\ninto, and what a republish is matched on — is deliberately untouched.",
+        "operationId": "rename_artifact",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Artifact id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArtifactNaming"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Artifact"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/artifacts/{id}/address": {
       "get": {
         "tags": [
@@ -8344,6 +8407,18 @@
           }
         ],
         "description": "One artifact, with the address it can be opened at."
+      },
+      "ArtifactNaming": {
+        "type": "object",
+        "description": "A new name for an artifact.\n\n**Not `Rename`.** A host already registers one of those, and utoipa keys a\nschema by its short name — so a second `Rename` silently becomes whichever\nthe generator reached last, and the clients typecheck against a shape the\nserver never sends. `SkillNaming` exists for the same reason.",
+        "required": [
+          "title"
+        ],
+        "properties": {
+          "title": {
+            "type": "string"
+          }
+        }
       },
       "ArtifactRow": {
         "type": "object",

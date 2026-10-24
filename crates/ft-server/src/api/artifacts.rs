@@ -120,6 +120,70 @@ fn port_of(headers: &HeaderMap) -> Option<u16> {
 }
 
 
+/// A new name for an artifact.
+///
+/// **Not `Rename`.** A host already registers one of those, and utoipa keys a
+/// schema by its short name — so a second `Rename` silently becomes whichever
+/// the generator reached last, and the clients typecheck against a shape the
+/// server never sends. `SkillNaming` exists for the same reason.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ArtifactNaming {
+    pub title: String,
+}
+
+/// Rename an artifact.
+///
+/// The title is what a person calls it. The slug — the folder the agent writes
+/// into, and what a republish is matched on — is deliberately untouched.
+#[utoipa::path(
+    patch, path = "/api/v1/artifacts/{id}", tag = "artifacts",
+    params(("id" = String, Path, description = "Artifact id")),
+    request_body = ArtifactNaming,
+    responses((status = 200, body = Artifact), (status = 400, body = ApiError), (status = 404, body = ApiError)),
+)]
+pub(super) async fn rename_artifact(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(body): Json<ArtifactNaming>,
+) -> ApiResult<Json<Artifact>> {
+    let owner = principal
+        .owner()
+        .ok_or_else(|| ApiError::new(ErrorCode::Unauthorized, "Sign in to rename."))?;
+
+    let title = body.title.trim();
+    if title.is_empty() || title.chars().count() > 200 {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            "a title is between one and two hundred characters",
+        ));
+    }
+
+    let artifact = ft_core::ArtifactId::from_stored(id.clone());
+    if !state.db.rename_artifact(owner, &artifact, title).await? {
+        // Not found and not allowed answer the same way on purpose: telling
+        // somebody a thing exists but is not theirs is itself a disclosure.
+        return Err(ApiError::not_found("artifact"));
+    }
+
+    let row = state
+        .db
+        .artifacts_of(owner)
+        .await?
+        .into_iter()
+        .find(|r| r.id == id)
+        .ok_or_else(|| ApiError::not_found("artifact"))?;
+
+    Ok(Json(Artifact {
+        url: state
+            .names
+            .artifact_url(scheme_of(&headers), port_of(&headers), &artifact),
+        row,
+    }))
+}
+
 /// Where a session writes the artifacts it publishes.
 ///
 /// Under the session's own directory, which is already outside git — the same

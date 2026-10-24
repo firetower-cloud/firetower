@@ -30,6 +30,36 @@ export const ListArtifactsResponseItem = zod.object({
 export const ListArtifactsResponse = zod.array(ListArtifactsResponseItem)
 
 /**
+ * The title is what a person calls it. The slug — the folder the agent writes
+ * into, and what a republish is matched on — is deliberately untouched.
+ * @summary Rename an artifact.
+ */
+export const RenameArtifactParams = zod.object({
+  "id": zod.string().describe('Artifact id')
+})
+
+export const RenameArtifactBody = zod.object({
+  "title": zod.string()
+}).describe('A new name for an artifact.\n\n**Not `Rename`.** A host already registers one of those, and utoipa keys a\nschema by its short name — so a second `Rename` silently becomes whichever\nthe generator reached last, and the clients typecheck against a shape the\nserver never sends. `SkillNaming` exists for the same reason.')
+
+export const RenameArtifactResponse = zod.object({
+  "bytes": zod.int(),
+  "fromSessionId": zod.string().nullish(),
+  "fromWorkspaceName": zod.string().nullish(),
+  "id": zod.string(),
+  "mayShare": zod.boolean().describe('Whether the asker may move it — drawn as the move control, and\nre-decided server-side by `may_share` whatever the client drew.'),
+  "mine": zod.boolean().describe('True when it is filed at the asker\'s own root rather than shared.'),
+  "path": zod.string().describe('Where it is filed. `u/<somebody>/<slug>` until it is moved.'),
+  "slug": zod.string(),
+  "title": zod.string(),
+  "updatedAt": zod.iso.datetime({"offset":true}),
+  "version": zod.int(),
+  "versionId": zod.string().nullish().describe('The version currently served.\n\nExposed because the picker injected into the page identifies itself by\nit — a note belongs to the bytes it was written on, not to the artifact\nin general — so a client that cannot name the version cannot complete\nthe handshake, and Annotate stays dead with nothing to say why.')
+}).describe('One artifact, as a list shows it.').and(zod.object({
+  "url": zod.string().describe('Ready to put in an `iframe` or paste into a tab.')
+})).describe('One artifact, with the address it can be opened at.')
+
+/**
  * @summary Where one artifact can be opened.
  */
 export const ArtifactAddressParams = zod.object({

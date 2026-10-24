@@ -28,6 +28,7 @@ import type {
 import type {
   ApiError,
   Artifact,
+  ArtifactNaming,
   Folder,
   Publish
 } from '../model';
@@ -171,7 +172,97 @@ export const useGetListArtifactsQueryData = () => {
 }
 
 
-export const getArtifactAddressUrl = (id: string,) => {
+export const getRenameArtifactUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/artifacts/${id}`
+}
+
+/**
+ * The title is what a person calls it. The slug — the folder the agent writes
+ * into, and what a republish is matched on — is deliberately untouched.
+ * @summary Rename an artifact.
+ */
+export const renameArtifact = async (id: string,
+    artifactNaming: ArtifactNaming, options?: Parameters<typeof http>[1]): Promise<Artifact> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return http<Artifact>(getRenameArtifactUrl(id),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(artifactNaming)
+  }
+);}
+
+
+
+
+
+export const getRenameArtifactMutationKey = () => ['renameArtifact'] as const;
+
+export const getRenameArtifactMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof renameArtifact>>, TError,RenameArtifactMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof renameArtifact>>, TError,RenameArtifactMutationVariables, TContext> => {
+
+const mutationKey = getRenameArtifactMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof renameArtifact>>, RenameArtifactMutationVariables> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  renameArtifact(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RenameArtifactMutationResult = NonNullable<Awaited<ReturnType<typeof renameArtifact>>>
+    export type RenameArtifactMutationBody = ArtifactNaming
+    export type RenameArtifactMutationError = ApiError
+    export type RenameArtifactMutationVariables = {id: string;data: ArtifactNaming}
+
+    /**
+ * @summary Rename an artifact.
+ */
+export const useRenameArtifact = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof renameArtifact>>, TError,RenameArtifactMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof renameArtifact>>,
+        TError,
+        RenameArtifactMutationVariables,
+        TContext
+      > => {
+      return useMutation(getRenameArtifactMutationOptions(options), queryClient);
+    }
+    export const getArtifactAddressUrl = (id: string,) => {
 
 
 

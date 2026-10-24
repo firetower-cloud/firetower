@@ -20,6 +20,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, Download, ExternalLink, Link2, Maximize2, Minimize2, Send, Share2, Trash2 } from "lucide-react";
 import type { Artifact } from "~/api/generated/model";
 import { sendTurn } from "~/api/generated/sessions/sessions";
+import { renameArtifact } from "~/api/generated/artifacts/artifacts";
+import { useQueryClient } from "@tanstack/react-query";
+import { getListArtifactsQueryKey } from "~/api/generated/artifacts/artifacts";
 import { openExternal } from "~/open";
 import { bridge as shell } from "~/bridge";
 import { apiBase, token } from "~/client/http";
@@ -62,6 +65,22 @@ export function ArtifactTab({
   const [sending, setSending] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [saving, setSaving] = useState(false);
+  /* `null` when the title is just a title. A string while it is being typed —
+     including the empty string, which is why this is not `naming || title`. */
+  const [naming, setNaming] = useState<string | null>(null);
+  const cache = useQueryClient();
+
+  const rename = async () => {
+    const next = (naming ?? "").trim();
+    setNaming(null);
+    if (!next || next === artifact.title) return;
+    try {
+      await renameArtifact(artifact.id, { title: next });
+      await cache.invalidateQueries({ queryKey: getListArtifactsQueryKey() });
+    } catch (e) {
+      setNotice(why(e) ?? "Could not rename it.");
+    }
+  };
 
   /* The picker needs to be told which window to talk to; it will not guess. */
   const src = origin ? `${artifact.url}#__firetower_ui=${encodeURIComponent(self())}` : undefined;
@@ -156,9 +175,31 @@ export function ArtifactTab({
   const body = (
     <div className="relative flex h-full min-h-0 flex-col bg-ground">
       <header className="flex h-9 shrink-0 items-center gap-2 border-b border-line bg-panel px-2">
-        <span className="min-w-0 truncate text-ui font-medium text-bone" title={artifact.title}>
-          {artifact.title}
-        </span>
+        {/* The title is the control. Clicking a name to change it is how the
+            rest of this app renames a workspace, and an artifact is the one
+            thing here whose name was invented by a poller from a folder. */}
+        {naming === null ? (
+          <button
+            onClick={() => setNaming(artifact.title)}
+            title="Rename"
+            className="min-w-0 truncate rounded px-1 text-ui font-medium text-bone hover:bg-raise"
+          >
+            {artifact.title}
+          </button>
+        ) : (
+          <input
+            autoFocus
+            value={naming}
+            onChange={(e) => setNaming(e.target.value)}
+            onBlur={rename}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void rename();
+              if (e.key === "Escape") setNaming(null);
+            }}
+            spellCheck={false}
+            className="min-w-0 flex-1 rounded border border-line bg-ground px-1 text-ui font-medium text-bone focus:outline-none"
+          />
+        )}
         <span className="shrink-0 rounded-full border border-line px-1.5 font-mono text-micro text-mute">
           v{artifact.version}
         </span>

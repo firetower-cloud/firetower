@@ -7193,18 +7193,23 @@ impl Db {
         //
         // Which session *made* a thing does not change when another one edits
         // it. The title does, because that is what the publisher called it.
+        // The title is *not* set here, only on insert.
+        //
+        // Publishing happens every time the agent touches the file, and the
+        // title it sends is derived from the folder name — so overwriting
+        // would undo a rename within seconds of somebody typing it. The name
+        // belongs to whoever named it last on purpose, which is a person
+        // pressing enter, not a poller.
         sqlx::query(
             "UPDATE artifacts
                 SET current_version_id = $2,
-                    title = $3,
                     updated_at = now(),
-                    from_session_id = coalesce(from_session_id, $4),
-                    from_workspace_name = coalesce(from_workspace_name, $5)
+                    from_session_id = coalesce(from_session_id, $3),
+                    from_workspace_name = coalesce(from_workspace_name, $4)
               WHERE id = $1",
         )
         .bind(artifact.as_str())
         .bind(version.as_str())
-        .bind(title)
         .bind(from_session)
         .bind(from_workspace)
         .execute(&mut *tx)
@@ -7279,6 +7284,36 @@ impl Db {
                 updated_at: r.get("updated_at"),
             })
             .collect())
+    }
+
+    /// Give an artifact the name a person chose.
+    ///
+    /// The **title** only. The slug is the folder the agent writes into and
+    /// the key a republish is matched on — renaming that would orphan the
+    /// artifact and the next save would appear as a second one.
+    ///
+    /// Writer, not viewer: this changes something, and reading at viewer then
+    /// writing is the first mistake `paths-and-ownership.md` names.
+    pub async fn rename_artifact(
+        &self,
+        person: &str,
+        id: &ft_core::ArtifactId,
+        title: &str,
+    ) -> Result<bool> {
+        use crate::access::{filed_where, Level};
+        let sql = format!(
+            "UPDATE artifacts a SET title = $3, updated_at = now()
+              WHERE a.id = $2 AND {allowed}",
+            allowed = filed_where("a", 1, Level::Writer),
+        );
+        let done = sqlx::query(&sql)
+            .bind(person)
+            .bind(id.as_str())
+            .bind(title)
+            .execute(&self.pool)
+            .await
+            .context("renaming an artifact")?;
+        Ok(done.rows_affected() > 0)
     }
 
     /// Every file of an artifact's current version, for an export.
