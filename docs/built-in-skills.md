@@ -207,26 +207,32 @@ left. One line is cheap insurance against the same failure in a new costume.
 
 ---
 
-## 8. What to decide before building
+## 8. Decided
 
-1. **On by default, or listed and not ticked?** `key-decisions.md` is firm that
-   a shared skill is *labelled and not ticked*, because a capability nobody
-   needs is pure cost. Thirty tokens is cheap and the feature is meant to work
-   without ceremony — but defaulting it on is a real departure from a rule that
-   was argued for, so it should be chosen rather than slid in.
+1. **On by default.** A departure from `key-decisions.md`'s *labelled and not
+   ticked*, taken deliberately. That rule is about capability skills pushed on
+   people who do not need them; this one describes how a Firetower feature
+   works, which is closer to convention — and convention is the kind the same
+   document says is worth everybody having.
 
-2. **"Not removable" means what, exactly?** Not deletable from the organisation
-   is clearly right. Not *turn-off-able for a session* is a different claim, and
-   somebody who never publishes anything should be able to stop paying for it.
-   Recommendation: undeletable, always untickable.
+2. **Undeletable from the organisation, always untickable for a session.**
+   Nobody can remove it from the library; anybody who never publishes can stop
+   paying its thirty tokens.
 
-3. **May an administrator ever override one?** The clean answer is that a skill
-   of the same name at your own root wins over the built-in — override by
-   shadowing, nothing to configure. Worth confirming before it is the rule.
+3. **Not overridable.** A skill of the same name at somebody's own root does
+   *not* shadow it. The built-in carries the contract — where a file has to be
+   for anybody to see it — and a contract that any skill can replace is not a
+   contract.
 
-4. **Does the cost total belong on the screen at all?** It is the distinctive
-   idea here and it is also a number that could read as nagging. It may want to
-   be a per-section total and nothing more.
+   This is why the skill itself has to separate its two halves out loud. The
+   **delivery** is fixed and the **craft is explicitly overridable**: another
+   artifact builder's typography, components, palette and build tooling all win,
+   so long as what it produces ends up at the path Firetower watches. The skill
+   says so in as many words, because an agent holding two sets of instructions
+   needs to know which one yields.
+
+4. **The cost total is out.** Interesting, easy to read as nagging, and not
+   what anybody came to this screen for. Revisit with a reason.
 
 ---
 
