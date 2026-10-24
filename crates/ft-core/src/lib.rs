@@ -211,9 +211,15 @@ impl Agent {
                     preferred.effort.clone().unwrap_or_else(|| EFFORT.into()),
                 ]);
 
+                // Always appended, with the handover after it when there is
+                // one. Two `--append-system-prompt` flags would be the obvious
+                // shape and the agent takes only one, so they are joined here
+                // rather than discovered to be exclusive later.
+                let mut appended = vec![ARTIFACT_GUIDANCE.to_string()];
                 if let Start::Carrying(before) = &start {
-                    argv.extend(["--append-system-prompt".into(), before.clone()]);
+                    appended.push(before.clone());
                 }
+                argv.extend(["--append-system-prompt".into(), appended.join("\n\n")]);
 
                 match asking {
                     // The agent stops and asks, and the question is routed to
@@ -1020,6 +1026,42 @@ pub enum Start {
     /// thing it then says is that it has no idea what you are talking about.
     Carrying(String),
 }
+
+/// What every agent is told about publishing something to look at.
+///
+/// **In the system prompt, not only in a file.** It lived only in the
+/// workspace's `AGENTS.md`, and `Start::Carrying` above already explains why
+/// that was not enough: *a file the agent is merely told about is a file it
+/// can decide not to read*. A session asked in as many words to "create an
+/// artifact" wrote an ordinary `.html` at the workspace root instead, because
+/// nothing in its context said there was anywhere else to put it.
+///
+/// Short on purpose: this is in context on every turn of every session,
+/// including the ones that will never publish anything. It is the contract —
+/// where the file goes and what the origin cannot do — and deliberately not a
+/// recipe, which is taste and belongs in a skill somebody installs.
+pub const ARTIFACT_GUIDANCE: &str = "\
+## Artifacts
+
+When somebody asks to *see* something — a mock-up, a page, a chart, a report —
+write it as one self-contained HTML file at
+`.firetower/artifacts/<name>/index.html`. Firetower publishes it from there and
+shows it in the conversation, where it opens full-screen and can be annotated.
+
+- `<name>` is lowercase letters, digits and hyphens: `pricing`, `onboarding-v2`.
+- One file. Inline the CSS and the JS — it is served from an origin with no
+  network access, so a CDN link renders as nothing.
+- Writing the same `<name>` again publishes a new version of the same artifact
+  rather than a second one.
+- This path is outside git, so a mock-up never turns up in the pull request.
+  Something that belongs in the repository goes in the repository instead.
+
+If a skill for building web artifacts is available to you, use it — this says
+where the result goes, not how to make a good one. Those skills finish by
+producing a single self-contained HTML file; copy that file to the path above
+and it is published. Do not hand back a path inside a scratch project and call
+it done: nothing outside `.firetower/artifacts/` is ever shown to anybody.
+";
 
 /// Whether there is anybody to answer a permission prompt.
 ///

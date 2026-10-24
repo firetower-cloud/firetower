@@ -91,10 +91,14 @@ fn a_restarted_agent_is_handed_the_conversation() {
         )
         .expect("Claude Code is driven headless");
 
-    assert_eq!(
-        after(&argv, "--append-system-prompt").as_deref(),
-        Some("they asked for drawings"),
+    let appended = after(&argv, "--append-system-prompt").expect("there is a system prompt");
+    assert!(
+        appended.contains("they asked for drawings"),
         "it goes in the system prompt, where it cannot be missed"
+    );
+    assert!(
+        appended.contains(".firetower/artifacts/"),
+        "the workspace's own guidance is carried alongside it, not replaced by it"
     );
     assert!(
         argv.iter().any(|a| a == "--session-id"),
@@ -154,4 +158,28 @@ fn claude_is_launched_with_the_settings_its_pickers_show() {
         after("--permission-mode").as_deref(),
         Some(ft_core::ASKING_MODE)
     );
+}
+
+
+/// The same lesson as the handover above, learned twice.
+///
+/// Where to publish something to look at lived only in the workspace's
+/// `AGENTS.md`. A session asked in as many words to "create an artifact" wrote
+/// an ordinary `.html` at the workspace root, because nothing in its context
+/// said there was anywhere else to put it — which is exactly what the comment
+/// on `Start::Carrying` already warned about.
+#[test]
+fn every_agent_is_told_where_an_artifact_goes() {
+    for start in [Start::Fresh, Start::Resume] {
+        let argv = Agent::ClaudeCode
+            .launch_headless("s_01example", &Asking::CannotAsk, start, &Default::default())
+            .expect("Claude Code is driven headless");
+
+        let appended = after(&argv, "--append-system-prompt")
+            .expect("the guidance is there with no handover to carry");
+        assert!(
+            appended.contains(".firetower/artifacts/<name>/index.html"),
+            "the path is the one thing it cannot be left to guess"
+        );
+    }
 }

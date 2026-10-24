@@ -1909,50 +1909,14 @@ Docker is installed here and the daemon is not answering, so `docker` commands w
         }
     }
 
-    /// How to publish something somebody asked to look at.
+    /// The same words the system prompt carries.
     ///
-    /// Here rather than in a skill because a skill has to be chosen: the
-    /// library is "discovery without enforcement" by design, so a skill
-    /// nobody ticked is a feature nobody has. This file is read by every
-    /// agent on every session, which is what the convention needs.
-    ///
-    /// **This is a contract, not a recipe, and the distinction is the whole
-    /// design.** What belongs here is what only Firetower can know: where the
-    /// file goes, that the origin has no network, that the page is framed.
-    /// What does *not* belong here is how to build a good one — that is
-    /// taste, it is long, and it already exists as skills people install and
-    /// change without shipping a worker binary. Anthropic's own
-    /// `web-artifacts-builder` ends by producing a single self-contained
-    /// `bundle.html`, which is precisely what the path below wants; the only
-    /// thing missing was anybody saying the two fit together. So the last
-    /// paragraph points at whatever skill is in the session rather than
-    /// competing with it.
-    ///
-    /// Kept short on purpose. It is in context on every turn, including the
-    /// turns that will never make an artifact.
-    fn artifact_guidance() -> &'static str {
-        "
-## Artifacts
-
-When somebody asks to *see* something — a mock-up, a page, a chart, a report —
-write it as one self-contained HTML file at
-`.firetower/artifacts/<name>/index.html`. Firetower publishes it from there and
-shows it in the conversation, where it opens full-screen and can be annotated.
-
-- `<name>` is lowercase letters, digits and hyphens: `pricing`, `onboarding-v2`.
-- One file. Inline the CSS and the JS — it is served from an origin with no
-  network access, so a CDN link renders as nothing.
-- Writing the same `<name>` again publishes a new version of the same artifact
-  rather than a second one.
-- This path is outside git, so a mock-up never turns up in the pull request.
-  Something that belongs in the repository goes in the repository instead.
-
-If a skill for building web artifacts is available to you, use it — this says
-where the result goes, not how to make a good one. Those skills finish by
-producing a single self-contained HTML file; copy that file to the path above
-and it is published. Do not hand back a path inside a scratch project and call
-it done: nothing outside `.firetower/artifacts/` is ever shown to anybody.
-"
+    /// Still written into `AGENTS.md` as well, because Codex reads that file
+    /// as its own convention and has no append-a-prompt flag to be given
+    /// instead. For Claude Code the file is now belt and braces: the prompt is
+    /// what it actually reads.
+    fn artifact_guidance() -> String {
+        format!("\n{}", ft_core::ARTIFACT_GUIDANCE)
     }
 
     /// Write down what is checked out and where.
@@ -2002,7 +1966,7 @@ You are in the directory that holds them, not inside one of them.              P
 ",
             );
         }
-        text.push_str(Self::artifact_guidance());
+        text.push_str(&Self::artifact_guidance());
         text.push_str(&Self::docker_guidance(&crate::docker::state().await, id));
 
         let at = workspace.join("AGENTS.md");
