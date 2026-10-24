@@ -719,10 +719,13 @@ function ArtifactCard({ artifact, onOpen }: { artifact: ArtifactModel; onOpen: (
             title={artifact.title}
             tabIndex={-1}
             aria-hidden
+            scrolling="no"
             style={{ width: 1180, height: 740, transform: "scale(0.355)", transformOrigin: "0 0" }}
             className="pointer-events-none absolute inset-0 border-0"
           />
-          <span className="absolute inset-0 bg-gradient-to-b from-transparent to-ground/40 opacity-0 transition-opacity group-hover/art:opacity-100" />
+          {/* Above the frame, so the wheel never reaches the inner document —
+              see the note in ArtifactsPage. This doubles as the hover veil. */}
+          <span className="absolute inset-0 z-10 bg-gradient-to-b from-transparent to-ground/40 opacity-0 transition-opacity group-hover/art:opacity-100" />
         </div>
       </button>
       <div className="mt-1.5 flex items-baseline gap-2">

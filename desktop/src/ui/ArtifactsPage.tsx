@@ -219,6 +219,7 @@ function Shot({ artifact, w, h }: { artifact: Artifact; w: number; h: number }) 
         title=""
         tabIndex={-1}
         aria-hidden
+        scrolling="no"
         style={{
           width: page,
           height: (page * h) / w,
@@ -227,6 +228,15 @@ function Shot({ artifact, w, h }: { artifact: Artifact; w: number; h: number }) 
         }}
         className="pointer-events-none absolute inset-0 border-0"
       />
+      {/* A pane over the frame, and it is load-bearing.
+          `pointer-events: none` on an `iframe` stops clicks but does not
+          reliably stop the wheel in WKWebView — the event reaches the inner
+          document and scrolls *that*, so scrolling a grid of thumbnails
+          scrolled the thumbnails instead of the grid. A sibling above it in
+          z-order catches the wheel first, and clicks land on the button this
+          sits inside. `scrolling="no"` is belt and braces for the engines
+          that still honour it. */}
+      <span className="absolute inset-0 z-10" aria-hidden />
     </span>
   );
 }
