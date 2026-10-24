@@ -172,7 +172,83 @@ export const useGetListArtifactsQueryData = () => {
 }
 
 
-export const getRenameArtifactUrl = (id: string,) => {
+export const getDeleteArtifactUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/artifacts/${id}`
+}
+
+/**
+ * There is no undo and nothing to restore from: the bytes live here and
+ * nowhere else once the workspace that produced them is gone. The client
+ * asks before calling this; the server does not ask twice.
+ * @summary Remove an artifact.
+ */
+export const deleteArtifact = async (id: string, options?: Parameters<typeof http>[1]): Promise<void> => {
+
+  return http<void>(getDeleteArtifactUrl(id),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDeleteArtifactMutationKey = () => ['deleteArtifact'] as const;
+
+export const getDeleteArtifactMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteArtifact>>, TError,DeleteArtifactMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteArtifact>>, TError,DeleteArtifactMutationVariables, TContext> => {
+
+const mutationKey = getDeleteArtifactMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteArtifact>>, DeleteArtifactMutationVariables> = (props) => {
+          const {id} = props ?? {};
+
+          return  deleteArtifact(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteArtifactMutationResult = NonNullable<Awaited<ReturnType<typeof deleteArtifact>>>
+
+    export type DeleteArtifactMutationError = ApiError
+    export type DeleteArtifactMutationVariables = {id: string}
+
+    /**
+ * @summary Remove an artifact.
+ */
+export const useDeleteArtifact = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteArtifact>>, TError,DeleteArtifactMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof deleteArtifact>>,
+        TError,
+        DeleteArtifactMutationVariables,
+        TContext
+      > => {
+      return useMutation(getDeleteArtifactMutationOptions(options), queryClient);
+    }
+    export const getRenameArtifactUrl = (id: string,) => {
 
 
 

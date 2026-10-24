@@ -30,6 +30,18 @@ export const ListArtifactsResponseItem = zod.object({
 export const ListArtifactsResponse = zod.array(ListArtifactsResponseItem)
 
 /**
+ * There is no undo and nothing to restore from: the bytes live here and
+ * nowhere else once the workspace that produced them is gone. The client
+ * asks before calling this; the server does not ask twice.
+ * @summary Remove an artifact.
+ */
+export const DeleteArtifactParams = zod.object({
+  "id": zod.string().describe('Artifact id')
+})
+
+export const DeleteArtifactResponse = zod.void()
+
+/**
  * The title is what a person calls it. The slug — the folder the agent writes
  * into, and what a republish is matched on — is deliberately untouched.
  * @summary Rename an artifact.

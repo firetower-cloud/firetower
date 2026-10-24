@@ -605,6 +605,40 @@
       }
     },
     "/api/v1/artifacts/{id}": {
+      "delete": {
+        "tags": [
+          "artifacts"
+        ],
+        "summary": "Remove an artifact.",
+        "description": "There is no undo and nothing to restore from: the bytes live here and\nnowhere else once the workspace that produced them is gone. The client\nasks before calling this; the server does not ask twice.",
+        "operationId": "delete_artifact",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Artifact id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
       "patch": {
         "tags": [
           "artifacts"

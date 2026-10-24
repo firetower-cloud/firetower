@@ -22,8 +22,17 @@
  * `WorkspaceImage` already makes for a picture in the transcript.
  */
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, LayoutGrid, Rows3, Search, Shapes } from "lucide-react";
-import { useListArtifacts } from "~/api/generated/artifacts/artifacts";
+import { ArrowLeft, LayoutGrid, MoreHorizontal, Rows3, Search, Shapes } from "lucide-react";
+import {
+  useListArtifacts,
+  deleteArtifact,
+  getListArtifactsQueryKey,
+} from "~/api/generated/artifacts/artifacts";
+import { useQueryClient } from "@tanstack/react-query";
+import { ContextMenu, useMenu, type MenuItem } from "~/ui/ContextMenu";
+import { useConfirm } from "~/ui/Confirm";
+import { bridge as shell } from "~/bridge";
+import { apiBase, token } from "~/client/http";
 import type { Artifact } from "~/api/generated/model";
 import { elapsed, minutesSince } from "~/api/view";
 import { ArtifactTab } from "~/ui/ArtifactTab";
@@ -81,6 +90,66 @@ export function ArtifactsPage() {
   const shared = everything.filter((a) => !a.mine).length;
   const reading = everything.find((a) => a.id === open) ?? null;
 
+  /* The three things you do to an artifact without opening it. Built here
+     rather than per tile so the grid and the list offer the same menu. */
+  const menu = useMenu<Artifact>();
+  const confirm = useConfirm();
+  const cache = useQueryClient();
+  const [notice, setNotice] = useState<string | null>(null);
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(null), 3000);
+    return () => clearTimeout(t);
+  }, [notice]);
+
+  const itemsFor = (a: Artifact): MenuItem[] => [
+    {
+      label: "Copy link",
+      onPick: () => {
+        void navigator.clipboard.writeText(a.url);
+        setNotice("Link copied.");
+      },
+    },
+    {
+      label: "Download as .zip",
+      onPick: () => {
+        void shell
+          .save(
+            `${apiBase()}/api/v1/artifacts/${a.id}/download`,
+            `${a.slug || "artifact"}-v${a.version}.zip`,
+            token(),
+          )
+          .catch((e) => setNotice(why(e) ?? "Could not save that."));
+      },
+    },
+    "-",
+    {
+      label: "Delete",
+      tone: "danger",
+      // `may_share` is the writer check, and the server decides again
+      // whatever this draws.
+      disabled: !a.mayShare,
+      onPick: () => {
+        void (async () => {
+          const sure = await confirm({
+            title: `Delete “${a.title}”?`,
+            body: "The page and every version of it go. There is no undo, and nothing to restore from once the workspace that made it is gone.",
+            action: "Delete",
+            tone: "danger",
+          });
+          if (!sure) return;
+          try {
+            await deleteArtifact(a.id);
+            if (open === a.id) setOpen(null);
+            await cache.invalidateQueries({ queryKey: getListArtifactsQueryKey() });
+          } catch (e) {
+            setNotice(why(e) ?? "Could not delete it.");
+          }
+        })();
+      },
+    },
+  ];
+
   if (isPending) return <Empty>Looking…</Empty>;
   if (error) return <Empty>{why(error) ?? "Could not read your artifacts."}</Empty>;
   if (everything.length === 0)
@@ -123,7 +192,7 @@ export function ArtifactsPage() {
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="relative flex min-h-0 flex-1 flex-col">
       <div className="flex h-10 shrink-0 items-center gap-2 border-b border-line px-3">
         <Shapes className="h-3.5 w-3.5 shrink-0 text-mute" strokeWidth={1.75} />
         <span className="shrink-0 text-ui text-bone">Artifacts</span>
@@ -191,17 +260,26 @@ export function ArtifactsPage() {
         ) : look === "grid" ? (
           <div className="grid grid-cols-[repeat(auto-fill,minmax(14rem,1fr))] gap-4 p-4">
             {showing.map((a) => (
-              <Tile key={a.id} artifact={a} onOpen={() => setOpen(a.id)} />
+              <Tile key={a.id} artifact={a} onOpen={() => setOpen(a.id)} onMenu={menu.show} />
             ))}
           </div>
         ) : (
           <div className="p-1.5">
             {showing.map((a) => (
-              <Line key={a.id} artifact={a} onOpen={() => setOpen(a.id)} />
+              <Line key={a.id} artifact={a} onOpen={() => setOpen(a.id)} onMenu={menu.show} />
             ))}
           </div>
         )}
       </div>
+
+      {menu.open && (
+        <ContextMenu at={menu.open.at} items={itemsFor(menu.open.on)} onClose={menu.close} />
+      )}
+      {notice && (
+        <div className="pointer-events-none absolute bottom-4 left-1/2 z-30 -translate-x-1/2 rounded-full border border-line bg-overlay px-3.5 py-1.5 text-meta text-dim shadow-(--shadow-float)">
+          {notice}
+        </div>
+      )}
     </div>
   );
 }
@@ -241,9 +319,18 @@ function Shot({ artifact, w, h }: { artifact: Artifact; w: number; h: number }) 
   );
 }
 
-function Tile({ artifact, onOpen }: { artifact: Artifact; onOpen: () => void }) {
+function Tile({
+  artifact,
+  onOpen,
+  onMenu,
+}: {
+  artifact: Artifact;
+  onOpen: () => void;
+  onMenu: (e: React.MouseEvent, a: Artifact) => void;
+}) {
   return (
-    <button onClick={onOpen} className="group/tile block w-full text-left">
+    <div className="group/tile relative">
+      <button onClick={onOpen} onContextMenu={(e) => onMenu(e, artifact)} className="block w-full text-left">
       <span className="block group-hover/tile:[&>span]:border-mute">
         <Shot artifact={artifact} w={224} h={140} />
       </span>
@@ -256,15 +343,35 @@ function Tile({ artifact, onOpen }: { artifact: Artifact; onOpen: () => void }) 
         </span>
         <span className="ml-auto shrink-0">{elapsed(minutesSince(artifact.updatedAt))}</span>
       </span>
-    </button>
+      </button>
+      {/* On the thumbnail, above the shield, and only once the pointer is
+          here — a control on every tile all the time is six controls
+          competing with the thing they are about. */}
+      <button
+        onClick={(e) => onMenu(e, artifact)}
+        title="More"
+        className="absolute top-1.5 right-1.5 z-20 grid h-6 w-6 place-items-center rounded-md border border-line bg-overlay text-dim opacity-0 transition-opacity group-hover/tile:opacity-100 hover:text-bone focus-visible:opacity-100"
+      >
+        <MoreHorizontal className="h-3.5 w-3.5" strokeWidth={1.75} />
+      </button>
+    </div>
   );
 }
 
-function Line({ artifact, onOpen }: { artifact: Artifact; onOpen: () => void }) {
+function Line({
+  artifact,
+  onOpen,
+  onMenu,
+}: {
+  artifact: Artifact;
+  onOpen: () => void;
+  onMenu: (e: React.MouseEvent, a: Artifact) => void;
+}) {
   return (
     <button
       onClick={onOpen}
-      className="flex w-full items-center gap-3 rounded-md px-2 py-2 text-left transition-colors hover:bg-raise/60"
+      onContextMenu={(e) => onMenu(e, artifact)}
+      className="group/line flex w-full items-center gap-3 rounded-md px-2 py-2 text-left transition-colors hover:bg-raise/60"
     >
       <Shot artifact={artifact} w={84} h={48} />
       <span className="min-w-0 flex-1">
@@ -278,6 +385,18 @@ function Line({ artifact, onOpen }: { artifact: Artifact; onOpen: () => void }) 
         </span>
       </span>
       <span className="shrink-0 text-micro text-mute">{elapsed(minutesSince(artifact.updatedAt))}</span>
+      <span
+        role="button"
+        tabIndex={0}
+        onClick={(e) => {
+          e.stopPropagation();
+          onMenu(e, artifact);
+        }}
+        title="More"
+        className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-mute opacity-0 transition-opacity group-hover/line:opacity-100 hover:bg-raise hover:text-bone"
+      >
+        <MoreHorizontal className="h-3.5 w-3.5" strokeWidth={1.75} />
+      </span>
     </button>
   );
 }

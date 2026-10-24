@@ -184,6 +184,34 @@ pub(super) async fn rename_artifact(
     }))
 }
 
+/// Remove an artifact.
+///
+/// There is no undo and nothing to restore from: the bytes live here and
+/// nowhere else once the workspace that produced them is gone. The client
+/// asks before calling this; the server does not ask twice.
+#[utoipa::path(
+    delete, path = "/api/v1/artifacts/{id}", tag = "artifacts",
+    params(("id" = String, Path, description = "Artifact id")),
+    responses((status = 204), (status = 404, body = ApiError)),
+)]
+pub(super) async fn delete_artifact(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(id): Path<String>,
+) -> ApiResult<axum::http::StatusCode> {
+    let owner = principal
+        .owner()
+        .ok_or_else(|| ApiError::new(ErrorCode::Unauthorized, "Sign in to delete."))?;
+
+    let artifact = ft_core::ArtifactId::from_stored(id);
+    if !state.db.delete_artifact(owner, &artifact).await? {
+        // Not found and not permitted answer alike: saying "it exists but is
+        // not yours" is itself a disclosure.
+        return Err(ApiError::not_found("artifact"));
+    }
+    Ok(axum::http::StatusCode::NO_CONTENT)
+}
+
 /// Where a session writes the artifacts it publishes.
 ///
 /// Under the session's own directory, which is already outside git — the same

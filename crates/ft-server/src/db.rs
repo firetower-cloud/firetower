@@ -7316,6 +7316,26 @@ impl Db {
         Ok(done.rows_affected() > 0)
     }
 
+    /// Remove an artifact and everything under it.
+    ///
+    /// Writer, like renaming. The versions and their bytes go with it by
+    /// cascade, and so does any note anchored to one — which is the whole of
+    /// what deleting an artifact means, and why it is asked about first.
+    pub async fn delete_artifact(&self, person: &str, id: &ft_core::ArtifactId) -> Result<bool> {
+        use crate::access::{filed_where, Level};
+        let sql = format!(
+            "DELETE FROM artifacts a WHERE a.id = $2 AND {allowed}",
+            allowed = filed_where("a", 1, Level::Writer),
+        );
+        let done = sqlx::query(&sql)
+            .bind(person)
+            .bind(id.as_str())
+            .execute(&self.pool)
+            .await
+            .context("deleting an artifact")?;
+        Ok(done.rows_affected() > 0)
+    }
+
     /// Every file of an artifact's current version, for an export.
     pub async fn artifact_bundle(
         &self,
