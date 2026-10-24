@@ -17,14 +17,17 @@
  * keeps the frame a frame, so Annotate goes on working at full width.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, ExternalLink, Maximize2, Minimize2, Send, Trash2 } from "lucide-react";
+import { Check, Download, ExternalLink, Link2, Maximize2, Minimize2, Send, Share2, Trash2 } from "lucide-react";
 import type { Artifact } from "~/api/generated/model";
 import { sendTurn } from "~/api/generated/sessions/sessions";
 import { openExternal } from "~/open";
+import { bridge as shell } from "~/bridge";
+import { apiBase, token } from "~/client/http";
 import { why } from "~/data";
 import { Annotate, type Anchor } from "~/ui/Annotate";
 import { anchorIn } from "~/preview/anchor";
 import { usePickerBridge, type Selection } from "~/preview/bridge";
+import { WhoCanAccess } from "~/ui/Sharing";
 
 /** What an element is, for a person: its tag and a little of its text. */
 function nameOf(label: string, html: string): string {
@@ -57,6 +60,8 @@ export function ArtifactTab({
   const [drafting, setDrafting] = useState<(Anchor & Selection) | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const [sharing, setSharing] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   /* The picker needs to be told which window to talk to; it will not guess. */
   const src = origin ? `${artifact.url}#__firetower_ui=${encodeURIComponent(self())}` : undefined;
@@ -86,9 +91,11 @@ export function ArtifactTab({
       onLocated: () => {},
       onFocusNote: () => setShowNotes(true),
     },
-    // The *version*, not the artifact: a note means what it means against the
-    // bytes it was written on.
-    artifact.id ? `arv:${artifact.id}` : null,
+    // The *version*, verbatim, because that is what the control plane wrote
+    // into the page as `data-artifact`. This used to be an invented string
+    // (`arv:` + the artifact id), which matched nothing — so the handshake
+    // never completed and Annotate was permanently disabled with no clue why.
+    artifact.versionId ?? null,
   );
 
   useEffect(() => {
@@ -192,6 +199,83 @@ export function ArtifactTab({
           >
             <ExternalLink className="h-3.5 w-3.5" strokeWidth={1.75} />
           </button>
+          {/* Where it is filed, and the move picker — the same control every
+              other Placed kind gets, rather than an artifact-shaped copy of
+              one. `may_share` decides server-side whatever this draws. */}
+          <WhoCanAccess look="toolbar" kind="artifact" id={artifact.id} path={artifact.path} />
+          <div className="relative">
+            <button
+              onClick={() => setSharing((v) => !v)}
+              title="Send it somewhere"
+              className="grid h-7 w-7 place-items-center rounded-md text-mute hover:bg-raise hover:text-bone"
+            >
+              <Share2 className="h-3.5 w-3.5" strokeWidth={1.75} />
+            </button>
+            {sharing && (
+              <>
+                <button
+                  className="fixed inset-0 z-40 cursor-default"
+                  aria-label="Close"
+                  onClick={() => setSharing(false)}
+                />
+                <div className="absolute top-full right-0 z-50 mt-1.5 w-[21rem] overflow-hidden rounded-xl border border-line bg-overlay shadow-(--shadow-float)">
+                  <div className="px-3.5 pt-3 pb-2 text-meta text-dim">Share this artifact</div>
+
+                  <button
+                    onClick={() => {
+                      void navigator.clipboard.writeText(artifact.url);
+                      setNotice("Link copied.");
+                      setSharing(false);
+                    }}
+                    className="flex w-full items-start gap-2.5 px-3.5 py-2 text-left transition-colors hover:bg-raise/70"
+                  >
+                    <Link2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-mute" strokeWidth={1.75} />
+                    <span>
+                      <span className="block text-ui text-bone">Copy link</span>
+                      {/* "your Firetower network", not "your network": the
+                          boundary is this installation's reach, not whatever
+                          LAN or VPN somebody happens to be on. The control
+                          plane is never on the public internet, so the link is
+                          not "public" in the way a URL usually is. */}
+                      <span className="mt-0.5 block text-micro text-mute">
+                        Opens for anyone who can reach your Firetower network.
+                      </span>
+                    </span>
+                  </button>
+
+                  <button
+                    disabled={saving}
+                    onClick={async () => {
+                      setSaving(true);
+                      try {
+                        await shell.save(
+                          `${apiBase()}/api/v1/artifacts/${artifact.id}/download`,
+                          `${artifact.slug || "artifact"}-v${artifact.version}.zip`,
+                          token(),
+                        );
+                        setSharing(false);
+                      } catch (e) {
+                        setNotice(why(e) ?? "Could not save that.");
+                      } finally {
+                        setSaving(false);
+                      }
+                    }}
+                    className="flex w-full items-start gap-2.5 border-t border-line px-3.5 py-2 text-left transition-colors hover:bg-raise/70 disabled:opacity-50"
+                  >
+                    <Download className="mt-0.5 h-3.5 w-3.5 shrink-0 text-mute" strokeWidth={1.75} />
+                    <span>
+                      <span className="block text-ui text-bone">
+                        {saving ? "Saving…" : "Download as .zip"}
+                      </span>
+                      <span className="mt-0.5 block text-micro text-mute">
+                        The whole artifact as files. To send it outside your Firetower network.
+                      </span>
+                    </span>
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </header>
 
@@ -275,10 +359,24 @@ export function ArtifactTab({
     </div>
   );
 
-  /* Expanded takes the window. The frame is never unmounted on the way in or
-     out — doing that would reload the page and lose the scroll, the picker's
-     connection and every note anchored to what is on screen. */
-  return expanded ? <div className="fixed inset-0 z-40 bg-ground">{body}</div> : body;
+  /* Expanded takes the window *below the chrome* — never `inset-0`.
+     Two things live in that 38px strip and both broke when this covered it:
+     macOS draws its traffic lights there whatever we paint underneath, so the
+     toolbar came out beneath them; and the title bar is the window's drag
+     region, so covering it meant the window could no longer be moved.
+     The frame is never unmounted on the way in or out, because that would
+     reload the page and lose the scroll, the picker's connection, and every
+     note anchored to what is on screen. */
+  return expanded ? (
+    // An inline style rather than a Tailwind arbitrary value: nothing else in
+    // this app sets an inset from a custom property, so a class that silently
+    // generated nothing would leave the bug exactly as it was and look fixed.
+    <div className="fixed inset-x-0 bottom-0 z-40 bg-ground" style={{ top: "var(--chrome-title)" }}>
+      {body}
+    </div>
+  ) : (
+    body
+  );
 }
 
 function Plain({ title, children }: { title: string; children: React.ReactNode }) {

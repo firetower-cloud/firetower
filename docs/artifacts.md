@@ -544,7 +544,112 @@ exists.
 
 ---
 
-## 12. Not in v1
+## 12. Discoverability, and what filing actually buys
+
+The library screen exists — Rail → **Artifacts**. It lists what *you* have
+published, newest first, with the selected one rendered beside it. What it
+cannot do is show you an artifact somebody else made, because `artifacts` is
+keyed on `owner_id` and an owner id is not a path.
+
+That is the whole of the gap, and closing it is one change rather than two:
+**give an artifact a path and the sharing, the permissions and the
+discoverability all arrive together.**
+
+### Why a path rather than a second mechanism
+
+`access::filed_where` is already "the only definition of may see this" — a SQL
+fragment pasted into a `WHERE`, covering three routes at once: the owner's
+personal root, every directory the asker has a grant on, and `extra_perms` for
+a few named people. `skills.rs` pastes it; so does everything else Placed.
+
+An artifact that is Placed inherits all of it. An artifact that invents its own
+visibility rule is a second answer that can disagree with the first, which
+`paths-and-ownership.md` §8 lists as one of the five mistakes already made here.
+
+### The change
+
+| | |
+|---|---|
+| `artifacts` gains | `path ltree not null`, a GiST index, a unique index on `path`, `extra_perms jsonb not null default '{}'`, `created_by` |
+| Born at | `u.<owner slug>.<artifact slug>`, written only by `ft_core::ResourcePath` |
+| `artifacts_of` becomes | one query with `filed_where("a", 1, Level::Viewer)` in its `WHERE` |
+| `may_share` | learns `FiledKind::Artifact`; `mayMove` mirrors it in both clients |
+| The filing UI | already exists — `Sharing.tsx` is the sheet every other Placed kind uses |
+
+**The unique index has to move.** Today it is `unique (owner_id, slug)`. Once an
+artifact can be filed into a directory, two people's `pricing` are different
+rows at different paths and the owner-scoped index is the wrong shape:
+`unique (path)` is what skills use and what this wants.
+
+### What the screen then shows
+
+Three scopes, which is the shape worth copying from the products people already
+know:
+
+- **Yours** — `path <@ u.<me>`
+- **Shared with you** — filed in a directory you hold a grant on, **labelled
+  with the directory**, the way the skill picker labels one shared into a
+  directory you are in
+- **All** — the union, which is simply `filed_where` with no extra predicate
+
+Discovery at no context cost: unlike a skill, an artifact in a list costs
+nothing until somebody opens it. There is no equivalent of the description
+budget here, so the "labelled, and **not ticked**" caution from
+`key-decisions.md` does not apply — nothing is being loaded into a prompt.
+
+### Serving stops being a special case
+
+`artifact::serve` currently checks nothing: the signed hostname is the entire
+credential. With a path, the check it *could* make is the standard one, and the
+decision in §9 becomes a real toggle rather than a thing we never built:
+
+- **public** — what it does today: the name is the credential
+- **filed** — `filed_where` decides, and the iframe problem from §9 has to be
+  solved first (this product has no cookies at all, so that is an
+  architectural decision and not a patch)
+
+Those can ship in either order. Filing is useful on its own for *finding*
+things even while serving stays public.
+
+### Offboarding falls out, and it is the skills split
+
+`offboarding.md` is unambiguous: what sits at a personal root dies with the
+person and may not be handed on, by an administrator or anyone else. So an
+artifact left at `u/kevin/…` goes, and one filed into a directory stays —
+exactly the rule skills took, and it has to be said out loud in the offboarding
+screen's per-kind row rather than inherited quietly.
+
+### Rough size
+
+| | |
+|---|---|
+| Migration: path, indexes, `extra_perms`, backfill `u.<owner>.<slug>` | small, and the backfill is one `UPDATE` |
+| `artifacts_of` → `filed_where` | one query |
+| `may_share` + `mayMove` | two named-kind arms |
+| Screen: three scopes, directory labels | a tab strip over the list that is already there |
+| Offboarding row | one arm, with the sentence |
+
+Nothing here is new machinery. The whole of it is pointing an existing
+mechanism at one more table.
+
+### Two things it does not answer
+
+**A link still only works inside your network.** The control plane is not on the
+public internet by design, so "public by default" means *public to anyone who
+can reach the control plane* — not to a client or a friend. Sharing outward is
+an export, not a URL, which is why the Share sheet offers a download beside the
+link.
+
+**Which directory should an artifact be born in?** A skill is imported
+deliberately, so asking is natural. An artifact appears as a side effect of a
+turn, and a dialogue per artifact would be unbearable. Born personal and moved
+by hand is the safe default; born into the workspace's own directory is the
+convenient one and leaks work-in-progress to a team by default. Personal, and
+revisit with evidence.
+
+---
+
+## 13. Not in v1
 
 - The MCP tool. The skill plus derivation is enough to find out whether the
   shape is right.
@@ -558,7 +663,7 @@ exists.
 
 ---
 
-## 13. Open questions
+## 14. Open questions
 
 1. **Does the slug come from the agent or from us?** A model-chosen slug is in a
    hostname forever. Probably: the agent names the directory, the control plane
@@ -586,7 +691,7 @@ exists.
 
 ---
 
-## 14. Rough size
+## 15. Rough size
 
 Of the four, the first is the one that has to be got right; the rest follow it.
 

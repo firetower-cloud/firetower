@@ -570,6 +570,118 @@
         }
       }
     },
+    "/api/v1/artifacts": {
+      "get": {
+        "tags": [
+          "artifacts"
+        ],
+        "summary": "Everything this person has published.",
+        "operationId": "list_artifacts",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Artifact"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/artifacts/{id}/address": {
+      "get": {
+        "tags": [
+          "artifacts"
+        ],
+        "summary": "Where one artifact can be opened.",
+        "operationId": "artifact_address",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Artifact id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Artifact"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/artifacts/{id}/download": {
+      "get": {
+        "tags": [
+          "artifacts"
+        ],
+        "summary": "An artifact as a file somebody can send to anyone.",
+        "description": "**This is the only sharing that reaches outside your network.** The control\nplane is deliberately not on the public internet, so a link — signed,\nunauthenticated, \"public\" — is still only openable by somebody who can\nreach this machine. For a client, or a friend, the URL is not partly useful\nbut useless, and an export is the whole answer.\n\nAlways a zip, even for the one-file case. A download that is sometimes an\n`.html` and sometimes a `.zip` is two behaviours to explain and two paths to\nget wrong, and the saving is a few hundred bytes.",
+        "operationId": "download_artifact",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Artifact id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A zip of the current version"
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/auth/login": {
       "post": {
         "tags": [
@@ -3948,6 +4060,113 @@
             }
           },
           "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{id}/artifacts": {
+      "get": {
+        "tags": [
+          "artifacts"
+        ],
+        "summary": "Which artifact folders a session has written, and a fingerprint of each.",
+        "description": "The client polls this rather than the control plane watching the stream:\na guess that misses costs a card appearing late, never a lost artifact.",
+        "operationId": "session_artifact_folders",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Folder"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "artifacts"
+        ],
+        "summary": "Publish what a session wrote, as a new version.",
+        "description": "The bytes are *copied* out of the workspace rather than read on every\nrequest. That is the whole difference between this and a preview: a minute\nafter the last session in a workspace ends, `reclaim.rs` takes the\nworkspace — and the artifact has to still be there.",
+        "operationId": "publish_artifact",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Publish"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Artifact"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
             "description": "",
             "content": {
               "application/json": {
@@ -8106,6 +8325,95 @@
           }
         }
       },
+      "Artifact": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ArtifactRow"
+          },
+          {
+            "type": "object",
+            "required": [
+              "url"
+            ],
+            "properties": {
+              "url": {
+                "type": "string",
+                "description": "Ready to put in an `iframe` or paste into a tab."
+              }
+            }
+          }
+        ],
+        "description": "One artifact, with the address it can be opened at."
+      },
+      "ArtifactRow": {
+        "type": "object",
+        "description": "One artifact, as a list shows it.",
+        "required": [
+          "id",
+          "path",
+          "mayShare",
+          "mine",
+          "title",
+          "slug",
+          "version",
+          "bytes",
+          "updatedAt"
+        ],
+        "properties": {
+          "bytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "fromSessionId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "fromWorkspaceName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "mayShare": {
+            "type": "boolean",
+            "description": "Whether the asker may move it — drawn as the move control, and\nre-decided server-side by `may_share` whatever the client drew."
+          },
+          "mine": {
+            "type": "boolean",
+            "description": "True when it is filed at the asker's own root rather than shared."
+          },
+          "path": {
+            "$ref": "#/components/schemas/ResourcePath",
+            "description": "Where it is filed. `u/<somebody>/<slug>` until it is moved."
+          },
+          "slug": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "versionId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The version currently served.\n\nExposed because the picker injected into the page identifies itself by\nit — a note belongs to the bytes it was written on, not to the artifact\nin general — so a client that cannot name the version cannot complete\nthe handshake, and Annotate stays dead with nothing to say why."
+          }
+        }
+      },
       "Asking": {
         "type": "object",
         "description": "What is about to be imported, named and fingerprinted but not yet sent.",
@@ -10070,6 +10378,7 @@
           "agentAccount",
           "secret",
           "skill",
+          "artifact",
           "repository"
         ]
       },
@@ -10086,6 +10395,23 @@
           },
           "kind": {
             "$ref": "#/components/schemas/FiledKind"
+          }
+        }
+      },
+      "Folder": {
+        "type": "object",
+        "description": "One artifact folder a session has written, and whether it has changed.",
+        "required": [
+          "name",
+          "fingerprint"
+        ],
+        "properties": {
+          "fingerprint": {
+            "type": "string",
+            "description": "Changes whenever the folder's contents do.\n\nSizes and modification times of the files inside, not of the directory:\nediting a file in place leaves the directory's own mtime untouched, so\na fingerprint taken from the directory would say \"unchanged\" for\nexactly the edit somebody just asked for."
+          },
+          "name": {
+            "type": "string"
           }
         }
       },
@@ -12098,6 +12424,25 @@
           "publicKey": {
             "type": "string",
             "description": "`ssh-ed25519 AAAAC3… firetower`, exactly as `authorized_keys` wants it."
+          }
+        }
+      },
+      "Publish": {
+        "type": "object",
+        "required": [
+          "slug"
+        ],
+        "properties": {
+          "slug": {
+            "type": "string",
+            "description": "The folder under `.firetower/artifacts/`."
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What a person should call it. Falls back to the slug."
           }
         }
       },

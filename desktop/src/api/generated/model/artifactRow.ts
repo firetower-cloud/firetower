@@ -5,6 +5,7 @@
  * The Firetower control plane: API, scheduling, and worker transports.
  * OpenAPI spec version: 0
  */
+import type { ResourcePath } from './resourcePath.ts';
 
 /**
  * One artifact, as a list shows it.
@@ -16,8 +17,27 @@ export interface ArtifactRow {
   /** @nullable */
   fromWorkspaceName?: string | null;
   id: string;
+  /**
+     * Whether the asker may move it — drawn as the move control, and
+     * re-decided server-side by `may_share` whatever the client drew.
+     */
+  mayShare: boolean;
+  /** True when it is filed at the asker's own root rather than shared. */
+  mine: boolean;
+  /** Where it is filed. `u/<somebody>/<slug>` until it is moved. */
+  path: ResourcePath;
   slug: string;
   title: string;
   updatedAt: string;
   version: number;
+  /**
+     * The version currently served.
+     *
+     * Exposed because the picker injected into the page identifies itself by
+     * it — a note belongs to the bytes it was written on, not to the artifact
+     * in general — so a client that cannot name the version cannot complete
+     * the handshake, and Annotate stays dead with nothing to say why.
+     * @nullable
+     */
+  versionId?: string | null;
 }

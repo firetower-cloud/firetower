@@ -28,6 +28,7 @@ import type {
 import type {
   ApiError,
   Artifact,
+  Folder,
   Publish
 } from '../model';
 
@@ -287,6 +288,132 @@ export const useGetArtifactAddressQueryData = () => {
 }
 
 
+export const getDownloadArtifactUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/artifacts/${id}/download`
+}
+
+/**
+ * **This is the only sharing that reaches outside your network.** The control
+ * plane is deliberately not on the public internet, so a link — signed,
+ * unauthenticated, "public" — is still only openable by somebody who can
+ * reach this machine. For a client, or a friend, the URL is not partly useful
+ * but useless, and an export is the whole answer.
+ *
+ * Always a zip, even for the one-file case. A download that is sometimes an
+ * `.html` and sometimes a `.zip` is two behaviours to explain and two paths to
+ * get wrong, and the saving is a few hundred bytes.
+ * @summary An artifact as a file somebody can send to anyone.
+ */
+export const downloadArtifact = async (id: string, options?: Parameters<typeof http>[1]): Promise<void> => {
+
+  return http<void>(getDownloadArtifactUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getDownloadArtifactQueryKey = (id: string,) => {
+    return [
+    `/api/v1/artifacts/${id}/download`
+    ] as const;
+    }
+
+
+export const getDownloadArtifactQueryOptions = <TData = Awaited<ReturnType<typeof downloadArtifact>>, TError = ApiError>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof downloadArtifact>>, TError, TData>>, request?: SecondParameter<typeof http>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getDownloadArtifactQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof downloadArtifact>>> = ({ signal }) => downloadArtifact(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof downloadArtifact>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type DownloadArtifactQueryResult = NonNullable<Awaited<ReturnType<typeof downloadArtifact>>>
+export type DownloadArtifactQueryError = ApiError
+
+
+export function useDownloadArtifact<TData = Awaited<ReturnType<typeof downloadArtifact>>, TError = ApiError>(
+ id: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof downloadArtifact>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof downloadArtifact>>,
+          TError,
+          Awaited<ReturnType<typeof downloadArtifact>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useDownloadArtifact<TData = Awaited<ReturnType<typeof downloadArtifact>>, TError = ApiError>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof downloadArtifact>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof downloadArtifact>>,
+          TError,
+          Awaited<ReturnType<typeof downloadArtifact>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useDownloadArtifact<TData = Awaited<ReturnType<typeof downloadArtifact>>, TError = ApiError>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof downloadArtifact>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary An artifact as a file somebody can send to anyone.
+ */
+
+export function useDownloadArtifact<TData = Awaited<ReturnType<typeof downloadArtifact>>, TError = ApiError>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof downloadArtifact>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getDownloadArtifactQueryOptions(id,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+/**
+ * @summary An artifact as a file somebody can send to anyone.
+ */
+export const useSetDownloadArtifactQueryData = () => {
+  const queryClient = useQueryClient();
+  return (id: string,updater: Awaited<ReturnType<typeof downloadArtifact>> | undefined | ((old: Awaited<ReturnType<typeof downloadArtifact>> | undefined) => Awaited<ReturnType<typeof downloadArtifact>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof downloadArtifact>>>({ exact: $exactMatch, queryKey: getDownloadArtifactQueryKey(id) }, updater);
+  };
+}
+
+/**
+ * @summary An artifact as a file somebody can send to anyone.
+ */
+export const useGetDownloadArtifactQueryData = () => {
+  const queryClient = useQueryClient();
+  return (id: string,) =>
+    queryClient.getQueryData<Awaited<ReturnType<typeof downloadArtifact>>>(getDownloadArtifactQueryKey(id));
+}
+
+
 export const getSessionArtifactFoldersUrl = (id: string,) => {
 
 
@@ -298,11 +425,11 @@ export const getSessionArtifactFoldersUrl = (id: string,) => {
 /**
  * The client polls this rather than the control plane watching the stream:
  * a guess that misses costs a card appearing late, never a lost artifact.
- * @summary Which artifact folders a session has written but not yet published.
+ * @summary Which artifact folders a session has written, and a fingerprint of each.
  */
-export const sessionArtifactFolders = async (id: string, options?: Parameters<typeof http>[1]): Promise<string[]> => {
+export const sessionArtifactFolders = async (id: string, options?: Parameters<typeof http>[1]): Promise<Folder[]> => {
 
-  return http<string[]>(getSessionArtifactFoldersUrl(id),
+  return http<Folder[]>(getSessionArtifactFoldersUrl(id),
   {
     ...options,
     method: 'GET'
@@ -369,7 +496,7 @@ export function useSessionArtifactFolders<TData = Awaited<ReturnType<typeof sess
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary Which artifact folders a session has written but not yet published.
+ * @summary Which artifact folders a session has written, and a fingerprint of each.
  */
 
 export function useSessionArtifactFolders<TData = Awaited<ReturnType<typeof sessionArtifactFolders>>, TError = ApiError>(
@@ -387,7 +514,7 @@ export function useSessionArtifactFolders<TData = Awaited<ReturnType<typeof sess
 
 
 /**
- * @summary Which artifact folders a session has written but not yet published.
+ * @summary Which artifact folders a session has written, and a fingerprint of each.
  */
 export const useSetSessionArtifactFoldersQueryData = () => {
   const queryClient = useQueryClient();
@@ -397,7 +524,7 @@ export const useSetSessionArtifactFoldersQueryData = () => {
 }
 
 /**
- * @summary Which artifact folders a session has written but not yet published.
+ * @summary Which artifact folders a session has written, and a fingerprint of each.
  */
 export const useGetSessionArtifactFoldersQueryData = () => {
   const queryClient = useQueryClient();

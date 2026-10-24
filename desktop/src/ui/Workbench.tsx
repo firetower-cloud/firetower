@@ -250,6 +250,80 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
       ? { id: workspace, name: opened.data.name, branch: opened.data.branch ?? undefined, runs: [opened.data] }
       : undefined);
 
+  /* The session to publish from, derived here rather than from `run` below.
+     `run` is computed after an early return, and a hook may not live there —
+     putting these below it meant the hook count changed between the render
+     where `place` was still loading and the one after it. The selection is
+     the same; only the optional chaining differs. */
+  const publishFrom =
+    place?.runs.find((r) => r.id === reading)?.id ??
+    place?.runs.find((r) => r.id === workspace)?.id ??
+    place?.runs.find((r) => r.agent !== "Shell")?.id ??
+    place?.runs[0]?.id ??
+    null;
+
+  /* Publishing, without the agent having to know how.
+   *
+   * The worker-side tool is the real answer and is not built yet. Until then
+   * the client watches `.firetower/artifacts/` for folders the agent has
+   * written and publishes each one it has not seen. A guess that misses costs
+   * a card appearing a few seconds late; it never costs the artifact, because
+   * the folder is still sitting there to be picked up on the next pass.
+   *
+   * It republishes when the folder is new to *this list*, so an agent that
+   * rewrites the page produces a new version rather than a second artifact —
+   * that is `publish_artifact`'s doing, keyed on the slug. */
+  const folders = useSessionArtifactFolders(publishFrom ?? "", {
+    query: { refetchInterval: 3000, enabled: publishFrom !== null },
+  });
+  /* What was last sent for each folder, so an *edit* becomes a new version.
+     Keyed on the fingerprint rather than on "have I seen this slug": the first
+     version of this skipped anything already published, which meant asking the
+     agent to change a colour produced no v2 at all — the card sat on v1 and
+     looked like the same artifact coming back. */
+  const published = useRef(new Map<string, string>());
+  const publishing = useRef(new Set<string>());
+  useEffect(() => {
+    if (!publishFrom) return;
+    for (const folder of folders.data ?? []) {
+      if (publishing.current.has(folder.name)) continue;
+      if (published.current.get(folder.name) === folder.fingerprint) continue;
+      publishing.current.add(folder.name);
+      publishArtifact(publishFrom, {
+        slug: folder.name,
+        title: folder.name.replace(/-/g, " "),
+      })
+        // Recorded only on success, so a failed publish is retried on the next
+        // poll rather than remembered as done.
+        .then(() => {
+          published.current.set(folder.name, folder.fingerprint);
+          artifacts.refetch();
+        })
+        .catch(() => {})
+        .finally(() => publishing.current.delete(folder.name));
+    }
+  }, [folders.data, publishFrom]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* A document wants the width.
+   *
+   * An artifact and a preview are both things you *look at*, and the rail
+   * beside them is 368px of changes list nobody is reading while they do. So
+   * it steps aside — and comes back when you leave, remembering what it was,
+   * so somebody who had it shut does not return to it opened for them. */
+  const inFront = tabs.find((t) => t.id === active);
+  const immersive = !!inFront && ("artifactId" in inFront || "port" in inFront);
+  const railWas = useRef<boolean | null>(null);
+  useEffect(() => {
+    if (immersive) {
+      if (railWas.current === null) {
+        railWas.current = open;
+        setOpen(false);
+      }
+    } else if (railWas.current !== null) {
+      setOpen(railWas.current);
+      railWas.current = null;
+    }
+  }, [immersive]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey)) return;
@@ -320,30 +394,6 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
     place.runs.find((r) => r.id === reading) ??
     place.runs.find((r) => r.id === workspace) ??
     primary;
-  /* Publishing, without the agent having to know how.
-   *
-   * The worker-side tool is the real answer and is not built yet. Until then
-   * the client watches `.firetower/artifacts/` for folders the agent has
-   * written and publishes each one it has not seen. A guess that misses costs
-   * a card appearing a few seconds late; it never costs the artifact, because
-   * the folder is still sitting there to be picked up on the next pass.
-   *
-   * It republishes when the folder is new to *this list*, so an agent that
-   * rewrites the page produces a new version rather than a second artifact —
-   * that is `publish_artifact`'s doing, keyed on the slug. */
-  const folders = useSessionArtifactFolders(run.id, { query: { refetchInterval: 3000 } });
-  const publishing = useRef(new Set<string>());
-  useEffect(() => {
-    const seen = new Set((artifacts.data ?? []).map((a) => a.slug));
-    for (const slug of folders.data ?? []) {
-      if (seen.has(slug) || publishing.current.has(slug)) continue;
-      publishing.current.add(slug);
-      publishArtifact(run.id, { slug, title: slug.replace(/-/g, " ") })
-        .then(() => artifacts.refetch())
-        .catch(() => {})
-        .finally(() => publishing.current.delete(slug));
-    }
-  }, [folders.data, artifacts.data, run.id]); // eslint-disable-line react-hooks/exhaustive-deps
   /* Checkouts belong to the workspace rather than to whichever agent is being
      read, so take them from the one the list is freshest on. */
   const checkouts = run.checkouts ?? [];
@@ -543,24 +593,17 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
             {tabs.map((t) =>
               "artifactId" in t ? (
                 <div key={t.id} hidden={active !== t.id} className="h-full">
-                  <ArtifactTab
-                    artifact={
-                      (artifacts.data ?? []).find((a) => a.id === t.artifactId) ?? {
-                        id: t.artifactId,
-                        title: t.title,
-                        slug: "",
-                        version: 0,
-                        bytes: 0,
-                        url: "",
-                        fromSessionId: null,
-                        fromWorkspaceName: null,
-                        updatedAt: new Date().toISOString(),
-                      }
-                    }
-                    sessionId={run.id}
-                    expanded={expanded === t.id}
-                    onExpanded={(v) => setExpanded(v ? t.id : null)}
-                  />
+                  {(() => {
+                    const found = (artifacts.data ?? []).find((a) => a.id === t.artifactId);
+                    return found ? (
+                      <ArtifactTab
+                        artifact={found}
+                        sessionId={run.id}
+                        expanded={expanded === t.id}
+                        onExpanded={(v) => setExpanded(v ? t.id : null)}
+                      />
+                    ) : null;
+                  })()}
                 </div>
               ) : "port" in t ? (
                 <div key={t.id} hidden={active !== t.id} className="h-full">

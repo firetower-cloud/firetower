@@ -44,6 +44,7 @@ tokio-stream = { version = "0.1", features = ["sync"] }
 # The interface, compiled in. One binary and one origin is the whole reason.
 rust-embed.workspace = true
 mime_guess.workspace = true
+zip.workspace = true
 
 lol_html = "=2.7.0"
 tiktoken-rs = { version = "0.12.1", default-features = false }

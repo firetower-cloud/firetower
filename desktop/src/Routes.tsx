@@ -9,6 +9,7 @@
  */
 import { Dashboard } from "~/ui/Dashboard";
 import { TasksPage } from "~/ui/TasksPage";
+import { ArtifactsPage } from "~/ui/ArtifactsPage";
 import { Workbench } from "~/ui/Workbench";
 import { Configuration } from "~/ui/Configuration";
 import { Updates } from "~/ui/Updates";
@@ -22,6 +23,7 @@ export function Routes({ backend, onForgot }: { backend: Backend; onForgot: () =
   const path = usePathname();
 
   if (path.startsWith("/tasks")) return <TasksPage backend={backend} />;
+  if (path.startsWith("/artifacts")) return <ArtifactsPage />;
   if (path.startsWith("/configuration")) return <Configuration backend={backend} onForgot={onForgot} />;
   if (path.startsWith("/updates")) return <Updates />;
   if (path.startsWith("/account")) return <Account backend={backend} onForgot={onForgot} />;

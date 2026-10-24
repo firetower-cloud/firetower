@@ -291,20 +291,34 @@ pub(super) async fn publish_artifact(
     ))
 }
 
-/// Which artifact folders a session has written but not yet published.
+/// One artifact folder a session has written, and whether it has changed.
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Folder {
+    pub name: String,
+    /// Changes whenever the folder's contents do.
+    ///
+    /// Sizes and modification times of the files inside, not of the directory:
+    /// editing a file in place leaves the directory's own mtime untouched, so
+    /// a fingerprint taken from the directory would say "unchanged" for
+    /// exactly the edit somebody just asked for.
+    pub fingerprint: String,
+}
+
+/// Which artifact folders a session has written, and a fingerprint of each.
 ///
 /// The client polls this rather than the control plane watching the stream:
 /// a guess that misses costs a card appearing late, never a lost artifact.
 #[utoipa::path(
     get, path = "/api/v1/sessions/{id}/artifacts", tag = "artifacts",
     params(("id" = String, Path, description = "Session id")),
-    responses((status = 200, body = Vec<String>), (status = 404, body = ApiError)),
+    responses((status = 200, body = Vec<Folder>), (status = 404, body = ApiError)),
 )]
 pub(super) async fn session_artifact_folders(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
     Path(id): Path<String>,
-) -> ApiResult<Json<Vec<String>>> {
+) -> ApiResult<Json<Vec<Folder>>> {
     let session = ft_core::SessionId::from_stored(id);
     let (_, host) = session_context(&state, &principal, &session).await?;
 
@@ -315,11 +329,115 @@ pub(super) async fn session_artifact_folders(
         _ => return Ok(Json(Vec::new())),
     };
 
-    Ok(Json(
-        listing
-            .into_iter()
-            .filter(|e| e.directory && !e.link)
-            .map(|e| e.name)
-            .collect(),
-    ))
+    let mut folders = Vec::new();
+    for entry in listing.into_iter().filter(|e| e.directory && !e.link) {
+        let inside = match state
+            .fleet
+            .list_files(&host, &session, &format!("{DIR}/{}", entry.name))
+            .await
+        {
+            Ok(Ok(files)) => files,
+            _ => continue,
+        };
+        let mut parts: Vec<String> = inside
+            .iter()
+            .filter(|f| !f.directory)
+            .map(|f| {
+                format!(
+                    "{}:{}:{}",
+                    f.name,
+                    f.size,
+                    f.modified.map(|m| m.timestamp_millis()).unwrap_or(0)
+                )
+            })
+            .collect();
+        parts.sort();
+        folders.push(Folder {
+            name: entry.name,
+            fingerprint: parts.join("|"),
+        });
+    }
+
+    Ok(Json(folders))
+}
+
+
+/// An artifact as a file somebody can send to anyone.
+///
+/// **This is the only sharing that reaches outside your network.** The control
+/// plane is deliberately not on the public internet, so a link — signed,
+/// unauthenticated, "public" — is still only openable by somebody who can
+/// reach this machine. For a client, or a friend, the URL is not partly useful
+/// but useless, and an export is the whole answer.
+///
+/// Always a zip, even for the one-file case. A download that is sometimes an
+/// `.html` and sometimes a `.zip` is two behaviours to explain and two paths to
+/// get wrong, and the saving is a few hundred bytes.
+#[utoipa::path(
+    get, path = "/api/v1/artifacts/{id}/download", tag = "artifacts",
+    params(("id" = String, Path, description = "Artifact id")),
+    responses((status = 200, description = "A zip of the current version"), (status = 404, body = ApiError)),
+)]
+pub(super) async fn download_artifact(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(id): Path<String>,
+) -> Result<axum::response::Response, ApiError> {
+    let owner = principal
+        .owner()
+        .ok_or_else(|| ApiError::new(ErrorCode::Unauthorized, "Sign in to download."))?;
+
+    // Ownership is checked here even though serving the artifact itself is not:
+    // this endpoint is on the authenticated API, and an export is the one place
+    // where "whose is this" is both answerable and cheap.
+    if !state
+        .db
+        .artifacts_of(owner)
+        .await?
+        .iter()
+        .any(|r| r.id == id)
+    {
+        return Err(ApiError::not_found("artifact"));
+    }
+
+    let artifact = ft_core::ArtifactId::from_stored(id);
+    let (slug, version, files) = state
+        .db
+        .artifact_bundle(&artifact)
+        .await?
+        .ok_or_else(|| ApiError::not_found("artifact"))?;
+
+    let bytes = {
+        use std::io::Write;
+        use zip::write::SimpleFileOptions;
+
+        let mut buffer = std::io::Cursor::new(Vec::new());
+        let mut zipped = zip::ZipWriter::new(&mut buffer);
+        let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+        for (path, body) in &files {
+            zipped
+                .start_file(path, options)
+                .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e}")))?;
+            zipped
+                .write_all(body)
+                .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e}")))?;
+        }
+        // `finish` consumes the writer and hands the sink back, which is also
+        // what releases the borrow on the buffer.
+        zipped
+            .finish()
+            .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e}")))?;
+        buffer.into_inner()
+    };
+
+    let name = format!("{slug}-v{version}.zip");
+    axum::response::Response::builder()
+        .header(axum::http::header::CONTENT_TYPE, "application/zip")
+        .header(axum::http::header::CONTENT_LENGTH, bytes.len())
+        .header(
+            axum::http::header::CONTENT_DISPOSITION,
+            format!("attachment; filename=\"{}\"", name.replace('"', "")),
+        )
+        .body(axum::body::Body::from(bytes))
+        .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e:#}")))
 }

@@ -99,6 +99,7 @@ export * from './fileEntry.ts';
 export * from './filePlan.ts';
 export * from './fileVerdict.ts';
 export * from './findFilesParams.ts';
+export * from './folder.ts';
 export * from './forwarded.ts';
 export * from './found.ts';
 export * from './getConversationParams.ts';

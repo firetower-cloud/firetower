@@ -6982,6 +6982,20 @@ pub struct CurrentVersion {
 #[serde(rename_all = "camelCase")]
 pub struct ArtifactRow {
     pub id: String,
+    /// Where it is filed. `u/<somebody>/<slug>` until it is moved.
+    pub path: ft_core::ResourcePath,
+    /// Whether the asker may move it — drawn as the move control, and
+    /// re-decided server-side by `may_share` whatever the client drew.
+    pub may_share: bool,
+    /// True when it is filed at the asker's own root rather than shared.
+    pub mine: bool,
+    /// The version currently served.
+    ///
+    /// Exposed because the picker injected into the page identifies itself by
+    /// it — a note belongs to the bytes it was written on, not to the artifact
+    /// in general — so a client that cannot name the version cannot complete
+    /// the handshake, and Annotate stays dead with nothing to say why.
+    pub version_id: Option<String>,
     pub title: String,
     pub slug: String,
     pub version: i32,
@@ -7079,10 +7093,19 @@ impl Db {
             }
             None => {
                 let id = ft_core::ArtifactId::new();
+                // Born at the owner's own root. Never into the workspace's
+                // directory, however convenient that would be: a mock-up is
+                // work in progress, and filing one into a team's directory the
+                // moment it exists shares it with everybody by default.
+                // Moving it later is one gesture; unsharing something nobody
+                // meant to share is not.
                 sqlx::query(
                     "INSERT INTO artifacts (id, org_id, owner_id, title, slug,
-                                            from_session_id, from_workspace_name)
-                     VALUES ($1,$2,$3,$4,$5,$6,$7)",
+                                            from_session_id, from_workspace_name,
+                                            created_by, path)
+                     VALUES ($1,$2,$3,$4,$5,$6,$7,$3,
+                             (SELECT ('u.' || slug || '.' || $5)::ltree
+                                FROM principals WHERE id = $3))",
                 )
                 .bind(id.as_str())
                 .bind(org)
@@ -7096,6 +7119,44 @@ impl Db {
                 id
             }
         };
+
+        // A version identical to the one already current is not a version.
+        //
+        // The backstop that lets a caller publish whenever it is unsure. The
+        // client polls for changes and can be wrong in either direction — a
+        // fingerprint that moves when nothing did, a republish after a
+        // reconnect — and without this, each of those mints a version, so the
+        // history fills with v2..v9 that are all the same page.
+        let current: Vec<(String, Vec<u8>)> = sqlx::query_as(
+            "SELECT f.path, f.body
+               FROM artifact_files f
+               JOIN artifacts a ON a.current_version_id = f.version_id
+              WHERE a.id = $1
+              ORDER BY f.path",
+        )
+        .bind(artifact.as_str())
+        .fetch_all(&mut *tx)
+        .await?;
+
+        if !current.is_empty() {
+            let mut incoming: Vec<(String, Vec<u8>)> = files
+                .iter()
+                .map(|(p, _, b)| (p.clone(), b.clone()))
+                .collect();
+            incoming.sort_by(|a, b| a.0.cmp(&b.0));
+            if incoming == current {
+                let n: i32 = sqlx::query_scalar(
+                    "SELECT v.n FROM artifact_versions v
+                       JOIN artifacts a ON a.current_version_id = v.id
+                      WHERE a.id = $1",
+                )
+                .bind(artifact.as_str())
+                .fetch_one(&mut *tx)
+                .await?;
+                tx.commit().await?;
+                return Ok((artifact, n));
+            }
+        }
 
         let n: i32 = sqlx::query_scalar(
             "SELECT coalesce(max(n), 0) + 1 FROM artifact_versions WHERE artifact_id = $1",
@@ -7137,29 +7198,66 @@ impl Db {
             .execute(&mut *tx)
             .await?;
 
+        // Only the current version is kept.
+        //
+        // Deliberately the simplest rule there is, and taken knowing what it
+        // costs: there is no going back to the page as it was before this
+        // save. The alternative — keep the last two — is worth almost nothing
+        // while publishing is driven by polling, because an agent writes a
+        // file two or three times inside one turn and "previous" is then the
+        // same page from eight seconds ago. Keeping more becomes worth doing
+        // when a publish is one deliberate act (the MCP tool, §5), not before.
+        //
+        // Deleting here rather than in a sweep: the moment a version stops
+        // being current is the moment it stops being wanted, and a sweep would
+        // be a second mechanism deciding the same thing. `artifact_files`
+        // cascades, and so would any note anchored to the version — which is
+        // only harmless while notes are not durable. Wiring §8 means revisiting
+        // this line, not adding to it.
+        sqlx::query("DELETE FROM artifact_versions WHERE artifact_id = $1 AND id <> $2")
+            .bind(artifact.as_str())
+            .bind(version.as_str())
+            .execute(&mut *tx)
+            .await?;
+
         tx.commit().await?;
         Ok((artifact, n))
     }
 
-    /// Everything this person has made, newest first.
-    pub async fn artifacts_of(&self, owner: &str) -> Result<Vec<ArtifactRow>> {
-        let rows = sqlx::query(
-            "SELECT a.id, a.title, a.slug, a.from_session_id, a.from_workspace_name,
-                    a.updated_at, v.n, v.bytes
+    /// Every artifact this person may see, newest first.
+    ///
+    /// `filed_where` rather than `owner_id = $1`: that is the only definition
+    /// of "may see this" in the product, and an artifact filed into a
+    /// directory has to appear for everybody with a grant on it. Writing a
+    /// second predicate here is how two answers come to disagree.
+    pub async fn artifacts_of(&self, person: &str) -> Result<Vec<ArtifactRow>> {
+        use crate::access::{filed_where, Level};
+        let sql = format!(
+            "SELECT a.id, a.path::text AS path, a.current_version_id, a.title, a.slug,
+                    a.from_session_id, a.from_workspace_name, a.updated_at, v.n, v.bytes,
+                    (a.path <@ (SELECT ('u.' || slug)::ltree FROM principals WHERE id = $1)) AS mine,
+                    {shareable} AS may_share
                FROM artifacts a
                LEFT JOIN artifact_versions v ON v.id = a.current_version_id
-              WHERE a.owner_id = $1
+              WHERE {visible}
               ORDER BY a.updated_at DESC",
-        )
-        .bind(owner)
-        .fetch_all(&self.pool)
-        .await
-        .context("listing artifacts")?;
+            visible = filed_where("a", 1, Level::Viewer),
+            shareable = filed_where("a", 1, Level::Writer),
+        );
+        let rows = sqlx::query(&sql)
+            .bind(person)
+            .fetch_all(&self.pool)
+            .await
+            .context("listing artifacts")?;
 
         Ok(rows
             .into_iter()
             .map(|r| ArtifactRow {
                 id: r.get("id"),
+                path: ft_core::ResourcePath::from_stored(r.get::<String, _>("path")),
+                may_share: r.try_get("may_share").unwrap_or(false),
+                mine: r.try_get("mine").unwrap_or(false),
+                version_id: r.get("current_version_id"),
                 title: r.get("title"),
                 slug: r.get("slug"),
                 version: r.try_get("n").unwrap_or(0),
@@ -7169,6 +7267,36 @@ impl Db {
                 updated_at: r.get("updated_at"),
             })
             .collect())
+    }
+
+    /// Every file of an artifact's current version, for an export.
+    pub async fn artifact_bundle(
+        &self,
+        id: &ft_core::ArtifactId,
+    ) -> Result<Option<(String, i32, Vec<(String, Vec<u8>)>)>> {
+        let head = sqlx::query(
+            "SELECT a.slug, v.n FROM artifacts a
+               JOIN artifact_versions v ON v.id = a.current_version_id
+              WHERE a.id = $1",
+        )
+        .bind(id.as_str())
+        .fetch_optional(&self.pool)
+        .await
+        .context("looking up an artifact to export")?;
+
+        let Some(head) = head else { return Ok(None) };
+
+        let files: Vec<(String, Vec<u8>)> = sqlx::query_as(
+            "SELECT f.path, f.body FROM artifact_files f
+               JOIN artifacts a ON a.current_version_id = f.version_id
+              WHERE a.id = $1 ORDER BY f.path",
+        )
+        .bind(id.as_str())
+        .fetch_all(&self.pool)
+        .await
+        .context("reading an artifact's files")?;
+
+        Ok(Some((head.get("slug"), head.get("n"), files)))
     }
 
     /// The org a person belongs to, for stamping a new artifact.

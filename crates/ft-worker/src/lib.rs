@@ -1909,6 +1909,34 @@ Docker is installed here and the daemon is not answering, so `docker` commands w
         }
     }
 
+    /// How to publish something somebody asked to look at.
+    ///
+    /// Here rather than in a skill because a skill has to be chosen: the
+    /// library is "discovery without enforcement" by design, so a skill
+    /// nobody ticked is a feature nobody has. This file is read by every
+    /// agent on every session, which is what the convention needs.
+    ///
+    /// Kept short on purpose. It is in context on every turn, including the
+    /// turns that will never make an artifact.
+    fn artifact_guidance() -> &'static str {
+        "
+## Artifacts
+
+When somebody asks to *see* something — a mock-up, a page, a chart, a report —
+write it as one self-contained HTML file at
+`.firetower/artifacts/<name>/index.html`. Firetower publishes it from there and
+shows it in the conversation, where it opens full-screen and can be annotated.
+
+- `<name>` is lowercase letters, digits and hyphens: `pricing`, `onboarding-v2`.
+- One file. Inline the CSS and the JS — it is served from an origin with no
+  network access, so a CDN link renders as nothing.
+- Writing the same `<name>` again publishes a new version of the same artifact
+  rather than a second one.
+- This path is outside git, so a mock-up never turns up in the pull request.
+  Something that belongs in the repository goes in the repository instead.
+"
+    }
+
     /// Write down what is checked out and where.
     ///
     /// The agent starts at the workspace rather than inside a repository, so
@@ -1920,18 +1948,25 @@ Docker is installed here and the daemon is not answering, so `docker` commands w
     /// Best effort. A workspace without it is a worse first turn, not a broken
     /// session.
     async fn write_workspace_guide(&self, id: &SessionId, workspace: &Path) {
-        let checkouts = match self.store.checkouts_of(id).await {
-            Ok(c) if !c.is_empty() => c,
-            _ => return,
-        };
+        // Not `return` on an empty list. A session can have no repository at
+        // all, and that is precisely the session most in need of being told
+        // what this directory is — it is the one somebody opened to be made
+        // something rather than to change something.
+        let checkouts = self.store.checkouts_of(id).await.unwrap_or_default();
 
-        let mut text = String::from(
+        let mut text = String::from(if checkouts.is_empty() {
+            "# This workspace
+
+             Nothing is checked out here: this session has no repository. The              directory is yours to work in.
+
+"
+        } else {
             "# This workspace
 
              Firetower checked these out for this session. Each is a git worktree on              its own branch, and each is a separate repository — a change in one is              committed and pushed on its own.
 
-",
-        );
+"
+        });
         for c in &checkouts {
             text.push_str(&format!(
                 "- `{}/` — {} · on `{}`, from `{}`
@@ -1942,11 +1977,14 @@ Docker is installed here and the daemon is not answering, so `docker` commands w
                 c.base
             ));
         }
-        text.push_str(
-            "
+        if !checkouts.is_empty() {
+            text.push_str(
+                "
 You are in the directory that holds them, not inside one of them.              Paths in what you say should be relative to here.
 ",
-        );
+            );
+        }
+        text.push_str(Self::artifact_guidance());
         text.push_str(&Self::docker_guidance(&crate::docker::state().await, id));
 
         let at = workspace.join("AGENTS.md");

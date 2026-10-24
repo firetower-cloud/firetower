@@ -31,13 +31,14 @@ import { usePrompt } from "~/ui/Confirm";
 import { useEndWorkspace } from "~/ui/end";
 import { HostCard, whereItRuns } from "~/ui/StatusBar";
 import { useHosts } from "~/data";
-import { Monitor, Server } from "lucide-react";
+import { Monitor, Server, Shapes } from "lucide-react";
 import { useRef, useState } from "react";
 import { key } from "~/platform";
 
 const NAV: { href: string; label: string; icon: LucideIcon }[] = [
   { href: "/", label: "Dashboard", icon: LayoutList },
   { href: "/tasks", label: "Tasks", icon: ListTodo },
+  { href: "/artifacts", label: "Artifacts", icon: Shapes },
 ];
 
 export function Rail({ backend }: { backend: Backend }) {
