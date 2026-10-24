@@ -70,6 +70,8 @@ export type Asked = {
 export type Item = {
   id: string;
   kind: ItemKind;
+  /** Which line of the agent's log opened this. Absent on optimistic ones. */
+  lineNo?: number;
   title?: string;
   status?: ItemStatus;
   /** Which subagent owns this, when the main thread doesn't. */
@@ -409,6 +411,7 @@ export function apply(state: Conversation, event: ConversationEvent): Conversati
           {
             id: event.item,
             kind: event.kind,
+            lineNo: event.lineNo,
             title: event.title ?? undefined,
             task: event.task ?? undefined,
             text: "",

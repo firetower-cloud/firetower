@@ -13,6 +13,7 @@ import * as zod from 'zod';
  */
 export const ListArtifactsResponseItem = zod.object({
   "bytes": zod.int(),
+  "firstSeenLine": zod.int().nullish().describe('Where in the producing session\'s log this first appeared.\n\nWhat the conversation anchors its card to. `None` for rows written\nbefore this existed, which fall back to the end of the transcript.'),
   "fromSessionId": zod.string().nullish(),
   "fromWorkspaceName": zod.string().nullish(),
   "id": zod.string(),
@@ -56,6 +57,7 @@ export const RenameArtifactBody = zod.object({
 
 export const RenameArtifactResponse = zod.object({
   "bytes": zod.int(),
+  "firstSeenLine": zod.int().nullish().describe('Where in the producing session\'s log this first appeared.\n\nWhat the conversation anchors its card to. `None` for rows written\nbefore this existed, which fall back to the end of the transcript.'),
   "fromSessionId": zod.string().nullish(),
   "fromWorkspaceName": zod.string().nullish(),
   "id": zod.string(),
@@ -80,6 +82,7 @@ export const ArtifactAddressParams = zod.object({
 
 export const ArtifactAddressResponse = zod.object({
   "bytes": zod.int(),
+  "firstSeenLine": zod.int().nullish().describe('Where in the producing session\'s log this first appeared.\n\nWhat the conversation anchors its card to. `None` for rows written\nbefore this existed, which fall back to the end of the transcript.'),
   "fromSessionId": zod.string().nullish(),
   "fromWorkspaceName": zod.string().nullish(),
   "id": zod.string(),
@@ -146,6 +149,7 @@ export const PublishArtifactBody = zod.object({
 
 export const PublishArtifactResponse = zod.object({
   "bytes": zod.int(),
+  "firstSeenLine": zod.int().nullish().describe('Where in the producing session\'s log this first appeared.\n\nWhat the conversation anchors its card to. `None` for rows written\nbefore this existed, which fall back to the end of the transcript.'),
   "fromSessionId": zod.string().nullish(),
   "fromWorkspaceName": zod.string().nullish(),
   "id": zod.string(),

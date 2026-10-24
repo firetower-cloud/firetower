@@ -8473,6 +8473,14 @@
             "type": "integer",
             "format": "int64"
           },
+          "firstSeenLine": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Where in the producing session's log this first appeared.\n\nWhat the conversation anchors its card to. `None` for rows written\nbefore this existed, which fall back to the end of the transcript."
+          },
           "fromSessionId": {
             "type": [
               "string",

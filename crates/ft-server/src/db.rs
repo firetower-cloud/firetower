@@ -6982,6 +6982,11 @@ pub struct CurrentVersion {
 #[serde(rename_all = "camelCase")]
 pub struct ArtifactRow {
     pub id: String,
+    /// Where in the producing session's log this first appeared.
+    ///
+    /// What the conversation anchors its card to. `None` for rows written
+    /// before this existed, which fall back to the end of the transcript.
+    pub first_seen_line: Option<i64>,
     /// Where it is filed. `u/<somebody>/<slug>` until it is moved.
     pub path: ft_core::ResourcePath,
     /// Whether the asker may move it — drawn as the move control, and
@@ -7091,10 +7096,15 @@ impl Db {
                 sqlx::query(
                     "INSERT INTO artifacts (id, org_id, owner_id, title, slug,
                                             from_session_id, from_workspace_name,
-                                            created_by, path)
+                                            created_by, path, first_seen_line)
                      VALUES ($1,$2,$3,$4,$5,$6,$7,$3,
                              (SELECT ('u.' || slug || '.' || $5)::ltree
-                                FROM principals WHERE id = $3))",
+                                FROM principals WHERE id = $3),
+                             -- Where the conversation had got to. Stamped only
+                             -- here, so the card marks where the artifact
+                             -- appeared and does not move when it is edited.
+                             (SELECT max(line_no) FROM agent_lines
+                               WHERE session_id = $6))",
                 )
                 .bind(id.as_str())
                 .bind(org)
@@ -7250,7 +7260,8 @@ impl Db {
     pub async fn artifacts_of(&self, person: &str) -> Result<Vec<ArtifactRow>> {
         use crate::access::{filed_where, Level};
         let sql = format!(
-            "SELECT a.id, a.path::text AS path, a.current_version_id, a.title, a.slug,
+            "SELECT a.id, a.first_seen_line, a.path::text AS path, a.current_version_id,
+                    a.title, a.slug,
                     a.from_session_id, a.from_workspace_name, a.updated_at, v.n, v.bytes,
                     (a.path <@ (SELECT ('u.' || slug)::ltree FROM principals WHERE id = $1)) AS mine,
                     {shareable} AS may_share
@@ -7271,6 +7282,7 @@ impl Db {
             .into_iter()
             .map(|r| ArtifactRow {
                 id: r.get("id"),
+                first_seen_line: r.try_get("first_seen_line").unwrap_or(None),
                 path: ft_core::ResourcePath::from_stored(r.get::<String, _>("path")),
                 may_share: r.try_get("may_share").unwrap_or(false),
                 mine: r.try_get("mine").unwrap_or(false),

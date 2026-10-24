@@ -216,29 +216,27 @@ export function Chat({
      once where it read as though the agent you are talking to had run it. */
   const rows = useMemo(() => fold(mainline(items)), [items]);
 
-  /* Where each artifact was *made*, so its card sits in the conversation
-     rather than walking down it.
+  /* Where each artifact's card goes.
    *
-   * Two rules, and the first one is the whole fix. **The earliest match
-   * wins.** This took the latest, which meant every later mention moved the
-   * card: an agent that curls its own artifact, cats it, or greps it writes
-   * that path into a `Bash` argument each time, so the card followed the
-   * conversation down and was always at the bottom. A card marks where
-   * something entered the transcript; that moment does not change because it
-   * was referred to again.
+   * By **log line**, not by searching the transcript for the artifact's
+   * folder. That search could not work and three attempts at it did not: an
+   * agent names a file however it likes, and one real session ran
    *
-   * **A write beats a mention.** `FileChange` is what made the thing;
-   * everything else naming the path is talking about it. Mentions are still
-   * used as a fallback, because an artifact built with a shell heredoc or a
-   * `cp` arrives as `CommandExecution` and would otherwise have no anchor at
-   * all.
+   *     cd …/.firetower/artifacts && cp firetower-architecture/index.html \
+   *          firetower-architecture-copy/index.html
    *
-   * Items carry no timestamp, so there is nothing else to place them by; and
-   * the input is matched as text rather than by `file_path`, because that key
-   * is Claude Code's spelling and Codex and ACP each have their own.
+   * after which the full path appears nowhere in the log, nothing matched,
+   * and the card fell to the end of the conversation and stayed there.
    *
-   * An artifact with no mention in the loaded transcript — made before the
-   * window of exchanges being shown — falls to the end rather than vanishing. */
+   * `first_seen_line` is stamped by the server when the artifact is first
+   * published, from the agent's own log. It is a position rather than a
+   * guess, it is unaffected by how the file was referred to, and because it
+   * is written once the card stops where it started instead of following
+   * later edits down the page.
+   *
+   * An artifact with no line — published before the column existed, or whose
+   * line is outside the window of exchanges loaded — falls to the end rather
+   * than vanishing. */
   const mineHere = useMemo(
     () => artifacts.filter((a) => a.fromSessionId === session.id),
     [artifacts, session.id],
@@ -246,19 +244,22 @@ export function Chat({
   const placed = useMemo(() => {
     const at = new Map<number, typeof mineHere>();
     const loose: typeof mineHere = [];
+
+    /* The highest log line each row covers, so a card lands after the row the
+       conversation had reached — not inside the middle of a folded group. */
+    const reach = rows.map((row) => {
+      const inRow = row.type === "item" ? [row.item] : row.items;
+      return inRow.reduce((high, it) => Math.max(high, it.lineNo ?? 0), 0);
+    });
+
     for (const a of mineHere) {
-      const needle = `.firetower/artifacts/${a.slug}/`;
-      let wrote = -1;
-      let named = -1;
-      rows.forEach((row, i) => {
-        const inRow = row.type === "item" ? [row.item] : row.items;
-        for (const it of inRow) {
-          if (!JSON.stringify(it.input ?? "").includes(needle)) continue;
-          if (named < 0) named = i;
-          if (wrote < 0 && it.kind === "FileChange") wrote = i;
+      const line = a.firstSeenLine ?? 0;
+      let found = -1;
+      if (line > 0) {
+        for (let i = 0; i < reach.length; i++) {
+          if (reach[i] > 0 && reach[i] <= line) found = i;
         }
-      });
-      const found = wrote >= 0 ? wrote : named;
+      }
       if (found >= 0) at.set(found, [...(at.get(found) ?? []), a]);
       else loose.push(a);
     }

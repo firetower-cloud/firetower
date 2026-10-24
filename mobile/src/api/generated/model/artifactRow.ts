@@ -12,6 +12,14 @@ import type { ResourcePath } from './resourcePath';
  */
 export interface ArtifactRow {
   bytes: number;
+  /**
+     * Where in the producing session's log this first appeared.
+     *
+     * What the conversation anchors its card to. `None` for rows written
+     * before this existed, which fall back to the end of the transcript.
+     * @nullable
+     */
+  firstSeenLine?: number | null;
   /** @nullable */
   fromSessionId?: string | null;
   /** @nullable */
