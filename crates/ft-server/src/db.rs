@@ -7076,21 +7076,10 @@ impl Db {
                 .await?;
 
         let artifact = match existing {
-            Some(id) => {
-                sqlx::query(
-                    "UPDATE artifacts SET title = $2, updated_at = now(),
-                            from_session_id = coalesce($3, from_session_id),
-                            from_workspace_name = coalesce($4, from_workspace_name)
-                      WHERE id = $1",
-                )
-                .bind(&id)
-                .bind(title)
-                .bind(from_session)
-                .bind(from_workspace)
-                .execute(&mut *tx)
-                .await?;
-                ft_core::ArtifactId::from_stored(id)
-            }
+            // Nothing is written yet. An identical republish must leave this
+            // row completely alone — not even `updated_at` — and the check for
+            // that is below, after the files are known.
+            Some(id) => ft_core::ArtifactId::from_stored(id),
             None => {
                 let id = ft_core::ArtifactId::new();
                 // Born at the owner's own root. Never into the workspace's
@@ -7145,6 +7134,11 @@ impl Db {
                 .collect();
             incoming.sort_by(|a, b| a.0.cmp(&b.0));
             if incoming == current {
+                // Identical. No version, no touched timestamp, and above all
+                // no change of provenance: a second agent in the same
+                // workspace polls the same folder, and letting its republish
+                // claim the artifact moved the card into a conversation that
+                // had never said anything.
                 let n: i32 = sqlx::query_scalar(
                     "SELECT v.n FROM artifact_versions v
                        JOIN artifacts a ON a.current_version_id = v.id
@@ -7192,11 +7186,29 @@ impl Db {
             .await?;
         }
 
-        sqlx::query("UPDATE artifacts SET current_version_id = $2, updated_at = now() WHERE id = $1")
-            .bind(artifact.as_str())
-            .bind(version.as_str())
-            .execute(&mut *tx)
-            .await?;
+        // Provenance is first-writer-wins: `coalesce(column, $n)`, not
+        // `coalesce($n, column)`. The second spelling is what shipped, and it
+        // meant whichever session published last owned the artifact — so
+        // opening a new agent in the same workspace silently took it.
+        //
+        // Which session *made* a thing does not change when another one edits
+        // it. The title does, because that is what the publisher called it.
+        sqlx::query(
+            "UPDATE artifacts
+                SET current_version_id = $2,
+                    title = $3,
+                    updated_at = now(),
+                    from_session_id = coalesce(from_session_id, $4),
+                    from_workspace_name = coalesce(from_workspace_name, $5)
+              WHERE id = $1",
+        )
+        .bind(artifact.as_str())
+        .bind(version.as_str())
+        .bind(title)
+        .bind(from_session)
+        .bind(from_workspace)
+        .execute(&mut *tx)
+        .await?;
 
         // Only the current version is kept.
         //

@@ -19,7 +19,7 @@
  * it is up — the tool call is held open on the host — and it can sit there for
  * hours; the session picks up where it was.
  */
-import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createContext, Fragment, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   Bot,
@@ -215,6 +215,37 @@ export function Chat({
      once where it read as though the agent you are talking to had run it. */
   const rows = useMemo(() => fold(mainline(items)), [items]);
 
+  /* Where each artifact was made, so its card sits *in* the conversation
+     rather than always at the bottom of it.
+   *
+   * The anchor is the agent's own write — a tool call whose arguments mention
+   * this artifact's folder. Items carry no timestamp, so there is nothing else
+   * to place them by; and the input is matched as text rather than by
+   * `file_path`, because that key is Claude Code's spelling and Codex and ACP
+   * each have their own.
+   *
+   * An artifact with no write in the loaded transcript — made before the
+   * window of exchanges being shown — falls to the end rather than vanishing. */
+  const mineHere = useMemo(
+    () => artifacts.filter((a) => a.fromSessionId === session.id),
+    [artifacts, session.id],
+  );
+  const placed = useMemo(() => {
+    const at = new Map<number, typeof mineHere>();
+    const loose: typeof mineHere = [];
+    for (const a of mineHere) {
+      const needle = `.firetower/artifacts/${a.slug}/`;
+      let found = -1;
+      rows.forEach((row, i) => {
+        const inRow = row.type === "item" ? [row.item] : row.items;
+        if (inRow.some((it) => JSON.stringify(it.input ?? "").includes(needle))) found = i;
+      });
+      if (found >= 0) at.set(found, [...(at.get(found) ?? []), a]);
+      else loose.push(a);
+    }
+    return { at, loose };
+  }, [mineHere, rows]);
+
   /* Subagents that have not reported. The turn can end with these still
      going, and when it has they are the only thing still working — so they
      are what the line under the transcript has to be about. */
@@ -379,22 +410,27 @@ export function Chat({
           )}
 
           <ol className="mt-9 space-y-7">
-            {rows.map((row) =>
-              row.type === "item" ? (
-                <Node key={row.item.id} item={row.item} items={items} tasks={conversation.tasks} onOpenDiff={onOpenDiff} onOpenFile={onOpenFile} />
-              ) : (
-                <Group key={row.id} items={row.items} all={items} tasks={conversation.tasks} onOpenDiff={onOpenDiff} onOpenFile={onOpenFile} />
-              ),
-            )}
+            {rows.map((row, i) => (
+              <Fragment key={row.type === "item" ? row.item.id : row.id}>
+                {row.type === "item" ? (
+                  <Node item={row.item} items={items} tasks={conversation.tasks} onOpenDiff={onOpenDiff} onOpenFile={onOpenFile} />
+                ) : (
+                  <Group items={row.items} all={items} tasks={conversation.tasks} onOpenDiff={onOpenDiff} onOpenFile={onOpenFile} />
+                )}
+                {onOpenArtifact &&
+                  (placed.at.get(i) ?? []).map((a) => (
+                    <li key={a.id}>
+                      <ArtifactCard artifact={a} onOpen={onOpenArtifact} />
+                    </li>
+                  ))}
+              </Fragment>
+            ))}
           </ol>
 
-          {/* What this session published. The card is the thing that says an
-              artifact exists at all — without it the only evidence is a file
-              write in a folded step, which is no evidence at all. */}
+          {/* Only the ones whose write is not in the loaded transcript. The
+              rest sit where they were made, above. */}
           {onOpenArtifact &&
-            artifacts
-              .filter((a) => a.fromSessionId === session.id)
-              .map((a) => <ArtifactCard key={a.id} artifact={a} onOpen={onOpenArtifact} />)}
+            placed.loose.map((a) => <ArtifactCard key={a.id} artifact={a} onOpen={onOpenArtifact} />)}
 
           {/* After the transcript, because it is the newest thing that
               happened here — and the agent's own acknowledgement of it arrives
