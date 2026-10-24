@@ -11,7 +11,7 @@
 //! What proves a reused connection clean is hyper's own readiness rather than
 //! anything decided here.
 
-use super::{Names, Preview, TunnelStream};
+use super::{Addressed, Names, Preview, TunnelStream};
 use crate::AppState;
 use axum::{
     body::Body,
@@ -175,7 +175,7 @@ pub async fn serve(state: AppState, preview: Preview, mut request: Request) -> R
         super::annotations::instrument(
             response,
             preview.session.as_str(),
-            preview.port,
+            super::annotations::Target::Port(preview.port),
             &state.public_url,
         )
     } else {
@@ -356,8 +356,8 @@ pub fn scheme_of(request: &Request) -> &'static str {
     }
 }
 
-/// Whether a request is addressed to a preview rather than to Firetower.
-pub fn addressed_to(names: &Names, request: &Request) -> Option<Preview> {
+/// Whether a request is addressed to a signed name rather than to Firetower.
+pub fn addressed_to(names: &Names, request: &Request) -> Option<Addressed> {
     let host = request
         .headers()
         .get(header::HOST)
@@ -397,7 +397,7 @@ mod tests {
         };
 
         let found = addressed_to(&names, &with_host(&names.host(&preview)));
-        assert_eq!(found, Some(preview));
+        assert_eq!(found, Some(Addressed::Preview(preview)));
     }
 
     /// `Connection: keep-alive, Upgrade` is legal and common, so the header is

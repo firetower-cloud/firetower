@@ -23,6 +23,12 @@ import { FileTab } from "~/ui/FileTab";
 import { ImageTab } from "~/ui/ImageTab";
 import { isImage } from "~/api/text";
 import { PreviewTab } from "~/ui/PreviewTab";
+import { ArtifactTab } from "~/ui/ArtifactTab";
+import {
+  useListArtifacts,
+  useSessionArtifactFolders,
+  publishArtifact,
+} from "~/api/generated/artifacts/artifacts";
 import { PortPicker } from "~/ui/PortPicker";
 import { AddAgent } from "~/ui/AddAgent";
 import { Repositories } from "~/ui/Repositories";
@@ -170,6 +176,19 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
   /* What is checked out here, and checking another one in. */
   const [repos, setRepos] = useState(false);
 
+  /* Artifacts this person has published. Asked for by owner rather than by
+     session, because one outlives the workspace that produced it — the list
+     is filtered to this session's for the rail, not fetched per session. */
+  const artifacts = useListArtifacts({ query: { refetchInterval: 4000 } });
+
+
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const openArtifact = (id: string, title: string) => {
+    const tabId = `a:${id}`;
+    setTabs((held) => (held.some((t) => t.id === tabId) ? held : [...held, { id: tabId, artifactId: id, title }]));
+    setActive(tabId);
+  };
+
   /* A preview is a kept tab from the start: nobody skims ports. */
   const [picking, setPicking] = useState(false);
   const openPreview = (port: number) => {
@@ -301,6 +320,30 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
     place.runs.find((r) => r.id === reading) ??
     place.runs.find((r) => r.id === workspace) ??
     primary;
+  /* Publishing, without the agent having to know how.
+   *
+   * The worker-side tool is the real answer and is not built yet. Until then
+   * the client watches `.firetower/artifacts/` for folders the agent has
+   * written and publishes each one it has not seen. A guess that misses costs
+   * a card appearing a few seconds late; it never costs the artifact, because
+   * the folder is still sitting there to be picked up on the next pass.
+   *
+   * It republishes when the folder is new to *this list*, so an agent that
+   * rewrites the page produces a new version rather than a second artifact —
+   * that is `publish_artifact`'s doing, keyed on the slug. */
+  const folders = useSessionArtifactFolders(run.id, { query: { refetchInterval: 3000 } });
+  const publishing = useRef(new Set<string>());
+  useEffect(() => {
+    const seen = new Set((artifacts.data ?? []).map((a) => a.slug));
+    for (const slug of folders.data ?? []) {
+      if (seen.has(slug) || publishing.current.has(slug)) continue;
+      publishing.current.add(slug);
+      publishArtifact(run.id, { slug, title: slug.replace(/-/g, " ") })
+        .then(() => artifacts.refetch())
+        .catch(() => {})
+        .finally(() => publishing.current.delete(slug));
+    }
+  }, [folders.data, artifacts.data, run.id]); // eslint-disable-line react-hooks/exhaustive-deps
   /* Checkouts belong to the workspace rather than to whichever agent is being
      read, so take them from the one the list is freshest on. */
   const checkouts = run.checkouts ?? [];
@@ -481,12 +524,15 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
                 session={run}
                 branch={place.branch}
                 onOpenFile={openFile}
+                artifacts={artifacts.data ?? []}
+                onOpenArtifact={openArtifact}
                 onOpenDiff={() => {
                   setSide("diff");
                   setOpen(true);
                 }}
               />
-            ) : "port" in (tabs.find((t) => t.id === active) ?? {}) ? null : isImage((tabs.find((t) => t.id === active) as { path: string }).path) ? (
+            ) : "port" in (tabs.find((t) => t.id === active) ?? {}) ||
+              "artifactId" in (tabs.find((t) => t.id === active) ?? {}) ? null : isImage((tabs.find((t) => t.id === active) as { path: string }).path) ? (
               <ImageTab session={run} path={(tabs.find((t) => t.id === active) as { path: string }).path} />
             ) : (
               <FileTab session={run} path={(tabs.find((t) => t.id === active) as { path: string }).path} line={(tabs.find((t) => t.id === active) as { line?: number }).line} />
@@ -495,7 +541,28 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
                 unmounted is a page reloaded, and the scroll and state you left
                 it with are gone. Hidden, it keeps everything. */}
             {tabs.map((t) =>
-              "port" in t ? (
+              "artifactId" in t ? (
+                <div key={t.id} hidden={active !== t.id} className="h-full">
+                  <ArtifactTab
+                    artifact={
+                      (artifacts.data ?? []).find((a) => a.id === t.artifactId) ?? {
+                        id: t.artifactId,
+                        title: t.title,
+                        slug: "",
+                        version: 0,
+                        bytes: 0,
+                        url: "",
+                        fromSessionId: null,
+                        fromWorkspaceName: null,
+                        updatedAt: new Date().toISOString(),
+                      }
+                    }
+                    sessionId={run.id}
+                    expanded={expanded === t.id}
+                    onExpanded={(v) => setExpanded(v ? t.id : null)}
+                  />
+                </div>
+              ) : "port" in t ? (
                 <div key={t.id} hidden={active !== t.id} className="h-full">
                   <PreviewTab
                     session={run}

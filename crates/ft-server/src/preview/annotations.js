@@ -10,7 +10,10 @@
   if (window.parent === window) return;
   const script = document.currentScript;
   const session = script.dataset.session;
-  const port = Number(script.dataset.port);
+  // A preview carries a port; an artifact carries a version id. Exactly one
+  // of the two is present, and whichever it is travels with every message.
+  const port = script.dataset.port ? Number(script.dataset.port) : null;
+  const artifact = script.dataset.artifact || null;
   const nonce = script.nonce;
   const connectionKey = "firetower.annotation-ui";
   let uiOrigin = null;
@@ -146,11 +149,11 @@
   }
   function panelURL() {
     const url = new URL("/preview-annotations", uiOrigin);
-    url.search = new URLSearchParams({
-      session,
-      port: String(port),
-      origin: location.origin,
-    }).toString();
+    url.search = new URLSearchParams(
+      artifact
+        ? { session, artifact, origin: location.origin }
+        : { session, port: String(port), origin: location.origin },
+    ).toString();
     return url.href;
   }
   function openPanel() {
@@ -550,7 +553,7 @@
       channel = data.channel;
       clearTimeout(handshakeTimer);
       status.hidden = true;
-      tell("ready", { session, port, enabled: annotating, path: here() });
+      tell("ready", { session, port, artifact, enabled: annotating, path: here() });
       if (newConnection && selected?.isConnected)
         tell("selection", {
           snapshot: snapshot(selected),

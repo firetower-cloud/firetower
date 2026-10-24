@@ -11,6 +11,7 @@ use std::sync::Arc;
 pub mod access;
 pub mod accounts;
 pub mod api;
+pub mod artifact;
 pub mod auth;
 pub mod db;
 pub mod diagnose;
@@ -687,14 +688,25 @@ pub const CLIENT_ORIGINS: &[&str] = &[
     "https://tauri.localhost",
 ];
 
-/// Anything addressed to a preview hostname belongs to that preview.
+/// Anything addressed to a signed hostname belongs to what that name says.
+///
+/// Two kinds come through here and they are served by different code: a
+/// preview is proxied over a tunnel to a port somebody is running, an artifact
+/// is read out of storage. Sharing the door is deliberate — one wildcard
+/// certificate, one parser, one place that decides what a `Host` means — and
+/// sharing anything below it is not.
 async fn preview_first(
     axum::extract::State(state): axum::extract::State<AppState>,
     request: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> axum::response::Response {
     match preview::proxy::addressed_to(&state.names, &request) {
-        Some(preview) => preview::proxy::serve(state, preview, request).await,
+        Some(preview::Addressed::Preview(preview)) => {
+            preview::proxy::serve(state, preview, request).await
+        }
+        Some(preview::Addressed::Artifact(artifact)) => {
+            artifact::serve(state, artifact, request).await
+        }
         None => next.run(request).await,
     }
 }

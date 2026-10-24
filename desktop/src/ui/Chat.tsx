@@ -48,7 +48,7 @@ import { editFrom } from "~/components/EditCard";
 import { stepLines } from "~/components/Steps";
 import { delegating, useConversation, type Asked, type Item, type Questionnaire, type Task } from "~/api/conversation";
 import { delegated, fold, mainline, summarise } from "~/api/steps";
-import type { Decision, Event, ItemKind, PlanStep, RequestKind, Session } from "~/api/generated/model";
+import type { Artifact as ArtifactModel, Decision, Event, ItemKind, PlanStep, RequestKind, Session } from "~/api/generated/model";
 import { useAnswerRequest, useRelaunchSession, getGetSessionQueryKey, sendTurn } from "~/api/generated/sessions/sessions";
 import { asMessage, useNotes, type Note } from "~/api/notes";
 import { forgetCheckout, landed, refused, settled, useCheckouts, type Run } from "~/api/checkouts";
@@ -115,9 +115,13 @@ export function Chat({
   branch,
   onOpenDiff,
   onOpenFile,
+  artifacts = [],
+  onOpenArtifact,
 }: {
   session: Session;
   branch?: string;
+  artifacts?: ArtifactModel[];
+  onOpenArtifact?: (id: string, title: string) => void;
 } & Open) {
   const { conversation, echo, settle, remember, stopping, older } = useConversation(session.id);
   const scroller = useRef<HTMLDivElement>(null);
@@ -384,6 +388,14 @@ export function Chat({
             )}
           </ol>
 
+          {/* What this session published. The card is the thing that says an
+              artifact exists at all — without it the only evidence is a file
+              write in a folded step, which is no evidence at all. */}
+          {onOpenArtifact &&
+            artifacts
+              .filter((a) => a.fromSessionId === session.id)
+              .map((a) => <ArtifactCard key={a.id} artifact={a} onOpen={onOpenArtifact} />)}
+
           {/* After the transcript, because it is the newest thing that
               happened here — and the agent's own acknowledgement of it arrives
               in the turn below. */}
@@ -646,6 +658,43 @@ function Group({ items, all, tasks, onOpenDiff, onOpenFile }: { items: Item[]; a
         </ol>
       )}
     </li>
+  );
+}
+
+/**
+ * An artifact, where the turn that made it ended.
+ *
+ * Not a rounded card around prose — the same treatment a picture the agent
+ * pointed at already gets, which is a border around *the bytes* and nothing
+ * around the sentence. The thumbnail is the artifact itself in a frame,
+ * scaled: no screenshot service, no headless browser on the control plane.
+ */
+function ArtifactCard({ artifact, onOpen }: { artifact: ArtifactModel; onOpen: (id: string, title: string) => void }) {
+  return (
+    <div className="mt-6 max-w-[26rem]">
+      <button
+        onClick={() => onOpen(artifact.id, artifact.title)}
+        title="Open it beside the conversation"
+        className="group/art block w-full overflow-hidden rounded-md border border-line transition-colors hover:border-mute"
+      >
+        <div className="relative h-[148px] overflow-hidden bg-white">
+          <iframe
+            src={artifact.url}
+            title={artifact.title}
+            tabIndex={-1}
+            aria-hidden
+            style={{ width: 1180, height: 740, transform: "scale(0.355)", transformOrigin: "0 0" }}
+            className="pointer-events-none absolute inset-0 border-0"
+          />
+          <span className="absolute inset-0 bg-gradient-to-b from-transparent to-ground/40 opacity-0 transition-opacity group-hover/art:opacity-100" />
+        </div>
+      </button>
+      <div className="mt-1.5 flex items-baseline gap-2">
+        <span className="text-ui font-medium text-bone">{artifact.title}</span>
+        <span className="font-mono text-micro text-mute">v{artifact.version}</span>
+        <span className="ml-auto text-micro text-mute">{elapsed(minutesSince(artifact.updatedAt))} ago</span>
+      </div>
+    </div>
   );
 }
 

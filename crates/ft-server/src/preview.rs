@@ -31,7 +31,7 @@
 pub mod pool;
 pub mod proxy;
 
-use ft_core::SessionId;
+use ft_core::{ArtifactId, SessionId};
 
 /// What the signing key is scoped to. Changing this invalidates every hostname
 /// in flight, which is the only revocation this design has.
@@ -55,6 +55,24 @@ pub const DOMAIN_ENV: &str = "FIRETOWER_PREVIEW_DOMAIN";
 pub struct Preview {
     pub session: SessionId,
     pub port: u16,
+}
+
+/// What a signed hostname turned out to name.
+///
+/// Two shapes share this door, and the difference between them is one hyphen.
+/// A session label is a lowercased ULID, which has none — so a preview's
+/// `<session>-<port>-<signature>` has exactly two and an artifact's
+/// `<artifact>-<signature>` has exactly one. They cannot be read as each
+/// other, and the parser that predates artifacts already returned `None` for
+/// the one-hyphen form rather than guessing.
+///
+/// What they are *not* is one kind with a flag. A preview is a live port that
+/// stops existing when its session does; an artifact is stored bytes that
+/// outlive the workspace. Only the address is shared.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Addressed {
+    Preview(Preview),
+    Artifact(ArtifactId),
 }
 
 /// Signs and checks preview hostnames.
@@ -112,9 +130,32 @@ impl Names {
             "{}-{}-{}.{}",
             label_of(&preview.session),
             preview.port,
-            self.sign(preview),
+            self.sign_preview(preview),
             self.domain,
         )
+    }
+
+    /// The hostname an artifact is served at.
+    ///
+    /// No port and no session in it. The session that produced it is
+    /// provenance, not part of the address — the artifact outlives it, and a
+    /// name that carried a dead session id would read as though it had not.
+    pub fn artifact_host(&self, artifact: &ArtifactId) -> String {
+        format!(
+            "{}-{}.{}",
+            artifact_label_of(artifact),
+            self.sign_artifact(artifact),
+            self.domain,
+        )
+    }
+
+    /// The whole address of an artifact, ready for an `iframe` or a tab.
+    pub fn artifact_url(&self, scheme: &str, port: Option<u16>, artifact: &ArtifactId) -> String {
+        let host = self.artifact_host(artifact);
+        match port {
+            Some(port) if !default_port(scheme, port) => format!("{scheme}://{host}:{port}/"),
+            _ => format!("{scheme}://{host}/"),
+        }
     }
 
     /// What a `Host` header names, if it names a preview of ours.
@@ -122,42 +163,67 @@ impl Names {
     /// `None` for the interface's own address and for anything that does not
     /// verify — a name that is not signed is not a preview, and saying which of
     /// those it was would tell somebody guessing whether they were close.
-    pub fn resolve(&self, host_header: &str) -> Option<Preview> {
+    pub fn resolve(&self, host_header: &str) -> Option<Addressed> {
         let host = host_header.split(':').next()?;
         let label = host.strip_suffix(&format!(".{}", self.domain))?;
 
-        // From the right: the signature, then the port, then whatever is left
-        // is the session. Splitting from the left would break the day an id
-        // contains a hyphen.
+        // From the right: the signature first, then whatever is left decides
+        // which shape this is. Splitting from the left would break the day an
+        // id contains a hyphen.
         let (rest, signature) = label.rsplit_once('-')?;
-        let (session, port) = rest.rsplit_once('-')?;
 
-        let preview = Preview {
-            session: session_of(session),
-            port: port.parse().ok()?,
-        };
-
-        // Constant time: this is a credential on a public deployment, and a
-        // comparison that returns early is a comparison that can be measured.
-        let expected = self.sign(&preview);
-        if constant_time_eq(expected.as_bytes(), signature.as_bytes()) {
-            Some(preview)
-        } else {
-            None
+        // Constant time throughout: these are credentials on a public
+        // deployment, and a comparison that returns early can be measured.
+        match rest.rsplit_once('-') {
+            // `<session>-<port>-<signature>` — a live port.
+            Some((session, port)) => {
+                let preview = Preview {
+                    session: session_of(session),
+                    port: port.parse().ok()?,
+                };
+                constant_time_eq(
+                    self.sign_preview(&preview).as_bytes(),
+                    signature.as_bytes(),
+                )
+                .then_some(Addressed::Preview(preview))
+            }
+            // `<artifact>-<signature>` — stored bytes.
+            None => {
+                let artifact = artifact_of(rest);
+                constant_time_eq(
+                    self.sign_artifact(&artifact).as_bytes(),
+                    signature.as_bytes(),
+                )
+                .then_some(Addressed::Artifact(artifact))
+            }
         }
     }
 
-    fn sign(&self, preview: &Preview) -> String {
+    fn sign_preview(&self, preview: &Preview) -> String {
+        self.sign(&[
+            PREVIEW_TAG,
+            preview.session.as_str().as_bytes(),
+            &preview.port.to_be_bytes(),
+        ])
+    }
+
+    fn sign_artifact(&self, artifact: &ArtifactId) -> String {
+        self.sign(&[ARTIFACT_TAG, artifact.as_str().as_bytes()])
+    }
+
+    /// One keyed digest over length-prefixed parts.
+    ///
+    /// Length-prefixed, so ("s_ab", 1) and ("s_a", 91) cannot collide into one
+    /// digest. Tagged, so that even if a future shape made two inputs
+    /// identical, a signature minted for one could not be replayed as the
+    /// other — the kind is part of what was signed rather than something the
+    /// parser decides afterwards.
+    fn sign(&self, parts: &[&[u8]]) -> String {
         use hmac::Mac;
 
         let mut mac = <hmac::Hmac<sha2::Sha256>>::new_from_slice(&self.key)
             .expect("HMAC accepts any key length");
-        // Length-prefixed, so ("s_ab", 1) and ("s_a", 91) cannot collide into
-        // one digest.
-        for part in [
-            preview.session.as_str().as_bytes(),
-            &preview.port.to_be_bytes(),
-        ] {
+        for part in parts {
             mac.update(&(part.len() as u64).to_be_bytes());
             mac.update(part);
         }
@@ -165,6 +231,10 @@ impl Names {
         base32(&mac.finalize().into_bytes()[..SIGNATURE_BYTES])
     }
 }
+
+/// What each shape is signed as. Changing either invalidates its names.
+const PREVIEW_TAG: &[u8] = b"preview";
+const ARTIFACT_TAG: &[u8] = b"artifact";
 
 /// Whether a browser would have assumed this port from the scheme alone.
 ///
@@ -198,6 +268,19 @@ fn label_of(session: &SessionId) -> String {
 
 fn session_of(label: &str) -> SessionId {
     SessionId::from_stored(format!("s_{label}"))
+}
+
+/// The same trick for an artifact id, whose prefix is two characters.
+fn artifact_label_of(artifact: &ArtifactId) -> String {
+    artifact
+        .as_str()
+        .strip_prefix("ar_")
+        .unwrap_or(artifact.as_str())
+        .to_string()
+}
+
+fn artifact_of(label: &str) -> ArtifactId {
+    ArtifactId::from_stored(format!("ar_{label}"))
 }
 
 /// Crockford-ish base32, lowercase: a hostname is case-insensitive and cannot
@@ -394,11 +477,63 @@ mod tests {
         }
     }
 
+    fn artifact() -> ArtifactId {
+        ArtifactId::from_stored("ar_01m1c0f9a3hgm99t4vfam429m3")
+    }
+
     #[test]
     fn a_name_survives_the_round_trip() {
         let names = names();
         let host = names.host(&preview());
-        assert_eq!(names.resolve(&host), Some(preview()));
+        assert_eq!(names.resolve(&host), Some(Addressed::Preview(preview())));
+    }
+
+    #[test]
+    fn an_artifact_name_survives_the_round_trip() {
+        let names = names();
+        let host = names.artifact_host(&artifact());
+        assert_eq!(names.resolve(&host), Some(Addressed::Artifact(artifact())));
+    }
+
+    /// The whole reason the two can share a door: one hyphen against two.
+    #[test]
+    fn the_two_shapes_cannot_be_read_as_each_other() {
+        let names = names();
+
+        let preview_host = names.host(&preview());
+        let artifact_host = names.artifact_host(&artifact());
+        assert_eq!(preview_host.split('.').next().unwrap().matches('-').count(), 2);
+        assert_eq!(artifact_host.split('.').next().unwrap().matches('-').count(), 1);
+
+        // And neither resolves to the other's kind.
+        assert!(matches!(
+            names.resolve(&preview_host),
+            Some(Addressed::Preview(_))
+        ));
+        assert!(matches!(
+            names.resolve(&artifact_host),
+            Some(Addressed::Artifact(_))
+        ));
+    }
+
+    /// A preview signature lifted onto an artifact name, and the reverse.
+    /// Neither verifies, because the kind is inside what was signed.
+    #[test]
+    fn a_signature_cannot_be_replayed_across_shapes() {
+        let names = names();
+
+        // The same id, signed as a preview, pasted into an artifact name.
+        let stolen = names
+            .host(&preview())
+            .split('.')
+            .next()
+            .unwrap()
+            .rsplit_once('-')
+            .unwrap()
+            .1
+            .to_string();
+        let forged = format!("{}-{}.localhost", "01m1c0f9a3hgm99t4vfam429m3", stolen);
+        assert_eq!(names.resolve(&forged), None);
     }
 
     /// The browser sends the port it connected to along with the name.
@@ -406,14 +541,14 @@ mod tests {
     fn a_name_resolves_with_a_port_on_it() {
         let names = names();
         let host = format!("{}:8080", names.host(&preview()));
-        assert_eq!(names.resolve(&host), Some(preview()));
+        assert_eq!(names.resolve(&host), Some(Addressed::Preview(preview())));
     }
 
     /// A hostname is a hostname: no underscores, nothing over 63 characters,
     /// and nothing a resolver would refuse.
     #[test]
     fn a_name_is_a_legal_hostname() {
-        let host = names().host(&preview());
+        for host in [names().host(&preview()), names().artifact_host(&artifact())] {
         let label = host.split('.').next().unwrap();
 
         assert!(label.len() <= 63, "{} characters: {label}", label.len());
@@ -424,6 +559,7 @@ mod tests {
             "{label}"
         );
         assert!(!label.starts_with('-') && !label.ends_with('-'), "{label}");
+        }
     }
 
     #[test]
@@ -449,6 +585,12 @@ mod tests {
         let host = names.host(&preview());
         let moved = host.replacen("-3000-", "-8000-", 1);
         assert_eq!(names.resolve(&moved), None);
+
+        // And an artifact id nobody signed.
+        assert_eq!(
+            names.resolve("01m1c0f9a3hgm99t4vfam429m3-aaaaaaaaaaaaaaaa.localhost"),
+            None
+        );
     }
 
     /// A name signed by one installation means nothing to another.
@@ -464,7 +606,7 @@ mod tests {
         let host = names.host(&preview());
 
         assert!(host.ends_with(".firetower.team"), "{host}");
-        assert_eq!(names.resolve(&host), Some(preview()));
+        assert_eq!(names.resolve(&host), Some(Addressed::Preview(preview())));
         // And a name for the wrong domain is not ours, however well signed.
         assert_eq!(Names::new([7u8; 32], "localhost").resolve(&host), None);
     }
@@ -522,7 +664,12 @@ mod tests {
         // What the browser will put in `Host` for that link, which is what
         // `preview_first` has to recognise on the way back in.
         let authority = url.trim_start_matches("http://").trim_end_matches('/');
-        assert_eq!(names.resolve(authority), Some(preview()));
+        assert_eq!(names.resolve(authority), Some(Addressed::Preview(preview())));
+
+        // The artifact URL does the same.
+        let url = names.artifact_url("http", Some(8080), &artifact());
+        let authority = url.trim_start_matches("http://").trim_end_matches('/');
+        assert_eq!(names.resolve(authority), Some(Addressed::Artifact(artifact())));
     }
 }
 

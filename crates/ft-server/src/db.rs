@@ -6959,3 +6959,224 @@ impl Db {
         }
     }
 }
+
+/* ── Artifacts ─────────────────────────────────────────────────────────
+ *
+ * Owned by a person, not by a workspace. Everything here deliberately avoids
+ * a foreign key to `sessions`: `reclaim.rs` would follow it within the minute.
+ * See `migrations/server/20261023120000_artifacts.sql`.
+ */
+
+/// The version being served, and what it needs to serve it.
+#[derive(Debug, Clone)]
+pub struct CurrentVersion {
+    pub id: String,
+    pub n: i32,
+    pub entry: String,
+    /// Provenance, copied at publish. `None` once there never was one.
+    pub from_session: Option<String>,
+}
+
+/// One artifact, as a list shows it.
+#[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ArtifactRow {
+    pub id: String,
+    pub title: String,
+    pub slug: String,
+    pub version: i32,
+    pub bytes: i64,
+    pub from_session_id: Option<String>,
+    pub from_workspace_name: Option<String>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+impl Db {
+    /// The version an address currently points at.
+    pub async fn artifact_current(&self, id: &ft_core::ArtifactId) -> Result<Option<CurrentVersion>> {
+        let row = sqlx::query(
+            "SELECT v.id, v.n, v.entry, a.from_session_id
+               FROM artifacts a
+               JOIN artifact_versions v ON v.id = a.current_version_id
+              WHERE a.id = $1",
+        )
+        .bind(id.as_str())
+        .fetch_optional(&self.pool)
+        .await
+        .context("looking up an artifact's current version")?;
+
+        Ok(row.map(|r| CurrentVersion {
+            id: r.get("id"),
+            n: r.get("n"),
+            entry: r.get("entry"),
+            from_session: r.get("from_session_id"),
+        }))
+    }
+
+    /// One file out of one version.
+    pub async fn artifact_file(
+        &self,
+        version_id: &str,
+        path: &str,
+    ) -> Result<Option<crate::artifact::Stored>> {
+        let row = sqlx::query(
+            "SELECT content_type, body FROM artifact_files WHERE version_id = $1 AND path = $2",
+        )
+        .bind(version_id)
+        .bind(path)
+        .fetch_optional(&self.pool)
+        .await
+        .context("reading an artifact file")?;
+
+        Ok(row.map(|r| crate::artifact::Stored {
+            content_type: r.get("content_type"),
+            body: r.get("body"),
+        }))
+    }
+
+    /// Store a new version, making the artifact if this is the first.
+    ///
+    /// The slug is the identity: publishing `pricing` twice is version 2 of
+    /// one artifact rather than two artifacts. One transaction, because a
+    /// version whose files are half-written is a page that renders broken and
+    /// would be indistinguishable from one the agent wrote badly.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn publish_artifact(
+        &self,
+        owner: &str,
+        org: &str,
+        slug: &str,
+        title: &str,
+        entry: &str,
+        files: &[(String, String, Vec<u8>)],
+        from_session: Option<&str>,
+        from_workspace: Option<&str>,
+    ) -> Result<(ft_core::ArtifactId, i32)> {
+        let mut tx = self.pool.begin().await?;
+
+        let existing: Option<String> =
+            sqlx::query_scalar("SELECT id FROM artifacts WHERE owner_id = $1 AND slug = $2")
+                .bind(owner)
+                .bind(slug)
+                .fetch_optional(&mut *tx)
+                .await?;
+
+        let artifact = match existing {
+            Some(id) => {
+                sqlx::query(
+                    "UPDATE artifacts SET title = $2, updated_at = now(),
+                            from_session_id = coalesce($3, from_session_id),
+                            from_workspace_name = coalesce($4, from_workspace_name)
+                      WHERE id = $1",
+                )
+                .bind(&id)
+                .bind(title)
+                .bind(from_session)
+                .bind(from_workspace)
+                .execute(&mut *tx)
+                .await?;
+                ft_core::ArtifactId::from_stored(id)
+            }
+            None => {
+                let id = ft_core::ArtifactId::new();
+                sqlx::query(
+                    "INSERT INTO artifacts (id, org_id, owner_id, title, slug,
+                                            from_session_id, from_workspace_name)
+                     VALUES ($1,$2,$3,$4,$5,$6,$7)",
+                )
+                .bind(id.as_str())
+                .bind(org)
+                .bind(owner)
+                .bind(title)
+                .bind(slug)
+                .bind(from_session)
+                .bind(from_workspace)
+                .execute(&mut *tx)
+                .await?;
+                id
+            }
+        };
+
+        let n: i32 = sqlx::query_scalar(
+            "SELECT coalesce(max(n), 0) + 1 FROM artifact_versions WHERE artifact_id = $1",
+        )
+        .bind(artifact.as_str())
+        .fetch_one(&mut *tx)
+        .await?;
+
+        let bytes: i64 = files.iter().map(|(_, _, b)| b.len() as i64).sum();
+        let version = ft_core::ArtifactVersionId::new();
+        sqlx::query(
+            "INSERT INTO artifact_versions (id, artifact_id, n, entry, bytes)
+             VALUES ($1,$2,$3,$4,$5)",
+        )
+        .bind(version.as_str())
+        .bind(artifact.as_str())
+        .bind(n)
+        .bind(entry)
+        .bind(bytes)
+        .execute(&mut *tx)
+        .await?;
+
+        for (path, content_type, body) in files {
+            sqlx::query(
+                "INSERT INTO artifact_files (version_id, path, content_type, body)
+                 VALUES ($1,$2,$3,$4)",
+            )
+            .bind(version.as_str())
+            .bind(path)
+            .bind(content_type)
+            .bind(body)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        sqlx::query("UPDATE artifacts SET current_version_id = $2, updated_at = now() WHERE id = $1")
+            .bind(artifact.as_str())
+            .bind(version.as_str())
+            .execute(&mut *tx)
+            .await?;
+
+        tx.commit().await?;
+        Ok((artifact, n))
+    }
+
+    /// Everything this person has made, newest first.
+    pub async fn artifacts_of(&self, owner: &str) -> Result<Vec<ArtifactRow>> {
+        let rows = sqlx::query(
+            "SELECT a.id, a.title, a.slug, a.from_session_id, a.from_workspace_name,
+                    a.updated_at, v.n, v.bytes
+               FROM artifacts a
+               LEFT JOIN artifact_versions v ON v.id = a.current_version_id
+              WHERE a.owner_id = $1
+              ORDER BY a.updated_at DESC",
+        )
+        .bind(owner)
+        .fetch_all(&self.pool)
+        .await
+        .context("listing artifacts")?;
+
+        Ok(rows
+            .into_iter()
+            .map(|r| ArtifactRow {
+                id: r.get("id"),
+                title: r.get("title"),
+                slug: r.get("slug"),
+                version: r.try_get("n").unwrap_or(0),
+                bytes: r.try_get("bytes").unwrap_or(0),
+                from_session_id: r.get("from_session_id"),
+                from_workspace_name: r.get("from_workspace_name"),
+                updated_at: r.get("updated_at"),
+            })
+            .collect())
+    }
+
+    /// The org a person belongs to, for stamping a new artifact.
+    pub async fn org_of_user(&self, owner: &str) -> Result<Option<String>> {
+        sqlx::query_scalar("SELECT org_id FROM users WHERE id = $1")
+            .bind(owner)
+            .fetch_optional(&self.pool)
+            .await
+            .context("finding somebody's organisation")
+    }
+}

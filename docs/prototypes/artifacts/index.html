@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>Firetower — artifact prototypes</title>
+<link rel="stylesheet" href="../skills/desk.css">
+<style>
+body{overflow:auto}
+.page{max-width:680px;margin:0 auto;padding:68px 28px 70px;display:flex;flex-direction:column;gap:30px}
+h1{font-size:var(--display);line-height:1.25;letter-spacing:-.02em;color:var(--bone);font-weight:600}
+.sub{font-size:var(--read);line-height:1.65;color:var(--dim);max-width:58ch}
+.links{display:flex;flex-direction:column}
+a.item{display:grid;grid-template-columns:26px 1fr auto;gap:13px;align-items:baseline;
+  padding:15px 10px;border-top:1px solid var(--line-soft);text-decoration:none;color:inherit;border-radius:var(--r-md)}
+a.item:last-child{border-bottom:1px solid var(--line-soft)}
+a.item:hover{background:color-mix(in srgb,var(--raise) 70%,transparent)}
+a.item .t{font-size:var(--ui);color:var(--bone);font-weight:600}
+a.item .d{font-size:var(--meta);color:var(--mute);line-height:1.55;margin-top:3px;max-width:54ch}
+a.item .go{color:#3a3a42;font-size:var(--ui)}
+.facts{margin-top:4px}
+</style></head><body>
+<div class="page">
+  <div>
+    <h1>An artifact, as screens</h1>
+    <p class="sub">The four states from &sect;7 of <span class="mono" style="color:var(--syn-string)">docs/artifacts.md</span>,
+    at desk density with the real tokens and faces. The claim being tested is that reading one
+    comfortably and annotating it are the same mode &mdash; which today they are not.</p>
+  </div>
+
+  <div class="links">
+    <a class="item" href="flow.html"><span class="mark">01</span>
+      <span><span class="t">In a workspace</span><span class="d">The card where the turn ended, opening
+      beside the conversation, expanding to the window, and annotating &mdash; which keeps working in all
+      three, because it never stops being a frame inside the app. One page; the switcher at the bottom
+      is scaffolding, not design.</span></span><span class="go">&rsaquo;</span></a>
+    <a class="item" href="library.html"><span class="mark">02</span>
+      <span><span class="t">Every artifact you have made</span><span class="d">The screen that can only
+      exist if an artifact belongs to you rather than to the workspace. Dense list by default, with the
+      grid beside it to be argued against.</span></span><span class="go">&rsaquo;</span></a>
+  </div>
+
+  <p class="aside">The pricing page in these is invented and so are the eleven artifacts in the
+  library. What is not invented: the tokens, the control heights, and the reason the thumbnails
+  work &mdash; they are the artifact itself under a CSS transform, in the client, which is why
+  &sect;13&rsquo;s worry about needing a headless browser on the control plane goes away.</p>
+</div></body></html>
