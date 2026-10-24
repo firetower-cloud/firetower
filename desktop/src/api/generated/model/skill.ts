@@ -23,6 +23,11 @@ export interface Skill {
      * @nullable
      */
   author?: string | null;
+  /**
+     * Firetower ships this one. Filed in `d/firetower`, which nobody holds
+     * writer on — so it is readable by everybody and deletable by nobody.
+     */
+  builtin: boolean;
   bytes: number;
   /** The repositories this person has it on by default. Empty for most. */
   defaultIn: string[];

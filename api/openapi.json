@@ -13802,6 +13802,7 @@
           "files",
           "bytes",
           "risk",
+          "builtin",
           "updatedAt",
           "mayWrite",
           "mayShare",
@@ -13819,6 +13820,10 @@
               "null"
             ],
             "description": "Who wrote it. A fact that outlives them leaving."
+          },
+          "builtin": {
+            "type": "boolean",
+            "description": "Firetower ships this one. Filed in `d/firetower`, which nobody holds\nwriter on — so it is readable by everybody and deletable by nobody."
           },
           "bytes": {
             "type": "integer",

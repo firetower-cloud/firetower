@@ -251,6 +251,11 @@ pub async fn run(config: Config) -> Result<()> {
         .execute(state.db.pool()).await?;
     tokio::spawn(crate::api::accounts::watch_fallbacks(state.clone()));
     tokio::spawn(seed_agents(state.clone()));
+    // Firetower's own skills, into every organisation. Idempotent and cheap:
+    // a bundle whose bytes are unchanged costs one digest comparison. Spawned
+    // rather than awaited because a control plane that will not start over a
+    // missing skill has traded a product for a paragraph.
+    tokio::spawn(seed_builtin_skills(state.clone()));
     // Whether a release is out, every few hours; and whatever upgrade was in
     // progress when this process was last replaced — which, for the run that
     // recreates the control plane, is the ordinary way it ends.
@@ -326,6 +331,19 @@ const SEEDED: &str = "seeded_local_agent";
 /// is having a bad day, a worker still connecting — none of them is a reason
 /// for the control plane not to serve. The Agents page can install one at any
 /// time, which is the same code path this uses.
+/// Put the skills this binary ships into every organisation.
+///
+/// On every boot, not once: the point is that upgrading Firetower upgrades
+/// what its agents know. A running session is unaffected because it pins the
+/// version it started with.
+async fn seed_builtin_skills(state: AppState) {
+    match state.skills.seed_builtins().await {
+        Ok(0) => {}
+        Ok(n) => tracing::info!("seeded or updated {n} built-in skill(s)"),
+        Err(e) => tracing::warn!("seeding built-in skills: {e:#}"),
+    }
+}
+
 async fn seed_agents(state: AppState) {
     const KIND: ft_core::Agent = ft_core::Agent::ClaudeCode;
 

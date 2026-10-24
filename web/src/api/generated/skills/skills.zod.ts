@@ -101,6 +101,7 @@ export const ChooseSkillsResponse = zod.object({
 export const ListSkillsResponseItem = zod.object({
   "alwaysOn": zod.boolean().describe('On in every workspace this person starts.'),
   "author": zod.string().nullish().describe('Who wrote it. A fact that outlives them leaving.'),
+  "builtin": zod.boolean().describe('Firetower ships this one. Filed in `d/firetower`, which nobody holds\nwriter on — so it is readable by everybody and deletable by nobody.'),
   "bytes": zod.int(),
   "defaultIn": zod.array(zod.string()).describe('The repositories this person has it on by default. Empty for most.'),
   "description": zod.string(),
@@ -135,6 +136,7 @@ export const CreateSkillBody = zod.object({
 export const CreateSkillResponse = zod.object({
   "alwaysOn": zod.boolean().describe('On in every workspace this person starts.'),
   "author": zod.string().nullish().describe('Who wrote it. A fact that outlives them leaving.'),
+  "builtin": zod.boolean().describe('Firetower ships this one. Filed in `d/firetower`, which nobody holds\nwriter on — so it is readable by everybody and deletable by nobody.'),
   "bytes": zod.int(),
   "defaultIn": zod.array(zod.string()).describe('The repositories this person has it on by default. Empty for most.'),
   "description": zod.string(),
@@ -204,6 +206,7 @@ export const RenameSkillBody = zod.object({
 export const RenameSkillResponse = zod.object({
   "alwaysOn": zod.boolean().describe('On in every workspace this person starts.'),
   "author": zod.string().nullish().describe('Who wrote it. A fact that outlives them leaving.'),
+  "builtin": zod.boolean().describe('Firetower ships this one. Filed in `d/firetower`, which nobody holds\nwriter on — so it is readable by everybody and deletable by nobody.'),
   "bytes": zod.int(),
   "defaultIn": zod.array(zod.string()).describe('The repositories this person has it on by default. Empty for most.'),
   "description": zod.string(),
@@ -284,6 +287,7 @@ export const AddVersionBody = zod.object({
 export const AddVersionResponse = zod.object({
   "alwaysOn": zod.boolean().describe('On in every workspace this person starts.'),
   "author": zod.string().nullish().describe('Who wrote it. A fact that outlives them leaving.'),
+  "builtin": zod.boolean().describe('Firetower ships this one. Filed in `d/firetower`, which nobody holds\nwriter on — so it is readable by everybody and deletable by nobody.'),
   "bytes": zod.int(),
   "defaultIn": zod.array(zod.string()).describe('The repositories this person has it on by default. Empty for most.'),
   "description": zod.string(),

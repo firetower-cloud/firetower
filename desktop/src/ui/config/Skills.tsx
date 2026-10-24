@@ -134,7 +134,13 @@ export function Skills() {
     : feed.data;
   const tickable = shown.filter((s) => s.mayShare);
   const allOn = tickable.length > 0 && tickable.every((s) => picked.has(s.id));
-  const sharedWithMe = shown.filter((s) => !s.mayShare);
+  /* Three groups, and they are the three the path already encodes: what
+     Firetower ships, what is yours, and what somebody filed into a directory
+     you can reach. The built-ins are split out of "shared with you" because
+     they are not shared *with* you by anybody — they arrive with the product,
+     and lumping them in made it look as though a colleague had sent them. */
+  const builtIn = shown.filter((s) => s.builtin);
+  const sharedWithMe = shown.filter((s) => !s.mayShare && !s.builtin);
 
   const row = (s: Skill, manage: boolean) => (
     <div
@@ -249,6 +255,15 @@ export function Skills() {
         {tickable.map((s) => row(s, true))}
       </Rows>
     </Section>
+
+    {builtIn.length > 0 && (
+      <Section
+        title="From Firetower"
+        note="Shipped with the product and on by default. They cannot be deleted — turn one off for a session in the composer's skill picker."
+      >
+        {builtIn.map((s) => row(s, false))}
+      </Section>
+    )}
 
     {sharedWithMe.length > 0 && (
       <Section

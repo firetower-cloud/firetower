@@ -1044,23 +1044,13 @@ pub const ARTIFACT_GUIDANCE: &str = "\
 ## Artifacts
 
 When somebody asks to *see* something — a mock-up, a page, a chart, a report —
-write it as one self-contained HTML file at
-`.firetower/artifacts/<name>/index.html`. Firetower publishes it from there and
-shows it in the conversation, where it opens full-screen and can be annotated.
+publish it as one self-contained HTML file at
+`.firetower/artifacts/<name>/index.html`. Firetower serves it from there and
+shows it in the conversation, where it opens full screen and can be annotated.
+Nothing written anywhere else is shown to anybody.
 
-- `<name>` is lowercase letters, digits and hyphens: `pricing`, `onboarding-v2`.
-- One file. Inline the CSS and the JS — it is served from an origin with no
-  network access, so a CDN link renders as nothing.
-- Writing the same `<name>` again publishes a new version of the same artifact
-  rather than a second one.
-- This path is outside git, so a mock-up never turns up in the pull request.
-  Something that belongs in the repository goes in the repository instead.
-
-If a skill for building web artifacts is available to you, use it — this says
-where the result goes, not how to make a good one. Those skills finish by
-producing a single self-contained HTML file; copy that file to the path above
-and it is published. Do not hand back a path inside a scratch project and call
-it done: nothing outside `.firetower/artifacts/` is ever shown to anybody.
+The `firetower-artifacts` skill has the rest: what the page is rendered inside,
+what makes one good, and how to use a richer artifact skill alongside it.
 ";
 
 /// Whether there is anybody to answer a permission prompt.

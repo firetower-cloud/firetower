@@ -1,14 +1,6 @@
 ---
 name: firetower-artifacts
-description: >-
-  Publish a page for somebody to look at — a mock-up, a page, a chart, a
-  report, a prototype, a diagram — so it appears in the Firetower
-  conversation, opens full screen, and can be annotated. Use this whenever
-  somebody asks to *see* something rather than change the repository: "show
-  me", "mock up", "make a page", "visualise this", "build a dashboard",
-  "draw the architecture", "create an artifact". Use it even when the word
-  artifact is never said, and use it before writing any standalone HTML file
-  — a page written anywhere else is not shown to anybody.
+description: Publish a page for somebody to look at — a mock-up, a page, a chart, a report, a prototype, a diagram — so it appears in the Firetower conversation, opens full screen, and can be annotated. Use this whenever somebody asks to *see* something rather than change the repository: "show me", "mock up", "make a page", "visualise this", "build a dashboard", "draw the architecture", "create an artifact". Use it even when the word artifact is never said, and use it before writing any standalone HTML file — a page written anywhere else is not shown to anybody.
 ---
 
 # Publishing an artifact
