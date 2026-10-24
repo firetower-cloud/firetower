@@ -25,6 +25,7 @@ import {
   Pencil,
   Search,
   Server,
+  Shapes,
   Sparkles,
   Trash2,
   UserPlus,
@@ -100,6 +101,7 @@ const KINDS: Record<FiledKind, { one: string; many: string; icon: typeof FolderO
   agentAccount: { one: "Agent account", many: "Agent accounts", icon: Sparkles },
   secret: { one: "Secret", many: "Secrets", icon: KeyRound },
   skill: { one: "Skill", many: "Skills", icon: Diamond },
+  artifact: { one: "Artifact", many: "Artifacts", icon: Shapes },
   // Never in a directory — a repository is opened by the token of whoever
   // connected it, so there is nowhere to file one. Named here because this map
   // covers every kind the server can name, and what somebody owns is drawn
