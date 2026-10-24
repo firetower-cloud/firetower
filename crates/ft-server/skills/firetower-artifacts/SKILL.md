@@ -67,29 +67,60 @@ Knowing this prevents the three failures that actually happen:
 
 ## Making it good
 
-A floor, so the default result is not embarrassing:
+A floor, not a house style — another skill may replace all of it. Where none is
+available, this is what keeps the default result from being embarrassing.
 
-- Lead with the thing somebody asked to see. If it is a chart, the chart is the
-  first thing on the page, not a title card and a legend.
-- Set real type. One family is fine; two if they are clearly distinct. Give
-  body text a line length under about 80 characters.
-- Avoid the look that reads as machine-made: everything in identical rounded
-  cards with one shadow, a tracked-out all-caps label above every heading, a
-  warm-cream background with a terracotta accent, a single bright accent on
-  near-black, meta strings joined with middle dots.
-- Spend boldness once. One element carries the page; everything else stays
-  quiet.
-- Motion answers an action — opening, expanding, confirming. Entrance
-  animations on every section are the generic default.
-- If it holds data, the data is the design: label axes, state units, and do not
-  invent numbers. If something is a placeholder, say so on the page.
+**Lead with the thing that was asked for**, in the form that suits it: the
+chart, the screen, the number, the comparison. A title card and a legend ahead
+of the content is a slide, not a page.
 
----
+**Type carries the personality.** One family, or two if they are clearly
+distinct. Set a real scale rather than three sizes of one weight. Body text
+under about 80 characters a line; serif wants more line-height than sans.
+
+**Structure is information.** A rule, a border, a number should encode
+something about the content rather than decorate it. Numbered markers belong on
+a sequence — a process, a timeline — and nowhere else.
+
+**Spend boldness once.** One element is the memorable thing and everything
+around it stays quiet. Then take one more thing out than feels comfortable.
+
+**Motion answers an action** — opening, expanding, confirming. Entrance
+animations on each section and a hover transition on every card are the
+generic default.
+
+**Say true things.** Label axes, state units, name the period. If a number is
+invented, say so on the page: a plausible fake is worse than a blank.
+
+### What reads as machine-made
+
+Defaults rather than choices, and they turn up whatever the subject:
+
+- a warm cream background with a high-contrast serif and a terracotta accent;
+- near-black with a single bright acid-green or vermilion accent;
+- purple gradients, uniform rounded corners everywhere, and Inter;
+- content chopped into identical cards — one radius on everything regardless of
+  hierarchy, the same soft grey shadow under each, gradient washes as filler;
+- a tracked-out ALL-CAPS label above every heading; meta strings joined with
+  middle dots; one word of a headline in italic or a different colour; an arrow
+  appended to every link and button.
+
+Any of these is right for a brief that calls for it. None of them is right
+because it was the first thing to hand.
+
+### A floor to hit without announcing it
+
+Readable down to a phone, visible keyboard focus, `prefers-reduced-motion`
+respected, text that passes contrast in whatever scheme the page paints. If the
+page carries data and a `dataviz` skill is available, use it rather than
+inventing a palette — the colours are the hard part and it has done it already.
 
 ## If you have a better artifact builder
 
-Many agents ship a richer skill for this — scaffolding a React project,
-component libraries, a bundler, a house style. **Use it.** It will produce a
+Many agents ship a richer skill for this — `web-artifacts-builder` scaffolds a
+React, Tailwind and shadcn project and bundles it to one file;
+`frontend-design` carries a fuller design method; `dataviz` knows charts.
+Whatever is available, **use it.** It will produce a
 better page than the floor above, and the style guidance here is explicitly
 yours to override: its typography, its components, its palette, its build
 tooling all win over this file.
