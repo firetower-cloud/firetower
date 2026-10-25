@@ -208,6 +208,12 @@ export function ArtifactTab({
         )}
 
         <div className="ml-auto flex shrink-0 items-center gap-1">
+          {/* On is heavier, never a hue. `STYLE.md`: colour is fully spent, and
+              anything new is identified by shape, weight or position. Ember in
+              particular answers one question — whether somebody is waiting on
+              you — so an annotating toggle wearing it was claiming that. This
+              is the same treatment every segmented control already uses when a
+              segment is on. */}
           <button
             disabled={!bridge.ready}
             onClick={() => {
@@ -215,7 +221,11 @@ export function ArtifactTab({
               if (!bridge.annotating) setShowNotes(true);
             }}
             title={bridge.ready ? "Pick an element and write a note on it" : "The page has not connected its picker yet"}
-            className={`control ${bridge.annotating ? "bg-ember text-ground" : "border border-line bg-raise text-bone hover:bg-overlay"} disabled:opacity-40`}
+            className={`control ${
+              bridge.annotating
+                ? "bg-overlay font-medium text-bone shadow-(--shadow-raise)"
+                : "border border-line bg-raise text-dim hover:bg-overlay hover:text-bone"
+            } disabled:opacity-40`}
           >
             {bridge.annotating ? "Annotating" : "Annotate"}
           </button>

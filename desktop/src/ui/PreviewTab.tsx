@@ -176,7 +176,12 @@ export function PreviewTab({ session, port, path: initialPath = "/", onPath }: {
           disabled={!bridge.ready}
           onClick={() => bridge.tell({ type: "mode", enabled: !bridge.annotating })}
           title={bridge.ready ? (bridge.annotating ? "Stop picking elements" : "Pick an element and write a note on it") : "The page has not connected its picker yet — reload, or the page may refuse scripts"}
-          className={`control ml-1 shrink-0 ${bridge.annotating ? "bg-ember text-ground" : "border border-line bg-raise text-bone hover:bg-overlay"} disabled:opacity-40`}
+          /* Heavier when on, never a hue — see the note in ArtifactTab. */
+          className={`control ml-1 shrink-0 ${
+            bridge.annotating
+              ? "bg-overlay font-medium text-bone shadow-(--shadow-raise)"
+              : "border border-line bg-raise text-dim hover:bg-overlay hover:text-bone"
+          } disabled:opacity-40`}
         >
           {bridge.annotating ? "Annotating" : "Annotate"}
         </button>
