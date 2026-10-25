@@ -307,7 +307,12 @@ mod tests {
             .header(header::ETAG, "old")
             .body(body)
             .unwrap();
-        let response = instrument(response, "s_test", Target::Port(3000), "http://localhost:3000");
+        let response = instrument(
+            response,
+            "s_test",
+            Target::Port(3000),
+            "http://localhost:3000",
+        );
         assert!(!response.headers().contains_key(header::CONTENT_LENGTH));
         assert!(!response.headers().contains_key(header::ETAG));
         let bytes = axum::body::to_bytes(response.into_body(), 10000)

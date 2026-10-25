@@ -13,7 +13,6 @@
 //! cascade from `sessions` next to a row that is deliberately exempt from one.
 
 use axum::{
-
     extract::Request,
     http::{header, StatusCode},
     response::{IntoResponse, Response},

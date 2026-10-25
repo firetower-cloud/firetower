@@ -181,11 +181,8 @@ impl Names {
                     session: session_of(session),
                     port: port.parse().ok()?,
                 };
-                constant_time_eq(
-                    self.sign_preview(&preview).as_bytes(),
-                    signature.as_bytes(),
-                )
-                .then_some(Addressed::Preview(preview))
+                constant_time_eq(self.sign_preview(&preview).as_bytes(), signature.as_bytes())
+                    .then_some(Addressed::Preview(preview))
             }
             // `<artifact>-<signature>` — stored bytes.
             None => {
@@ -502,8 +499,19 @@ mod tests {
 
         let preview_host = names.host(&preview());
         let artifact_host = names.artifact_host(&artifact());
-        assert_eq!(preview_host.split('.').next().unwrap().matches('-').count(), 2);
-        assert_eq!(artifact_host.split('.').next().unwrap().matches('-').count(), 1);
+        assert_eq!(
+            preview_host.split('.').next().unwrap().matches('-').count(),
+            2
+        );
+        assert_eq!(
+            artifact_host
+                .split('.')
+                .next()
+                .unwrap()
+                .matches('-')
+                .count(),
+            1
+        );
 
         // And neither resolves to the other's kind.
         assert!(matches!(
@@ -549,16 +557,16 @@ mod tests {
     #[test]
     fn a_name_is_a_legal_hostname() {
         for host in [names().host(&preview()), names().artifact_host(&artifact())] {
-        let label = host.split('.').next().unwrap();
+            let label = host.split('.').next().unwrap();
 
-        assert!(label.len() <= 63, "{} characters: {label}", label.len());
-        assert!(
-            label
-                .chars()
-                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'),
-            "{label}"
-        );
-        assert!(!label.starts_with('-') && !label.ends_with('-'), "{label}");
+            assert!(label.len() <= 63, "{} characters: {label}", label.len());
+            assert!(
+                label
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'),
+                "{label}"
+            );
+            assert!(!label.starts_with('-') && !label.ends_with('-'), "{label}");
         }
     }
 
@@ -664,12 +672,18 @@ mod tests {
         // What the browser will put in `Host` for that link, which is what
         // `preview_first` has to recognise on the way back in.
         let authority = url.trim_start_matches("http://").trim_end_matches('/');
-        assert_eq!(names.resolve(authority), Some(Addressed::Preview(preview())));
+        assert_eq!(
+            names.resolve(authority),
+            Some(Addressed::Preview(preview()))
+        );
 
         // The artifact URL does the same.
         let url = names.artifact_url("http", Some(8080), &artifact());
         let authority = url.trim_start_matches("http://").trim_end_matches('/');
-        assert_eq!(names.resolve(authority), Some(Addressed::Artifact(artifact())));
+        assert_eq!(
+            names.resolve(authority),
+            Some(Addressed::Artifact(artifact()))
+        );
     }
 }
 

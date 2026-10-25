@@ -7012,7 +7012,10 @@ pub struct ArtifactRow {
 
 impl Db {
     /// The version an address currently points at.
-    pub async fn artifact_current(&self, id: &ft_core::ArtifactId) -> Result<Option<CurrentVersion>> {
+    pub async fn artifact_current(
+        &self,
+        id: &ft_core::ArtifactId,
+    ) -> Result<Option<CurrentVersion>> {
         let row = sqlx::query(
             "SELECT v.id, v.n, v.entry, a.from_session_id
                FROM artifacts a

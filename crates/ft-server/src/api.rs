@@ -582,10 +582,16 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(agents::install_agent))
         .routes(routes!(agents::update_agent))
         .routes(routes!(artifacts::list_artifacts))
-        .routes(routes!(artifacts::publish_artifact, artifacts::session_artifact_folders))
+        .routes(routes!(
+            artifacts::publish_artifact,
+            artifacts::session_artifact_folders
+        ))
         .routes(routes!(artifacts::artifact_address))
         .routes(routes!(artifacts::download_artifact))
-        .routes(routes!(artifacts::rename_artifact, artifacts::delete_artifact))
+        .routes(routes!(
+            artifacts::rename_artifact,
+            artifacts::delete_artifact
+        ))
         .routes(routes!(skills::list_skills, skills::create_skill))
         .routes(routes!(skills::match_skills))
         .routes(routes!(skills::rename_skill, skills::delete_skill))

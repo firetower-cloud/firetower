@@ -160,7 +160,6 @@ fn claude_is_launched_with_the_settings_its_pickers_show() {
     );
 }
 
-
 /// The same lesson as the handover above, learned twice.
 ///
 /// Where to publish something to look at lived only in the workspace's
@@ -172,7 +171,12 @@ fn claude_is_launched_with_the_settings_its_pickers_show() {
 fn every_agent_is_told_where_an_artifact_goes() {
     for start in [Start::Fresh, Start::Resume] {
         let argv = Agent::ClaudeCode
-            .launch_headless("s_01example", &Asking::CannotAsk, start, &Default::default())
+            .launch_headless(
+                "s_01example",
+                &Asking::CannotAsk,
+                start,
+                &Default::default(),
+            )
             .expect("Claude Code is driven headless");
 
         let appended = after(&argv, "--append-system-prompt")

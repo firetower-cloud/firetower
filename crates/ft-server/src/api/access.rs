@@ -636,7 +636,10 @@ pub(super) async fn may_share(
     // out of `d/firetower`, taking the `everyone` grant with it — and the next
     // boot would quietly seed a second copy, because the seed looks the skill
     // up by its path.
-    if at.to_ltree().starts_with(crate::skills::builtin::PATH_PREFIX) {
+    if at
+        .to_ltree()
+        .starts_with(crate::skills::builtin::PATH_PREFIX)
+    {
         return Err(ApiError::new(
             ErrorCode::Forbidden,
             "Firetower keeps its own skills in one place, so this cannot be moved. \

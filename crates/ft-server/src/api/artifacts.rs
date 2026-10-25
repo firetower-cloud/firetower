@@ -119,7 +119,6 @@ fn port_of(headers: &HeaderMap) -> Option<u16> {
     port.parse().ok()
 }
 
-
 /// A new name for an artifact.
 ///
 /// **Not `Rename`.** A host already registers one of those, and utoipa keys a
@@ -453,7 +452,6 @@ pub(super) async fn session_artifact_folders(
     Ok(Json(folders))
 }
 
-
 /// An artifact as a file somebody can send to anyone.
 ///
 /// **This is the only sharing that reaches outside your network.** The control
@@ -505,7 +503,8 @@ pub(super) async fn download_artifact(
 
         let mut buffer = std::io::Cursor::new(Vec::new());
         let mut zipped = zip::ZipWriter::new(&mut buffer);
-        let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+        let options =
+            SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
         for (path, body) in &files {
             zipped
                 .start_file(path, options)
