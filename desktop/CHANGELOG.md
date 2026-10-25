@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.21.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.20.0...desktop-v0.21.0) (2026-10-25)
+
+
+### Features
+
+* artifacts — a page an agent made, published, read and annotated ([663bb1d](https://github.com/firetower-cloud/firetower/commit/663bb1de95012313ec54ac0240343992e054aa03))
+* artifacts — stored pages served at a signed name ([3f948f5](https://github.com/firetower-cloud/firetower/commit/3f948f5888f190f50a39ad2a8d9b8221f09f6f90))
+* **artifacts:** a menu on each tile — copy link, download, delete ([892a46b](https://github.com/firetower-cloud/firetower/commit/892a46bcbf819d63bed3c1d2764939e252e054ef))
+* **artifacts:** browse the library as a grid, with search and sort ([cbeedae](https://github.com/firetower-cloud/firetower/commit/cbeedaefb9428ec86071cb2fa5e87029f8a34011))
+* **artifacts:** one card around the tile, picture and name together ([f908d5b](https://github.com/firetower-cloud/firetower/commit/f908d5b082c669078b076ee5dfca07fba78d5acc))
+* **artifacts:** publish, serve, read and file a page an agent made ([70ffc76](https://github.com/firetower-cloud/firetower/commit/70ffc761ffc61e8c322975e4dc8d47b9012f0e42))
+* **artifacts:** rename one by clicking its title ([cce194d](https://github.com/firetower-cloud/firetower/commit/cce194d90b410fd25686cfe24d6e5eb8c025dab7))
+* Cursor Agent through ACP, onto current main ([934a113](https://github.com/firetower-cloud/firetower/commit/934a113bf1240a301a2ff050ef63776190e0006f))
+* cut the ledger by agent, and stop filing a setting under models ([49819a6](https://github.com/firetower-cloud/firetower/commit/49819a6bf674bb99a4004223414137319ef54e2d))
+* **desktop:** drop the command palette shortcut and its titlebar control ([48ba4b9](https://github.com/firetower-cloud/firetower/commit/48ba4b956f440c48a8b9d867dc73df1bf2723b4c))
+* **skills:** Firetower ships its own, starting with firetower-artifacts ([9336313](https://github.com/firetower-cloud/firetower/commit/93363133e7643e48a351ef84965b5e31712b3f2c))
+* workspaces without a repository ([a08e09a](https://github.com/firetower-cloud/firetower/commit/a08e09adadd94a2abb2cf9e31e2dfd7ea1bfd2f0))
+
+
+### Bug Fixes
+
+* **artifacts:** an artifact older than the loaded window goes above it ([9461d34](https://github.com/firetower-cloud/firetower/commit/9461d346e5b0637d8c41b9e84dd9210287e153bf))
+* **artifacts:** anchor the card where it was made, not where it was last named ([ca51eb9](https://github.com/firetower-cloud/firetower/commit/ca51eb911994f0a80433fdbe5b42655625eb9871))
+* **artifacts:** keep provenance with the session that made it, and anchor ([3e2d8e2](https://github.com/firetower-cloud/firetower/commit/3e2d8e2cff4dfe460fca8fe691cc31eecb0fcae0))
+* **artifacts:** measure the thumbnail, and give the library a real empty state ([93e3c27](https://github.com/firetower-cloud/firetower/commit/93e3c278acc523926af1cd3fc5eebeb592291104))
+* **artifacts:** place the card by log line, not by searching for its name ([dc21528](https://github.com/firetower-cloud/firetower/commit/dc215282ed2959021b31f2946237994ba7636b07))
+* **artifacts:** stop a thumbnail swallowing the scroll ([d4511e3](https://github.com/firetower-cloud/firetower/commit/d4511e39d1934da486ad0a8e79f2d1307b54a9fc))
+* Cursor's own mark, not a hexagon that belonged to nobody ([1bd751b](https://github.com/firetower-cloud/firetower/commit/1bd751b21febfa431549311dfe043be79d3515b3))
+* **skills:** a built-in says it is on, and the switch stops lying ([eb11cec](https://github.com/firetower-cloud/firetower/commit/eb11cec670f73fcb28496b1e722eb21c670b5cf4))
+* **skills:** a built-in's default is a default, not a lock ([3817b3b](https://github.com/firetower-cloud/firetower/commit/3817b3bc8c137d633f0e174cd43a577f8f6259d5))
+* **telemetry:** deliver the newest day first, and let the outbox settle ([015082f](https://github.com/firetower-cloud/firetower/commit/015082fd9533c933b96d045affca618b29c76d64))
+* **telemetry:** deliver the newest day first, and let the outbox settle ([95cf579](https://github.com/firetower-cloud/firetower/commit/95cf57990253a129a50ef3d21423ed3ab73fada3))
+* **ui:** the annotating toggle is heavier when on, not orange ([e2ab0bb](https://github.com/firetower-cloud/firetower/commit/e2ab0bbf9d61d5e7c53057b50020f5f95679f44f))
+
 ## [0.20.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.19.0...desktop-v0.20.0) (2026-10-20)
 
 
