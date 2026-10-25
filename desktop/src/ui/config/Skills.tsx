@@ -472,7 +472,7 @@ function Detail({
         <div className="min-w-0 flex-1">
           <h1 className="truncate font-mono text-display text-bone">{skill.name}</h1>
           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-meta text-dim">
-            <span>{skill.author ?? "somebody who has left"}</span>
+            <span>{skill.builtin ? "Firetower" : (skill.author ?? "somebody who has left")}</span>
             <span className="h-3 w-px bg-line" />
             <span className="tabular-nums">v{skill.version}</span>
             <span className="h-3 w-px bg-line" />
@@ -517,7 +517,7 @@ function Detail({
               rows={[
                 ["Version", `v${skill.version}`],
                 ["Updated", new Date(skill.updatedAt).toLocaleDateString()],
-                ["Author", skill.author ?? "somebody who has left"],
+                ["Author", skill.builtin ? "Firetower" : (skill.author ?? "somebody who has left")],
                 ["Size", `${size(skill.bytes)}, ${skill.files} files`],
                 ["Context", `${skill.tokens} tokens a turn`],
               ]}
@@ -580,22 +580,49 @@ function Detail({
  * against wherever the layout happened to put it, which is how the first
  * version ended up with the knob hanging off the right edge of its track.
  */
-function Switch({ on, busy, onFlip }: { on: boolean; busy: boolean; onFlip: () => void }) {
+function Switch({
+  on,
+  busy,
+  fixed,
+  onFlip,
+}: {
+  on: boolean;
+  busy: boolean;
+  /** On by construction. Shown, not offered. */
+  fixed?: boolean;
+  onFlip: () => void;
+}) {
   return (
     <button
       role="switch"
       aria-checked={on}
-      disabled={busy}
-      onClick={onFlip}
-      className={`relative h-4 w-7 shrink-0 rounded-full transition-colors disabled:opacity-50 ${
-        on ? "bg-sage-deep" : "bg-ground shadow-[inset_0_1px_2px_rgb(0_0_0/0.4)]"
+      aria-disabled={fixed || busy}
+      // Not `disabled`: a disabled control is skipped by the keyboard and has
+      // no title, so somebody tabbing through has no way to find out why it
+      // will not move. This stays focusable and says why.
+      title={fixed ? "Firetower keeps this on. Turn it off for one session in the composer." : undefined}
+      onClick={() => {
+        if (fixed || busy) return;
+        onFlip();
+      }}
+      className={`relative h-4 w-7 shrink-0 rounded-full border transition-colors ${
+        fixed ? "cursor-default" : ""
+      } ${
+        on
+          ? "border-sage-deep bg-sage-deep"
+          : // A track that is only `bg-ground` on a near-black screen is
+            // invisible — it read as empty space rather than as something off.
+            "border-line bg-raise"
       }`}
     >
       <span
-        style={{ left: on ? 14 : 2 }}
-        className={`absolute top-1/2 h-3 w-3 -translate-y-1/2 rounded-full transition-[left,background-color] duration-150 ${
-          on ? "bg-sage" : "bg-mute"
-        }`}
+        // `translate` rather than animating `left`: a transitioned layout
+        // property is laid out again every frame, which is the stutter this
+        // had on the way across.
+        style={{ transform: `translate(${on ? 14 : 2}px, -50%)` }}
+        className={`absolute top-1/2 left-0 h-3 w-3 rounded-full transition-[transform,background-color] duration-150 ease-out ${
+          on ? "bg-sage" : "bg-dim"
+        } ${busy ? "opacity-60" : ""}`}
       />
     </button>
   );
@@ -704,11 +731,20 @@ function Defaults({ skill, onChanged }: { skill: Skill; onChanged: () => void })
 
   const rows = useMemo(
     () => [
-      { id: null as string | null, label: "In every workspace you start", on: skill.alwaysOn },
+      {
+        id: null as string | null,
+        label: "In every workspace you start",
+        on: skill.alwaysOn,
+        // Firetower's own are on everywhere by construction. The switch is
+        // shown so the row still says what is true, and fixed so it does not
+        // offer a change the server would refuse.
+        fixed: skill.builtin,
+      },
       ...repos.data.map((r) => ({
         id: r.id as string | null,
         label: r.slug,
         on: skill.defaultIn.includes(r.slug),
+        fixed: skill.builtin,
       })),
     ],
     [repos.data, skill.alwaysOn, skill.defaultIn],
@@ -722,7 +758,7 @@ function Defaults({ skill, onChanged }: { skill: Skill; onChanged: () => void })
             <span className={`min-w-0 flex-1 truncate text-meta text-text ${r.id ? "font-mono" : ""}`}>
               {r.label}
             </span>
-            <Switch on={r.on} busy={busy} onFlip={() => flip(r.id, !r.on)} />
+            <Switch on={r.on} busy={busy} fixed={r.fixed} onFlip={() => flip(r.id, !r.on)} />
           </div>
         ))}
       </div>

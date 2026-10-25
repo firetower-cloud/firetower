@@ -1070,7 +1070,8 @@ impl Skills {
                   FROM skill_defaults sd LEFT JOIN repos r ON r.id = sd.repo_id \
                  WHERE sd.skill_id = k.id AND sd.user_id = $1 AND sd.repo_id IS NOT NULL) AS default_in, \
                EXISTS (SELECT 1 FROM skill_defaults sd \
-                        WHERE sd.skill_id = k.id AND sd.user_id = $1 AND sd.repo_id IS NULL) AS always_on, \
+                        WHERE sd.skill_id = k.id AND sd.user_id = $1 AND sd.repo_id IS NULL) \
+               OR k.path <@ 'd.firetower'::ltree AS always_on, \
                {writable} AS may_write, \
                ({shareable} AND NOT k.path <@ 'd.firetower'::ltree) AS may_share \
              {FROM} WHERE {visible} ORDER BY k.name",
@@ -1089,7 +1090,8 @@ impl Skills {
     /// One skill, if this person may see it.
     pub async fn one(&self, person: &str, id: &str, at_least: Level) -> Result<Option<Skill>> {
         let sql = format!(
-            "SELECT {COLUMNS}, '{{}}'::text[] AS default_in, false AS always_on, \
+            "SELECT {COLUMNS}, '{{}}'::text[] AS default_in, \
+               (k.path <@ 'd.firetower'::ltree) AS always_on, \
                {writable} AS may_write, \
                ({shareable} AND NOT k.path <@ 'd.firetower'::ltree) AS may_share \
              {FROM} WHERE k.id = $2 AND {visible}",
