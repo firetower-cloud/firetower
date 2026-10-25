@@ -1865,7 +1865,7 @@ impl Skills {
     /// What a new session starts with: somebody's own defaults, and nothing
     /// else.
     ///
-    /// A built-in is on by default because `seed_builtin_defaults` writes it a
+    /// A built-in is on by default because `offer_builtins_once` writes it a
     /// real row here, not because this query knows about it. That difference
     /// is the whole point — a union here forced them on whatever the library
     /// said, so the switch on the Defaults screen could not move and had to be
@@ -2151,6 +2151,97 @@ mod tests {
     /// The two sides of the fingerprint have to agree, so the format is
     /// pinned here as a literal rather than as whatever the code happens to
     /// build. The migration computes the identical string in SQL.
+    /// Shipping a built-in is a one-shot migration, and this is the test for
+    /// the shot. Everybody who already had an account when it shipped has to
+    /// end up with it on — they were created before the skill existed, so the
+    /// offer made at user creation cannot reach them. `offer_builtins_once` is
+    /// the only thing that can, and it runs on a boot that happens exactly
+    /// once per slug.
+    ///
+    /// The hard part is that "once" has to hold against the obvious bug in the
+    /// other direction: seeding on every boot would put the row back after
+    /// somebody turned it off, and a switch that resets itself overnight is
+    /// worse than no switch.
+    #[tokio::test]
+    async fn a_builtin_reaches_everybody_who_was_already_here() {
+        let (db, _admin) = crate::db::Db::open_for_test_owned().await.unwrap();
+        let accounts = crate::accounts::Accounts::new(db.pool().clone());
+        let org = ft_core::OrgId::from_stored(db.org().await.unwrap());
+        let skills = Skills::new(db.pool().clone());
+
+        // Ana predates the built-in entirely: no `d/firetower` yet, so there
+        // is nothing for the offer at her creation to give her.
+        let (ana, _) = accounts
+            .create_user(&org, "ana", "ana@westlabs.com", "member")
+            .await
+            .unwrap();
+        assert!(
+            skills.always_on(ana.id.as_str()).await.unwrap().is_empty(),
+            "nothing is on before anything ships"
+        );
+
+        // The update lands: the bundles become rows, and the one-time offer runs.
+        assert!(
+            skills.seed_builtins().await.unwrap() > 0,
+            "something shipped"
+        );
+        skills.offer_builtins_once(&accounts).await.unwrap();
+
+        let shipped: Vec<String> = sqlx::query_scalar(
+            "SELECT id FROM skills WHERE path <@ 'd.firetower'::ltree ORDER BY id",
+        )
+        .fetch_all(db.pool())
+        .await
+        .unwrap();
+        assert_eq!(shipped.len(), builtin::ALL.len(), "one row per built-in");
+
+        // Both of them: the person who was here first, and Ana.
+        let admin = accounts.user_by_name("admin").await.unwrap().unwrap();
+        for (who, id) in [("admin", admin.id.as_str()), ("ana", ana.id.as_str())] {
+            assert_eq!(
+                skills.always_on(id).await.unwrap(),
+                shipped,
+                "{who} should have the built-in on after the update"
+            );
+            // And a session they start would pick it up, which is the point of
+            // the row being here rather than in the query.
+            assert_eq!(
+                skills.defaults_for(id, &[]).await.unwrap(),
+                shipped,
+                "{who}'s next session starts with it"
+            );
+        }
+
+        // Ana decides against it. A second boot must leave that alone.
+        skills
+            .set_default(ana.id.as_str(), &shipped[0], None, false)
+            .await
+            .unwrap();
+        skills.offer_builtins_once(&accounts).await.unwrap();
+        assert!(
+            skills.always_on(ana.id.as_str()).await.unwrap().is_empty(),
+            "turning a built-in off has to survive a restart"
+        );
+        assert_eq!(
+            skills.always_on(admin.id.as_str()).await.unwrap(),
+            shipped,
+            "and leaves everybody else's alone"
+        );
+
+        // Somebody who joins afterwards gets it from the other end, because
+        // the once-only offer has already run and will not run for them.
+        let (zoe, _) = accounts
+            .create_user(&org, "zoe", "zoe@westlabs.com", "member")
+            .await
+            .unwrap();
+        skills.offer_builtins_to(zoe.id.as_str()).await.unwrap();
+        assert_eq!(
+            skills.always_on(zoe.id.as_str()).await.unwrap(),
+            shipped,
+            "a new account gets what Firetower ships"
+        );
+    }
+
     #[test]
     fn the_fingerprint_is_over_the_manifest() {
         let bundle = |runs: bool| {
