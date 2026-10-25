@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.47.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.46.0...firetower-v0.47.0) (2026-10-25)
+
+
+### Features
+
+* artifacts — a page an agent made, published, read and annotated ([663bb1d](https://github.com/firetower-cloud/firetower/commit/663bb1de95012313ec54ac0240343992e054aa03))
+* artifacts — stored pages served at a signed name ([3f948f5](https://github.com/firetower-cloud/firetower/commit/3f948f5888f190f50a39ad2a8d9b8221f09f6f90))
+* **artifacts:** a menu on each tile — copy link, download, delete ([892a46b](https://github.com/firetower-cloud/firetower/commit/892a46bcbf819d63bed3c1d2764939e252e054ef))
+* **artifacts:** point the workspace guide at whatever skill is installed ([caa32f9](https://github.com/firetower-cloud/firetower/commit/caa32f9efabc51041f6f098371d86d372abe034b))
+* **artifacts:** publish, serve, read and file a page an agent made ([70ffc76](https://github.com/firetower-cloud/firetower/commit/70ffc761ffc61e8c322975e4dc8d47b9012f0e42))
+* **artifacts:** rename one by clicking its title ([cce194d](https://github.com/firetower-cloud/firetower/commit/cce194d90b410fd25686cfe24d6e5eb8c025dab7))
+* Cursor Agent through ACP, onto current main ([934a113](https://github.com/firetower-cloud/firetower/commit/934a113bf1240a301a2ff050ef63776190e0006f))
+* cut the ledger by agent, and stop filing a setting under models ([49819a6](https://github.com/firetower-cloud/firetower/commit/49819a6bf674bb99a4004223414137319ef54e2d))
+* hand the vault's GitHub token to gh in a workspace ([5cb3d14](https://github.com/firetower-cloud/firetower/commit/5cb3d148767921ed07d6d55abbe579045cf0283e))
+* hand the vault's GitHub token to gh in a workspace ([14d8908](https://github.com/firetower-cloud/firetower/commit/14d8908032b9a7bdb56cbeeab39e41cab687130a))
+* let Cursor say it is out of date, and be updated like the others ([e76a112](https://github.com/firetower-cloud/firetower/commit/e76a11266c5f6dba0bbbead376f29009a04441d8))
+* **skills:** Firetower ships its own, starting with firetower-artifacts ([9336313](https://github.com/firetower-cloud/firetower/commit/93363133e7643e48a351ef84965b5e31712b3f2c))
+* workspaces without a repository ([a08e09a](https://github.com/firetower-cloud/firetower/commit/a08e09adadd94a2abb2cf9e31e2dfd7ea1bfd2f0))
+
+
+### Bug Fixes
+
+* **artifacts:** keep provenance with the session that made it, and anchor ([3e2d8e2](https://github.com/firetower-cloud/firetower/commit/3e2d8e2cff4dfe460fca8fe691cc31eecb0fcae0))
+* **artifacts:** place the card by log line, not by searching for its name ([dc21528](https://github.com/firetower-cloud/firetower/commit/dc215282ed2959021b31f2946237994ba7636b07))
+* **artifacts:** tell the agent in the system prompt, not only in a file ([d29ad2f](https://github.com/firetower-cloud/firetower/commit/d29ad2fac79af8f9423c4585c04573997294e339))
+* Cursor's own mark, not a hexagon that belonged to nobody ([1bd751b](https://github.com/firetower-cloud/firetower/commit/1bd751b21febfa431549311dfe043be79d3515b3))
+* record an ACP turn that reported nothing, not only one with a gauge ([c339ebb](https://github.com/firetower-cloud/firetower/commit/c339ebb8e8f4a5f4fdca011b73b02e9ee92ad11e))
+* **skills:** a built-in says it is on, and the switch stops lying ([eb11cec](https://github.com/firetower-cloud/firetower/commit/eb11cec670f73fcb28496b1e722eb21c670b5cf4))
+* **skills:** a built-in's default is a default, not a lock ([3817b3b](https://github.com/firetower-cloud/firetower/commit/3817b3bc8c137d633f0e174cd43a577f8f6259d5))
+* **telemetry:** deliver the newest day first, and let the outbox settle ([015082f](https://github.com/firetower-cloud/firetower/commit/015082fd9533c933b96d045affca618b29c76d64))
+* **telemetry:** deliver the newest day first, and let the outbox settle ([95cf579](https://github.com/firetower-cloud/firetower/commit/95cf57990253a129a50ef3d21423ed3ab73fada3))
+
 ## [0.46.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.45.0...firetower-v0.46.0) (2026-10-20)
 
 

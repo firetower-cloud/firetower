@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.9.0](https://github.com/firetower-cloud/firetower/compare/mobile-v0.8.0...mobile-v0.9.0) (2026-10-25)
+
+
+### Features
+
+* artifacts — a page an agent made, published, read and annotated ([663bb1d](https://github.com/firetower-cloud/firetower/commit/663bb1de95012313ec54ac0240343992e054aa03))
+* **artifacts:** a menu on each tile — copy link, download, delete ([892a46b](https://github.com/firetower-cloud/firetower/commit/892a46bcbf819d63bed3c1d2764939e252e054ef))
+* **artifacts:** rename one by clicking its title ([cce194d](https://github.com/firetower-cloud/firetower/commit/cce194d90b410fd25686cfe24d6e5eb8c025dab7))
+* Cursor Agent through ACP, onto current main ([934a113](https://github.com/firetower-cloud/firetower/commit/934a113bf1240a301a2ff050ef63776190e0006f))
+* cut the ledger by agent, and stop filing a setting under models ([49819a6](https://github.com/firetower-cloud/firetower/commit/49819a6bf674bb99a4004223414137319ef54e2d))
+* **skills:** Firetower ships its own, starting with firetower-artifacts ([9336313](https://github.com/firetower-cloud/firetower/commit/93363133e7643e48a351ef84965b5e31712b3f2c))
+* workspaces without a repository ([a08e09a](https://github.com/firetower-cloud/firetower/commit/a08e09adadd94a2abb2cf9e31e2dfd7ea1bfd2f0))
+
+
+### Bug Fixes
+
+* **artifacts:** place the card by log line, not by searching for its name ([dc21528](https://github.com/firetower-cloud/firetower/commit/dc215282ed2959021b31f2946237994ba7636b07))
+* Cursor's own mark, not a hexagon that belonged to nobody ([1bd751b](https://github.com/firetower-cloud/firetower/commit/1bd751b21febfa431549311dfe043be79d3515b3))
+* **telemetry:** deliver the newest day first, and let the outbox settle ([015082f](https://github.com/firetower-cloud/firetower/commit/015082fd9533c933b96d045affca618b29c76d64))
+* **telemetry:** deliver the newest day first, and let the outbox settle ([95cf579](https://github.com/firetower-cloud/firetower/commit/95cf57990253a129a50ef3d21423ed3ab73fada3))
+
 ## [0.8.0](https://github.com/firetower-cloud/firetower/compare/mobile-v0.7.0...mobile-v0.8.0) (2026-10-20)
 
 
