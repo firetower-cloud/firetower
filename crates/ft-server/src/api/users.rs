@@ -111,6 +111,15 @@ pub(super) async fn create_user(
         .create_user(&me.org_id, &request.username, &request.email, &request.role)
         .await
         .map_err(|e| ApiError::new(ErrorCode::InvalidRequest, format!("{e:#}")))?;
+    // Somebody who joins after a built-in shipped still gets it turned on.
+    // The once-only offer at boot has already run for everybody who existed
+    // then, and would not run again for this person.
+    //
+    // Best effort: a new account without a default skill is a tick-box away
+    // from being fixed, and refusing to create the account would not be.
+    if let Err(e) = state.skills.offer_builtins_to(user.id.as_str()).await {
+        tracing::warn!(user = %user.username, "offering the built-in skills: {e:#}");
+    }
     tracing::info!(by = %me.username, user = %user.username, role = %user.role, "user added");
     Ok(Json(CreatedUser { user, password }))
 }

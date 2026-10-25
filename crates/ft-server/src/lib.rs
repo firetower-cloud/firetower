@@ -342,6 +342,11 @@ async fn seed_builtin_skills(state: AppState) {
         Ok(n) => tracing::info!("seeded or updated {n} built-in skill(s)"),
         Err(e) => tracing::warn!("seeding built-in skills: {e:#}"),
     }
+    // And turn each on for everybody the first time it ships — once, so that
+    // somebody who turns it off does not find it back on after a restart.
+    if let Err(e) = state.skills.offer_builtins_once(&state.accounts).await {
+        tracing::warn!("offering built-in skills: {e:#}");
+    }
 }
 
 async fn seed_agents(state: AppState) {

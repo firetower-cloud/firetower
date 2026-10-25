@@ -1070,8 +1070,7 @@ impl Skills {
                   FROM skill_defaults sd LEFT JOIN repos r ON r.id = sd.repo_id \
                  WHERE sd.skill_id = k.id AND sd.user_id = $1 AND sd.repo_id IS NOT NULL) AS default_in, \
                EXISTS (SELECT 1 FROM skill_defaults sd \
-                        WHERE sd.skill_id = k.id AND sd.user_id = $1 AND sd.repo_id IS NULL) \
-               OR k.path <@ 'd.firetower'::ltree AS always_on, \
+                        WHERE sd.skill_id = k.id AND sd.user_id = $1 AND sd.repo_id IS NULL) AS always_on, \
                {writable} AS may_write, \
                ({shareable} AND NOT k.path <@ 'd.firetower'::ltree) AS may_share \
              {FROM} WHERE {visible} ORDER BY k.name",
@@ -1091,7 +1090,9 @@ impl Skills {
     pub async fn one(&self, person: &str, id: &str, at_least: Level) -> Result<Option<Skill>> {
         let sql = format!(
             "SELECT {COLUMNS}, '{{}}'::text[] AS default_in, \
-               (k.path <@ 'd.firetower'::ltree) AS always_on, \
+               EXISTS (SELECT 1 FROM skill_defaults sd \
+                        WHERE sd.skill_id = k.id AND sd.user_id = $1 AND sd.repo_id IS NULL) \
+                 AS always_on, \
                {writable} AS may_write, \
                ({shareable} AND NOT k.path <@ 'd.firetower'::ltree) AS may_share \
              {FROM} WHERE k.id = $2 AND {visible}",
@@ -1277,6 +1278,56 @@ impl Skills {
             }
         }
         Ok(touched)
+    }
+
+    /// Turn a built-in on for everybody — **once**, the first time it ships.
+    ///
+    /// Once, not on every boot, and that is the whole difficulty. Seeding the
+    /// row repeatedly would undo somebody turning it off: they clear it, the
+    /// next restart puts it back, and the switch becomes a thing that resets
+    /// itself overnight. The key is per slug rather than one flag for all of
+    /// them, so a built-in added later is still offered to people who already
+    /// decided about the first.
+    ///
+    /// Somebody who joins afterwards is handled where they are made — see
+    /// `offer_builtins_to`.
+    pub async fn offer_builtins_once(&self, accounts: &crate::accounts::Accounts) -> Result<()> {
+        for one in builtin::ALL {
+            let key = format!("offered_builtin:{}", one.slug);
+            if accounts.setting(&key).await?.is_some() {
+                continue;
+            }
+            sqlx::query(
+                "INSERT INTO skill_defaults (user_id, repo_id, skill_id)
+                 SELECT u.id, NULL, k.id FROM users u
+                   CROSS JOIN skills k
+                  WHERE k.path = ('d.firetower.' || $1)::ltree AND k.org_id = u.org_id
+                 ON CONFLICT DO NOTHING",
+            )
+            .bind(one.slug)
+            .execute(&self.pool)
+            .await
+            .context("offering a built-in to everybody")?;
+            accounts.set_setting(&key, "done").await?;
+            tracing::info!(skill = one.slug, "turned a built-in on for everybody, once");
+        }
+        Ok(())
+    }
+
+    /// The same offer, for somebody who has just been created.
+    pub async fn offer_builtins_to(&self, person: &str) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO skill_defaults (user_id, repo_id, skill_id)
+             SELECT $1, NULL, k.id FROM skills k
+               JOIN users u ON u.id = $1 AND u.org_id = k.org_id
+              WHERE k.path <@ 'd.firetower'::ltree
+             ON CONFLICT DO NOTHING",
+        )
+        .bind(person)
+        .execute(&self.pool)
+        .await
+        .context("offering the built-ins to somebody new")?;
+        Ok(())
     }
 
     /// `d/firetower`, open to everybody and writable by nobody.
@@ -1811,24 +1862,19 @@ impl Skills {
 
     /// Which skills would be ticked for somebody starting work on these
     /// repositories: the union of their defaults, plus their always-on set.
-    /// What a new session starts with.
+    /// What a new session starts with: somebody's own defaults, and nothing
+    /// else.
     ///
-    /// Somebody's own defaults, **and every built-in**. That is a departure
-    /// from `key-decisions.md`'s *labelled, and not ticked*, taken on purpose:
-    /// that rule is about capability skills pushed onto people who do not need
-    /// them, and a built-in describes how a Firetower feature works — closer
-    /// to the convention kind the same document says is worth everybody
-    /// having.
-    ///
-    /// On by *default*, not permanently: this decides what a session begins
-    /// with, and the picker can take it straight back out. Somebody who never
-    /// publishes anything should not keep paying for the description.
+    /// A built-in is on by default because `seed_builtin_defaults` writes it a
+    /// real row here, not because this query knows about it. That difference
+    /// is the whole point — a union here forced them on whatever the library
+    /// said, so the switch on the Defaults screen could not move and had to be
+    /// locked to stop it lying. A default that cannot be changed is not a
+    /// default.
     pub async fn defaults_for(&self, person: &str, repos: &[String]) -> Result<Vec<String>> {
         sqlx::query_scalar(
             "SELECT DISTINCT sd.skill_id FROM skill_defaults sd \
-              WHERE sd.user_id = $1 AND (sd.repo_id IS NULL OR sd.repo_id = ANY($2)) \
-             UNION \
-             SELECT k.id FROM skills k WHERE k.path <@ 'd.firetower'::ltree",
+              WHERE sd.user_id = $1 AND (sd.repo_id IS NULL OR sd.repo_id = ANY($2))",
         )
         .bind(person)
         .bind(repos)

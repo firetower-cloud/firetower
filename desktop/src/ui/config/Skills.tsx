@@ -580,34 +580,17 @@ function Detail({
  * against wherever the layout happened to put it, which is how the first
  * version ended up with the knob hanging off the right edge of its track.
  */
-function Switch({
-  on,
-  busy,
-  fixed,
-  onFlip,
-}: {
-  on: boolean;
-  busy: boolean;
-  /** On by construction. Shown, not offered. */
-  fixed?: boolean;
-  onFlip: () => void;
-}) {
+function Switch({ on, busy, onFlip }: { on: boolean; busy: boolean; onFlip: () => void }) {
   return (
     <button
       role="switch"
       aria-checked={on}
-      aria-disabled={fixed || busy}
-      // Not `disabled`: a disabled control is skipped by the keyboard and has
-      // no title, so somebody tabbing through has no way to find out why it
-      // will not move. This stays focusable and says why.
-      title={fixed ? "Firetower keeps this on. Turn it off for one session in the composer." : undefined}
+      aria-disabled={busy}
       onClick={() => {
-        if (fixed || busy) return;
+        if (busy) return;
         onFlip();
       }}
       className={`relative h-4 w-7 shrink-0 rounded-full border transition-colors ${
-        fixed ? "cursor-default" : ""
-      } ${
         on
           ? "border-sage-deep bg-sage-deep"
           : // A track that is only `bg-ground` on a near-black screen is
@@ -735,16 +718,11 @@ function Defaults({ skill, onChanged }: { skill: Skill; onChanged: () => void })
         id: null as string | null,
         label: "In every workspace you start",
         on: skill.alwaysOn,
-        // Firetower's own are on everywhere by construction. The switch is
-        // shown so the row still says what is true, and fixed so it does not
-        // offer a change the server would refuse.
-        fixed: skill.builtin,
       },
       ...repos.data.map((r) => ({
         id: r.id as string | null,
         label: r.slug,
         on: skill.defaultIn.includes(r.slug),
-        fixed: skill.builtin,
       })),
     ],
     [repos.data, skill.alwaysOn, skill.defaultIn],
@@ -758,7 +736,7 @@ function Defaults({ skill, onChanged }: { skill: Skill; onChanged: () => void })
             <span className={`min-w-0 flex-1 truncate text-meta text-text ${r.id ? "font-mono" : ""}`}>
               {r.label}
             </span>
-            <Switch on={r.on} busy={busy} fixed={r.fixed} onFlip={() => flip(r.id, !r.on)} />
+            <Switch on={r.on} busy={busy} onFlip={() => flip(r.id, !r.on)} />
           </div>
         ))}
       </div>
