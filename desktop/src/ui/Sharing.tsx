@@ -107,6 +107,7 @@ const KINDS: Record<FiledKind, string> = {
   agentAccount: "subscription",
   secret: "secret",
   skill: "skill",
+  artifact: "artifact",
   // Here for completeness and never drawn: this sheet is how something is
   // filed into a directory, and a repository cannot be. The server refuses it
   // by name, and nothing opens the sheet for one.

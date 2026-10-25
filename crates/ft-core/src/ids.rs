@@ -92,6 +92,16 @@ id_type!(
     "skv",
     "Identifies one version of a skill. Append-only: a session pins one."
 );
+id_type!(
+    ArtifactId,
+    "ar",
+    "Identifies an artifact — a page an agent published for somebody to look at."
+);
+id_type!(
+    ArtifactVersionId,
+    "arv",
+    "Identifies one version of an artifact. Append-only: a note is anchored to one."
+);
 
 #[cfg(test)]
 mod tests {

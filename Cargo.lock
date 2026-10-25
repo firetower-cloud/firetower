@@ -1025,6 +1025,7 @@ dependencies = [
  "utoipa",
  "utoipa-axum",
  "zeroize",
+ "zip",
 ]
 
 [[package]]

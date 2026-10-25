@@ -11,6 +11,7 @@ use std::sync::Arc;
 pub mod access;
 pub mod accounts;
 pub mod api;
+pub mod artifact;
 pub mod auth;
 pub mod db;
 pub mod diagnose;
@@ -250,6 +251,11 @@ pub async fn run(config: Config) -> Result<()> {
         .execute(state.db.pool()).await?;
     tokio::spawn(crate::api::accounts::watch_fallbacks(state.clone()));
     tokio::spawn(seed_agents(state.clone()));
+    // Firetower's own skills, into every organisation. Idempotent and cheap:
+    // a bundle whose bytes are unchanged costs one digest comparison. Spawned
+    // rather than awaited because a control plane that will not start over a
+    // missing skill has traded a product for a paragraph.
+    tokio::spawn(seed_builtin_skills(state.clone()));
     // Whether a release is out, every few hours; and whatever upgrade was in
     // progress when this process was last replaced — which, for the run that
     // recreates the control plane, is the ordinary way it ends.
@@ -325,6 +331,24 @@ const SEEDED: &str = "seeded_local_agent";
 /// is having a bad day, a worker still connecting — none of them is a reason
 /// for the control plane not to serve. The Agents page can install one at any
 /// time, which is the same code path this uses.
+/// Put the skills this binary ships into every organisation.
+///
+/// On every boot, not once: the point is that upgrading Firetower upgrades
+/// what its agents know. A running session is unaffected because it pins the
+/// version it started with.
+async fn seed_builtin_skills(state: AppState) {
+    match state.skills.seed_builtins().await {
+        Ok(0) => {}
+        Ok(n) => tracing::info!("seeded or updated {n} built-in skill(s)"),
+        Err(e) => tracing::warn!("seeding built-in skills: {e:#}"),
+    }
+    // And turn each on for everybody the first time it ships — once, so that
+    // somebody who turns it off does not find it back on after a restart.
+    if let Err(e) = state.skills.offer_builtins_once(&state.accounts).await {
+        tracing::warn!("offering built-in skills: {e:#}");
+    }
+}
+
 async fn seed_agents(state: AppState) {
     const KIND: ft_core::Agent = ft_core::Agent::ClaudeCode;
 
@@ -687,14 +711,25 @@ pub const CLIENT_ORIGINS: &[&str] = &[
     "https://tauri.localhost",
 ];
 
-/// Anything addressed to a preview hostname belongs to that preview.
+/// Anything addressed to a signed hostname belongs to what that name says.
+///
+/// Two kinds come through here and they are served by different code: a
+/// preview is proxied over a tunnel to a port somebody is running, an artifact
+/// is read out of storage. Sharing the door is deliberate — one wildcard
+/// certificate, one parser, one place that decides what a `Host` means — and
+/// sharing anything below it is not.
 async fn preview_first(
     axum::extract::State(state): axum::extract::State<AppState>,
     request: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> axum::response::Response {
     match preview::proxy::addressed_to(&state.names, &request) {
-        Some(preview) => preview::proxy::serve(state, preview, request).await,
+        Some(preview::Addressed::Preview(preview)) => {
+            preview::proxy::serve(state, preview, request).await
+        }
+        Some(preview::Addressed::Artifact(artifact)) => {
+            artifact::serve(state, artifact, request).await
+        }
         None => next.run(request).await,
     }
 }

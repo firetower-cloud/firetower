@@ -6959,3 +6959,434 @@ impl Db {
         }
     }
 }
+
+/* ── Artifacts ─────────────────────────────────────────────────────────
+ *
+ * Owned by a person, not by a workspace. Everything here deliberately avoids
+ * a foreign key to `sessions`: `reclaim.rs` would follow it within the minute.
+ * See `migrations/server/20261023120000_artifacts.sql`.
+ */
+
+/// The version being served, and what it needs to serve it.
+#[derive(Debug, Clone)]
+pub struct CurrentVersion {
+    pub id: String,
+    pub n: i32,
+    pub entry: String,
+    /// Provenance, copied at publish. `None` once there never was one.
+    pub from_session: Option<String>,
+}
+
+/// One artifact, as a list shows it.
+#[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ArtifactRow {
+    pub id: String,
+    /// Where in the producing session's log this first appeared.
+    ///
+    /// What the conversation anchors its card to. `None` for rows written
+    /// before this existed, which fall back to the end of the transcript.
+    pub first_seen_line: Option<i64>,
+    /// Where it is filed. `u/<somebody>/<slug>` until it is moved.
+    pub path: ft_core::ResourcePath,
+    /// Whether the asker may move it — drawn as the move control, and
+    /// re-decided server-side by `may_share` whatever the client drew.
+    pub may_share: bool,
+    /// True when it is filed at the asker's own root rather than shared.
+    pub mine: bool,
+    /// The version currently served.
+    ///
+    /// Exposed because the picker injected into the page identifies itself by
+    /// it — a note belongs to the bytes it was written on, not to the artifact
+    /// in general — so a client that cannot name the version cannot complete
+    /// the handshake, and Annotate stays dead with nothing to say why.
+    pub version_id: Option<String>,
+    pub title: String,
+    pub slug: String,
+    pub version: i32,
+    pub bytes: i64,
+    pub from_session_id: Option<String>,
+    pub from_workspace_name: Option<String>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+impl Db {
+    /// The version an address currently points at.
+    pub async fn artifact_current(
+        &self,
+        id: &ft_core::ArtifactId,
+    ) -> Result<Option<CurrentVersion>> {
+        let row = sqlx::query(
+            "SELECT v.id, v.n, v.entry, a.from_session_id
+               FROM artifacts a
+               JOIN artifact_versions v ON v.id = a.current_version_id
+              WHERE a.id = $1",
+        )
+        .bind(id.as_str())
+        .fetch_optional(&self.pool)
+        .await
+        .context("looking up an artifact's current version")?;
+
+        Ok(row.map(|r| CurrentVersion {
+            id: r.get("id"),
+            n: r.get("n"),
+            entry: r.get("entry"),
+            from_session: r.get("from_session_id"),
+        }))
+    }
+
+    /// One file out of one version.
+    pub async fn artifact_file(
+        &self,
+        version_id: &str,
+        path: &str,
+    ) -> Result<Option<crate::artifact::Stored>> {
+        let row = sqlx::query(
+            "SELECT content_type, body FROM artifact_files WHERE version_id = $1 AND path = $2",
+        )
+        .bind(version_id)
+        .bind(path)
+        .fetch_optional(&self.pool)
+        .await
+        .context("reading an artifact file")?;
+
+        Ok(row.map(|r| crate::artifact::Stored {
+            content_type: r.get("content_type"),
+            body: r.get("body"),
+        }))
+    }
+
+    /// Store a new version, making the artifact if this is the first.
+    ///
+    /// The slug is the identity: publishing `pricing` twice is version 2 of
+    /// one artifact rather than two artifacts. One transaction, because a
+    /// version whose files are half-written is a page that renders broken and
+    /// would be indistinguishable from one the agent wrote badly.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn publish_artifact(
+        &self,
+        owner: &str,
+        org: &str,
+        slug: &str,
+        title: &str,
+        entry: &str,
+        files: &[(String, String, Vec<u8>)],
+        from_session: Option<&str>,
+        from_workspace: Option<&str>,
+    ) -> Result<(ft_core::ArtifactId, i32)> {
+        let mut tx = self.pool.begin().await?;
+
+        let existing: Option<String> =
+            sqlx::query_scalar("SELECT id FROM artifacts WHERE owner_id = $1 AND slug = $2")
+                .bind(owner)
+                .bind(slug)
+                .fetch_optional(&mut *tx)
+                .await?;
+
+        let artifact = match existing {
+            // Nothing is written yet. An identical republish must leave this
+            // row completely alone — not even `updated_at` — and the check for
+            // that is below, after the files are known.
+            Some(id) => ft_core::ArtifactId::from_stored(id),
+            None => {
+                let id = ft_core::ArtifactId::new();
+                // Born at the owner's own root. Never into the workspace's
+                // directory, however convenient that would be: a mock-up is
+                // work in progress, and filing one into a team's directory the
+                // moment it exists shares it with everybody by default.
+                // Moving it later is one gesture; unsharing something nobody
+                // meant to share is not.
+                sqlx::query(
+                    "INSERT INTO artifacts (id, org_id, owner_id, title, slug,
+                                            from_session_id, from_workspace_name,
+                                            created_by, path, first_seen_line)
+                     VALUES ($1,$2,$3,$4,$5,$6,$7,$3,
+                             (SELECT ('u.' || slug || '.' || $5)::ltree
+                                FROM principals WHERE id = $3),
+                             -- Where the conversation had got to. Stamped only
+                             -- here, so the card marks where the artifact
+                             -- appeared and does not move when it is edited.
+                             (SELECT max(line_no) FROM agent_lines
+                               WHERE session_id = $6))",
+                )
+                .bind(id.as_str())
+                .bind(org)
+                .bind(owner)
+                .bind(title)
+                .bind(slug)
+                .bind(from_session)
+                .bind(from_workspace)
+                .execute(&mut *tx)
+                .await?;
+                id
+            }
+        };
+
+        // A version identical to the one already current is not a version.
+        //
+        // The backstop that lets a caller publish whenever it is unsure. The
+        // client polls for changes and can be wrong in either direction — a
+        // fingerprint that moves when nothing did, a republish after a
+        // reconnect — and without this, each of those mints a version, so the
+        // history fills with v2..v9 that are all the same page.
+        let current: Vec<(String, Vec<u8>)> = sqlx::query_as(
+            "SELECT f.path, f.body
+               FROM artifact_files f
+               JOIN artifacts a ON a.current_version_id = f.version_id
+              WHERE a.id = $1
+              ORDER BY f.path",
+        )
+        .bind(artifact.as_str())
+        .fetch_all(&mut *tx)
+        .await?;
+
+        if !current.is_empty() {
+            let mut incoming: Vec<(String, Vec<u8>)> = files
+                .iter()
+                .map(|(p, _, b)| (p.clone(), b.clone()))
+                .collect();
+            incoming.sort_by(|a, b| a.0.cmp(&b.0));
+            if incoming == current {
+                // Identical. No version, no touched timestamp, and above all
+                // no change of provenance: a second agent in the same
+                // workspace polls the same folder, and letting its republish
+                // claim the artifact moved the card into a conversation that
+                // had never said anything.
+                let n: i32 = sqlx::query_scalar(
+                    "SELECT v.n FROM artifact_versions v
+                       JOIN artifacts a ON a.current_version_id = v.id
+                      WHERE a.id = $1",
+                )
+                .bind(artifact.as_str())
+                .fetch_one(&mut *tx)
+                .await?;
+                tx.commit().await?;
+                return Ok((artifact, n));
+            }
+        }
+
+        let n: i32 = sqlx::query_scalar(
+            "SELECT coalesce(max(n), 0) + 1 FROM artifact_versions WHERE artifact_id = $1",
+        )
+        .bind(artifact.as_str())
+        .fetch_one(&mut *tx)
+        .await?;
+
+        let bytes: i64 = files.iter().map(|(_, _, b)| b.len() as i64).sum();
+        let version = ft_core::ArtifactVersionId::new();
+        sqlx::query(
+            "INSERT INTO artifact_versions (id, artifact_id, n, entry, bytes)
+             VALUES ($1,$2,$3,$4,$5)",
+        )
+        .bind(version.as_str())
+        .bind(artifact.as_str())
+        .bind(n)
+        .bind(entry)
+        .bind(bytes)
+        .execute(&mut *tx)
+        .await?;
+
+        for (path, content_type, body) in files {
+            sqlx::query(
+                "INSERT INTO artifact_files (version_id, path, content_type, body)
+                 VALUES ($1,$2,$3,$4)",
+            )
+            .bind(version.as_str())
+            .bind(path)
+            .bind(content_type)
+            .bind(body)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        // Provenance is first-writer-wins: `coalesce(column, $n)`, not
+        // `coalesce($n, column)`. The second spelling is what shipped, and it
+        // meant whichever session published last owned the artifact — so
+        // opening a new agent in the same workspace silently took it.
+        //
+        // Which session *made* a thing does not change when another one edits
+        // it. The title does, because that is what the publisher called it.
+        // The title is *not* set here, only on insert.
+        //
+        // Publishing happens every time the agent touches the file, and the
+        // title it sends is derived from the folder name — so overwriting
+        // would undo a rename within seconds of somebody typing it. The name
+        // belongs to whoever named it last on purpose, which is a person
+        // pressing enter, not a poller.
+        sqlx::query(
+            "UPDATE artifacts
+                SET current_version_id = $2,
+                    updated_at = now(),
+                    from_session_id = coalesce(from_session_id, $3),
+                    from_workspace_name = coalesce(from_workspace_name, $4)
+              WHERE id = $1",
+        )
+        .bind(artifact.as_str())
+        .bind(version.as_str())
+        .bind(from_session)
+        .bind(from_workspace)
+        .execute(&mut *tx)
+        .await?;
+
+        // Only the current version is kept.
+        //
+        // Deliberately the simplest rule there is, and taken knowing what it
+        // costs: there is no going back to the page as it was before this
+        // save. The alternative — keep the last two — is worth almost nothing
+        // while publishing is driven by polling, because an agent writes a
+        // file two or three times inside one turn and "previous" is then the
+        // same page from eight seconds ago. Keeping more becomes worth doing
+        // when a publish is one deliberate act (the MCP tool, §5), not before.
+        //
+        // Deleting here rather than in a sweep: the moment a version stops
+        // being current is the moment it stops being wanted, and a sweep would
+        // be a second mechanism deciding the same thing. `artifact_files`
+        // cascades, and so would any note anchored to the version — which is
+        // only harmless while notes are not durable. Wiring §8 means revisiting
+        // this line, not adding to it.
+        sqlx::query("DELETE FROM artifact_versions WHERE artifact_id = $1 AND id <> $2")
+            .bind(artifact.as_str())
+            .bind(version.as_str())
+            .execute(&mut *tx)
+            .await?;
+
+        tx.commit().await?;
+        Ok((artifact, n))
+    }
+
+    /// Every artifact this person may see, newest first.
+    ///
+    /// `filed_where` rather than `owner_id = $1`: that is the only definition
+    /// of "may see this" in the product, and an artifact filed into a
+    /// directory has to appear for everybody with a grant on it. Writing a
+    /// second predicate here is how two answers come to disagree.
+    pub async fn artifacts_of(&self, person: &str) -> Result<Vec<ArtifactRow>> {
+        use crate::access::{filed_where, Level};
+        let sql = format!(
+            "SELECT a.id, a.first_seen_line, a.path::text AS path, a.current_version_id,
+                    a.title, a.slug,
+                    a.from_session_id, a.from_workspace_name, a.updated_at, v.n, v.bytes,
+                    (a.path <@ (SELECT ('u.' || slug)::ltree FROM principals WHERE id = $1)) AS mine,
+                    {shareable} AS may_share
+               FROM artifacts a
+               LEFT JOIN artifact_versions v ON v.id = a.current_version_id
+              WHERE {visible}
+              ORDER BY a.updated_at DESC",
+            visible = filed_where("a", 1, Level::Viewer),
+            shareable = filed_where("a", 1, Level::Writer),
+        );
+        let rows = sqlx::query(&sql)
+            .bind(person)
+            .fetch_all(&self.pool)
+            .await
+            .context("listing artifacts")?;
+
+        Ok(rows
+            .into_iter()
+            .map(|r| ArtifactRow {
+                id: r.get("id"),
+                first_seen_line: r.try_get("first_seen_line").unwrap_or(None),
+                path: ft_core::ResourcePath::from_stored(r.get::<String, _>("path")),
+                may_share: r.try_get("may_share").unwrap_or(false),
+                mine: r.try_get("mine").unwrap_or(false),
+                version_id: r.get("current_version_id"),
+                title: r.get("title"),
+                slug: r.get("slug"),
+                version: r.try_get("n").unwrap_or(0),
+                bytes: r.try_get("bytes").unwrap_or(0),
+                from_session_id: r.get("from_session_id"),
+                from_workspace_name: r.get("from_workspace_name"),
+                updated_at: r.get("updated_at"),
+            })
+            .collect())
+    }
+
+    /// Give an artifact the name a person chose.
+    ///
+    /// The **title** only. The slug is the folder the agent writes into and
+    /// the key a republish is matched on — renaming that would orphan the
+    /// artifact and the next save would appear as a second one.
+    ///
+    /// Writer, not viewer: this changes something, and reading at viewer then
+    /// writing is the first mistake `paths-and-ownership.md` names.
+    pub async fn rename_artifact(
+        &self,
+        person: &str,
+        id: &ft_core::ArtifactId,
+        title: &str,
+    ) -> Result<bool> {
+        use crate::access::{filed_where, Level};
+        let sql = format!(
+            "UPDATE artifacts a SET title = $3, updated_at = now()
+              WHERE a.id = $2 AND {allowed}",
+            allowed = filed_where("a", 1, Level::Writer),
+        );
+        let done = sqlx::query(&sql)
+            .bind(person)
+            .bind(id.as_str())
+            .bind(title)
+            .execute(&self.pool)
+            .await
+            .context("renaming an artifact")?;
+        Ok(done.rows_affected() > 0)
+    }
+
+    /// Remove an artifact and everything under it.
+    ///
+    /// Writer, like renaming. The versions and their bytes go with it by
+    /// cascade, and so does any note anchored to one — which is the whole of
+    /// what deleting an artifact means, and why it is asked about first.
+    pub async fn delete_artifact(&self, person: &str, id: &ft_core::ArtifactId) -> Result<bool> {
+        use crate::access::{filed_where, Level};
+        let sql = format!(
+            "DELETE FROM artifacts a WHERE a.id = $2 AND {allowed}",
+            allowed = filed_where("a", 1, Level::Writer),
+        );
+        let done = sqlx::query(&sql)
+            .bind(person)
+            .bind(id.as_str())
+            .execute(&self.pool)
+            .await
+            .context("deleting an artifact")?;
+        Ok(done.rows_affected() > 0)
+    }
+
+    /// Every file of an artifact's current version, for an export.
+    pub async fn artifact_bundle(
+        &self,
+        id: &ft_core::ArtifactId,
+    ) -> Result<Option<(String, i32, Vec<(String, Vec<u8>)>)>> {
+        let head = sqlx::query(
+            "SELECT a.slug, v.n FROM artifacts a
+               JOIN artifact_versions v ON v.id = a.current_version_id
+              WHERE a.id = $1",
+        )
+        .bind(id.as_str())
+        .fetch_optional(&self.pool)
+        .await
+        .context("looking up an artifact to export")?;
+
+        let Some(head) = head else { return Ok(None) };
+
+        let files: Vec<(String, Vec<u8>)> = sqlx::query_as(
+            "SELECT f.path, f.body FROM artifact_files f
+               JOIN artifacts a ON a.current_version_id = f.version_id
+              WHERE a.id = $1 ORDER BY f.path",
+        )
+        .bind(id.as_str())
+        .fetch_all(&self.pool)
+        .await
+        .context("reading an artifact's files")?;
+
+        Ok(Some((head.get("slug"), head.get("n"), files)))
+    }
+
+    /// The org a person belongs to, for stamping a new artifact.
+    pub async fn org_of_user(&self, owner: &str) -> Result<Option<String>> {
+        sqlx::query_scalar("SELECT org_id FROM users WHERE id = $1")
+            .bind(owner)
+            .fetch_optional(&self.pool)
+            .await
+            .context("finding somebody's organisation")
+    }
+}

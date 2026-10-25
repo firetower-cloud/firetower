@@ -47,8 +47,10 @@ export function usePickerBridge(
   frame: RefObject<HTMLIFrameElement | null>,
   origin: string | null,
   session: string,
-  port: number,
+  port: number | null,
   handlers: Handlers,
+  /** Set instead of `port` when the page is an artifact version, not a dev server. */
+  artifact?: string | null,
 ) {
   const [ready, setReady] = useState(false);
   const [annotating, setAnnotating] = useState(false);
@@ -84,7 +86,10 @@ export function usePickerBridge(
         return;
       }
       if (d.channel !== mine) return;
-      if (d.type === "ready" && d.session === session && d.port === port) {
+      // One of the two identifies the page. An artifact carries a version id
+      // and no port; a preview carries a port and no artifact.
+      const forUs = artifact ? d.artifact === artifact : d.port === port;
+      if (d.type === "ready" && d.session === session && forUs) {
         setReady(true);
         setAnnotating(d.enabled === true);
         if (isPath(d.path)) held.current.onPath(d.path);
@@ -115,7 +120,7 @@ export function usePickerBridge(
       window.removeEventListener("message", listen);
       channel.current = null;
     };
-  }, [origin, session, port, frame]);
+  }, [origin, session, port, artifact, frame]);
 
   return { ready, annotating, tell };
 }

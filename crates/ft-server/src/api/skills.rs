@@ -200,6 +200,19 @@ pub(super) async fn delete_skill(
     Path(id): Path<String>,
 ) -> ApiResult<StatusCode> {
     let me = whoever(&principal)?;
+    // Said plainly rather than left as the 404 the writer check would give.
+    // Nobody holds writer on `d/firetower`, so this is already refused — but
+    // "no such skill" about one visibly sitting in the library is a worse
+    // answer than the true one.
+    if let Ok(Some(skill)) = state.skills.one(me.id.as_str(), &id, Level::Viewer).await {
+        if skill.builtin {
+            return Err(ApiError::new(
+                ErrorCode::InvalidRequest,
+                "Firetower ships this skill, so it cannot be deleted. \
+                 Turn it off for a session instead — the picker in the composer.",
+            ));
+        }
+    }
     state
         .skills
         .one(me.id.as_str(), &id, Level::Writer)
@@ -261,6 +274,19 @@ pub(super) async fn add_version(
     Json(new): Json<NewSkill>,
 ) -> ApiResult<(StatusCode, Json<Skill>)> {
     let me = whoever(&principal)?;
+    // Said plainly rather than left as the 404 the writer check would give.
+    // Nobody holds writer on `d/firetower`, so this is already refused — but
+    // "no such skill" about one visibly sitting in the library is a worse
+    // answer than the true one.
+    if let Ok(Some(skill)) = state.skills.one(me.id.as_str(), &id, Level::Viewer).await {
+        if skill.builtin {
+            return Err(ApiError::new(
+                ErrorCode::InvalidRequest,
+                "Firetower ships this skill, so it cannot be deleted. \
+                 Turn it off for a session instead — the picker in the composer.",
+            ));
+        }
+    }
     state
         .skills
         .one(me.id.as_str(), &id, Level::Writer)

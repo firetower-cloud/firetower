@@ -1,6 +1,7 @@
 export * from './access/access';
 export * from './accounts/accounts';
 export * from './agents/agents';
+export * from './artifacts/artifacts';
 export * from './auth/auth';
 export * from './consumption/consumption';
 export * from './conversation/conversation';

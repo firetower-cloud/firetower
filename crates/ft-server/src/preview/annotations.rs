@@ -11,6 +11,34 @@ use std::sync::{Arc, Mutex};
 
 pub const RUNTIME_PATH: &str = "/__firetower/annotations.js";
 
+/// What the instrumented page is, so the panel knows what a note is about.
+///
+/// A preview is a port somebody is running; an artifact is a stored version.
+/// The runtime carries whichever it was, and the panel keys its notes on it.
+pub enum Target {
+    Port(u16),
+    /// An artifact *version* id. The version rather than the artifact,
+    /// because a note means what it means against the bytes it was written
+    /// on — see `docs/artifacts.md` §8.
+    Artifact(String),
+}
+
+impl Target {
+    /// The data attribute that carries it into the page.
+    fn attribute(&self) -> String {
+        match self {
+            Target::Port(port) => format!(r#"data-port="{port}""#),
+            Target::Artifact(id) => {
+                let id = id
+                    .replace('&', "&amp;")
+                    .replace('"', "&quot;")
+                    .replace('<', "&lt;");
+                format!(r#"data-artifact="{id}""#)
+            }
+        }
+    }
+}
+
 pub fn runtime() -> Response {
     (
         [
@@ -103,7 +131,7 @@ fn nonce_policy(policy: &str, nonce: &str) -> String {
     directives.join("; ")
 }
 
-pub fn instrument(mut response: Response, session: &str, port: u16, ui: &str) -> Response {
+pub fn instrument(mut response: Response, session: &str, target: Target, ui: &str) -> Response {
     if !response.status().is_success() || !eligible(response.headers()) {
         return response;
     }
@@ -118,8 +146,9 @@ pub fn instrument(mut response: Response, session: &str, port: u16, ui: &str) ->
         .replace('&', "&amp;")
         .replace('"', "&quot;")
         .replace('<', "&lt;");
+    let target = target.attribute();
     let script = format!(
-        r#"<script nonce="{nonce}" src="{RUNTIME_PATH}" data-session="{session}" data-port="{port}" data-ui="{ui}" defer></script>"#
+        r#"<script nonce="{nonce}" src="{RUNTIME_PATH}" data-session="{session}" {target} data-ui="{ui}" defer></script>"#
     );
     let policies: Vec<_> = response
         .headers()
@@ -278,7 +307,12 @@ mod tests {
             .header(header::ETAG, "old")
             .body(body)
             .unwrap();
-        let response = instrument(response, "s_test", 3000, "http://localhost:3000");
+        let response = instrument(
+            response,
+            "s_test",
+            Target::Port(3000),
+            "http://localhost:3000",
+        );
         assert!(!response.headers().contains_key(header::CONTENT_LENGTH));
         assert!(!response.headers().contains_key(header::ETAG));
         let bytes = axum::body::to_bytes(response.into_body(), 10000)

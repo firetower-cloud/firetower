@@ -14,6 +14,8 @@
 //! who dropped the same folder share one copy. See `blobs`.
 
 use anyhow::{Context, Result};
+
+pub mod builtin;
 use chrono::{DateTime, Utc};
 use ft_core::{SkillId, SkillVersionId};
 use serde::{Deserialize, Serialize};
@@ -103,6 +105,9 @@ pub struct Skill {
     pub risk: Vec<String>,
     /// Who wrote it. A fact that outlives them leaving.
     pub author: Option<String>,
+    /// Firetower ships this one. Filed in `d/firetower`, which nobody holds
+    /// writer on — so it is readable by everybody and deletable by nobody.
+    pub builtin: bool,
     pub updated_at: DateTime<Utc>,
     /// Whether this person may make a version of it or rename it.
     pub may_write: bool,
@@ -1042,6 +1047,7 @@ const COLUMNS: &str = "k.id, k.path::text AS path, k.name, k.slug, k.description
      v.version, v.tokens, v.files, v.bytes, v.frontmatter, v.body, \
      EXISTS (SELECT 1 FROM skill_files f \
               WHERE f.version_id = v.id AND f.path LIKE 'scripts/%') AS has_scripts, \
+     (k.path <@ 'd.firetower'::ltree) AS builtin, \
      u.name AS author";
 
 const FROM: &str = "FROM skills k \
@@ -1065,7 +1071,8 @@ impl Skills {
                  WHERE sd.skill_id = k.id AND sd.user_id = $1 AND sd.repo_id IS NOT NULL) AS default_in, \
                EXISTS (SELECT 1 FROM skill_defaults sd \
                         WHERE sd.skill_id = k.id AND sd.user_id = $1 AND sd.repo_id IS NULL) AS always_on, \
-               {writable} AS may_write, {shareable} AS may_share \
+               {writable} AS may_write, \
+               ({shareable} AND NOT k.path <@ 'd.firetower'::ltree) AS may_share \
              {FROM} WHERE {visible} ORDER BY k.name",
             visible = filed_where("k", 1, at_least),
             writable = filed_where("k", 1, Level::Writer),
@@ -1082,8 +1089,12 @@ impl Skills {
     /// One skill, if this person may see it.
     pub async fn one(&self, person: &str, id: &str, at_least: Level) -> Result<Option<Skill>> {
         let sql = format!(
-            "SELECT {COLUMNS}, '{{}}'::text[] AS default_in, false AS always_on, \
-               {writable} AS may_write, {shareable} AS may_share \
+            "SELECT {COLUMNS}, '{{}}'::text[] AS default_in, \
+               EXISTS (SELECT 1 FROM skill_defaults sd \
+                        WHERE sd.skill_id = k.id AND sd.user_id = $1 AND sd.repo_id IS NULL) \
+                 AS always_on, \
+               {writable} AS may_write, \
+               ({shareable} AND NOT k.path <@ 'd.firetower'::ltree) AS may_share \
              {FROM} WHERE k.id = $2 AND {visible}",
             visible = filed_where("k", 1, at_least),
             writable = filed_where("k", 1, Level::Writer),
@@ -1238,6 +1249,186 @@ impl Skills {
         .await?;
         tx.commit().await?;
         Ok(version)
+    }
+
+    /// Put Firetower's own skills in every organisation, and keep them current.
+    ///
+    /// Idempotent, and run on every start-up. A bundle whose bytes have not
+    /// changed costs one digest comparison and writes nothing; one that has
+    /// gains a **version** rather than overwriting the old — `skill_versions`
+    /// is append-only and a running session pins the version it started with,
+    /// which is what makes upgrading safe rather than something to schedule.
+    ///
+    /// Failure here is logged and not fatal. A control plane that refuses to
+    /// start because a built-in could not be seeded would trade a missing
+    /// skill for a missing product.
+    pub async fn seed_builtins(&self) -> Result<usize> {
+        let orgs: Vec<String> = sqlx::query_scalar("SELECT id FROM organizations")
+            .fetch_all(&self.pool)
+            .await
+            .context("listing organisations to seed")?;
+
+        let mut touched = 0;
+        for org in orgs {
+            let directory = self.ensure_builtin_directory(&org).await?;
+            for one in builtin::ALL {
+                if self.ensure_builtin(&org, &directory, one).await? {
+                    touched += 1;
+                }
+            }
+        }
+        Ok(touched)
+    }
+
+    /// Turn a built-in on for everybody — **once**, the first time it ships.
+    ///
+    /// Once, not on every boot, and that is the whole difficulty. Seeding the
+    /// row repeatedly would undo somebody turning it off: they clear it, the
+    /// next restart puts it back, and the switch becomes a thing that resets
+    /// itself overnight. The key is per slug rather than one flag for all of
+    /// them, so a built-in added later is still offered to people who already
+    /// decided about the first.
+    ///
+    /// Somebody who joins afterwards is handled where they are made — see
+    /// `offer_builtins_to`.
+    pub async fn offer_builtins_once(&self, accounts: &crate::accounts::Accounts) -> Result<()> {
+        for one in builtin::ALL {
+            let key = format!("offered_builtin:{}", one.slug);
+            if accounts.setting(&key).await?.is_some() {
+                continue;
+            }
+            sqlx::query(
+                "INSERT INTO skill_defaults (user_id, repo_id, skill_id)
+                 SELECT u.id, NULL, k.id FROM users u
+                   CROSS JOIN skills k
+                  WHERE k.path = ('d.firetower.' || $1)::ltree AND k.org_id = u.org_id
+                 ON CONFLICT DO NOTHING",
+            )
+            .bind(one.slug)
+            .execute(&self.pool)
+            .await
+            .context("offering a built-in to everybody")?;
+            accounts.set_setting(&key, "done").await?;
+            tracing::info!(skill = one.slug, "turned a built-in on for everybody, once");
+        }
+        Ok(())
+    }
+
+    /// The same offer, for somebody who has just been created.
+    pub async fn offer_builtins_to(&self, person: &str) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO skill_defaults (user_id, repo_id, skill_id)
+             SELECT $1, NULL, k.id FROM skills k
+               JOIN users u ON u.id = $1 AND u.org_id = k.org_id
+              WHERE k.path <@ 'd.firetower'::ltree
+             ON CONFLICT DO NOTHING",
+        )
+        .bind(person)
+        .execute(&self.pool)
+        .await
+        .context("offering the built-ins to somebody new")?;
+        Ok(())
+    }
+
+    /// `d/firetower`, open to everybody and writable by nobody.
+    ///
+    /// Viewer rather than writer, which is the opposite of `d/shared`: that
+    /// one holds machines people are expected to use, this one holds what
+    /// Firetower ships. A writer grant here would be a delete button on the
+    /// product's own instructions.
+    async fn ensure_builtin_directory(&self, org: &str) -> Result<String> {
+        let id: String = sqlx::query_scalar(
+            "INSERT INTO directories (id, org_id, name, slug) VALUES ($1, $2, 'Firetower', $3)
+             ON CONFLICT (org_id, slug) DO UPDATE SET slug = EXCLUDED.slug
+             RETURNING id",
+        )
+        .bind(ft_core::DirectoryId::new().as_str())
+        .bind(org)
+        .bind(builtin::DIRECTORY_SLUG)
+        .fetch_one(&self.pool)
+        .await
+        .context("making the Firetower directory")?;
+
+        let everyone: Option<String> =
+            sqlx::query_scalar("SELECT id FROM teams WHERE org_id = $1 AND everyone")
+                .bind(org)
+                .fetch_optional(&self.pool)
+                .await?;
+
+        if let Some(team) = everyone {
+            sqlx::query(
+                "INSERT INTO grants (directory_id, subject_kind, subject_id, level)
+                 VALUES ($1, 'team', $2, 'viewer')
+                 ON CONFLICT DO NOTHING",
+            )
+            .bind(&id)
+            .bind(&team)
+            .execute(&self.pool)
+            .await
+            .context("opening the Firetower directory to everybody")?;
+        }
+
+        Ok(id)
+    }
+
+    /// One bundle, created or brought up to date. True when something changed.
+    async fn ensure_builtin(
+        &self,
+        org: &str,
+        _directory: &str,
+        one: &builtin::Builtin,
+    ) -> Result<bool> {
+        let (name, description, body) = builtin::fields(one.markdown)?;
+        let new = NewSkill {
+            name: name.clone(),
+            description: description.clone(),
+            frontmatter: serde_json::json!({ "name": name, "description": description }),
+            body,
+            files: vec![IncomingFile {
+                path: "SKILL.md".to_string(),
+                contents: ft_proto::encode(one.markdown.as_bytes()),
+                executable: false,
+            }],
+            notes: None,
+        };
+
+        let path = format!("{}{}", builtin::PATH_PREFIX, one.slug);
+        let existing: Option<String> =
+            sqlx::query_scalar("SELECT id FROM skills WHERE org_id = $1 AND path = $2::ltree")
+                .bind(org)
+                .bind(&path)
+                .fetch_optional(&self.pool)
+                .await?;
+
+        let Some(id) = existing else {
+            let id = SkillId::new();
+            let mut tx = self.pool.begin().await?;
+            sqlx::query(
+                "INSERT INTO skills (id, org_id, path, name, slug, description)
+                 VALUES ($1, $2, $3::ltree, $4, $5, $6)",
+            )
+            .bind(id.as_str())
+            .bind(org)
+            .bind(&path)
+            .bind(&new.name)
+            .bind(one.slug)
+            .bind(&new.description)
+            .execute(&mut *tx)
+            .await
+            .context("writing a built-in skill")?;
+            // No `created_by`: nobody made this, Firetower ships it.
+            write_version(&mut tx, id.as_str(), "", &new, 1).await?;
+            tx.commit().await?;
+            return Ok(true);
+        };
+
+        // Content-addressed, so an unchanged bundle writes nothing at all.
+        let want = Self::digest_of_new(&new)?;
+        if self.current_digest(&id).await?.as_deref() == Some(want.as_str()) {
+            return Ok(false);
+        }
+        self.add_version(&id, "", &new).await?;
+        Ok(true)
     }
 
     /// Rename a skill, or rewrite what it says it is for.
@@ -1671,6 +1862,15 @@ impl Skills {
 
     /// Which skills would be ticked for somebody starting work on these
     /// repositories: the union of their defaults, plus their always-on set.
+    /// What a new session starts with: somebody's own defaults, and nothing
+    /// else.
+    ///
+    /// A built-in is on by default because `offer_builtins_once` writes it a
+    /// real row here, not because this query knows about it. That difference
+    /// is the whole point — a union here forced them on whatever the library
+    /// said, so the switch on the Defaults screen could not move and had to be
+    /// locked to stop it lying. A default that cannot be changed is not a
+    /// default.
     pub async fn defaults_for(&self, person: &str, repos: &[String]) -> Result<Vec<String>> {
         sqlx::query_scalar(
             "SELECT DISTINCT sd.skill_id FROM skill_defaults sd \
@@ -1815,7 +2015,9 @@ async fn write_version(
     .bind(&new.notes)
     .bind(tokens_for(&new.name, &new.description))
     .bind(paths.len() as i32)
-    .bind(person)
+    // Empty means nobody, which is what a built-in is: Firetower ships it and
+    // no principal made it. Binding "" would fail the foreign key instead.
+    .bind((!person.is_empty()).then_some(person))
     .execute(&mut **tx)
     .await
     .context("writing a skill version")?;
@@ -1931,6 +2133,7 @@ fn read_skill(r: sqlx::postgres::PgRow) -> Result<Skill> {
             },
         ),
         author: r.try_get("author").ok().flatten(),
+        builtin: r.try_get("builtin").unwrap_or(false),
         updated_at: r.get("updated_at"),
         may_write: r.try_get("may_write").unwrap_or(false),
         may_share: r.try_get("may_share").unwrap_or(false),
@@ -1948,6 +2151,97 @@ mod tests {
     /// The two sides of the fingerprint have to agree, so the format is
     /// pinned here as a literal rather than as whatever the code happens to
     /// build. The migration computes the identical string in SQL.
+    /// Shipping a built-in is a one-shot migration, and this is the test for
+    /// the shot. Everybody who already had an account when it shipped has to
+    /// end up with it on — they were created before the skill existed, so the
+    /// offer made at user creation cannot reach them. `offer_builtins_once` is
+    /// the only thing that can, and it runs on a boot that happens exactly
+    /// once per slug.
+    ///
+    /// The hard part is that "once" has to hold against the obvious bug in the
+    /// other direction: seeding on every boot would put the row back after
+    /// somebody turned it off, and a switch that resets itself overnight is
+    /// worse than no switch.
+    #[tokio::test]
+    async fn a_builtin_reaches_everybody_who_was_already_here() {
+        let (db, _admin) = crate::db::Db::open_for_test_owned().await.unwrap();
+        let accounts = crate::accounts::Accounts::new(db.pool().clone());
+        let org = ft_core::OrgId::from_stored(db.org().await.unwrap());
+        let skills = Skills::new(db.pool().clone());
+
+        // Ana predates the built-in entirely: no `d/firetower` yet, so there
+        // is nothing for the offer at her creation to give her.
+        let (ana, _) = accounts
+            .create_user(&org, "ana", "ana@westlabs.com", "member")
+            .await
+            .unwrap();
+        assert!(
+            skills.always_on(ana.id.as_str()).await.unwrap().is_empty(),
+            "nothing is on before anything ships"
+        );
+
+        // The update lands: the bundles become rows, and the one-time offer runs.
+        assert!(
+            skills.seed_builtins().await.unwrap() > 0,
+            "something shipped"
+        );
+        skills.offer_builtins_once(&accounts).await.unwrap();
+
+        let shipped: Vec<String> = sqlx::query_scalar(
+            "SELECT id FROM skills WHERE path <@ 'd.firetower'::ltree ORDER BY id",
+        )
+        .fetch_all(db.pool())
+        .await
+        .unwrap();
+        assert_eq!(shipped.len(), builtin::ALL.len(), "one row per built-in");
+
+        // Both of them: the person who was here first, and Ana.
+        let admin = accounts.user_by_name("admin").await.unwrap().unwrap();
+        for (who, id) in [("admin", admin.id.as_str()), ("ana", ana.id.as_str())] {
+            assert_eq!(
+                skills.always_on(id).await.unwrap(),
+                shipped,
+                "{who} should have the built-in on after the update"
+            );
+            // And a session they start would pick it up, which is the point of
+            // the row being here rather than in the query.
+            assert_eq!(
+                skills.defaults_for(id, &[]).await.unwrap(),
+                shipped,
+                "{who}'s next session starts with it"
+            );
+        }
+
+        // Ana decides against it. A second boot must leave that alone.
+        skills
+            .set_default(ana.id.as_str(), &shipped[0], None, false)
+            .await
+            .unwrap();
+        skills.offer_builtins_once(&accounts).await.unwrap();
+        assert!(
+            skills.always_on(ana.id.as_str()).await.unwrap().is_empty(),
+            "turning a built-in off has to survive a restart"
+        );
+        assert_eq!(
+            skills.always_on(admin.id.as_str()).await.unwrap(),
+            shipped,
+            "and leaves everybody else's alone"
+        );
+
+        // Somebody who joins afterwards gets it from the other end, because
+        // the once-only offer has already run and will not run for them.
+        let (zoe, _) = accounts
+            .create_user(&org, "zoe", "zoe@westlabs.com", "member")
+            .await
+            .unwrap();
+        skills.offer_builtins_to(zoe.id.as_str()).await.unwrap();
+        assert_eq!(
+            skills.always_on(zoe.id.as_str()).await.unwrap(),
+            shipped,
+            "a new account gets what Firetower ships"
+        );
+    }
+
     #[test]
     fn the_fingerprint_is_over_the_manifest() {
         let bundle = |runs: bool| {

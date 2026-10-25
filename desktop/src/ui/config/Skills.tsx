@@ -134,7 +134,13 @@ export function Skills() {
     : feed.data;
   const tickable = shown.filter((s) => s.mayShare);
   const allOn = tickable.length > 0 && tickable.every((s) => picked.has(s.id));
-  const sharedWithMe = shown.filter((s) => !s.mayShare);
+  /* Three groups, and they are the three the path already encodes: what
+     Firetower ships, what is yours, and what somebody filed into a directory
+     you can reach. The built-ins are split out of "shared with you" because
+     they are not shared *with* you by anybody — they arrive with the product,
+     and lumping them in made it look as though a colleague had sent them. */
+  const builtIn = shown.filter((s) => s.builtin);
+  const sharedWithMe = shown.filter((s) => !s.mayShare && !s.builtin);
 
   const row = (s: Skill, manage: boolean) => (
     <div
@@ -249,6 +255,15 @@ export function Skills() {
         {tickable.map((s) => row(s, true))}
       </Rows>
     </Section>
+
+    {builtIn.length > 0 && (
+      <Section
+        title="From Firetower"
+        note="Shipped with the product and on by default. They cannot be deleted — turn one off for a session in the composer's skill picker."
+      >
+        {builtIn.map((s) => row(s, false))}
+      </Section>
+    )}
 
     {sharedWithMe.length > 0 && (
       <Section
@@ -457,7 +472,7 @@ function Detail({
         <div className="min-w-0 flex-1">
           <h1 className="truncate font-mono text-display text-bone">{skill.name}</h1>
           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-meta text-dim">
-            <span>{skill.author ?? "somebody who has left"}</span>
+            <span>{skill.builtin ? "Firetower" : (skill.author ?? "somebody who has left")}</span>
             <span className="h-3 w-px bg-line" />
             <span className="tabular-nums">v{skill.version}</span>
             <span className="h-3 w-px bg-line" />
@@ -502,7 +517,7 @@ function Detail({
               rows={[
                 ["Version", `v${skill.version}`],
                 ["Updated", new Date(skill.updatedAt).toLocaleDateString()],
-                ["Author", skill.author ?? "somebody who has left"],
+                ["Author", skill.builtin ? "Firetower" : (skill.author ?? "somebody who has left")],
                 ["Size", `${size(skill.bytes)}, ${skill.files} files`],
                 ["Context", `${skill.tokens} tokens a turn`],
               ]}
@@ -570,17 +585,27 @@ function Switch({ on, busy, onFlip }: { on: boolean; busy: boolean; onFlip: () =
     <button
       role="switch"
       aria-checked={on}
-      disabled={busy}
-      onClick={onFlip}
-      className={`relative h-4 w-7 shrink-0 rounded-full transition-colors disabled:opacity-50 ${
-        on ? "bg-sage-deep" : "bg-ground shadow-[inset_0_1px_2px_rgb(0_0_0/0.4)]"
+      aria-disabled={busy}
+      onClick={() => {
+        if (busy) return;
+        onFlip();
+      }}
+      className={`relative h-4 w-7 shrink-0 rounded-full border transition-colors ${
+        on
+          ? "border-sage-deep bg-sage-deep"
+          : // A track that is only `bg-ground` on a near-black screen is
+            // invisible — it read as empty space rather than as something off.
+            "border-line bg-raise"
       }`}
     >
       <span
-        style={{ left: on ? 14 : 2 }}
-        className={`absolute top-1/2 h-3 w-3 -translate-y-1/2 rounded-full transition-[left,background-color] duration-150 ${
-          on ? "bg-sage" : "bg-mute"
-        }`}
+        // `translate` rather than animating `left`: a transitioned layout
+        // property is laid out again every frame, which is the stutter this
+        // had on the way across.
+        style={{ transform: `translate(${on ? 14 : 2}px, -50%)` }}
+        className={`absolute top-1/2 left-0 h-3 w-3 rounded-full transition-[transform,background-color] duration-150 ease-out ${
+          on ? "bg-sage" : "bg-dim"
+        } ${busy ? "opacity-60" : ""}`}
       />
     </button>
   );
@@ -689,7 +714,11 @@ function Defaults({ skill, onChanged }: { skill: Skill; onChanged: () => void })
 
   const rows = useMemo(
     () => [
-      { id: null as string | null, label: "In every workspace you start", on: skill.alwaysOn },
+      {
+        id: null as string | null,
+        label: "In every workspace you start",
+        on: skill.alwaysOn,
+      },
       ...repos.data.map((r) => ({
         id: r.id as string | null,
         label: r.slug,

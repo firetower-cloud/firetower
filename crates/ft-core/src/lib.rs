@@ -26,8 +26,8 @@ pub mod turn;
 
 pub use grants::{Level, SubjectKind};
 pub use ids::{
-    DirectoryId, HostId, OrgId, RepoId, SessionId, SkillId, SkillVersionId, TeamId, UserId,
-    WorkspaceId,
+    ArtifactId, ArtifactVersionId, DirectoryId, HostId, OrgId, RepoId, SessionId, SkillId,
+    SkillVersionId, TeamId, UserId, WorkspaceId,
 };
 pub use path::{slug, ResourcePath};
 pub use session::{
@@ -211,9 +211,15 @@ impl Agent {
                     preferred.effort.clone().unwrap_or_else(|| EFFORT.into()),
                 ]);
 
+                // Always appended, with the handover after it when there is
+                // one. Two `--append-system-prompt` flags would be the obvious
+                // shape and the agent takes only one, so they are joined here
+                // rather than discovered to be exclusive later.
+                let mut appended = vec![ARTIFACT_GUIDANCE.to_string()];
                 if let Start::Carrying(before) = &start {
-                    argv.extend(["--append-system-prompt".into(), before.clone()]);
+                    appended.push(before.clone());
                 }
+                argv.extend(["--append-system-prompt".into(), appended.join("\n\n")]);
 
                 match asking {
                     // The agent stops and asks, and the question is routed to
@@ -1020,6 +1026,32 @@ pub enum Start {
     /// thing it then says is that it has no idea what you are talking about.
     Carrying(String),
 }
+
+/// What every agent is told about publishing something to look at.
+///
+/// **In the system prompt, not only in a file.** It lived only in the
+/// workspace's `AGENTS.md`, and `Start::Carrying` above already explains why
+/// that was not enough: *a file the agent is merely told about is a file it
+/// can decide not to read*. A session asked in as many words to "create an
+/// artifact" wrote an ordinary `.html` at the workspace root instead, because
+/// nothing in its context said there was anywhere else to put it.
+///
+/// Short on purpose: this is in context on every turn of every session,
+/// including the ones that will never publish anything. It is the contract —
+/// where the file goes and what the origin cannot do — and deliberately not a
+/// recipe, which is taste and belongs in a skill somebody installs.
+pub const ARTIFACT_GUIDANCE: &str = "\
+## Artifacts
+
+When somebody asks to *see* something — a mock-up, a page, a chart, a report —
+publish it as one self-contained HTML file at
+`.firetower/artifacts/<name>/index.html`. Firetower serves it from there and
+shows it in the conversation, where it opens full screen and can be annotated.
+Nothing written anywhere else is shown to anybody.
+
+The `firetower-artifacts` skill has the rest: what the page is rendered inside,
+what makes one good, and how to use a richer artifact skill alongside it.
+";
 
 /// Whether there is anybody to answer a permission prompt.
 ///

@@ -10,22 +10,14 @@
  * everything below starts at a clean edge, and the whole bar drags the window
  * except the controls in it.
  */
-import { Command, Minus, Square, X } from "lucide-react";
-import { isMac, mod } from "~/platform";
+import { Minus, Square, X } from "lucide-react";
+import { isMac } from "~/platform";
 import { bridge } from "~/bridge";
 import { drag } from "~/drag";
 import { useFleet } from "~/fleet";
 import type { Scope } from "~/ui/ServerStrip";
 
-export function Titlebar({
-  scope,
-  waiting,
-  onPalette,
-}: {
-  scope: Scope;
-  waiting: number;
-  onPalette: () => void;
-}) {
+export function Titlebar({ scope, waiting }: { scope: Scope; waiting: number }) {
   const fleet = useFleet();
   const here = scope === "all" ? null : fleet.find((f) => f.backend.id === scope)?.backend;
 
@@ -55,13 +47,6 @@ export function Titlebar({
       )}
 
       <span className="flex-1 self-stretch" />
-
-      <button
-        onClick={onPalette}
-        className="no-drag mr-2 flex h-6 items-center gap-1 rounded-sm px-2 text-meta text-mute transition-colors hover:bg-raise hover:text-dim"
-      >
-        {isMac ? <Command className="h-3 w-3" strokeWidth={2} /> : <span>{mod}+</span>}K
-      </button>
 
       {/* macOS draws its own lights at the left; everywhere else the window
           has no frame and these are the buttons, at the right, in the order

@@ -431,6 +431,21 @@ pub(super) async fn delete_directory(
 ) -> ApiResult<StatusCode> {
     let me = whoever(&principal)?;
     may_administer(&state, me, &id).await?;
+
+    // Firetower's own directory is system-managed. An administrator holds
+    // admin on every directory, so without this an organisation could revoke
+    // its own access to the skills the product ships — and the next boot would
+    // silently put them back, which is a support ticket rather than a feature.
+    if let Ok(Some(directory)) = state.access.directory(&id).await {
+        if directory.slug == crate::skills::builtin::DIRECTORY_SLUG {
+            return Err(ApiError::new(
+                ErrorCode::InvalidRequest,
+                "Firetower keeps its own skills here. The directory cannot be removed, \
+                 but any skill in it can be turned off for a session.",
+            ));
+        }
+    }
+
     state.access.delete_directory(&id).await.map_err(said)?;
     tracing::info!(by = %me.username, directory = %id, "directory removed");
     Ok(StatusCode::NO_CONTENT)
@@ -612,6 +627,25 @@ pub(super) async fn may_share(
         .path_of(kind, id)
         .await?
         .ok_or_else(|| ApiError::not_found(kind.singular()))?;
+
+    // What Firetower ships stays where Firetower put it.
+    //
+    // Before the administrator bypass below, because that bypass is exactly
+    // what would otherwise allow this: an organisation administrator holds
+    // admin on every directory, so without this they could re-file a built-in
+    // out of `d/firetower`, taking the `everyone` grant with it — and the next
+    // boot would quietly seed a second copy, because the seed looks the skill
+    // up by its path.
+    if at
+        .to_ltree()
+        .starts_with(crate::skills::builtin::PATH_PREFIX)
+    {
+        return Err(ApiError::new(
+            ErrorCode::Forbidden,
+            "Firetower keeps its own skills in one place, so this cannot be moved. \
+             Turn it off for a session instead.",
+        ));
+    }
 
     // **Somebody's own root is theirs, and an administrator is not an
     // exception.** Everywhere else `role == "admin"` is the way back in when a

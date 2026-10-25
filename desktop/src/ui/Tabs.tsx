@@ -11,11 +11,16 @@
  * replacing the pane's content: skimming six files while reading a diff should
  * not leave six tabs behind.
  */
-import { Globe, Image, MessageSquare, X } from "lucide-react";
+import { Globe, Image, MessageSquare, Shapes, X } from "lucide-react";
 import { langOf } from "~/syntax";
 import { isImage } from "~/api/text";
 
-export type Tab = { id: "chat" } | { id: string; path: string; preview?: boolean; line?: number } | { id: string; port: number; path?: string };
+export type Tab =
+  | { id: "chat" }
+  | { id: string; path: string; preview?: boolean; line?: number }
+  | { id: string; port: number; path?: string }
+  /** An artifact. Named rather than pathed: it is not a file in this workspace. */
+  | { id: string; artifactId: string; title: string };
 
 /** Files get the kind colours the tree already uses. Nine categories, not ninety. */
 function tone(path: string): string {
@@ -56,6 +61,7 @@ export function TabStrip({
         const on = tab.id === active;
         const chat = tab.id === "chat";
         const port = "port" in tab ? tab.port : null;
+        const art = "artifactId" in tab ? tab : null;
         const preview = !chat && "preview" in tab && tab.preview;
 
         return (
@@ -73,6 +79,8 @@ export function TabStrip({
             {on && <span className="absolute inset-x-0 top-0 h-[2px] bg-bone/70" />}
             {chat ? (
               <MessageSquare className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
+            ) : art ? (
+              <Shapes className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
             ) : port !== null ? (
               <Globe className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
             ) : isImage((tab as { path: string }).path) ? (
@@ -86,10 +94,10 @@ export function TabStrip({
             )}
 
             <span
-              className={`min-w-0 truncate text-ui ${chat ? "" : "font-mono"} ${preview ? "italic" : ""}`}
-              title={chat ? "Conversation" : port !== null ? `Port ${port} in this session` : (tab as { path: string }).path}
+              className={`min-w-0 truncate text-ui ${chat || art ? "" : "font-mono"} ${preview ? "italic" : ""}`}
+              title={chat ? "Conversation" : art ? art.title : port !== null ? `Port ${port} in this session` : (tab as { path: string }).path}
             >
-              {chat ? "Conversation" : port !== null ? `:${port}` : (tab as { path: string }).path.split("/").pop()}
+              {chat ? "Conversation" : art ? art.title : port !== null ? `:${port}` : (tab as { path: string }).path.split("/").pop()}
             </span>
 
             {!chat && (

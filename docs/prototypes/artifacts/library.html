@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>Firetower — artifacts</title>
+<link rel="stylesheet" href="../skills/desk.css">
+<link rel="stylesheet" href="art.css">
+<style>
+  #body{grid-template-columns:206px minmax(0,1fr)}
+  .main{display:flex;flex-direction:column;min-height:0;min-width:0}
+  .scroll{flex:1;min-height:0;overflow-y:auto;padding:0 12px 40px}
+  .legendrow{display:flex;align-items:baseline;gap:10px;padding:16px 10px 7px}
+  .legendrow .n{font-size:var(--micro);color:var(--mute)}
+
+  /* list — the default, because this is a dense Mac app */
+  .lst .a{display:grid;grid-template-columns:94px 1fr 92px 86px 74px;gap:14px;align-items:center;
+    height:62px;padding:0 10px;border-radius:var(--r-md);cursor:default}
+  .lst .a:hover{background:color-mix(in srgb,var(--raise) 70%,transparent)}
+  .lst .a .thumb{width:94px;height:54px;border:1px solid var(--line);border-radius:var(--r-sm);
+    overflow:hidden;background:#fff;position:relative}
+  .lst .a .thumb i{position:absolute;inset:0;transform-origin:0 0;display:block}
+  .lst .a .nm{color:var(--bone);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .lst .a .sub{font-size:var(--micro);color:var(--mute);margin-top:1px;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .lst .a .c{font-size:var(--meta);color:var(--dim)}
+  .lst .a .r{font-size:var(--meta);color:var(--mute);text-align:right;font-variant-numeric:tabular-nums}
+  .lst .head{height:24px!important;color:var(--mute);font-family:"Archivo Narrow";font-size:var(--micro);
+    letter-spacing:.18em;text-transform:uppercase}
+  .lst .head:hover{background:none}
+
+  /* grid — the claude.ai shape, offered for comparison */
+  .grd{display:grid;grid-template-columns:repeat(auto-fill,minmax(216px,1fr));gap:14px;padding:6px 10px}
+  .grd .a{cursor:default}
+  .grd .a .thumb{height:132px;border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden;
+    background:#fff;position:relative;transition:border-color var(--dur) var(--swift)}
+  .grd .a:hover .thumb{border-color:#3d3d46}
+  .grd .a .thumb i{position:absolute;inset:0;transform-origin:0 0;display:block}
+  .grd .a .nm{font-size:var(--ui);color:var(--bone);font-weight:600;margin-top:7px;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .grd .a .sub{font-size:var(--micro);color:var(--mute);margin-top:2px}
+  body[data-view=list] .grd{display:none}
+  body[data-view=grid] .lst{display:none}
+
+  .mini{font:11px/1.45 ui-sans-serif,system-ui,sans-serif;color:#1c1c1f;background:#fff;
+    padding:26px 30px;width:620px;height:360px}
+  .mini h3{font-size:30px;font-weight:700;letter-spacing:-.02em;color:#0c0c0e;line-height:1.2}
+  .mini p{color:#6b6b75;margin-top:10px;max-width:44ch;font-size:15px}
+  .mini .bars{display:flex;gap:12px;margin-top:28px}
+  .mini .bars b{flex:1;height:150px;border:1px solid #e3e3e8;border-radius:5px;display:block}
+  .mini .bars b.on{border-color:#1c1c1f;background:#fafafb}
+  .mini .rows{margin-top:24px;display:flex;flex-direction:column;gap:13px}
+  .mini .rows u{display:block;height:17px;border-radius:5px;background:#edeef1;text-decoration:none}
+  .mini .rows u.s{width:62%}.mini .rows u.m{width:84%}.mini .rows u.l{width:45%}
+</style></head>
+<body data-view="list">
+<div id="win">
+
+  <div class="titlebar">
+    <div class="lights"><i></i><i></i><i></i></div>
+    <div class="where"><b>Artifacts</b></div>
+    <div class="right"><span class="sig you">kevin</span></div>
+  </div>
+
+  <div id="body">
+    <div class="sidebar">
+      <div class="legend">You</div>
+      <div class="row"><span style="width:26px;text-align:center;color:var(--mute)">&#9634;</span><span>Inbox</span><span style="margin-left:auto;font-size:var(--micro);color:var(--ember)" class="num">2</span></div>
+      <div class="row"><span style="width:26px;text-align:center;color:var(--mute)">&#9643;</span><span>Workspaces</span></div>
+      <div class="row" data-on="true"><span style="width:26px;text-align:center;color:var(--dim)">&#9671;</span><span>Artifacts</span><span style="margin-left:auto;font-size:var(--micro);color:var(--mute)" class="num">11</span></div>
+      <div class="row"><span style="width:26px;text-align:center;color:var(--mute)">&#9651;</span><span>Skills</span></div>
+      <div class="legend">Shared with you</div>
+      <div class="row"><span class="mark">D</span><span>design</span></div>
+      <div class="row"><span class="mark">G</span><span>growth</span></div>
+    </div>
+
+    <div class="main">
+      <div class="toolbar">
+        <div class="search" style="width:260px"><span style="color:var(--mute)">&#9906;</span>
+          <input placeholder="Find an artifact"></div>
+        <div class="track" style="margin-left:8px">
+          <button data-on="true">All</button><button>Yours</button><button>Shared</button>
+        </div>
+        <div class="right">
+          <span class="legend" style="letter-spacing:.1em">Sort</span>
+          <div class="track"><button data-on="true">Recent</button><button>Name</button></div>
+          <div class="track" id="view">
+            <button data-v="list" data-on="true" title="List">&#9776;</button>
+            <button data-v="grid" title="Grid">&#9638;</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="scroll">
+        <div class="legendrow"><span class="legend">This week</span><span class="n">4</span></div>
+        <div class="lst" id="lst"></div>
+        <div class="grd" id="grd"></div>
+
+        <div style="padding:22px 10px 0;max-width:80ch">
+          <p class="aside note"><b>Why these outlive the conversations that made them.</b>
+          <code class="mono" style="color:var(--syn-string)">reclaim.rs</code> deletes a workspace
+          within a minute of its last session ending, with no grace period. An artifact hung off the
+          workspace would go with it &mdash; so this screen only exists if an artifact belongs to
+          <i>you</i>, and the session it came from is provenance rather than its parent.</p>
+
+          <p class="aside" style="margin-top:12px"><b>List, not a wall of cards.</b> The density
+          rules in <code class="mono" style="color:var(--syn-string)">desktop/STYLE.md</code> and
+          &ldquo;a rounded card around everything&rdquo; both point at the list. The grid is here to
+          be compared against, not because it is the answer &mdash; switch it, top right.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="statusbar">
+    <span>11 artifacts</span><span>&middot;</span><span>48.2 MB of 200 MB</span>
+    <div class="right"><span>oldest version evicted at 20</span></div>
+  </div>
+</div>
+
+<script>
+const ART = [
+  { nm:'Pricing, three tiers',   ws:'pricing rework',  v:3, when:'just now',  notes:3, kind:'pricing' },
+  { nm:'Onboarding, four steps', ws:'pricing rework',  v:1, when:'2h ago',    notes:0, kind:'steps' },
+  { nm:'Ledger import — states', ws:'ledger import',   v:7, when:'yesterday', notes:5, kind:'rows' },
+  { nm:'Failure map',            ws:'auth cleanup',    v:2, when:'Tuesday',   notes:0, kind:'rows' },
+  { nm:'Token watch, per host',  ws:'fleet metering',  v:4, when:'last week', notes:1, kind:'bars' },
+  { nm:'Skill picker, v2',       ws:'skills library',  v:9, when:'last week', notes:2, kind:'steps' },
+];
+
+function mini(a){
+  const bars = '<div class="bars"><b></b><b class="on"></b><b></b></div>';
+  const rows = '<div class="rows"><u class="m"></u><u class="s"></u><u class="l"></u><u class="m"></u></div>';
+  const inner = a.kind === 'pricing' ? bars
+              : a.kind === 'bars'    ? bars
+              : a.kind === 'steps'   ? bars + rows
+              :                        rows + rows;
+  return '<div class="mini"><h3>' + a.nm + '</h3>'
+       + '<p>Made in ' + a.ws + '. Version ' + a.v + '.</p>' + inner + '</div>';
+}
+
+function thumb(a, w, h){
+  const k = w / 620;
+  return '<div class="thumb"><i style="transform:scale(' + k + ');width:620px;height:'
+       + (h / k) + 'px;overflow:hidden">' + mini(a) + '</i></div>';
+}
+
+document.getElementById('lst').innerHTML =
+  '<div class="a head" style="height:24px"><span></span><span>Artifact</span><span>Workspace</span><span>Notes</span><span style="text-align:right">Updated</span></div>'
+  + ART.map(a =>
+    '<div class="a">' + thumb(a, 94, 54)
+    + '<span><div class="nm">' + a.nm + '</div><div class="sub">v' + a.v + ' &nbsp;&middot;&nbsp; '
+    + (a.notes ? a.notes + (a.notes === 1 ? ' note' : ' notes') : 'no notes') + '</div></span>'
+    + '<span class="c">' + a.ws + '</span>'
+    + '<span class="c">' + (a.notes ? '<span class="tag info">' + a.notes + '</span>' : '<span style="color:var(--mute)">&mdash;</span>') + '</span>'
+    + '<span class="r">' + a.when + '</span></div>').join('');
+
+document.getElementById('grd').innerHTML = ART.map(a =>
+  '<div class="a">' + thumb(a, 216, 132)
+  + '<div class="nm">' + a.nm + '</div>'
+  + '<div class="sub">v' + a.v + ' in ' + a.ws + ' &mdash; ' + a.when + '</div></div>').join('');
+
+document.querySelectorAll('#view button').forEach(b => b.onclick = () => {
+  document.body.dataset.view = b.dataset.v;
+  document.querySelectorAll('#view button').forEach(x => x.dataset.on = String(x === b));
+});
+</script>
+</body></html>

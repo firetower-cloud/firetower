@@ -1,9 +1,8 @@
 /**
  * ⌘P.
  *
- * Scoped to this workspace and to files only, which is what separates it from
- * ⌘K — that one crosses servers and does commands, this one answers "where is
- * that file" without making you say which of the three things you meant.
+ * Scoped to this workspace and to files only: it answers "where is that file"
+ * without making you say which of the three things you meant.
  *
  * On a connected server the worker answers (`find_files`), debounced the way
  * the web's Finder debounces, so a half-typed query is not sent as three.

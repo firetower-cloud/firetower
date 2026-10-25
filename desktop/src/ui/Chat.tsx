@@ -19,7 +19,7 @@
  * it is up — the tool call is held open on the host — and it can sit there for
  * hours; the session picks up where it was.
  */
-import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createContext, Fragment, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   Bot,
@@ -48,7 +48,7 @@ import { editFrom } from "~/components/EditCard";
 import { stepLines } from "~/components/Steps";
 import { delegating, useConversation, type Asked, type Item, type Questionnaire, type Task } from "~/api/conversation";
 import { delegated, fold, mainline, summarise } from "~/api/steps";
-import type { Decision, Event, ItemKind, PlanStep, RequestKind, Session } from "~/api/generated/model";
+import type { Artifact as ArtifactModel, Decision, Event, ItemKind, PlanStep, RequestKind, Session } from "~/api/generated/model";
 import { useAnswerRequest, useRelaunchSession, getGetSessionQueryKey, sendTurn } from "~/api/generated/sessions/sessions";
 import { asMessage, useNotes, type Note } from "~/api/notes";
 import { forgetCheckout, landed, refused, settled, useCheckouts, type Run } from "~/api/checkouts";
@@ -60,6 +60,7 @@ import { AccountSwitcher } from "~/ui/AccountSwitcher";
 import { Annotate, type Anchor } from "~/ui/Annotate";
 import { markPaths, resolvePath } from "~/paths";
 import { ImagesFrom } from "~/components/WorkspaceImage";
+import { ArtifactShot } from "~/components/ArtifactShot";
 import { AddAgent } from "~/ui/AddAgent";
 
 const DID: Partial<Record<ItemKind, string>> = {
@@ -115,9 +116,13 @@ export function Chat({
   branch,
   onOpenDiff,
   onOpenFile,
+  artifacts = [],
+  onOpenArtifact,
 }: {
   session: Session;
   branch?: string;
+  artifacts?: ArtifactModel[];
+  onOpenArtifact?: (id: string, title: string) => void;
 } & Open) {
   const { conversation, echo, settle, remember, stopping, older } = useConversation(session.id);
   const scroller = useRef<HTMLDivElement>(null);
@@ -210,6 +215,74 @@ export function Chat({
      and drawing it here as well put the same `grep` on the screen twice —
      once where it read as though the agent you are talking to had run it. */
   const rows = useMemo(() => fold(mainline(items)), [items]);
+
+  /* Where each artifact's card goes.
+   *
+   * By **log line**, not by searching the transcript for the artifact's
+   * folder. That search could not work and three attempts at it did not: an
+   * agent names a file however it likes, and one real session ran
+   *
+   *     cd …/.firetower/artifacts && cp firetower-architecture/index.html \
+   *          firetower-architecture-copy/index.html
+   *
+   * after which the full path appears nowhere in the log, nothing matched,
+   * and the card fell to the end of the conversation and stayed there.
+   *
+   * `first_seen_line` is stamped by the server when the artifact is first
+   * published, from the agent's own log. It is a position rather than a
+   * guess, it is unaffected by how the file was referred to, and because it
+   * is written once the card stops where it started instead of following
+   * later edits down the page.
+   *
+   * Three places a card can go, and getting this wrong is what kept it at the
+   * bottom even once the line was right. The transcript is a *window* — this
+   * session loads from line 6007 while the artifact was published at 5141 —
+   * so "no row matches" has two very different meanings:
+   *
+   *   - **inside the window**: after the row the conversation had reached;
+   *   - **before the window**: above the transcript, because it happened
+   *     before everything on screen. Sending that case to the end put the
+   *     oldest artifact under the newest message;
+   *   - **no line at all** (published before this column existed): the end,
+   *     which is the only honest answer when the position is unknown. */
+  const mineHere = useMemo(
+    () => artifacts.filter((a) => a.fromSessionId === session.id),
+    [artifacts, session.id],
+  );
+  const placed = useMemo(() => {
+    const at = new Map<number, typeof mineHere>();
+    const before: typeof mineHere = [];
+    const loose: typeof mineHere = [];
+
+    /* The highest log line each row covers, so a card lands after the row the
+       conversation had reached — not inside the middle of a folded group. */
+    const reach = rows.map((row) => {
+      const inRow = row.type === "item" ? [row.item] : row.items;
+      return inRow.reduce((high, it) => Math.max(high, it.lineNo ?? 0), 0);
+    });
+
+    const known = reach.filter((r) => r > 0);
+    const earliest = known.length > 0 ? Math.min(...known) : 0;
+
+    for (const a of mineHere) {
+      const line = a.firstSeenLine ?? 0;
+      if (line <= 0) {
+        loose.push(a);
+        continue;
+      }
+      if (earliest > 0 && line < earliest) {
+        before.push(a);
+        continue;
+      }
+      let found = -1;
+      for (let i = 0; i < reach.length; i++) {
+        if (reach[i] > 0 && reach[i] <= line) found = i;
+      }
+      if (found >= 0) at.set(found, [...(at.get(found) ?? []), a]);
+      else loose.push(a);
+    }
+    return { at, before, loose };
+  }, [mineHere, rows]);
 
   /* Subagents that have not reported. The turn can end with these still
      going, and when it has they are the only thing still working — so they
@@ -374,15 +447,34 @@ export function Chat({
             </div>
           )}
 
+          {/* Published before anything on screen. Above the transcript, not
+              below it — the window is the last few exchanges, and an artifact
+              older than all of them is not the newest thing that happened. */}
+          {onOpenArtifact &&
+            placed.before.map((a) => <ArtifactCard key={a.id} artifact={a} onOpen={onOpenArtifact} />)}
+
           <ol className="mt-9 space-y-7">
-            {rows.map((row) =>
-              row.type === "item" ? (
-                <Node key={row.item.id} item={row.item} items={items} tasks={conversation.tasks} onOpenDiff={onOpenDiff} onOpenFile={onOpenFile} />
-              ) : (
-                <Group key={row.id} items={row.items} all={items} tasks={conversation.tasks} onOpenDiff={onOpenDiff} onOpenFile={onOpenFile} />
-              ),
-            )}
+            {rows.map((row, i) => (
+              <Fragment key={row.type === "item" ? row.item.id : row.id}>
+                {row.type === "item" ? (
+                  <Node item={row.item} items={items} tasks={conversation.tasks} onOpenDiff={onOpenDiff} onOpenFile={onOpenFile} />
+                ) : (
+                  <Group items={row.items} all={items} tasks={conversation.tasks} onOpenDiff={onOpenDiff} onOpenFile={onOpenFile} />
+                )}
+                {onOpenArtifact &&
+                  (placed.at.get(i) ?? []).map((a) => (
+                    <li key={a.id}>
+                      <ArtifactCard artifact={a} onOpen={onOpenArtifact} />
+                    </li>
+                  ))}
+              </Fragment>
+            ))}
           </ol>
+
+          {/* Only the ones whose write is not in the loaded transcript. The
+              rest sit where they were made, above. */}
+          {onOpenArtifact &&
+            placed.loose.map((a) => <ArtifactCard key={a.id} artifact={a} onOpen={onOpenArtifact} />)}
 
           {/* After the transcript, because it is the newest thing that
               happened here — and the agent's own acknowledgement of it arrives
@@ -646,6 +738,33 @@ function Group({ items, all, tasks, onOpenDiff, onOpenFile }: { items: Item[]; a
         </ol>
       )}
     </li>
+  );
+}
+
+/**
+ * An artifact, where the turn that made it ended.
+ *
+ * Not a rounded card around prose — the same treatment a picture the agent
+ * pointed at already gets, which is a border around *the bytes* and nothing
+ * around the sentence. The thumbnail is the artifact itself in a frame,
+ * scaled: no screenshot service, no headless browser on the control plane.
+ */
+function ArtifactCard({ artifact, onOpen }: { artifact: ArtifactModel; onOpen: (id: string, title: string) => void }) {
+  return (
+    <div className="mt-6 max-w-[26rem]">
+      <button
+        onClick={() => onOpen(artifact.id, artifact.title)}
+        title="Open it beside the conversation"
+        className="group/art block w-full"
+      >
+        <ArtifactShot artifact={artifact} className="group-hover/art:border-mute" />
+      </button>
+      <div className="mt-1.5 flex items-baseline gap-2">
+        <span className="text-ui font-medium text-bone">{artifact.title}</span>
+        <span className="font-mono text-micro text-mute">v{artifact.version}</span>
+        <span className="ml-auto text-micro text-mute">{elapsed(minutesSince(artifact.updatedAt))} ago</span>
+      </div>
+    </div>
   );
 }
 

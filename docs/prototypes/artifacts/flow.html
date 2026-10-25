@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>Firetower — an artifact, in a workspace</title>
+<link rel="stylesheet" href="../skills/desk.css">
+<link rel="stylesheet" href="art.css">
+<style>
+  #body{grid-template-columns:206px minmax(0,1fr) 300px}
+  body[data-state=beside] #body{grid-template-columns:206px minmax(0,1fr) minmax(0,1.22fr)}
+  body[data-state=expanded] #body{grid-template-columns:44px minmax(0,1fr)}
+  body[data-state=card] .art{display:none}
+  body[data-state=card] .strip{display:none}
+  body[data-state=beside] .inspector{display:none}
+  body[data-state=beside] .strip{display:none}
+  body[data-state=expanded] .sidebar,
+  body[data-state=expanded] .inspector,
+  body[data-state=expanded] .conv{display:none}
+  body:not([data-state=expanded]) .strip{display:none}
+  .inspector{background:rgb(17 17 19/.72);border-left:1px solid var(--line-soft);
+    display:flex;flex-direction:column;min-height:0}
+  .conv{display:flex;flex-direction:column;min-height:0;min-width:0}
+  /* The switcher is scaffolding for reading this page, not part of the design. */
+  /* Its own gutter under the window, so it cannot sit on top of the composer
+     and cannot be mistaken for a control the app has. */
+  body{padding-bottom:48px}
+  .scaff{position:fixed;left:0;right:0;bottom:0;height:48px;z-index:40;
+    display:flex;align-items:center;justify-content:center;gap:8px;
+    background:var(--ground);border-top:1px solid var(--line-soft)}
+  .scaff .lbl{font-size:var(--micro);color:var(--mute);padding-left:4px;padding-right:2px}
+</style></head>
+<body data-state="card">
+<div id="win">
+
+  <div class="titlebar">
+    <div class="lights"><i></i><i></i><i></i></div>
+    <div class="where"><b>pricing rework</b></div>
+    <span class="sep">/</span>
+    <div class="where">westlabs/site</div>
+    <span class="sep">/</span>
+    <div class="where mono" style="font-size:var(--micro)">agent/pricing</div>
+    <div class="right">
+      <span class="sig ok">fire-01</span>
+      <button class="control plain sm">Share</button>
+    </div>
+  </div>
+
+  <div id="body">
+
+    <!-- ── the rail ──────────────────────────────────────────── -->
+    <div class="sidebar">
+      <div class="legend">Workspaces</div>
+      <div class="row" data-on="true"><span class="mark">PR</span><span>pricing rework</span></div>
+      <div class="row"><span class="mark">LE</span><span>ledger import</span></div>
+      <div class="row"><span class="mark">AU</span><span>auth cleanup</span></div>
+      <div class="legend">This workspace</div>
+      <div class="row"><span style="width:26px;text-align:center;color:var(--mute)">&#9643;</span><span>Changes</span><span style="margin-left:auto;font-size:var(--micro);color:var(--mute)" class="num">7</span></div>
+      <div class="row"><span style="width:26px;text-align:center;color:var(--mute)">&#9634;</span><span>Files</span></div>
+      <div class="row" data-on="true"><span style="width:26px;text-align:center;color:var(--dim)">&#9671;</span><span>Artifacts</span><span style="margin-left:auto;font-size:var(--micro);color:var(--mute)" class="num">2</span></div>
+      <div class="row"><span style="width:26px;text-align:center;color:var(--mute)">&#9654;</span><span>Ship</span></div>
+    </div>
+
+    <!-- ── the conversation ──────────────────────────────────── -->
+    <div class="pane conv">
+      <div class="tabs">
+        <div class="tab" data-on="true"><span class="g">&#9679;</span><span>Conversation</span></div>
+      </div>
+
+      <div class="chat" id="chat">
+        <div class="turn">
+
+          <div class="said you">
+            <div class="who">K</div>
+            <div class="body"><p>Mock up the new pricing page — three tiers, and make the middle
+            one the obvious pick. Don&rsquo;t touch the real site yet, I just want to look at it.</p></div>
+          </div>
+
+          <div class="said">
+            <div class="who">CC</div>
+            <div class="body"><p>Three tiers with the middle one carrying the weight. I&rsquo;ve kept it
+            to one page so it reads in a single scroll.</p></div>
+          </div>
+
+          <div class="steps"><span class="chev">&rsaquo;</span><span>read 2 files, ran 1 command</span></div>
+
+          <!-- the artifact, as it arrives -->
+          <div class="card">
+            <div class="shot" id="shot" title="Open beside the conversation">
+              <div class="scaled" id="scaled"></div>
+              <div class="veil"></div>
+              <button class="control sm open">Open &nbsp;&rsaquo;</button>
+            </div>
+            <div class="line">
+              <span class="name">Pricing, three tiers</span>
+              <span class="ver">v3</span>
+              <span class="when">just now</span>
+            </div>
+          </div>
+
+          <div class="said">
+            <div class="who">CC</div>
+            <div class="body"><p>The middle tier is the only one with a filled button and a dark
+            border; the other two are quiet. If that reads as too heavy I can drop the border and
+            keep only the button.</p></div>
+          </div>
+
+        </div>
+      </div>
+
+      <div class="composer">
+        <div class="box">
+          <div class="ph">Reply, or press Annotate on the artifact to point at something&hellip;</div>
+          <div class="row2">
+            <button class="control plain sm">&#43;</button>
+            <button class="control plain sm">Skills</button>
+            <div class="right">
+              <span class="keycap">&#8984;</span><span class="keycap">&crarr;</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── the conversation, collapsed (expanded mode only) ──── -->
+    <div class="strip" id="strip" title="Back to the conversation">
+      <button class="control plain sm" id="unexpand" style="padding-inline:6px">&lsaquo;</button>
+      <div class="vert">Conversation</div>
+      <div class="dot live" style="margin-top:auto;margin-bottom:12px" title="the agent is working"></div>
+    </div>
+
+    <!-- ── the artifact ──────────────────────────────────────── -->
+    <div class="art" id="art">
+      <div class="toolbar">
+        <button class="control quiet sm" title="Close this artifact" style="padding-inline:5px;margin-left:-4px">&times;</button>
+        <span class="title">Pricing, three tiers</span>
+        <span class="tag" id="vertag">v3</span>
+        <div class="right">
+          <button class="control sm" id="annotate">Annotate</button>
+          <button class="control plain sm" id="notesbtn">Notes <span class="num" id="notecount">0</span></button>
+          <button class="control plain sm" id="expand">Expand</button>
+          <button class="control plain sm" title="Open in the browser">&nearr;</button>
+          <button class="control plain sm" title="Share">Share</button>
+        </div>
+      </div>
+
+      <div class="stage" id="stage" data-annotating="false">
+        <div class="sheet" id="sheet">
+          <h1 data-el="h1">Pricing that stops at the number</h1>
+          <p class="lede" data-el="p.lede">Every tier runs the same agents on your own machines. What
+          changes is how many of them, and who else can see the work.</p>
+
+          <div class="tiers">
+            <div class="tier" data-el="div.tier">
+              <div class="nm" data-el="div.nm">Solo</div>
+              <div class="pr" data-el="div.pr">$0 <span>forever</span></div>
+              <ul>
+                <li data-el="li">One machine</li>
+                <li data-el="li">Two agents at once</li>
+                <li data-el="li">Your own subscriptions</li>
+              </ul>
+              <div class="cta" data-el="div.cta">Self-host in 5 min</div>
+            </div>
+            <div class="tier pick" data-el="div.tier.pick">
+              <div class="nm" data-el="div.nm">Team</div>
+              <div class="pr" data-el="div.pr">$19 <span>per person</span></div>
+              <ul>
+                <li data-el="li">Unlimited machines</li>
+                <li data-el="li">Shared directories</li>
+                <li data-el="li">The vault, and audit</li>
+                <li data-el="li">Previews and artifacts</li>
+              </ul>
+              <div class="cta" data-el="div.cta">Start a team</div>
+            </div>
+            <div class="tier" data-el="div.tier">
+              <div class="nm" data-el="div.nm">Company</div>
+              <div class="pr" data-el="div.pr">Talk <span>to us</span></div>
+              <ul>
+                <li data-el="li">SSO, and roles</li>
+                <li data-el="li">Air-gapped install</li>
+                <li data-el="li">A person to call</li>
+              </ul>
+              <div class="cta" data-el="div.cta">Book a call</div>
+            </div>
+          </div>
+
+          <p class="fine" data-el="p.fine">Billed on the people who actually started a session that
+          month. Nobody pays for a seat they did not use.</p>
+
+          <div class="faq">
+            <h2 data-el="h2">Questions people actually ask</h2>
+            <div class="q"><b data-el="b">Does this run my agents in your cloud?</b>
+              <p data-el="p">No. It runs them on machines you own, over ssh. We never see the code.</p></div>
+            <div class="q"><b data-el="b">What happens when my laptop sleeps?</b>
+              <p data-el="p">Nothing. The agent is on the machine, under tmux, and it keeps going.</p></div>
+          </div>
+        </div>
+
+        <div class="outline" id="outline"></div>
+
+        <div class="pop" id="pop">
+          <div class="what" id="popwhat">&lt;div.cta&gt;</div>
+          <textarea id="poptext" placeholder="What should change here?"></textarea>
+          <div class="acts">
+            <button class="control go sm" id="popkeep">Keep</button>
+            <button class="control plain sm" id="popcancel">Cancel</button>
+            <span class="hint">&crarr; to keep</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="notes" id="notes">
+        <div class="hd"><span>Notes on this version</span>
+          <button class="control quiet sm" style="margin-left:auto" id="noteclose">&times;</button></div>
+        <div class="list" id="notelist">
+          <div class="empty">Press <b style="color:var(--dim)">Annotate</b>, then click anything in
+          the page. The note remembers the element on&nbsp;v3, so it still means something after
+          the agent changes it.</div>
+        </div>
+        <div class="ft" id="noteft" style="display:none">
+          <button class="control plain sm" style="justify-content:center">Another agent&hellip;</button>
+          <button class="control go sm" style="justify-content:center" id="send">Send <span id="sendn">0</span> notes to the agent</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── the inspector (card state only) ───────────────────── -->
+    <div class="inspector">
+      <div class="toolbar">
+        <div class="track">
+          <button data-on="true">Changes</button><button>Files</button><button>Ship</button>
+        </div>
+      </div>
+      <div style="padding:8px 8px 0" class="files">
+        <div class="f head"><span class="p">7 files</span><span class="sz">+241</span><span style="width:34px"></span></div>
+        <div class="f"><span class="p">app/pricing/page.tsx</span><span class="sz">+128</span><span class="tag good" style="width:34px;text-align:center">new</span></div>
+        <div class="f"><span class="p">app/pricing/tiers.ts</span><span class="sz">+44</span><span class="tag good" style="width:34px;text-align:center">new</span></div>
+        <div class="f"><span class="p">content/faq.md</span><span class="sz">+31</span><span style="width:34px"></span></div>
+        <div class="f"><span class="p">styles/tokens.css</span><span class="sz">+9</span><span style="width:34px"></span></div>
+      </div>
+      <div style="margin-top:auto;padding:11px">
+        <p class="aside note">The artifact is not in this list. It is written under
+        <code class="mono" style="color:var(--syn-string)">.firetower/artifacts/</code>, outside git,
+        so a mock-up never turns up in the pull request.</p>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="statusbar">
+    <span>Claude Code</span><span>&middot;</span><span>agent/pricing</span>
+    <div class="right">
+      <span class="sig ok">working</span>
+      <span class="num">2 artifacts</span>
+    </div>
+  </div>
+</div>
+
+<!-- scaffolding: lets you jump between the three states while reading -->
+<div class="scaff">
+  <span class="lbl">State</span>
+  <div class="track" id="states">
+    <button data-s="card" data-on="true">In the conversation</button>
+    <button data-s="beside">Beside it</button>
+    <button data-s="expanded">Expanded</button>
+  </div>
+  <span class="lbl" style="padding-left:6px">Annotating is live in all three &mdash; try it</span>
+</div>
+
+<script>
+/* ── the card's thumbnail is the artifact itself, scaled ──────────
+   Worth keeping: docs/artifacts.md §12 asks how a thumbnail gets made and
+   assumes a headless browser on the control plane. It does not need one. The
+   client already has the artifact in a frame; a transform is the whole job. */
+const sheet = document.getElementById('sheet');
+const scaled = document.getElementById('scaled');
+function paintThumb(){
+  const clone = sheet.cloneNode(true);
+  clone.removeAttribute('id');
+  clone.style.width = '1180px';
+  scaled.replaceChildren(clone);
+  const k = scaled.parentElement.clientWidth / 1180;
+  scaled.style.transform = 'scale(' + k + ')';
+  scaled.style.width = '1180px';
+  scaled.style.height = (scaled.parentElement.clientHeight / k) + 'px';
+}
+
+/* ── states ───────────────────────────────────────────────────── */
+const body = document.body;
+function go(s){
+  body.dataset.state = s;
+  document.querySelectorAll('#states button').forEach(b =>
+    b.dataset.on = String(b.dataset.s === s));
+  document.getElementById('expand').textContent = s === 'expanded' ? 'Collapse' : 'Expand';
+  requestAnimationFrame(() => { paintThumb(); placePins(); });
+}
+document.querySelectorAll('#states button').forEach(b =>
+  b.onclick = () => go(b.dataset.s));
+document.getElementById('shot').onclick = () => go('beside');
+document.getElementById('expand').onclick = () =>
+  go(body.dataset.state === 'expanded' ? 'beside' : 'expanded');
+document.getElementById('unexpand').onclick = () => go('beside');
+
+/* ── annotating ───────────────────────────────────────────────── */
+const stage = document.getElementById('stage');
+const outline = document.getElementById('outline');
+const pop = document.getElementById('pop');
+const popwhat = document.getElementById('popwhat');
+const poptext = document.getElementById('poptext');
+const notesPanel = document.getElementById('notes');
+let on = false, picked = null, notes = [];
+
+function setMode(v){
+  on = v;
+  stage.dataset.annotating = String(v);
+  const b = document.getElementById('annotate');
+  b.textContent = v ? 'Annotating' : 'Annotate';
+  b.classList.toggle('go', v);
+  if (!v){ outline.style.display='none'; hidePop(); }
+}
+document.getElementById('annotate').onclick = () => { setMode(!on); if(on) openNotes(); };
+
+function boxOf(el){
+  const a = el.getBoundingClientRect(), b = stage.getBoundingClientRect();
+  return { x: a.left - b.left, y: a.top - b.top + stage.scrollTop, w: a.width, h: a.height };
+}
+stage.addEventListener('mousemove', e => {
+  if (!on || pop.style.display === 'block') return;
+  const el = e.target.closest('[data-el]');
+  if (!el){ outline.style.display='none'; return; }
+  const r = boxOf(el);
+  Object.assign(outline.style, { display:'block', left:r.x+'px', top:r.y+'px',
+    width:r.w+'px', height:r.h+'px' });
+});
+stage.addEventListener('click', e => {
+  if (!on) return;
+  const el = e.target.closest('[data-el]');
+  if (!el) return;
+  e.preventDefault(); e.stopPropagation();
+  picked = el;
+  const r = boxOf(el);
+  popwhat.textContent = '<' + el.dataset.el + '>  ' +
+    (el.textContent.trim().slice(0,34) || '');
+  poptext.value = '';
+  /* The card goes where the pointer was, not at the element's edge: an element
+     taller than the view has no on-screen edge to hang it off. */
+  const sx = Math.min(r.x + 12, stage.clientWidth - 284);
+  pop.style.left = Math.max(8, sx) + 'px';
+  pop.style.top  = (e.clientY - stage.getBoundingClientRect().top + stage.scrollTop + 10) + 'px';
+  pop.style.display = 'block';
+  poptext.focus();
+});
+function hidePop(){ pop.style.display='none'; picked=null; }
+document.getElementById('popcancel').onclick = hidePop;
+poptext.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); keep(); }
+  if (e.key === 'Escape') hidePop();
+});
+document.getElementById('popkeep').onclick = keep;
+function keep(){
+  const text = poptext.value.trim();
+  if (!text || !picked) return hidePop();
+  notes.push({ el: picked, what: picked.dataset.el, text });
+  hidePop(); drawNotes(); placePins(); openNotes();
+}
+
+function placePins(){
+  stage.querySelectorAll('.pin').forEach(p => p.remove());
+  notes.forEach((n, i) => {
+    const r = boxOf(n.el);
+    const p = document.createElement('button');
+    p.className = 'pin'; p.textContent = i + 1;
+    p.style.left = Math.max(0, r.x - 9) + 'px';
+    p.style.top  = Math.max(0, r.y - 9) + 'px';
+    p.onclick = ev => { ev.stopPropagation(); openNotes(); };
+    stage.appendChild(p);
+  });
+}
+function drawNotes(){
+  const list = document.getElementById('notelist');
+  document.getElementById('notecount').textContent = notes.length;
+  document.getElementById('sendn').textContent = notes.length;
+  document.getElementById('noteft').style.display = notes.length ? 'flex' : 'none';
+  if (!notes.length){
+    list.innerHTML = '<div class="empty">Press <b style="color:var(--dim)">Annotate</b>, then click '
+      + 'anything in the page. The note remembers the element on&nbsp;v3, so it still means '
+      + 'something after the agent changes it.</div>';
+    return;
+  }
+  list.innerHTML = notes.map((n, i) =>
+    '<div class="n"><span class="ix">'+(i+1)+'</span><span><span class="el">&lt;'+n.what+'&gt;</span>'
+    + '<span class="tx">'+ n.text.replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c])) +'</span></span></div>'
+  ).join('');
+}
+const artPane = document.getElementById('art');
+function showNotes(v){
+  notesPanel.dataset.open = String(v);
+  artPane.dataset.notes = String(v);
+  requestAnimationFrame(placePins);
+}
+function openNotes(){ showNotes(true); }
+document.getElementById('noteclose').onclick = () => showNotes(false);
+document.getElementById('notesbtn').onclick = () =>
+  showNotes(notesPanel.dataset.open !== 'true');
+document.getElementById('send').onclick = () => {
+  if (!notes.length) return;
+  notes = []; drawNotes(); placePins(); setMode(false);
+  const t = document.querySelector('#chat .turn');
+  const d = document.createElement('div');
+  d.className = 'said you';
+  d.innerHTML = '<div class="who">K</div><div class="body"><p>3 notes on '
+    + '<b>Pricing, three tiers</b> v3 &mdash; sent as one turn.</p></div>';
+  t.appendChild(d);
+  document.getElementById('chat').scrollTop = 99999;
+};
+
+window.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  if (pop.style.display === 'block') return hidePop();
+  if (on) return setMode(false);
+  if (body.dataset.state === 'expanded') go('beside');
+});
+/* ?s=card|beside|expanded, and ?notes=1 to arrive with two already kept —
+   so a state can be linked to rather than described. */
+const q = new URLSearchParams(location.search);
+if (q.get('notes') === '1'){
+  notes = [
+    { el: sheet.querySelector('.tier.pick .cta'), what:'div.cta',
+      text:'This is the only filled button on the page. Good — but make the label a verb: "Start a team" reads as a noun here.' },
+    { el: sheet.querySelector('.lede'), what:'p.lede',
+      text:'Second sentence is doing the work. Lead with it and cut the first.' },
+  ];
+  setMode(true); openNotes();
+}
+stage.addEventListener('scroll', placePins);
+window.addEventListener('resize', () => { paintThumb(); placePins(); });
+paintThumb(); drawNotes();
+go(['card','beside','expanded'].includes(q.get('s')) ? q.get('s') : 'card');
+if (notes.length) requestAnimationFrame(placePins);
+</script>
+</body></html>
