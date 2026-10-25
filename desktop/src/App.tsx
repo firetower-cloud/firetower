@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { ServerStrip, type Scope } from "~/ui/ServerStrip";
 import { Titlebar } from "~/ui/Titlebar";
-import { Palette } from "~/ui/Palette";
 import { Rail } from "~/ui/Rail";
 import { Routes } from "~/Routes";
 import { Fleet } from "~/ui/Fleet";
@@ -44,7 +43,6 @@ export function App() {
   /* The servers this Mac has connected to. */
   const [real$, setReal] = useState(servers);
   useEffect(() => onServers(() => setReal(servers())), []);
-  const [palette, setPalette] = useState(false);
   const path = usePathname();
   /* Is there a newer build: now, and every ten minutes after, so a window left
      open for a fortnight does not learn about a release by being restarted.
@@ -65,17 +63,6 @@ export function App() {
      on screen waits for it and nothing here decides what is in a digest — see
      `~/telemetry`. */
   useEffect(() => startCourier(), []);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        setPalette((open) => !open);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
 
   /* Ember, on the dock: summed across every server, because the person glancing
      at it does not care whose machine stopped. */
@@ -137,7 +124,7 @@ export function App() {
   return (
     <>
       <div className="flex h-full w-full flex-col overflow-hidden bg-ground text-text">
-        <Titlebar scope={scope} waiting={waiting} onPalette={() => setPalette(true)} />
+        <Titlebar scope={scope} waiting={waiting} />
 
         <div className="flex min-h-0 flex-1">
           <ServerStrip scope={scope} onScope={pick} />
@@ -206,7 +193,6 @@ export function App() {
           )}
         </div>
 
-        <Palette open={palette} onClose={() => setPalette(false)} />
       </div>
     </>
   );
