@@ -58,6 +58,7 @@ import { Composer, TAKES, type Hand } from "~/ui/Composer";
 import { folderRefusals, useFileDrop } from "~/ui/drop";
 import { AccountSwitcher } from "~/ui/AccountSwitcher";
 import { Annotate, type Anchor } from "~/ui/Annotate";
+import { FindInChat } from "~/ui/FindInChat";
 import { markPaths, resolvePath } from "~/paths";
 import { ImagesFrom } from "~/components/WorkspaceImage";
 import { ArtifactShot } from "~/components/ArtifactShot";
@@ -294,6 +295,30 @@ export function Chat({
     [conversation.tasks],
   );
 
+  /* ⌘F. The window has no browser find bar, and the conversation is the one
+     place in the app long enough to need one — an afternoon of work with the
+     command you are looking for somewhere in the middle of it.
+
+     Bound here rather than in the workbench because `Chat` is only mounted
+     while the conversation is the tab in front, so the key is the
+     conversation's exactly when the conversation is what you are reading. */
+  const [finding, setFinding] = useState(false);
+  const [summoned, setSummoned] = useState(0);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "f") return;
+      /* A focused terminal owns ⌘F — it searches its own scrollback, and
+         swallows the key before it reaches here. Checked anyway, because the
+         shell stays mounted behind a hidden panel. */
+      if ((document.activeElement as HTMLElement | null)?.closest(".xterm")) return;
+      e.preventDefault();
+      setFinding(true);
+      setSummoned((n) => n + 1);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   /* Edits are not on the event stream, only the tool calls that make them
      are. So every finished edit or command is the cue to read the diff, the
      tree and any open file again — before the poll would have. */
@@ -375,9 +400,13 @@ export function Chat({
      observer reports after layout and can trail a fast stream by a few
      frames, which reads as the page lagging behind the words and then
      catching up; a frame-by-frame check costs one comparison and keeps the
-     last line pinned. Nothing runs while the agent is idle. */
+     last line pinned. Nothing runs while the agent is idle.
+
+     And nothing runs while ⌘F is up. Opening the find bar is saying you are
+     reading rather than watching, and a pin that fights the jump to a match
+     is the one thing that would make searching a live session useless. */
   useEffect(() => {
-    if (!working) return;
+    if (!working || finding) return;
     let raf = 0;
     const loop = () => {
       const el = scroller.current;
@@ -386,7 +415,7 @@ export function Chat({
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
-  }, [working]);
+  }, [working, finding]);
 
   return (
     <div className="relative flex h-full min-h-0 flex-col" {...surface}>
@@ -501,6 +530,10 @@ export function Chat({
         </ImagesFrom.Provider>
         </SessionContext.Provider>
       </div>
+
+      {finding && (
+        <FindInChat scroller={scroller} body={body} summoned={summoned} onClose={() => setFinding(false)} />
+      )}
 
       {drafting && (
         <Annotate
