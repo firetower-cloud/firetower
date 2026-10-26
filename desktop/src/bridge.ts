@@ -73,6 +73,15 @@ export interface Bridge {
     token: string | null,
     onPhase?: (phase: SavePhase) => void,
   ): Promise<string | null>;
+  /**
+   * Photograph a page, as PNG bytes.
+   *
+   * `null` where there is no native shell to render in — a browser tab cannot
+   * read the pixels of a cross-origin frame, and an artifact is deliberately
+   * on an origin of its own. The library draws its placeholder in that case,
+   * which is the same thing it draws before a picture has been taken.
+   */
+  shoot(url: string): Promise<ArrayBuffer | null>;
   /** The OS keychain, for tokens. A browser tab has none and keeps them beside the registry. */
   secrets: {
     get(key: string): Promise<string | null>;
@@ -134,6 +143,7 @@ const browser: Bridge = {
     setTimeout(() => URL.revokeObjectURL(href), 30_000);
     return suggested;
   },
+  shoot: async () => null,
   secrets: null,
   island: null,
 };
@@ -172,6 +182,13 @@ function tauri(): Bridge | null {
       } catch (e) {
         throw asError(e);
       }
+    },
+    shoot: async (url) => {
+      const bytes = await invoke("capture_poster", { url });
+      /* Tauri hands a `Response` back as an ArrayBuffer, but a failure that
+         slipped through as something else should draw the placeholder rather
+         than be uploaded as a poster. */
+      return bytes instanceof ArrayBuffer ? bytes : null;
     },
     secrets: {
       get: (key) => invoke("secret_get", { key }) as Promise<string | null>,

@@ -17,7 +17,7 @@
  * keeps the frame a frame, so Annotate goes on working at full width.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, Download, ExternalLink, Link2, Maximize2, Minimize2, Send, Share2, Trash2 } from "lucide-react";
+import { Check, ChevronDown, CornerUpRight, Download, ExternalLink, Link2, Maximize2, Minimize2, Send, Share2, Trash2 } from "lucide-react";
 import type { Artifact } from "~/api/generated/model";
 import { sendTurn } from "~/api/generated/sessions/sessions";
 import { renameArtifact } from "~/api/generated/artifacts/artifacts";
@@ -28,6 +28,9 @@ import { bridge as shell } from "~/bridge";
 import { apiBase, token } from "~/client/http";
 import { why } from "~/data";
 import { Annotate, type Anchor } from "~/ui/Annotate";
+import { ContextMenu, useMenu, type MenuItem } from "~/ui/ContextMenu";
+import { useSessions } from "~/data";
+import { noteTarget } from "~/artifacts/target";
 import { anchorIn } from "~/preview/anchor";
 import { usePickerBridge, type Selection } from "~/preview/bridge";
 import { WhoCanAccess } from "~/ui/Sharing";
@@ -46,13 +49,26 @@ type Note = { id: string; what: string; html: string; text: string; sent: boolea
 
 export function ArtifactTab({
   artifact,
-  sessionId,
+  sendTo,
   expanded,
   onExpanded,
 }: {
   artifact: Artifact;
-  /** Where to send notes. Absent when the session that made it is gone. */
-  sessionId: string | null;
+  /**
+   * Where notes go, when opening the artifact already settled that.
+   *
+   * A workspace's own agent, when the artifact was opened inside one: you are
+   * looking at a conversation, and that is plainly who a note is for.
+   *
+   * `null` means it was opened from the library, where there is no
+   * conversation in view and the right answer cannot be guessed — so one is
+   * chosen below. **Not `fromSessionId`**, which is what this used to be
+   * given: that column is stamped text rather than a foreign key, precisely so
+   * it survives `reclaim.rs` taking the workspace. It therefore keeps naming a
+   * session that no longer exists, the send button stayed enabled because the
+   * id was not null, and the turn 404'd.
+   */
+  sendTo: string | null;
   expanded: boolean;
   onExpanded: (v: boolean) => void;
 }) {
@@ -69,6 +85,34 @@ export function ArtifactTab({
      including the empty string, which is why this is not `naming || title`. */
   const [naming, setNaming] = useState<string | null>(null);
   const cache = useQueryClient();
+
+  /* **Who a note goes to.**
+     Fixed when the artifact was opened inside a workspace. Otherwise chosen
+     here, out of what is actually running — which is the only list that can
+     answer it, because an artifact outlives the conversation that made it and
+     the library is full of ones whose workspace is gone.
+     `Ended` is the whole filter: a session in any other state has an agent
+     that can be handed a turn. */
+  const choosing = sendTo === null;
+  const sessions = useSessions();
+  const running = useMemo(
+    () => sessions.data.filter((s) => s.status !== "Ended"),
+    [sessions.data],
+  );
+  /* Undefined until somebody decides, so that the default below can apply once
+     the session list has actually arrived rather than racing it. */
+  const [picked, setPicked] = useState<string | null | undefined>(undefined);
+  const pick = useMenu<null>();
+
+  /* The rule itself lives in `target.ts`, where it can be tested: which of
+     these wins, and what happens when the session behind one of them has
+     ended, is the whole of the bug this replaced. */
+  const madeBy = artifact.fromSessionId ?? null;
+  const to = useMemo(
+    () => noteTarget({ fixed: sendTo, picked, running, origin: madeBy }),
+    [sendTo, picked, running, madeBy],
+  );
+  const going = running.find((s) => s.id === to) ?? null;
 
   const rename = async () => {
     const next = (naming ?? "").trim();
@@ -154,15 +198,15 @@ export function ArtifactTab({
 
   const unsent = notes.filter((n) => !n.sent);
   const send = async () => {
-    if (!sessionId || unsent.length === 0) return;
+    if (!to || unsent.length === 0) return;
     setSending(true);
     const body = `${unsent.length === 1 ? "A note" : `${unsent.length} notes`} on the artifact “${artifact.title}” (v${artifact.version}):\n\n${unsent
       .map((n, i) => `${i + 1}. ${nameOf(n.what, n.html)}\n> ${n.html.replace(/\s+/g, " ").slice(0, 300)}\n\n${n.text}`)
       .join("\n\n")}`;
     try {
-      await sendTurn(sessionId, { text: body });
+      await sendTurn(to, { text: body });
       setNotes((held) => held.map((n) => ({ ...n, sent: true })));
-      setNotice("Sent to the agent as one turn.");
+      setNotice(going ? `Sent to ${going.name} as one turn.` : "Sent as one turn.");
     } catch (e) {
       setNotice(why(e) ?? "Could not send those notes.");
     } finally {
@@ -375,14 +419,43 @@ export function ArtifactTab({
             </div>
             {unsent.length > 0 && (
               <div className="shrink-0 border-t border-line p-2.5">
+                {/* Only when it is a question. Inside a workspace the answer is
+                    the conversation you are looking at, and a row saying so
+                    would be a control with one option. */}
+                {choosing && (
+                  <button
+                    onClick={(e) => pick.show(e, null)}
+                    disabled={running.length === 0}
+                    title={running.length === 0 ? undefined : "Choose which agent these go to"}
+                    className="mb-1.5 flex w-full items-center gap-1.5 rounded-md border border-line bg-ground px-2 py-1 text-left hover:border-mute disabled:opacity-50"
+                  >
+                    <CornerUpRight className="h-3 w-3 shrink-0 text-mute" strokeWidth={1.75} />
+                    <span className={`min-w-0 flex-1 truncate text-micro ${going ? "text-text" : "text-mute"}`}>
+                      {running.length === 0
+                        ? "Nothing is running"
+                        : going
+                          ? going.name
+                          : "Choose an agent"}
+                    </span>
+                    {running.length > 0 && <ChevronDown className="h-3 w-3 shrink-0 text-mute" strokeWidth={1.75} />}
+                  </button>
+                )}
                 <button
-                  disabled={sending || !sessionId}
+                  disabled={sending || !to}
                   onClick={send}
-                  title={sessionId ? undefined : "The session that made this has ended, so there is nobody to send to."}
+                  title={
+                    to
+                      ? undefined
+                      : running.length === 0
+                        ? "No agent is running to send these to."
+                        : "Pick an agent to send these to."
+                  }
                   className="control w-full justify-center bg-bone font-medium text-ground hover:opacity-90 disabled:bg-raise disabled:text-mute"
                 >
                   {sending ? <Check className="h-3.5 w-3.5" /> : <Send className="h-3.5 w-3.5" strokeWidth={2} />}
-                  {sending ? "Sending…" : `Send ${unsent.length} note${unsent.length > 1 ? "s" : ""} to the agent`}
+                  {sending
+                    ? "Sending…"
+                    : `Send ${unsent.length} note${unsent.length > 1 ? "s" : ""}${choosing ? "" : " to the agent"}`}
                 </button>
               </div>
             )}
@@ -394,6 +467,29 @@ export function ArtifactTab({
         <div className="pointer-events-none absolute bottom-4 left-1/2 z-30 -translate-x-1/2 rounded-full border border-line bg-overlay px-3.5 py-1.5 text-meta text-dim shadow-(--shadow-float)">
           {notice}
         </div>
+      )}
+
+      {/* Built from what is running at the moment it opens, so a workspace
+          that ended while the notes were being written is simply not offered.
+          The one that made the artifact is marked, because out of a long list
+          it is the one with a reason to be chosen. */}
+      {pick.open && (
+        <ContextMenu
+          at={pick.open.at}
+          items={running.map(
+            (s): MenuItem => ({
+              label: s.name,
+              /* `shortcut` is only ever a dim right-aligned hint, and this is
+                 what one is for here: workspaces are routinely named the same
+                 thing, so a column of identical labels is a menu you cannot
+                 choose from. The one that made the artifact says so; the rest
+                 say what they are doing. */
+              shortcut: s.id === madeBy ? "made this" : s.status,
+              onPick: () => setPicked(s.id),
+            }),
+          )}
+          onClose={pick.close}
+        />
       )}
 
       {drafting && (

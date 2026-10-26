@@ -588,6 +588,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         ))
         .routes(routes!(artifacts::artifact_address))
         .routes(routes!(artifacts::download_artifact))
+        .routes(routes!(artifacts::put_artifact_poster))
         .routes(routes!(
             artifacts::rename_artifact,
             artifacts::delete_artifact

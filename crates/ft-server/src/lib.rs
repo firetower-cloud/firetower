@@ -615,6 +615,7 @@ fn build_router(
 
     let mut app = axum::Router::new()
         .merge(api)
+        .merge(posters(state.clone()))
         .merge(operational(state))
         // Axum's `Json` refuses a body over 2 MB unless told otherwise, which
         // is the right default for an API of small JSON and the wrong one for
@@ -650,10 +651,35 @@ fn build_router(
     // carries its own credential in its name, it must not be answered with the
     // interface's own 404 page, and every path under it belongs to somebody
     // else's application rather than to us.
-    app.layer(axum::middleware::from_fn_with_state(
+    let app = app.layer(axum::middleware::from_fn_with_state(
         state_for_preview,
         preview_first,
-    ))
+    ));
+
+    // Outside the preview door on purpose, so it is the *last* thing to touch a
+    // response and therefore sees the finished bytes.
+    //
+    // An artifact is rewritten on the way out by `annotations::instrument`,
+    // which both needs an identity body to parse and produces one. Compressing
+    // inside that would hand the rewriter gzip to look for a `<head>` in;
+    // compressing outside it means the page is parsed as text and squeezed
+    // once, afterwards. Measured on a real artifact: 74,622 bytes to 22,000.
+    //
+    // Nothing here was compressed before — the feature was not even enabled on
+    // `tower-http` — so this is every JSON response in the product as well as
+    // the documents this was reached for.
+    //
+    // The default predicate already declines images, which is what keeps it off
+    // the posters below. A zip is added to that: `download_artifact` deflates
+    // its own entries, so a second pass is pure cost for a few bytes back.
+    use tower_http::compression::predicate::Predicate as _;
+    app.layer(
+        tower_http::compression::CompressionLayer::new().compress_when(
+            tower_http::compression::predicate::DefaultPredicate::new().and(
+                tower_http::compression::predicate::NotForContentType::const_new("application/zip"),
+            ),
+        ),
+    )
 }
 
 /// The most one request body may be.
@@ -732,6 +758,38 @@ async fn preview_first(
         }
         None => next.run(request).await,
     }
+}
+
+/// An artifact's picture, outside the authentication gate.
+///
+/// Outside it for the same reason the artifact itself is: this is read by an
+/// `<img>`, which cannot be given an `Authorization` header, so the capability
+/// travels in the signed name instead — see [`preview::Names::poster_path`].
+/// Nothing here is reachable without that signature, and the signature is a
+/// keyed digest of the artifact id, so it cannot be guessed from one you have.
+///
+/// Not in the generated contract on purpose, like `operational`: the clients
+/// build this address from the artifact row rather than calling an operation.
+fn posters(state: AppState) -> axum::Router {
+    use axum::response::IntoResponse as _;
+    use axum::routing::get;
+
+    axum::Router::new()
+        .route(
+            &format!("{}{{name}}", preview::POSTER_PREFIX),
+            get(
+                |axum::extract::State(state): axum::extract::State<AppState>,
+                 axum::extract::Path(name): axum::extract::Path<String>,
+                 request: axum::extract::Request| async move {
+                    let path = format!("{}{name}", preview::POSTER_PREFIX);
+                    match state.names.poster_of(&path) {
+                        Some(artifact) => artifact::serve_poster(state, artifact, request).await,
+                        None => axum::http::StatusCode::NOT_FOUND.into_response(),
+                    }
+                },
+            ),
+        )
+        .with_state(state)
 }
 
 /// Liveness and readiness, deliberately outside the API contract.

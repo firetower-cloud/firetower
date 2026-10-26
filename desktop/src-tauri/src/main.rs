@@ -14,6 +14,7 @@
 
 use tauri::{Manager, Runtime, WebviewWindow};
 
+mod capture;
 mod island;
 mod tray;
 
@@ -261,6 +262,10 @@ fn main() {
         // A file or a directory leaves a workspace through the save sheet.
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
+            // Before the main window is touched: when this is on, nothing else
+            // about this launch matters. See `capture::self_test`.
+            capture::self_test(app.handle());
+
             let window = app.get_webview_window("main").expect("main window");
 
             // A macOS sidebar is translucent, and a flat panel is the clearest
@@ -307,6 +312,7 @@ fn main() {
             zoom,
             close,
             save_download,
+            capture::capture_poster,
             secret_get,
             secret_set,
             secret_delete,

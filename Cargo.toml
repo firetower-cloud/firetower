@@ -46,7 +46,7 @@ axum = { version = "0.8", features = ["ws"] }
 hyper = { version = "1", features = ["client", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 http-body-util = "0.1"
-tower-http = { version = "0.6", features = ["cors", "trace"] }
+tower-http = { version = "0.6", features = ["cors", "trace", "compression-gzip"] }
 
 # api contract
 utoipa = { version = "5", features = ["axum_extras", "chrono"] }

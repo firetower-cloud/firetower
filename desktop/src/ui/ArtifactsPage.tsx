@@ -46,7 +46,9 @@ type Look = "grid" | "list";
 const LOOK_KEY = "firetower.artifacts.look";
 
 export function ArtifactsPage() {
-  const { data, isPending, error } = useListArtifacts({ query: { refetchInterval: 5000 } });
+  /* No interval of its own — `Posters` polls for every screen. Two screens
+     each naming a cadence is how the list came to be fetched on two timers. */
+  const { data, isPending, error } = useListArtifacts();
   const everything = useMemo(() => data ?? [], [data]);
 
   const [scope, setScope] = useState<Scope>("all");
@@ -183,7 +185,10 @@ export function ArtifactsPage() {
           <ArtifactTab
             key={reading.id}
             artifact={reading}
-            sessionId={reading.fromSessionId ?? null}
+            /* Deliberately not `fromSessionId`: the library is full of
+               artifacts whose workspace has been reclaimed, and that column
+               goes on naming one. `null` means "ask". */
+            sendTo={null}
             expanded={expanded}
             onExpanded={setExpanded}
           />

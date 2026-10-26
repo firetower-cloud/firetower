@@ -55,7 +55,103 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   return result;
 };
 
-export const getListArtifactsUrl = () => {
+export const getPutArtifactPosterUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/artifact-versions/${id}/poster`
+}
+
+/**
+ * Uploaded by whichever client rendered it rather than taken here: the
+ * control plane has no browser and `docs/artifacts.md` is right that it
+ * should not grow one. Every client already is one.
+ *
+ * Addressed by *version*, not by artifact, because that is what the picture
+ * is of. A republish makes a new version with no poster, which is the signal
+ * to take another — there is no invalidation to perform and no way for this
+ * to overwrite a picture of bytes somebody is still looking at.
+ * @summary Keep a picture of a version.
+ */
+export const putArtifactPoster = async (id: string,
+    putArtifactPosterBody: Blob, options?: Parameters<typeof http>[1]): Promise<void> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return http<void>(getPutArtifactPosterUrl(id),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'image/png', ...getHeaders(options?.headers) },
+    body: putArtifactPosterBody
+  }
+);}
+
+
+
+
+
+export const getPutArtifactPosterMutationKey = () => ['putArtifactPoster'] as const;
+
+export const getPutArtifactPosterMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof putArtifactPoster>>, TError,PutArtifactPosterMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof putArtifactPoster>>, TError,PutArtifactPosterMutationVariables, TContext> => {
+
+const mutationKey = getPutArtifactPosterMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof putArtifactPoster>>, PutArtifactPosterMutationVariables> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  putArtifactPoster(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PutArtifactPosterMutationResult = NonNullable<Awaited<ReturnType<typeof putArtifactPoster>>>
+    export type PutArtifactPosterMutationBody = Blob
+    export type PutArtifactPosterMutationError = ApiError
+    export type PutArtifactPosterMutationVariables = {id: string;data: Blob}
+
+    /**
+ * @summary Keep a picture of a version.
+ */
+export const usePutArtifactPoster = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof putArtifactPoster>>, TError,PutArtifactPosterMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof putArtifactPoster>>,
+        TError,
+        PutArtifactPosterMutationVariables,
+        TContext
+      > => {
+      return useMutation(getPutArtifactPosterMutationOptions(options), queryClient);
+    }
+    export const getListArtifactsUrl = () => {
 
 
 

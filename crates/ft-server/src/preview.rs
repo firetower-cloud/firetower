@@ -208,6 +208,43 @@ impl Names {
         self.sign(&[ARTIFACT_TAG, artifact.as_str().as_bytes()])
     }
 
+    /// Where an artifact's picture is, as a path on the interface's own origin.
+    ///
+    /// **A path, deliberately, when everything else here is a hostname.** An
+    /// artifact needs an origin of its own because it is a document that
+    /// resolves its own relative links and must not share a cookie jar with
+    /// anything. A poster is one immutable image referenced by exactly one
+    /// `<img>`, and giving each one its own hostname would put the library
+    /// right back to opening a connection per tile — which is the thing being
+    /// fixed. On the interface's origin they share the connection that is
+    /// already open.
+    ///
+    /// Still signed, so it needs no session and no token: an `<img>` cannot
+    /// carry an `Authorization` header, and a capability in the name is the
+    /// scheme this module already is.
+    pub fn poster_path(&self, artifact: &ArtifactId) -> String {
+        format!(
+            "{POSTER_PREFIX}{}-{}.png",
+            artifact_label_of(artifact),
+            self.sign(&[POSTER_TAG, artifact.as_str().as_bytes()]),
+        )
+    }
+
+    /// Which artifact a poster path names, if it names one of ours.
+    pub fn poster_of(&self, path: &str) -> Option<ArtifactId> {
+        let label = path.strip_prefix(POSTER_PREFIX)?.strip_suffix(".png")?;
+        // From the right, for the reason `resolve` gives: an id may hold a
+        // hyphen and splitting from the left would break the day one does.
+        let (rest, signature) = label.rsplit_once('-')?;
+        let artifact = artifact_of(rest);
+        constant_time_eq(
+            self.sign(&[POSTER_TAG, artifact.as_str().as_bytes()])
+                .as_bytes(),
+            signature.as_bytes(),
+        )
+        .then_some(artifact)
+    }
+
     /// One keyed digest over length-prefixed parts.
     ///
     /// Length-prefixed, so ("s_ab", 1) and ("s_a", 91) cannot collide into one
@@ -232,6 +269,19 @@ impl Names {
 /// What each shape is signed as. Changing either invalidates its names.
 const PREVIEW_TAG: &[u8] = b"preview";
 const ARTIFACT_TAG: &[u8] = b"artifact";
+/// Its own tag, so a poster's signature cannot be lifted into a hostname.
+///
+/// Both names grant a read of the same artifact today, so this buys nothing
+/// immediately — but the whole point of tagging in [`Names::sign`] is that the
+/// kind is decided by what was signed rather than by whichever parser read it
+/// afterwards, and a path and a hostname are parsed by different ones.
+const POSTER_TAG: &[u8] = b"poster";
+
+/// The one path on the interface's origin that answers without a token.
+///
+/// Under `__firetower/` with the annotation runtime, which is the existing
+/// place for "ours, not the application's".
+pub const POSTER_PREFIX: &str = "/__firetower/poster/";
 
 /// Whether a browser would have assumed this port from the scheme alone.
 ///
@@ -476,6 +526,61 @@ mod tests {
 
     fn artifact() -> ArtifactId {
         ArtifactId::from_stored("ar_01m1c0f9a3hgm99t4vfam429m3")
+    }
+
+    #[test]
+    fn a_poster_path_survives_the_round_trip() {
+        let names = names();
+        let path = names.poster_path(&artifact());
+        assert!(path.starts_with(POSTER_PREFIX), "{path}");
+        assert!(path.ends_with(".png"), "{path}");
+        assert_eq!(names.poster_of(&path), Some(artifact()));
+    }
+
+    /// The whole reason it is signed: the id is in the name, so without this
+    /// anybody could read any artifact's picture by editing the path.
+    #[test]
+    fn a_poster_path_with_a_forged_signature_is_refused() {
+        let names = names();
+        let forged = format!(
+            "{POSTER_PREFIX}{}-aaaaaaaaaaaaaaaa.png",
+            artifact_label_of(&artifact())
+        );
+        assert_eq!(names.poster_of(&forged), None);
+    }
+
+    /// Another key is another installation, and a path minted there means
+    /// nothing here.
+    #[test]
+    fn a_poster_path_from_another_key_is_refused() {
+        let path = Names::new([9u8; 32], "localhost").poster_path(&artifact());
+        assert_eq!(names().poster_of(&path), None);
+    }
+
+    /// `POSTER_TAG` earning its place: the same artifact signs differently for
+    /// a hostname and for a path, so neither signature can be lifted into the
+    /// other parser.
+    #[test]
+    fn a_hostname_signature_is_not_a_poster_signature() {
+        let names = names();
+        let host = names.artifact_host(&artifact());
+        let from_host = host.split('.').next().unwrap().rsplit_once('-').unwrap().1;
+        let lifted = format!(
+            "{POSTER_PREFIX}{}-{from_host}.png",
+            artifact_label_of(&artifact())
+        );
+        assert_eq!(names.poster_of(&lifted), None);
+    }
+
+    /// Nothing that is not a poster path is read as one, including the
+    /// prefix on its own and a path with the extension missing.
+    #[test]
+    fn something_that_is_not_a_poster_is_not_one() {
+        let names = names();
+        assert_eq!(names.poster_of("/api/v1/artifacts"), None);
+        assert_eq!(names.poster_of(POSTER_PREFIX), None);
+        let no_extension = names.poster_path(&artifact()).replace(".png", "");
+        assert_eq!(names.poster_of(&no_extension), None);
     }
 
     #[test]

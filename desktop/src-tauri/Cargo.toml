@@ -45,17 +45,35 @@ window-vibrancy = "0.6"
 # reaches for NSScreen and NSWindow directly, and a transitive dependency is
 # not an API you are allowed to call.
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSEvent", "NSResponder", "NSRunningApplication", "NSScreen", "NSView", "NSWindow"] }
+# `NSImage` and `NSBitmapImageRep` are for `capture.rs`: `takeSnapshot` hands
+# back an NSImage and the only way out of one to PNG bytes is a bitmap rep.
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSBitmapImageRep", "NSEvent", "NSGraphics", "NSImage", "NSImageRep", "NSResponder", "NSRunningApplication", "NSScreen", "NSView", "NSWindow"] }
 # `NSRect`, to set a window's size and origin in one call. Two calls are two
 # frame changes, and the gap between them is a visible flicker.
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSGeometry"] }
+# The rest are `capture.rs` again: a width to scale the snapshot to (`NSNumber`,
+# which lives in `NSValue`), the properties dictionary PNG encoding takes, and
+# the `NSData` the bytes come back in.
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSData", "NSDictionary", "NSGeometry", "NSString", "NSValue"] }
+# The completion handler `takeSnapshot` is given. Paired with objc2's major,
+# for the same reason the `windows` crate below is pinned to Tauri's.
+block2 = "0.6"
 
 # The island's window flags on Windows. Pinned to the same major as Tauri's
 # own: `WebviewWindow::hwnd()` hands back a `windows::Win32::Foundation::HWND`
 # from *its* copy of the crate, and two majors in one tree makes that handle a
 # different type that no amount of casting will accept.
 [target.'cfg(target_os = "windows")'.dependencies]
-windows = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_UI_WindowsAndMessaging"] }
+windows = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_System_Com", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+# `capture.rs` on Windows. Pinned to the majors Tauri already resolves, for the
+# same reason the `windows` crate is: `PlatformWebview::controller()` hands back
+# an `ICoreWebView2Controller` from *its* copy, and two majors in one tree makes
+# that a different type no cast will accept.
+webview2-com = "0.38"
+# WebView2 photographs the webview at its real size — there is no
+# `snapshotWidth` the way WebKit has — so the downscale is done here. macOS
+# does not link this: `takeSnapshot` scales as it captures.
+image = { version = "0.25", default-features = false, features = ["png"] }
+
 # The notification area (`tray.rs`). Asked for only on the platform that has
 # one, so the Mac build does not link a tray implementation it can never use.
 # Unlike `macos-private-api` above, nothing in `build.rs` reads this one, so
