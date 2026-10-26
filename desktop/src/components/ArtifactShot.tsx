@@ -1,29 +1,28 @@
 /**
- * A thumbnail of an artifact: the artifact itself, scaled.
+ * A thumbnail of an artifact: a picture of it, not a running copy of it.
  *
- * No screenshot service and no headless browser on the control plane — the
- * client already has something that can render the page, so a transform is the
- * whole job. That is the one thing this buys, and it charges an iframe's
- * event behaviour in return, which is what the two awkward parts below are.
+ * **This used to be an iframe, and that was the whole problem.** Every tile in
+ * the library, every row of the list and every card in the transcript mounted
+ * the published page at 1180px and scaled it down — so a library of six was
+ * six page loads of six separate origins, six copies of the injected picker
+ * runtime, and six documents whose scripts and timers went on running behind a
+ * grid nobody was interacting with. The white box people saw was this
+ * component's own background, waiting.
  *
- * **The scale is measured, never assumed.** It used to be computed from the
- * tile width the grid was *expected* to have, while the columns are
- * `minmax(14rem, 1fr)` — so any column wider than that drew the page at its
- * assumed size and left white beside it. A thumbnail that is mostly blank
- * reads as a broken artifact rather than a wide column.
+ * What replaces it is an `<img>` against a poster rendered once per version
+ * (`posters.ts`), which is cacheable forever because a version's bytes cannot
+ * change. The live page survives in exactly one place now: `ArtifactTab`,
+ * where somebody is actually reading it.
  *
- * **The pane over the frame is load-bearing.** `pointer-events: none` stops
- * clicks but does not reliably stop the wheel in WKWebView: the event reaches
- * the inner document and scrolls *that*, so scrolling a grid of thumbnails
- * scrolled whichever thumbnail the pointer was over. A sibling above it in
- * z-order catches the wheel first, and clicks still land on whatever this is
- * nested inside.
+ * **There is deliberately no iframe fallback.** "Render it live if there is no
+ * poster yet" sounds safe and quietly keeps the entire cost for the one case
+ * that hurts most — a fresh library where every tile is missing at once. A
+ * placeholder is honest and costs nothing; the picture arrives a moment later.
  */
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
+import { Shapes } from "lucide-react";
+import { apiBase } from "~/client/http";
 import type { Artifact } from "~/api/generated/model";
-
-/** The width the page is laid out at before being scaled down. */
-const PAGE = 1180;
 
 export function ArtifactShot({
   artifact,
@@ -38,45 +37,57 @@ export function ArtifactShot({
   /** Its own border and corners. Off when something around it draws them. */
   framed?: boolean;
 }) {
-  const box = useRef<HTMLSpanElement>(null);
-  const [width, setWidth] = useState(0);
-
-  useEffect(() => {
-    const el = box.current;
-    if (!el) return;
-    setWidth(el.clientWidth);
-    const watch = new ResizeObserver(([entry]) => setWidth(entry.contentRect.width));
-    watch.observe(el);
-    return () => watch.disconnect();
-  }, []);
+  /* A poster the server says exists can still fail to load — an old row whose
+     bytes went with a deleted version, or a request that lost the network. The
+     placeholder is the same either way, so this collapses into one flag. */
+  const [broken, setBroken] = useState(false);
+  const showing = artifact.hasPoster && !broken;
 
   return (
     <span
-      ref={box}
       style={{ aspectRatio: String(ratio) }}
-      className={`relative block w-full overflow-hidden bg-white transition-colors ${
-        framed ? "rounded-md border border-line" : ""
-      } ${className}`}
+      className={`relative block w-full overflow-hidden ${
+        /* Not `bg-white`. A white rectangle is what a page looks like before it
+           has painted, so it read as a broken artifact rather than as one that
+           has not been photographed yet.
+           Not `bg-panel` either, which was the first attempt at that: the tile
+           around this is already `bg-panel`, so the two met with nothing
+           between them and the whole card read as one blank slab.
+           `--color-line` is the lightest grey the palette has, and a plate is
+           the one place it is used as a fill rather than an edge: against
+           `panel` it is unmistakably an area waiting for a picture, which
+           neither `panel` nor `raise` managed. */
+        showing ? "bg-white" : "bg-line"
+      } ${framed ? "rounded-md border border-line" : ""} ${className}`}
     >
-      {/* Nothing until the width is known: mounting at scale 0 would load the
-          page once and lay it out again a frame later. */}
-      {width > 0 && (
-        <iframe
-          src={artifact.url}
-          title=""
-          tabIndex={-1}
+      {showing ? (
+        <img
+          src={`${apiBase()}${artifact.posterUrl}`}
+          alt=""
+          /* Decorative: every caller draws the title beside this, so announcing
+             it again is one more thing to listen past. */
           aria-hidden
-          scrolling="no"
-          style={{
-            width: PAGE,
-            height: PAGE / ratio,
-            transform: `scale(${width / PAGE})`,
-            transformOrigin: "0 0",
-          }}
-          className="pointer-events-none absolute inset-0 border-0"
+          loading="lazy"
+          decoding="async"
+          onError={() => setBroken(true)}
+          /* `top` rather than `center`: a page is read from the top, and a tall
+             document cropped to 16:10 from the middle shows its middle, which
+             is the one part nobody recognises it by. */
+          className="absolute inset-0 h-full w-full object-cover object-top"
         />
+      ) : (
+        /* Sized off the tile rather than fixed, because this same component is
+           84px wide in the list, ~224px in the grid and up to 416px in the
+           transcript — one pixel size is lost at the top of that range and
+           crowded at the bottom. The clamps stop it going silly either way.
+           `text-dim` on this plate, not `text-mute`: at a glyph this large the
+           quieter one still reads as a smudge rather than a mark. */
+        <span className="absolute inset-0 grid place-items-center">
+          <span className="grid aspect-square w-[16%] max-w-9 min-w-5 place-items-center">
+            <Shapes className="h-full w-full text-dim" strokeWidth={1.5} />
+          </span>
+        </span>
       )}
-      <span className="absolute inset-0 z-10" aria-hidden />
     </span>
   );
 }

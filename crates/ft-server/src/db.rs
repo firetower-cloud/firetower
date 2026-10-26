@@ -7001,6 +7001,13 @@ pub struct ArtifactRow {
     /// in general — so a client that cannot name the version cannot complete
     /// the handshake, and Annotate stays dead with nothing to say why.
     pub version_id: Option<String>,
+    /// Whether this version has been photographed yet.
+    ///
+    /// What the library draws instead of mounting the artifact, and what tells
+    /// a client which versions still need a picture taking. False is an
+    /// ordinary state — a version is published before anything has rendered
+    /// it — so the tile shows a placeholder rather than an error.
+    pub has_poster: bool,
     pub title: String,
     pub slug: String,
     pub version: i32,
@@ -7054,6 +7061,86 @@ impl Db {
             content_type: r.get("content_type"),
             body: r.get("body"),
         }))
+    }
+
+    /// The picture of whatever this artifact currently points at.
+    ///
+    /// Returns the version id alongside the bytes because that is the
+    /// validator the response is cached on — the caller has no other way to
+    /// name which render it just received.
+    pub async fn artifact_poster(
+        &self,
+        id: &ft_core::ArtifactId,
+    ) -> Result<Option<(String, Vec<u8>)>> {
+        let row = sqlx::query(
+            "SELECT v.id, v.poster
+               FROM artifacts a
+               JOIN artifact_versions v ON v.id = a.current_version_id
+              WHERE a.id = $1 AND v.poster IS NOT NULL",
+        )
+        .bind(id.as_str())
+        .fetch_optional(&self.pool)
+        .await
+        .context("reading an artifact's poster")?;
+
+        Ok(row.map(|r| (r.get("id"), r.get("poster"))))
+    }
+
+    /// Keep a picture of a version, if it does not already have one.
+    ///
+    /// `WHERE poster IS NULL` is what makes two clients looking at the same
+    /// library harmless: both notice the gap, both render, and the second
+    /// write is a no-op rather than a conflict or a needless rewrite of the
+    /// same page. It also means a poster is taken once for the life of a
+    /// version, which is the whole saving — a republish makes a new row.
+    ///
+    /// `false` means somebody else got there first, which is not a failure.
+    pub async fn set_artifact_poster(&self, version_id: &str, png: &[u8]) -> Result<bool> {
+        let done = sqlx::query(
+            "UPDATE artifact_versions
+                SET poster = $2, poster_at = now()
+              WHERE id = $1 AND poster IS NULL",
+        )
+        .bind(version_id)
+        .bind(png)
+        .execute(&self.pool)
+        .await
+        .context("storing an artifact's poster")?;
+
+        Ok(done.rows_affected() > 0)
+    }
+
+    /// Which artifact a version belongs to, if this person may see it.
+    ///
+    /// **Viewer, and the name says so now** — it was `artifact_version_for_writer`,
+    /// which described neither what it checks nor what it is for, on a function
+    /// whose whole job is an access decision.
+    ///
+    /// Viewer is deliberate. A poster is a cache of what a page looks like, not
+    /// a change to the artifact, so somebody a directory was shared with can
+    /// fill one in. Requiring writer would leave every shared artifact without
+    /// a picture for exactly the people it was shared with.
+    pub async fn artifact_version_visible_to(
+        &self,
+        person: &str,
+        version_id: &str,
+    ) -> Result<Option<String>> {
+        use crate::access::{filed_where, Level};
+        let sql = format!(
+            "SELECT a.id
+               FROM artifacts a
+               JOIN artifact_versions v ON v.artifact_id = a.id
+              WHERE v.id = $2 AND {visible}",
+            visible = filed_where("a", 1, Level::Viewer),
+        );
+        let row = sqlx::query(&sql)
+            .bind(person)
+            .bind(version_id)
+            .fetch_optional(&self.pool)
+            .await
+            .context("checking who may photograph an artifact")?;
+
+        Ok(row.map(|r| r.get("id")))
     }
 
     /// Store a new version, making the artifact if this is the first.
@@ -7261,25 +7348,35 @@ impl Db {
     /// directory has to appear for everybody with a grant on it. Writing a
     /// second predicate here is how two answers come to disagree.
     pub async fn artifacts_of(&self, person: &str) -> Result<Vec<ArtifactRow>> {
+        self.artifacts_where(person, None).await
+    }
+
+    /// Every artifact this person may see, or the one of them named.
+    ///
+    /// One query behind both so the access predicate cannot come to mean two
+    /// different things depending on which handler asked.
+    async fn artifacts_where(&self, person: &str, one: Option<&str>) -> Result<Vec<ArtifactRow>> {
         use crate::access::{filed_where, Level};
+        let only = if one.is_some() { "AND a.id = $2" } else { "" };
         let sql = format!(
             "SELECT a.id, a.first_seen_line, a.path::text AS path, a.current_version_id,
                     a.title, a.slug,
                     a.from_session_id, a.from_workspace_name, a.updated_at, v.n, v.bytes,
+                    (v.poster IS NOT NULL) AS has_poster,
                     (a.path <@ (SELECT ('u.' || slug)::ltree FROM principals WHERE id = $1)) AS mine,
                     {shareable} AS may_share
                FROM artifacts a
                LEFT JOIN artifact_versions v ON v.id = a.current_version_id
-              WHERE {visible}
+              WHERE {visible} {only}
               ORDER BY a.updated_at DESC",
             visible = filed_where("a", 1, Level::Viewer),
             shareable = filed_where("a", 1, Level::Writer),
         );
-        let rows = sqlx::query(&sql)
-            .bind(person)
-            .fetch_all(&self.pool)
-            .await
-            .context("listing artifacts")?;
+        let mut q = sqlx::query(&sql).bind(person);
+        if let Some(id) = one {
+            q = q.bind(id);
+        }
+        let rows = q.fetch_all(&self.pool).await.context("listing artifacts")?;
 
         Ok(rows
             .into_iter()
@@ -7290,6 +7387,7 @@ impl Db {
                 may_share: r.try_get("may_share").unwrap_or(false),
                 mine: r.try_get("mine").unwrap_or(false),
                 version_id: r.get("current_version_id"),
+                has_poster: r.try_get("has_poster").unwrap_or(false),
                 title: r.get("title"),
                 slug: r.get("slug"),
                 version: r.try_get("n").unwrap_or(0),
@@ -7299,6 +7397,25 @@ impl Db {
                 updated_at: r.get("updated_at"),
             })
             .collect())
+    }
+
+    /// One artifact this person may see.
+    ///
+    /// `artifacts_of` filtered in Rust was how three handlers found a single
+    /// row: the address, the rename's answer and the download's access check
+    /// each pulled every artifact in the organisation across the wire, ran the
+    /// access predicate over all of them, and then kept one. Same predicate,
+    /// same answer, one row.
+    pub async fn artifact_of(
+        &self,
+        person: &str,
+        id: &ft_core::ArtifactId,
+    ) -> Result<Option<ArtifactRow>> {
+        Ok(self
+            .artifacts_where(person, Some(id.as_str()))
+            .await?
+            .into_iter()
+            .next())
     }
 
     /// Give an artifact the name a person chose.

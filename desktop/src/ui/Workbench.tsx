@@ -179,7 +179,9 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
   /* Artifacts this person has published. Asked for by owner rather than by
      session, because one outlives the workspace that produced it — the list
      is filtered to this session's for the rail, not fetched per session. */
-  const artifacts = useListArtifacts({ query: { refetchInterval: 4000 } });
+  /* No interval: `Posters`, mounted beside the rail, owns the poll on every
+     screen. This reads what it keeps warm. */
+  const artifacts = useListArtifacts();
 
 
   const [expanded, setExpanded] = useState<string | null>(null);

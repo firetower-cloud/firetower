@@ -45,10 +45,18 @@ window-vibrancy = "0.6"
 # reaches for NSScreen and NSWindow directly, and a transitive dependency is
 # not an API you are allowed to call.
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSEvent", "NSResponder", "NSRunningApplication", "NSScreen", "NSView", "NSWindow"] }
+# `NSImage` and `NSBitmapImageRep` are for `capture.rs`: `takeSnapshot` hands
+# back an NSImage and the only way out of one to PNG bytes is a bitmap rep.
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSBitmapImageRep", "NSEvent", "NSGraphics", "NSImage", "NSImageRep", "NSResponder", "NSRunningApplication", "NSScreen", "NSView", "NSWindow"] }
 # `NSRect`, to set a window's size and origin in one call. Two calls are two
 # frame changes, and the gap between them is a visible flicker.
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSGeometry"] }
+# The rest are `capture.rs` again: a width to scale the snapshot to (`NSNumber`,
+# which lives in `NSValue`), the properties dictionary PNG encoding takes, and
+# the `NSData` the bytes come back in.
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSData", "NSDictionary", "NSGeometry", "NSString", "NSValue"] }
+# The completion handler `takeSnapshot` is given. Paired with objc2's major,
+# for the same reason the `windows` crate below is pinned to Tauri's.
+block2 = "0.6"
 
 # The island's window flags on Windows. Pinned to the same major as Tauri's
 # own: `WebviewWindow::hwnd()` hands back a `windows::Win32::Foundation::HWND`

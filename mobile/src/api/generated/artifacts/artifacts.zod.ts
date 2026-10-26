@@ -9,6 +9,23 @@ import * as zod from 'zod';
 
 
 /**
+ * Uploaded by whichever client rendered it rather than taken here: the
+ * control plane has no browser and `docs/artifacts.md` is right that it
+ * should not grow one. Every client already is one.
+ *
+ * Addressed by *version*, not by artifact, because that is what the picture
+ * is of. A republish makes a new version with no poster, which is the signal
+ * to take another — there is no invalidation to perform and no way for this
+ * to overwrite a picture of bytes somebody is still looking at.
+ * @summary Keep a picture of a version.
+ */
+export const PutArtifactPosterParams = zod.object({
+  "id": zod.string().describe('Artifact version id')
+})
+
+export const PutArtifactPosterResponse = zod.void()
+
+/**
  * @summary Everything this person has published.
  */
 export const ListArtifactsResponseItem = zod.object({
@@ -16,6 +33,7 @@ export const ListArtifactsResponseItem = zod.object({
   "firstSeenLine": zod.int().nullish().describe('Where in the producing session\'s log this first appeared.\n\nWhat the conversation anchors its card to. `None` for rows written\nbefore this existed, which fall back to the end of the transcript.'),
   "fromSessionId": zod.string().nullish(),
   "fromWorkspaceName": zod.string().nullish(),
+  "hasPoster": zod.boolean().describe('Whether this version has been photographed yet.\n\nWhat the library draws instead of mounting the artifact, and what tells\na client which versions still need a picture taking. False is an\nordinary state — a version is published before anything has rendered\nit — so the tile shows a placeholder rather than an error.'),
   "id": zod.string(),
   "mayShare": zod.boolean().describe('Whether the asker may move it — drawn as the move control, and\nre-decided server-side by `may_share` whatever the client drew.'),
   "mine": zod.boolean().describe('True when it is filed at the asker\'s own root rather than shared.'),
@@ -26,6 +44,7 @@ export const ListArtifactsResponseItem = zod.object({
   "version": zod.int(),
   "versionId": zod.string().nullish().describe('The version currently served.\n\nExposed because the picker injected into the page identifies itself by\nit — a note belongs to the bytes it was written on, not to the artifact\nin general — so a client that cannot name the version cannot complete\nthe handshake, and Annotate stays dead with nothing to say why.')
 }).describe('One artifact, as a list shows it.').and(zod.object({
+  "posterUrl": zod.string().describe('Where the picture of it is, for an `<img>` in a library or a transcript.\n\nAlways an address, even before anything has rendered the page —\n`hasPoster` is what says whether it answers yet. Two fields rather than\nan optional URL because the client needs to tell "no picture taken" from\n"no picture possible", and only the first of those is worth queueing.'),
   "url": zod.string().describe('Ready to put in an `iframe` or paste into a tab.')
 })).describe('One artifact, with the address it can be opened at.')
 export const ListArtifactsResponse = zod.array(ListArtifactsResponseItem)
@@ -60,6 +79,7 @@ export const RenameArtifactResponse = zod.object({
   "firstSeenLine": zod.int().nullish().describe('Where in the producing session\'s log this first appeared.\n\nWhat the conversation anchors its card to. `None` for rows written\nbefore this existed, which fall back to the end of the transcript.'),
   "fromSessionId": zod.string().nullish(),
   "fromWorkspaceName": zod.string().nullish(),
+  "hasPoster": zod.boolean().describe('Whether this version has been photographed yet.\n\nWhat the library draws instead of mounting the artifact, and what tells\na client which versions still need a picture taking. False is an\nordinary state — a version is published before anything has rendered\nit — so the tile shows a placeholder rather than an error.'),
   "id": zod.string(),
   "mayShare": zod.boolean().describe('Whether the asker may move it — drawn as the move control, and\nre-decided server-side by `may_share` whatever the client drew.'),
   "mine": zod.boolean().describe('True when it is filed at the asker\'s own root rather than shared.'),
@@ -70,6 +90,7 @@ export const RenameArtifactResponse = zod.object({
   "version": zod.int(),
   "versionId": zod.string().nullish().describe('The version currently served.\n\nExposed because the picker injected into the page identifies itself by\nit — a note belongs to the bytes it was written on, not to the artifact\nin general — so a client that cannot name the version cannot complete\nthe handshake, and Annotate stays dead with nothing to say why.')
 }).describe('One artifact, as a list shows it.').and(zod.object({
+  "posterUrl": zod.string().describe('Where the picture of it is, for an `<img>` in a library or a transcript.\n\nAlways an address, even before anything has rendered the page —\n`hasPoster` is what says whether it answers yet. Two fields rather than\nan optional URL because the client needs to tell "no picture taken" from\n"no picture possible", and only the first of those is worth queueing.'),
   "url": zod.string().describe('Ready to put in an `iframe` or paste into a tab.')
 })).describe('One artifact, with the address it can be opened at.')
 
@@ -85,6 +106,7 @@ export const ArtifactAddressResponse = zod.object({
   "firstSeenLine": zod.int().nullish().describe('Where in the producing session\'s log this first appeared.\n\nWhat the conversation anchors its card to. `None` for rows written\nbefore this existed, which fall back to the end of the transcript.'),
   "fromSessionId": zod.string().nullish(),
   "fromWorkspaceName": zod.string().nullish(),
+  "hasPoster": zod.boolean().describe('Whether this version has been photographed yet.\n\nWhat the library draws instead of mounting the artifact, and what tells\na client which versions still need a picture taking. False is an\nordinary state — a version is published before anything has rendered\nit — so the tile shows a placeholder rather than an error.'),
   "id": zod.string(),
   "mayShare": zod.boolean().describe('Whether the asker may move it — drawn as the move control, and\nre-decided server-side by `may_share` whatever the client drew.'),
   "mine": zod.boolean().describe('True when it is filed at the asker\'s own root rather than shared.'),
@@ -95,6 +117,7 @@ export const ArtifactAddressResponse = zod.object({
   "version": zod.int(),
   "versionId": zod.string().nullish().describe('The version currently served.\n\nExposed because the picker injected into the page identifies itself by\nit — a note belongs to the bytes it was written on, not to the artifact\nin general — so a client that cannot name the version cannot complete\nthe handshake, and Annotate stays dead with nothing to say why.')
 }).describe('One artifact, as a list shows it.').and(zod.object({
+  "posterUrl": zod.string().describe('Where the picture of it is, for an `<img>` in a library or a transcript.\n\nAlways an address, even before anything has rendered the page —\n`hasPoster` is what says whether it answers yet. Two fields rather than\nan optional URL because the client needs to tell "no picture taken" from\n"no picture possible", and only the first of those is worth queueing.'),
   "url": zod.string().describe('Ready to put in an `iframe` or paste into a tab.')
 })).describe('One artifact, with the address it can be opened at.')
 
@@ -152,6 +175,7 @@ export const PublishArtifactResponse = zod.object({
   "firstSeenLine": zod.int().nullish().describe('Where in the producing session\'s log this first appeared.\n\nWhat the conversation anchors its card to. `None` for rows written\nbefore this existed, which fall back to the end of the transcript.'),
   "fromSessionId": zod.string().nullish(),
   "fromWorkspaceName": zod.string().nullish(),
+  "hasPoster": zod.boolean().describe('Whether this version has been photographed yet.\n\nWhat the library draws instead of mounting the artifact, and what tells\na client which versions still need a picture taking. False is an\nordinary state — a version is published before anything has rendered\nit — so the tile shows a placeholder rather than an error.'),
   "id": zod.string(),
   "mayShare": zod.boolean().describe('Whether the asker may move it — drawn as the move control, and\nre-decided server-side by `may_share` whatever the client drew.'),
   "mine": zod.boolean().describe('True when it is filed at the asker\'s own root rather than shared.'),
@@ -162,6 +186,7 @@ export const PublishArtifactResponse = zod.object({
   "version": zod.int(),
   "versionId": zod.string().nullish().describe('The version currently served.\n\nExposed because the picker injected into the page identifies itself by\nit — a note belongs to the bytes it was written on, not to the artifact\nin general — so a client that cannot name the version cannot complete\nthe handshake, and Annotate stays dead with nothing to say why.')
 }).describe('One artifact, as a list shows it.').and(zod.object({
+  "posterUrl": zod.string().describe('Where the picture of it is, for an `<img>` in a library or a transcript.\n\nAlways an address, even before anything has rendered the page —\n`hasPoster` is what says whether it answers yet. Two fields rather than\nan optional URL because the client needs to tell "no picture taken" from\n"no picture possible", and only the first of those is worth queueing.'),
   "url": zod.string().describe('Ready to put in an `iframe` or paste into a tab.')
 })).describe('One artifact, with the address it can be opened at.')
 

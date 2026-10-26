@@ -11,6 +11,15 @@ import type { ArtifactRow } from './artifactRow';
  * One artifact, with the address it can be opened at.
  */
 export type Artifact = ArtifactRow & {
+  /**
+     * Where the picture of it is, for an `<img>` in a library or a transcript.
+     *
+     * Always an address, even before anything has rendered the page —
+     * `hasPoster` is what says whether it answers yet. Two fields rather than
+     * an optional URL because the client needs to tell "no picture taken" from
+     * "no picture possible", and only the first of those is worth queueing.
+     */
+  posterUrl: string;
   /** Ready to put in an `iframe` or paste into a tab. */
   url: string;
 };

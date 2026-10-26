@@ -570,6 +570,67 @@
         }
       }
     },
+    "/api/v1/artifact-versions/{id}/poster": {
+      "put": {
+        "tags": [
+          "artifacts"
+        ],
+        "summary": "Keep a picture of a version.",
+        "description": "Uploaded by whichever client rendered it rather than taken here: the\ncontrol plane has no browser and `docs/artifacts.md` is right that it\nshould not grow one. Every client already is one.\n\nAddressed by *version*, not by artifact, because that is what the picture\nis of. A republish makes a new version with no poster, which is the signal\nto take another — there is no invalidation to perform and no way for this\nto overwrite a picture of bytes somebody is still looking at.",
+        "operationId": "put_artifact_poster",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Artifact version id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "image/png": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/artifacts": {
       "get": {
         "tags": [
@@ -8430,9 +8491,14 @@
           {
             "type": "object",
             "required": [
-              "url"
+              "url",
+              "posterUrl"
             ],
             "properties": {
+              "posterUrl": {
+                "type": "string",
+                "description": "Where the picture of it is, for an `<img>` in a library or a transcript.\n\nAlways an address, even before anything has rendered the page —\n`hasPoster` is what says whether it answers yet. Two fields rather than\nan optional URL because the client needs to tell \"no picture taken\" from\n\"no picture possible\", and only the first of those is worth queueing."
+              },
               "url": {
                 "type": "string",
                 "description": "Ready to put in an `iframe` or paste into a tab."
@@ -8462,6 +8528,7 @@
           "path",
           "mayShare",
           "mine",
+          "hasPoster",
           "title",
           "slug",
           "version",
@@ -8492,6 +8559,10 @@
               "string",
               "null"
             ]
+          },
+          "hasPoster": {
+            "type": "boolean",
+            "description": "Whether this version has been photographed yet.\n\nWhat the library draws instead of mounting the artifact, and what tells\na client which versions still need a picture taking. False is an\nordinary state — a version is published before anything has rendered\nit — so the tile shows a placeholder rather than an error."
           },
           "id": {
             "type": "string"

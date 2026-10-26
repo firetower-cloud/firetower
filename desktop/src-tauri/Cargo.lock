@@ -1102,6 +1102,7 @@ checksum = "3e0f1c7c3a72c66fd80abe965175f7523475c0489a87d3ff9d6e8c87d87a9d2d"
 name = "firetower-desktop"
 version = "0.21.0"
 dependencies = [
+ "block2",
  "keyring",
  "objc2",
  "objc2-app-kit",

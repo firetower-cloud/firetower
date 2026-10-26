@@ -50,6 +50,27 @@ pub async fn serve(state: AppState, artifact: ArtifactId, request: Request) -> R
         asked.to_string()
     };
 
+    // A version's bytes cannot change — `20261023120000_artifacts.sql` makes a
+    // version immutable and `publish_artifact` mints a new one rather than
+    // editing this — so the version id *is* the validator. The path is in it
+    // because one version holds many files and a cache in front of us should
+    // never be able to confuse two of them.
+    let tag = format!("\"{}:{}\"", current.id, wanted.replace('"', ""));
+
+    // Answered before the body is read, which is the point of it: a revalidation
+    // costs a primary-key lookup and an empty response rather than pulling the
+    // bytes out of Postgres and running them through the rewriter again.
+    if asked_for(request.headers(), &tag) {
+        return (
+            StatusCode::NOT_MODIFIED,
+            [
+                (header::ETAG, tag),
+                (header::CACHE_CONTROL, "no-cache".to_string()),
+            ],
+        )
+            .into_response();
+    }
+
     let file = match state.db.artifact_file(&current.id, &wanted).await {
         Ok(Some(file)) => file,
         Ok(None) => return missing(&wanted),
@@ -66,7 +87,16 @@ pub async fn serve(state: AppState, artifact: ArtifactId, request: Request) -> R
     )
         .into_response();
 
-    if is_html {
+    // A capture is a top-level window, where the runtime disables itself on
+    // `window.parent === window` anyway — so this is not about what ends up in
+    // the photograph. It is the 21 KB of picker and the rewrite that produces
+    // it, neither of which anything is going to use.
+    let shooting = request.uri().query().is_some_and(|q| {
+        q.split('&')
+            .any(|p| p == "ft-shot" || p.starts_with("ft-shot="))
+    });
+
+    let mut response = if is_html && !shooting {
         // The same picker a preview gets, injected the same way. The artifact
         // never learns it is there, and no credential enters its origin.
         crate::preview::annotations::instrument(
@@ -77,7 +107,91 @@ pub async fn serve(state: AppState, artifact: ArtifactId, request: Request) -> R
         )
     } else {
         response
+    };
+
+    // After `instrument`, never before: it strips the validators it was handed
+    // because a proxied response's own `ETag` describes bytes it just rewrote.
+    // This one is minted here, on the near side of that rewrite, so it is the
+    // one thing in the response that does describe what is being sent.
+    //
+    // `no-cache` rather than `no-store`, which is what `instrument` leaves: the
+    // address is the *artifact*, so what it points at changes when a new version
+    // is published, and the client has to ask. It just no longer has to be
+    // answered with 74 KB to be told nothing moved.
+    if let Ok(tag) = header::HeaderValue::from_str(&tag) {
+        let headers = response.headers_mut();
+        headers.insert(header::ETAG, tag);
+        headers.insert(
+            header::CACHE_CONTROL,
+            header::HeaderValue::from_static("no-cache"),
+        );
     }
+    response
+}
+
+/// Whether the asker already holds these bytes.
+///
+/// `If-None-Match` is a list, entries may be weak, and `*` means "anything you
+/// have". Weak and strong compare alike here because there is only ever one
+/// representation of a path within a version — there is no transfer-coding
+/// variant for the distinction to be about.
+fn asked_for(headers: &axum::http::HeaderMap, tag: &str) -> bool {
+    let Some(held) = headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|v| v.to_str().ok())
+    else {
+        return false;
+    };
+    held.split(',')
+        .map(|e| e.trim().trim_start_matches("W/"))
+        .any(|e| e == "*" || e == tag)
+}
+
+/// Answer a request for an artifact's picture.
+///
+/// Unauthenticated and signed, like the artifact itself: an `<img>` cannot
+/// carry a token, and the capability is in the name. Served from the
+/// interface's own origin rather than the artifact's so that a library of
+/// twenty tiles is twenty images on one connection instead of twenty origins.
+pub async fn serve_poster(state: AppState, artifact: ArtifactId, request: Request) -> Response {
+    let Ok(Some((version, png))) = state.db.artifact_poster(&artifact).await else {
+        // No picture yet is the ordinary state of a version nothing has
+        // rendered, and the client already draws a placeholder for it. 404 so
+        // the `<img>` fails quietly rather than being cached as an error page.
+        return StatusCode::NOT_FOUND.into_response();
+    };
+
+    // `immutable` is only true because the caller put the version in the
+    // address — `present()` appends `?v=<version>`, and that is what makes
+    // these bytes final *for this URL*.
+    //
+    // Said plainly because getting it wrong is silent: the first version of
+    // this served `immutable` on the bare, artifact-addressed path, and a
+    // browser holding v1's picture was told it could keep it for a year. It
+    // did. The artifact moved to v3 and the library drew v1 with nothing
+    // anywhere to suggest it was stale. A poster is immutable per *version*;
+    // the path alone names the artifact, which is a different thing.
+    //
+    // The `ETag` is kept for the case the query string is dropped by something
+    // in the middle: a revalidation then still costs an empty 304 rather than
+    // the image.
+    let tag = format!("\"{version}\"");
+    if asked_for(request.headers(), &tag) {
+        return (StatusCode::NOT_MODIFIED, [(header::ETAG, tag)]).into_response();
+    }
+
+    (
+        [
+            (header::CONTENT_TYPE, "image/png".to_string()),
+            (header::ETAG, tag),
+            (
+                header::CACHE_CONTROL,
+                "public, max-age=31536000, immutable".to_string(),
+            ),
+        ],
+        png,
+    )
+        .into_response()
 }
 
 /// A page, rather than a blank frame. Same reasoning as the preview's.
@@ -166,5 +280,70 @@ mod tests {
     #[test]
     fn what_a_failure_says_is_escaped() {
         assert_eq!(html_escape("a <b> & c"), "a &lt;b&gt; &amp; c");
+    }
+
+    fn holding(value: &str) -> axum::http::HeaderMap {
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(header::IF_NONE_MATCH, value.parse().unwrap());
+        headers
+    }
+
+    #[test]
+    fn nothing_held_is_not_a_match() {
+        assert!(!asked_for(
+            &axum::http::HeaderMap::new(),
+            "\"v1:index.html\""
+        ));
+    }
+
+    #[test]
+    fn the_same_tag_is_a_match() {
+        assert!(asked_for(
+            &holding("\"v1:index.html\""),
+            "\"v1:index.html\""
+        ));
+    }
+
+    /// The case the whole thing is for: a new version means a new id, so what
+    /// the browser is holding stops matching and it is sent the new bytes.
+    #[test]
+    fn another_version_is_not_a_match() {
+        assert!(!asked_for(
+            &holding("\"v1:index.html\""),
+            "\"v2:index.html\""
+        ));
+    }
+
+    /// One version holds many files, and two of them must never be confused
+    /// for each other — which is why the path is in the tag at all.
+    #[test]
+    fn another_file_of_the_same_version_is_not_a_match() {
+        assert!(!asked_for(
+            &holding("\"v1:index.html\""),
+            "\"v1:style.css\""
+        ));
+    }
+
+    #[test]
+    fn a_list_matches_on_any_of_its_entries() {
+        assert!(asked_for(
+            &holding("\"other\", \"v1:index.html\""),
+            "\"v1:index.html\""
+        ));
+    }
+
+    /// Weak and strong compare alike here: there is only one representation of
+    /// a path within a version, so there is no distinction to preserve.
+    #[test]
+    fn a_weak_tag_still_matches() {
+        assert!(asked_for(
+            &holding("W/\"v1:index.html\""),
+            "\"v1:index.html\""
+        ));
+    }
+
+    #[test]
+    fn a_star_matches_whatever_is_there() {
+        assert!(asked_for(&holding("*"), "\"v1:index.html\""));
     }
 }

@@ -3,6 +3,7 @@ import { ServerStrip, type Scope } from "~/ui/ServerStrip";
 import { Titlebar } from "~/ui/Titlebar";
 import { Rail } from "~/ui/Rail";
 import { Routes } from "~/Routes";
+import { Posters } from "~/artifacts/posters";
 import { Fleet } from "~/ui/Fleet";
 import { useFleet, waitingIn, asBackend as liveBackend } from "~/fleet";
 import { lazy, Suspense } from "react";
@@ -171,6 +172,9 @@ export function App() {
                 )}
               >
                 <Rail backend={here} />
+                {/* Draws nothing: it keeps the artifact list warm and fills in
+                    the pictures the tiles use, on whichever screen is up. */}
+                <Posters />
                 {/* Keyed on the path so leaving a broken screen clears the
                     error rather than sticking on it. */}
                 <Boundary key={path} onReset={() => navigate("/")}>

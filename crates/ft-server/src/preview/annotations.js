@@ -140,6 +140,10 @@
   let frameStarted = false,
     handshakeTimer = null;
   let lastPinPaint = 0;
+  /* The handle of the layout-following timer, or null while it is not
+     running. Declared with the rest of the state rather than beside `follow`
+     so that an early `setMode` cannot reach it in its dead zone. */
+  let following = null;
   function tell(type, data = {}) {
     if (panelWindow && channel && uiOrigin)
       panelWindow.postMessage(
@@ -231,6 +235,7 @@
     toggle.setAttribute("aria-pressed", String(value));
     if (!value) selected = null;
     paint();
+    follow();
     tell("mode", { enabled: value });
   }
   toggle.onclick = () => {
@@ -475,6 +480,7 @@
     });
     lastPinPaint = 0;
     paint();
+    follow();
   }
   function paint() {
     if (!host.isConnected) document.documentElement.append(host);
@@ -504,7 +510,26 @@
   }
   // Layout updates are capped instead of installing a mutation observer on every
   // React commit. Selection still follows scrolling, resizing and hot reload.
-  setInterval(paint, 100);
+  //
+  // **Only while there is something drawn to follow.** `paint` calls
+  // `getBoundingClientRect`, which forces a synchronous layout, and this
+  // runtime is injected into every HTML response from an artifact origin —
+  // including the thumbnail of every tile in the library and every card in the
+  // transcript. Those frames can never be annotated and never have a pin, so
+  // the timer there was ten forced layouts a second, per tile, for the life of
+  // the window, to move an outline nobody had asked for. Unconditionally
+  // installing it was most of why the client felt heavy.
+  //
+  // `annotating` changes only in `setMode` and `pins` only in `updatePins`, so
+  // those two are the whole of the transition and both already end in `paint`.
+  function follow() {
+    const wanted = annotating || pins.length > 0;
+    if (wanted && !following) following = setInterval(paint, 100);
+    else if (!wanted && following) {
+      clearInterval(following);
+      following = null;
+    }
+  }
   window.addEventListener("message", (event) => {
     const data = event.data;
     if (!data || typeof data !== "object") return;

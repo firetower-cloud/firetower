@@ -24,6 +24,15 @@ export interface ArtifactRow {
   fromSessionId?: string | null;
   /** @nullable */
   fromWorkspaceName?: string | null;
+  /**
+     * Whether this version has been photographed yet.
+     *
+     * What the library draws instead of mounting the artifact, and what tells
+     * a client which versions still need a picture taking. False is an
+     * ordinary state — a version is published before anything has rendered
+     * it — so the tile shows a placeholder rather than an error.
+     */
+  hasPoster: boolean;
   id: string;
   /**
      * Whether the asker may move it — drawn as the move control, and
