@@ -600,7 +600,7 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
                     return found ? (
                       <ArtifactTab
                         artifact={found}
-                        sessionId={run.id}
+                        sendTo={run.id}
                         expanded={expanded === t.id}
                         onExpanded={(v) => setExpanded(v ? t.id : null)}
                       />
