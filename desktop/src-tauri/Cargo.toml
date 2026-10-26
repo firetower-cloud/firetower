@@ -63,7 +63,17 @@ block2 = "0.6"
 # from *its* copy of the crate, and two majors in one tree makes that handle a
 # different type that no amount of casting will accept.
 [target.'cfg(target_os = "windows")'.dependencies]
-windows = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_UI_WindowsAndMessaging"] }
+windows = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_System_Com", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+# `capture.rs` on Windows. Pinned to the majors Tauri already resolves, for the
+# same reason the `windows` crate is: `PlatformWebview::controller()` hands back
+# an `ICoreWebView2Controller` from *its* copy, and two majors in one tree makes
+# that a different type no cast will accept.
+webview2-com = "0.38"
+# WebView2 photographs the webview at its real size — there is no
+# `snapshotWidth` the way WebKit has — so the downscale is done here. macOS
+# does not link this: `takeSnapshot` scales as it captures.
+image = { version = "0.25", default-features = false, features = ["png"] }
+
 # The notification area (`tray.rs`). Asked for only on the platform that has
 # one, so the Mac build does not link a tray implementation it can never use.
 # Unlike `macos-private-api` above, nothing in `build.rs` reads this one, so

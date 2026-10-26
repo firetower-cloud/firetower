@@ -2736,6 +2736,126 @@ mod tests {
         Db::open_for_test_owned().await.unwrap()
     }
 
+    /// Publish a page, as the real path does.
+    async fn publish(db: &Db, who: &str, slug: &str, body: &[u8]) -> ft_core::ArtifactId {
+        let org = db.org().await.unwrap();
+        let files = vec![(
+            "index.html".to_string(),
+            "text/html; charset=utf-8".to_string(),
+            body.to_vec(),
+        )];
+        db.publish_artifact(who, &org, slug, slug, "index.html", &files, None, None)
+            .await
+            .unwrap()
+            .0
+    }
+
+    async fn current_version(db: &Db, id: &ft_core::ArtifactId) -> String {
+        db.artifact_current(id).await.unwrap().unwrap().id
+    }
+
+    /// The picture goes in and comes back, named by the version it is of.
+    #[tokio::test]
+    async fn a_poster_is_kept_and_read_back() {
+        let (db, who) = db_with_user().await;
+        let id = publish(&db, &who, "pricing", b"<html>one</html>").await;
+        let version = current_version(&db, &id).await;
+
+        assert!(db.artifact_poster(&id).await.unwrap().is_none());
+        assert!(db
+            .set_artifact_poster(&version, b"\x89PNG...")
+            .await
+            .unwrap());
+
+        let (named, bytes) = db.artifact_poster(&id).await.unwrap().unwrap();
+        assert_eq!(named, version, "the poster is named by its own version");
+        assert_eq!(bytes, b"\x89PNG...");
+    }
+
+    /// Two clients looking at the same library both notice the gap and both
+    /// render. The second write is a no-op rather than a conflict, and the
+    /// first picture stands.
+    #[tokio::test]
+    async fn a_second_photograph_does_not_replace_the_first() {
+        let (db, who) = db_with_user().await;
+        let id = publish(&db, &who, "pricing", b"<html>one</html>").await;
+        let version = current_version(&db, &id).await;
+
+        assert!(db.set_artifact_poster(&version, b"first").await.unwrap());
+        assert!(
+            !db.set_artifact_poster(&version, b"second").await.unwrap(),
+            "somebody got there first, and that is not a failure"
+        );
+        assert_eq!(db.artifact_poster(&id).await.unwrap().unwrap().1, b"first");
+    }
+
+    /// **The staleness bug, held down.**
+    ///
+    /// A republish mints a version, and the new one has no picture — which is
+    /// the signal to take another. If this ever came back true the library
+    /// would go on drawing the previous version with nothing to say so.
+    #[tokio::test]
+    async fn republishing_leaves_the_new_version_without_a_picture() {
+        let (db, who) = db_with_user().await;
+        let id = publish(&db, &who, "pricing", b"<html>one</html>").await;
+        let first = current_version(&db, &id).await;
+        db.set_artifact_poster(&first, b"a picture of one")
+            .await
+            .unwrap();
+        assert!(db.artifacts_of(&who).await.unwrap()[0].has_poster);
+
+        publish(&db, &who, "pricing", b"<html>two</html>").await;
+        let second = current_version(&db, &id).await;
+        assert_ne!(second, first, "different bytes are a different version");
+
+        assert!(db.artifact_poster(&id).await.unwrap().is_none());
+        let row = &db.artifacts_of(&who).await.unwrap()[0];
+        assert_eq!(row.version, 2);
+        assert!(!row.has_poster, "v2 has not been photographed yet");
+    }
+
+    /// Republishing the same bytes is not a version, so the picture survives —
+    /// the client polls and can be wrong in either direction.
+    #[tokio::test]
+    async fn republishing_the_same_page_keeps_its_picture() {
+        let (db, who) = db_with_user().await;
+        let id = publish(&db, &who, "pricing", b"<html>one</html>").await;
+        let version = current_version(&db, &id).await;
+        db.set_artifact_poster(&version, b"a picture")
+            .await
+            .unwrap();
+
+        publish(&db, &who, "pricing", b"<html>one</html>").await;
+
+        assert_eq!(current_version(&db, &id).await, version);
+        assert!(db.artifacts_of(&who).await.unwrap()[0].has_poster);
+    }
+
+    /// A version id alone is not permission to write to it.
+    #[tokio::test]
+    async fn a_version_nobody_can_see_cannot_be_photographed() {
+        let (db, who) = db_with_user().await;
+        let id = publish(&db, &who, "pricing", b"<html>one</html>").await;
+        let version = current_version(&db, &id).await;
+
+        assert_eq!(
+            db.artifact_version_visible_to(&who, &version)
+                .await
+                .unwrap(),
+            Some(id.as_str().to_string())
+        );
+        assert!(db
+            .artifact_version_visible_to(&who, "arv_nothing")
+            .await
+            .unwrap()
+            .is_none());
+        assert!(db
+            .artifact_version_visible_to("u_somebody_else", &version)
+            .await
+            .unwrap()
+            .is_none());
+    }
+
     /// A turn's bill, written down and read back.
     ///
     /// The half of the write path with a database in it. Everything on the

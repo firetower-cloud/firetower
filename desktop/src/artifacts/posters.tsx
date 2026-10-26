@@ -16,7 +16,7 @@
  * already polls the list, so the gaps are in front of it. An artifact nobody
  * ever opens the library on is never rendered and never costs anything.
  */
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useSyncExternalStore } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   getListArtifactsQueryKey,
@@ -38,6 +38,59 @@ const SULK = 10 * 60_000;
 
 /** A stable identity, so a poll that has not answered is not a new array. */
 const NOTHING: Artifact[] = [];
+
+/**
+ * How many captures must fail in a row before the library stops expecting one.
+ *
+ * Two rather than one: a single failure is an artifact that would not render —
+ * a page stuck loading, something enormous — and giving up on the whole
+ * mechanism because of one bad document would be wrong. Two in a row is the
+ * platform, not the page.
+ */
+const GIVE_UP_AFTER = 2;
+
+/**
+ * Whether a poster is worth waiting for on this machine.
+ *
+ * **This is what the iframe fallback hangs off, and why it exists.** Capture is
+ * native, and on Windows it is code that compiles and has never been run — so
+ * "it does not work here" has to be something the interface can discover at
+ * runtime rather than something decided at build time. When it does, tiles go
+ * back to rendering the artifact live, which is what shipped before any of
+ * this: worse, but not blank.
+ *
+ * `unsure` until something has either worked or failed twice, because the
+ * honest state on first launch is that nobody has tried yet.
+ */
+type Shooting = "unsure" | "works" | "broken";
+let shooting: Shooting = "unsure";
+const watchers = new Set<() => void>();
+
+function decide(next: Shooting) {
+  if (next === shooting) return;
+  shooting = next;
+  for (const watcher of watchers) watcher();
+}
+
+function watch(cb: () => void) {
+  watchers.add(cb);
+  return () => void watchers.delete(cb);
+}
+
+/**
+ * Whether a tile should wait for a picture or draw the page itself.
+ *
+ * A browser has no capture at all — it cannot read the pixels of a frame on
+ * another origin — so it never waits.
+ */
+export function useExpectPoster(): boolean {
+  const state = useSyncExternalStore(
+    watch,
+    () => shooting,
+    () => "unsure" as Shooting,
+  );
+  return bridge.native && state !== "broken";
+}
 
 /**
  * Where the artifact list is kept fresh, and where its pictures get taken.
@@ -67,6 +120,7 @@ export function usePosters(artifacts: Artifact[]) {
      re-render per attempt would be a re-render of the whole window. */
   const busy = useRef(false);
   const failed = useRef(new Map<string, number>());
+  const missed = useRef(0);
   /* The latest list, so the work below reads what is true now rather than what
      was true when the effect that started it ran. */
   const latest = useRef<Artifact[]>(artifacts);
@@ -109,12 +163,16 @@ export function usePosters(artifacts: Artifact[]) {
 
         /* Only now does anything redraw, and it redraws because `hasPoster`
            moved — the tile swaps its placeholder for the picture. */
+        missed.current = 0;
+        decide("works");
         await cache.invalidateQueries({ queryKey: getListArtifactsQueryKey() });
       } catch {
         /* Quiet on purpose. A missing thumbnail is a placeholder, which is a
            legible state; a toast about a background render is not something
            anybody asked for or can act on. */
         failed.current.set(version, Date.now());
+        missed.current += 1;
+        if (missed.current >= GIVE_UP_AFTER) decide("broken");
       } finally {
         busy.current = false;
       }

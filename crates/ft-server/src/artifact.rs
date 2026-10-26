@@ -50,12 +50,34 @@ pub async fn serve(state: AppState, artifact: ArtifactId, request: Request) -> R
         asked.to_string()
     };
 
+    // Whether the picker is injected changes the bytes, so it has to be
+    // decided before the validator is minted — see below.
+    //
+    // A capture is a top-level window, where the runtime disables itself on
+    // `window.parent === window` anyway, so this is not about what ends up in
+    // the photograph. It is the 21 KB of picker and the rewrite that produces
+    // it, neither of which anything is going to use.
+    let shooting = request.uri().query().is_some_and(|q| {
+        q.split('&')
+            .any(|p| p == "ft-shot" || p.starts_with("ft-shot="))
+    });
+
     // A version's bytes cannot change — `20261023120000_artifacts.sql` makes a
     // version immutable and `publish_artifact` mints a new one rather than
     // editing this — so the version id *is* the validator. The path is in it
     // because one version holds many files and a cache in front of us should
     // never be able to confuse two of them.
-    let tag = format!("\"{}:{}\"", current.id, wanted.replace('"', ""));
+    // The `ft-shot` flag is in it because it selects between two different
+    // bodies — one with the picker injected and one without — and a validator
+    // that did not distinguish them would describe both. Browsers key on the
+    // URL first, so nothing was observably wrong, but an `ETag` that can name
+    // two representations is the kind of thing that is only ever wrong later.
+    let tag = format!(
+        "\"{}:{}{}\"",
+        current.id,
+        wanted.replace('"', ""),
+        if shooting { ":shot" } else { "" },
+    );
 
     // Answered before the body is read, which is the point of it: a revalidation
     // costs a primary-key lookup and an empty response rather than pulling the
@@ -86,15 +108,6 @@ pub async fn serve(state: AppState, artifact: ArtifactId, request: Request) -> R
         file.body,
     )
         .into_response();
-
-    // A capture is a top-level window, where the runtime disables itself on
-    // `window.parent === window` anyway — so this is not about what ends up in
-    // the photograph. It is the 21 KB of picker and the rewrite that produces
-    // it, neither of which anything is going to use.
-    let shooting = request.uri().query().is_some_and(|q| {
-        q.split('&')
-            .any(|p| p == "ft-shot" || p.starts_with("ft-shot="))
-    });
 
     let mut response = if is_html && !shooting {
         // The same picker a preview gets, injected the same way. The artifact

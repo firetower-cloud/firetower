@@ -37,8 +37,14 @@ const TALL: f64 = 737.0;
 /// 1280px, 170 KB image to be drawn into a 224px tile.
 const POSTER: f64 = 420.0;
 
-/// Far enough left that no arrangement of displays reaches it.
-const AWAY: f64 = -8000.0;
+/// How far past the last display the capture window is parked.
+///
+/// A fixed `-8000` was the first version of this and it was a guess: it
+/// happened to be offscreen on the machine it was written on. A display wall,
+/// or a monitor arranged far to the left of the primary, could reach it — and
+/// a capture window that lands *on* a screen is a window flashing in somebody's
+/// face every few seconds.
+const CLEAR: f64 = 2000.0;
 
 /// How long to wait for the page before giving up on it.
 const PATIENCE: std::time::Duration = std::time::Duration::from_secs(20);
@@ -91,10 +97,15 @@ async fn shoot(app: tauri::AppHandle, url: String) -> Result<Vec<u8>, String> {
         .parse()
         .map_err(|_| format!("that is not an address: {url}"))?;
 
+    // Below every display rather than at a number that is probably offscreen.
+    // `y` only: going left risks a monitor arranged to the left of the primary,
+    // and going down is the one direction a desktop is never extended in.
+    let (x, y) = parked(&app);
+
     let window = WebviewWindowBuilder::new(&app, &label, WebviewUrl::External(parsed))
         .title("")
         .inner_size(PAGE, TALL)
-        .position(AWAY, AWAY)
+        .position(x, y)
         .resizable(false)
         .decorations(false)
         .skip_taskbar(true)
@@ -157,6 +168,31 @@ async fn capture_once(
         Ok(Ok(result)) => result,
         Ok(Err(_)) => Err("the capture was dropped before it answered".into()),
         Err(_) => Err("the capture did not answer".into()),
+    }
+}
+
+/// Somewhere no display covers.
+///
+/// Asks the window manager where the screens actually are and goes past the
+/// bottom of the lowest one. Falls back to the old guess only if nothing can be
+/// enumerated, which is the one case where there is nothing better to say.
+fn parked(app: &tauri::AppHandle) -> (f64, f64) {
+    let Ok(monitors) = app.available_monitors() else {
+        return (0.0, 8000.0);
+    };
+    let bottom = monitors
+        .iter()
+        .map(|m| {
+            let p = m.position();
+            let s = m.size();
+            p.y as f64 + s.height as f64
+        })
+        .fold(f64::NEG_INFINITY, f64::max);
+
+    if bottom.is_finite() {
+        (0.0, bottom + CLEAR)
+    } else {
+        (0.0, 8000.0)
     }
 }
 
@@ -313,25 +349,135 @@ mod platform {
 
 #[cfg(windows)]
 mod platform {
-    /// Nothing here can photograph a page yet, and `shoot` checks this before
-    /// it opens a window rather than after it has rendered one.
-    pub const SUPPORTED: bool = false;
-    pub const WHY: &str = "photographing an artifact is not built on Windows yet";
+    use super::POSTER;
+    use webview2_com::CapturePreviewCompletedHandler;
+    use webview2_com::Microsoft::Web::WebView2::Win32::COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG;
+    use windows::Win32::System::Com::{IStream, STREAM_SEEK_SET};
+    use windows::Win32::UI::Shell::SHCreateMemStream;
 
-    /// Not built yet.
+    pub const SUPPORTED: bool = true;
+    pub const WHY: &str = "";
+
+    /// `ICoreWebView2::CapturePreview`, into a memory stream.
     ///
-    /// WebView2's `ICoreWebView2::CapturePreview` is the equivalent and takes
-    /// the same shape — an async call handing back PNG into a stream — but it
-    /// is COM rather than Objective-C and none of it has been run. A clear
-    /// refusal is better than untested `unsafe`: the library falls back to the
-    /// placeholder tile, which is a worse thumbnail and a working application.
+    /// The shape is the same as the macOS side — an async call that hands back
+    /// PNG — but two things differ and both are visible below.
+    ///
+    /// **It photographs at the webview's real size.** There is no
+    /// `snapshotWidth` here, so the page comes back at the window's 1180 and is
+    /// scaled afterwards by [`scaled`]. On a display at 150% it arrives larger
+    /// still, which is why the scale is a clamp rather than a fixed ratio.
+    ///
+    /// **It writes into an `IStream` rather than returning an object.** The
+    /// stream has to outlive the call and be rewound before reading, so it is
+    /// cloned into the handler: dropping our copy early would leave WebView2
+    /// writing into something freed.
     pub fn snapshot(
-        _webview: &tauri::webview::PlatformWebview,
+        webview: &tauri::webview::PlatformWebview,
         hand: impl FnOnce(Result<Vec<u8>, String>) + 'static,
     ) {
-        hand(Err(
-            "photographing an artifact is not built on Windows yet".into()
-        ));
+        let core = match unsafe { webview.controller().CoreWebView2() } {
+            Ok(core) => core,
+            Err(e) => {
+                hand(Err(format!("there is no webview to photograph: {e}")));
+                return;
+            }
+        };
+
+        let Some(stream) = (unsafe { SHCreateMemStream(None) }) else {
+            hand(Err("could not make a stream to photograph into".into()));
+            return;
+        };
+
+        // The same `FnOnce`-in-a-cell dance the macOS side does, and for the
+        // same reason: the handler has to be callable more than once as far as
+        // the type system is concerned, and this is what makes "the first time
+        // only" true.
+        let holding = stream.clone();
+        let hand = std::cell::RefCell::new(Some(hand));
+        let handler = CapturePreviewCompletedHandler::create(Box::new(move |result| {
+            let Some(hand) = hand.borrow_mut().take() else {
+                return Ok(());
+            };
+            match result {
+                Ok(()) => hand(read_all(&holding).and_then(|png| scaled(&png, POSTER as u32 * 2))),
+                Err(e) => hand(Err(format!("WebView2 could not photograph that page: {e}"))),
+            }
+            Ok(())
+        }));
+
+        if let Err(e) = unsafe {
+            core.CapturePreview(
+                COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG,
+                &stream,
+                &handler,
+            )
+        } {
+            // The handler will not run, so nothing else will ever answer.
+            tracing_refused(e);
+        }
+    }
+
+    /// `CapturePreview` refused outright.
+    ///
+    /// Nothing can be said to the caller here — the closure moved into the
+    /// handler, which will never run — so the capture times out upstream and
+    /// the version is left for the next pass. Noted rather than swallowed.
+    fn tracing_refused(e: windows::core::Error) {
+        eprintln!("WebView2 refused to photograph the page: {e}");
+    }
+
+    fn read_all(stream: &IStream) -> Result<Vec<u8>, String> {
+        unsafe {
+            stream
+                .Seek(0, STREAM_SEEK_SET, None)
+                .map_err(|e| format!("could not rewind the capture: {e}"))?;
+            let mut out = Vec::new();
+            let mut buf = [0u8; 64 * 1024];
+            loop {
+                let mut read = 0u32;
+                stream
+                    .Read(buf.as_mut_ptr().cast(), buf.len() as u32, Some(&mut read))
+                    .ok()
+                    .map_err(|e| format!("reading the capture: {e}"))?;
+                if read == 0 {
+                    break;
+                }
+                out.extend_from_slice(&buf[..read as usize]);
+            }
+            Ok(out)
+        }
+    }
+
+    /// Scale a capture down to `wide` pixels, keeping its shape.
+    ///
+    /// `POSTER * 2` so that a 100%-DPI Windows machine lands on the same 840px
+    /// image a Retina Mac produces. Never upscales: a smaller capture is passed
+    /// through rather than blown up into a soft one.
+    fn scaled(png: &[u8], wide: u32) -> Result<Vec<u8>, String> {
+        use image::ImageEncoder;
+        let shot = image::load_from_memory_with_format(png, image::ImageFormat::Png)
+            .map_err(|e| format!("that capture would not decode: {e}"))?;
+        if shot.width() <= wide || shot.width() == 0 {
+            return Ok(png.to_vec());
+        }
+        let tall = (shot.height() as u64 * wide as u64 / shot.width() as u64) as u32;
+        let small = image::imageops::resize(
+            &shot.to_rgba8(),
+            wide,
+            tall.max(1),
+            image::imageops::FilterType::Lanczos3,
+        );
+        let mut out = Vec::new();
+        image::codecs::png::PngEncoder::new(&mut out)
+            .write_image(
+                small.as_raw(),
+                small.width(),
+                small.height(),
+                image::ExtendedColorType::Rgba8,
+            )
+            .map_err(|e| format!("that capture would not re-encode: {e}"))?;
+        Ok(out)
     }
 }
 
