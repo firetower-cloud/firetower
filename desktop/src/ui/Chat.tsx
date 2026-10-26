@@ -184,7 +184,9 @@ export function Chat({
     if (!said) return;
     // Where the drag ended — a turn longer than the window has a selection box
     // whose bottom edge is off the bottom of it. See `FileTab`.
-    setDrafting({ quote: quote.length > 400 ? `${quote.slice(0, 400)}…` : quote, line: 0, label: "Note on what the agent said", item: said.dataset.said ?? "", x: e.clientX, y: e.clientY });
+    // `copy` is the whole of it; `quote` is what fits on the card. Wanting the
+    // passage rather than a note on it is the other half of this gesture.
+    setDrafting({ quote: quote.length > 400 ? `${quote.slice(0, 400)}…` : quote, copy: quote, line: 0, label: "Note on what the agent said", item: said.dataset.said ?? "", x: e.clientX, y: e.clientY });
   };
 
   /* The bring-up — Fetch → Worktree → Workspace → Setup → Launch — so a fresh

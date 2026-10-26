@@ -9,16 +9,41 @@
  * Anchored in viewport coordinates and clamped to the window. It deliberately
  * does not follow the text on scroll — you scrolled to leave, and it closes on
  * Escape, on a click outside, or on keeping the note.
+ *
+ * **Selecting text is two questions, not one** — note it, or take it away —
+ * and this card used to answer only the first. Worse, it broke the second:
+ * the textarea takes focus the moment the card opens, so the ⌘C that a hand
+ * reaches for next lands on an empty box. So the header carries a copy, and
+ * ⌘C means it while the note is still blank. See `copy` on `Anchor`.
  */
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ArrowUp, CornerDownLeft, MessageSquarePlus } from "lucide-react";
+import { ArrowUp, Copy, CornerDownLeft, MessageSquarePlus } from "lucide-react";
+import { write } from "~/components/ui/Copy";
+import { key } from "~/platform";
 
 /**
  * Where a note goes: a line of a file, or something the agent said (`line` 0,
  * named by `label`). `x` and `y` are a *point* in the window — where the
  * pointer was — not a corner of what was selected.
  */
-export type Anchor = { quote: string; line: number; label?: string; x: number; y: number };
+export type Anchor = {
+  quote: string;
+  line: number;
+  label?: string;
+  x: number;
+  y: number;
+  /**
+   * The whole of what was selected, when `quote` is an abridgement of it —
+   * every caller clips the quote so the card stays a card, and nobody wants
+   * four hundred characters and an ellipsis on their clipboard.
+   *
+   * Absent where there is no text behind the note: a point on an image, or an
+   * element picked out of a page, where a copy would offer co-ordinates or
+   * raw markup and neither is what the gesture asked for. The control is
+   * drawn only when this is here.
+   */
+  copy?: string;
+};
 
 const W = 360;
 /** Breathing room at the window's edge, and between the card and its point. */
@@ -83,6 +108,20 @@ export function Annotate({
      moment would take a half-written note with it. */
   const anchor = useRef(at);
   const side = useRef<Side | undefined>(undefined);
+  /* Only the refusal is held. A copy that worked closes the card, so there is
+     no state left to say so in — and a clipboard that *refused* needs a
+     sentence rather than a shrug, because a self-hosted Firetower is often
+     reached over plain http where `navigator.clipboard` is simply not there. */
+  const [refused, setRefused] = useState(false);
+
+  /* Taking the selection away instead of noting it.
+     The card closes on success: you asked for the text, you have it, and the
+     card is sitting on top of what you were reading. */
+  const takeAway = async () => {
+    if (!at.copy) return;
+    if (await write(at.copy)) onCancel();
+    else setRefused(true);
+  };
 
   useLayoutEffect(() => {
     const node = card.current;
@@ -106,10 +145,18 @@ export function Annotate({
   }, []);
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onCancel();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") return onCancel();
+      /* ⌘C, which the card broke by taking focus — and only while the note is
+         still blank, because once there are words in it ⌘C is about them. */
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "c" && at.copy && !text) {
+        e.preventDefault();
+        void takeAway();
+      }
+    };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onCancel]);
+  });
 
   return (
     <>
@@ -126,6 +173,17 @@ export function Annotate({
         <div className="flex items-center gap-2 px-3.5 pt-3">
           <MessageSquarePlus className="h-3.5 w-3.5 shrink-0 text-slate" strokeWidth={1.75} />
           <span className="min-w-0 flex-1 truncate text-meta text-dim">{at.label ?? `Note on line ${at.line}`}</span>
+          {at.copy && (
+            <button
+              onClick={takeAway}
+              title={refused ? "Couldn't copy it" : `Copy the selection  ${key("C")}`}
+              className={`grid h-6 w-6 shrink-0 place-items-center rounded transition-colors hover:bg-raise hover:text-bone ${
+                refused ? "text-brick" : "text-mute"
+              }`}
+            >
+              <Copy className="h-3.5 w-3.5" strokeWidth={1.75} />
+            </button>
+          )}
           {onParent && (
             <button onClick={onParent} title="Pick the element around this one" className="grid h-6 w-6 shrink-0 place-items-center rounded text-mute hover:bg-raise hover:text-bone">
               <ArrowUp className="h-3.5 w-3.5" strokeWidth={2} />
