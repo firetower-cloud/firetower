@@ -7,8 +7,7 @@
  * lockfile and useless for a screenshot.
  *
  * The bytes come off the worker through the same `useFileText` a file tab
- * uses; it hands pictures back as a blob URL, because the desktop shell's CSP
- * allows `blob:` for images and not `http:`, and because the request carries a
+ * uses; it hands pictures back as a blob URL, because the request carries a
  * bearer token that an `<img>` could not send.
  *
  * Clicking the picture starts a note pinned to the point you clicked, sent

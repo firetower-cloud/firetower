@@ -2,10 +2,10 @@
  * A picture the agent pointed at, drawn where it pointed.
  *
  * `![the failing state](docs/shot.png)` used to render an `<img>` at the app's
- * own origin, which is a broken image on a good day — and on the desktop shell
- * not even that, because the CSP allows `blob:` and `data:` for images and not
- * `http:`. The bytes have to come through the API client, with the session's
- * bearer token, and be handed to the browser as a blob.
+ * own origin — a request for a file the app does not serve, and one that could
+ * carry no token even if it did. The bytes have to come through the API
+ * client, with the session's bearer token, and be handed to the browser as a
+ * blob.
  *
  * The src is resolved the same way a path in prose is: by asking the workspace
  * whether it is real, by the last segment. An agent writes the path it was
