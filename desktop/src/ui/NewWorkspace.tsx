@@ -116,9 +116,16 @@ export function NewWorkspace({
      under — there is no branch to fall back on. */
   const ready = !!name.trim() && !!host && !!kind && !!account && isReady(readiness.data) && !create.isPending;
 
+  /* Escape belongs to whatever is on top.
+     The repository list is a layer of its own, and sending Escape past it to
+     the sheet threw away a half-filled form because somebody changed their
+     mind about one field. The list shuts; everything typed stays. */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        if (adding) setAdding(false);
+        else onClose();
+      }
       if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) go();
     };
     window.addEventListener("keydown", onKey);
@@ -233,8 +240,13 @@ export function NewWorkspace({
               ))}
 
               <div className="relative">
+                {/* Named outright. `Field` is a `<label>`, a `<button>` is
+                    labelable, so without this the trigger answers to
+                    everything else in the field — the hint, the chips, and
+                    now the `esc` key beside the search. */}
                 <button
                   ref={addAt}
+                  aria-label={checkouts.length === 0 ? "Choose a repository" : "Add another repository"}
                   onClick={openList}
                   className="control border border-dashed border-line-soft text-mute hover:bg-raise hover:text-bone"
                 >
@@ -252,12 +264,27 @@ export function NewWorkspace({
                           value={wanted}
                           onChange={(e) => setWanted(e.target.value)}
                           onKeyDown={(e) => {
-                            if (e.key === "Escape") setAdding(false);
                             if (e.key === "Enter" && offered[0]) take(offered[0]);
                           }}
                           placeholder="Find a repository"
-                          className="w-full bg-transparent py-2 text-ui text-bone placeholder:text-mute focus:outline-none"
+                          className="min-w-0 flex-1 bg-transparent py-2 text-ui text-bone placeholder:text-mute focus:outline-none"
                         />
+                        {/* The way out, written where it is used. Changing your
+                            mind about the repository is as ordinary as picking
+                            one, and a list whose only exits are a keystroke and
+                            a click on nothing reads as a trap. */}
+                        <button
+                          type="button"
+                          onClick={() => setAdding(false)}
+                          title="Close this list"
+                          className="keycap shrink-0 transition-colors hover:bg-raise hover:text-bone"
+                        >
+                          {/* The word on the key, not `⎋`. At 11px the glyph
+                              is a circle with an arrow in it and reads as a
+                              reload control, which is the opposite of what it
+                              does to a form somebody has half filled in. */}
+                          esc
+                        </button>
                       </div>
                       <div className="scroll-slim max-h-56 overflow-y-auto p-1">
                         {offered.length === 0 && (

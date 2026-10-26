@@ -84,7 +84,7 @@ export function FileTab({ session, path, line }: { session: Session; path: strin
     if (!quote || !body.current || !sel?.anchorNode || sel.rangeCount === 0) return;
     if (!body.current.contains(sel.anchorNode)) return;
     const row = (sel.anchorNode.parentElement as HTMLElement | null)?.closest("[data-line]");
-    setDrafting({ quote: quote.length > 400 ? `${quote.slice(0, 400)}…` : quote, line: Number(row?.getAttribute("data-line") ?? 0), x: e.clientX, y: e.clientY });
+    setDrafting({ quote: quote.length > 400 ? `${quote.slice(0, 400)}…` : quote, copy: quote, line: Number(row?.getAttribute("data-line") ?? 0), x: e.clientX, y: e.clientY });
   };
 
   const copy = () => {

@@ -642,6 +642,22 @@
   text-decoration-color: var(--color-slate);
 }
 
+/* What ⌘F found in the conversation (`ui/FindInChat.tsx`).
+   Ranges painted over the text rather than markup wrapped around it — the
+   transcript is React's, and an element inserted into a turn the agent is
+   still writing is overwritten by the next token.
+   Slate, like `::selection`: finding a word is not the app asking for you,
+   and ember is the only thing allowed to mean that. The one you are on is the
+   same colour carried further, so stepping through the matches is a brightness
+   moving down the page rather than a second hue appearing on it. */
+::highlight(ft-find) {
+  background-color: color-mix(in srgb, var(--color-slate) 20%, transparent);
+}
+::highlight(ft-find-on) {
+  background-color: color-mix(in srgb, var(--color-slate) 60%, transparent);
+  color: var(--color-bone);
+}
+
 /* Something is happening, said in text: a band of light crossing the words,
    the way the agents people already use say it. Colour stays the text's own —
    mute, brightening to bone as the band passes — so it reads as the text
