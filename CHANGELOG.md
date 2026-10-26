@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.48.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.47.0...firetower-v0.48.0) (2026-10-26)
+
+
+### Features
+
+* **artifacts:** photograph on Windows, and fall back when it cannot ([79a6aa1](https://github.com/firetower-cloud/firetower/commit/79a6aa179957e65f618a3e97c31ee1345dd34140))
+
+
+### Performance Improvements
+
+* **artifacts:** photograph a thumbnail instead of running one ([3b0ab1b](https://github.com/firetower-cloud/firetower/commit/3b0ab1bc6bcf4c675a798957b3fdc35bd56f82de))
+
 ## [0.47.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.46.0...firetower-v0.47.0) (2026-10-25)
 
 

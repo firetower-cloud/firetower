@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.1](https://github.com/firetower-cloud/firetower/compare/mobile-v0.9.0...mobile-v0.9.1) (2026-10-26)
+
+
+### Performance Improvements
+
+* **artifacts:** photograph a thumbnail instead of running one ([3b0ab1b](https://github.com/firetower-cloud/firetower/commit/3b0ab1bc6bcf4c675a798957b3fdc35bd56f82de))
+
 ## [0.9.0](https://github.com/firetower-cloud/firetower/compare/mobile-v0.8.0...mobile-v0.9.0) (2026-10-25)
 
 

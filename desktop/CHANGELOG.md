@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.22.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.21.0...desktop-v0.22.0) (2026-10-26)
+
+
+### Features
+
+* **artifacts:** photograph on Windows, and fall back when it cannot ([79a6aa1](https://github.com/firetower-cloud/firetower/commit/79a6aa179957e65f618a3e97c31ee1345dd34140))
+* **desktop:** find in the conversation with ⌘F ([a79cce4](https://github.com/firetower-cloud/firetower/commit/a79cce4b808b23cf6bd388ee5b7ed77efb71e109))
+* **desktop:** take a selection away from the annotation card ([e962178](https://github.com/firetower-cloud/firetower/commit/e962178f4591113a18f60764df79320a2a6125f8))
+
+
+### Bug Fixes
+
+* **artifacts:** a note goes to an agent that exists ([cc09def](https://github.com/firetower-cloud/firetower/commit/cc09defc4347f003abab256c5b9cd9af21c3350a))
+* **desktop:** escape shuts the repository list, not the whole sheet ([f5bf0fd](https://github.com/firetower-cloud/firetower/commit/f5bf0fd9cce25b37ef17bfb570aeacccaade19cb))
+
+
+### Performance Improvements
+
+* **artifacts:** photograph a thumbnail instead of running one ([3b0ab1b](https://github.com/firetower-cloud/firetower/commit/3b0ab1bc6bcf4c675a798957b3fdc35bd56f82de))
+
 ## [0.21.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.20.0...desktop-v0.21.0) (2026-10-25)
 
 
