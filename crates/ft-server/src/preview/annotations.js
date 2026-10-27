@@ -530,6 +530,193 @@
       following = null;
     }
   }
+  // ── Find in the page ─────────────────────────────────────────────
+  //
+  // ⌘F, for a document in a frame. The window around the page is another
+  // origin and cannot read a word of it, so the search runs here and only
+  // what was found travels back: how many, and which one is lit. The desktop
+  // client draws the bar and sends the query; this is the half that has the
+  // text.
+  //
+  // Same shape as the client's own find in the conversation
+  // (`desktop/src/ui/FindInChat.tsx`), for the same reasons. Matches are
+  // painted with the Custom Highlight API — ranges, which own no DOM — so a
+  // page whose script is still drawing is never handed an element it did not
+  // make. Where the API is missing the current match is selected instead.
+  // One text node at a time, so a phrase split across an inline element is
+  // not found; that is the price of never touching the tree.
+  const FIND_ALL = "__firetower-find";
+  const FIND_ON = "__firetower-find-on";
+  // Past this the answer is a longer query rather than more highlights. The
+  // same number the client's bar prints as `600+`.
+  const FIND_CAP = 600;
+  let findQuery = "",
+    findFound = [],
+    findAt = 0,
+    findWatch = null,
+    findAgain = null,
+    findStyled = false;
+  // Where `needle` sits in `hay`, case-insensitively: the start of each
+  // non-overlapping match. Plain text, not a pattern — somebody looking for
+  // `total(net)` means those ten characters.
+  function hits(hay, needle) {
+    const a = hay.toLowerCase();
+    const b = needle.toLowerCase();
+    const found = [];
+    for (let at = a.indexOf(b); at !== -1; at = a.indexOf(b, at + b.length))
+      found.push(at);
+    return found;
+  }
+  function findRanges(needle) {
+    const found = [];
+    if (!needle || !document.body) return found;
+    const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+      acceptNode(node) {
+        // Script and style text is in the tree and not on the page. A page
+        // that inlines a chart library would fill the cap with its source
+        // before a single visible word was reached.
+        const parent = node.parentElement;
+        return parent &&
+          !/^(script|style|noscript|template)$/i.test(parent.localName)
+          ? NodeFilter.FILTER_ACCEPT
+          : NodeFilter.FILTER_REJECT;
+      },
+    });
+    for (
+      let node = walk.nextNode();
+      node && found.length < FIND_CAP;
+      node = walk.nextNode()
+    ) {
+      for (const at of hits(node.nodeValue || "", needle)) {
+        if (found.length >= FIND_CAP) break;
+        const span = document.createRange();
+        span.setStart(node, at);
+        span.setEnd(node, at + needle.length);
+        // Text the page has hidden — a closed tab, a collapsed section — is
+        // nothing a person can be shown, so it is not counted either. The
+        // browser's own find bar draws the same line.
+        if (span.getClientRects().length > 0) found.push(span);
+      }
+    }
+    return found;
+  }
+  function findStyle() {
+    if (findStyled) return;
+    findStyled = true;
+    // Into the document rather than the shadow root: a highlight pseudo is
+    // styled from the tree its text is in. The picker's own blue, so a match
+    // reads as Firetower pointing at something and not as the page's
+    // emphasis — translucent for the many, so the text keeps its colour, and
+    // solid for the one you are on, with the text forced dark so it stays
+    // readable whatever the page set.
+    const sheet = document.createElement("style");
+    sheet.nonce = nonce;
+    sheet.textContent =
+      "::highlight(" + FIND_ALL + "){background-color:rgba(114,159,255,.35)}" +
+      "::highlight(" + FIND_ON + "){background-color:#729fff;color:#0b0b0c}";
+    (document.head || document.documentElement).append(sheet);
+  }
+  function findPaint() {
+    if (window.CSS && CSS.highlights && window.Highlight) {
+      if (findFound.length === 0) {
+        CSS.highlights.delete(FIND_ALL);
+        CSS.highlights.delete(FIND_ON);
+        return;
+      }
+      findStyle();
+      CSS.highlights.set(FIND_ALL, new Highlight(...findFound));
+      // Above the rest, whatever order the registry ended up in.
+      const one = new Highlight(findFound[findAt]);
+      one.priority = 1;
+      CSS.highlights.set(FIND_ON, one);
+      return;
+    }
+    const sel = getSelection();
+    if (!sel) return;
+    sel.removeAllRanges();
+    if (findFound[findAt]) sel.addRange(findFound[findAt].cloneRange());
+  }
+  // Bring the current match into view, and only when it is not already
+  // there — a bar that scrolls on every keystroke twitches the page under a
+  // word you can already see. Into the upper third rather than the middle,
+  // because what you are reading is usually the line after the one you
+  // searched for.
+  function findShow() {
+    const span = findFound[findAt];
+    if (!span) return;
+    const spot = span.getBoundingClientRect();
+    // Zero on both edges means the text has left the document.
+    if (spot.width === 0 && spot.height === 0) return;
+    const room = innerHeight * 0.2;
+    if (spot.top >= room && spot.bottom <= innerHeight - room) return;
+    // A page may scroll inside an element rather than as a window — a
+    // dashboard with panes of its own — so the element the match is in goes
+    // first, through every scroller between it and here, and the window is
+    // then adjusted so the line itself sits where it should. Instant on both
+    // counts: a page that asked for smooth scrolling would otherwise still be
+    // animating the first move while the second measured where it had got to.
+    span.startContainer.parentElement?.scrollIntoView({
+      block: "center",
+      behavior: "instant",
+    });
+    const again = span.getBoundingClientRect();
+    scrollBy({ top: again.top - innerHeight / 3, behavior: "instant" });
+  }
+  // `scroll` is false when the page moved on its own: a dashboard with a
+  // clock in it redraws every second, and a bar that dragged you back to the
+  // match each time would make the rest of the page unreadable while it was
+  // open. Only a key you pressed moves the view.
+  function findLook(scroll) {
+    findFound = findRanges(findQuery);
+    findAt = Math.min(findAt, Math.max(findFound.length - 1, 0));
+    findPaint();
+    if (scroll) findShow();
+    tell("found", { count: findFound.length, at: findAt });
+  }
+  // The page is live. A script still drawing replaces the very text nodes
+  // these ranges point at, and a stale range paints nothing — so the search
+  // is re-run once the writing settles. Watched only while there is a query,
+  // for the same reason `follow` only runs while there is something drawn.
+  function findWatching(wanted) {
+    if (wanted && !findWatch) {
+      findWatch = new MutationObserver(() => {
+        clearTimeout(findAgain);
+        findAgain = setTimeout(() => findLook(false), 250);
+      });
+      findWatch.observe(document.body, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+      });
+    } else if (!wanted && findWatch) {
+      findWatch.disconnect();
+      findWatch = null;
+      clearTimeout(findAgain);
+    }
+  }
+  // ⌘F pressed in the page — which is where focus is after clicking or
+  // scrolling it, and a key pressed in a frame never reaches the window
+  // around it. The bar is the panel's to draw; this only says the key was
+  // pressed, and swallows it so nothing else answers. Only when that window
+  // *is* the panel: anywhere else the browser's own find bar is the right
+  // answer and is left alone. Escape with a search painted closes it, for the
+  // same reason — the bar is in the other window and the key is in this one.
+  document.addEventListener(
+    "keydown",
+    (event) => {
+      if (ours(event) || !panelWindow || panelWindow !== window.parent) return;
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
+        event.preventDefault();
+        tell("find-bar", { open: true });
+      } else if (event.key === "Escape" && findQuery && !annotating) {
+        // Only when there is nothing more urgent for Escape to do. Annotating
+        // has its own Escape — leaving the mode — and that wins, so one press
+        // undoes one thing and a second press then closes the search.
+        tell("find-bar", { open: false });
+      }
+    },
+    true,
+  );
   window.addEventListener("message", (event) => {
     const data = event.data;
     if (!data || typeof data !== "object") return;
@@ -578,7 +765,17 @@
       channel = data.channel;
       clearTimeout(handshakeTimer);
       status.hidden = true;
-      tell("ready", { session, port, artifact, enabled: annotating, path: here() });
+      // `find: true` is what lets a client tell this runtime from an older
+      // one that would ignore a search, and say so rather than draw a bar
+      // that answers nothing.
+      tell("ready", {
+        session,
+        port,
+        artifact,
+        enabled: annotating,
+        path: here(),
+        find: true,
+      });
       if (newConnection && selected?.isConnected)
         tell("selection", {
           snapshot: snapshot(selected),
@@ -621,6 +818,24 @@
         paint();
       }
       tell("located", { id: data.id, found: !!el });
+    }
+    // An empty query is how the bar closes: the highlights are the page's,
+    // and a page left glowing after esc would be the app remembering a
+    // search nobody is running.
+    if (data.type === "find") {
+      const next =
+        typeof data.query === "string" ? data.query.trim().slice(0, 500) : "";
+      if (next !== findQuery) findAt = 0;
+      findQuery = next;
+      findWatching(!!next);
+      findLook(true);
+    }
+    if (data.type === "find-step" && findFound.length > 0) {
+      const n = findFound.length;
+      findAt = (findAt + (data.by === -1 ? -1 : 1) + n) % n;
+      findPaint();
+      findShow();
+      tell("found", { count: n, at: findAt });
     }
   });
   // Advertise to an embedded PreviewTab, using the configured exact UI origin.

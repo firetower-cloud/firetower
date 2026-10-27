@@ -75,6 +75,13 @@ the window that embeds it as the panel when that window is the configured
 interface (`#__firetower_ui=`), so notes are written here and kept through the
 annotations API. The webview's CSP allows `frame-src http: https:` for this.
 
+An artifact opens the same way, in `ArtifactTab`. `⌘F` searches it, as it does
+the conversation — the page is another origin, so the bar is drawn here and the
+search runs in the injected picker, which hands back the count and lights each
+match in place (`ui/FindBar`, `preview/bridge`, and the find half of
+`crates/ft-server/src/preview/annotations.js`). `scripts/find-in-artifact.mjs`
+drives the real runtime in Chrome against a page with known counts.
+
 ## The shell
 
 `⌘J` opens a shell in the session's workspace — the web's protocol (a

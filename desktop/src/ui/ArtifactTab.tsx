@@ -16,7 +16,7 @@
  * browser is exactly where annotating stops working. Expanding inside the app
  * keeps the frame a frame, so Annotate goes on working at full width.
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, CornerUpRight, Download, ExternalLink, Link2, Maximize2, Minimize2, Send, Share2, Trash2 } from "lucide-react";
 import type { Artifact } from "~/api/generated/model";
 import { sendTurn } from "~/api/generated/sessions/sessions";
@@ -32,7 +32,8 @@ import { ContextMenu, useMenu, type MenuItem } from "~/ui/ContextMenu";
 import { useSessions } from "~/data";
 import { noteTarget } from "~/artifacts/target";
 import { anchorIn } from "~/preview/anchor";
-import { usePickerBridge, type Selection } from "~/preview/bridge";
+import { usePickerBridge, type Found, type Selection } from "~/preview/bridge";
+import { FindBar } from "~/ui/FindBar";
 import { WhoCanAccess } from "~/ui/Sharing";
 
 /** What an element is, for a person: its tag and a little of its text. */
@@ -129,6 +130,22 @@ export function ArtifactTab({
   /* The picker needs to be told which window to talk to; it will not guess. */
   const src = origin ? `${artifact.url}#__firetower_ui=${encodeURIComponent(self())}` : undefined;
 
+  /* ⌘F. The page is another origin, so nothing here can read a word of it —
+     the search runs inside the frame, in the picker the control plane
+     injected, and this side draws the bar, sends the query and shows the
+     count that comes back (`preview/bridge`). Same bar as the conversation's,
+     same keys. Summoned from here when ⌘F lands in this window, and from the
+     page when it lands in the frame, which is where focus is once you have
+     clicked or scrolled the document. */
+  const [finding, setFinding] = useState(false);
+  const [summoned, setSummoned] = useState(0);
+  const [query, setQuery] = useState("");
+  const [found, setFound] = useState<Found | null>(null);
+  const summon = useCallback(() => {
+    setFinding(true);
+    setSummoned((n) => n + 1);
+  }, []);
+
   const bridge = usePickerBridge(
     frame,
     origin,
@@ -153,6 +170,8 @@ export function ArtifactTab({
       },
       onLocated: () => {},
       onFocusNote: () => setShowNotes(true),
+      onFound: setFound,
+      onFindBar: (open) => (open ? summon() : setFinding(false)),
     },
     // The *version*, verbatim, because that is what the control plane wrote
     // into the page as `data-artifact`. This used to be an invented string
@@ -167,17 +186,59 @@ export function ArtifactTab({
     return () => clearTimeout(t);
   }, [notice]);
 
-  /* Esc leaves the expanded view, and leaves annotating before that. */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "f") return;
+      /* A workspace keeps every artifact tab mounted behind the one in front,
+         hidden, so the frame keeps its page. The key is this tab's only while
+         this tab is the one on screen; otherwise it is the conversation's. */
+      if (!frame.current || frame.current.getClientRects().length === 0) return;
+      /* A focused terminal owns ⌘F — it searches its own scrollback. */
+      if ((document.activeElement as HTMLElement | null)?.closest(".xterm")) return;
+      e.preventDefault();
+      summon();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [summon]);
+
+  /* The query goes to the page as it is typed, and again when the page
+     connects — a bar opened before the picker answered would otherwise be
+     searching nothing. `found` is cleared first so the count reads as "not
+     answered yet" rather than as the previous query's. */
+  useEffect(() => {
+    if (!finding) return;
+    setFound(null);
+    bridge.tell({ type: "find", query });
+  }, [finding, query, bridge.ready, bridge.tell]);
+
+  /* Nothing of this outlives the bar. The highlights are the page's, and a
+     page left glowing after esc would be the app remembering a search nobody
+     is running. Reset here rather than on opening, so the bar comes up empty
+     the way the conversation's does. */
+  useEffect(() => {
+    if (!finding) return;
+    return () => {
+      setQuery("");
+      setFound(null);
+      bridge.tell({ type: "find", query: "" });
+    };
+  }, [finding, bridge.tell]);
+
+  /* Esc closes the find bar, leaves annotating after that, and leaves the
+     expanded view last — one press, one thing. The bar's own field stops its
+     esc before it gets here; this is for when focus is anywhere else. */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       if (drafting) return;
-      if (bridge.annotating) bridge.tell({ type: "mode", enabled: false });
+      if (finding) setFinding(false);
+      else if (bridge.annotating) bridge.tell({ type: "mode", enabled: false });
       else if (expanded) onExpanded(false);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [bridge, drafting, expanded, onExpanded]);
+  }, [bridge, drafting, finding, expanded, onExpanded]);
 
   const keep = (text: string) => {
     if (!drafting) return;
@@ -375,8 +436,27 @@ export function ArtifactTab({
       </header>
 
       <div className="flex min-h-0 flex-1">
-        <div className="min-h-0 min-w-0 flex-1">
+        {/* Relative so the find bar floats over the page itself, clear of the
+            header and of the notes beside it. */}
+        <div className="relative min-h-0 min-w-0 flex-1">
           <iframe ref={frame} src={src} title={artifact.title} className="h-full w-full border-0 bg-white" />
+          {finding && (
+            <FindBar
+              query={query}
+              onQuery={setQuery}
+              found={found}
+              onStep={(by) => bridge.tell({ type: "find-step", by })}
+              onClose={() => setFinding(false)}
+              summoned={summoned}
+              placeholder="Find in artifact"
+              /* Said in the field rather than discovered by typing into it:
+                 a picker from an older control plane ignores the query, and
+                 a count that never arrives looks like a page with nothing in
+                 it. Only once the page has connected — before that, nothing
+                 is known either way. */
+              disabled={bridge.ready && !bridge.finds ? "Update Firetower to search here" : undefined}
+            />
+          )}
         </div>
 
         {showNotes && (
