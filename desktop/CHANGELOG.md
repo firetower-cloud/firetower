@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.22.1](https://github.com/firetower-cloud/firetower/compare/desktop-v0.22.0...desktop-v0.22.1) (2026-10-27)
+
+
+### Bug Fixes
+
+* **desktop:** let a thumbnail load from the server it was taken for ([c5ca519](https://github.com/firetower-cloud/firetower/commit/c5ca5194c8b71059353a93139adf9b2efa9f236f))
+* **desktop:** let a thumbnail load from the server it was taken for ([6b99e64](https://github.com/firetower-cloud/firetower/commit/6b99e6437012f756c7ae59c3ec8efb81dde58058))
+
 ## [0.22.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.21.0...desktop-v0.22.0) (2026-10-26)
 
 
