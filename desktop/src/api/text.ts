@@ -14,9 +14,8 @@
  *
  * Images are the exception to "binary means nothing to draw": a screenshot is
  * the thing you wanted to look at. They arrive as a blob URL rather than as a
- * `<img src>` pointed at the endpoint, because the desktop shell's CSP allows
- * `blob:` and `data:` for images but not `http:` — and because the request
- * needs an `authorization` header that an `<img>` cannot send.
+ * `<img src>` pointed at the endpoint, because reading a file out of a
+ * workspace needs an `authorization` header that an `<img>` cannot send.
  */
 
 import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";

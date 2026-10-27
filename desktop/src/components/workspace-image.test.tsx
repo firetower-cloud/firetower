@@ -3,10 +3,9 @@
  *
  * `![the failing state](docs/shot.png)` used to fall through to
  * react-markdown's default `<img>`, pointed at the app's own origin — a
- * request for a file the app does not serve, and on the desktop shell one the
- * CSP refuses outright, because `img-src` allows `blob:` and `data:` and not
- * `http:`. So the one thing worth asserting is that a workspace path never
- * reaches the DOM as a bare `src`.
+ * request for a file the app does not serve, and one that could carry no
+ * session token even if it did. So the one thing worth asserting is that a
+ * workspace path never reaches the DOM as a bare `src`.
  */
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
