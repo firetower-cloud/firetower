@@ -6,7 +6,7 @@
  * the address having ended.
  */
 import { describe, expect, it } from "vitest";
-import { group, placeOf } from "./workspaces";
+import { childrenWorking, doing, group, isChild, placeOf } from "./workspaces";
 import type { Session } from "~/api/generated/model";
 
 const run = (id: string, workspaceId: string, status = "Ready"): Session =>
@@ -58,5 +58,47 @@ describe("placeOf", () => {
 
   it("is undefined when the whole place is gone", () => {
     expect(placeOf(places([]), "s_3", "s_1")).toBeUndefined();
+  });
+});
+
+/**
+ * A lead and what it delegated read as one piece of work.
+ *
+ * A child in a workspace of its own sorts straight after its lead rather than
+ * by its own age, a child started *in* the lead's workspace is another run of
+ * that place, and a child that has handed back is its lead's business rather
+ * than yours.
+ */
+describe("leads and children", () => {
+  const child = (id: string, parentId: string, workspaceId = id, status = "Working"): Session =>
+    ({ ...run(id, workspaceId, status), parentId }) as unknown as Session;
+
+  it("puts a child straight after its lead, newest siblings first", () => {
+    // Ages: s_1 oldest … s_4 newest. Without leads the order is 4, 3, 2, 1.
+    const all = [run("s_1", "s_1"), child("s_2", "s_1"), run("s_3", "s_3"), child("s_4", "s_1")];
+    expect(places(all).map((p) => p.id)).toEqual(["s_3", "s_1", "s_4", "s_2"]);
+    expect(places(all).map((p) => isChild(p, places(all)))).toEqual([false, false, true, true]);
+  });
+
+  it("counts a child in its own workspace and one in the lead's alike", () => {
+    const all = [run("s_1", "s_1"), child("s_2", "s_1"), child("s_3", "s_1", "s_1")];
+    const lead = placeOf(places(all), "s_1")!;
+    expect(lead.runs).toHaveLength(2);
+    expect(childrenWorking(lead, places(all))).toBe(2);
+  });
+
+  it("leaves a child whose lead is gone where its age puts it", () => {
+    const all = [run("s_3", "s_3"), child("s_2", "s_gone")];
+    expect(places(all).map((p) => p.id)).toEqual(["s_3", "s_2"]);
+    expect(isChild(places(all)[1], places(all))).toBe(false);
+  });
+
+  it("does not count a child's hand-back as waiting on you", () => {
+    const all = [run("s_1", "s_1", "Working"), child("s_2", "s_1", "s_2", "HandedBack")];
+    const [, kid] = places(all);
+    expect(kid.id).toBe("s_2");
+    expect(doing(kid)).toBe("idle");
+    // The same status with nobody to hand back to is yours.
+    expect(doing(places([run("s_9", "s_9", "HandedBack")])[0])).toBe("waiting");
   });
 });

@@ -574,6 +574,7 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
             {active === "chat" ? (
               <Chat
                 session={run}
+                lead={run.parentId ? (sessions?.find((s) => s.id === run.parentId) ?? null) : null}
                 branch={place.branch}
                 onOpenFile={openFile}
                 artifacts={artifacts.data ?? []}

@@ -13596,6 +13596,17 @@
             ],
             "description": "What to call the owner, so a shared list can say whose this is.\n\nSent because it cannot be looked up: listing the people in an\norganisation is an administrator's request, and a member seeing a\ncolleague's workspace still has to be told a name rather than an id."
           },
+          "parentId": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SessionId",
+                "description": "The session that asked for this one, when a session did.\n\nAbsent for everything a person started, which is every session there\nwas until a lead could ask for a child. What hangs off this edge is in\nthe control plane: a child's hand-back goes to its lead rather than\ninto the inbox, and ending the lead ends the tree."
+              }
+            ]
+          },
           "path": {
             "$ref": "#/components/schemas/ResourcePath",
             "description": "Which directory the workspace is filed in — `u/kevin/…` for somebody's\nown, `d/backend/…` once it has been handed to a directory."
@@ -13635,6 +13646,13 @@
           },
           "size": {
             "$ref": "#/components/schemas/WorkspaceSize"
+          },
+          "spawnReason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What the lead said this child was for, in its own words.\n\nCarried so the child's own screen can say why it exists — the first\nquestion anyone asks about a workspace they did not open."
           },
           "status": {
             "$ref": "#/components/schemas/SessionStatus"

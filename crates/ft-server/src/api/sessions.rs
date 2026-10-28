@@ -236,11 +236,44 @@ pub(super) async fn create_session(
         .map(|u| u.username.clone())
         .unwrap_or_else(|| owner.clone());
 
+    let session = create_session_as(state, owner, whose, req, None).await?;
+    Ok((StatusCode::CREATED, Json(session)))
+}
+
+/// Which session asked for the one being made, when a session did.
+///
+/// Carried into creation rather than written afterwards by the caller, so the
+/// child is a child from the moment it has a row — a lead listing its children
+/// between the two writes would otherwise not find the one it just made.
+pub(crate) struct Lineage {
+    pub parent: SessionId,
+    /// What the lead said this was for, in its own words.
+    pub reason: Option<String>,
+    /// The lead's own id for the call that asked, so the same call arriving
+    /// twice finds this child rather than making a second.
+    pub req: Option<String>,
+}
+
+/// Start a session as somebody — whether they asked in person, or a session
+/// of theirs did.
+///
+/// The handler above is this with a principal unwrapped. A lead delegating
+/// part of its task comes through here directly, as its owner, carrying the
+/// lineage that makes the child a child. Nothing about who may do what is
+/// different between the two: the owner is the owner either way, and every
+/// check below is made against them.
+pub(crate) async fn create_session_as(
+    state: AppState,
+    owner: String,
+    whose: String,
+    req: NewSession,
+    lineage: Option<Lineage>,
+) -> ApiResult<Session> {
     // Another agent in a place that already exists, which is a different job
     // from making one: the host, the repositories, the branch and the directory
     // are all decided, and everything below about choosing them does not apply.
     if let Some(workspace_id) = req.workspace_id.clone() {
-        return start_another_agent(state, owner, workspace_id, req).await;
+        return start_another_agent(state, owner, workspace_id, req, lineage).await;
     }
 
     // What was actually asked for, if anything. A workspace may be created
@@ -560,6 +593,19 @@ pub(super) async fn create_session(
         state.db.bind_task(&id, key, url).await?;
     }
 
+    // Whose child this is, for the same reason and at the same moment.
+    if let Some(lineage) = &lineage {
+        state
+            .db
+            .set_lineage(
+                &id,
+                &lineage.parent,
+                lineage.reason.as_deref(),
+                lineage.req.as_deref(),
+            )
+            .await?;
+    }
+
     // Shared from the start, when that is what was asked for. `insert_session`
     // files it in the creator's own space; this hands it to a directory, which
     // is the same operation the Access screen performs later — at the one
@@ -784,7 +830,7 @@ pub(super) async fn create_session(
         .await?
         .ok_or_else(|| ApiError::not_found("session"))?;
 
-    Ok((StatusCode::CREATED, Json(session)))
+    Ok(session)
 }
 
 /// Start this session's agent again, in the workspace it already has.
@@ -993,7 +1039,8 @@ async fn start_another_agent(
     owner: String,
     workspace_id: ft_core::WorkspaceId,
     req: NewSession,
-) -> ApiResult<(StatusCode, Json<Session>)> {
+    lineage: Option<Lineage>,
+) -> ApiResult<Session> {
     if !req.agent.speaks_a_protocol() {
         return Err(ApiError::new(
             ErrorCode::InvalidRequest,
@@ -1096,6 +1143,20 @@ async fn start_another_agent(
         })
         .await?;
 
+    // A second agent a lead asked for, sharing the lead's own directory, is
+    // still that lead's child.
+    if let Some(lineage) = &lineage {
+        state
+            .db
+            .set_lineage(
+                &id,
+                &lineage.parent,
+                lineage.reason.as_deref(),
+                lineage.req.as_deref(),
+            )
+            .await?;
+    }
+
     // Its own credential and its own environment, resolved against this session
     // so the vault's log names the run that spent it.
     let mut env: Vec<(String, String)> = Vec::new();
@@ -1161,7 +1222,7 @@ async fn start_another_agent(
         .await?
         .ok_or_else(|| ApiError::not_found("session"))?;
 
-    Ok((StatusCode::CREATED, Json(session)))
+    Ok(session)
 }
 
 #[utoipa::path(
@@ -3423,8 +3484,9 @@ pub(super) async fn continue_with_account(
         .workspace_id
         .clone()
         .ok_or_else(|| ApiError::new(ErrorCode::InvalidRequest, "this session has no workspace"))?;
-    let (_, Json(next)) =
-        start_another_agent(state.clone(), owner.to_string(), workspace, req).await?;
+    // A hand-over between agents, not a delegation: the new run is a root
+    // like the one it continues, and nobody is told when it hands back.
+    let next = start_another_agent(state.clone(), owner.to_string(), workspace, req, None).await?;
     Ok(next.id)
 }
 

@@ -20,6 +20,7 @@
  * hours; the session picks up where it was.
  */
 import { createContext, Fragment, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { navigate } from "~/shims/next-navigation";
 import {
   AlertTriangle,
   Bot,
@@ -116,6 +117,7 @@ type Open = { onOpenDiff: () => void; onOpenFile: (path: string, keep?: boolean,
 
 export function Chat({
   session,
+  lead = null,
   branch,
   onOpenDiff,
   onOpenFile,
@@ -123,6 +125,8 @@ export function Chat({
   onOpenArtifact,
 }: {
   session: Session;
+  /** The session that asked for this one, when one did and it is still listed. */
+  lead?: Session | null;
   branch?: string;
   artifacts?: ArtifactModel[];
   onOpenArtifact?: (id: string, title: string) => void;
@@ -461,6 +465,27 @@ export function Chat({
             <span>started {elapsed(minutesSince(session.createdAt))} ago</span>
             {conversation.model && <span className="font-mono">{conversation.model}</span>}
           </div>
+
+          {/* Whose work this is part of. A session another session asked for
+              says so at the top, because "why does this exist" is the first
+              question anyone asks about a workspace they did not open — and
+              because what it says when it finishes goes to that session, not
+              to the inbox. */}
+          {session.parentId && (
+            <div className="mt-3 flex items-center gap-2 rounded-md border border-line bg-slate-tint px-3 py-2 text-meta">
+              <span className="text-dim">Started by</span>
+              <button
+                onClick={() => navigate(`/sessions/${lead?.workspaceId ?? session.parentId}`)}
+                className="font-medium text-bone hover:underline"
+              >
+                {lead?.name ?? "another session"}
+              </button>
+              {session.spawnReason && (
+                <span className="min-w-0 truncate text-dim">— {session.spawnReason}</span>
+              )}
+              <span className="ml-auto shrink-0 text-mute">hands back to it</span>
+            </div>
+          )}
 
           {steps.length > 0 && <BringUp steps={steps} />}
 

@@ -133,6 +133,7 @@ export interface Session {
      * @nullable
      */
   ownerName?: string | null;
+  parentId?: null | SessionId;
   /**
      * Which directory the workspace is filed in — `u/kevin/…` for somebody's
      * own, `d/backend/…` once it has been handed to a directory.
@@ -169,6 +170,14 @@ export interface Session {
   repo?: string | null;
   share?: Share;
   size: WorkspaceSize;
+  /**
+     * What the lead said this child was for, in its own words.
+     *
+     * Carried so the child's own screen can say why it exists — the first
+     * question anyone asks about a workspace they did not open.
+     * @nullable
+     */
+  spawnReason?: string | null;
   status: SessionStatus;
   /**
      * What this session is going to do, in order, decided when it was created.

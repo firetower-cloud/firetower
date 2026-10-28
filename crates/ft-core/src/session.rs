@@ -276,6 +276,20 @@ pub struct Session {
     pub proposed_title: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proposed_body: Option<String>,
+    /// The session that asked for this one, when a session did.
+    ///
+    /// Absent for everything a person started, which is every session there
+    /// was until a lead could ask for a child. What hangs off this edge is in
+    /// the control plane: a child's hand-back goes to its lead rather than
+    /// into the inbox, and ending the lead ends the tree.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<SessionId>,
+    /// What the lead said this child was for, in its own words.
+    ///
+    /// Carried so the child's own screen can say why it exists — the first
+    /// question anyone asks about a workspace they did not open.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spawn_reason: Option<String>,
     pub host_id: HostId,
     pub workspace_id: Option<WorkspaceId>,
     /// What this session is going to do, in order, decided when it was created.

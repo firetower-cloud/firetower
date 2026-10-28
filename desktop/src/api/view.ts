@@ -45,7 +45,21 @@ export function elapsed(minutes: number): string {
 export const NEEDS_YOU: SessionStatus[] = ["NeedsYou", "HandedBack", "Failed"];
 export const IN_FLIGHT: SessionStatus[] = ["Starting", "Working"];
 
-export const needsYou = (s: { status: SessionStatus }) => NEEDS_YOU.includes(s.status);
+/**
+ * A child's hand-back is its lead's to hear, not yours.
+ *
+ * A session another session asked for reports to that session: the control
+ * plane delivers its result into the lead's conversation, and the lead decides
+ * what, if anything, is for you. Counting it as waiting on you would put every
+ * delegated task back in your inbox — the opposite of what delegating it was
+ * for. A child blocked on a *permission* still counts, because that is a
+ * decision nobody may make on your behalf.
+ */
+export const handedToLead = (s: { status: SessionStatus; parentId?: string | null }) =>
+  s.status === "HandedBack" && !!s.parentId;
+
+export const needsYou = (s: { status: SessionStatus; parentId?: string | null }) =>
+  NEEDS_YOU.includes(s.status) && !handedToLead(s);
 export const inFlight = (s: { status: SessionStatus }) => IN_FLIGHT.includes(s.status);
 
 /**

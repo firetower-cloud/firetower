@@ -14,7 +14,7 @@ import type { LucideIcon } from "lucide-react";
 import { AgentMark } from "~/components/AgentMark";
 import { Blocks } from "~/island/Blocks";
 import { HostMark, Icon } from "~/components/ui";
-import { doing, group, shortRepo, type Repositories, type Workspace } from "~/api/workspaces";
+import { childrenWorking, doing, group, isChild, shortRepo, type Repositories, type Workspace } from "~/api/workspaces";
 import { beatOf, elapsed, minutesSince } from "~/api/view";
 import type { Backend } from "~/fleet";
 import { useHostOf, useSessions, useUpdatesRow } from "~/data";
@@ -249,8 +249,25 @@ function RepoTally({ places }: { places: Workspace[] }) {
   );
 }
 
-/** One workspace: its branch, and what is happening in it. */
-function Row({ place, on }: { place: Workspace; on: boolean }) {
+/**
+ * One workspace: its branch, and what is happening in it.
+ *
+ * `child` draws it under the row before it, which is its lead's: indented,
+ * with a rule down its left — position and weight, not a colour. `working`
+ * is how many of a place's own children are still at it, which is what a
+ * lead's row says while its agent sits idle between a dispatch and a result.
+ */
+function Row({
+  place,
+  on,
+  child = false,
+  working = 0,
+}: {
+  place: Workspace;
+  on: boolean;
+  child?: boolean;
+  working?: number;
+}) {
   const state = doing(place);
   const menu = useMenu<null>();
   const prompt = usePrompt();
@@ -280,9 +297,9 @@ function Row({ place, on }: { place: Workspace; on: boolean }) {
     <button
       onClick={() => navigate(`/sessions/${place.id}`)}
       onContextMenu={(e) => menu.show(e, null)}
-      className={`block w-full rounded-md px-2.5 py-1.5 text-left transition-colors duration-150 select-none ${
-        on ? "bg-overlay shadow-(--shadow-raise)" : "hover:bg-raise/60"
-      }`}
+      className={`block rounded-md px-2.5 py-1.5 text-left transition-colors duration-150 select-none ${
+        child ? "ml-3 w-[calc(100%-0.75rem)] border-l border-line-soft" : "w-full"
+      } ${on ? "bg-overlay shadow-(--shadow-raise)" : "hover:bg-raise/60"}`}
     >
       <div className="flex items-center gap-2">
         {/* The island's mark, at nine pixels instead of eleven. One alphabet
@@ -302,6 +319,13 @@ function Row({ place, on }: { place: Workspace; on: boolean }) {
       </div>
       <div className="flex items-center gap-1.5 pl-[12px]">
         <span className="min-w-0 flex-1 truncate font-mono text-micro text-mute">{place.branch ?? "—"}</span>
+        {/* Slate, which already means "in flight" beside this row: the agent
+            here may be idle, but what it delegated is not. */}
+        {working > 0 && (
+          <span className="shrink-0 font-mono text-micro tabular-nums text-slate" title={`${working} delegated and still working`}>
+            ↳{working}
+          </span>
+        )}
         {state === "working" &&
           place.runs.slice(0, 3).map((run) => (
             <AgentMark key={run.id} agent={run.agent} size={10} className="shrink-0 text-mute" />
@@ -366,7 +390,13 @@ function Repos({ repos, path }: { repos: Repositories; path: string }) {
             <RepoTally places={places} />
           </div>
           {places.map((place) => (
-            <Row key={place.id} place={place} on={path === `/sessions/${place.id}`} />
+            <Row
+              key={place.id}
+              place={place}
+              on={path === `/sessions/${place.id}`}
+              child={isChild(place, places)}
+              working={childrenWorking(place, places)}
+            />
           ))}
         </div>
       ))}

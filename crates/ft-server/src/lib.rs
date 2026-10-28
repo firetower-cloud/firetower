@@ -14,6 +14,7 @@ pub mod api;
 pub mod artifact;
 pub mod auth;
 pub mod db;
+pub mod delegate;
 pub mod diagnose;
 pub mod fleet;
 pub mod forward;
@@ -249,6 +250,12 @@ pub async fn run(config: Config) -> Result<()> {
     // start-up does should wait on somebody's connection to npm.
     sqlx::query("UPDATE agent_account_switches SET state='failed',detail='The server restarted during the switch. Check the selected account and retry.' WHERE state='switching'")
         .execute(state.db.pool()).await?;
+    // A session asking for a child reaches the fleet's connection loop, which
+    // has no business starting sessions and nothing to start them with. It
+    // hands the request here, where everything starting one takes is to hand.
+    let (delegations, requests) = tokio::sync::mpsc::channel(64);
+    state.fleet.serve_delegations(delegations).await;
+    tokio::spawn(delegate::serve(state.clone(), requests));
     tokio::spawn(crate::api::accounts::watch_fallbacks(state.clone()));
     tokio::spawn(seed_agents(state.clone()));
     // Firetower's own skills, into every organisation. Idempotent and cheap:

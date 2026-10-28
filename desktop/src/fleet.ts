@@ -18,7 +18,7 @@
  */
 import { useEffect, useState } from "react";
 import type { Session } from "~/api/generated/model";
-import { NEEDS_YOU } from "~/api/view";
+import { needsYou } from "~/api/view";
 import { onServers, servers, type Connected } from "~/servers";
 
 export type Reach = "live" | "unreachable";
@@ -136,5 +136,7 @@ export function dropFleet(serverId: string) {
 
 /** Ember, summed over every server. What goes on the dock. */
 export function waitingIn(sessions: Session[]): number {
-  return sessions.filter((s) => NEEDS_YOU.includes(s.status)).length;
+  // `needsYou` rather than the statuses: a child that handed back to its
+  // lead is not waiting on you, and the dock should not say it is.
+  return sessions.filter(needsYou).length;
 }

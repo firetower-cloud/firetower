@@ -23,7 +23,7 @@ pub(crate) mod hosts;
 mod providers;
 mod repos;
 mod secrets;
-mod sessions;
+pub(crate) mod sessions;
 mod setup;
 mod skills;
 mod stream;

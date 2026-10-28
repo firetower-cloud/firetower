@@ -1397,6 +1397,151 @@ impl Db {
         Ok(())
     }
 
+    // ── lineage ──────────────────────────────────────────────────────────
+
+    /// Record which session asked for this one.
+    ///
+    /// After the insert rather than inside it, for the reason `bind_task` is:
+    /// a lineage that fails to record costs the child its place in the tree
+    /// and nothing else, which is not worth another argument on every caller
+    /// of `insert_session` and `insert_run`.
+    pub async fn set_lineage(
+        &self,
+        child: &SessionId,
+        parent: &SessionId,
+        reason: Option<&str>,
+        req: Option<&str>,
+    ) -> Result<()> {
+        sqlx::query(
+            "UPDATE sessions SET parent_id = $1, spawn_reason = $2, spawn_req = $3 WHERE id = $4",
+        )
+        .bind(parent.as_str())
+        .bind(reason)
+        .bind(req)
+        .bind(child.as_str())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// The session that asked for this one, if one did.
+    pub async fn parent_of(&self, session_id: &SessionId) -> Result<Option<SessionId>> {
+        let stored: Option<Option<String>> =
+            sqlx::query_scalar("SELECT parent_id FROM sessions WHERE id = $1")
+                .bind(session_id.as_str())
+                .fetch_optional(&self.pool)
+                .await?;
+        Ok(stored.flatten().map(SessionId::from_stored))
+    }
+
+    /// The child a lead's spawn request already made, if it did.
+    ///
+    /// A worker that reconnects re-announces every question its agent is still
+    /// blocked on, so the same spawn can arrive twice. The agent's own id for
+    /// the call is what tells a second arrival from a new request, and this
+    /// is what answers it with the child it already has rather than a second
+    /// child.
+    pub async fn child_by_req(&self, parent: &SessionId, req: &str) -> Result<Option<Session>> {
+        let row = sqlx::query(
+            format!(
+                "SELECT {columns} FROM sessions s
+                   JOIN workspaces w ON w.id = s.workspace_id
+                  WHERE s.parent_id = $1 AND s.spawn_req = $2",
+                columns = session_columns(None)
+            )
+            .as_str(),
+        )
+        .bind(parent.as_str())
+        .bind(req)
+        .fetch_optional(&self.pool)
+        .await?;
+        let Some(row) = row else { return Ok(None) };
+        Ok(self.with_checkouts(vec![row]).await?.pop())
+    }
+
+    /// Every session this one asked for, oldest first.
+    ///
+    /// Whoever they belong to — which is whoever the lead belongs to, since a
+    /// child is made in its lead's owner's name. For the control plane acting
+    /// on the lead's behalf, never for a handler acting for a person: those
+    /// list sessions through the predicate that knows what the person may see.
+    pub async fn children_of(&self, parent: &SessionId) -> Result<Vec<Session>> {
+        let rows = sqlx::query(
+            format!(
+                "SELECT {columns} FROM sessions s
+                   JOIN workspaces w ON w.id = s.workspace_id
+                  WHERE s.parent_id = $1
+                  ORDER BY s.created_at",
+                columns = session_columns(None)
+            )
+            .as_str(),
+        )
+        .bind(parent.as_str())
+        .fetch_all(&self.pool)
+        .await?;
+        self.with_checkouts(rows).await
+    }
+
+    // ── deliveries ───────────────────────────────────────────────────────
+
+    /// Hold a result for a lead that is mid-turn.
+    ///
+    /// A result is delivered between a lead's turns, never into one. When the
+    /// lead is working, this is where it waits; `take_deliveries` is what
+    /// sends it the moment the lead stops.
+    pub async fn queue_delivery(
+        &self,
+        to: &SessionId,
+        from: Option<&SessionId>,
+        body: &str,
+    ) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO deliveries (id, to_session, from_session, body) VALUES ($1, $2, $3, $4)",
+        )
+        .bind(ft_core::DeliveryId::new().as_str())
+        .bind(to.as_str())
+        .bind(from.map(SessionId::as_str))
+        .bind(body)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Everything waiting for this session, oldest first, claimed on the way out.
+    ///
+    /// Claimed in the same statement that reads it, so two deliverers racing
+    /// for the same lead — a status change and a sweep, say — cannot both send
+    /// one row. Ordered afterwards because `RETURNING` promises no order.
+    pub async fn take_deliveries(
+        &self,
+        to: &SessionId,
+    ) -> Result<Vec<(Option<SessionId>, String)>> {
+        let rows = sqlx::query(
+            "UPDATE deliveries SET delivered_at = now()
+              WHERE to_session = $1 AND delivered_at IS NULL
+              RETURNING from_session, body, created_at",
+        )
+        .bind(to.as_str())
+        .fetch_all(&self.pool)
+        .await?;
+        let mut taken: Vec<(chrono::DateTime<chrono::Utc>, Option<SessionId>, String)> = rows
+            .into_iter()
+            .map(|r| {
+                (
+                    r.get("created_at"),
+                    r.get::<Option<String>, _>("from_session")
+                        .map(SessionId::from_stored),
+                    r.get("body"),
+                )
+            })
+            .collect();
+        taken.sort_by_key(|t| t.0);
+        Ok(taken
+            .into_iter()
+            .map(|(_, from, body)| (from, body))
+            .collect())
+    }
+
     /// One workspace they may work in, for starting another agent in it.
     ///
     /// Writer, not viewer: this is the read that precedes putting an agent into
@@ -2690,6 +2835,12 @@ fn session_from_row(r: sqlx::postgres::PgRow) -> Result<Session> {
         pull_request: r.get("pull_request"),
         proposed_title: r.get("proposed_title"),
         proposed_body: r.get("proposed_body"),
+        // Both null for every session a person started, which is every
+        // session there was before a lead could ask for a child.
+        parent_id: r
+            .get::<Option<String>, _>("parent_id")
+            .map(SessionId::from_stored),
+        spawn_reason: r.get("spawn_reason"),
         host_id: HostId::from_stored(r.get::<String, _>("host_id")),
         // A real id now, rather than the `None` it was while a session and the
         // place it runs in were the same row.
@@ -6052,6 +6203,108 @@ mod tests {
         assert_eq!(db.sessions(&mine).await.unwrap().len(), 1);
         assert_eq!(db.sessions(&theirs).await.unwrap().len(), 1);
         assert_eq!(db.live_sessions(&mine).await.unwrap().len(), 1);
+    }
+
+    /// A child knows its lead, a lead can list its children, and a spawn that
+    /// arrives twice finds the child it already made.
+    #[tokio::test]
+    async fn a_child_remembers_which_session_asked_for_it() {
+        let (db, mine) = db_with_user().await;
+        let host = db
+            .ensure_host("localhost", Compute::Local, mine.as_str())
+            .await
+            .unwrap();
+
+        let lead = SessionId::new();
+        let child = SessionId::new();
+        for (id, title) in [(&lead, "Lead"), (&child, "Child")] {
+            db.insert_session(
+                id,
+                &host.id,
+                &mine,
+                None,
+                title,
+                "do a thing",
+                None,
+                None,
+                "ClaudeCode",
+                WorkspaceSize::Medium,
+                ft_core::Share::Equal,
+                &[],
+                None,
+            )
+            .await
+            .unwrap();
+        }
+
+        // Every session starts as a root.
+        assert!(db.parent_of(&child).await.unwrap().is_none());
+        assert!(db.children_of(&lead).await.unwrap().is_empty());
+
+        db.set_lineage(&child, &lead, Some("review the diff"), Some("toolu_1"))
+            .await
+            .unwrap();
+
+        assert_eq!(db.parent_of(&child).await.unwrap(), Some(lead.clone()));
+        let children = db.children_of(&lead).await.unwrap();
+        assert_eq!(children.len(), 1);
+        assert_eq!(children[0].id, child);
+        assert_eq!(children[0].parent_id, Some(lead.clone()));
+        assert_eq!(children[0].spawn_reason.as_deref(), Some("review the diff"));
+
+        // The same request again is the same child, not a second one.
+        let again = db.child_by_req(&lead, "toolu_1").await.unwrap().unwrap();
+        assert_eq!(again.id, child);
+        assert!(db.child_by_req(&lead, "toolu_2").await.unwrap().is_none());
+
+        // And the lead is still a root, read back through the ordinary path.
+        let read = db.session(&lead).await.unwrap().unwrap();
+        assert!(read.parent_id.is_none());
+    }
+
+    /// A result for a lead that is mid-turn waits, and is handed over once in
+    /// the order it arrived.
+    #[tokio::test]
+    async fn deliveries_wait_and_are_taken_once_in_order() {
+        let (db, mine) = db_with_user().await;
+        let host = db
+            .ensure_host("localhost", Compute::Local, mine.as_str())
+            .await
+            .unwrap();
+        let lead = SessionId::new();
+        db.insert_session(
+            &lead,
+            &host.id,
+            &mine,
+            None,
+            "Lead",
+            "do a thing",
+            None,
+            None,
+            "ClaudeCode",
+            WorkspaceSize::Medium,
+            ft_core::Share::Equal,
+            &[],
+            None,
+        )
+        .await
+        .unwrap();
+
+        db.queue_delivery(&lead, None, "first").await.unwrap();
+        db.queue_delivery(&lead, None, "second").await.unwrap();
+
+        let taken = db.take_deliveries(&lead).await.unwrap();
+        assert_eq!(
+            taken
+                .iter()
+                .map(|(_, body)| body.as_str())
+                .collect::<Vec<_>>(),
+            ["first", "second"]
+        );
+        assert!(
+            db.take_deliveries(&lead).await.unwrap().is_empty(),
+            "a delivery is handed over once"
+        );
     }
 
     /// What a session narrated is as much its owner's as the session is.

@@ -50,10 +50,57 @@ use crate::agentd::{AgentClient, FromAgent, ToAgent};
 pub const SERVER: &str = "firetower";
 pub const TOOL: &str = "approve";
 
+/// Start another agent for part of the task, as a child of this session.
+///
+/// Served here rather than by a server of its own because this process is the
+/// one thing in the agent's tree that already has the session's socket, and a
+/// second process would need the same socket for the same reason.
+pub const SPAWN: &str = "spawn";
+/// List, steer or stop the children this session started.
+pub const CHILDREN: &str = "children";
+
+/// What a delegation call is named on its way to the control plane.
+///
+/// It travels the path a permission question takes — the socket, then the
+/// worker's `AgentAsks` frame — because that path already exists and already
+/// carries an id, a name and some arguments to somebody who can answer. The
+/// prefix is what tells the control plane this is a call to act on rather than
+/// a question to put to a person, and it cannot collide with a real tool's
+/// permission name, which the agent spells `mcp__firetower__spawn`.
+pub const DELEGATION: &str = "firetower:";
+
 /// The full name the agent uses, which is how MCP addresses any tool.
 pub fn tool_name() -> String {
     format!("mcp__{SERVER}__{TOOL}")
 }
+
+/// What `spawn` and `children` do, as the agent reads it.
+///
+/// The one place the agent learns delegation exists, so it carries the rules
+/// rather than pointing at them: when to use which placement, that a result
+/// arrives between turns, and what a child may not do.
+const SPAWN_DESCRIPTION: &str = "\
+Start another agent to work on part of this task, as a child of this session. \
+It gets its own conversation and knows nothing of yours: put everything it \
+needs in `goal` and `context`. \
+`placement: \"here\"` starts it in this workspace, sharing the directory and \
+the branch — cheap, and right for a reviewer or a second pair of eyes on what \
+you are doing. `placement: \"new\"` gives it a workspace and a branch of its \
+own, cut from the repository's default branch, for independent work. \
+Returns the child's id and name at once; the child takes its own time. \
+Its result arrives in THIS conversation as a message when it hands back — \
+between your turns, never inside one — so dispatch, do what does not depend \
+on it, then end your turn with a one-line status. \
+A child cannot spawn, cannot ask the person, and cannot message or schedule. \
+A question it has comes to you as a message; a command it needs permission \
+for goes to the person. At most 4 children may be live at once and 8 per \
+session; a refusal says which limit and why.";
+
+const CHILDREN_DESCRIPTION: &str = "\
+The children this session started. `list` says what each is doing and \
+whether it is waiting on someone. `steer` sends `message` into one child's \
+conversation mid-run, without stopping it. `stop` ends the turn a child is \
+in; what it has done so far stays.";
 
 /// The configuration file that tells an agent to start this.
 pub fn mcp_config(exe: &std::path::Path, session_id: &str, workspace: &std::path::Path) -> Value {
@@ -153,6 +200,59 @@ async fn answer(
                         "properties": {},
                         "additionalProperties": true,
                     },
+                }, {
+                    "name": SPAWN,
+                    "description": SPAWN_DESCRIPTION,
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "goal": {
+                                "type": "string",
+                                "description": "What the child should accomplish. Self-contained: it has not seen this conversation.",
+                            },
+                            "context": {
+                                "type": "string",
+                                "description": "Background it needs: file paths, constraints, what has been tried, what to hand back.",
+                            },
+                            "placement": {
+                                "type": "string",
+                                "enum": ["here", "new"],
+                                "description": "\"here\" shares this workspace and branch; \"new\" gets its own. Default \"here\".",
+                            },
+                            "agent": {
+                                "type": "string",
+                                "enum": ["ClaudeCode", "Codex", "KimiCode"],
+                                "description": "Which agent runs it. Omit for the same kind as you.",
+                            },
+                            "name": {
+                                "type": "string",
+                                "description": "A short name for the child, like \"reviewer\" or \"developer\".",
+                            },
+                            "reason": {
+                                "type": "string",
+                                "description": "One line on why this is being delegated. Shown on the child.",
+                            },
+                        },
+                        "required": ["goal"],
+                    },
+                }, {
+                    "name": CHILDREN,
+                    "description": CHILDREN_DESCRIPTION,
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "action": { "type": "string", "enum": ["list", "steer", "stop"] },
+                            "id": {
+                                "type": "string",
+                                "description": "The child's session id, from spawn or list. For steer and stop.",
+                            },
+                            "message": {
+                                "type": "string",
+                                "description": "For steer: what to tell the child. Lands in its conversation as a message from you.",
+                            },
+                        },
+                        "required": ["action"],
+                    },
                 }]
             }),
         )),
@@ -163,7 +263,19 @@ async fn answer(
                 .pointer("/params/arguments")
                 .cloned()
                 .unwrap_or(json!({}));
-            let decision = ask(session_id, workspace, settled, &arguments).await;
+            let name = request
+                .pointer("/params/name")
+                .and_then(Value::as_str)
+                .unwrap_or(TOOL);
+            let text = match name {
+                SPAWN | CHILDREN => delegate(session_id, name, &id, &arguments).await,
+                // Every call used to be a permission question, and an agent
+                // from before the other tools existed still only knows this
+                // one — so anything unnamed is still that.
+                _ => ask(session_id, workspace, settled, &arguments)
+                    .await
+                    .to_string(),
+            };
             Some(reply(
                 id,
                 json!({
@@ -171,7 +283,7 @@ async fn answer(
                         "type": "text",
                         // The decision travels as text because that is what a
                         // tool result carries. The agent parses it back.
-                        "text": decision.to_string(),
+                        "text": text,
                     }]
                 }),
             ))
@@ -235,6 +347,38 @@ async fn ask(
                 "message": format!("Firetower could not ask anyone about this: {e:#}"),
             })
         }
+    }
+}
+
+/// Carry a delegation call to the control plane, and bring its answer back.
+///
+/// The same road a permission question takes, with the name prefixed so the
+/// far end acts on it rather than asking somebody. The request id has to be
+/// unique for as long as the lead session exists: a worker that reconnects
+/// re-announces every call still waiting, and the control plane answers a
+/// repeat with the child the first arrival made — so an id that repeated
+/// across agent restarts would hand a new spawn an old child. JSON-RPC ids
+/// start again at one each time the agent starts, which is why this process's
+/// own start is part of the name.
+async fn delegate(session_id: &str, name: &str, id: &Value, arguments: &Value) -> String {
+    use std::sync::OnceLock;
+    static STARTED: OnceLock<u128> = OnceLock::new();
+    let started = STARTED.get_or_init(|| {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    });
+    let req = format!("{name}-{started}-{}", id.to_string().trim_matches('"'));
+
+    match wait_for_a_decision(session_id, &req, &format!("{DELEGATION}{name}"), arguments).await {
+        // The control plane answers in words, for the agent to read; anything
+        // else it sends is handed over verbatim rather than guessed at.
+        Ok(result) => match result.get("text").and_then(Value::as_str) {
+            Some(text) => text.to_string(),
+            None => result.to_string(),
+        },
+        Err(e) => format!("Firetower could not reach anyone to {name}: {e:#}"),
     }
 }
 
@@ -402,15 +546,51 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn it_offers_exactly_one_tool_and_the_agent_is_told_its_full_name() {
+    async fn it_offers_the_permission_tool_first_and_the_agent_is_told_its_full_name() {
         let request = json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" });
         let response = answer(&request, "s_test", nowhere(), &none())
             .await
             .unwrap();
         let tools = response["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 1);
-        assert_eq!(tools[0]["name"], TOOL);
+        let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
+        // The permission tool first: it is the one the launch flags name, and
+        // the one an older agent only knows.
+        assert_eq!(names, [TOOL, SPAWN, CHILDREN]);
         assert_eq!(tool_name(), "mcp__firetower__approve");
+        // A child's goal is the one thing a spawn cannot do without.
+        assert_eq!(tools[1]["inputSchema"]["required"], json!(["goal"]));
+    }
+
+    #[tokio::test]
+    async fn a_spawn_nobody_can_carry_is_refused_in_words() {
+        // The same safe end as a permission nobody can answer: the agent reads
+        // why, rather than seeing a tool that silently did nothing.
+        let request = json!({
+            "jsonrpc": "2.0", "id": 4, "method": "tools/call",
+            "params": { "name": SPAWN, "arguments": { "goal": "review the diff" } },
+        });
+        let response = answer(&request, "s_no-such-session-at-all", nowhere(), &none())
+            .await
+            .unwrap();
+        let text = response["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("Firetower"), "{text}");
+        assert!(text.contains("spawn"), "{text}");
+    }
+
+    #[tokio::test]
+    async fn a_call_without_a_name_is_still_a_permission_question() {
+        // An agent from before `spawn` existed calls the only tool it knows,
+        // and what it gets back has to parse as a decision.
+        let request = json!({
+            "jsonrpc": "2.0", "id": 5, "method": "tools/call",
+            "params": { "arguments": { "tool_name": "Write", "input": {}, "tool_use_id": "toolu_y" } },
+        });
+        let response = answer(&request, "s_no-such-session-at-all", nowhere(), &none())
+            .await
+            .unwrap();
+        let text = response["result"]["content"][0]["text"].as_str().unwrap();
+        let decision: Value = serde_json::from_str(text).unwrap();
+        assert_eq!(decision["behavior"], "deny");
     }
 
     #[tokio::test]
