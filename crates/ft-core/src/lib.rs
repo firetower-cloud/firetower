@@ -215,7 +215,10 @@ impl Agent {
                 // one. Two `--append-system-prompt` flags would be the obvious
                 // shape and the agent takes only one, so they are joined here
                 // rather than discovered to be exclusive later.
-                let mut appended = vec![ARTIFACT_GUIDANCE.to_string()];
+                let mut appended = vec![
+                    ARTIFACT_GUIDANCE.to_string(),
+                    DELEGATION_GUIDANCE.to_string(),
+                ];
                 if let Start::Carrying(before) = &start {
                     appended.push(before.clone());
                 }
@@ -1051,6 +1054,26 @@ Nothing written anywhere else is shown to anybody.
 
 The `firetower-artifacts` skill has the rest: what the page is rendered inside,
 what makes one good, and how to use a richer artifact skill alongside it.
+";
+
+/// What every session is told about starting other agents.
+///
+/// The contract and not the manual, for the reason [`ARTIFACT_GUIDANCE`] is:
+/// this is in context on every turn. The `spawn` tool's own description says
+/// how to use it; this says that it exists, where a result comes back, and
+/// the one thing a child has to know about itself.
+pub const DELEGATION_GUIDANCE: &str = "\
+## Delegation
+
+Firetower can start other agents for you. `spawn` starts one — in this
+workspace, sharing its directory and branch, or in a workspace of its own on
+its own branch — and `children` lists, steers or stops the ones you started.
+A child knows nothing of this conversation: give it everything in `goal` and
+`context`. Its result arrives here as a message when it hands back, between
+your turns, so dispatch, do what does not depend on it, then end your turn.
+
+If another session started *you*, you cannot spawn, you cannot ask the person,
+and what you say when you finish goes to that session.
 ";
 
 /// Whether there is anybody to answer a permission prompt.

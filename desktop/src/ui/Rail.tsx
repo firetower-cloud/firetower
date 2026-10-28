@@ -14,7 +14,7 @@ import type { LucideIcon } from "lucide-react";
 import { AgentMark } from "~/components/AgentMark";
 import { Blocks } from "~/island/Blocks";
 import { HostMark, Icon } from "~/components/ui";
-import { childrenWorking, doing, group, isChild, shortRepo, type Repositories, type Workspace } from "~/api/workspaces";
+import { childrenOf, childrenWorking, doing, group, isChild, shortRepo, type Repositories, type Workspace } from "~/api/workspaces";
 import { beatOf, elapsed, minutesSince } from "~/api/view";
 import type { Backend } from "~/fleet";
 import { useHostOf, useSessions, useUpdatesRow } from "~/data";
@@ -262,11 +262,14 @@ function Row({
   on,
   child = false,
   working = 0,
+  delegated = 0,
 }: {
   place: Workspace;
   on: boolean;
   child?: boolean;
   working?: number;
+  /** Agents it started and has not ended; ending this place ends them too. */
+  delegated?: number;
 }) {
   const state = doing(place);
   const menu = useMenu<null>();
@@ -290,7 +293,7 @@ function Row({
           { label: "Open", onPick: () => navigate(`/sessions/${place.id}`) },
           { label: "Rename…", onPick: () => void rename() },
           "-",
-          { label: "End workspace", tone: "danger", onPick: () => void endWorkspace(place).then(({ ended }) => ended && on && navigate("/")) },
+          { label: "End workspace", tone: "danger", onPick: () => void endWorkspace(place, delegated).then(({ ended }) => ended && on && navigate("/")) },
         ]}
       />
     )}
@@ -396,6 +399,7 @@ function Repos({ repos, path }: { repos: Repositories; path: string }) {
               on={path === `/sessions/${place.id}`}
               child={isChild(place, places)}
               working={childrenWorking(place, places)}
+              delegated={childrenOf(place, places)}
             />
           ))}
         </div>

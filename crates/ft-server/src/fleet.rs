@@ -924,6 +924,15 @@ fn note_for(code: &str, message: &str) -> String {
 
 /// A question, short enough for a card in the inbox.
 fn asking_about(tool: &str, args: &serde_json::Value) -> String {
+    // A lead asking leave to start a child: say what for, not which tool.
+    // The agent spells the permission name `mcp__firetower__spawn`, which
+    // tells somebody on a phone nothing about what is being asked.
+    if tool.ends_with("__spawn") {
+        return match args.get("goal").and_then(|v| v.as_str()) {
+            Some(goal) => format!("start a child agent: {goal}"),
+            None => "start a child agent".to_string(),
+        };
+    }
     for key in ["command", "file_path", "path", "url"] {
         if let Some(value) = args.get(key).and_then(|v| v.as_str()) {
             return format!("{tool}: {value}");
@@ -1496,7 +1505,20 @@ impl Fleet {
         let Ok(Some(lead_row)) = self.db.session(lead).await else {
             return;
         };
-        if lead_row.status.in_flight() || lead_row.status == SessionStatus::Ended {
+        if lead_row.status == SessionStatus::Ended {
+            return;
+        }
+        // Mid-turn is the *agent's* turn, not the session's status. A lead
+        // waiting on its children is `Working` with an idle agent, and that is
+        // exactly the moment a result should go in; a lead whose agent is
+        // actually mid-turn gets it when that turn ends.
+        let mid_turn = self
+            .progress
+            .read()
+            .await
+            .get(lead.as_str())
+            .is_some_and(|p| p.in_turn);
+        if mid_turn {
             return;
         }
         let waiting = match self.db.take_deliveries(lead).await {
@@ -2283,6 +2305,23 @@ impl Fleet {
                             }
 
                             if let Some((status, note)) = read.moved {
+                                // A lead whose own turn ended while the agents
+                                // it started are still at work is waiting,
+                                // not resting: nothing is for the person yet,
+                                // and the next thing to happen is a child
+                                // handing back into this conversation. The
+                                // breathing dot already means exactly this.
+                                let (status, note) = if status == SessionStatus::HandedBack
+                                    && db.children_in_flight(&session_id).await.unwrap_or(0) > 0
+                                {
+                                    (
+                                        SessionStatus::Working,
+                                        Some("Waiting on the agents it started.".to_string()),
+                                    )
+                                } else {
+                                    (status, note)
+                                };
+
                                 let was_waiting = db
                                     .session_status(&session_id)
                                     .await
@@ -2293,10 +2332,15 @@ impl Fleet {
 
                                 // A child's hand-back is its lead's to hear,
                                 // not the person's: that is what delegating
-                                // meant. A child blocked on a permission still
-                                // reaches the person — a lead may not approve
+                                // meant. So is a child breaking — a lead
+                                // waiting on it has to be told why nothing is
+                                // coming. A child blocked on a permission still
+                                // reaches the person: a lead may not approve
                                 // on anybody's behalf.
-                                let lead = if status == SessionStatus::HandedBack {
+                                let lead = if matches!(
+                                    status,
+                                    SessionStatus::HandedBack | SessionStatus::Failed
+                                ) {
                                     db.parent_of(&session_id).await.ok().flatten()
                                 } else {
                                     None
@@ -2337,9 +2381,12 @@ impl Fleet {
                                     tokio::spawn(async move {
                                         fleet.hand_back_to_lead(&lead, &child, said, note).await;
                                     });
-                                } else if !status.in_flight() {
-                                    // Between turns now, so anything its own
+                                } else {
+                                    // Its status moved, which is as often as
+                                    // not a turn ending — so anything its own
                                     // children handed back meanwhile can go.
+                                    // Harmless when the turn has only just
+                                    // started: the drain checks for itself.
                                     let fleet = replying.clone();
                                     let this = session_id.clone();
                                     tokio::spawn(async move {
@@ -4005,6 +4052,28 @@ impl Fleet {
 #[cfg(test)]
 mod progress_tests {
     use super::*;
+
+    /// A permission card about starting a child says what the child is for.
+    /// The agent's own name for the tool tells a phone nothing.
+    #[test]
+    fn a_card_about_spawning_names_the_goal() {
+        assert_eq!(
+            asking_about(
+                "mcp__firetower__spawn",
+                &serde_json::json!({ "goal": "review the diff" })
+            ),
+            "start a child agent: review the diff"
+        );
+        assert_eq!(
+            asking_about("mcp__firetower__spawn", &serde_json::json!({})),
+            "start a child agent"
+        );
+        // Everything else is as it was.
+        assert_eq!(
+            asking_about("Bash", &serde_json::json!({ "command": "ls" })),
+            "Bash: ls"
+        );
+    }
 
     /// Stopping a session is not the same as a session breaking.
     ///

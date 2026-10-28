@@ -1916,7 +1916,11 @@ Docker is installed here and the daemon is not answering, so `docker` commands w
     /// instead. For Claude Code the file is now belt and braces: the prompt is
     /// what it actually reads.
     fn artifact_guidance() -> String {
-        format!("\n{}", ft_core::ARTIFACT_GUIDANCE)
+        format!(
+            "\n{}\n{}",
+            ft_core::ARTIFACT_GUIDANCE,
+            ft_core::DELEGATION_GUIDANCE
+        )
     }
 
     /// Write down what is checked out and where.

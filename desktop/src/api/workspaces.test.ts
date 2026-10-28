@@ -6,7 +6,7 @@
  * the address having ended.
  */
 import { describe, expect, it } from "vitest";
-import { childrenWorking, doing, group, isChild, placeOf } from "./workspaces";
+import { childrenOf, childrenWorking, doing, group, isChild, placeOf } from "./workspaces";
 import type { Session } from "~/api/generated/model";
 
 const run = (id: string, workspaceId: string, status = "Ready"): Session =>
@@ -100,5 +100,18 @@ describe("leads and children", () => {
     expect(doing(kid)).toBe("idle");
     // The same status with nobody to hand back to is yours.
     expect(doing(places([run("s_9", "s_9", "HandedBack")])[0])).toBe("waiting");
+  });
+});
+
+describe("childrenOf", () => {
+  const child = (id: string, parentId: string, workspaceId = id, status = "Working"): Session =>
+    ({ ...run(id, workspaceId, status), parentId }) as unknown as Session;
+
+  it("counts what ending the place takes with it, and not what has already ended", () => {
+    const all = [run("s_1", "s_1"), child("s_2", "s_1"), child("s_3", "s_1", "s_1"), child("s_4", "s_1", "s_4", "Ended")];
+    // An ended session is not listed by the rail at all; here it is, and it
+    // still must not count.
+    const lead = placeOf(places(all), "s_1")!;
+    expect(childrenOf(lead, places(all))).toBe(3);
   });
 });

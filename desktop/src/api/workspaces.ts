@@ -137,6 +137,19 @@ export function isChild(place: Workspace, places: Workspace[]): boolean {
 }
 
 /**
+ * How many agents a place has delegated to and not yet ended, wherever they
+ * run. What ending the place takes with it.
+ */
+export function childrenOf(place: Workspace, places: Workspace[]): number {
+  const mine = new Set(place.runs.map((r) => r.id));
+  const here = place.runs.filter((r) => r.parentId && mine.has(r.parentId) && r.status !== "Ended").length;
+  const elsewhere = places.filter(
+    (other) => other.id !== place.id && !!other.leadOf && mine.has(other.leadOf),
+  ).length;
+  return here + elsewhere;
+}
+
+/**
  * How many of a place's children are still at work: runs in this place that
  * one of its own runs asked for, and places elsewhere on the list it started.
  *

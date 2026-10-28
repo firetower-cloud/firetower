@@ -13,7 +13,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { getListSessionsQueryKey, useRenameSession } from "~/api/generated/sessions/sessions";
 import { Signal } from "~/components/Signal";
 import { AgentMark } from "~/components/AgentMark";
-import { group, placeOf } from "~/api/workspaces";
+import { childrenOf, group, placeOf } from "~/api/workspaces";
 import type { Backend } from "~/fleet";
 import { useHostOf, useSession, useSessions } from "~/data";
 import { navigate } from "~/shims/next-navigation";
@@ -525,8 +525,8 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
               and drawn only to somebody the server will take it from. */}
           {mayEndPlace && (
             <button
-              onClick={() => void endWorkspace(place).then(({ ended, trouble }) => (ended ? navigate("/") : trouble && void confirm({ title: "It did not end.", body: trouble, action: "OK" })))}
-              title="End workspace — every agent in it stops"
+              onClick={() => void endWorkspace(place, childrenOf(place, group(sessions ?? []).groups.flatMap(([, ps]) => ps))).then(({ ended, trouble }) => (ended ? navigate("/") : trouble && void confirm({ title: "It did not end.", body: trouble, action: "OK" })))}
+              title="End workspace — every agent in it stops, and every agent it started"
               className="control text-mute hover:bg-raise hover:text-brick"
             >
               <Trash2 className="h-4 w-4" strokeWidth={1.75} />

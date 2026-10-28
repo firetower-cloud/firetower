@@ -1424,6 +1424,21 @@ impl Db {
         Ok(())
     }
 
+    /// How many of this session's children are still starting or working.
+    ///
+    /// What decides whether a lead that has ended its turn is resting or
+    /// waiting: with any of these above zero, nothing is for the person yet.
+    pub async fn children_in_flight(&self, parent: &SessionId) -> Result<usize> {
+        let count: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM sessions
+              WHERE parent_id = $1 AND status IN ('Starting', 'Working')",
+        )
+        .bind(parent.as_str())
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(count.max(0) as usize)
+    }
+
     /// The session that asked for this one, if one did.
     pub async fn parent_of(&self, session_id: &SessionId) -> Result<Option<SessionId>> {
         let stored: Option<Option<String>> =
@@ -6260,6 +6275,21 @@ mod tests {
         // And the lead is still a root, read back through the ordinary path.
         let read = db.session(&lead).await.unwrap().unwrap();
         assert!(read.parent_id.is_none());
+
+        // A child counts as in flight while it is starting or working, and
+        // stops counting the moment it is anything else.
+        assert_eq!(db.children_in_flight(&lead).await.unwrap(), 1);
+        db.record_local_event(
+            &child,
+            &EventKind::StatusChanged {
+                status: SessionStatus::HandedBack,
+                note: None,
+            },
+            chrono::Utc::now(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(db.children_in_flight(&lead).await.unwrap(), 0);
     }
 
     /// A result for a lead that is mid-turn waits, and is handed over once in

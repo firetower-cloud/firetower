@@ -1303,6 +1303,15 @@ pub(super) async fn destroy_session(
     state.forwards.stop_session(&id).await;
     state.previews.forget(&id);
 
+    // Ending a lead ends what it delegated. A child left running would be
+    // working for a session that no longer exists: its result would have
+    // nowhere to go, and nothing would ever end it. Each goes the way this
+    // one is going — torn down where its host answers, forgotten where it
+    // does not — and a branch a child pushed stays on the remote either way.
+    // A child in this very workspace is also a sibling, and the teardown
+    // below would reach it as one; ending it here first is the same end.
+    end_children(&state, &id).await?;
+
     // Ending is normally the worker's word: it tears the workspace down and
     // reports it, and the row follows. With nobody listening there is no such
     // word, and this used to fail as an internal error — a 500 for a machine
@@ -1389,6 +1398,40 @@ pub(super) async fn destroy_session(
         .await?;
 
     Ok(StatusCode::ACCEPTED)
+}
+
+/// End every child of a session that is being ended.
+///
+/// Best effort per child and none of it fatal to ending the lead: a child
+/// whose host is away is forgotten here and owed a teardown there, exactly
+/// as the lead would be on that path.
+async fn end_children(state: &AppState, lead: &SessionId) -> ApiResult<()> {
+    for child in state.db.children_of(lead).await? {
+        if child.status == SessionStatus::Ended {
+            continue;
+        }
+        state.forwards.stop_session(&child.id).await;
+        state.previews.forget(&child.id);
+        if state.fleet.is_connected(&child.host_id).await {
+            if let Err(e) = state
+                .fleet
+                .send(
+                    &child.host_id,
+                    ToWorker::Destroy {
+                        session_id: child.id.clone(),
+                        force: false,
+                    },
+                )
+                .await
+            {
+                tracing::warn!(session = %child.id, "ending a child with its lead: {e:#}");
+                state.db.forget_session(&child.id).await?;
+            }
+        } else {
+            state.db.forget_session(&child.id).await?;
+        }
+    }
+    Ok(())
 }
 
 /// Removing a session whose host has stopped answering.
