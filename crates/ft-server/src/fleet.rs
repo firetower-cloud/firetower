@@ -270,7 +270,11 @@ impl Progress {
                     reported.model = self.preferred.model.clone();
                 }
                 if reported.approval.is_none() {
-                    reported.approval = self.preferred.mode.clone();
+                    reported.approval = self
+                        .preferred
+                        .mode
+                        .clone()
+                        .or_else(|| Some(ft_core::codex::DEFAULT_MODE.to_string()));
                 }
                 (
                     reader.models().to_vec(),
