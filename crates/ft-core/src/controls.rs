@@ -302,9 +302,14 @@ fn claude_efforts() -> Vec<Choice> {
 fn codex_modes() -> Vec<Choice> {
     vec![
         Choice::new(
+            "Auto",
+            "auto",
+            "Codex reviews the ordinary escalations itself. The risky ones still reach you",
+        ),
+        Choice::new(
             "Ask when needed",
             "on-request",
-            "Asks when it wants to do something it is not allowed to",
+            "Asks you about anything it is not allowed to do",
         ),
         Choice::new(
             "Ask everything",

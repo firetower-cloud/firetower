@@ -138,11 +138,69 @@ impl Default for Fence {
     }
 }
 
+/// The permission mode a new Codex session opens in when nobody has chosen.
+///
+/// `auto` rather than `on-request`: a session here is unattended by
+/// construction, so an agent that stops to ask *may I run this* stops for
+/// somebody who is not there. `auto` keeps the same sandbox and the same
+/// questions, and hands the ordinary ones to Codex's own reviewer instead of
+/// the person — the same arrangement Claude Code's `auto` is, which is why its
+/// default is the same word. See [`approval_wire`].
+pub const DEFAULT_MODE: &str = "auto";
+
+/// How a chosen permission mode reaches Codex: the approval policy it sets, and
+/// who reviews the prompts that policy would raise.
+///
+/// `auto` is ours, not Codex's: it is `on-request` with the reviewer subagent
+/// (`auto_review`, what Codex's own app calls "Approve for me") standing in for
+/// the person on the ordinary escalations. Every other value names a Codex
+/// policy directly and keeps the person as the reviewer — which is also the
+/// right reading of a value stored before `auto` existed.
+pub fn approval_wire(mode: &str) -> (&str, &'static str) {
+    match mode {
+        "auto" => ("on-request", "auto_review"),
+        other => (other, "user"),
+    }
+}
+
+/// The permission mode a session is in, read back from what it reported.
+///
+/// The inverse of [`approval_wire`]: `on-request` reviewed by the subagent is
+/// `auto`, and anything else is the policy's own name. An app-server that does
+/// not name a reviewer is read as the person reviewing, which it is.
+pub fn approval_mode(policy: &str, reviewer: Option<&str>) -> String {
+    if policy == "on-request" && reviewer == Some("auto_review") {
+        "auto".to_string()
+    } else {
+        policy.to_string()
+    }
+}
+
 /// The handshake, which has to finish before Codex will take any work.
 ///
 /// Two requests rather than one because the second needs the first: an
 /// app-server answers nothing until it has been introduced.
 pub fn opening(cwd: &str, preferred: &crate::controls::Preferred) -> Vec<Value> {
+    // It asks, and the question reaches whoever is watching — or, in `auto`,
+    // Codex's own reviewer answers the ordinary ones so an unattended session
+    // is not stopped by a question nobody is there to take. Either way it is
+    // still sandboxed to the workspace underneath: being asked is not the same
+    // as being unconfined.
+    let mode = preferred.mode.as_deref().unwrap_or(DEFAULT_MODE);
+    let (approval_policy, reviewer) = approval_wire(mode);
+
+    // The stored choice is Firetower's name for the fence; `thread/start` takes
+    // Codex's own word and refuses anything else, so it is mapped rather than
+    // sent raw. An unknown or absent value falls back to the default instead of
+    // refusing to start — sending it raw left a session that had ever touched
+    // the Sandbox picker stuck at "starting the agent" for good.
+    let sandbox = preferred
+        .sandbox
+        .as_deref()
+        .and_then(Fence::named)
+        .unwrap_or_default()
+        .word();
+
     vec![
         serde_json::json!({
             "id": INITIALIZE_ID,
@@ -163,22 +221,9 @@ pub fn opening(cwd: &str, preferred: &crate::controls::Preferred) -> Vec<Value> 
             "method": "thread/start",
             "params": {
                 "cwd": cwd,
-                // It asks, and the question reaches whoever is watching.
-                // That is the point of the whole arrangement, so it is the
-                // ordinary case — and a session nobody is watching is exactly
-                // the one that most needs to be able to stop and say so.
-                //
-                // Still sandboxed to the workspace underneath. Being asked is
-                // not the same as being unconfined: an approval somebody grants
-                // in a hurry should not be able to reach the rest of the host.
-                "approvalPolicy": preferred
-                    .mode
-                    .clone()
-                    .unwrap_or_else(|| "on-request".to_string()),
-                "sandbox": preferred
-                    .sandbox
-                    .clone()
-                    .unwrap_or_else(|| Fence::default().word().to_string()),
+                "approvalPolicy": approval_policy,
+                "approvalsReviewer": reviewer,
+                "sandbox": sandbox,
             },
         }),
     ]
@@ -214,8 +259,17 @@ pub fn turn_start(id: u64, thread: &str, text: &str, settings: &Settings) -> Val
     if let Some(effort) = &settings.effort {
         fields.insert("effort".into(), Value::String(effort.clone()));
     }
-    if let Some(approval) = &settings.approval {
-        fields.insert("approvalPolicy".into(), Value::String(approval.clone()));
+    // The mode is Firetower's; Codex takes an approval policy and, for `auto`,
+    // a reviewer. Both are sent so that switching back to a person-reviewed
+    // mode takes the subagent down again rather than leaving it in place from
+    // a turn that set it.
+    if let Some(mode) = &settings.approval {
+        let (policy, reviewer) = approval_wire(mode);
+        fields.insert("approvalPolicy".into(), Value::String(policy.to_string()));
+        fields.insert(
+            "approvalsReviewer".into(),
+            Value::String(reviewer.to_string()),
+        );
     }
     // Always, even unset: the default has the network on and `thread/start`
     // had no way to say so, so the first turn is where it starts being true.
@@ -752,10 +806,21 @@ impl CodexNormaliser {
                     .get("model")
                     .and_then(Value::as_str)
                     .map(str::to_string);
-                self.reported.approval = result
-                    .get("approvalPolicy")
-                    .and_then(Value::as_str)
-                    .map(str::to_string);
+                // The policy and its reviewer together are the mode the picker
+                // shows: `on-request` reviewed by the subagent is `auto`. Read
+                // as the pair so a session opened in `auto` does not come back
+                // reading `on-request` with the picker a step behind it.
+                let reported_mode =
+                    result
+                        .get("approvalPolicy")
+                        .and_then(Value::as_str)
+                        .map(|policy| {
+                            approval_mode(
+                                policy,
+                                result.get("approvalsReviewer").and_then(Value::as_str),
+                            )
+                        });
+                self.reported.approval = reported_mode.clone();
                 self.reported.effort = result
                     .get("reasoningEffort")
                     .and_then(Value::as_str)
@@ -770,11 +835,7 @@ impl CodexNormaliser {
                         .and_then(Value::as_str)
                         .unwrap_or_default()
                         .to_string(),
-                    mode: result
-                        .get("approvalPolicy")
-                        .and_then(Value::as_str)
-                        .unwrap_or_default()
-                        .to_string(),
+                    mode: reported_mode.unwrap_or_default(),
                     // Codex names neither here, and an empty list is the
                     // honest reading of that.
                     tools: Vec::new(),
@@ -1765,6 +1826,8 @@ mod tests {
         assert!(params.get("model").is_none());
         assert!(params.get("effort").is_none());
         assert!(params.get("approvalPolicy").is_none());
+        // The reviewer rides with the policy, so an unset mode says neither.
+        assert!(params.get("approvalsReviewer").is_none());
         // Except the fence, which is always said: the default has the network
         // on and `thread/start` had no way to say so.
         assert_eq!(params["sandboxPolicy"]["networkAccess"], true);
@@ -1783,10 +1846,90 @@ mod tests {
         assert_eq!(chosen["params"]["model"], "gpt-5.6-mini");
         assert_eq!(chosen["params"]["effort"], "high");
         assert_eq!(chosen["params"]["approvalPolicy"], "never");
+        // A person-reviewed mode says so, so switching to it from `auto` takes
+        // the subagent back down rather than leaving it in force.
+        assert_eq!(chosen["params"]["approvalsReviewer"], "user");
         assert_eq!(
             chosen["params"]["sandboxPolicy"]["type"],
             "dangerFullAccess"
         );
+    }
+
+    /// `auto` is Firetower's name for `on-request` reviewed by Codex's own
+    /// subagent — the whole of the "stop asking me about the ordinary ones"
+    /// request. It turns the reviewer on, and the other modes turn it off.
+    #[test]
+    fn auto_mode_turns_the_reviewer_on_and_the_others_off() {
+        assert_eq!(approval_wire("auto"), ("on-request", "auto_review"));
+        assert_eq!(approval_wire("on-request"), ("on-request", "user"));
+        assert_eq!(approval_wire("untrusted"), ("untrusted", "user"));
+        assert_eq!(approval_wire("never"), ("never", "user"));
+
+        // And back, the way the picker reads what the session reported.
+        assert_eq!(approval_mode("on-request", Some("auto_review")), "auto");
+        assert_eq!(approval_mode("on-request", Some("user")), "on-request");
+        assert_eq!(approval_mode("on-request", None), "on-request");
+        assert_eq!(approval_mode("never", Some("auto_review")), "never");
+    }
+
+    /// A new session opens in `auto`: `on-request`, reviewed by the subagent,
+    /// still fenced to the workspace with the network on.
+    #[test]
+    fn a_new_session_opens_in_auto() {
+        let start = opening("/w", &crate::controls::Preferred::default())
+            .into_iter()
+            .find(|m| m["method"] == "thread/start")
+            .expect("the opening starts a thread");
+        assert_eq!(start["params"]["approvalPolicy"], "on-request");
+        assert_eq!(start["params"]["approvalsReviewer"], "auto_review");
+        assert_eq!(start["params"]["sandbox"], "workspace-write");
+    }
+
+    /// The bug this guards: a remembered Sandbox choice is Firetower's word,
+    /// and `thread/start` refuses anything but Codex's. It is mapped, and an
+    /// unreadable one falls back rather than wedging the session at startup.
+    #[test]
+    fn a_remembered_sandbox_reaches_codex_in_its_own_words() {
+        let word = |stored: &str| {
+            let preferred = crate::controls::Preferred {
+                sandbox: Some(stored.to_string()),
+                ..Default::default()
+            };
+            opening("/w", &preferred)
+                .into_iter()
+                .find(|m| m["method"] == "thread/start")
+                .expect("the opening starts a thread")["params"]["sandbox"]
+                .clone()
+        };
+
+        assert_eq!(
+            word(crate::controls::SANDBOX_WORKSPACE_NETWORK),
+            "workspace-write"
+        );
+        assert_eq!(word(crate::controls::SANDBOX_WORKSPACE), "workspace-write");
+        assert_eq!(
+            word(crate::controls::SANDBOX_EVERYTHING),
+            "danger-full-access"
+        );
+        // Not a word Codex would take, and once stored it is forever — so it
+        // falls back to the default instead of being sent and refused.
+        assert_eq!(word("workspace-write"), "workspace-write");
+    }
+
+    /// A session opened in `auto` reports itself as `auto`, not as the
+    /// `on-request` it is built on, so the picker opens on the real state.
+    #[test]
+    fn a_session_reports_the_mode_it_opened_in() {
+        let mut reader = CodexNormaliser::new();
+        reader.sent_thread_start(THREAD_START_ID);
+        let seen = reader.push(
+            r#"{"id":2,"result":{"thread":{"id":"th_1"},"model":"gpt-5.6-sol","approvalPolicy":"on-request","approvalsReviewer":"auto_review"}}"#,
+        );
+        assert_eq!(reader.reported().approval.as_deref(), Some("auto"));
+        match seen.first() {
+            Some(TurnEvent::SessionConfigured { mode, .. }) => assert_eq!(mode, "auto"),
+            other => panic!("expected the session to report itself, got {other:?}"),
+        }
     }
 
     /// Codex echoes back the turn it was given, whole and never as a stream.
