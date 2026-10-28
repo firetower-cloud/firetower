@@ -1303,15 +1303,6 @@ pub(super) async fn destroy_session(
     state.forwards.stop_session(&id).await;
     state.previews.forget(&id);
 
-    // Ending a lead ends what it delegated. A child left running would be
-    // working for a session that no longer exists: its result would have
-    // nowhere to go, and nothing would ever end it. Each goes the way this
-    // one is going — torn down where its host answers, forgotten where it
-    // does not — and a branch a child pushed stays on the remote either way.
-    // A child in this very workspace is also a sibling, and the teardown
-    // below would reach it as one; ending it here first is the same end.
-    end_children(&state, &id).await?;
-
     // Ending is normally the worker's word: it tears the workspace down and
     // reports it, and the row follows. With nobody listening there is no such
     // word, and this used to fail as an internal error — a 500 for a machine
@@ -1335,6 +1326,12 @@ pub(super) async fn destroy_session(
             ));
         }
 
+        // Ending a lead ends what it delegated, and only once we are past the
+        // point of turning back: a lead whose own host is away but which the
+        // caller did not force stays, so its children must stay too. Here it
+        // is forced, so they go — each the way this one is going.
+        end_children(&state, &id).await?;
+
         // Removed here, and owed a teardown there. The debt is paid the next
         // time that host connects; see `Fleet`'s reconnect.
         //
@@ -1357,6 +1354,12 @@ pub(super) async fn destroy_session(
         state.db.forget_session(&id).await?;
         return Ok(StatusCode::ACCEPTED);
     }
+
+    // Its host answers, so it is being torn down for real: end what it
+    // delegated the same way. A child in this very workspace is also a
+    // sibling, and the sibling teardown below reaches it too — ending it here
+    // first is the same end, asked once.
+    end_children(&state, &id).await?;
 
     // Ending the *place* takes the other agents in it with it. They share its
     // directory, and it is about to be reclaimed; left running they would be
