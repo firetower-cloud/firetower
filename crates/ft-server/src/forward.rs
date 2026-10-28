@@ -369,6 +369,12 @@ pub mod testing {
     pub struct Worker {
         once: std::sync::Mutex<Option<Connection>>,
         pub turns: Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
+        /// Every action asked of it, in order.
+        ///
+        /// An attachment is answered with the path the real worker would have
+        /// written it to, which is enough for a test to see what was handed
+        /// over and what it was called. Nothing else is answered at all.
+        pub actions: Arc<std::sync::Mutex<Vec<ft_proto::Action>>>,
     }
 
     impl Worker {
@@ -376,6 +382,8 @@ pub mod testing {
             let (ours, theirs) = tokio::io::duplex(64 * 1024);
             let turns = Arc::new(std::sync::Mutex::new(Vec::new()));
             let received = turns.clone();
+            let actions = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let asked = actions.clone();
 
             tokio::spawn(async move {
                 let tunnels = Arc::new(ft_worker::tunnel::Tunnels::new());
@@ -403,6 +411,18 @@ pub mod testing {
                                 }
                                 ToWorker::Ping => { let _ = out.send(ToServer::Pong).await; }
                                 ToWorker::SendTurn { message, .. } => { received.lock().unwrap().push(message); }
+                                ToWorker::RunAction { req, action, .. } => {
+                                    let answer = match &action {
+                                        ft_proto::Action::Attach { name, .. } => {
+                                            Some(Ok(format!(".firetower/attachments/{name}")))
+                                        }
+                                        _ => None,
+                                    };
+                                    asked.lock().unwrap().push(action);
+                                    if let Some(result) = answer {
+                                        let _ = out.send(ToServer::ActionDone { req, result }).await;
+                                    }
+                                }
                                 ToWorker::TunnelOpen { tunnel, session_id, port } => {
                                     tunnels.open(tunnel, session_id, port, &ft_worker::Out::merged(out.clone())).await;
                                 }
@@ -432,6 +452,7 @@ pub mod testing {
             Arc::new(Self {
                 once: std::sync::Mutex::new(Some(Connection::piped(Box::new(r), Box::new(w)))),
                 turns,
+                actions,
             })
         }
     }

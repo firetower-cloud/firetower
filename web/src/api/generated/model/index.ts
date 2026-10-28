@@ -132,6 +132,8 @@ export * from './listSessionsParams';
 export * from './listTasksParams';
 export * from './match';
 export * from './me';
+export * from './mention';
+export * from './mentioned';
 export * from './modelUsage';
 export * from './named';
 export * from './nameOrganization';
