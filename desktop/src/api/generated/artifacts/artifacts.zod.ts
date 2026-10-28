@@ -190,3 +190,36 @@ export const PublishArtifactResponse = zod.object({
   "url": zod.string().describe('Ready to put in an `iframe` or paste into a tab.')
 })).describe('One artifact, with the address it can be opened at.')
 
+/**
+ * **A mention is an attachment.** The page goes into the workspace through
+ * the same frame a dropped file takes, lands beside the other attachments,
+ * and is only *named* in the turn — so it costs the agent no context until
+ * it opens the file, and it works for every agent, because every agent reads
+ * files. No worker change and no protocol bump, which is the reason it is
+ * shaped this way.
+ *
+ * Not under `.firetower/artifacts/`: the client publishes whatever appears
+ * there, and a mention must never republish.
+ *
+ * Two checks, both ones that already exist. The asker must be able to
+ * *speak* in the session — the owner, as for any turn, since a mention
+ * becomes part of one — and must be able to *see* the artifact, by the rule
+ * the library applies. A mention of what this session itself made copies
+ * nothing: the folder is already there, and the answer names it.
+ * @summary Hand an artifact to a session's agent.
+ */
+export const MentionArtifactParams = zod.object({
+  "id": zod.string().describe('Session id')
+})
+
+export const MentionArtifactBody = zod.object({
+  "artifactId": zod.string()
+}).describe('What a mention asks for.')
+
+export const MentionArtifactResponse = zod.object({
+  "path": zod.string().describe('Where it is, relative to the workspace — what to say to the agent, and\nwhat the agent can open.'),
+  "slug": zod.string(),
+  "title": zod.string(),
+  "version": zod.int()
+}).describe('Where a mentioned artifact landed, and what to call it.\n\n`Placed` with a name on it: the chip in the composer carries the title and\nthe version, and should not have to look them up again on the way back.')
+

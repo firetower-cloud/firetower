@@ -36,6 +36,7 @@ import {
   Search,
   Send,
   Diamond,
+  Shapes,
   Terminal,
   Users,
   X,
@@ -62,6 +63,7 @@ import { FindInChat } from "~/ui/FindInChat";
 import { markPaths, resolvePath } from "~/paths";
 import { ImagesFrom } from "~/components/WorkspaceImage";
 import { ArtifactShot } from "~/components/ArtifactShot";
+import { segments, splitMentions, type Read } from "~/mentions";
 import { AddAgent } from "~/ui/AddAgent";
 
 const DID: Partial<Record<ItemKind, string>> = {
@@ -126,6 +128,7 @@ export function Chat({
   onOpenArtifact?: (id: string, title: string) => void;
 } & Open) {
   const { conversation, echo, settle, remember, stopping, older } = useConversation(session.id);
+  const mentionable = useMemo(() => ({ artifacts, open: onOpenArtifact }), [artifacts, onOpenArtifact]);
   const scroller = useRef<HTMLDivElement>(null);
   const body = useRef<HTMLDivElement>(null);
   const following = useRef(true);
@@ -443,6 +446,7 @@ export function Chat({
         }}
       >
         <SessionContext.Provider value={{ session: session.id, mayAct }}>
+        <MentionsContext.Provider value={mentionable}>
         <ImagesFrom.Provider value={{ session: session.id, onOpen: onOpenFile }}>
         <NotesContext.Provider value={{ notes, drop }}>
         <div ref={body} className="mx-auto w-full max-w-[46rem] px-8 pt-8 pb-4">
@@ -528,6 +532,7 @@ export function Chat({
         </div>
         </NotesContext.Provider>
         </ImagesFrom.Provider>
+        </MentionsContext.Provider>
         </SessionContext.Provider>
       </div>
 
@@ -617,6 +622,10 @@ function Node({
   onOpenFile,
 }: { item: Item; items: Item[]; tasks: Task[] } & Open) {
   if (item.kind === "UserMessage") {
+    /* The block the composer wrote under the message comes back out as
+       chips, and the handles in the sentence are drawn as handles. The text
+       is still what the agent read; nothing here is a second copy of it. */
+    const { said, mentions } = splitMentions(item.text ?? "");
     return (
       <li className="flex justify-end">
         <div className="max-w-[85%] rounded-2xl rounded-br-md border border-line bg-raise px-4 py-2.5 text-read text-text shadow-(--shadow-raise)">
@@ -627,7 +636,25 @@ function Node({
               ))}
             </div>
           )}
-          {item.text && <p className="whitespace-pre-wrap">{item.text}</p>}
+          {said && (
+            <p className="whitespace-pre-wrap">
+              {mentions.length === 0
+                ? said
+                : segments(
+                    said,
+                    mentions.map((m) => m.handle),
+                  ).map((s, i) =>
+                    s.kind === "handle" ? (
+                      <span key={i} className="rounded bg-overlay px-1 font-mono text-code text-bone">
+                        {s.value}
+                      </span>
+                    ) : (
+                      <Fragment key={i}>{s.value}</Fragment>
+                    ),
+                  )}
+            </p>
+          )}
+          {mentions.length > 0 && <Mentioned mentions={mentions} />}
         </div>
       </li>
     );
@@ -686,6 +713,13 @@ const SessionContext = createContext<{ session: string | null; mayAct: boolean }
 
 /** The notes so far, and how to take one back — read by the turn it is on. */
 const NotesContext = createContext<{ notes: Note[]; drop: (id: string) => void }>({ notes: [], drop: () => {} });
+
+/**
+ * What a mention in somebody's message is resolved against, and what opening
+ * one does. The bubble reads the mention back out of the text it was written
+ * into (`splitMentions`) and finds the artifact in the list the cards use.
+ */
+const MentionsContext = createContext<{ artifacts: ArtifactModel[]; open?: (id: string, title: string) => void }>({ artifacts: [] });
 
 /**
  * What the agent said. Selecting any of it starts a note (see `takeSelection`
@@ -799,6 +833,61 @@ function ArtifactCard({ artifact, onOpen }: { artifact: ArtifactModel; onOpen: (
         <span className="font-mono text-micro text-mute">v{artifact.version}</span>
         <span className="ml-auto text-micro text-mute">{elapsed(minutesSince(artifact.updatedAt))} ago</span>
       </div>
+    </div>
+  );
+}
+
+/**
+ * The artifacts a message mentioned, as chips under it.
+ *
+ * Resolved by handle against the list the cards use — the slug at that
+ * version, then the slug with its number taken off, then the title — so the
+ * chip has the picture and opens the artifact beside the conversation. One
+ * that is no longer in the list (deleted since) is still named, with the
+ * glyph and nowhere to go.
+ */
+function Mentioned({ mentions }: { mentions: Read[] }) {
+  const { artifacts, open } = useContext(MentionsContext);
+  const find = (m: Read) => {
+    const slug = m.handle.replace(/-\d+$/, "");
+    return (
+      artifacts.find((a) => a.slug === m.handle && a.version === m.version) ??
+      artifacts.find((a) => a.slug === slug && a.title === m.title) ??
+      artifacts.find((a) => a.title === m.title) ??
+      artifacts.find((a) => a.slug === m.handle) ??
+      artifacts.find((a) => a.slug === slug)
+    );
+  };
+  const look = "flex max-w-full items-center gap-2 rounded-lg border border-line bg-panel py-1 pr-2.5 pl-1 text-text";
+  return (
+    <div className="mt-2 flex flex-wrap gap-1.5">
+      {mentions.map((m) => {
+        const found = find(m);
+        const inner = (
+          <>
+            <span className="block w-9 shrink-0 overflow-hidden rounded">
+              {found ? (
+                <ArtifactShot artifact={found} framed={false} />
+              ) : (
+                <span style={{ aspectRatio: "16 / 10" }} className="grid w-full place-items-center bg-line text-dim">
+                  <Shapes className="h-3 w-3" strokeWidth={1.5} />
+                </span>
+              )}
+            </span>
+            <span className="truncate text-meta">{m.title}</span>
+            <span className="shrink-0 font-mono text-micro text-mute">v{m.version}</span>
+          </>
+        );
+        return found && open ? (
+          <button key={m.handle} onClick={() => open(found.id, found.title)} title="Open it beside the conversation" className={`${look} transition-colors hover:border-mute hover:text-bone`}>
+            {inner}
+          </button>
+        ) : (
+          <span key={m.handle} title={m.path} className={look}>
+            {inner}
+          </span>
+        );
+      })}
     </div>
   );
 }

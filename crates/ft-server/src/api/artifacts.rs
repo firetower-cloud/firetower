@@ -12,6 +12,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+use super::conversation::host_to_speak_in;
 use super::sessions::session_context;
 use super::{ApiError, ApiResult, ErrorCode};
 use crate::auth::Principal;
@@ -395,6 +396,150 @@ pub(super) async fn publish_artifact(
     ))
 }
 
+/// Every file of a version in one archive, deflated.
+///
+/// What Download sends, and what a mention of a page with assets beside it
+/// sends too — the attach frame carries one file, and the assets have to stay
+/// next to the page that refers to them.
+fn zipped(files: &[(String, Vec<u8>)]) -> Result<Vec<u8>, ApiError> {
+    use std::io::Write;
+    use zip::write::SimpleFileOptions;
+
+    let mut buffer = std::io::Cursor::new(Vec::new());
+    let mut zipped = zip::ZipWriter::new(&mut buffer);
+    let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    for (path, body) in files {
+        zipped
+            .start_file(path, options)
+            .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e}")))?;
+        zipped
+            .write_all(body)
+            .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e}")))?;
+    }
+    // `finish` consumes the writer and hands the sink back, which is also
+    // what releases the borrow on the buffer.
+    zipped
+        .finish()
+        .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e}")))?;
+    Ok(buffer.into_inner())
+}
+
+/// What a mention asks for.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Mention {
+    pub artifact_id: String,
+}
+
+/// Where a mentioned artifact landed, and what to call it.
+///
+/// `Placed` with a name on it: the chip in the composer carries the title and
+/// the version, and should not have to look them up again on the way back.
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Mentioned {
+    /// Where it is, relative to the workspace — what to say to the agent, and
+    /// what the agent can open.
+    pub path: String,
+    pub slug: String,
+    pub title: String,
+    pub version: i32,
+}
+
+/// Hand an artifact to a session's agent.
+///
+/// **A mention is an attachment.** The page goes into the workspace through
+/// the same frame a dropped file takes, lands beside the other attachments,
+/// and is only *named* in the turn — so it costs the agent no context until
+/// it opens the file, and it works for every agent, because every agent reads
+/// files. No worker change and no protocol bump, which is the reason it is
+/// shaped this way.
+///
+/// Not under `.firetower/artifacts/`: the client publishes whatever appears
+/// there, and a mention must never republish.
+///
+/// Two checks, both ones that already exist. The asker must be able to
+/// *speak* in the session — the owner, as for any turn, since a mention
+/// becomes part of one — and must be able to *see* the artifact, by the rule
+/// the library applies. A mention of what this session itself made copies
+/// nothing: the folder is already there, and the answer names it.
+#[utoipa::path(
+    post, path = "/api/v1/sessions/{id}/mention", tag = "artifacts",
+    params(("id" = String, Path, description = "Session id")),
+    request_body = Mention,
+    responses((status = 200, body = Mentioned), (status = 404, body = ApiError), (status = 409, body = ApiError)),
+)]
+pub(super) async fn mention_artifact(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(id): Path<String>,
+    Json(req): Json<Mention>,
+) -> ApiResult<Json<Mentioned>> {
+    let owner = principal
+        .owner()
+        .ok_or_else(|| ApiError::new(ErrorCode::Unauthorized, "Sign in to mention an artifact."))?;
+    let session = ft_core::SessionId::from_stored(id);
+    let host = host_to_speak_in(&state, &principal, &session).await?;
+
+    let artifact = ft_core::ArtifactId::from_stored(req.artifact_id);
+    let row = state
+        .db
+        .artifact_of(owner, &artifact)
+        .await?
+        .ok_or_else(|| ApiError::not_found("artifact"))?;
+
+    // Made here. The agent wrote it, so it is already in the workspace, at
+    // the path the handle will name.
+    if row.from_session_id.as_deref() == Some(session.as_str()) {
+        let entry = state
+            .db
+            .artifact_current(&artifact)
+            .await?
+            .map(|v| v.entry)
+            .unwrap_or_else(|| "index.html".to_string());
+        return Ok(Json(Mentioned {
+            path: format!("{DIR}/{}/{entry}", row.slug),
+            slug: row.slug,
+            title: row.title,
+            version: row.version,
+        }));
+    }
+
+    let (slug, version, files) = state
+        .db
+        .artifact_bundle(&artifact)
+        .await?
+        .ok_or_else(|| ApiError::not_found("artifact"))?;
+
+    // One file is the page, and goes as itself. Several go as one zip.
+    let (name, bytes) = match files.as_slice() {
+        [(_, body)] => (format!("{slug}-v{version}.html"), body.clone()),
+        _ => (format!("{slug}-v{version}.zip"), zipped(&files)?),
+    };
+
+    let path = state
+        .fleet
+        .run_action(
+            &host,
+            &session,
+            ft_proto::Action::Attach {
+                name,
+                data: ft_proto::encode(&bytes),
+            },
+            None,
+        )
+        .await
+        .map_err(|e| ApiError::new(ErrorCode::HostUnreachable, format!("{e:#}")))?
+        .map_err(|why| ApiError::new(ErrorCode::ActionFailed, why))?;
+
+    Ok(Json(Mentioned {
+        path,
+        slug,
+        title: row.title,
+        version,
+    }))
+}
+
 /// The most a picture of a page may weigh.
 ///
 /// A 1180-wide render scaled to 640 lands well under this. The cap is here so
@@ -595,29 +740,7 @@ pub(super) async fn download_artifact(
         .await?
         .ok_or_else(|| ApiError::not_found("artifact"))?;
 
-    let bytes = {
-        use std::io::Write;
-        use zip::write::SimpleFileOptions;
-
-        let mut buffer = std::io::Cursor::new(Vec::new());
-        let mut zipped = zip::ZipWriter::new(&mut buffer);
-        let options =
-            SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
-        for (path, body) in &files {
-            zipped
-                .start_file(path, options)
-                .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e}")))?;
-            zipped
-                .write_all(body)
-                .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e}")))?;
-        }
-        // `finish` consumes the writer and hands the sink back, which is also
-        // what releases the borrow on the buffer.
-        zipped
-            .finish()
-            .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e}")))?;
-        buffer.into_inner()
-    };
+    let bytes = zipped(&files)?;
 
     let name = format!("{slug}-v{version}.zip");
     axum::response::Response::builder()
@@ -629,4 +752,302 @@ pub(super) async fn download_artifact(
         )
         .body(axum::body::Body::from(bytes))
         .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e:#}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::auth::Principal;
+    use ft_core::SessionId;
+    use std::sync::Arc;
+
+    /// A signed-in owner, a session of theirs on a stand-in worker, and the
+    /// state to call handlers with — the arrangement `annotations.rs` uses.
+    async fn fixture() -> (
+        AppState,
+        Principal,
+        SessionId,
+        Arc<crate::forward::testing::Worker>,
+    ) {
+        let (db, who) = crate::db::Db::open_for_test_owned().await.unwrap();
+        let accounts = crate::accounts::Accounts::new(db.pool().clone());
+        let user = accounts.user_by_name("admin").await.unwrap().unwrap();
+        let principal = Principal {
+            subject: "admin".into(),
+            via: crate::auth::Via::Session,
+            user: Some(user),
+        };
+        let host = db
+            .ensure_host("localhost", ft_core::Compute::Local, &who)
+            .await
+            .unwrap();
+        let id = SessionId::new();
+        db.insert_session(
+            &id,
+            &host.id,
+            &who,
+            None,
+            "Mention test",
+            "",
+            None,
+            None,
+            "ClaudeCode",
+            ft_core::WorkspaceSize::Medium,
+            ft_core::Share::Equal,
+            &[],
+            None,
+        )
+        .await
+        .unwrap();
+        let fleet = crate::fleet::Fleet::new(db.clone());
+        let worker = crate::forward::testing::worker();
+        fleet.supervise(host.id, worker.clone()).await;
+        let vault = Arc::new(crate::vault::Vault::new(
+            db.pool().clone(),
+            crate::vault::crypto::RootKey::generate(),
+        ));
+        let names = crate::preview::Names::from_vault(&vault);
+        let connections = crate::providers::Connections::opened(db.pool().clone())
+            .await
+            .unwrap();
+        (
+            AppState {
+                skills: crate::skills::Skills::new(db.pool().clone()),
+                updates: crate::updates::Updates::new(db.pool().clone()),
+                policy: crate::auth::Policy::open(),
+                access: crate::access::Access::new(db.pool().clone()),
+                connections,
+                db,
+                accounts,
+                fleet,
+                vault,
+                names,
+                key_source: "test".into(),
+                home: std::env::temp_dir(),
+                pending: Default::default(),
+                renewals: Default::default(),
+                forwards: Default::default(),
+                previews: Default::default(),
+                public_url: "http://localhost:3000".into(),
+            },
+            principal,
+            id,
+            worker,
+        )
+    }
+
+    fn page(body: &[u8]) -> (String, String, Vec<u8>) {
+        (
+            "index.html".to_string(),
+            "text/html; charset=utf-8".to_string(),
+            body.to_vec(),
+        )
+    }
+
+    /// Publish as the real path does, stamped with the session that made it
+    /// when there was one.
+    async fn publish(
+        state: &AppState,
+        owner: &str,
+        slug: &str,
+        files: Vec<(String, String, Vec<u8>)>,
+        from: Option<&SessionId>,
+    ) -> ft_core::ArtifactId {
+        let org = state.db.org_of_user(owner).await.unwrap().unwrap();
+        state
+            .db
+            .publish_artifact(
+                owner,
+                &org,
+                slug,
+                "Pricing, three tiers",
+                "index.html",
+                &files,
+                from.map(|s| s.as_str()),
+                from.map(|_| "pricing rework"),
+            )
+            .await
+            .unwrap()
+            .0
+    }
+
+    async fn mention(
+        state: &AppState,
+        principal: &Principal,
+        session: &SessionId,
+        artifact: &ft_core::ArtifactId,
+    ) -> ApiResult<Mentioned> {
+        mention_artifact(
+            State(state.clone()),
+            Extension(principal.clone()),
+            Path(session.to_string()),
+            Json(Mention {
+                artifact_id: artifact.to_string(),
+            }),
+        )
+        .await
+        .map(|json| json.0)
+    }
+
+    #[tokio::test]
+    async fn a_mention_places_the_page_beside_the_attachments_and_says_where() {
+        let (state, principal, session, worker) = fixture().await;
+        let owner = principal.owner().unwrap().to_string();
+        let artifact = publish(
+            &state,
+            &owner,
+            "pricing",
+            vec![page(b"<html>one</html>")],
+            None,
+        )
+        .await;
+
+        let mentioned = mention(&state, &principal, &session, &artifact)
+            .await
+            .unwrap();
+
+        assert_eq!(mentioned.path, ".firetower/attachments/pricing-v1.html");
+        assert_eq!(mentioned.slug, "pricing");
+        assert_eq!(mentioned.title, "Pricing, three tiers");
+        assert_eq!(mentioned.version, 1);
+
+        // The bytes went over as the page itself, under the name the answer
+        // gave back.
+        let actions = worker.actions.lock().unwrap();
+        assert_eq!(actions.len(), 1);
+        match &actions[0] {
+            ft_proto::Action::Attach { name, data } => {
+                assert_eq!(name, "pricing-v1.html");
+                assert_eq!(ft_proto::decode(data).unwrap(), b"<html>one</html>");
+            }
+            other => panic!("not an attachment: {other:?}"),
+        }
+    }
+
+    /// The folder is already in the workspace, so nothing travels and the
+    /// handle names the page where the agent wrote it.
+    #[tokio::test]
+    async fn what_this_session_made_is_named_in_place() {
+        let (state, principal, session, worker) = fixture().await;
+        let owner = principal.owner().unwrap().to_string();
+        let artifact = publish(
+            &state,
+            &owner,
+            "checkout",
+            vec![page(b"<html>here</html>")],
+            Some(&session),
+        )
+        .await;
+
+        let mentioned = mention(&state, &principal, &session, &artifact)
+            .await
+            .unwrap();
+
+        assert_eq!(mentioned.path, ".firetower/artifacts/checkout/index.html");
+        assert_eq!(mentioned.version, 1);
+        assert!(worker.actions.lock().unwrap().is_empty());
+    }
+
+    /// A page with assets beside it goes as one zip, with every file in it.
+    #[tokio::test]
+    async fn several_files_travel_as_one_zip() {
+        let (state, principal, session, worker) = fixture().await;
+        let owner = principal.owner().unwrap().to_string();
+        let artifact = publish(
+            &state,
+            &owner,
+            "funnel",
+            vec![
+                page(b"<html><link rel=stylesheet href=style.css></html>"),
+                (
+                    "style.css".to_string(),
+                    "text/css; charset=utf-8".to_string(),
+                    b"body{color:red}".to_vec(),
+                ),
+            ],
+            None,
+        )
+        .await;
+
+        let mentioned = mention(&state, &principal, &session, &artifact)
+            .await
+            .unwrap();
+        assert_eq!(mentioned.path, ".firetower/attachments/funnel-v1.zip");
+
+        let actions = worker.actions.lock().unwrap();
+        let ft_proto::Action::Attach { name, data } = &actions[0] else {
+            panic!("not an attachment: {:?}", actions[0]);
+        };
+        assert_eq!(name, "funnel-v1.zip");
+        let bytes = ft_proto::decode(data).unwrap();
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+        let mut names: Vec<String> = archive
+            .file_names()
+            .map(|name| name.unwrap().to_string())
+            .collect();
+        names.sort();
+        assert_eq!(names, vec!["index.html", "style.css"]);
+        let mut css = String::new();
+        std::io::Read::read_to_string(&mut archive.by_name("style.css").unwrap(), &mut css)
+            .unwrap();
+        assert_eq!(css, "body{color:red}");
+    }
+
+    /// Somebody else's artifact, filed at their own root, is not found —
+    /// the same answer the library gives — and nothing reaches the worker.
+    #[tokio::test]
+    async fn an_artifact_the_asker_cannot_see_is_not_found() {
+        let (state, principal, session, worker) = fixture().await;
+        let owner = principal.owner().unwrap().to_string();
+        let org = state.db.org_of_user(&owner).await.unwrap().unwrap();
+        let (lisa, _password) = state
+            .accounts
+            .create_user(
+                &ft_core::OrgId::from_stored(org),
+                "lisa",
+                "lisa@example.test",
+                "member",
+            )
+            .await
+            .unwrap();
+        let hers = publish(
+            &state,
+            lisa.id.as_str(),
+            "secret",
+            vec![page(b"<html>hers</html>")],
+            None,
+        )
+        .await;
+
+        let error = mention(&state, &principal, &session, &hers)
+            .await
+            .unwrap_err();
+        assert!(matches!(error.code, ErrorCode::NotFound), "{error:?}");
+        assert!(worker.actions.lock().unwrap().is_empty());
+    }
+
+    /// A session that is not the asker's is not found either: a mention
+    /// becomes part of a turn, and a turn is the owner's to send.
+    #[tokio::test]
+    async fn a_stranger_to_the_session_is_told_nothing() {
+        let (state, principal, session, worker) = fixture().await;
+        let owner = principal.owner().unwrap().to_string();
+        let artifact = publish(
+            &state,
+            &owner,
+            "pricing",
+            vec![page(b"<html>one</html>")],
+            None,
+        )
+        .await;
+
+        let mut stranger = principal.clone();
+        stranger.user.as_mut().unwrap().id = ft_core::UserId::from_stored("u_someone_else");
+
+        let error = mention(&state, &stranger, &session, &artifact)
+            .await
+            .unwrap_err();
+        assert!(matches!(error.code, ErrorCode::NotFound), "{error:?}");
+        assert!(worker.actions.lock().unwrap().is_empty());
+    }
 }

@@ -30,6 +30,8 @@ import type {
   Artifact,
   ArtifactNaming,
   Folder,
+  Mention,
+  Mentioned,
   Publish
 } from '../model';
 
@@ -887,4 +889,107 @@ export const usePublishArtifact = <TError = ApiError,
         TContext
       > => {
       return useMutation(getPublishArtifactMutationOptions(options), queryClient);
+    }
+    export const getMentionArtifactUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/sessions/${id}/mention`
+}
+
+/**
+ * **A mention is an attachment.** The page goes into the workspace through
+ * the same frame a dropped file takes, lands beside the other attachments,
+ * and is only *named* in the turn — so it costs the agent no context until
+ * it opens the file, and it works for every agent, because every agent reads
+ * files. No worker change and no protocol bump, which is the reason it is
+ * shaped this way.
+ *
+ * Not under `.firetower/artifacts/`: the client publishes whatever appears
+ * there, and a mention must never republish.
+ *
+ * Two checks, both ones that already exist. The asker must be able to
+ * *speak* in the session — the owner, as for any turn, since a mention
+ * becomes part of one — and must be able to *see* the artifact, by the rule
+ * the library applies. A mention of what this session itself made copies
+ * nothing: the folder is already there, and the answer names it.
+ * @summary Hand an artifact to a session's agent.
+ */
+export const mentionArtifact = async (id: string,
+    mention: Mention, options?: Parameters<typeof http>[1]): Promise<Mentioned> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return http<Mentioned>(getMentionArtifactUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(mention)
+  }
+);}
+
+
+
+
+
+export const getMentionArtifactMutationKey = () => ['mentionArtifact'] as const;
+
+export const getMentionArtifactMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof mentionArtifact>>, TError,MentionArtifactMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof mentionArtifact>>, TError,MentionArtifactMutationVariables, TContext> => {
+
+const mutationKey = getMentionArtifactMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof mentionArtifact>>, MentionArtifactMutationVariables> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  mentionArtifact(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type MentionArtifactMutationResult = NonNullable<Awaited<ReturnType<typeof mentionArtifact>>>
+    export type MentionArtifactMutationBody = Mention
+    export type MentionArtifactMutationError = ApiError
+    export type MentionArtifactMutationVariables = {id: string;data: Mention}
+
+    /**
+ * @summary Hand an artifact to a session's agent.
+ */
+export const useMentionArtifact = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof mentionArtifact>>, TError,MentionArtifactMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof mentionArtifact>>,
+        TError,
+        MentionArtifactMutationVariables,
+        TContext
+      > => {
+      return useMutation(getMentionArtifactMutationOptions(options), queryClient);
     }

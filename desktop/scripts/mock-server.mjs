@@ -171,6 +171,70 @@ const CLAUDE_CONTROLS = [
   },
 ];
 
+/**
+ * What the library answers, for the `@` list in the composer.
+ *
+ * One was made by this very session, so "this workspace" and the path that
+ * copies nothing are both on screen; one is a page with assets beside it, so
+ * the zip answer is too; two are shared through a directory; one has no
+ * poster yet. The posters are drawings served below — the shape of a page,
+ * not a page.
+ */
+/** What `poster` draws for each, and how many files it is; off the wire. */
+const LOOKS = {};
+const FILES_IN = {};
+const ARTIFACTS = [
+  art("a_checkout", "checkout-flow", "Checkout flow", 1, { fromSessionId: "s_1", fromWorkspaceName: "auth refactor", minutes: 12, look: "checkout" }),
+  art("a_pricing", "pricing", "Pricing, three tiers", 3, { fromWorkspaceName: "pricing rework", minutes: 120, look: "pricing" }),
+  art("a_funnel", "q3-funnel", "Q3 funnel", 2, { mine: false, path: "d/growth/q3-funnel", minutes: 60 * 24, look: "funnel", files: 3 }),
+  art("a_onboarding", "onboarding", "Onboarding, five screens", 4, { fromWorkspaceName: "auth cleanup", minutes: 60 * 72, look: "onboarding" }),
+  art("a_arch", "firetower-architecture", "Firetower architecture", 5, { fromWorkspaceName: "docs pass", minutes: 60 * 24 * 7, look: "architecture", hasPoster: false }),
+  art("a_ledger", "ledger-import", "Ledger import report", 1, { fromWorkspaceName: "ledger import", minutes: 60 * 24 * 14, look: "ledger" }),
+  art("a_dashboard", "dashboard", "Dashboard, inbox first", 2, { mine: false, path: "d/design/dashboard", minutes: 60 * 24 * 21, look: "dashboard" }),
+];
+function art(id, slug, title, version, { minutes = 0, look = "pricing", files = 1, ...over }) {
+  LOOKS[id] = look;
+  FILES_IN[id] = files;
+  return {
+    id,
+    slug,
+    title,
+    version,
+    versionId: `v_${id}_${version}`,
+    bytes: 42_000,
+    hasPoster: true,
+    mayShare: true,
+    mine: true,
+    path: `u/kevin/${slug}`,
+    fromSessionId: null,
+    fromWorkspaceName: null,
+    firstSeenLine: null,
+    updatedAt: new Date(Date.now() - minutes * 60_000).toISOString(),
+    url: `http://localhost:${PORT}/__artifact/${id}`,
+    posterUrl: `/api/v1/artifacts/${id}/poster?v=${version}`,
+    ...over,
+  };
+}
+
+/**
+ * A poster: the shape of a page in a white 640×400, enough to tell one
+ * artifact from the next in a 36px thumbnail — which is all a list asks of
+ * it. SVG so there is no image library and no binary in the tree.
+ */
+function poster(look) {
+  const r = (x, y, w, h, fill = "#edeef1", extra = "") => `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="6" fill="${fill}" ${extra}/>`;
+  const body = {
+    pricing: r(48, 40, 300, 36, "#1c1c1f") + r(48, 96, 440, 18) + [0, 1, 2].map((i) => r(48 + i * 190, 150, 164, 210, i === 1 ? "#fafafb" : "#fff", `stroke="${i === 1 ? "#1c1c1f" : "#e3e3e8"}" stroke-width="3"`)).join(""),
+    checkout: r(48, 40, 240, 36, "#1c1c1f") + [0, 1, 2, 3].map((i) => r(48, 100 + i * 52, i % 2 ? 540 : 360, 28)).join("") + r(48, 320, 220, 44, "#1c1c1f"),
+    funnel: r(48, 40, 180, 36, "#1c1c1f") + [0.92, 0.7, 0.46, 0.24].map((k, i) => r(48, 110 + i * 64, 544 * k, 40, "#7d95b0")).join(""),
+    onboarding: [0, 1, 2, 3, 4].map((i) => r(44 + i * 114, 60, 96, 280, "#fff", 'stroke="#d9d9de" stroke-width="3"')).join(""),
+    architecture: r(48, 40, 300, 36, "#1c1c1f") + [0, 1, 2].map((i) => r(60 + i * 200, 170, 150, 80, "#fff", 'stroke="#1c1c1f" stroke-width="3"')).join("") + '<path d="M210 210h50M410 210h50" stroke="#1c1c1f" stroke-width="3"/>',
+    ledger: r(48, 40, 260, 36, "#1c1c1f") + [0, 1, 2, 3, 4, 5].map((i) => r(48, 100 + i * 44, i % 2 ? 544 : 460, 24)).join(""),
+    dashboard: [0, 1, 2, 3].map((i) => r(48 + (i % 2) * 280, 40 + Math.floor(i / 2) * 170, 264, 150, "#fff", 'stroke="#e3e3e8" stroke-width="3"')).join(""),
+  }[look];
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="400" viewBox="0 0 640 400"><rect width="640" height="400" fill="#fff"/>${body}</svg>`;
+}
+
 const ACCOUNTS = [
   { id: "a_1", kind: "ClaudeCode", name: "Acme · Max", mode: "subscription", isDefault: true, enabled: true, state: "ready", revision: 1, credentialSet: true, identity: "kevin@acme.com", limits: [] },
   { id: "a_2", kind: "Codex", name: "Acme · Plus", mode: "subscription", isDefault: true, enabled: true, state: "ready", revision: 1, credentialSet: true, identity: "kevin@acme.com", limits: [] },
@@ -377,6 +441,34 @@ const server = createServer(async (req, res) => {
     return json(res, { detail: `back to three, playing ${scene}` });
   }
 
+  /* A mention, answered the way the control plane answers it: the page lands
+     beside the attachments under the slug and the version, a page with assets
+     lands as a zip, and what this very session made is named where it is. As
+     slow as a real attach, so the chip's waiting state is on screen. */
+  if (req.method === "POST" && /^\/api\/v1\/sessions\/[^/]+\/mention$/.test(path)) {
+    const body = await new Promise((done) => {
+      let raw = "";
+      req.on("data", (c) => (raw += c));
+      req.on("end", () => done(raw ? JSON.parse(raw) : {}));
+    });
+    const found = ARTIFACTS.find((a) => a.id === body.artifactId);
+    await new Promise((r) => setTimeout(r, 600));
+    if (!found || scene === "no-artifacts") return json(res, { code: "NotFound", message: "no such artifact" }, 404);
+    const at =
+      found.fromSessionId === "s_1"
+        ? `.firetower/artifacts/${found.slug}/index.html`
+        : `.firetower/attachments/${found.slug}-v${found.version}.${FILES_IN[found.id] > 1 ? "zip" : "html"}`;
+    return json(res, { path: at, slug: found.slug, title: found.title, version: found.version });
+  }
+
+  const poster_of = /^\/api\/v1\/artifacts\/([^/]+)\/poster$/.exec(path);
+  if (poster_of) {
+    const look = LOOKS[poster_of[1]];
+    if (!look) return json(res, { code: "NotFound", message: "no such picture" }, 404);
+    res.writeHead(200, { "content-type": "image/svg+xml", "access-control-allow-origin": "*", "cache-control": "no-store" });
+    return res.end(poster(look));
+  }
+
   if (req.method === "POST" && /^\/api\/v1\/sessions\/[^/]+\/repos$/.test(path)) {
     const body = await new Promise((done) => {
       let raw = "";
@@ -413,7 +505,9 @@ const server = createServer(async (req, res) => {
     "/api/v1/sessions/w_1": session(),
     "/api/v1/sessions/s_1/work": work(),
     "/api/v1/sessions/s_1/diff": bigDiff(url.searchParams.get("namesOnly") === "true"),
-    "/api/v1/sessions/s_1/files": BIG ? listing(url.searchParams.get("path") ?? "") : [],
+    "/api/v1/sessions/s_1/files": listing(url.searchParams.get("path") ?? ""),
+    "/api/v1/sessions/s_1/turn": { sent: true },
+    "/api/v1/artifacts": scene === "no-artifacts" ? [] : ARTIFACTS,
     "/api/v1/sessions/s_1/conversation": conversation(),
     "/api/v1/sessions/s_1/controls": scene.startsWith("codex") ? [] : CLAUDE_CONTROLS,
     "/api/v1/sessions/s_1/account": { account: ACCOUNTS[0], limits: [], switches: [] },
@@ -526,7 +620,18 @@ server.on("upgrade", (req, socket) => {
  * `web/src/auth` and nothing else — which is all the tree asks for.
  */
 function listing(path) {
-  if (!BIG) return [];
+  if (!BIG) {
+    // A small tree, for the `@` list's second section.
+    const tree = {
+      "": [["app", true], ["components", true], ["docs", true], ["src", true], ["package.json", false], ["README.md", false]],
+      app: [["checkout", true], ["pricing", true], ["layout.tsx", false], ["page.tsx", false]],
+      "app/checkout": [["page.tsx", false], ["form.tsx", false]],
+      src: [["ui", true], ["api", true], ["paths.ts", false]],
+      "src/ui": [["Chat.tsx", false], ["Composer.tsx", false]],
+      docs: [["artifacts.md", false], ["mentions.md", false]],
+    };
+    return (tree[path] ?? []).map(([name, directory]) => ({ name, directory, link: false, bytes: directory ? 0 : 2048 }));
+  }
   const dirs = { "": "web", web: "src", "web/src": "auth" };
   if (path in dirs) return [{ name: dirs[path], directory: true, link: false, bytes: 0 }];
   if (path !== "web/src/auth") return [];

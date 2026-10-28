@@ -1090,7 +1090,7 @@ async fn host_of(
 /// running on its owner's subscription. Writer on the workspace is a grant to
 /// work in the place; it was never a grant to spend somebody's account, and
 /// for a while it was both.
-async fn host_to_speak_in(
+pub(super) async fn host_to_speak_in(
     state: &AppState,
     principal: &Principal,
     id: &SessionId,

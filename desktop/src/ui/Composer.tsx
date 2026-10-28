@@ -16,11 +16,15 @@
  * The meter is the agent's own report of its context window, off the last
  * finished turn. Adding up deltas here would drift.
  */
-import { useEffect, useRef, useState } from "react";
-import type { RefObject } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { ReactNode, RefObject } from "react";
 import { ArrowUp, Diamond, FileText, ImageOff, Loader2, Paperclip, Square, X } from "lucide-react";
 import { interruptible, type Conversation } from "~/api/conversation";
-import type { Attached, Control, ControlKind, Session } from "~/api/generated/model";
+import type { Artifact, Attached, Control, ControlKind, Session } from "~/api/generated/model";
+import { mentionArtifact, useListArtifacts } from "~/api/generated/artifacts/artifacts";
+import { elapsed, minutesSince } from "~/api/view";
+import { ArtifactShot } from "~/components/ArtifactShot";
+import { handleFor, mentionBlock, MOST_ARTIFACTS, MOST_ROWS, originOf, rankArtifacts, withoutHandle, type Mention } from "~/mentions";
 import { useAttachFile, useInterruptSession, useListFiles, useSendTurn } from "~/api/generated/sessions/sessions";
 import { useChooseControl, useSessionControls } from "~/api/generated/conversation/conversation";
 import { takeDraft } from "~/workspace/draft";
@@ -30,7 +34,7 @@ import { Mic } from "~/ui/voice/Mic";
 import { VoiceDialog } from "~/ui/voice/Dialogs";
 import { useVoice } from "~/ui/voice/useVoice";
 import { SkillPicker } from "~/ui/SkillPicker";
-import { useAgents, useSessionSkillIds } from "~/data";
+import { useAgents, useSessionSkillIds, why } from "~/data";
 import { fromDefaults } from "~/skills";
 
 /**
@@ -45,7 +49,7 @@ import { fromDefaults } from "~/skills";
 type Chip = {
   id: number;
   name: string;
-  kind: "image" | "file";
+  kind: "image" | "file" | "artifact";
   size: string;
   /** A thumbnail, for a picture. */
   url?: string;
@@ -55,6 +59,9 @@ type Chip = {
   image?: Attached;
   /** Still being read, or still on its way to the workspace. */
   pending?: boolean;
+  /** The artifact this stands for, and the handle the sentence refers to it by. */
+  artifact?: Artifact;
+  handle?: string;
 };
 
 /**
@@ -127,13 +134,24 @@ function base64(file: File): Promise<string> {
 
 const size = (n: number) => (n > 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.ceil(n / 1024)} KB`);
 
-/** What is being typed after a trigger character, if anything. The web's rule. */
-type Token = { kind: "@" | "/"; at: number; query: string };
-function triggerAt(draft: string): Token | undefined {
-  const match = /(^|\s)([@/])([^\s]*)$/.exec(draft);
+/**
+ * What is being typed after a trigger character, if anything. The web's rule,
+ * read at the caret rather than at the end of the draft: an `@` in the middle
+ * of a sentence somebody went back to is a trigger too.
+ */
+export type Token = { kind: "@" | "/"; at: number; query: string; end: number };
+export function triggerAt(draft: string, caret: number = draft.length): Token | undefined {
+  const head = draft.slice(0, caret);
+  const match = /(^|\s)([@/])([^\s]*)$/.exec(head);
   if (!match) return undefined;
-  return { kind: match[2] as "@" | "/", at: match.index + match[1].length, query: match[3] };
+  return { kind: match[2] as "@" | "/", at: match.index + match[1].length, query: match[3], end: caret };
 }
+
+/** One row of the list above the box. */
+type Suggestion =
+  | { kind: "command"; value: string; hint?: string }
+  | { kind: "file"; value: string; hint?: string }
+  | { kind: "artifact"; artifact: Artifact };
 const directoryOf = (q: string) => (q.includes("/") ? q.slice(0, q.lastIndexOf("/")) : "");
 
 export function Composer({
@@ -206,32 +224,86 @@ export function Composer({
   const listening = voice.state.at !== "idle" && voice.state.at !== "asking";
 
   /* `/` offers the commands this install actually has, as the agent reported
-     them at startup; `@` offers files off the worker, one directory at a time,
-     relative to the workspace root. Both are the web build's affordances. */
-  const token = triggerAt(text);
-  const wantFiles = token?.kind === "@";
+     them at startup; `@` offers the artifacts this person can reach and then
+     files off the worker, one directory at a time, relative to the workspace
+     root. Commands and files are the web build's affordances; artifacts are
+     `~/mentions`. The list is read at the caret, and Escape closes it until
+     the next trigger — `dismissed` remembers which one was waved away. */
+  const [caret, setCaret] = useState(0);
+  const token = triggerAt(text, caret);
+  const [dismissed, setDismissed] = useState<number | null>(null);
+  const at = token?.at;
+  useEffect(() => {
+    if (at === undefined) setDismissed(null);
+  }, [at]);
+  const open = token !== undefined && dismissed !== token.at;
+  /* Where the caret belongs once the draft has been rewritten under it: a
+     pick replaces the token with a handle, and the caret goes just after that
+     rather than to the end of whatever sentence followed. Applied once the
+     new text is drawn, because the box cannot be told before. */
+  const wantCaret = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (wantCaret.current === null || !el) return;
+    const pos = wantCaret.current;
+    wantCaret.current = null;
+    el.setSelectionRange(pos, pos);
+    setCaret(pos);
+  }, [text]);
+
+  /* What `Posters` keeps warm for every screen; no interval of its own. */
+  const library = useListArtifacts();
+  const wantFiles = open && token?.kind === "@";
   const listing = useListFiles(session.id, { path: directoryOf(token?.query ?? "") }, { query: { enabled: !!wantFiles, staleTime: 30_000 } });
   const [pick, setPick] = useState(0);
-  const suggestions: { value: string; hint?: string }[] = !token
-    ? []
-    : token.kind === "/"
-      ? conversation.commands.filter((c) => c.name.toLowerCase().startsWith(token.query.toLowerCase())).slice(0, 8).map((c) => ({ value: `/${c.name}`, hint: c.description ?? undefined }))
-      : ((listing.data ?? []) as { name: string; directory: boolean }[])
+
+  const commands: Suggestion[] =
+    open && token?.kind === "/"
+      ? conversation.commands
+          .filter((c) => c.name.toLowerCase().startsWith(token.query.toLowerCase()))
+          .slice(0, MOST_ROWS)
+          .map((c) => ({ kind: "command", value: `/${c.name}`, hint: c.description ?? undefined }))
+      : [];
+  const artifacts = open && token?.kind === "@" ? rankArtifacts(library.data ?? [], token.query, session.id) : [];
+  const files: Suggestion[] =
+    open && token?.kind === "@"
+      ? ((listing.data ?? []) as { name: string; directory: boolean }[])
           .filter((f) => f.name.toLowerCase().startsWith((token.query.split("/").pop() ?? "").toLowerCase()))
-          .slice(0, 8)
           .map((f) => {
             const dir = directoryOf(token.query);
             const full = (dir ? `${dir}/` : "") + f.name + (f.directory ? "/" : "");
-            return { value: `@${full}`, hint: f.directory ? "directory" : undefined };
-          });
+            return { kind: "file", value: `@${full}`, hint: f.directory ? "directory" : undefined };
+          })
+      : [];
+  /* Eight rows in all, as the `/` list has always had: up to five artifacts,
+     and the files fill what is left. */
+  const shownArtifacts = artifacts.slice(0, MOST_ARTIFACTS);
+  const shownFiles = files.slice(0, MOST_ROWS - shownArtifacts.length);
+  const suggestions: Suggestion[] =
+    token?.kind === "/" ? commands : [...shownArtifacts.map((artifact): Suggestion => ({ kind: "artifact", artifact })), ...shownFiles];
+  /* An empty library is said once, so the feature can be found at all; the
+     line goes as soon as a query is typed. */
+  const libraryEmpty = library.isSuccess && (library.data?.length ?? 0) === 0;
+  const panel = open && token !== undefined && (token.kind === "/" ? suggestions.length > 0 : suggestions.length > 0 || token.query !== "" || libraryEmpty);
   useEffect(() => setPick(0), [token?.query, token?.kind]);
 
-  const accept = (value: string) => {
+  const mentioned = () => chips.flatMap((c) => (c.artifact && c.handle ? [{ artifact: c.artifact, handle: c.handle }] : []));
+
+  /* A pick rewrites the token in place. A file or a command becomes its own
+     text, as before. An artifact becomes a handle in the sentence and a chip
+     in the row above it, and its page starts its way into the workspace. */
+  const accept = (chosen: Suggestion) => {
     if (!token) return;
     const before = text.slice(0, token.at);
-    const after = text.slice(token.at + 1 + token.query.length);
-    setText(`${before}${value}${value.endsWith("/") ? "" : " "}${after}`);
+    const after = text.slice(token.end);
+    const inserted =
+      chosen.kind === "artifact"
+        ? `@${handleFor(chosen.artifact, mentioned())} `
+        : `${chosen.value}${chosen.value.endsWith("/") ? "" : " "}`;
+    setText(`${before}${inserted}${after}`);
+    wantCaret.current = before.length + inserted.length;
     box.current?.focus();
+    if (chosen.kind === "artifact") void mention(chosen.artifact, inserted.trim().slice(1));
   };
 
   useEffect(() => {
@@ -246,6 +318,33 @@ export function Composer({
   const forget = (id: number) => {
     setChips((all) => all.filter((c) => c.id !== id));
     held.current = Math.max(0, held.current - 1);
+  };
+
+  /* The chip appears before the page has landed, like a dropped file's, and
+     settles with where it went. A refusal — the host unreachable, the artifact
+     gone since the list was drawn — takes the chip and its handle back and
+     says so on the line the composer already has for that. */
+  const mention = async (artifact: Artifact, handle: string) => {
+    if (chips.some((c) => c.artifact?.id === artifact.id)) return;
+    const chip: Chip = { id: nextId.current++, name: artifact.title, kind: "artifact", size: `v${artifact.version}`, pending: true, artifact, handle };
+    held.current += 1;
+    setChips((all) => [...all, chip]);
+    try {
+      const placed = await mentionArtifact(session.id, { artifactId: artifact.id });
+      settle(chip.id, { path: placed.path });
+    } catch (e) {
+      forget(chip.id);
+      setText((was) => withoutHandle(was, handle));
+      setRefused(`${artifact.title} could not be put in the workspace. ${why(e)}`.trim());
+    }
+  };
+
+  /* Removing the chip removes the handle: the chip is the attachment, and a
+     handle left behind would read as a reference the agent cannot follow. */
+  const drop = (c: Chip) => {
+    forget(c.id);
+    const handle = c.handle;
+    if (handle) setText((was) => withoutHandle(was, handle));
   };
 
   /* Whatever the real list says, that is how many are held. Cheap, and it
@@ -338,8 +437,14 @@ export function Composer({
        — the path does not exist until the upload answers. */
     if (send.isPending || disabled || busy) return;
     const images = chips.flatMap((c) => (c.image ? [c.image] : []));
-    const named = chips.filter((c) => c.path).map((c) => c.path).join("\n");
-    const message = [said.trim(), named].filter(Boolean).join("\n\n");
+    const named = chips.filter((c) => c.kind === "file" && c.path).map((c) => c.path).join("\n");
+    /* A mention is an attachment too, named under the message — with the
+       title, the version and where it came from, which a bare path would not
+       say. The handle in the sentence is what each line resolves. */
+    const mentions: Mention[] = chips.flatMap((c) =>
+      c.kind === "artifact" && c.artifact && c.handle && c.path ? [{ handle: c.handle, artifact: c.artifact, path: c.path }] : [],
+    );
+    const message = [said.trim(), named, mentionBlock(mentions, session.id)].filter(Boolean).join("\n\n");
     if (!message && images.length === 0) return;
 
     onEcho(message, images);
@@ -431,7 +536,12 @@ export function Composer({
                 <span key={c.id} className="flex items-center gap-2 rounded-lg border border-line bg-raise py-1 pr-1 pl-2">
                   {/* The thumbnail stays visible under the spinner: dimming it
                       says "not yet" without taking away what you dropped. */}
-                  <span className="relative grid h-7 w-7 shrink-0 place-items-center rounded bg-ground text-mute">
+                  <span className={`relative grid h-7 shrink-0 place-items-center overflow-hidden rounded bg-ground text-mute ${c.kind === "artifact" ? "w-11" : "w-7"}`}>
+                    {c.artifact && (
+                      /* The picture the library draws, dimmed the way a
+                         thumbnail is while its bytes are on their way. */
+                      <ArtifactShot artifact={c.artifact} framed={false} className={c.pending ? "opacity-30" : ""} />
+                    )}
                     {c.url && !unreadable.has(c.id) && (
                       <img
                         src={c.url}
@@ -446,7 +556,7 @@ export function Composer({
                       /* Says which of the two went wrong: the picture, not the app. */
                       <ImageOff className="h-3.5 w-3.5 text-brick" strokeWidth={1.75} />
                     ) : (
-                      !c.url && <FileText className="h-3.5 w-3.5" strokeWidth={1.75} />
+                      !c.url && !c.artifact && <FileText className="h-3.5 w-3.5" strokeWidth={1.75} />
                     )}
                   </span>
                   {/* The name, not the path. Every attachment lands in the same
@@ -455,12 +565,12 @@ export function Composer({
                       message itself the moment this is sent. */}
                   <span
                     title={c.path ?? c.name}
-                    className={`max-w-[11rem] truncate font-mono text-meta ${c.pending ? "text-mute" : "text-text"}`}
+                    className={`max-w-[11rem] truncate text-meta ${c.kind === "artifact" ? "" : "font-mono"} ${c.pending ? "text-mute" : "text-text"}`}
                   >
                     {c.name}
                   </span>
-                  <span className="text-micro text-mute">{c.size}</span>
-                  <button onClick={() => forget(c.id)} className="grid h-5 w-5 place-items-center rounded text-mute hover:bg-overlay hover:text-bone">
+                  <span className={`text-micro text-mute ${c.kind === "artifact" ? "font-mono" : ""}`}>{c.size}</span>
+                  <button onClick={() => drop(c)} aria-label={`Remove ${c.name}`} className="grid h-5 w-5 place-items-center rounded text-mute hover:bg-overlay hover:text-bone">
                     <X className="h-3 w-3" strokeWidth={2} />
                   </button>
                 </span>
@@ -468,14 +578,75 @@ export function Composer({
             </div>
           )}
 
-          {suggestions.length > 0 && (
-            <div className="mx-3 mt-3 overflow-hidden rounded-lg border border-line bg-overlay">
-              {suggestions.map((sug, n) => (
-                <button key={sug.value} onMouseEnter={() => setPick(n)} onMouseDown={(e) => { e.preventDefault(); accept(sug.value); }} data-on={n === pick} className="row w-full rounded-none">
-                  <span className={`font-mono text-ui ${n === pick ? "text-bone" : "text-text"}`}>{sug.value}</span>
-                  {sug.hint && <span className="truncate text-meta text-mute">{sug.hint}</span>}
-                </button>
-              ))}
+          {/* Docked above the box rather than floated at the caret: the card
+              grows upward, the way the model menu opens upward, and there is
+              nothing to clip or to position. Two sections for `@`, each gone
+              when empty, so a workspace with no artifacts sees the list it
+              always had. */}
+          {panel && token && (
+            <div id="composer-suggestions" role="listbox" aria-label={token.kind === "@" ? "Artifacts and files to mention" : "Commands"} className="mx-3 mt-3 overflow-hidden rounded-lg border border-line bg-overlay">
+              {token.kind === "/" ? (
+                suggestions.map(
+                  (sug, n) =>
+                    sug.kind !== "artifact" && (
+                      <Option key={sug.value} n={n} on={n === pick} onHover={() => setPick(n)} onPick={() => accept(sug)}>
+                        <span className={`font-mono text-ui ${n === pick ? "text-bone" : "text-text"}`}>{sug.value}</span>
+                        {sug.hint && <span className="truncate text-meta text-mute">{sug.hint}</span>}
+                      </Option>
+                    ),
+                )
+              ) : (
+                <>
+                  {(shownArtifacts.length > 0 || (token.query === "" && libraryEmpty)) && <Heading title="Artifacts" count={artifacts.length} />}
+                  {token.query === "" && libraryEmpty && (
+                    <p className="px-2.5 pb-2 text-meta text-mute">No artifacts yet. Ask an agent to make one and it will be listed here.</p>
+                  )}
+                  {shownArtifacts.map((a, n) => {
+                    const here = a.fromSessionId === session.id;
+                    return (
+                      <Option key={a.id} n={n} on={n === pick} onHover={() => setPick(n)} onPick={() => accept({ kind: "artifact", artifact: a })}>
+                        <span className="block w-9 shrink-0">
+                          <ArtifactShot artifact={a} />
+                        </span>
+                        <span className={`truncate text-ui ${n === pick ? "text-bone" : "text-text"}`}>{a.title}</span>
+                        <span className="shrink-0 font-mono text-micro text-mute">v{a.version}</span>
+                        <span className={`truncate text-meta ${here ? "text-dim" : "text-mute"}`}>{originOf(a, session.id).label}</span>
+                        <span className="ml-auto shrink-0 text-micro text-mute">{elapsed(minutesSince(a.updatedAt))}</span>
+                      </Option>
+                    );
+                  })}
+                  {artifacts.length > shownArtifacts.length && <More n={artifacts.length - shownArtifacts.length} />}
+                  {shownFiles.length > 0 && <Heading title="Files" count={files.length} />}
+                  {shownFiles.map((sug, i) => {
+                    const n = shownArtifacts.length + i;
+                    return (
+                      sug.kind === "file" && (
+                        <Option key={sug.value} n={n} on={n === pick} onHover={() => setPick(n)} onPick={() => accept(sug)}>
+                          <span className={`font-mono text-ui ${n === pick ? "text-bone" : "text-text"}`}>{sug.value}</span>
+                          {sug.hint && <span className="truncate text-meta text-mute">{sug.hint}</span>}
+                        </Option>
+                      )
+                    );
+                  })}
+                  {files.length > shownFiles.length && <More n={files.length - shownFiles.length} />}
+                  {suggestions.length === 0 && token.query !== "" && (
+                    <p className="px-2.5 py-2 text-meta text-mute">Nothing called “{token.query}” — not an artifact, not a file.</p>
+                  )}
+                  {/* The keys where they are used, which is the desk's rule. */}
+                  <div className="flex items-center gap-3 border-t border-line-soft px-2.5 py-1.5 text-micro text-mute">
+                    <span className="flex items-center gap-1">
+                      <span className="keycap">↑</span>
+                      <span className="keycap">↓</span> move
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="keycap">⏎</span> mention
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="keycap">esc</span> leave it
+                    </span>
+                  </div>
+                </>
+              )}
             </div>
           )}
 
@@ -484,15 +655,26 @@ export function Composer({
             rows={1}
             value={text}
             disabled={disabled}
-            onChange={(e) => voice.typed(e.target.value)}
+            aria-autocomplete="list"
+            aria-expanded={panel}
+            aria-controls={panel ? "composer-suggestions" : undefined}
+            aria-activedescendant={panel && suggestions.length > 0 ? `composer-option-${pick}` : undefined}
+            onSelect={(e) => setCaret(e.currentTarget.selectionStart ?? e.currentTarget.value.length)}
+            onChange={(e) => {
+              setCaret(e.target.selectionStart ?? e.target.value.length);
+              voice.typed(e.target.value);
+            }}
             onPaste={(e) => e.clipboardData.files.length && take(e.clipboardData.files)}
             onKeyDown={(e) => {
-              if (suggestions.length > 0) {
+              if (panel && suggestions.length > 0) {
                 if (e.key === "ArrowDown") { e.preventDefault(); setPick((n) => Math.min(n + 1, suggestions.length - 1)); return; }
                 if (e.key === "ArrowUp") { e.preventDefault(); setPick((n) => Math.max(n - 1, 0)); return; }
-                if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) { e.preventDefault(); accept(suggestions[pick].value); return; }
-                if (e.key === "Escape") { setText(text + " "); return; }
+                if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) { e.preventDefault(); accept(suggestions[pick]); return; }
               }
+              /* Leaves the sentence exactly as typed and stays away until the
+                 next trigger — not the trailing space this used to add, which
+                 was a visible edit to somebody's words. */
+              if (panel && e.key === "Escape") { e.preventDefault(); setDismissed(token?.at ?? null); return; }
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
                 say();
@@ -582,7 +764,7 @@ export function Composer({
               <button
                 onClick={say}
                 disabled={disabled || busy || (!text.trim() && chips.length === 0)}
-                title={busy ? "Waiting for the files" : "Send"}
+                title={busy ? (chips.some((c) => c.pending && c.kind === "artifact") ? "Waiting for the artifact" : "Waiting for the files") : "Send"}
                 className="ml-auto grid h-8 w-8 place-items-center rounded-full bg-bone text-ground transition-opacity duration-150 hover:opacity-90 disabled:bg-raise disabled:text-mute"
               >
                 <ArrowUp className="h-4 w-4" strokeWidth={2.5} />
@@ -620,4 +802,42 @@ export function Composer({
       </div>
     </div>
   );
+}
+
+
+/**
+ * One row of the list. Picking is on mouse down, with the default prevented,
+ * so the box keeps the focus and the caret; hovering moves the highlight the
+ * way the arrow keys do.
+ */
+function Option({ n, on, onHover, onPick, children }: { n: number; on: boolean; onHover: () => void; onPick: () => void; children: ReactNode }) {
+  return (
+    <button
+      id={`composer-option-${n}`}
+      role="option"
+      aria-selected={on}
+      onMouseEnter={onHover}
+      onMouseDown={(e) => {
+        e.preventDefault();
+        onPick();
+      }}
+      data-on={on}
+      className="row w-full rounded-none"
+    >
+      {children}
+    </button>
+  );
+}
+
+function Heading({ title, count }: { title: string; count: number }) {
+  return (
+    <div className="flex items-baseline gap-1.5 px-2.5 pt-2 pb-0.5 text-micro">
+      <span className="text-dim">{title}</span>
+      <span className="tabular-nums text-mute">{count}</span>
+    </div>
+  );
+}
+
+function More({ n }: { n: number }) {
+  return <p className="px-2.5 pb-1.5 text-meta text-mute">{n} more — keep typing</p>;
 }
