@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.10.0](https://github.com/firetower-cloud/firetower/compare/mobile-v0.9.1...mobile-v0.10.0) (2026-10-28)
+
+
+### Features
+
+* **artifacts:** mention an artifact in a conversation ([9c60050](https://github.com/firetower-cloud/firetower/commit/9c600508c7f613cdf19100687a793cbf1a1ddc8b))
+* **artifacts:** mention an artifact in a conversation ([61821a2](https://github.com/firetower-cloud/firetower/commit/61821a20552dfd9c656fca26b3eed403119a0b4e))
+
 ## [0.9.1](https://github.com/firetower-cloud/firetower/compare/mobile-v0.9.0...mobile-v0.9.1) (2026-10-26)
 
 

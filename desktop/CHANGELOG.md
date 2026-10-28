@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.23.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.22.1...desktop-v0.23.0) (2026-10-28)
+
+
+### Features
+
+* **artifacts:** find in an artifact with ⌘F ([f8852b6](https://github.com/firetower-cloud/firetower/commit/f8852b6569c021612309e49aac5877919b5113ff))
+* **artifacts:** find in an artifact with ⌘F ([1c80e14](https://github.com/firetower-cloud/firetower/commit/1c80e14bdf5301de3b50341869e6dfc5b8a61496))
+* **artifacts:** mention an artifact in a conversation ([9c60050](https://github.com/firetower-cloud/firetower/commit/9c600508c7f613cdf19100687a793cbf1a1ddc8b))
+* **artifacts:** mention an artifact in a conversation ([61821a2](https://github.com/firetower-cloud/firetower/commit/61821a20552dfd9c656fca26b3eed403119a0b4e))
+
 ## [0.22.1](https://github.com/firetower-cloud/firetower/compare/desktop-v0.22.0...desktop-v0.22.1) (2026-10-27)
 
 
