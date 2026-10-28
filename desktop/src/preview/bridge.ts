@@ -18,12 +18,22 @@ export type Selection = { snapshot: ElementSnapshot; parents: string[]; point?: 
 
 export type Pin = { id: string; path: string; selector: string; label: string; html: string };
 
+/** What the page found for a query: how many, and which one is lit. */
+export type Found = { count: number; at: number };
+
 type Handlers = {
   /** Where the page is now — pathname, search and hash. */
   onPath: (path: string) => void;
   onSelection: (s: Selection) => void;
   onLocated: (id: string, found: boolean) => void;
   onFocusNote: (id: string) => void;
+  /** The answer to the last `find` or `find-step`. */
+  onFound?: (found: Found) => void;
+  /**
+   * ⌘F (`true`) or esc (`false`) pressed *inside* the page — which is where
+   * focus is after scrolling it, and where a key never reaches this window.
+   */
+  onFindBar?: (open: boolean) => void;
 };
 
 /** What the panel may say to the picker. */
@@ -35,13 +45,30 @@ export type Outgoing =
   | { type: "locate"; id: string }
   | { type: "go"; delta: number }
   | { type: "reload" }
-  | { type: "navigate"; path: string };
+  | { type: "navigate"; path: string }
+  /** Search the page for this; an empty query clears what was painted. */
+  | { type: "find"; query: string }
+  /** Light the next (`1`) or previous (`-1`) match, wrapping. */
+  | { type: "find-step"; by: 1 | -1 };
 
 /** A point the page may claim the pointer was at: two real numbers, nothing else. */
 const isPoint = (p: unknown): p is [number, number] => Array.isArray(p) && p.length === 2 && p.every((n) => typeof n === "number" && Number.isFinite(n));
 
 /** A path the page may claim to be at: absolute, one line, not a URL in disguise. */
 const isPath = (p: unknown): p is string => typeof p === "string" && p.startsWith("/") && !p.startsWith("//") && p.length <= 2048 && !/[\r\n]/.test(p);
+
+/** A whole number the page may report, bounded so the bar's label stays a label. */
+const whole = (n: unknown): n is number => typeof n === "number" && Number.isInteger(n) && n >= 0 && n <= 1_000_000;
+
+/**
+ * What the page may claim to have found: two whole numbers, the second
+ * indexing the first. Anything else is `null`, and is not shown.
+ */
+export function readFound(d: Record<string, unknown>): Found | null {
+  if (!whole(d.count) || !whole(d.at)) return null;
+  if (d.count === 0 ? d.at !== 0 : d.at >= d.count) return null;
+  return { count: d.count, at: d.at };
+}
 
 export function usePickerBridge(
   frame: RefObject<HTMLIFrameElement | null>,
@@ -54,6 +81,10 @@ export function usePickerBridge(
 ) {
   const [ready, setReady] = useState(false);
   const [annotating, setAnnotating] = useState(false);
+  /* Whether the picker answers `find`. A control plane older than this app
+     injects one that does not, and a bar that searched it would count
+     nothing forever — so the page says, and the bar can say why. */
+  const [finds, setFinds] = useState(false);
   const readyRef = useRef(false);
   readyRef.current = ready;
   const channel = useRef<string | null>(null);
@@ -92,6 +123,7 @@ export function usePickerBridge(
       if (d.type === "ready" && d.session === session && forUs) {
         setReady(true);
         setAnnotating(d.enabled === true);
+        setFinds(d.find === true);
         if (isPath(d.path)) held.current.onPath(d.path);
       }
       if (d.type === "navigated" && isPath(d.path)) held.current.onPath(d.path);
@@ -107,6 +139,11 @@ export function usePickerBridge(
       }
       if (d.type === "located" && typeof d.id === "string") held.current.onLocated(d.id, d.found === true);
       if (d.type === "focus-note" && typeof d.id === "string") held.current.onFocusNote(d.id);
+      if (d.type === "found") {
+        const found = readFound(d);
+        if (found) held.current.onFound?.(found);
+      }
+      if (d.type === "find-bar") held.current.onFindBar?.(d.open === true);
     };
 
     window.addEventListener("message", listen);
@@ -122,5 +159,5 @@ export function usePickerBridge(
     };
   }, [origin, session, port, artifact, frame]);
 
-  return { ready, annotating, tell };
+  return { ready, annotating, finds, tell };
 }

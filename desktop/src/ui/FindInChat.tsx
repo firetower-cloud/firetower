@@ -5,8 +5,9 @@
  * index: an afternoon of work is a few thousand lines of prose with the one
  * command, path or name you are after somewhere in the middle of it. A window
  * has no browser find bar to fall back on, so the conversation carries its
- * own — the same shape as the terminal's (`Shell`), because it answers the
- * same question about the pane it sits in.
+ * own — the same bar an artifact gets (`FindBar`), because it answers the
+ * same question about the pane it sits in. What is here is the search; the
+ * bar is drawn by the piece the two share.
  *
  * **Ranges, not markup.** Matches are painted with the Custom Highlight API,
  * which colours a `Range` and owns no DOM. The obvious implementation —
@@ -20,20 +21,12 @@
  * `code` span is not found. That is the price of never owning the DOM, and
  * for what this is for — a path, a flag, a file name — it does not bite.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronDown, ChevronUp, Search, X } from "lucide-react";
-import { isMac } from "~/platform";
+import { useCallback, useEffect, useState } from "react";
+import { CAP, FindBar } from "~/ui/FindBar";
 
 /** The two highlight registries, styled by `::highlight()` in `styles.css`. */
 const ALL = "ft-find";
 const ON = "ft-find-on";
-
-/**
- * Enough to light up a long transcript without walking a thousand ranges on
- * every keystroke. Past it, the answer is a longer query rather than more
- * highlights — so the count says `600+` and means it.
- */
-const CAP = 600;
 
 /**
  * Where `needle` sits in `hay`, case-insensitively: the start of each
@@ -127,7 +120,6 @@ export function FindInChat({
      painted through ranges that point at nodes no longer in the document. */
   const [found, setFound] = useState<Range[]>([]);
   const count = found.length;
-  const field = useRef<HTMLInputElement>(null);
 
   const look = useCallback(() => {
     const scope = body.current;
@@ -138,13 +130,6 @@ export function FindInChat({
 
   useEffect(() => setAt(0), [q]);
   useEffect(() => look(), [look]);
-
-  /* ⌘F with the bar already up means "search again", not "nothing happens" —
-     the field comes back with what is in it selected, ready to be typed over. */
-  useEffect(() => {
-    field.current?.focus();
-    field.current?.select();
-  }, [summoned]);
 
   /* The transcript is live. An agent streaming into it replaces the very text
      nodes these ranges point at, and a stale range paints nothing — so the
@@ -201,63 +186,16 @@ export function FindInChat({
   );
 
   const step = (by: number) => setAt((n) => (count === 0 ? 0 : (n + by + count) % count));
-  const none = !!q.trim() && count === 0;
 
   return (
-    <div className="absolute top-3 right-5 z-30 flex items-center gap-1.5 rounded-md border border-line bg-panel py-1 pr-1 pl-2.5 shadow-(--shadow-float)">
-      <Search className="h-3.5 w-3.5 shrink-0 text-mute" strokeWidth={1.75} />
-      <input
-        ref={field}
-        autoFocus
-        value={q}
-        onChange={(e) => setQ(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Escape") onClose();
-          if (e.key === "Enter") {
-            e.preventDefault();
-            step(e.shiftKey ? -1 : 1);
-          }
-          if (e.key === "ArrowDown") {
-            e.preventDefault();
-            step(1);
-          }
-          if (e.key === "ArrowUp") {
-            e.preventDefault();
-            step(-1);
-          }
-        }}
-        placeholder="Find in conversation"
-        className="w-52 min-w-0 bg-transparent text-meta text-bone placeholder:text-mute focus:outline-none"
-      />
-      {/* A count, not a verdict: `none` is the honest word for a query that
-          matched nothing, and `600+` for one that matched more than is worth
-          lighting up. */}
-      <span className={`w-16 shrink-0 text-right font-mono text-micro tabular-nums ${none ? "text-dim" : "text-mute"}`}>
-        {none ? "none" : count === 0 ? "" : `${at + 1}/${count}${count === CAP ? "+" : ""}`}
-      </span>
-      <button
-        disabled={count === 0}
-        onClick={() => step(-1)}
-        title={`Previous  ${isMac ? "⇧⏎" : "Shift+⏎"}`}
-        className="grid h-6 w-6 shrink-0 place-items-center rounded text-mute transition-colors hover:bg-raise hover:text-bone disabled:text-line"
-      >
-        <ChevronUp className="h-3.5 w-3.5" strokeWidth={2} />
-      </button>
-      <button
-        disabled={count === 0}
-        onClick={() => step(1)}
-        title="Next  ⏎"
-        className="grid h-6 w-6 shrink-0 place-items-center rounded text-mute transition-colors hover:bg-raise hover:text-bone disabled:text-line"
-      >
-        <ChevronDown className="h-3.5 w-3.5" strokeWidth={2} />
-      </button>
-      <button
-        onClick={onClose}
-        title="Close  esc"
-        className="grid h-6 w-6 shrink-0 place-items-center rounded text-mute transition-colors hover:bg-raise hover:text-bone"
-      >
-        <X className="h-3.5 w-3.5" strokeWidth={2} />
-      </button>
-    </div>
+    <FindBar
+      query={q}
+      onQuery={setQ}
+      found={{ count, at }}
+      onStep={step}
+      onClose={onClose}
+      summoned={summoned}
+      placeholder="Find in conversation"
+    />
   );
 }
