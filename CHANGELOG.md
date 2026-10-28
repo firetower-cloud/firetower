@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.49.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.48.0...firetower-v0.49.0) (2026-10-28)
+
+
+### Features
+
+* **artifacts:** find in an artifact with ⌘F ([f8852b6](https://github.com/firetower-cloud/firetower/commit/f8852b6569c021612309e49aac5877919b5113ff))
+* **artifacts:** find in an artifact with ⌘F ([1c80e14](https://github.com/firetower-cloud/firetower/commit/1c80e14bdf5301de3b50341869e6dfc5b8a61496))
+* **artifacts:** mention an artifact in a conversation ([9c60050](https://github.com/firetower-cloud/firetower/commit/9c600508c7f613cdf19100687a793cbf1a1ddc8b))
+* **artifacts:** mention an artifact in a conversation ([61821a2](https://github.com/firetower-cloud/firetower/commit/61821a20552dfd9c656fca26b3eed403119a0b4e))
+* **codex:** add an Auto permission mode, and fix a saved sandbox wedging startup ([fd8d00b](https://github.com/firetower-cloud/firetower/commit/fd8d00b7dcf17a042f340f06129785ce8fb5b9cd))
+* **codex:** add an Auto permission mode, and stop a saved sandbox wedging startup ([2be7b98](https://github.com/firetower-cloud/firetower/commit/2be7b98db9a8ee97d6eb8e5ebb997b2b4dff61e5))
+
 ## [0.48.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.47.0...firetower-v0.48.0) (2026-10-26)
 
 
