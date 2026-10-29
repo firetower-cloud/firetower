@@ -1424,6 +1424,20 @@ impl Db {
         Ok(())
     }
 
+    /// Record which profile a session was started as.
+    ///
+    /// Set after the row exists rather than on the insert, for the same reason
+    /// the lineage is: it is one more thing a session may or may not have, not
+    /// worth another argument on every `insert_session` caller.
+    pub async fn set_profile(&self, session: &SessionId, profile: &str) -> Result<()> {
+        sqlx::query("UPDATE sessions SET profile_id = $1 WHERE id = $2")
+            .bind(profile)
+            .bind(session.as_str())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     /// How many of this session's children are still starting or working.
     ///
     /// What decides whether a lead that has ended its turn is resting or
@@ -2855,6 +2869,7 @@ fn session_from_row(r: sqlx::postgres::PgRow) -> Result<Session> {
         parent_id: r
             .get::<Option<String>, _>("parent_id")
             .map(SessionId::from_stored),
+        profile_id: r.get::<Option<String>, _>("profile_id"),
         spawn_reason: r.get("spawn_reason"),
         host_id: HostId::from_stored(r.get::<String, _>("host_id")),
         // A real id now, rather than the `None` it was while a session and the

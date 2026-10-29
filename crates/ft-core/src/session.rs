@@ -284,6 +284,11 @@ pub struct Session {
     /// into the inbox, and ending the lead ends the tree.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_id: Option<SessionId>,
+    /// The profile this session was started as, by id, when it was started as
+    /// one. What decides whether it may delegate — a Manager may — and what the
+    /// rail reads to say which kind of agent a workspace holds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_id: Option<String>,
     /// What the lead said this child was for, in its own words.
     ///
     /// Carried so the child's own screen can say why it exists — the first
@@ -383,6 +388,13 @@ pub struct NewSession {
     /// choice.
     #[serde(default)]
     pub share: Share,
+    /// The profile to start as, by id. Omit for a plain agent with no persona.
+    ///
+    /// It shapes the agent's system prompt, pins the engine when it names one,
+    /// and decides whether this session may delegate — a Manager may, an
+    /// Operator does the work itself.
+    #[serde(default)]
+    pub profile: Option<String>,
 }
 
 /// One repository to check out, as the API accepts it.

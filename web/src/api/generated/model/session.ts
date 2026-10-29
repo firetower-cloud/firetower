@@ -139,6 +139,13 @@ export interface Session {
      * own, `d/backend/…` once it has been handed to a directory.
      */
   path: ResourcePath;
+  /**
+     * The profile this session was started as, by id, when it was started as
+     * one. What decides whether it may delegate — a Manager may — and what the
+     * rail reads to say which kind of agent a workspace holds.
+     * @nullable
+     */
+  profileId?: string | null;
   prompt: string;
   /** @nullable */
   proposedBody?: string | null;

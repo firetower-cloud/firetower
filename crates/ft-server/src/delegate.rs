@@ -119,6 +119,25 @@ async fn spawn(state: &AppState, request: &AgentRequest) -> Result<String> {
         bail!("this session is itself a child, and children cannot spawn");
     }
 
+    // Only a Manager delegates. A session started as an Operator profile — or
+    // as no profile at all — does the work itself rather than handing it off,
+    // which is the whole of what the distinction means.
+    let is_manager = match &lead.profile_id {
+        Some(pid) => state
+            .roles
+            .one(lead.owner.as_str(), pid, crate::access::Level::Viewer)
+            .await?
+            .map(|p| p.can_delegate)
+            .unwrap_or(false),
+        None => false,
+    };
+    if !is_manager {
+        bail!(
+            "this session is not a Manager, so it does the work itself. Start the workspace as a \
+             Manager profile to hand work off."
+        );
+    }
+
     // The same call again — a worker that reconnects re-announces what its
     // agent is still blocked on — is the same child, not a second one.
     if let Some(existing) = state.db.child_by_req(&lead.id, &request.req).await? {

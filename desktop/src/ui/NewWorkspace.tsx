@@ -18,9 +18,10 @@
  * answered. A task seeds the composer instead, unsent.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronDown, Cpu, GitBranch, Plus, Search, Server, X } from "lucide-react";
+import { Check, ChevronDown, Cpu, GitBranch, Plus, Search, Server, UsersRound, X } from "lucide-react";
 import { HostMark, Icon } from "~/components/ui";
-import { AgentMark } from "~/components/AgentMark";
+import { AgentMark, AGENT_LABEL } from "~/components/AgentMark";
+import { useListRoles } from "~/api/generated/roles/roles";
 import { canRun, resolve, type Where } from "~/components/WhereItRuns";
 import { Readout, isReady } from "~/components/HostReadiness";
 import { useHostReadiness } from "~/api/generated/hosts/hosts";
@@ -72,6 +73,7 @@ export function NewWorkspace({
   const [branch, setBranch] = useState("");
   const [typed, setTyped] = useState(false);
   const [where, setWhere] = useState<Where>({ machine: "", hostId: "", agent: "" });
+  const [profileId, setProfileId] = useState<string | null>(null);
   const [accountId, setAccountId] = useState("");
   const [adding, setAdding] = useState(false);
   const [connecting, setConnecting] = useState(false);
@@ -91,9 +93,17 @@ export function NewWorkspace({
     const a = agents.find((x) => x.kind === kind);
     return !!a && !!host && canRun(a, host.id);
   };
-  const kind = (where.agent || agents.find((a) => host && canRun(a, host.id))?.kind || agents[0]?.kind) as
-    | Agent
-    | undefined;
+
+  /* The profiles you can start a workspace as. A profile that pins an engine
+     decides it; the picker then shows it rather than offering a choice. */
+  const profiles = useListRoles().data ?? [];
+  const profile = profiles.find((p) => p.id === profileId);
+  const pinned = (profile?.agent ?? undefined) as Agent | undefined;
+
+  const kind = (pinned ||
+    where.agent ||
+    agents.find((a) => host && canRun(a, host.id))?.kind ||
+    agents[0]?.kind) as Agent | undefined;
 
   /* The accounts this can run on. There is no "default" entry: the default
      is one of these, preselected, and with none of them there is nothing to
@@ -143,6 +153,7 @@ export function NewWorkspace({
           workspaceId: seed?.workspaceId as never,
           repos: checkouts.map((c) => ({ repoId: c.id, base: c.base })),
           agent: kind,
+          profile: profileId ?? undefined,
           accountId: account.id,
           // Nothing to cut a branch from, and the field above is not drawn.
           branch: checkouts.length ? shown.trim() || undefined : undefined,
@@ -348,6 +359,37 @@ export function NewWorkspace({
             </Field>
           )}
 
+          {/* What this workspace is for, before the details of where it runs.
+              A profile shapes the agent and decides whether it may delegate. */}
+          <Field label="Start as">
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <Icon of={UsersRound} size={14} className="shrink-0 text-mute" />
+                <select
+                  value={profileId ?? ""}
+                  onChange={(e) => setProfileId(e.target.value || null)}
+                  className="min-w-0 flex-1 rounded-md border border-line bg-panel px-2 py-1.5 text-ui text-bone focus:outline-none"
+                >
+                  <option value="">Just an agent — no profile</option>
+                  {profiles.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                      {p.canDelegate ? " — manager" : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {profile && (
+                <p className="px-0.5 text-micro text-mute">
+                  {profile.does}
+                  {profile.canDelegate
+                    ? " · can hand work to your profiles"
+                    : " · does the work itself"}
+                </p>
+              )}
+            </div>
+          </Field>
+
           {/* Machine, mode and agent are one control because what decides
               whether an agent can start is the three of them together. */}
           <Field label="Where it runs">
@@ -368,27 +410,35 @@ export function NewWorkspace({
                 </select>
               </div>
 
-              <div className="flex flex-wrap gap-1.5 pt-0.5">
-                {agents.map((a) => {
-                  const ok = runsHere(a.kind);
-                  return (
-                    <button
-                      key={a.kind}
-                      onClick={() => setWhere({ ...where, agent: a.kind })}
-                      className={`control border ${
-                        kind === a.kind
-                          ? "border-line bg-overlay text-bone"
-                          : "border-line bg-panel text-mute hover:bg-raise"
-                      }`}
-                      title={ok ? undefined : "Not installed there, or no account connected"}
-                    >
-                      <AgentMark agent={a.kind} size={12} />
-                      {a.label}
-                      {!ok && <span className="text-micro text-kind-data">·</span>}
-                    </button>
-                  );
-                })}
-              </div>
+              {pinned ? (
+                <div className="flex items-center gap-2 px-0.5 py-1 text-ui text-dim">
+                  <AgentMark agent={pinned} size={13} className="text-dim" />
+                  <span className="text-bone">{AGENT_LABEL[pinned]}</span>
+                  <span className="text-micro text-mute">· set by the “{profile?.name}” profile</span>
+                </div>
+              ) : (
+                <div className="flex flex-wrap gap-1.5 pt-0.5">
+                  {agents.map((a) => {
+                    const ok = runsHere(a.kind);
+                    return (
+                      <button
+                        key={a.kind}
+                        onClick={() => setWhere({ ...where, agent: a.kind })}
+                        className={`control border ${
+                          kind === a.kind
+                            ? "border-line bg-overlay text-bone"
+                            : "border-line bg-panel text-mute hover:bg-raise"
+                        }`}
+                        title={ok ? undefined : "Not installed there, or no account connected"}
+                      >
+                        <AgentMark agent={a.kind} size={12} />
+                        {a.label}
+                        {!ok && <span className="text-micro text-kind-data">·</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
 
               {host && kind && (
                 <div className="overflow-hidden rounded-md border border-line bg-panel">

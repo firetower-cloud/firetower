@@ -49,6 +49,15 @@ export interface NewSession {
      */
   name?: string | null;
   /**
+     * The profile to start as, by id. Omit for a plain agent with no persona.
+     *
+     * It shapes the agent's system prompt, pins the engine when it names one,
+     * and decides whether this session may delegate — a Manager may, an
+     * Operator does the work itself.
+     * @nullable
+     */
+  profile?: string | null;
+  /**
      * What to ask for first. Optional, because a workspace is a place before
      * it is a task: you may want the branch checked out and an agent waiting
      * in it, and to say what you want once you are looking at the files.

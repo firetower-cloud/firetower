@@ -12122,6 +12122,13 @@
             ],
             "description": "What to call the workspace. Omit to derive one from the branch.\n\nThe name a person reads in the rail, not an identifier: it is free text,\nit can be changed afterwards, and two workspaces may share one. The\nbranch is what has to be unique, and git enforces that itself."
           },
+          "profile": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The profile to start as, by id. Omit for a plain agent with no persona.\n\nIt shapes the agent's system prompt, pins the engine when it names one,\nand decides whether this session may delegate — a Manager may, an\nOperator does the work itself."
+          },
           "prompt": {
             "type": [
               "string",
@@ -13890,6 +13897,13 @@
           "path": {
             "$ref": "#/components/schemas/ResourcePath",
             "description": "Which directory the workspace is filed in — `u/kevin/…` for somebody's\nown, `d/backend/…` once it has been handed to a directory."
+          },
+          "profileId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The profile this session was started as, by id, when it was started as\none. What decides whether it may delegate — a Manager may — and what the\nrail reads to say which kind of agent a workspace holds."
           },
           "prompt": {
             "type": "string"

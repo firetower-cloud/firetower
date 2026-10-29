@@ -266,7 +266,7 @@ pub(crate) async fn create_session_as(
     state: AppState,
     owner: String,
     whose: String,
-    req: NewSession,
+    mut req: NewSession,
     lineage: Option<Lineage>,
 ) -> ApiResult<Session> {
     // Another agent in a place that already exists, which is a different job
@@ -275,6 +275,36 @@ pub(crate) async fn create_session_as(
     if let Some(workspace_id) = req.workspace_id.clone() {
         return start_another_agent(state, owner, workspace_id, req, lineage).await;
     }
+
+    // The profile this is started as, if any. Resolved before anything is
+    // chosen, because it may pin the engine — which the rest of this function
+    // reads off `req.agent` — and it composes the persona the session carries.
+    let profile = match &req.profile {
+        Some(id) => Some(
+            state
+                .roles
+                .one(&owner, id, crate::access::Level::Viewer)
+                .await?
+                .ok_or_else(|| {
+                    ApiError::new(
+                        ErrorCode::InvalidRequest,
+                        "that profile isn't one you can start a workspace as",
+                    )
+                })?,
+        ),
+        None => None,
+    };
+    if let Some(pinned) = profile
+        .as_ref()
+        .and_then(|p| p.agent.as_deref())
+        .and_then(ft_core::Agent::from_name)
+    {
+        req.agent = pinned;
+    }
+    let persona = match &profile {
+        Some(p) => Some(persona_for(&state, &owner, p).await?),
+        None => None,
+    };
 
     // What was actually asked for, if anything. A workspace may be created
     // empty — a branch, a checkout and an agent waiting in it — so the only
@@ -606,6 +636,12 @@ pub(crate) async fn create_session_as(
             .await?;
     }
 
+    // Which profile it was started as, for the same reason: one more thing a
+    // session may have, recorded once the row exists.
+    if let Some(profile) = &profile {
+        state.db.set_profile(&id, &profile.id).await?;
+    }
+
     // Shared from the start, when that is what was asked for. `insert_session`
     // files it in the creator's own space; this hands it to a directory, which
     // is the same operation the Access screen performs later — at the one
@@ -705,6 +741,9 @@ pub(crate) async fn create_session_as(
     // repository asked for in a *file* stays its own, inside its own checkout.
     let mut env: Vec<(String, String)> = Vec::new();
     carry_preferences(&state, &mut env, &owner, req.agent).await;
+    if let Some(persona) = &persona {
+        env.push((ft_core::PERSONA_ENV.to_string(), persona.clone()));
+    }
     for vars in &per_repo_env {
         for v in vars {
             env.retain(|(existing, _)| *existing != v.name);
@@ -885,6 +924,49 @@ pub(super) async fn relaunch_session(
 /// Nothing chosen means nothing added, and the agent's own defaults apply. A
 /// read that fails is the same as nothing chosen: starting a session on the
 /// defaults is a small surprise, and refusing to start one is not.
+/// The system-prompt a session started as a profile carries.
+///
+/// Composed here, in the control plane, because it is the only place that can
+/// see both the profile and everything its owner can reach. The identity and
+/// the instructions always; the delegation guidance and the list of profiles
+/// to hand to only for a Manager, so an Operator is never told it can delegate.
+async fn persona_for(
+    state: &AppState,
+    owner: &str,
+    profile: &crate::roles::Role,
+) -> ApiResult<String> {
+    let mut text = format!("# You are the \"{}\" profile\n\n{}\n", profile.name, profile.does);
+    if !profile.instructions.trim().is_empty() {
+        text.push('\n');
+        text.push_str(profile.instructions.trim());
+        text.push('\n');
+    }
+    if profile.can_delegate {
+        text.push('\n');
+        text.push_str(ft_core::DELEGATION_GUIDANCE);
+        let mut others: Vec<_> = state
+            .roles
+            .visible(owner, crate::access::Level::Viewer)
+            .await?
+            .into_iter()
+            .filter(|r| r.id != profile.id)
+            .collect();
+        others.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        if others.is_empty() {
+            text.push_str(
+                "\n\nThere are no other profiles to hand to yet, so describe any one-off work \
+                 in `goal`.",
+            );
+        } else {
+            text.push_str("\n\nThe profiles you can hand work to — pass the name as `role`:\n");
+            for r in &others {
+                text.push_str(&format!("- **{}** — {}\n", r.name, r.does));
+            }
+        }
+    }
+    Ok(text)
+}
+
 async fn carry_preferences(
     state: &AppState,
     env: &mut Vec<(String, String)>,
@@ -971,6 +1053,16 @@ pub(crate) async fn relaunch(
 
     let mut env: Vec<(String, String)> = Vec::new();
     carry_preferences(state, &mut env, owner, session.agent).await;
+    // Re-composed from the stored profile, so a session that resumes after a
+    // restart comes back as the profile it was started as. Best effort: a
+    // persona that cannot be read is a plain restart, not a refusal to restart.
+    if let Some(pid) = &session.profile_id {
+        if let Ok(Some(profile)) = state.roles.one(owner, pid, crate::access::Level::Viewer).await {
+            if let Ok(persona) = persona_for(state, owner, &profile).await {
+                env.push((ft_core::PERSONA_ENV.to_string(), persona));
+            }
+        }
+    }
     for (name, value) in agent_env(state, session.agent, &session.id, owner).await? {
         env.retain(|(existing, _)| *existing != name);
         env.push((name, value));
