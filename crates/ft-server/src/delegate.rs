@@ -129,6 +129,34 @@ async fn spawn(state: &AppState, request: &AgentRequest) -> Result<String> {
     let goal = text(&request.input, "goal")
         .context("spawn needs a `goal`: what the child should accomplish")?;
 
+    // A saved kind of agent, if one was named. Resolved against what the
+    // lead's owner may see, so a lead can never reach a role filed where its
+    // owner cannot — and an unknown name is refused with the ones that exist,
+    // which is the whole of discovery in this first cut.
+    let role = match text(&request.input, "role") {
+        Some(wanted) => match state.roles.by_name(lead.owner.as_str(), &wanted).await? {
+            Some(found) => Some(found),
+            None => {
+                let names: Vec<String> = state
+                    .roles
+                    .visible(lead.owner.as_str(), crate::access::Level::Viewer)
+                    .await?
+                    .into_iter()
+                    .map(|r| r.name)
+                    .collect();
+                bail!(
+                    "no role called \"{wanted}\". {}",
+                    if names.is_empty() {
+                        "No roles exist yet — make one under Configuration → Roles.".to_string()
+                    } else {
+                        format!("Roles you can use: {}.", names.join(", "))
+                    }
+                );
+            }
+        },
+        None => None,
+    };
+
     let siblings = state.db.children_of(&lead.id).await?;
     let live: Vec<&Session> = siblings.iter().filter(|c| c.status.in_flight()).collect();
     if live.len() >= LIVE_CHILDREN {
@@ -149,16 +177,31 @@ async fn spawn(state: &AppState, request: &AgentRequest) -> Result<String> {
         );
     }
 
-    let placement = text(&request.input, "placement").unwrap_or_else(|| "here".into());
+    // Explicit arguments win; a role fills in what they leave out; then the
+    // plain defaults. So "use the reviewer role, but in a new workspace" does
+    // what it says, and naming nothing but the role takes all of the role.
+    let placement = text(&request.input, "placement")
+        .or_else(|| role.as_ref().map(|r| r.placement.clone()))
+        .unwrap_or_else(|| "here".into());
     let agent = text(&request.input, "agent")
         .and_then(|n| Agent::from_name(&n))
+        .or_else(|| {
+            role.as_ref()
+                .and_then(|r| r.agent.as_deref())
+                .and_then(Agent::from_name)
+        })
         .unwrap_or(lead.agent);
     if !agent.speaks_a_protocol() {
         bail!("Firetower has no driver for {}", agent.label());
     }
-    let name = text(&request.input, "name");
-    let reason = text(&request.input, "reason");
-    let prompt = brief(&lead, &goal, text(&request.input, "context").as_deref());
+    let name = text(&request.input, "name").or_else(|| role.as_ref().map(|r| r.name.clone()));
+    let reason = text(&request.input, "reason").or_else(|| role.as_ref().map(|r| r.does.clone()));
+    let prompt = brief(
+        &lead,
+        &goal,
+        text(&request.input, "context").as_deref(),
+        role.as_ref(),
+    );
 
     // Built the way the API builds one, so every default and every check that
     // applies to a person starting a session applies here too.
@@ -215,19 +258,59 @@ async fn spawn(state: &AppState, request: &AgentRequest) -> Result<String> {
 
 /// What the child is first told.
 ///
-/// The goal as the task, the context beneath it, and then the two things a
-/// child has to know that nobody would think to say: who it is working for,
-/// and that handing back is how it reports.
-fn brief(lead: &Session, goal: &str, context: Option<&str>) -> String {
+/// The goal as the task, the context beneath it, the role it is acting as if
+/// one was named, and then the two things a child has to know that nobody
+/// would think to say: who it is working for, and that handing back is how it
+/// reports.
+fn brief(
+    lead: &Session,
+    goal: &str,
+    context: Option<&str>,
+    role: Option<&crate::roles::Role>,
+) -> String {
     let mut text = format!("Task: {goal}");
     if let Some(context) = context {
         text.push_str("\n\nContext:\n");
         text.push_str(context);
     }
+
+    if let Some(role) = role {
+        text.push_str(&format!(
+            "\n\nYou are acting as the \"{}\" role: {}",
+            role.name, role.does
+        ));
+        // In this first cut the tool policy is said, not enforced. An agent
+        // told to read-only and reaching for a write still has the tool; a
+        // later cut narrows the tools it is launched with.
+        if role.tools == "read-only" {
+            text.push_str(
+                "\n\nThis role is read-only: read, search and report. Do not edit or write \
+                 files, do not run commands that change anything, and do not push.",
+            );
+        }
+        if !role.instructions.trim().is_empty() {
+            text.push_str("\n\n");
+            text.push_str(role.instructions.trim());
+        }
+    }
+
+    // How to finish, shaped by what the role hands back.
+    let finish = match role.map(|r| r.hands_back.as_str()) {
+        Some("pr") => {
+            "When you are done, open a pull request and end with a short summary naming it."
+        }
+        Some("branch") => {
+            "When you are done, commit and push your branch, and end with a short summary of \
+             what is on it."
+        }
+        _ => {
+            "End with a short summary of what you did, what you found, and anything it should \
+             look at."
+        }
+    };
     text.push_str(&format!(
         "\n\nYou were started by another agent — the session \"{}\" — to do this part of its \
-         work. It will read what you say when you finish, so end with a short summary of what \
-         you did, what you found, and anything it should look at. You cannot ask the person \
+         work. It will read what you say when you finish. {finish} You cannot ask the person \
          questions: if something is unclear, say what you assumed and carry on.",
         lead.name
     ));
@@ -450,11 +533,50 @@ mod tests {
             &lead,
             "Add a limiter",
             Some("Use the token bucket in api/."),
+            None,
         );
         assert!(text.starts_with("Task: Add a limiter"));
         assert!(text.contains("Context:\nUse the token bucket"));
         assert!(text.contains("\"rate-limit\""));
         assert!(text.contains("cannot ask the person"));
+        // No role: the plain closing instruction, not a PR or branch one.
+        assert!(text.contains("End with a short summary"));
+    }
+
+    #[test]
+    fn a_role_shapes_the_brief() {
+        let lead = child("rate-limit", None);
+        let role = crate::roles::Role {
+            id: "role_x".into(),
+            path: "u/kevin/reviewer".into(),
+            name: "reviewer".into(),
+            does: "reads a branch and reports problems".into(),
+            use_when: String::new(),
+            not_when: String::new(),
+            hands_back: "summary".into(),
+            placement: "here".into(),
+            agent: None,
+            tools: "read-only".into(),
+            instructions: "Report findings as path:line.".into(),
+            may_write: true,
+            may_share: true,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+        let text = brief(&lead, "Review it", None, Some(&role));
+        assert!(text.contains("acting as the \"reviewer\" role"));
+        assert!(text.contains("read-only"));
+        assert!(text.contains("Report findings as path:line."));
+
+        // A pr role gets the pull-request closing instruction.
+        let pr = crate::roles::Role {
+            hands_back: "pr".into(),
+            tools: "full".into(),
+            instructions: String::new(),
+            ..role
+        };
+        let text = brief(&lead, "Implement it", None, Some(&pr));
+        assert!(text.contains("open a pull request"), "{text}");
     }
 
     #[test]

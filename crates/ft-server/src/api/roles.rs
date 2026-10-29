@@ -1,0 +1,108 @@
+//! Roles: the saved kinds of agent a lead can start.
+//!
+//! Every read pastes `filed_where` through `crate::roles`, so a role somebody
+//! has no grant on is absent rather than refused — the same rule as every
+//! other kind. Filing one into a directory is not here: a role is
+//! `FiledKind::Role`, so the sharing endpoints that already exist do it.
+
+use super::access::whoever;
+use super::{ApiError, ApiResult, ErrorCode};
+use crate::access::Level;
+use crate::auth::Principal;
+use crate::roles::{NewRole, Role};
+use crate::AppState;
+use axum::{
+    extract::{Path, State},
+    http::StatusCode,
+    Extension, Json,
+};
+
+/// A refusal somebody can act on, rather than a 500 with a backtrace in it.
+fn refused(e: crate::roles::Refused) -> ApiError {
+    ApiError::new(ErrorCode::InvalidRequest, e.to_string())
+}
+
+#[utoipa::path(
+    get, path = "/api/v1/roles", tag = "roles",
+    responses((status = 200, body = Vec<Role>), (status = 401, body = ApiError)),
+)]
+pub(super) async fn list_roles(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+) -> ApiResult<Json<Vec<Role>>> {
+    let me = whoever(&principal)?;
+    Ok(Json(
+        state.roles.visible(me.id.as_str(), Level::Viewer).await?,
+    ))
+}
+
+#[utoipa::path(
+    post, path = "/api/v1/roles", tag = "roles",
+    request_body = NewRole,
+    responses((status = 201, body = Role), (status = 400, body = ApiError)),
+)]
+pub(super) async fn create_role(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Json(new): Json<NewRole>,
+) -> ApiResult<(StatusCode, Json<Role>)> {
+    let me = whoever(&principal)?;
+    crate::roles::check(&new).map_err(refused)?;
+
+    let id = state
+        .roles
+        .create(me.org_id.as_str(), me.id.as_str(), &me.slug, &new)
+        .await?;
+    let made = state
+        .roles
+        .one(me.id.as_str(), id.as_str(), Level::Viewer)
+        .await?
+        .ok_or_else(|| ApiError::not_found("role"))?;
+    Ok((StatusCode::CREATED, Json(made)))
+}
+
+#[utoipa::path(
+    put, path = "/api/v1/roles/{id}", tag = "roles",
+    params(("id" = String, Path, description = "Role id")),
+    request_body = NewRole,
+    responses((status = 200, body = Role), (status = 400, body = ApiError), (status = 404, body = ApiError)),
+)]
+pub(super) async fn update_role(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(id): Path<String>,
+    Json(new): Json<NewRole>,
+) -> ApiResult<Json<Role>> {
+    let me = whoever(&principal)?;
+    crate::roles::check(&new).map_err(refused)?;
+
+    // Absent rather than refused when they may not change it, for the reason
+    // every other read gives: a role you cannot reach is one you are not told
+    // exists.
+    if !state.roles.update(me.id.as_str(), &id, &new).await? {
+        return Err(ApiError::not_found("role"));
+    }
+    let now = state
+        .roles
+        .one(me.id.as_str(), &id, Level::Viewer)
+        .await?
+        .ok_or_else(|| ApiError::not_found("role"))?;
+    Ok(Json(now))
+}
+
+#[utoipa::path(
+    delete, path = "/api/v1/roles/{id}", tag = "roles",
+    params(("id" = String, Path, description = "Role id")),
+    responses((status = 204), (status = 404, body = ApiError)),
+)]
+pub(super) async fn delete_role(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(id): Path<String>,
+) -> ApiResult<StatusCode> {
+    let me = whoever(&principal)?;
+    if !state.roles.delete(me.id.as_str(), &id).await? {
+        return Err(ApiError::not_found("role"));
+    }
+    Ok(StatusCode::NO_CONTENT)
+}

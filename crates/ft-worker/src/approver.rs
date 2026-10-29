@@ -214,6 +214,10 @@ async fn answer(
                                 "type": "string",
                                 "description": "Background it needs: file paths, constraints, what has been tried, what to hand back.",
                             },
+                            "role": {
+                                "type": "string",
+                                "description": "A saved kind of agent to start, by name — e.g. \"reviewer\". It supplies the agent, placement, what it hands back, and its instructions; anything you also pass here wins. Naming one that does not exist is refused with the ones that do. Omit for an ad-hoc child.",
+                            },
                             "placement": {
                                 "type": "string",
                                 "enum": ["here", "new"],

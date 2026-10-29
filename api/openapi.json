@@ -3400,6 +3400,170 @@
         }
       }
     },
+    "/api/v1/roles": {
+      "get": {
+        "tags": [
+          "roles"
+        ],
+        "operationId": "list_roles",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Role"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "roles"
+        ],
+        "operationId": "create_role",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewRole"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Role"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/roles/{id}": {
+      "put": {
+        "tags": [
+          "roles"
+        ],
+        "operationId": "update_role",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Role id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewRole"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Role"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "roles"
+        ],
+        "operationId": "delete_role",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Role id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/secrets": {
       "get": {
         "tags": [
@@ -10630,6 +10794,7 @@
           "secret",
           "skill",
           "artifact",
+          "role",
           "repository"
         ]
       },
@@ -11824,6 +11989,46 @@
           "slug": {
             "type": "string",
             "description": "`acme/backend`"
+          }
+        }
+      },
+      "NewRole": {
+        "type": "object",
+        "description": "What the API accepts to create or change a role.",
+        "required": [
+          "name",
+          "does"
+        ],
+        "properties": {
+          "agent": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "does": {
+            "type": "string"
+          },
+          "handsBack": {
+            "type": "string"
+          },
+          "instructions": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "notWhen": {
+            "type": "string"
+          },
+          "placement": {
+            "type": "string"
+          },
+          "tools": {
+            "type": "string"
+          },
+          "useWhen": {
+            "type": "string"
           }
         }
       },
@@ -13270,6 +13475,88 @@
           },
           "value": {
             "type": "string"
+          }
+        }
+      },
+      "Role": {
+        "type": "object",
+        "description": "A role, as the interface and the spawn tool read it.",
+        "required": [
+          "id",
+          "path",
+          "name",
+          "does",
+          "useWhen",
+          "notWhen",
+          "handsBack",
+          "placement",
+          "tools",
+          "instructions",
+          "mayWrite",
+          "mayShare",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "agent": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Which agent runs it, or absent to inherit the lead's."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "does": {
+            "type": "string",
+            "description": "One line: what this kind of agent does."
+          },
+          "handsBack": {
+            "type": "string",
+            "description": "`summary` | `branch` | `pr`."
+          },
+          "id": {
+            "type": "string"
+          },
+          "instructions": {
+            "type": "string",
+            "description": "Composed into the child's instructions."
+          },
+          "mayShare": {
+            "type": "boolean",
+            "description": "Whether they may move it into a directory, or out of one."
+          },
+          "mayWrite": {
+            "type": "boolean",
+            "description": "Whether the person asking may edit or delete it."
+          },
+          "name": {
+            "type": "string"
+          },
+          "notWhen": {
+            "type": "string",
+            "description": "When it should not — the line that says \"you can do this yourself\"."
+          },
+          "path": {
+            "type": "string"
+          },
+          "placement": {
+            "type": "string",
+            "description": "`here` | `new`."
+          },
+          "tools": {
+            "type": "string",
+            "description": "`full` | `read-only`."
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "useWhen": {
+            "type": "string",
+            "description": "When a lead should reach for it."
           }
         }
       },

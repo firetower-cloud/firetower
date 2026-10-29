@@ -24,6 +24,7 @@ pub mod oauth;
 pub mod preview;
 pub mod providers;
 pub mod reclaim;
+pub mod roles;
 pub mod skills;
 pub mod sshkey;
 pub mod tasks;
@@ -79,6 +80,7 @@ pub struct AppState {
     pub access: access::Access,
     /// The skill library, and what each session is reading from it.
     pub skills: skills::Skills,
+    pub roles: roles::Roles,
     /// What this deployment will accept, so `/bootstrap` can say so.
     ///
     /// A copy rather than a reference to the gate's: the gate enforces it and
@@ -240,6 +242,7 @@ pub async fn run(config: Config) -> Result<()> {
         connections,
         access: access::Access::new(db_pool.clone()),
         skills: skills::Skills::new(db_pool.clone()),
+        roles: roles::Roles::new(db_pool.clone()),
         forwards: Default::default(),
         previews: Default::default(),
         names,

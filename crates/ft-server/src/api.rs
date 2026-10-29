@@ -22,6 +22,7 @@ mod forwards;
 pub(crate) mod hosts;
 mod providers;
 mod repos;
+mod roles;
 mod secrets;
 pub(crate) mod sessions;
 mod setup;
@@ -431,6 +432,8 @@ async fn credential_on(
     // /bootstrap, which is the real answer and is always current.
     info(title = "Firetower", version = "0"),
     components(schemas(
+        crate::roles::Role,
+        crate::roles::NewRole,
         crate::db::Bucket,
         crate::db::Dimension,
         crate::db::Direction,
@@ -604,6 +607,8 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(skills::skill_collisions))
         .routes(routes!(skills::share_skills))
         .routes(routes!(skills::set_repo_defaults))
+        .routes(routes!(roles::list_roles, roles::create_role))
+        .routes(routes!(roles::update_role, roles::delete_role))
         .routes(routes!(secrets::list_secrets))
         .routes(routes!(secrets::replace_secret, secrets::remove_secret))
         .routes(routes!(secrets::reveal_secret))

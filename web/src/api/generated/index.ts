@@ -11,6 +11,7 @@ export * from './meta/meta';
 export * from './organization/organization';
 export * from './providers/providers';
 export * from './repos/repos';
+export * from './roles/roles';
 export * from './secrets/secrets';
 export * from './sessions/sessions';
 export * from './setup/setup';
