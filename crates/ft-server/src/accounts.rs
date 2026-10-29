@@ -596,6 +596,19 @@ impl Accounts {
         .await
         .context("removing their credentials")?;
 
+        // Their artifacts, the same way and for the same reason: what is at
+        // `u/<them>/…` goes with them. One they filed into a directory is the
+        // team's now and stays — `owner_id` goes null rather than cascading,
+        // and the path is what says whose it is.
+        sqlx::query(
+            "DELETE FROM artifacts
+              WHERE path <@ ('u.' || (SELECT slug FROM principals WHERE id = $1))::ltree",
+        )
+        .bind(id.as_str())
+        .execute(&mut **tx)
+        .await
+        .context("removing the artifacts that were theirs")?;
+
         sqlx::query("DELETE FROM users WHERE id = $1")
             .bind(id.as_str())
             .execute(&mut **tx)
@@ -1148,6 +1161,94 @@ mod tests {
             .iter()
             .all(|h| h.path.as_str() != "u/ana/fire_01"));
         drop(admin);
+    }
+
+    /// An artifact handed to a team is the team's. Deleting its author used to
+    /// take it anyway — `owner_id` cascaded from before artifacts had a path —
+    /// while the one still at their own root was never shown on the screen that
+    /// decides what goes with them.
+    #[tokio::test]
+    async fn an_artifact_filed_with_a_team_outlives_its_author() {
+        let (db, admin) = Db::open_for_test_owned().await.unwrap();
+        let accounts = Accounts::new(db.pool().clone());
+        let access = crate::access::Access::new(db.pool().clone());
+        let vault =
+            crate::vault::Vault::new(db.pool().clone(), crate::vault::crypto::RootKey::generate());
+        let org = OrgId::from_stored(db.org().await.unwrap());
+        let admin = UserId::from_stored(admin);
+        let ana = accounts
+            .create_user(&org, "ana", "ana@example.test", "member")
+            .await
+            .unwrap()
+            .0
+            .id;
+
+        let page = |body: &str| {
+            vec![(
+                "index.html".to_string(),
+                "text/html".to_string(),
+                body.as_bytes().to_vec(),
+            )]
+        };
+        let (shared, _) = db
+            .publish_artifact(
+                ana.as_str(),
+                org.as_str(),
+                "pricing",
+                "Pricing",
+                "index.html",
+                &page("<h1>for the team</h1>"),
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        let (draft, _) = db
+            .publish_artifact(
+                ana.as_str(),
+                org.as_str(),
+                "draft",
+                "Draft",
+                "index.html",
+                &page("<h1>still mine</h1>"),
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+
+        let shelf = access
+            .create_directory(&org, "Shelf", &admin, &[])
+            .await
+            .unwrap();
+        access
+            .transfer(
+                &vault,
+                crate::access::FiledKind::Artifact,
+                shared.as_str(),
+                &ft_core::ResourcePath::in_directory(&shelf.slug, "pricing"),
+                "admin",
+            )
+            .await
+            .unwrap();
+
+        // The screen that decides what goes with her names the one still at
+        // her root, and only that one.
+        let owns = access.reach(ana.as_str()).await.unwrap().owns;
+        assert_eq!(owns.len(), 1, "{owns:?}");
+        assert_eq!(owns[0].kind, crate::access::FiledKind::Artifact);
+        assert_eq!(owns[0].id, draft.as_str());
+
+        accounts.delete_user(&ana).await.unwrap();
+
+        // The team's copy is still served; hers went with her.
+        assert!(db.artifact_current(&shared).await.unwrap().is_some());
+        assert!(db.artifact_current(&draft).await.unwrap().is_none());
+        assert_eq!(
+            access.filed_in(&shelf.slug).await.unwrap().len(),
+            1,
+            "the directory still holds it"
+        );
     }
 
     #[test]
