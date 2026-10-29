@@ -1,12 +1,14 @@
 /**
- * Roles: the saved kinds of agent a lead can start.
+ * Profiles: the saved personas any agent can run — as a workspace's lead, or
+ * as a teammate a lead hands work to. "Profiles" to the person; `role` on the
+ * wire, where renaming would be churn for no one's benefit.
  *
- * A role is **Placed** like a skill or a machine, so sharing one is the same
- * sheet everything else uses and nothing here reimplements filing. What a role
- * is, beyond where it lives, is a handful of fields a lead reads to choose it
- * and a few the control plane applies when a spawn names it — so unlike a
- * skill, a role *does* have an editor: it is text somebody writes, not a folder
- * an agent drops.
+ * A profile is **Placed** like a skill or a machine, so sharing one is the same
+ * sheet everything else uses and nothing here reimplements filing. What a
+ * profile is, beyond where it lives, is a handful of fields it carries and a
+ * team — the other profiles it may delegate to. A profile with a team leads; a
+ * profile without one is a worker. Same object either way; the team is the only
+ * thing that makes one a manager.
  */
 import type { ReactNode } from "react";
 import { useState } from "react";
@@ -14,12 +16,15 @@ import {
   Check,
   ChevronDown,
   ChevronLeft,
+  CornerUpRight,
   GitBranch,
   GitBranchPlus,
   Plus,
   Sparkles,
   Trash2,
+  Users,
   UsersRound,
+  X,
   type LucideIcon,
 } from "lucide-react";
 import { Rows, Section } from "~/ui/config/bits";
@@ -48,7 +53,7 @@ const PLACEMENTS: { value: string; icon: LucideIcon; label: string; note: string
   { value: "new", icon: GitBranchPlus, label: "Its own workspace", note: "A fresh branch off the default." },
 ];
 
-/** An empty role, for a new one. Placement and agent start open. */
+/** An empty profile, for a new one. Placement and agent start open, no team. */
 const BLANK: NewRole = {
   name: "",
   does: "",
@@ -57,6 +62,7 @@ const BLANK: NewRole = {
   placement: "lead",
   agent: null,
   instructions: "",
+  members: [],
 };
 
 export function Roles() {
@@ -71,24 +77,24 @@ export function Roles() {
   );
 
   if (editing) {
-    return <Editor state={editing} onClose={() => setEditing(null)} />;
+    return <Editor state={editing} all={rows.data} onClose={() => setEditing(null)} />;
   }
 
   return (
     <Section
-      title="Subagents"
-      note="A saved kind of agent a lead can start by name — a developer, a reviewer, a QA. Each carries what it does, when to use it, where it runs, and its instructions."
+      title="Profiles"
+      note="A saved persona any agent can run — a lead, a developer, a reviewer, a QA. Each carries what it does, where it runs, its instructions, and the team it may hand work to."
       action={
         <button
           onClick={() => setEditing({ draft: { ...BLANK } })}
           className="control border border-line bg-raise text-ui text-text hover:border-dim hover:text-bone"
         >
           <Plus className="h-3.5 w-3.5" strokeWidth={2} />
-          New subagent
+          New profile
         </button>
       }
     >
-      <Rows feed={rows} empty="No subagents yet. Make one, and a lead can start it by name.">
+      <Rows feed={rows} empty="No profiles yet. Make one, and you can start a workspace as it or a lead can delegate to it.">
         {rows.data.map((role) => (
           <RoleRow
             key={role.id}
@@ -110,6 +116,7 @@ function toDraft(r: Role): NewRole {
     placement: r.placement,
     agent: r.agent ?? null,
     instructions: r.instructions,
+    members: r.members.map((m) => m.id),
   };
 }
 
@@ -136,6 +143,12 @@ function RoleRow({ role, onOpen }: { role: Role; onOpen: () => void }) {
         </div>
         <p className="mt-0.5 truncate text-meta text-dim">{role.does}</p>
         <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+          {role.canDelegate && (
+            <span className="inline-flex items-center gap-1 rounded bg-sage-tint px-1.5 py-0.5 text-micro text-sage">
+              <Users className="h-3 w-3" strokeWidth={1.75} />
+              leads {role.members.length}
+            </span>
+          )}
           <Chip>{place}</Chip>
           {agent && (
             <Chip>
@@ -160,9 +173,11 @@ function Chip({ children }: { children: ReactNode }) {
 
 function Editor({
   state,
+  all,
   onClose,
 }: {
   state: { id?: string; path?: string; draft: NewRole };
+  all: Role[];
   onClose: () => void;
 }) {
   const [draft, setDraft] = useState<NewRole>(state.draft);
@@ -171,6 +186,10 @@ function Editor({
   const cache = useQueryClient();
   const confirm = useConfirm();
   const existing = !!state.id;
+
+  // The profile as the server last read it — for the inverse "reports to" edge,
+  // which is a view of someone else's team rather than something edited here.
+  const current = state.id ? all.find((r) => r.id === state.id) : undefined;
 
   // The agents to pin to are the ones Firetower can actually drive, read from
   // the server rather than listed here — so a fourth or a tenth agent turns up
@@ -220,8 +239,8 @@ function Editor({
     if (!state.id) return;
     const ok = await confirm({
       title: `Delete "${draft.name}"?`,
-      body: "Leads can no longer start this subagent. Children already running are untouched.",
-      action: "Delete subagent",
+      body: "You can no longer start a workspace as it, and leads lose it from their teams. Agents already running are untouched.",
+      action: "Delete profile",
       tone: "danger",
     });
     if (!ok) return;
@@ -243,11 +262,11 @@ function Editor({
         className="flex items-center gap-1.5 px-2.5 py-2.5 text-ui text-dim transition-colors hover:text-bone"
       >
         <ChevronLeft className="h-3.5 w-3.5" strokeWidth={2} />
-        Subagents
+        Profiles
       </button>
 
       <div className="space-y-4 px-2.5">
-        <Field label="Name" hint="What a lead names to start it — e.g. reviewer.">
+        <Field label="Name" hint="What you start it as, and what a lead names to delegate to it — e.g. reviewer.">
           <input
             value={draft.name}
             onChange={(e) => set("name", e.target.value)}
@@ -313,7 +332,35 @@ function Editor({
           />
         </Group>
 
-        <Field label="Instructions" hint="Composed into the child's prompt. Markdown; the agent reads all of it.">
+        <Group
+          label="Team"
+          hint="The profiles it can hand work to. Adding any makes this a lead that may delegate — to these, and one-off tasks. An empty team is a worker that does the job and reports back."
+        >
+          <TeamField
+            all={all}
+            selfId={state.id}
+            memberIds={draft.members ?? []}
+            onChange={(ids) => set("members", ids)}
+          />
+        </Group>
+
+        {current && current.managedBy.length > 0 && (
+          <Group label="Reports to" hint="Profiles that have this one on their team. Set from their editor, not here.">
+            <div className="flex flex-wrap gap-1.5">
+              {current.managedBy.map((m) => (
+                <span
+                  key={m.id}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-line bg-panel px-2.5 py-1.5 text-meta text-text"
+                >
+                  <CornerUpRight className="h-3.5 w-3.5 text-mute" strokeWidth={1.75} />
+                  {m.name}
+                </span>
+              ))}
+            </div>
+          </Group>
+        )}
+
+        <Field label="Instructions" hint="Composed into its prompt. Markdown; the agent reads all of it.">
           <textarea
             value={draft.instructions}
             onChange={(e) => set("instructions", e.target.value)}
@@ -324,7 +371,7 @@ function Editor({
         </Field>
 
         {existing && (
-          <Field label="Who can use it" hint="A subagent in a directory can be used by anyone who can reach it.">
+          <Field label="Who can use it" hint="A profile in a directory can be used by anyone who can reach it.">
             <WhoCanAccess kind="role" id={state.id!} path={state.path} look="chip" />
           </Field>
         )}
@@ -341,7 +388,7 @@ function Editor({
             disabled={!valid || busy}
             className="control border border-sage-deep bg-sage-tint font-medium text-sage hover:bg-sage-deep/40 disabled:border-line disabled:bg-raise disabled:text-mute"
           >
-            {existing ? "Save changes" : "Create subagent"}
+            {existing ? "Save changes" : "Create profile"}
           </button>
           <button
             onClick={onClose}
@@ -404,6 +451,138 @@ function Group({
       <span className="text-meta font-medium text-dim">{label}</span>
       {children}
       {hint && <span className="text-micro text-mute">{hint}</span>}
+    </div>
+  );
+}
+
+/**
+ * A profile's team: the list of teammates it may hand work to.
+ *
+ * Edited here as a set — add from the menu, remove with the ×, the whole list
+ * is what gets saved. A gate line reads back what the team means, because the
+ * fact that an empty team is a worker and a non-empty one is a lead is the
+ * least obvious thing on the screen and the most important.
+ */
+function TeamField({
+  all,
+  selfId,
+  memberIds,
+  onChange,
+}: {
+  all: Role[];
+  selfId?: string;
+  memberIds: string[];
+  onChange: (ids: string[]) => void;
+}) {
+  const [open, setOpen] = useState<HTMLElement | null>(null);
+  const byId = new Map(all.map((r) => [r.id, r]));
+  const members = memberIds.map((id) => byId.get(id)).filter(Boolean) as Role[];
+  const candidates = all.filter((r) => r.id !== selfId && !memberIds.includes(r.id));
+
+  const mark = (r: Role) =>
+    r.agent ? (
+      <AgentMark agent={r.agent as Agent} size={14} className="text-dim" />
+    ) : (
+      <UsersRound className="h-3.5 w-3.5 text-mute" strokeWidth={1.75} />
+    );
+
+  return (
+    <div className="space-y-1.5">
+      {members.map((r) => (
+        <div
+          key={r.id}
+          className="flex items-center gap-2.5 rounded-lg border border-line bg-panel px-3 py-2.5"
+        >
+          <span className="shrink-0">{mark(r)}</span>
+          <span className="min-w-0 flex-1 truncate">
+            <span className="text-ui text-bone">{r.name}</span>
+            {r.does && <span className="text-meta text-mute"> · {r.does}</span>}
+          </span>
+          {r.canDelegate && (
+            <span className="shrink-0 rounded bg-sage-tint px-1.5 py-0.5 text-micro text-sage">
+              leads {r.members.length}
+            </span>
+          )}
+          <button
+            type="button"
+            aria-label={`Remove ${r.name}`}
+            onClick={() => onChange(memberIds.filter((id) => id !== r.id))}
+            className="shrink-0 text-mute transition-colors hover:text-brick"
+          >
+            <X className="h-3.5 w-3.5" strokeWidth={2} />
+          </button>
+        </div>
+      ))}
+
+      {candidates.length > 0 ? (
+        <>
+          <button
+            type="button"
+            onClick={(e) => setOpen(open ? null : e.currentTarget)}
+            className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-line bg-raise px-3 py-2.5 text-ui text-text transition-colors hover:border-dim hover:text-bone"
+          >
+            <Plus className="h-4 w-4" strokeWidth={1.75} />
+            Add a teammate
+          </button>
+          {open && (
+            <Pop anchor={open} onClose={() => setOpen(null)} width={open.offsetWidth}>
+              <div role="listbox" className="max-h-72 overflow-y-auto py-1">
+                {candidates.map((r) => (
+                  <button
+                    key={r.id}
+                    type="button"
+                    role="option"
+                    aria-selected={false}
+                    onClick={() => {
+                      onChange([...memberIds, r.id]);
+                      setOpen(null);
+                    }}
+                    className="flex w-full items-center gap-2.5 px-3 py-2 text-left hover:bg-raise"
+                  >
+                    <span className="shrink-0">{mark(r)}</span>
+                    <span className="min-w-0 flex-1 truncate">
+                      <span className="text-ui text-bone">{r.name}</span>
+                      {r.does && <span className="text-meta text-mute"> · {r.does}</span>}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </Pop>
+          )}
+        </>
+      ) : (
+        members.length === 0 && (
+          <p className="rounded-lg border border-dashed border-line bg-raise px-3 py-2.5 text-center text-meta text-mute">
+            No other profiles yet to add. Make one, and it can join a team here.
+          </p>
+        )
+      )}
+
+      <div
+        className={`flex items-center gap-2.5 rounded-lg border px-3 py-2.5 ${
+          members.length > 0
+            ? "border-sage-deep bg-sage-tint"
+            : "border-line bg-raise"
+        }`}
+      >
+        <Users
+          className={`h-4 w-4 shrink-0 ${members.length > 0 ? "text-sage" : "text-mute"}`}
+          strokeWidth={1.75}
+        />
+        <span className="text-meta text-text">
+          {members.length > 0 ? (
+            <>
+              <b className="font-medium text-sage">Leads a team of {members.length}.</b> When this
+              profile starts a workspace it can delegate — to its team, and one-off tasks.
+            </>
+          ) : (
+            <>
+              <b className="font-medium text-dim">A worker.</b> With no team it does the task and
+              reports back; it can't delegate.
+            </>
+          )}
+        </span>
+      </div>
     </div>
   );
 }

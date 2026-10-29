@@ -131,6 +131,7 @@ export * from './listFilesParams.ts';
 export * from './listSessionsParams.ts';
 export * from './listTasksParams.ts';
 export * from './match.ts';
+export * from './mate.ts';
 export * from './me.ts';
 export * from './mention.ts';
 export * from './mentioned.ts';

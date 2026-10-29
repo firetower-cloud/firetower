@@ -14,6 +14,11 @@ export interface NewRole {
   agent?: string | null;
   does: string;
   instructions?: string;
+  /**
+     * The team, as a list of profile ids. Replaces the whole set on save —
+     * the editor sends what the team should now be, not a diff.
+     */
+  members?: string[];
   name: string;
   notWhen?: string;
   placement?: string;

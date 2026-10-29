@@ -37,15 +37,17 @@ export const PANES: { group: string; items: { at: string; label: string }[] }[] 
   {
     // What shapes how an agent runs, rather than where. Firetower is a harness
     // for coding agents; this is the part of it you configure — the agents it
-    // can run, the subagents they can spawn, and the skills they can read.
+    // can run, the profiles they take on and delegate to, and the skills they
+    // can read.
     group: "Harness",
     items: [
       // The connected accounts — Claude Code, Codex, Kimi — an agent runs on.
       { at: "agents", label: "Agents" },
-      // The saved kinds a lead can spawn — developer, reviewer, QA. "Subagents"
-      // to the person, because a lead spawns them as sub-agents; `roles` on the
-      // wire, because the API and the spawn tool still say role.
-      { at: "roles", label: "Subagents" },
+      // The saved personas any agent can run — a lead, a developer, a reviewer,
+      // a QA — and the teams between them. "Profiles" to the person, because one
+      // is worn by a workspace's own agent as much as by a delegate; `roles` on
+      // the wire, because the API and the spawn tool still say role.
+      { at: "roles", label: "Profiles" },
       { at: "skills", label: "Skills" },
     ],
   },

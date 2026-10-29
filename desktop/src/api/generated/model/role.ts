@@ -5,6 +5,7 @@
  * The Firetower control plane: API, scheduling, and worker transports.
  * OpenAPI spec version: 0
  */
+import type { Mate } from './mate.ts';
 
 /**
  * A role, as the interface and the spawn tool read it.
@@ -15,16 +16,29 @@ export interface Role {
      * @nullable
      */
   agent?: string | null;
+  /**
+     * Whether it leads a team at all. `!members.is_empty()`, named so the
+     * interface and the control plane agree on what "can delegate" means.
+     */
+  canDelegate: boolean;
   createdAt: string;
   /** One line: what this kind of agent does. */
   does: string;
   id: string;
   /** Composed into the child's instructions. */
   instructions: string;
+  /**
+     * The inverse edge: the profiles that have this one on their team. What
+     * the "reports to" line reads, and why the field is not editable here —
+     * it is a view of someone else's team.
+     */
+  managedBy: Mate[];
   /** Whether they may move it into a directory, or out of one. */
   mayShare: boolean;
   /** Whether the person asking may edit or delete it. */
   mayWrite: boolean;
+  /** Its team — the profiles it may hand work to. Empty for a worker. */
+  members: Mate[];
   name: string;
   /** When it should not — the line that says "you can do this yourself". */
   notWhen: string;

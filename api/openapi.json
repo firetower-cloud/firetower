@@ -11571,6 +11571,33 @@
           }
         }
       },
+      "Mate": {
+        "type": "object",
+        "description": "One profile as it appears on another's team — the little a row needs to show\na teammate or a manager without reading the whole profile.",
+        "required": [
+          "id",
+          "name",
+          "does"
+        ],
+        "properties": {
+          "agent": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Which agent it pins, if any — for the mark the row draws."
+          },
+          "does": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
       "Me": {
         "type": "object",
         "description": "Who the caller is, and what they belong to.",
@@ -12011,6 +12038,13 @@
           },
           "instructions": {
             "type": "string"
+          },
+          "members": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The team, as a list of profile ids. Replaces the whole set on save —\nthe editor sends what the team should now be, not a diff."
           },
           "name": {
             "type": "string"
@@ -13484,6 +13518,9 @@
           "notWhen",
           "placement",
           "instructions",
+          "members",
+          "managedBy",
+          "canDelegate",
           "mayWrite",
           "mayShare",
           "createdAt",
@@ -13496,6 +13533,10 @@
               "null"
             ],
             "description": "Which agent runs it, or absent to let the lead choose."
+          },
+          "canDelegate": {
+            "type": "boolean",
+            "description": "Whether it leads a team at all. `!members.is_empty()`, named so the\ninterface and the control plane agree on what \"can delegate\" means."
           },
           "createdAt": {
             "type": "string",
@@ -13512,6 +13553,13 @@
             "type": "string",
             "description": "Composed into the child's instructions."
           },
+          "managedBy": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Mate"
+            },
+            "description": "The inverse edge: the profiles that have this one on their team. What\nthe \"reports to\" line reads, and why the field is not editable here —\nit is a view of someone else's team."
+          },
           "mayShare": {
             "type": "boolean",
             "description": "Whether they may move it into a directory, or out of one."
@@ -13519,6 +13567,13 @@
           "mayWrite": {
             "type": "boolean",
             "description": "Whether the person asking may edit or delete it."
+          },
+          "members": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Mate"
+            },
+            "description": "Its team — the profiles it may hand work to. Empty for a worker."
           },
           "name": {
             "type": "string"

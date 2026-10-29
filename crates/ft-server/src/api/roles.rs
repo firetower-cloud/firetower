@@ -48,6 +48,7 @@ pub(super) async fn create_role(
 ) -> ApiResult<(StatusCode, Json<Role>)> {
     let me = whoever(&principal)?;
     crate::roles::check(&new).map_err(refused)?;
+    state.roles.vet(me.id.as_str(), None, &new).await.map_err(refused)?;
 
     let id = state
         .roles
@@ -75,6 +76,11 @@ pub(super) async fn update_role(
 ) -> ApiResult<Json<Role>> {
     let me = whoever(&principal)?;
     crate::roles::check(&new).map_err(refused)?;
+    state
+        .roles
+        .vet(me.id.as_str(), Some(&id), &new)
+        .await
+        .map_err(refused)?;
 
     // Absent rather than refused when they may not change it, for the reason
     // every other read gives: a role you cannot reach is one you are not told
