@@ -216,7 +216,7 @@ async fn answer(
                             },
                             "role": {
                                 "type": "string",
-                                "description": "A saved kind of agent to start, by name — e.g. \"reviewer\". It supplies the agent, placement, what it hands back, and its instructions; anything you also pass here wins. Naming one that does not exist is refused with the ones that do. Omit for an ad-hoc child.",
+                                "description": "A saved subagent to start, by name — e.g. \"reviewer\" or \"developer\" (what the person defines on the Subagents screen). It supplies the agent, placement, what it hands back, and its instructions; anything you also pass here wins. Naming one that does not exist is refused with the ones that do. Omit for an ad-hoc child.",
                             },
                             "placement": {
                                 "type": "string",
@@ -226,7 +226,7 @@ async fn answer(
                             "agent": {
                                 "type": "string",
                                 "enum": ["ClaudeCode", "Codex", "KimiCode"],
-                                "description": "Which agent runs it. Omit for the same kind as you.",
+                                "description": "Which agent runs it — Claude Code, Codex or Kimi. NOT a saved subagent — use `role` for that. Omit for the same as you.",
                             },
                             "name": {
                                 "type": "string",

@@ -34,9 +34,20 @@ export const PANES: { group: string; items: { at: string; label: string }[] }[] 
     group: "Compute",
     items: [
       { at: "machines", label: "Machines" },
+      // The connected accounts — Claude Code, Codex, Kimi — an agent runs on.
       { at: "agents", label: "Agents" },
+    ],
+  },
+  {
+    // What shapes how an agent runs, rather than where. Firetower is a harness
+    // for coding agents; this is the part of it you configure.
+    group: "Harness",
+    items: [
       { at: "skills", label: "Skills" },
-      { at: "roles", label: "Roles" },
+      // The saved kinds a lead can spawn — developer, reviewer, QA. "Subagents"
+      // to the person, because a lead spawns them as sub-agents; `roles` on the
+      // wire, because the API and the spawn tool still say role.
+      { at: "roles", label: "Subagents" },
     ],
   },
   {

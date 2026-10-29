@@ -61,19 +61,19 @@ export function Roles() {
 
   return (
     <Section
-      title="Roles"
-      note="A saved kind of agent a lead can start by name. Each carries what it does, when to use it, where it runs, what it hands back, and its instructions."
+      title="Subagents"
+      note="A saved kind of agent a lead can start by name — a developer, a reviewer, a QA. Each carries what it does, when to use it, where it runs, what it hands back, and its instructions."
       action={
         <button
           onClick={() => setEditing({ draft: { ...BLANK } })}
           className="control border border-line bg-raise text-ui text-text hover:border-dim hover:text-bone"
         >
           <Plus className="h-3.5 w-3.5" strokeWidth={2} />
-          New role
+          New subagent
         </button>
       }
     >
-      <Rows feed={rows} empty="No roles yet. Make one, and a lead can start it by name.">
+      <Rows feed={rows} empty="No subagents yet. Make one, and a lead can start it by name.">
         {rows.data.map((role) => (
           <RoleRow
             key={role.id}
@@ -170,8 +170,8 @@ function Editor({
     if (!state.id) return;
     const ok = await confirm({
       title: `Delete "${draft.name}"?`,
-      body: "Leads can no longer start this role. Children already running are untouched.",
-      action: "Delete role",
+      body: "Leads can no longer start this subagent. Children already running are untouched.",
+      action: "Delete subagent",
       tone: "danger",
     });
     if (!ok) return;
@@ -193,7 +193,7 @@ function Editor({
         className="flex items-center gap-1.5 px-2.5 py-2.5 text-ui text-dim transition-colors hover:text-bone"
       >
         <ChevronLeft className="h-3.5 w-3.5" strokeWidth={2} />
-        Roles
+        Subagents
       </button>
 
       <div className="space-y-4 px-2.5">
@@ -293,7 +293,7 @@ function Editor({
         </Field>
 
         {existing && (
-          <Field label="Who can use it" hint="A role in a directory can be used by anyone who can reach it.">
+          <Field label="Who can use it" hint="A subagent in a directory can be used by anyone who can reach it.">
             <WhoCanAccess kind="role" id={state.id!} path={state.path} look="chip" />
           </Field>
         )}
@@ -310,7 +310,7 @@ function Editor({
             disabled={!valid || busy}
             className="control border border-sage-deep bg-sage-tint font-medium text-sage hover:bg-sage-deep/40 disabled:border-line disabled:bg-raise disabled:text-mute"
           >
-            {existing ? "Save changes" : "Create role"}
+            {existing ? "Save changes" : "Create subagent"}
           </button>
           <button
             onClick={onClose}

@@ -1072,9 +1072,10 @@ A child knows nothing of this conversation: give it everything in `goal` and
 `context`. Its result arrives here as a message when it hands back, between
 your turns, so dispatch, do what does not depend on it, then end your turn.
 
-To start a saved kind of agent, pass `role: \"<name>\"` to `spawn` — a role
-supplies the agent, where it runs, what it hands back, and its instructions.
-If you name one that does not exist, the refusal lists the ones that do.
+To start a saved subagent, pass `role: \"<name>\"` to `spawn` — a saved
+subagent (what the person defines on the Subagents screen) supplies the agent,
+where it runs, what it hands back, and its instructions. If you name one that
+does not exist, the refusal lists the ones that do.
 
 If another session started *you*, you cannot spawn, you cannot ask the person,
 and what you say when you finish goes to that session.

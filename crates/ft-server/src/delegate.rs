@@ -145,11 +145,12 @@ async fn spawn(state: &AppState, request: &AgentRequest) -> Result<String> {
                     .map(|r| r.name)
                     .collect();
                 bail!(
-                    "no role called \"{wanted}\". {}",
+                    "no subagent called \"{wanted}\". {}",
                     if names.is_empty() {
-                        "No roles exist yet — make one under Configuration → Roles.".to_string()
+                        "No subagents are defined yet — make one under Configuration → Subagents."
+                            .to_string()
                     } else {
-                        format!("Roles you can use: {}.", names.join(", "))
+                        format!("Subagents you can use: {}.", names.join(", "))
                     }
                 );
             }
@@ -276,7 +277,7 @@ fn brief(
 
     if let Some(role) = role {
         text.push_str(&format!(
-            "\n\nYou are acting as the \"{}\" role: {}",
+            "\n\nYou are acting as the \"{}\" subagent: {}",
             role.name, role.does
         ));
         // In this first cut the tool policy is said, not enforced. An agent
@@ -564,7 +565,7 @@ mod tests {
             updated_at: chrono::Utc::now(),
         };
         let text = brief(&lead, "Review it", None, Some(&role));
-        assert!(text.contains("acting as the \"reviewer\" role"));
+        assert!(text.contains("acting as the \"reviewer\" subagent"));
         assert!(text.contains("read-only"));
         assert!(text.contains("Report findings as path:line."));
 
