@@ -30,6 +30,7 @@ import { GitHosts } from "~/ui/config/GitHosts";
 import { Trackers } from "~/ui/config/Trackers";
 import { Agents } from "~/ui/config/Agents";
 import { Skills } from "~/ui/config/Skills";
+import { Roles } from "~/ui/config/Roles";
 import { Secrets } from "~/ui/config/Secrets";
 import { People } from "~/ui/config/People";
 import { Teams } from "~/ui/config/Teams";
@@ -62,6 +63,8 @@ function Pane({ at, backend, onForgot }: { at: string; backend: Backend; onForgo
       return <Agents live />;
     case "skills":
       return <Skills />;
+    case "roles":
+      return <Roles />;
     case "people":
       return <People backend={backend} />;
     case "teams":

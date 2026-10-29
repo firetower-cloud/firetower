@@ -36,6 +36,7 @@ export const PANES: { group: string; items: { at: string; label: string }[] }[] 
       { at: "machines", label: "Machines" },
       { at: "agents", label: "Agents" },
       { at: "skills", label: "Skills" },
+      { at: "roles", label: "Roles" },
     ],
   },
   {
