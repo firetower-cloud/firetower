@@ -540,8 +540,6 @@ mod tests {
             placement: "here".into(),
             agent: None,
             instructions: "Report findings as path:line.".into(),
-            members: Vec::new(),
-            managed_by: Vec::new(),
             can_delegate: false,
             may_write: true,
             may_share: true,

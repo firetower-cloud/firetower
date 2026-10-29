@@ -434,7 +434,6 @@ async fn credential_on(
     components(schemas(
         crate::roles::Role,
         crate::roles::NewRole,
-        crate::roles::Mate,
         crate::db::Bucket,
         crate::db::Dimension,
         crate::db::Direction,

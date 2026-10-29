@@ -12,13 +12,10 @@
 export interface NewRole {
   /** @nullable */
   agent?: string | null;
+  /** Whether it is a Manager. Defaults to an Operator. */
+  canDelegate?: boolean;
   does: string;
   instructions?: string;
-  /**
-     * The team, as a list of profile ids. Replaces the whole set on save —
-     * the editor sends what the team should now be, not a diff.
-     */
-  members?: string[];
   name: string;
   notWhen?: string;
   placement?: string;

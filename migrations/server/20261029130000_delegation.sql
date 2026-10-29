@@ -1,0 +1,13 @@
+-- Whether a profile delegates.
+--
+-- The one distinction that matters, kept as one column rather than a graph. A
+-- Manager gets the spawn tool and may hand work to any profile it can see —
+-- which profile, for what, lives in its instructions, where a sentence says
+-- what a curated list never could. An Operator does the work and reports back,
+-- and is never given the tool.
+--
+-- Bounded already: a Manager can only reach the profiles its owner can, through
+-- the same `access::filed_where` predicate everything else uses, so there is no
+-- second access system to keep. Defaults false — a new profile is an Operator
+-- until someone says otherwise.
+alter table roles add column can_delegate boolean not null default false;

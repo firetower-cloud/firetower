@@ -131,7 +131,6 @@ export * from './listFilesParams';
 export * from './listSessionsParams';
 export * from './listTasksParams';
 export * from './match';
-export * from './mate';
 export * from './me';
 export * from './mention';
 export * from './mentioned';

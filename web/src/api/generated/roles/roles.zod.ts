@@ -10,25 +10,13 @@ import * as zod from 'zod';
 
 export const ListRolesResponseItem = zod.object({
   "agent": zod.string().nullish().describe('Which agent runs it, or absent to let the lead choose.'),
-  "canDelegate": zod.boolean().describe('Whether it leads a team at all. `!members.is_empty()`, named so the\ninterface and the control plane agree on what "can delegate" means.'),
+  "canDelegate": zod.boolean().describe('A Manager (true) gets the spawn tool and may hand work to any profile it\ncan see; an Operator (false) does the work and reports back.'),
   "createdAt": zod.iso.datetime({"offset":true}),
   "does": zod.string().describe('One line: what this kind of agent does.'),
   "id": zod.string(),
   "instructions": zod.string().describe('Composed into the child\'s instructions.'),
-  "managedBy": zod.array(zod.object({
-  "agent": zod.string().nullish().describe('Which agent it pins, if any — for the mark the row draws.'),
-  "does": zod.string(),
-  "id": zod.string(),
-  "name": zod.string()
-}).describe('One profile as it appears on another\'s team — the little a row needs to show\na teammate or a manager without reading the whole profile.')).describe('The inverse edge: the profiles that have this one on their team. What\nthe "reports to" line reads, and why the field is not editable here —\nit is a view of someone else\'s team.'),
   "mayShare": zod.boolean().describe('Whether they may move it into a directory, or out of one.'),
   "mayWrite": zod.boolean().describe('Whether the person asking may edit or delete it.'),
-  "members": zod.array(zod.object({
-  "agent": zod.string().nullish().describe('Which agent it pins, if any — for the mark the row draws.'),
-  "does": zod.string(),
-  "id": zod.string(),
-  "name": zod.string()
-}).describe('One profile as it appears on another\'s team — the little a row needs to show\na teammate or a manager without reading the whole profile.')).describe('Its team — the profiles it may hand work to. Empty for a worker.'),
   "name": zod.string(),
   "notWhen": zod.string().describe('When it should not — the line that says "you can do this yourself".'),
   "path": zod.string(),
@@ -40,9 +28,9 @@ export const ListRolesResponse = zod.array(ListRolesResponseItem)
 
 export const CreateRoleBody = zod.object({
   "agent": zod.string().nullish(),
+  "canDelegate": zod.boolean().optional().describe('Whether it is a Manager. Defaults to an Operator.'),
   "does": zod.string(),
   "instructions": zod.string().optional(),
-  "members": zod.array(zod.string()).optional().describe('The team, as a list of profile ids. Replaces the whole set on save —\nthe editor sends what the team should now be, not a diff.'),
   "name": zod.string(),
   "notWhen": zod.string().optional(),
   "placement": zod.string().optional(),
@@ -51,25 +39,13 @@ export const CreateRoleBody = zod.object({
 
 export const CreateRoleResponse = zod.object({
   "agent": zod.string().nullish().describe('Which agent runs it, or absent to let the lead choose.'),
-  "canDelegate": zod.boolean().describe('Whether it leads a team at all. `!members.is_empty()`, named so the\ninterface and the control plane agree on what "can delegate" means.'),
+  "canDelegate": zod.boolean().describe('A Manager (true) gets the spawn tool and may hand work to any profile it\ncan see; an Operator (false) does the work and reports back.'),
   "createdAt": zod.iso.datetime({"offset":true}),
   "does": zod.string().describe('One line: what this kind of agent does.'),
   "id": zod.string(),
   "instructions": zod.string().describe('Composed into the child\'s instructions.'),
-  "managedBy": zod.array(zod.object({
-  "agent": zod.string().nullish().describe('Which agent it pins, if any — for the mark the row draws.'),
-  "does": zod.string(),
-  "id": zod.string(),
-  "name": zod.string()
-}).describe('One profile as it appears on another\'s team — the little a row needs to show\na teammate or a manager without reading the whole profile.')).describe('The inverse edge: the profiles that have this one on their team. What\nthe "reports to" line reads, and why the field is not editable here —\nit is a view of someone else\'s team.'),
   "mayShare": zod.boolean().describe('Whether they may move it into a directory, or out of one.'),
   "mayWrite": zod.boolean().describe('Whether the person asking may edit or delete it.'),
-  "members": zod.array(zod.object({
-  "agent": zod.string().nullish().describe('Which agent it pins, if any — for the mark the row draws.'),
-  "does": zod.string(),
-  "id": zod.string(),
-  "name": zod.string()
-}).describe('One profile as it appears on another\'s team — the little a row needs to show\na teammate or a manager without reading the whole profile.')).describe('Its team — the profiles it may hand work to. Empty for a worker.'),
   "name": zod.string(),
   "notWhen": zod.string().describe('When it should not — the line that says "you can do this yourself".'),
   "path": zod.string(),
@@ -84,9 +60,9 @@ export const UpdateRoleParams = zod.object({
 
 export const UpdateRoleBody = zod.object({
   "agent": zod.string().nullish(),
+  "canDelegate": zod.boolean().optional().describe('Whether it is a Manager. Defaults to an Operator.'),
   "does": zod.string(),
   "instructions": zod.string().optional(),
-  "members": zod.array(zod.string()).optional().describe('The team, as a list of profile ids. Replaces the whole set on save —\nthe editor sends what the team should now be, not a diff.'),
   "name": zod.string(),
   "notWhen": zod.string().optional(),
   "placement": zod.string().optional(),
@@ -95,25 +71,13 @@ export const UpdateRoleBody = zod.object({
 
 export const UpdateRoleResponse = zod.object({
   "agent": zod.string().nullish().describe('Which agent runs it, or absent to let the lead choose.'),
-  "canDelegate": zod.boolean().describe('Whether it leads a team at all. `!members.is_empty()`, named so the\ninterface and the control plane agree on what "can delegate" means.'),
+  "canDelegate": zod.boolean().describe('A Manager (true) gets the spawn tool and may hand work to any profile it\ncan see; an Operator (false) does the work and reports back.'),
   "createdAt": zod.iso.datetime({"offset":true}),
   "does": zod.string().describe('One line: what this kind of agent does.'),
   "id": zod.string(),
   "instructions": zod.string().describe('Composed into the child\'s instructions.'),
-  "managedBy": zod.array(zod.object({
-  "agent": zod.string().nullish().describe('Which agent it pins, if any — for the mark the row draws.'),
-  "does": zod.string(),
-  "id": zod.string(),
-  "name": zod.string()
-}).describe('One profile as it appears on another\'s team — the little a row needs to show\na teammate or a manager without reading the whole profile.')).describe('The inverse edge: the profiles that have this one on their team. What\nthe "reports to" line reads, and why the field is not editable here —\nit is a view of someone else\'s team.'),
   "mayShare": zod.boolean().describe('Whether they may move it into a directory, or out of one.'),
   "mayWrite": zod.boolean().describe('Whether the person asking may edit or delete it.'),
-  "members": zod.array(zod.object({
-  "agent": zod.string().nullish().describe('Which agent it pins, if any — for the mark the row draws.'),
-  "does": zod.string(),
-  "id": zod.string(),
-  "name": zod.string()
-}).describe('One profile as it appears on another\'s team — the little a row needs to show\na teammate or a manager without reading the whole profile.')).describe('Its team — the profiles it may hand work to. Empty for a worker.'),
   "name": zod.string(),
   "notWhen": zod.string().describe('When it should not — the line that says "you can do this yourself".'),
   "path": zod.string(),
