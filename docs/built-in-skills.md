@@ -171,6 +171,27 @@ borrowing the icon tile or the marketplace furniture.
 `web-artifacts-builder` and whatever house style somebody imports, and those
 belong in the library where they can change without shipping a binary.
 
+One thing that looks like taste ships in the binary anyway, because it is not
+taste: **when the page belongs to an application checked out in the
+workspace, that application's design system wins** — over the skill's own
+floor and over the theme of any richer builder. The skill carries no palette
+and no type scale of its own. It carries the rule that the application already
+has one; where to find it, in order — a style guide, the tokens, the fonts,
+the primitives, a rendered catalog; that the page as it is now goes into the
+artifact beside the proposal; and that the honest way to reuse the real
+components is to build with the repository's own toolchain and inline the
+result. Nothing in it names any particular repository. It is a procedure for
+finding whatever is there.
+
+That rule has to ship with the contract rather than wait in the library, for
+two reasons. It is true of every repository, not of one house style. And the
+richer builders ship a theme of their own — `web-artifacts-builder` scaffolds
+a shadcn kit — so a hand-off that said *their palette wins* produced, in a
+workspace with the application checked out, a prototype of one of its own
+pages in another product's clothes. The hand-off is now conditional: a
+builder's tooling always wins; its theme yields when the page is the
+application's.
+
 The description is the whole triggering mechanism, so it names what it does and
 the phrasings that should reach it, including the ones that never say
 "artifact":
@@ -179,12 +200,20 @@ the phrasings that should reach it, including the ones that never say
 name: firetower-artifacts
 description: >-
   Publish a page for somebody to look at — a mock-up, a page, a chart, a
-  report, a prototype — so it appears in the Firetower conversation, opens
-  full screen, and can be annotated. Use this whenever somebody asks to *see*
-  something rather than change the repository: "show me", "mock up", "make a
-  page", "visualise this", "build a dashboard", "create an artifact". Use it
-  even when the word artifact is never said.
+  report, a prototype, a diagram — so it appears in the Firetower
+  conversation, opens full screen, and can be annotated. Use this whenever
+  somebody asks to *see* something rather than change the repository: "show
+  me", "mock up", "make a page", "visualise this", "build a dashboard", "draw
+  the architecture", "prototype this feature", "create an artifact". Use it
+  even when the word artifact is never said, and use it before writing any
+  standalone HTML file — a page written anywhere else is not shown to anybody.
+  When the page belongs to an application checked out here, it has to look
+  like that application, and this says how.
 ```
+
+The last sentence is the one addition that costs something on every turn. It
+is there so that an agent asked to prototype a change to the application reads
+the body before reaching for a richer builder, rather than after.
 
 The body is the contract already proven in `ft_core::ARTIFACT_GUIDANCE`: the
 path, one self-contained file, an origin with no network, same name means a new
@@ -203,7 +232,10 @@ left. One line is cheap insurance against the same failure in a new costume.
   arrive by being dropped, and until that changes a browse surface is furniture.
 - **Icons per skill.** Decoration standing in for the description.
 - **An editor.** `config/Skills.tsx` says why, and nothing here changes it.
-- **Taste.** Firetower ships the contract. The design system is yours.
+- **Taste.** Firetower ships the contract. The design system is yours — and
+  when it is in the checkout, the artifact uses it rather than a builder's.
+  What stays out is any style of Firetower's own: no palette, no type scale,
+  no component kit in the skill, and nothing about any one repository.
 
 ---
 
@@ -224,15 +256,27 @@ left. One line is cheap insurance against the same failure in a new costume.
    for anybody to see it — and a contract that any skill can replace is not a
    contract.
 
-   This is why the skill itself has to separate its two halves out loud. The
+   This is why the skill itself has to separate its halves out loud. The
    **delivery** is fixed and the **craft is explicitly overridable**: another
-   artifact builder's typography, components, palette and build tooling all win,
-   so long as what it produces ends up at the path Firetower watches. The skill
-   says so in as many words, because an agent holding two sets of instructions
-   needs to know which one yields.
+   artifact builder's typography, components, palette and build tooling all win
+   for a page that stands on its own, so long as what it produces ends up at
+   the path Firetower watches. For a page of an application checked out in the
+   workspace, the builder's tooling still wins and its theme does not — §6.
+   The skill says both in as many words, because an agent holding two sets of
+   instructions needs to know which one yields.
 
 4. **The cost total is out.** Interesting, easy to read as nagging, and not
    what anybody came to this screen for. Revisit with a reason.
+
+5. **The application outranks the builder, in this skill and not a second
+   one.** Decided after the first prototypes of an application's own pages
+   came back in a kit's theme. The rule only matters when a repository is
+   checked out, and a second description in every system prompt is the wrong
+   price for it. What is specific to one repository — which client owns which
+   page, where its tokens and its screenshot tooling are — belongs to that
+   repository: in its own committed skills once the aggregation
+   `docs/skills.md` §7 describes lands, and in the library as a repository
+   default until then. Never in the binary.
 
 ---
 
