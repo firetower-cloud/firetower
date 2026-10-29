@@ -28,6 +28,22 @@ use crate::AppState;
 /// spells a tool's permission name `mcp__firetower__spawn`.
 pub const PREFIX: &str = "firetower:";
 
+/// The first line of a message relayed between a lead and a child.
+///
+/// A child's result and a lead's steer both have to arrive as a user turn —
+/// that is the only thing an agent reads as input — so in the raw transcript
+/// they look like the person typed them. This marks them as what they are, so
+/// the interface can draw them as a card from the other agent rather than as a
+/// bubble from you. `⟦ft:<kind>:<session>:<name>⟧` on its own line, stripped
+/// before display. The desktop mirrors this in `desktop/src/api/relay.ts`;
+/// keep the two in step.
+fn relay_marker(kind: &str, id: &SessionId, name: &str) -> String {
+    // The name is last and runs to the end bracket, so a name with spaces or a
+    // slash — "Hello / saluteur" — needs no escaping; only `⟧` could break it,
+    // and nothing names a session that.
+    format!("⟦ft:{kind}:{}:{}⟧", id.as_str(), name)
+}
+
 /// How many children a lead may have in flight at once.
 pub const LIVE_CHILDREN: usize = 4;
 /// How many a lead may start over its life.
@@ -266,11 +282,12 @@ async fn children(state: &AppState, request: &AgentRequest) -> Result<String> {
             if action == "steer" {
                 let message =
                     text(&request.input, "message").context("`message` is what to tell it")?;
-                // Said as the lead, and said so: a child reading its own
-                // transcript has to be able to tell its lead from the person.
+                // Said as the lead, and marked so: a child reading its own
+                // transcript — and whoever is watching it — sees a card from
+                // the lead rather than a message that looks like the person's.
                 let told = format!(
-                    "Message from your lead session \"{}\":\n\n{message}",
-                    lead.name
+                    "{}\n\n{message}",
+                    relay_marker("steer", &lead.id, &lead.name)
                 );
                 state
                     .fleet
@@ -337,8 +354,8 @@ pub fn hand_back_body(child: &Session, said: Option<&str>, note: Option<&str>) -
     };
 
     let mut body = format!(
-        "[{} handed back — child session {}]\n\n{text}",
-        child.name, child.id
+        "{}\n\n{text}",
+        relay_marker("handback", &child.id, &child.name)
     );
     let mut facts = Vec::new();
     if let Some(branch) = &child.branch {
@@ -386,12 +403,23 @@ mod tests {
             Some("Two findings."),
             None,
         );
-        assert!(
-            body.starts_with("[reviewer handed back — child session s_child]"),
-            "{body}"
-        );
+        // The marker the interface keys on to draw a sub-agent card rather
+        // than a user bubble: kind, session, name, on the first line.
+        assert!(body.starts_with("⟦ft:handback:s_child:reviewer⟧"), "{body}");
         assert!(body.contains("Two findings."));
         assert!(body.ends_with("(branch `agent/x-reviewer`)"), "{body}");
+    }
+
+    #[test]
+    fn the_relay_marker_survives_a_name_with_spaces_and_a_slash() {
+        // "Hello / saluteur" is a real child name: the marker runs the name to
+        // the closing bracket, so nothing in it needs escaping.
+        let marker = relay_marker(
+            "handback",
+            &SessionId::from_stored("s_abc"),
+            "Hello / saluteur",
+        );
+        assert_eq!(marker, "⟦ft:handback:s_abc:Hello / saluteur⟧");
     }
 
     #[test]

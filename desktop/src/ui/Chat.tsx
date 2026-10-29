@@ -26,6 +26,8 @@ import {
   Bot,
   Check,
   ChevronRight,
+  CornerDownLeft,
+  CornerUpRight,
   Copy,
   Eye,
   FileText,
@@ -50,6 +52,7 @@ import { editFrom } from "~/components/EditCard";
 import { stepLines } from "~/components/Steps";
 import { delegating, useConversation, type Asked, type Item, type Questionnaire, type Task } from "~/api/conversation";
 import { delegated, fold, mainline, summarise } from "~/api/steps";
+import { relays, type Relay } from "~/api/relay";
 import type { Artifact as ArtifactModel, Decision, Event, ItemKind, PlanStep, RequestKind, Session } from "~/api/generated/model";
 import { useAnswerRequest, useRelaunchSession, getGetSessionQueryKey, sendTurn } from "~/api/generated/sessions/sessions";
 import { asMessage, useNotes, type Note } from "~/api/notes";
@@ -647,6 +650,21 @@ function Node({
   onOpenFile,
 }: { item: Item; items: Item[]; tasks: Task[] } & Open) {
   if (item.kind === "UserMessage") {
+    /* A result a child handed back, or a steer from a lead, arrives as a user
+       turn — the only thing an agent reads as input — so without this it would
+       draw as a bubble from you. Drawn instead as a card from the other agent.
+       Usually one; a lead that was mid-turn when several children reported gets
+       them in one turn, so there can be more. */
+    const relayed = relays(item.text);
+    if (relayed.length > 0) {
+      return (
+        <>
+          {relayed.map((r, i) => (
+            <Relayed key={i} relay={r} />
+          ))}
+        </>
+      );
+    }
     /* The block the composer wrote under the message comes back out as
        chips, and the handles in the sentence are drawn as handles. The text
        is still what the agent read; nothing here is a second copy of it. */
@@ -1073,6 +1091,55 @@ function Delegated({ item, items, tasks, onOpenDiff, onOpenFile }: { item: Item;
           )}
           {rows.length === 0 && !task?.summary && <p className="text-meta text-mute">Nothing back yet.</p>}
         </div>
+      )}
+    </li>
+  );
+}
+
+/**
+ * A message from another agent, drawn so it is not mistaken for yours.
+ *
+ * A child's hand-back or a lead's steer reaches the agent as a user turn, so
+ * the transcript would otherwise draw it as a bubble from you — which is a lie
+ * about who spoke. Left of the thread, with the other session named and a line
+ * down the side in the tone its direction carries: sage for a child reporting
+ * back, slate for a lead steering. Collapsed to a line by default — the summary
+ * is the agent's to read, and yours to open when you want it.
+ */
+function Relayed({ relay }: { relay: Relay }) {
+  const [open, setOpen] = useState(false);
+  const back = relay.kind === "handback";
+  const label = back ? "handed back" : "steered";
+  const preview = relay.body.split("\n").find((l) => l.trim())?.trim() ?? "";
+  const rendered = useMemo(() => <Markdown>{relay.body}</Markdown>, [relay.body]);
+
+  return (
+    <li className={`border-l-2 pl-3 ${back ? "border-sage-deep" : "border-slate-deep"}`}>
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={() => setOpen(!open)}
+        onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && setOpen(!open)}
+        className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 hover:bg-raise/60"
+      >
+        <ChevronRight className={`h-3.5 w-3.5 shrink-0 text-mute transition-transform duration-150 ${open ? "rotate-90" : ""}`} strokeWidth={1.75} />
+        <Icon of={back ? CornerDownLeft : CornerUpRight} size={14} className={back ? "text-sage" : "text-slate"} />
+        {/* The other session's name, a way into it. A button, not nested in the
+            row's button — this is a div with a click, so that is allowed. */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            navigate(`/sessions/${relay.id}`);
+          }}
+          className="shrink-0 font-mono text-code text-bone hover:underline"
+        >
+          {relay.name}
+        </button>
+        <span className="shrink-0 text-meta text-mute">{label}</span>
+        {!open && preview && <span className="min-w-0 flex-1 truncate text-meta text-dim">{preview}</span>}
+      </div>
+      {open && (
+        <div className="prose-desk mt-1 pl-1">{rendered}</div>
       )}
     </li>
   );
