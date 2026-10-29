@@ -6,7 +6,7 @@
  * the address having ended.
  */
 import { describe, expect, it } from "vitest";
-import { childrenOf, childrenWorking, doing, group, isChild, placeOf } from "./workspaces";
+import { childrenOf, childrenWorking, doing, group, isChild, placeOf, rowLabel } from "./workspaces";
 import type { Session } from "~/api/generated/model";
 
 const run = (id: string, workspaceId: string, status = "Ready"): Session =>
@@ -113,5 +113,27 @@ describe("childrenOf", () => {
     // still must not count.
     const lead = placeOf(places(all), "s_1")!;
     expect(childrenOf(lead, places(all))).toBe(3);
+  });
+});
+
+describe("rowLabel", () => {
+  const child = (id: string, parentId: string, name: string, workspaceId = id): Session =>
+    ({ ...run(id, workspaceId), parentId, name }) as unknown as Session;
+
+  it("drops the lead prefix when the lead is shown above it", () => {
+    const lead = { ...run("s_1", "s_1"), name: "Main session" } as unknown as Session;
+    const kid = child("s_2", "s_1", "Main session / hello-fr");
+    const ps = places([lead, kid]);
+    const row = ps.find((p) => p.id === "s_2")!;
+    expect(rowLabel(row, ps)).toBe("hello-fr");
+    // The lead keeps its own name.
+    expect(rowLabel(ps.find((p) => p.id === "s_1")!, ps)).toBe("Main session");
+  });
+
+  it("keeps the full name where the lead is not on the list", () => {
+    const kid = child("s_2", "s_gone", "Main session / hello-fr");
+    const ps = places([run("s_9", "s_9"), kid]);
+    const row = ps.find((p) => p.id === "s_2")!;
+    expect(rowLabel(row, ps)).toBe("Main session / hello-fr");
   });
 });

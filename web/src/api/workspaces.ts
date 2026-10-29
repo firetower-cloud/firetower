@@ -128,12 +128,30 @@ function underTheirLeads(places: Workspace[]): Workspace[] {
   return top.flatMap((place) => [place, ...(under.get(place.id) ?? [])]);
 }
 
+/** The place whose session started this one, if it is on the list. */
+function leadPlace(place: Workspace, places: Workspace[]): Workspace | undefined {
+  if (!place.leadOf) return undefined;
+  return places.find((other) => other.id !== place.id && other.runs.some((r) => r.id === place.leadOf));
+}
+
 /** Whether this place was started by a session in another place on the list. */
 export function isChild(place: Workspace, places: Workspace[]): boolean {
-  return (
-    !!place.leadOf &&
-    places.some((other) => other.id !== place.id && other.runs.some((r) => r.id === place.leadOf))
-  );
+  return !!leadPlace(place, places);
+}
+
+/**
+ * What a row is called where its lead is shown right above it.
+ *
+ * A child is named "<lead> / <what>" so it still reads on its own — in a flat
+ * list, in search, on the child's own page. Drawn nested under its lead, that
+ * prefix is said twice, so drop it and show just the part that differs. Only
+ * when the lead is actually on this list: a flat view keeps the full name,
+ * which is the only thing carrying the association there.
+ */
+export function rowLabel(place: Workspace, places: Workspace[]): string {
+  const lead = leadPlace(place, places);
+  const prefix = lead ? `${lead.name} / ` : "";
+  return prefix && place.name.startsWith(prefix) ? place.name.slice(prefix.length) : place.name;
 }
 
 /**

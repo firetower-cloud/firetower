@@ -14,7 +14,7 @@ import type { LucideIcon } from "lucide-react";
 import { AgentMark } from "~/components/AgentMark";
 import { Blocks } from "~/island/Blocks";
 import { HostMark, Icon } from "~/components/ui";
-import { childrenOf, childrenWorking, doing, group, isChild, shortRepo, type Repositories, type Workspace } from "~/api/workspaces";
+import { childrenOf, childrenWorking, doing, group, isChild, rowLabel, shortRepo, type Repositories, type Workspace } from "~/api/workspaces";
 import { beatOf, elapsed, minutesSince } from "~/api/view";
 import type { Backend } from "~/fleet";
 import { useHostOf, useSessions, useUpdatesRow } from "~/data";
@@ -260,12 +260,15 @@ function RepoTally({ places }: { places: Workspace[] }) {
 function Row({
   place,
   on,
+  label,
   child = false,
   working = 0,
   delegated = 0,
 }: {
   place: Workspace;
   on: boolean;
+  /** What to call it here: a child's own part, the lead prefix dropped. */
+  label?: string;
   child?: boolean;
   working?: number;
   /** Agents it started and has not ended; ending this place ends them too. */
@@ -315,7 +318,7 @@ function Row({
             a finished workspace drew sage and then ember, a failed one brick
             and then ember. The mark is the only thing that speaks now. */}
         <Blocks beat={beatOf(place.runs[0])} size={9} />
-        <span className={`min-w-0 flex-1 truncate text-ui ${on ? "text-bone" : "text-dim"}`}>{place.name}</span>
+        <span className={`min-w-0 flex-1 truncate text-ui ${on ? "text-bone" : "text-dim"}`}>{label ?? place.name}</span>
         <span className="shrink-0 font-mono text-micro text-mute">
           {elapsed(minutesSince(place.runs[0].createdAt))}
         </span>
@@ -397,6 +400,7 @@ function Repos({ repos, path }: { repos: Repositories; path: string }) {
               key={place.id}
               place={place}
               on={path === `/sessions/${place.id}`}
+              label={rowLabel(place, places)}
               child={isChild(place, places)}
               working={childrenWorking(place, places)}
               delegated={childrenOf(place, places)}
