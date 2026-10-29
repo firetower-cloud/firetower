@@ -8,10 +8,22 @@
  * skill, a role *does* have an editor: it is text somebody writes, not a folder
  * an agent drops.
  */
+import type { ReactNode } from "react";
 import { useState } from "react";
-import { ChevronLeft, Plus, Trash2, UsersRound } from "lucide-react";
+import {
+  Check,
+  ChevronLeft,
+  GitBranch,
+  GitBranchPlus,
+  Plus,
+  Sparkles,
+  Trash2,
+  UsersRound,
+  type LucideIcon,
+} from "lucide-react";
 import { Rows, Section } from "~/ui/config/bits";
 import { WhoCanAccess } from "~/ui/Sharing";
+import { AgentMark, AGENT_LABEL } from "~/components/AgentMark";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useListRoles,
@@ -21,14 +33,16 @@ import {
   deleteRole,
 } from "~/api/generated/roles/roles";
 import { why } from "~/data";
-import type { Role, NewRole } from "~/api/generated/model";
+import type { Agent, Role, NewRole } from "~/api/generated/model";
 import { useConfirm } from "~/ui/Confirm";
 
-const AGENTS: { value: string; label: string }[] = [
-  { value: "", label: "Let the lead choose" },
-  { value: "ClaudeCode", label: "Claude Code" },
-  { value: "Codex", label: "Codex" },
-  { value: "KimiCode", label: "Kimi Code" },
+/** The three agents a lead can be pinned to — the spawn tool's own enum. */
+const AGENT_PINS: Agent[] = ["ClaudeCode", "Codex", "KimiCode"];
+
+/** Where a child runs, as the lead reads it. */
+const PLACEMENTS: { value: string; icon: LucideIcon; title: string; note: string }[] = [
+  { value: "here", icon: GitBranch, title: "Same workspace", note: "Shares this directory and branch." },
+  { value: "new", icon: GitBranchPlus, title: "Its own workspace", note: "A fresh branch off the default." },
 ];
 
 /** An empty role, for a new one. Placement and agent start open. */
@@ -98,14 +112,13 @@ function toDraft(r: Role): NewRole {
 
 /** One role in the list: its name, what it does, and the shape of it as chips. */
 function RoleRow({ role, onOpen }: { role: Role; onOpen: () => void }) {
-  const chips = [
+  const place =
     role.placement === "here"
       ? "same workspace"
       : role.placement === "new"
         ? "new workspace"
-        : null,
-    role.agent ? role.agent : null,
-  ].filter(Boolean) as string[];
+        : "lead picks where";
+  const agent = role.agent as Agent | null;
 
   return (
     <button
@@ -119,15 +132,26 @@ function RoleRow({ role, onOpen }: { role: Role; onOpen: () => void }) {
           {!role.mayWrite && <span className="shrink-0 text-micro text-mute">shared with you</span>}
         </div>
         <p className="mt-0.5 truncate text-meta text-dim">{role.does}</p>
-        <div className="mt-1.5 flex flex-wrap gap-1.5">
-          {chips.map((c) => (
-            <span key={c} className="rounded bg-raise px-1.5 py-0.5 font-mono text-micro text-mute">
-              {c}
-            </span>
-          ))}
+        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+          <Chip>{place}</Chip>
+          {agent && (
+            <Chip>
+              <AgentMark agent={agent} size={11} className="text-dim" />
+              {AGENT_LABEL[agent]}
+            </Chip>
+          )}
         </div>
       </div>
     </button>
+  );
+}
+
+/** A small fact about a role, in the list. */
+function Chip({ children }: { children: ReactNode }) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded bg-raise px-1.5 py-0.5 text-micro text-mute">
+      {children}
+    </span>
   );
 }
 
@@ -232,37 +256,67 @@ function Editor({
           </Field>
         </div>
 
-        <Field
+        <Group
           label="Placement"
-          hint="Where the child runs. Leave it to the lead, or pin it so every spawn of this subagent runs the same way."
+          hint="Where the child runs. Leave it open, or pin it so every spawn runs the same way."
         >
-          <Seg
-            value={draft.placement ?? "lead"}
-            onChange={(v) => set("placement", v)}
-            options={[
-              ["lead", "Let the lead choose"],
-              ["here", "Same workspace"],
-              ["new", "New workspace"],
-            ]}
-          />
-        </Field>
+          <div className="space-y-1.5">
+            <Open
+              on={(draft.placement ?? "lead") === "lead"}
+              onPick={() => set("placement", "lead")}
+              note="The lead decides where each child runs."
+            />
+            <div className="grid grid-cols-2 gap-1.5">
+              {PLACEMENTS.map((p) => (
+                <Choice
+                  key={p.value}
+                  on={draft.placement === p.value}
+                  onPick={() => set("placement", p.value)}
+                  className={ROW}
+                >
+                  <p.icon
+                    className={`mt-0.5 h-4 w-4 shrink-0 ${draft.placement === p.value ? "text-slate" : "text-dim"}`}
+                    strokeWidth={1.75}
+                  />
+                  <span className="min-w-0">
+                    <span className="block text-ui text-bone">{p.title}</span>
+                    <span className="block text-micro text-mute">{p.note}</span>
+                  </span>
+                </Choice>
+              ))}
+            </div>
+          </div>
+        </Group>
 
-        <Field
+        <Group
           label="Agent"
-          hint="Which agent runs it. Leave it to the lead, or pin one so every spawn uses it."
+          hint="Which agent runs it. Leave it open, or pin one so every spawn uses it."
         >
-          <select
-            value={draft.agent ?? ""}
-            onChange={(e) => set("agent", e.target.value || null)}
-            className="w-full rounded-md border border-line bg-ground px-3 py-2 text-ui text-bone focus:border-dim focus:outline-none"
-          >
-            {AGENTS.map((a) => (
-              <option key={a.value} value={a.value}>
-                {a.label}
-              </option>
-            ))}
-          </select>
-        </Field>
+          <div className="space-y-1.5">
+            <Open
+              on={!draft.agent}
+              onPick={() => set("agent", null)}
+              note="The lead picks — its own agent, by default."
+            />
+            <div className="grid grid-cols-3 gap-1.5">
+              {AGENT_PINS.map((kind) => (
+                <Choice
+                  key={kind}
+                  on={draft.agent === kind}
+                  onPick={() => set("agent", kind)}
+                  className="flex flex-col items-center gap-2 px-3 py-3 text-center"
+                >
+                  <AgentMark
+                    agent={kind}
+                    size={22}
+                    className={draft.agent === kind ? "text-bone" : "text-dim"}
+                  />
+                  <span className="text-meta text-bone">{AGENT_LABEL[kind]}</span>
+                </Choice>
+              ))}
+            </div>
+          </div>
+        </Group>
 
         <Field label="Instructions" hint="Composed into the child's prompt. Markdown; the agent reads all of it.">
           <textarea
@@ -334,28 +388,84 @@ function Field({
   );
 }
 
-function Seg({
-  value,
-  onChange,
-  options,
+/**
+ * Field, for a group of buttons rather than one input.
+ *
+ * The same heading and hint, but a `div` with a labelled group — a `label`
+ * around a set of buttons hands every click to the first one, which is wrong
+ * for a picker where each tile is its own control.
+ */
+function Group({
+  label,
+  hint,
+  children,
 }: {
-  value: string;
-  onChange: (v: string) => void;
-  options: [string, string][];
+  label: string;
+  hint?: string;
+  children: ReactNode;
 }) {
   return (
-    <div className="flex overflow-hidden rounded-md border border-line">
-      {options.map(([v, label], i) => (
-        <button
-          key={v}
-          onClick={() => onChange(v)}
-          className={`flex-1 border-line px-2 py-2 text-micro transition-colors ${i > 0 ? "border-l" : ""} ${
-            value === v ? "bg-raise text-bone" : "text-dim hover:text-text"
-          }`}
-        >
-          {label}
-        </button>
-      ))}
+    <div role="group" aria-label={label} className="flex flex-col gap-1.5">
+      <span className="text-meta font-medium text-dim">{label}</span>
+      {children}
+      {hint && <span className="text-micro text-mute">{hint}</span>}
     </div>
+  );
+}
+
+/**
+ * A selectable tile — the field-picker all over this editor.
+ *
+ * Chosen reads in `slate`, the one hue this interface spends on "this is the
+ * selected thing"; the tick is what carries it so colour is never the only
+ * signal. Everything unchosen stays quiet, so a form of them reads as a set of
+ * options rather than a wall of borders.
+ */
+function Choice({
+  on,
+  onPick,
+  children,
+  className = "",
+}: {
+  on: boolean;
+  onPick: () => void;
+  children: ReactNode;
+  className?: string;
+}) {
+  // Only chrome and selected-state live here; the caller owns the layout, so
+  // no two class strings ever set the same flex, gap or padding property.
+  return (
+    <button
+      type="button"
+      aria-pressed={on}
+      onClick={onPick}
+      className={`relative rounded-lg border text-left transition-colors ${
+        on
+          ? "border-slate-deep bg-slate-tint"
+          : "border-line bg-panel hover:border-dim hover:bg-raise"
+      } ${className}`}
+    >
+      {children}
+      {on && <Check className="absolute right-2 top-2 h-3.5 w-3.5 text-slate" strokeWidth={2.5} />}
+    </button>
+  );
+}
+
+/** The layout a titled tile — the open default and each placement — shares. */
+const ROW = "flex items-start gap-2.5 px-3 py-2.5";
+
+/** The "let the lead choose" tile: the open default, above the pins. */
+function Open({ on, onPick, note }: { on: boolean; onPick: () => void; note: string }) {
+  return (
+    <Choice on={on} onPick={onPick} className={`${ROW} w-full`}>
+      <Sparkles
+        className={`mt-0.5 h-4 w-4 shrink-0 ${on ? "text-slate" : "text-dim"}`}
+        strokeWidth={1.75}
+      />
+      <span className="min-w-0">
+        <span className="block text-ui text-bone">Let the lead choose</span>
+        <span className="block text-micro text-mute">{note}</span>
+      </span>
+    </Choice>
   );
 }
