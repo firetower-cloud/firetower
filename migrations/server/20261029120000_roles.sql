@@ -6,10 +6,14 @@
 -- second way to answer that.
 --
 -- What a role *is*, beyond where it lives: the short lines a lead reads to
--- choose it (`does`, `use_when`, `not_when`), what it hands back, where it
--- runs, which agent runs it, and the instructions composed into the child it
--- starts. A spawn names a role and the control plane applies the rest, so the
--- lead does not describe the same kind of agent every time.
+-- choose it (`does`, `use_when`, `not_when`), where it runs, which agent runs
+-- it, and the instructions composed into the child it starts. A spawn names a
+-- role and the control plane applies the rest, so the lead does not describe
+-- the same kind of agent every time.
+--
+-- `placement` and `agent` each have a "let the lead choose" state — 'lead' and
+-- null — so a role can pin them when it must and leave them open otherwise. A
+-- pinned value is enforced: the lead's own argument does not override it.
 create table roles (
     id            text primary key,
     org_id        text not null references organizations(id) on delete cascade,
@@ -33,17 +37,15 @@ create table roles (
     use_when      text not null default '',
     not_when      text not null default '',
 
-    -- What a child started with this role hands back: 'summary' | 'branch' | 'pr'.
-    hands_back    text not null default 'summary',
-    -- Where it runs: 'here' (the lead's workspace) | 'new' (its own).
-    placement     text not null default 'here',
-    -- Which agent runs it, or null to inherit the lead's. 'ClaudeCode' | 'Codex' | 'KimiCode'.
+    -- Where it runs: 'lead' (let the lead choose), 'here' (the lead's
+    -- workspace), or 'new' (its own). 'lead' is the open default.
+    placement     text not null default 'lead',
+    -- Which agent runs it: null lets the lead choose (defaulting to the lead's
+    -- own), or one of 'ClaudeCode' | 'Codex' | 'KimiCode' to pin it.
     agent         text,
-    -- The tool policy: 'full' | 'read-only'. In this first cut it is expressed
-    -- in the composed instructions rather than enforced at the kernel; a column
-    -- so that enforcement, when it lands, has somewhere to read it from.
-    tools         text not null default 'full',
-    -- Composed into the child's AGENTS.md and prompt. Markdown, the agent's to read.
+    -- Composed into the child's AGENTS.md and prompt. Markdown, the agent's to
+    -- read. A read-only or hand-back-a-PR intent lives here, in words, rather
+    -- than as a field that looks enforced and is not.
     instructions  text not null default '',
 
     created_at    timestamptz not null default now(),

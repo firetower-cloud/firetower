@@ -1073,8 +1073,8 @@ A child knows nothing of this conversation: give it everything in `goal` and
 your turns, so dispatch, do what does not depend on it, then end your turn.
 
 To start a saved subagent, pass `role: \"<name>\"` to `spawn` — a saved
-subagent (what the person defines on the Subagents screen) supplies the agent,
-where it runs, what it hands back, and its instructions. If you name one that
+subagent (what the person defines on the Subagents screen) supplies the
+instructions and may pin the agent and where it runs. If you name one that
 does not exist, the refusal lists the ones that do.
 
 If another session started *you*, you cannot spawn, you cannot ask the person,

@@ -36,13 +36,8 @@ fn shareable(alias: &str, person: usize) -> String {
     )
 }
 
-/// How a role's child reports when it is done.
-pub const HANDS_BACK: [&str; 3] = ["summary", "branch", "pr"];
-/// Where a role's child runs.
-pub const PLACEMENT: [&str; 2] = ["here", "new"];
-/// The tool policy a role narrows to. Expressed in instructions for now; the
-/// column is where enforcement will read it when it lands.
-pub const TOOLS: [&str; 2] = ["full", "read-only"];
+/// Where a role's child runs. `lead` lets the lead choose; the other two pin it.
+pub const PLACEMENT: [&str; 3] = ["lead", "here", "new"];
 
 /// A role, as the interface and the spawn tool read it.
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -57,15 +52,11 @@ pub struct Role {
     pub use_when: String,
     /// When it should not — the line that says "you can do this yourself".
     pub not_when: String,
-    /// `summary` | `branch` | `pr`.
-    pub hands_back: String,
-    /// `here` | `new`.
+    /// `lead` (let the lead choose) | `here` | `new`.
     pub placement: String,
-    /// Which agent runs it, or absent to inherit the lead's.
+    /// Which agent runs it, or absent to let the lead choose.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent: Option<String>,
-    /// `full` | `read-only`.
-    pub tools: String,
     /// Composed into the child's instructions.
     pub instructions: String,
     /// Whether the person asking may edit or delete it.
@@ -86,26 +77,16 @@ pub struct NewRole {
     pub use_when: String,
     #[serde(default)]
     pub not_when: String,
-    #[serde(default = "summary")]
-    pub hands_back: String,
-    #[serde(default = "here")]
+    #[serde(default = "lead")]
     pub placement: String,
     #[serde(default)]
     pub agent: Option<String>,
-    #[serde(default = "full")]
-    pub tools: String,
     #[serde(default)]
     pub instructions: String,
 }
 
-fn summary() -> String {
-    "summary".into()
-}
-fn here() -> String {
-    "here".into()
-}
-fn full() -> String {
-    "full".into()
+fn lead() -> String {
+    "lead".into()
 }
 
 /// Why a role was refused, in a sentence somebody can act on.
@@ -130,14 +111,8 @@ pub fn check(new: &NewRole) -> Result<(), Refused> {
     if new.does.trim().is_empty() {
         return Err(Refused("a role needs a line saying what it does".into()));
     }
-    if !HANDS_BACK.contains(&new.hands_back.as_str()) {
-        return Err(Refused("hands back must be summary, branch or pr".into()));
-    }
     if !PLACEMENT.contains(&new.placement.as_str()) {
-        return Err(Refused("placement must be here or new".into()));
-    }
-    if !TOOLS.contains(&new.tools.as_str()) {
-        return Err(Refused("tools must be full or read-only".into()));
+        return Err(Refused("placement must be lead, here or new".into()));
     }
     if let Some(agent) = &new.agent {
         if ft_core::Agent::from_name(agent).is_none() {
@@ -166,8 +141,7 @@ fn slug_of(name: &str, id: &str) -> String {
 }
 
 const FIELDS: &str = "r.id, r.path::text AS path, r.name, r.does, r.use_when, r.not_when, \
-                      r.hands_back, r.placement, r.agent, r.tools, r.instructions, \
-                      r.created_at, r.updated_at";
+                      r.placement, r.agent, r.instructions, r.created_at, r.updated_at";
 
 fn read(row: sqlx::postgres::PgRow) -> Result<Role> {
     Ok(Role {
@@ -177,10 +151,8 @@ fn read(row: sqlx::postgres::PgRow) -> Result<Role> {
         does: row.get("does"),
         use_when: row.get("use_when"),
         not_when: row.get("not_when"),
-        hands_back: row.get("hands_back"),
         placement: row.get("placement"),
         agent: row.get("agent"),
-        tools: row.get("tools"),
         instructions: row.get("instructions"),
         may_write: row.get("may_write"),
         may_share: row.get("may_share"),
@@ -263,8 +235,8 @@ impl Roles {
         sqlx::query(
             "INSERT INTO roles \
                (id, org_id, path, created_by, name, slug, does, use_when, not_when, \
-                hands_back, placement, agent, tools, instructions) \
-             VALUES ($1, $2, $3::ltree, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
+                placement, agent, instructions) \
+             VALUES ($1, $2, $3::ltree, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
         )
         .bind(id.as_str())
         .bind(org)
@@ -275,10 +247,8 @@ impl Roles {
         .bind(new.does.trim())
         .bind(new.use_when.trim())
         .bind(new.not_when.trim())
-        .bind(&new.hands_back)
         .bind(&new.placement)
         .bind(&new.agent)
-        .bind(&new.tools)
         .bind(&new.instructions)
         .execute(&self.pool)
         .await
@@ -295,18 +265,16 @@ impl Roles {
             return Ok(false);
         }
         sqlx::query(
-            "UPDATE roles SET name=$2, does=$3, use_when=$4, not_when=$5, hands_back=$6, \
-               placement=$7, agent=$8, tools=$9, instructions=$10, updated_at=now() WHERE id=$1",
+            "UPDATE roles SET name=$2, does=$3, use_when=$4, not_when=$5, \
+               placement=$6, agent=$7, instructions=$8, updated_at=now() WHERE id=$1",
         )
         .bind(id)
         .bind(new.name.trim())
         .bind(new.does.trim())
         .bind(new.use_when.trim())
         .bind(new.not_when.trim())
-        .bind(&new.hands_back)
         .bind(&new.placement)
         .bind(&new.agent)
-        .bind(&new.tools)
         .bind(&new.instructions)
         .execute(&self.pool)
         .await
@@ -339,10 +307,8 @@ mod tests {
             does: "reads a branch and reports problems".into(),
             use_when: "after a developer hands back".into(),
             not_when: "a one-line fix".into(),
-            hands_back: "summary".into(),
             placement: "here".into(),
             agent: None,
-            tools: "read-only".into(),
             instructions: "Report findings as path:line.".into(),
         }
     }
@@ -371,7 +337,7 @@ mod tests {
         assert_eq!(mine.len(), 1);
         assert_eq!(mine[0].name, "reviewer");
         assert!(mine[0].may_write);
-        assert_eq!(mine[0].tools, "read-only");
+        assert_eq!(mine[0].placement, "here");
 
         // Found by name, case-insensitively — what a lead says.
         assert_eq!(
@@ -386,7 +352,7 @@ mod tests {
 
         // Changed through the one predicate.
         let mut changed = new("reviewer");
-        changed.hands_back = "pr".into();
+        changed.placement = "new".into();
         changed.does = "implements and opens a PR".into();
         assert!(roles.update(&me, id.as_str(), &changed).await.unwrap());
         assert_eq!(
@@ -395,8 +361,8 @@ mod tests {
                 .await
                 .unwrap()
                 .unwrap()
-                .hands_back,
-            "pr"
+                .placement,
+            "new"
         );
 
         // Gone.

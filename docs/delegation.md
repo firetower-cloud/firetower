@@ -107,7 +107,7 @@ in the lead's conversation rather than in the inbox.
 
 Each of these is a smaller change on top of what is here.
 
-- **Roles.** A saved narrowing — agent, tools, placement, what it hands back,
+- **Roles.** A saved narrowing — a pinned or lead-chosen agent and placement,
   an `AGENTS.md` of instructions — that a lead can pick by name and a person
   can `@mention`. Today a spawn is described inline.
 - **A child's questions routed to the lead.** A child's `AskUserQuestion` goes

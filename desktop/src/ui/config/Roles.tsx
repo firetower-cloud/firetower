@@ -25,22 +25,20 @@ import type { Role, NewRole } from "~/api/generated/model";
 import { useConfirm } from "~/ui/Confirm";
 
 const AGENTS: { value: string; label: string }[] = [
-  { value: "", label: "Inherit the lead's" },
+  { value: "", label: "Let the lead choose" },
   { value: "ClaudeCode", label: "Claude Code" },
   { value: "Codex", label: "Codex" },
   { value: "KimiCode", label: "Kimi Code" },
 ];
 
-/** An empty role, for a new one. */
+/** An empty role, for a new one. Placement and agent start open. */
 const BLANK: NewRole = {
   name: "",
   does: "",
   useWhen: "",
   notWhen: "",
-  handsBack: "summary",
-  placement: "here",
+  placement: "lead",
   agent: null,
-  tools: "full",
   instructions: "",
 };
 
@@ -62,7 +60,7 @@ export function Roles() {
   return (
     <Section
       title="Subagents"
-      note="A saved kind of agent a lead can start by name — a developer, a reviewer, a QA. Each carries what it does, when to use it, where it runs, what it hands back, and its instructions."
+      note="A saved kind of agent a lead can start by name — a developer, a reviewer, a QA. Each carries what it does, when to use it, where it runs, and its instructions."
       action={
         <button
           onClick={() => setEditing({ draft: { ...BLANK } })}
@@ -92,10 +90,8 @@ function toDraft(r: Role): NewRole {
     does: r.does,
     useWhen: r.useWhen,
     notWhen: r.notWhen,
-    handsBack: r.handsBack,
     placement: r.placement,
     agent: r.agent ?? null,
-    tools: r.tools,
     instructions: r.instructions,
   };
 }
@@ -103,9 +99,11 @@ function toDraft(r: Role): NewRole {
 /** One role in the list: its name, what it does, and the shape of it as chips. */
 function RoleRow({ role, onOpen }: { role: Role; onOpen: () => void }) {
   const chips = [
-    role.placement === "new" ? "new workspace" : "same workspace",
-    `hands back ${role.handsBack === "pr" ? "a PR" : role.handsBack}`,
-    role.tools === "read-only" ? "read-only" : null,
+    role.placement === "here"
+      ? "same workspace"
+      : role.placement === "new"
+        ? "new workspace"
+        : null,
     role.agent ? role.agent : null,
   ].filter(Boolean) as string[];
 
@@ -234,41 +232,25 @@ function Editor({
           </Field>
         </div>
 
-        <div className="grid grid-cols-3 gap-3">
-          <Field label="Placement">
-            <Seg
-              value={draft.placement ?? "here"}
-              onChange={(v) => set("placement", v)}
-              options={[
-                ["here", "Same workspace"],
-                ["new", "New workspace"],
-              ]}
-            />
-          </Field>
-          <Field label="Hands back">
-            <Seg
-              value={draft.handsBack ?? "summary"}
-              onChange={(v) => set("handsBack", v)}
-              options={[
-                ["summary", "Summary"],
-                ["branch", "Branch"],
-                ["pr", "PR"],
-              ]}
-            />
-          </Field>
-          <Field label="Tools" hint="Read-only is said in the instructions, not yet enforced.">
-            <Seg
-              value={draft.tools ?? "full"}
-              onChange={(v) => set("tools", v)}
-              options={[
-                ["full", "Full"],
-                ["read-only", "Read-only"],
-              ]}
-            />
-          </Field>
-        </div>
+        <Field
+          label="Placement"
+          hint="Where the child runs. Leave it to the lead, or pin it so every spawn of this subagent runs the same way."
+        >
+          <Seg
+            value={draft.placement ?? "lead"}
+            onChange={(v) => set("placement", v)}
+            options={[
+              ["lead", "Let the lead choose"],
+              ["here", "Same workspace"],
+              ["new", "New workspace"],
+            ]}
+          />
+        </Field>
 
-        <Field label="Agent" hint="Which agent runs it. Omit to use the same kind as the lead.">
+        <Field
+          label="Agent"
+          hint="Which agent runs it. Leave it to the lead, or pin one so every spawn uses it."
+        >
           <select
             value={draft.agent ?? ""}
             onChange={(e) => set("agent", e.target.value || null)}

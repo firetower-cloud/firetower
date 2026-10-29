@@ -12009,9 +12009,6 @@
           "does": {
             "type": "string"
           },
-          "handsBack": {
-            "type": "string"
-          },
           "instructions": {
             "type": "string"
           },
@@ -12022,9 +12019,6 @@
             "type": "string"
           },
           "placement": {
-            "type": "string"
-          },
-          "tools": {
             "type": "string"
           },
           "useWhen": {
@@ -13488,9 +13482,7 @@
           "does",
           "useWhen",
           "notWhen",
-          "handsBack",
           "placement",
-          "tools",
           "instructions",
           "mayWrite",
           "mayShare",
@@ -13503,7 +13495,7 @@
               "string",
               "null"
             ],
-            "description": "Which agent runs it, or absent to inherit the lead's."
+            "description": "Which agent runs it, or absent to let the lead choose."
           },
           "createdAt": {
             "type": "string",
@@ -13512,10 +13504,6 @@
           "does": {
             "type": "string",
             "description": "One line: what this kind of agent does."
-          },
-          "handsBack": {
-            "type": "string",
-            "description": "`summary` | `branch` | `pr`."
           },
           "id": {
             "type": "string"
@@ -13544,11 +13532,7 @@
           },
           "placement": {
             "type": "string",
-            "description": "`here` | `new`."
-          },
-          "tools": {
-            "type": "string",
-            "description": "`full` | `read-only`."
+            "description": "`lead` (let the lead choose) | `here` | `new`."
           },
           "updatedAt": {
             "type": "string",

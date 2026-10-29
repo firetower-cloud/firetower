@@ -9,10 +9,9 @@ import * as zod from 'zod';
 
 
 export const ListRolesResponseItem = zod.object({
-  "agent": zod.string().nullish().describe('Which agent runs it, or absent to inherit the lead\'s.'),
+  "agent": zod.string().nullish().describe('Which agent runs it, or absent to let the lead choose.'),
   "createdAt": zod.iso.datetime({"offset":true}),
   "does": zod.string().describe('One line: what this kind of agent does.'),
-  "handsBack": zod.string().describe('`summary` | `branch` | `pr`.'),
   "id": zod.string(),
   "instructions": zod.string().describe('Composed into the child\'s instructions.'),
   "mayShare": zod.boolean().describe('Whether they may move it into a directory, or out of one.'),
@@ -20,8 +19,7 @@ export const ListRolesResponseItem = zod.object({
   "name": zod.string(),
   "notWhen": zod.string().describe('When it should not — the line that says "you can do this yourself".'),
   "path": zod.string(),
-  "placement": zod.string().describe('`here` | `new`.'),
-  "tools": zod.string().describe('`full` | `read-only`.'),
+  "placement": zod.string().describe('`lead` (let the lead choose) | `here` | `new`.'),
   "updatedAt": zod.iso.datetime({"offset":true}),
   "useWhen": zod.string().describe('When a lead should reach for it.')
 }).describe('A role, as the interface and the spawn tool read it.')
@@ -30,20 +28,17 @@ export const ListRolesResponse = zod.array(ListRolesResponseItem)
 export const CreateRoleBody = zod.object({
   "agent": zod.string().nullish(),
   "does": zod.string(),
-  "handsBack": zod.string().optional(),
   "instructions": zod.string().optional(),
   "name": zod.string(),
   "notWhen": zod.string().optional(),
   "placement": zod.string().optional(),
-  "tools": zod.string().optional(),
   "useWhen": zod.string().optional()
 }).describe('What the API accepts to create or change a role.')
 
 export const CreateRoleResponse = zod.object({
-  "agent": zod.string().nullish().describe('Which agent runs it, or absent to inherit the lead\'s.'),
+  "agent": zod.string().nullish().describe('Which agent runs it, or absent to let the lead choose.'),
   "createdAt": zod.iso.datetime({"offset":true}),
   "does": zod.string().describe('One line: what this kind of agent does.'),
-  "handsBack": zod.string().describe('`summary` | `branch` | `pr`.'),
   "id": zod.string(),
   "instructions": zod.string().describe('Composed into the child\'s instructions.'),
   "mayShare": zod.boolean().describe('Whether they may move it into a directory, or out of one.'),
@@ -51,8 +46,7 @@ export const CreateRoleResponse = zod.object({
   "name": zod.string(),
   "notWhen": zod.string().describe('When it should not — the line that says "you can do this yourself".'),
   "path": zod.string(),
-  "placement": zod.string().describe('`here` | `new`.'),
-  "tools": zod.string().describe('`full` | `read-only`.'),
+  "placement": zod.string().describe('`lead` (let the lead choose) | `here` | `new`.'),
   "updatedAt": zod.iso.datetime({"offset":true}),
   "useWhen": zod.string().describe('When a lead should reach for it.')
 }).describe('A role, as the interface and the spawn tool read it.')
@@ -64,20 +58,17 @@ export const UpdateRoleParams = zod.object({
 export const UpdateRoleBody = zod.object({
   "agent": zod.string().nullish(),
   "does": zod.string(),
-  "handsBack": zod.string().optional(),
   "instructions": zod.string().optional(),
   "name": zod.string(),
   "notWhen": zod.string().optional(),
   "placement": zod.string().optional(),
-  "tools": zod.string().optional(),
   "useWhen": zod.string().optional()
 }).describe('What the API accepts to create or change a role.')
 
 export const UpdateRoleResponse = zod.object({
-  "agent": zod.string().nullish().describe('Which agent runs it, or absent to inherit the lead\'s.'),
+  "agent": zod.string().nullish().describe('Which agent runs it, or absent to let the lead choose.'),
   "createdAt": zod.iso.datetime({"offset":true}),
   "does": zod.string().describe('One line: what this kind of agent does.'),
-  "handsBack": zod.string().describe('`summary` | `branch` | `pr`.'),
   "id": zod.string(),
   "instructions": zod.string().describe('Composed into the child\'s instructions.'),
   "mayShare": zod.boolean().describe('Whether they may move it into a directory, or out of one.'),
@@ -85,8 +76,7 @@ export const UpdateRoleResponse = zod.object({
   "name": zod.string(),
   "notWhen": zod.string().describe('When it should not — the line that says "you can do this yourself".'),
   "path": zod.string(),
-  "placement": zod.string().describe('`here` | `new`.'),
-  "tools": zod.string().describe('`full` | `read-only`.'),
+  "placement": zod.string().describe('`lead` (let the lead choose) | `here` | `new`.'),
   "updatedAt": zod.iso.datetime({"offset":true}),
   "useWhen": zod.string().describe('When a lead should reach for it.')
 }).describe('A role, as the interface and the spawn tool read it.')

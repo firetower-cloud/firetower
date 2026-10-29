@@ -11,15 +11,13 @@
  */
 export interface Role {
   /**
-     * Which agent runs it, or absent to inherit the lead's.
+     * Which agent runs it, or absent to let the lead choose.
      * @nullable
      */
   agent?: string | null;
   createdAt: string;
   /** One line: what this kind of agent does. */
   does: string;
-  /** `summary` | `branch` | `pr`. */
-  handsBack: string;
   id: string;
   /** Composed into the child's instructions. */
   instructions: string;
@@ -31,10 +29,8 @@ export interface Role {
   /** When it should not — the line that says "you can do this yourself". */
   notWhen: string;
   path: string;
-  /** `here` | `new`. */
+  /** `lead` (let the lead choose) | `here` | `new`. */
   placement: string;
-  /** `full` | `read-only`. */
-  tools: string;
   updatedAt: string;
   /** When a lead should reach for it. */
   useWhen: string;

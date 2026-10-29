@@ -178,20 +178,25 @@ async fn spawn(state: &AppState, request: &AgentRequest) -> Result<String> {
         );
     }
 
-    // Explicit arguments win; a role fills in what they leave out; then the
-    // plain defaults. So "use the reviewer role, but in a new workspace" does
-    // what it says, and naming nothing but the role takes all of the role.
-    let placement = text(&request.input, "placement")
-        .or_else(|| role.as_ref().map(|r| r.placement.clone()))
-        .unwrap_or_else(|| "here".into());
-    let agent = text(&request.input, "agent")
-        .and_then(|n| Agent::from_name(&n))
-        .or_else(|| {
-            role.as_ref()
-                .and_then(|r| r.agent.as_deref())
-                .and_then(Agent::from_name)
-        })
-        .unwrap_or(lead.agent);
+    // A role that pins a field enforces it — the lead's own argument does not
+    // override it, which is the point of pinning. A role that leaves a field
+    // open ("lead" for placement, no agent) hands the choice back: the lead's
+    // argument, then the plain default.
+    let placement = match role.as_ref().map(|r| r.placement.as_str()) {
+        Some("here") => "here".to_string(),
+        Some("new") => "new".to_string(),
+        _ => text(&request.input, "placement").unwrap_or_else(|| "here".into()),
+    };
+    let agent = match role
+        .as_ref()
+        .and_then(|r| r.agent.as_deref())
+        .and_then(Agent::from_name)
+    {
+        Some(pinned) => pinned,
+        None => text(&request.input, "agent")
+            .and_then(|n| Agent::from_name(&n))
+            .unwrap_or(lead.agent),
+    };
     if !agent.speaks_a_protocol() {
         bail!("Firetower has no driver for {}", agent.label());
     }
@@ -280,38 +285,16 @@ fn brief(
             "\n\nYou are acting as the \"{}\" subagent: {}",
             role.name, role.does
         ));
-        // In this first cut the tool policy is said, not enforced. An agent
-        // told to read-only and reaching for a write still has the tool; a
-        // later cut narrows the tools it is launched with.
-        if role.tools == "read-only" {
-            text.push_str(
-                "\n\nThis role is read-only: read, search and report. Do not edit or write \
-                 files, do not run commands that change anything, and do not push.",
-            );
-        }
         if !role.instructions.trim().is_empty() {
             text.push_str("\n\n");
             text.push_str(role.instructions.trim());
         }
     }
 
-    // How to finish, shaped by what the role hands back.
-    let finish = match role.map(|r| r.hands_back.as_str()) {
-        Some("pr") => {
-            "When you are done, open a pull request and end with a short summary naming it."
-        }
-        Some("branch") => {
-            "When you are done, commit and push your branch, and end with a short summary of \
-             what is on it."
-        }
-        _ => {
-            "End with a short summary of what you did, what you found, and anything it should \
-             look at."
-        }
-    };
     text.push_str(&format!(
         "\n\nYou were started by another agent — the session \"{}\" — to do this part of its \
-         work. It will read what you say when you finish. {finish} You cannot ask the person \
+         work. It will read what you say when you finish. End with a short summary of what you \
+         did, what you found, and anything it should look at. You cannot ask the person \
          questions: if something is unclear, say what you assumed and carry on.",
         lead.name
     ));
@@ -554,10 +537,8 @@ mod tests {
             does: "reads a branch and reports problems".into(),
             use_when: String::new(),
             not_when: String::new(),
-            hands_back: "summary".into(),
             placement: "here".into(),
             agent: None,
-            tools: "read-only".into(),
             instructions: "Report findings as path:line.".into(),
             may_write: true,
             may_share: true,
@@ -566,18 +547,11 @@ mod tests {
         };
         let text = brief(&lead, "Review it", None, Some(&role));
         assert!(text.contains("acting as the \"reviewer\" subagent"));
-        assert!(text.contains("read-only"));
+        assert!(text.contains("reads a branch and reports problems"));
         assert!(text.contains("Report findings as path:line."));
-
-        // A pr role gets the pull-request closing instruction.
-        let pr = crate::roles::Role {
-            hands_back: "pr".into(),
-            tools: "full".into(),
-            instructions: String::new(),
-            ..role
-        };
-        let text = brief(&lead, "Implement it", None, Some(&pr));
-        assert!(text.contains("open a pull request"), "{text}");
+        // The closing instruction is the plain summary one — a role no longer
+        // swaps it for a PR or branch variant.
+        assert!(text.contains("End with a short summary"));
     }
 
     #[test]

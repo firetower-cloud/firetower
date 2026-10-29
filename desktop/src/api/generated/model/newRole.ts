@@ -13,11 +13,9 @@ export interface NewRole {
   /** @nullable */
   agent?: string | null;
   does: string;
-  handsBack?: string;
   instructions?: string;
   name: string;
   notWhen?: string;
   placement?: string;
-  tools?: string;
   useWhen?: string;
 }

@@ -216,7 +216,7 @@ async fn answer(
                             },
                             "role": {
                                 "type": "string",
-                                "description": "A saved subagent to start, by name — e.g. \"reviewer\" or \"developer\" (what the person defines on the Subagents screen). It supplies the agent, placement, what it hands back, and its instructions; anything you also pass here wins. Naming one that does not exist is refused with the ones that do. Omit for an ad-hoc child.",
+                                "description": "A saved subagent to start, by name — e.g. \"reviewer\" or \"developer\" (what the person defines on the Subagents screen). It supplies the instructions and may pin the agent and placement; where it pins one, that wins over what you pass. Naming one that does not exist is refused with the ones that do. Omit for an ad-hoc child.",
                             },
                             "placement": {
                                 "type": "string",
