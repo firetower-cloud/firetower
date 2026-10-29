@@ -186,7 +186,22 @@ async fn answer(
             }),
         )),
 
-        "tools/list" => Some(reply(
+        "tools/list" => {
+            // Built from the agents Firetower can drive, not spelled out here,
+            // so the list the lead is offered never falls behind the ones that
+            // exist — the whole of `Agent::all()`, labels and names together.
+            let agent_names: Vec<String> =
+                ft_core::Agent::all().iter().map(|a| format!("{a:?}")).collect();
+            let agent_labels = ft_core::Agent::all()
+                .iter()
+                .map(|a| a.label())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let agent_desc = format!(
+                "Which agent runs it — one of {agent_labels}. NOT a saved subagent — use \
+                 `role` for that. Omit for the same as you."
+            );
+            Some(reply(
             id?,
             json!({
                 "tools": [{
@@ -225,8 +240,8 @@ async fn answer(
                             },
                             "agent": {
                                 "type": "string",
-                                "enum": ["ClaudeCode", "Codex", "KimiCode"],
-                                "description": "Which agent runs it — Claude Code, Codex or Kimi. NOT a saved subagent — use `role` for that. Omit for the same as you.",
+                                "enum": agent_names,
+                                "description": agent_desc,
                             },
                             "name": {
                                 "type": "string",
@@ -259,7 +274,8 @@ async fn answer(
                     },
                 }]
             }),
-        )),
+        ))
+        }
 
         "tools/call" => {
             let id = id?;

@@ -12,6 +12,7 @@ import type { ReactNode } from "react";
 import { useState } from "react";
 import {
   Check,
+  ChevronDown,
   ChevronLeft,
   GitBranch,
   GitBranchPlus,
@@ -23,6 +24,7 @@ import {
 } from "lucide-react";
 import { Rows, Section } from "~/ui/config/bits";
 import { WhoCanAccess } from "~/ui/Sharing";
+import { Pop } from "~/ui/Pop";
 import { AgentMark, AGENT_LABEL } from "~/components/AgentMark";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -32,17 +34,18 @@ import {
   updateRole,
   deleteRole,
 } from "~/api/generated/roles/roles";
-import { why } from "~/data";
+import { useAgents, why } from "~/data";
 import type { Agent, Role, NewRole } from "~/api/generated/model";
 import { useConfirm } from "~/ui/Confirm";
 
-/** The three agents a lead can be pinned to — the spawn tool's own enum. */
-const AGENT_PINS: Agent[] = ["ClaudeCode", "Codex", "KimiCode"];
+/** The open "let the lead choose" state, as placement stores it. */
+const OPEN = "lead";
 
-/** Where a child runs, as the lead reads it. */
-const PLACEMENTS: { value: string; icon: LucideIcon; title: string; note: string }[] = [
-  { value: "here", icon: GitBranch, title: "Same workspace", note: "Shares this directory and branch." },
-  { value: "new", icon: GitBranchPlus, title: "Its own workspace", note: "A fresh branch off the default." },
+/** Where a child runs — the fixed set, each with the line that explains it. */
+const PLACEMENTS: { value: string; icon: LucideIcon; label: string; note: string }[] = [
+  { value: OPEN, icon: Sparkles, label: "Let the lead choose", note: "The lead decides where each child runs." },
+  { value: "here", icon: GitBranch, label: "Same workspace", note: "Shares this directory and branch." },
+  { value: "new", icon: GitBranchPlus, label: "Its own workspace", note: "A fresh branch off the default." },
 ];
 
 /** An empty role, for a new one. Placement and agent start open. */
@@ -169,6 +172,31 @@ function Editor({
   const confirm = useConfirm();
   const existing = !!state.id;
 
+  // The agents to pin to are the ones Firetower can actually drive, read from
+  // the server rather than listed here — so a fourth or a tenth agent turns up
+  // in this menu the moment it is supported, without a change to this screen.
+  const agents = useAgents();
+  const agentOptions: Opt[] = [
+    { value: null, icon: <Sparkles className="h-4 w-4" strokeWidth={1.75} />, label: "Let the lead choose", note: "The lead picks — its own agent, by default." },
+    ...agents.data
+      .filter((a) => a.supported)
+      .map((a) => ({
+        value: a.kind,
+        icon: <AgentMark agent={a.kind} size={16} />,
+        label: a.label,
+      })),
+  ];
+  // A role may already pin an agent that is no longer on offer; keep it
+  // nameable rather than silently reading as "let the lead choose".
+  if (draft.agent && !agentOptions.some((o) => o.value === draft.agent)) {
+    const pinned = draft.agent as Agent;
+    agentOptions.push({
+      value: pinned,
+      icon: <AgentMark agent={pinned} size={16} />,
+      label: AGENT_LABEL[pinned] ?? pinned,
+    });
+  }
+
   const set = <K extends keyof NewRole>(k: K, v: NewRole[K]) => setDraft((d) => ({ ...d, [k]: v }));
   const refresh = () => cache.invalidateQueries({ queryKey: getListRolesQueryKey() });
   const valid = draft.name.trim().length > 0 && draft.does.trim().length > 0;
@@ -260,62 +288,29 @@ function Editor({
           label="Placement"
           hint="Where the child runs. Leave it open, or pin it so every spawn runs the same way."
         >
-          <div className="space-y-1.5">
-            <Open
-              on={(draft.placement ?? "lead") === "lead"}
-              onPick={() => set("placement", "lead")}
-              note="The lead decides where each child runs."
-            />
-            <div className="grid grid-cols-2 gap-1.5">
-              {PLACEMENTS.map((p) => (
-                <Choice
-                  key={p.value}
-                  on={draft.placement === p.value}
-                  onPick={() => set("placement", p.value)}
-                  className={ROW}
-                >
-                  <p.icon
-                    className={`mt-0.5 h-4 w-4 shrink-0 ${draft.placement === p.value ? "text-slate" : "text-dim"}`}
-                    strokeWidth={1.75}
-                  />
-                  <span className="min-w-0">
-                    <span className="block text-ui text-bone">{p.title}</span>
-                    <span className="block text-micro text-mute">{p.note}</span>
-                  </span>
-                </Choice>
-              ))}
-            </div>
-          </div>
+          <Select
+            ariaLabel="Placement"
+            value={draft.placement ?? OPEN}
+            options={PLACEMENTS.map((p) => ({
+              value: p.value,
+              icon: <p.icon className="h-4 w-4" strokeWidth={1.75} />,
+              label: p.label,
+              note: p.note,
+            }))}
+            onChange={(v) => set("placement", v ?? OPEN)}
+          />
         </Group>
 
         <Group
           label="Agent"
           hint="Which agent runs it. Leave it open, or pin one so every spawn uses it."
         >
-          <div className="space-y-1.5">
-            <Open
-              on={!draft.agent}
-              onPick={() => set("agent", null)}
-              note="The lead picks — its own agent, by default."
-            />
-            <div className="grid grid-cols-3 gap-1.5">
-              {AGENT_PINS.map((kind) => (
-                <Choice
-                  key={kind}
-                  on={draft.agent === kind}
-                  onPick={() => set("agent", kind)}
-                  className="flex flex-col items-center gap-2 px-3 py-3 text-center"
-                >
-                  <AgentMark
-                    agent={kind}
-                    size={22}
-                    className={draft.agent === kind ? "text-bone" : "text-dim"}
-                  />
-                  <span className="text-meta text-bone">{AGENT_LABEL[kind]}</span>
-                </Choice>
-              ))}
-            </div>
-          </div>
+          <Select
+            ariaLabel="Agent"
+            value={draft.agent ?? null}
+            options={agentOptions}
+            onChange={(v) => set("agent", v)}
+          />
         </Group>
 
         <Field label="Instructions" hint="Composed into the child's prompt. Markdown; the agent reads all of it.">
@@ -413,59 +408,80 @@ function Group({
   );
 }
 
+/** One option in a {@link Select}: what it is worth, and how it reads. */
+type Opt = { value: string | null; icon: ReactNode; label: string; note?: string };
+
 /**
- * A selectable tile — the field-picker all over this editor.
+ * A dropdown that shows a mark, not just a word.
  *
- * Chosen reads in `slate`, the one hue this interface spends on "this is the
- * selected thing"; the tick is what carries it so colour is never the only
- * signal. Everything unchosen stays quiet, so a form of them reads as a set of
- * options rather than a wall of borders.
+ * The one control both the Agent and the Placement fields use: a trigger that
+ * wears the current choice, and a menu — the app's own `Pop`, so it escapes
+ * this card's clipping and matches every other menu — that lists the rest. A
+ * dropdown rather than a row of tiles because the list is open-ended: a new
+ * supported agent is one more row here, not a reflow of the form.
  */
-function Choice({
-  on,
-  onPick,
-  children,
-  className = "",
+function Select({
+  value,
+  options,
+  onChange,
+  ariaLabel,
 }: {
-  on: boolean;
-  onPick: () => void;
-  children: ReactNode;
-  className?: string;
+  value: string | null;
+  options: Opt[];
+  onChange: (v: string | null) => void;
+  ariaLabel: string;
 }) {
-  // Only chrome and selected-state live here; the caller owns the layout, so
-  // no two class strings ever set the same flex, gap or padding property.
-  return (
-    <button
-      type="button"
-      aria-pressed={on}
-      onClick={onPick}
-      className={`relative rounded-lg border text-left transition-colors ${
-        on
-          ? "border-slate-deep bg-slate-tint"
-          : "border-line bg-panel hover:border-dim hover:bg-raise"
-      } ${className}`}
-    >
-      {children}
-      {on && <Check className="absolute right-2 top-2 h-3.5 w-3.5 text-slate" strokeWidth={2.5} />}
-    </button>
-  );
-}
+  const [open, setOpen] = useState<HTMLElement | null>(null);
+  const current = options.find((o) => o.value === value) ?? options[0];
 
-/** The layout a titled tile — the open default and each placement — shares. */
-const ROW = "flex items-start gap-2.5 px-3 py-2.5";
-
-/** The "let the lead choose" tile: the open default, above the pins. */
-function Open({ on, onPick, note }: { on: boolean; onPick: () => void; note: string }) {
   return (
-    <Choice on={on} onPick={onPick} className={`${ROW} w-full`}>
-      <Sparkles
-        className={`mt-0.5 h-4 w-4 shrink-0 ${on ? "text-slate" : "text-dim"}`}
-        strokeWidth={1.75}
-      />
-      <span className="min-w-0">
-        <span className="block text-ui text-bone">Let the lead choose</span>
-        <span className="block text-micro text-mute">{note}</span>
-      </span>
-    </Choice>
+    <>
+      <button
+        type="button"
+        aria-haspopup="listbox"
+        aria-label={ariaLabel}
+        onClick={(e) => setOpen(open ? null : e.currentTarget)}
+        className="flex w-full items-center gap-2.5 rounded-md border border-line bg-ground px-3 py-2 text-left transition-colors hover:border-dim focus:border-dim focus:outline-none"
+      >
+        <span className="shrink-0 text-dim">{current.icon}</span>
+        <span className="min-w-0 flex-1 truncate text-ui text-bone">{current.label}</span>
+        <ChevronDown
+          className={`h-4 w-4 shrink-0 text-mute transition-transform ${open ? "rotate-180" : ""}`}
+          strokeWidth={1.75}
+        />
+      </button>
+      {open && (
+        <Pop anchor={open} onClose={() => setOpen(null)} width={open.offsetWidth}>
+          <div role="listbox" className="max-h-72 overflow-y-auto py-1">
+            {options.map((o) => {
+              const on = o.value === value;
+              return (
+                <button
+                  key={o.value ?? "__open"}
+                  type="button"
+                  role="option"
+                  aria-selected={on}
+                  onClick={() => {
+                    onChange(o.value);
+                    setOpen(null);
+                  }}
+                  className="flex w-full items-start gap-2.5 px-3 py-2 text-left hover:bg-raise"
+                >
+                  <span className={`mt-px shrink-0 ${on ? "text-bone" : "text-dim"}`}>{o.icon}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-ui text-bone">{o.label}</span>
+                    {o.note && <span className="block text-micro text-mute">{o.note}</span>}
+                  </span>
+                  <Check
+                    className={`mt-px h-4 w-4 shrink-0 ${on ? "text-slate" : "text-transparent"}`}
+                    strokeWidth={2.5}
+                  />
+                </button>
+              );
+            })}
+          </div>
+        </Pop>
+      )}
+    </>
   );
 }
