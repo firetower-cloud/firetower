@@ -84,7 +84,7 @@ function draw(trackers: TrackerStatus[], seed?: [ListTasksParams, Page]) {
   if (seed) cache.setQueryData(getListTasksQueryKey(seed[0]), seed[1]);
   return renderToStaticMarkup(
     <QueryClientProvider client={cache}>
-      <StartProvider render={() => null}>
+      <StartProvider>
         <TasksPage backend={{} as Backend} />
       </StartProvider>
     </QueryClientProvider>,

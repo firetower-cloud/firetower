@@ -13,7 +13,6 @@ import { bridge } from "~/bridge";
 import { StartProvider } from "~/start";
 import { Connect } from "~/ui/Connect";
 import { servers, onServers } from "~/servers";
-import { NewWorkspace } from "~/ui/NewWorkspace";
 import { Boundary } from "~/ui/Boundary";
 import { Gate } from "~/ui/Gate";
 import { navigate, usePathname } from "~/shims/next-navigation";
@@ -164,13 +163,7 @@ export function App() {
               {/* Inside the provider, not around it: the new-workspace form
                   reads this server's repositories, so it needs the same
                   QueryClient as the screen that opened it. */}
-              <StartProvider
-                render={(seed, close) => (
-                  <Boundary onReset={close}>
-                    <NewWorkspace backend={here} seed={seed} onClose={close} />
-                  </Boundary>
-                )}
-              >
+              <StartProvider>
                 <Rail backend={here} />
                 {/* Draws nothing: it keeps the artifact list warm and fills in
                     the pictures the tiles use, on whichever screen is up. */}

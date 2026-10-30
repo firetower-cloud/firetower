@@ -68,6 +68,18 @@ export function Rail({ backend }: { backend: Backend }) {
         <Settings path={path} />
       ) : (
         <nav className="flex shrink-0 flex-col gap-0.5 px-2 pt-2">
+          <button
+            onClick={() => start()}
+            title={`New workspace  ${key("N")}`}
+            className={`mb-0.5 flex h-8 items-center gap-2.5 rounded-md px-2.5 text-ui transition-colors duration-150 ${
+              path.startsWith("/new")
+                ? "bg-overlay text-bone shadow-(--shadow-raise)"
+                : "text-bone hover:bg-raise/60"
+            }`}
+          >
+            <Icon of={Plus} size={16} />
+            New
+          </button>
           {NAV.map((n) => (
             <NavLink
               key={n.href}
