@@ -293,7 +293,7 @@ export function NewPage() {
         </div>
 
         {/* the four decisions */}
-        <div className="mt-3 flex flex-wrap gap-0.5">
+        <div className="mt-3 flex items-center gap-0.5">
           {/* Profile */}
           <Pill
             icon={
@@ -322,7 +322,8 @@ export function NewPage() {
             set={checkouts.length > 0}
             onClick={(e) => toggle("repo", e)}
           />
-          {/* Where it runs */}
+          {/* Where it runs — pushed to the far right, apart from the rest */}
+          <span className="flex-1" />
           <Pill
             icon={<Server className="h-[15px] w-[15px]" strokeWidth={1.8} />}
             label={machine ? machineLabel(machine) : "Where it runs"}
