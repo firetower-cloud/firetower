@@ -27,6 +27,8 @@ import {
 } from "lucide-react";
 import { Icon } from "~/components/ui";
 import { AgentMark, AGENT_LABEL } from "~/components/AgentMark";
+import { AgentPicker } from "~/ui/AgentPicker";
+import { useAgentControls } from "~/api/generated/agents/agents";
 import { Pop } from "~/ui/Pop";
 import { Readout, isReady } from "~/components/HostReadiness";
 import { useHostReadiness } from "~/api/generated/hosts/hosts";
@@ -41,7 +43,7 @@ import { navigate } from "~/shims/next-navigation";
 import { leaveDraft } from "~/workspace/draft";
 import { isMac } from "~/platform";
 import { consumeSeed } from "~/start";
-import type { Agent } from "~/api/generated/model";
+import type { Agent, Control, ControlKind } from "~/api/generated/model";
 
 type Checkout = { id: string; slug: string };
 
@@ -99,6 +101,15 @@ export function NewPage() {
     setAccountId((mine.find((a) => a.isDefault) ?? mine[0]).id);
   }, [account, mine]);
 
+  /* Model, effort and permissions — the same picker the conversation uses,
+     fed the choices Firetower knows for this agent before one is running. A
+     fresh set each time the engine changes, since a model is one agent's. */
+  const controlsQ = useAgentControls(kind ?? "", { query: { enabled: !!kind } });
+  const controls = (kind ? (controlsQ.data ?? []) : []) as Control[];
+  const [chosen, setChosen] = useState<Partial<Record<ControlKind, string>>>({});
+  useEffect(() => setChosen({}), [kind]);
+  const valueOf = (c: Control) => chosen[c.kind] ?? c.current ?? undefined;
+
   const readiness = useHostReadiness(
     host?.id ?? "",
     { agent: kind },
@@ -133,6 +144,12 @@ export function NewPage() {
           accountId: account.id,
           branch,
           hostId: host?.id,
+          settings: {
+            model: chosen.model,
+            effort: chosen.effort,
+            mode: chosen.mode,
+            sandbox: chosen.sandbox,
+          },
         },
       },
       {
@@ -158,16 +175,13 @@ export function NewPage() {
 
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-auto">
-      <div className="m-auto w-full max-w-[720px] px-7 py-10">
-        <div className="mb-6 flex items-center justify-center gap-3">
-          <Sparkles className="h-6 w-6 text-ember" strokeWidth={1.75} />
-          <h1 className="text-display font-semibold tracking-tight text-bone">
-            What are we building?
-          </h1>
-        </div>
+      <div className="m-auto w-full max-w-[680px] px-7 py-10">
+        <h1 className="mb-8 text-center text-[1.6rem] font-normal leading-snug tracking-[-0.02em] text-bone/90">
+          What are we building?
+        </h1>
 
         {/* composer */}
-        <div className="rounded-[18px] border border-line bg-panel px-4 pt-4 pb-3 shadow-(--shadow-float) focus-within:border-slate-deep">
+        <div className="group rounded-2xl border border-line bg-raise/40 px-5 py-4 transition-colors focus-within:border-slate-deep/80 focus-within:bg-raise/60">
           <textarea
             ref={box}
             value={prompt}
@@ -177,20 +191,31 @@ export function NewPage() {
               el.style.height = "auto";
               el.style.height = Math.min(el.scrollHeight, 240) + "px";
             }}
-            placeholder="Describe the task — or just start it empty and say what you want in the conversation."
+            placeholder="Describe the task, or start empty and say what you want in the conversation."
             rows={2}
-            className="scroll-slim w-full resize-none bg-transparent text-read leading-relaxed text-bone placeholder:text-mute focus:outline-none"
+            className="scroll-slim w-full resize-none bg-transparent text-read leading-relaxed text-bone placeholder:text-mute/80 focus:outline-none"
           />
-          <div className="mt-2 flex items-center gap-2">
+          <div className="mt-2.5 flex items-center gap-3">
+            {kind && controls.length > 0 && (
+              <AgentPicker
+                agent={kind}
+                agentLabel={agents.find((a) => a.kind === kind)?.label}
+                controls={controls}
+                valueOf={valueOf}
+                onPick={(k, v) => setChosen((p) => ({ ...p, [k]: v }))}
+              />
+            )}
             <span className="flex-1" />
             <span className="text-micro text-mute">Starts a workspace</span>
             <button
               onClick={go}
               disabled={!ready}
-              className="inline-flex h-8 items-center gap-2 rounded-lg bg-bone px-3 text-ui font-semibold text-ground transition hover:bg-white disabled:bg-raise disabled:text-mute"
+              className="inline-flex h-8 items-center gap-2 rounded-full bg-bone pr-2.5 pl-3.5 text-ui font-medium text-ground transition enabled:hover:bg-white disabled:cursor-default disabled:bg-overlay disabled:text-mute"
             >
-              Start it
-              <span className="font-mono text-micro opacity-60">{isMac ? "⌘↵" : "Ctrl↵"}</span>
+              Start
+              <span className={`font-mono text-micro ${ready ? "opacity-50" : "opacity-40"}`}>
+                {isMac ? "⌘↵" : "Ctrl↵"}
+              </span>
             </button>
           </div>
         </div>
@@ -430,17 +455,17 @@ function Pill({
   return (
     <button
       onClick={(e) => onClick(e.currentTarget)}
-      className={`inline-flex h-[34px] items-center gap-2 rounded-[10px] border px-3 text-ui transition-colors ${
+      className={`inline-flex h-[30px] items-center gap-2 rounded-full border px-3 text-meta transition-colors ${
         set
-          ? "border-slate-deep bg-slate-tint text-bone"
-          : "border-line bg-panel text-text hover:border-dim hover:bg-raise"
+          ? "border-slate-deep/70 bg-slate-tint text-bone"
+          : "border-line bg-transparent text-dim hover:border-dim hover:text-text"
       }`}
     >
       <span className={set ? "text-slate" : "text-dim"}>{icon}</span>
-      <span className="text-bone">{label}</span>
+      <span className={set ? "text-bone" : "text-text"}>{label}</span>
       {sub && <span className="text-mute">{sub}</span>}
-      {lock && <span className="text-micro text-sage">· {lock}</span>}
-      <ChevronDown className="h-3.5 w-3.5 text-mute" strokeWidth={1.9} />
+      {lock && <span className="text-sage/90">· {lock}</span>}
+      <ChevronDown className="h-3 w-3 text-mute/70" strokeWidth={2} />
     </button>
   );
 }

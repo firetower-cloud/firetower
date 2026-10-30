@@ -93,7 +93,7 @@ impl Choice {
 /// Every field optional, because "never chosen" is the ordinary state and the
 /// agent's own default is the right answer then. A value that is no longer
 /// offered is dropped rather than sent: see [`Preferred::keeping_only`].
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Preferred {
     #[serde(default, skip_serializing_if = "Option::is_none")]

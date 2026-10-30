@@ -101,6 +101,12 @@ export const CreateSessionBody = zod.object({
   "base": zod.string().nullish().describe('The branch to start from. Omit for the repository\'s own default.'),
   "repoId": zod.string().describe('Identifies a connected repository.')
 }).describe('One repository to check out, as the API accepts it.')).optional().describe('Every repository to check out, in the order they should appear.\n\nEach may name its own base branch; the working branch is the session\'s\nand is the same in all of them, which is what makes a change across two\nrepositories reviewable.'),
+  "settings": zod.object({
+  "effort": zod.string().nullish(),
+  "mode": zod.string().nullish(),
+  "model": zod.string().nullish(),
+  "sandbox": zod.string().nullish()
+}).optional().describe('Model, effort, permissions and sandbox to start with, overriding what\nthis person last used. What the New page\'s picker sends; once the\nsession has run a turn, its own choices are what a restart remembers.'),
   "share": zod.enum(['yields', 'equal', 'takesMore']).optional().describe('How this workspace competes when the machine is busy.\n\nDefaulted, so a caller that has never heard of it opens a workspace that\ntakes its turn — which is what every workspace did before there was a\nchoice.'),
   "size": zod.enum(['Small', 'Medium', 'Large']).optional(),
   "taskKey": zod.string().nullish().describe('The task this is for, when it was started from one.'),

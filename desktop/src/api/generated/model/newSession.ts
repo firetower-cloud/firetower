@@ -9,6 +9,7 @@ import type { Agent } from './agent.ts';
 import type { DirectoryId } from './directoryId.ts';
 import type { HostId } from './hostId.ts';
 import type { NewCheckout } from './newCheckout.ts';
+import type { Preferred } from './preferred.ts';
 import type { RepoId } from './repoId.ts';
 import type { Share } from './share.ts';
 import type { WorkspaceId } from './workspaceId.ts';
@@ -75,6 +76,12 @@ export interface NewSession {
      * repositories reviewable.
      */
   repos?: NewCheckout[];
+  /**
+     * Model, effort, permissions and sandbox to start with, overriding what
+     * this person last used. What the New page's picker sends; once the
+     * session has run a turn, its own choices are what a restart remembers.
+     */
+  settings?: Preferred;
   /**
      * How this workspace competes when the machine is busy.
      *

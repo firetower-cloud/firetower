@@ -172,6 +172,7 @@ export * from './planRequest';
 export * from './planStep';
 export * from './planStepStatus';
 export * from './ports';
+export * from './preferred';
 export * from './preview';
 export * from './previewAddress';
 export * from './previewAddressParams';

@@ -395,6 +395,11 @@ pub struct NewSession {
     /// Operator does the work itself.
     #[serde(default)]
     pub profile: Option<String>,
+    /// Model, effort, permissions and sandbox to start with, overriding what
+    /// this person last used. What the New page's picker sends; once the
+    /// session has run a turn, its own choices are what a restart remembers.
+    #[serde(default)]
+    pub settings: crate::controls::Preferred,
 }
 
 /// One repository to check out, as the API accepts it.

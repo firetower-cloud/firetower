@@ -9,6 +9,7 @@ import type { Agent } from './agent';
 import type { DirectoryId } from './directoryId';
 import type { HostId } from './hostId';
 import type { NewCheckout } from './newCheckout';
+import type { Preferred } from './preferred';
 import type { RepoId } from './repoId';
 import type { Share } from './share';
 import type { WorkspaceId } from './workspaceId';
@@ -75,6 +76,12 @@ export interface NewSession {
      * repositories reviewable.
      */
   repos?: NewCheckout[];
+  /**
+     * Model, effort, permissions and sandbox to start with, overriding what
+     * this person last used. What the New page's picker sends; once the
+     * session has run a turn, its own choices are what a restart remembers.
+     */
+  settings?: Preferred;
   /**
      * How this workspace competes when the machine is busy.
      *

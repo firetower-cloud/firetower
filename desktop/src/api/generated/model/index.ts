@@ -172,6 +172,7 @@ export * from './planRequest.ts';
 export * from './planStep.ts';
 export * from './planStepStatus.ts';
 export * from './ports.ts';
+export * from './preferred.ts';
 export * from './preview.ts';
 export * from './previewAddress.ts';
 export * from './previewAddressParams.ts';

@@ -365,6 +365,52 @@
         }
       }
     },
+    "/api/v1/agents/{kind}/controls": {
+      "get": {
+        "tags": [
+          "agents"
+        ],
+        "summary": "What an agent can be asked to change, before there is a session to ask.",
+        "description": "So the New page can offer the model and effort you'll start with. The\nchoices Firetower knows on its own — Claude Code's are fixed; Codex lists\nits own only once it is running, so its model is absent here until then —\nand each one's `current` is what this person last used, so the picker opens\non it rather than blank.",
+        "operationId": "agent_controls",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "description": "Agent kind, e.g. ClaudeCode",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Control"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/agents/{kind}/install": {
       "post": {
         "tags": [
@@ -12154,6 +12200,10 @@
             },
             "description": "Every repository to check out, in the order they should appear.\n\nEach may name its own base branch; the working branch is the session's\nand is the same in all of them, which is what makes a change across two\nrepositories reviewable."
           },
+          "settings": {
+            "$ref": "#/components/schemas/Preferred",
+            "description": "Model, effort, permissions and sandbox to start with, overriding what\nthis person last used. What the New page's picker sends; once the\nsession has run a turn, its own choices are what a restart remembers."
+          },
           "share": {
             "$ref": "#/components/schemas/Share",
             "description": "How this workspace competes when the machine is busy.\n\nDefaulted, so a caller that has never heard of it opens a workspace that\ntakes its turn — which is what every workspace did before there was a\nchoice."
@@ -12522,6 +12572,36 @@
               "$ref": "#/components/schemas/Forwarded"
             },
             "description": "Ports already open on this machine for this session."
+          }
+        }
+      },
+      "Preferred": {
+        "type": "object",
+        "description": "What somebody last chose about an agent, to open their next session on.\n\nThe rule, in one place: **a session starts on the settings you were last\nworking with.** A default you have already corrected once should not come\nback on the next session, and before this one did — every session opened on\nthe flagship model at the house effort, whatever you had switched to.\n\nEvery field optional, because \"never chosen\" is the ordinary state and the\nagent's own default is the right answer then. A value that is no longer\noffered is dropped rather than sent: see [`Preferred::keeping_only`].",
+        "properties": {
+          "effort": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "mode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sandbox": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },

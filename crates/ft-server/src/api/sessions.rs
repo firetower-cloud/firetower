@@ -740,7 +740,7 @@ pub(crate) async fn create_session_as(
     // there is nothing better to do: one process, one environment. What each
     // repository asked for in a *file* stays its own, inside its own checkout.
     let mut env: Vec<(String, String)> = Vec::new();
-    carry_preferences(&state, &mut env, &owner, req.agent).await;
+    carry_preferences(&state, &mut env, &owner, req.agent, &req.settings).await;
     if let Some(persona) = &persona {
         env.push((ft_core::PERSONA_ENV.to_string(), persona.clone()));
     }
@@ -972,15 +972,30 @@ async fn carry_preferences(
     env: &mut Vec<(String, String)>,
     user_id: &str,
     agent: ft_core::Agent,
+    overrides: &ft_core::controls::Preferred,
 ) {
     let pairs = match state.db.preferred_controls(user_id, agent).await {
         Ok(pairs) => pairs,
         Err(e) => {
             tracing::warn!("reading remembered settings for {}: {e:#}", agent.label());
-            return;
+            Vec::new()
         }
     };
-    let preferred = ft_core::controls::Preferred::from_pairs(pairs);
+    // What was remembered, then whatever this start chose on top — the New
+    // page's picker wins over the last session's, field by field.
+    let mut preferred = ft_core::controls::Preferred::from_pairs(pairs);
+    if overrides.model.is_some() {
+        preferred.model = overrides.model.clone();
+    }
+    if overrides.effort.is_some() {
+        preferred.effort = overrides.effort.clone();
+    }
+    if overrides.mode.is_some() {
+        preferred.mode = overrides.mode.clone();
+    }
+    if overrides.sandbox.is_some() {
+        preferred.sandbox = overrides.sandbox.clone();
+    }
     if preferred.is_empty() {
         return;
     }
@@ -1052,7 +1067,7 @@ pub(crate) async fn relaunch(
     };
 
     let mut env: Vec<(String, String)> = Vec::new();
-    carry_preferences(state, &mut env, owner, session.agent).await;
+    carry_preferences(state, &mut env, owner, session.agent, &Default::default()).await;
     // Re-composed from the stored profile, so a session that resumes after a
     // restart comes back as the profile it was started as. Best effort: a
     // persona that cannot be read is a plain restart, not a refusal to restart.
@@ -1252,7 +1267,7 @@ async fn start_another_agent(
     // Its own credential and its own environment, resolved against this session
     // so the vault's log names the run that spent it.
     let mut env: Vec<(String, String)> = Vec::new();
-    carry_preferences(&state, &mut env, &owner, req.agent).await;
+    carry_preferences(&state, &mut env, &owner, req.agent, &req.settings).await;
     if let Some(account) = &req.account_id {
         super::accounts::pin(&state, &owner, &id, account, req.agent).await?;
     }

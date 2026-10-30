@@ -450,6 +450,7 @@ async fn credential_on(
         ft_core::controls::Control,
         ft_core::controls::Choice,
         ft_core::controls::ControlKind,
+        ft_core::controls::Preferred,
         RemoteRepo,
         AgentMode,
         AgentPresence,
@@ -579,6 +580,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(accounts::switch_account))
         .routes(routes!(accounts::get_fallback, accounts::set_fallback))
         .routes(routes!(agents::list_agents))
+        .routes(routes!(agents::agent_controls))
         .routes(routes!(agents::configure_agent, agents::forget_agent))
         .routes(routes!(agents::check_agents))
         .routes(routes!(agents::sign_agent_in))
