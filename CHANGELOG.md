@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.50.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.49.0...firetower-v0.50.0) (2026-10-30)
+
+
+### Features
+
+* **artifacts:** a page of the application looks like the application ([0844387](https://github.com/firetower-cloud/firetower/commit/08443873e7ab3afb85647ff520a0899b86672978))
+* **artifacts:** a page of the application looks like the application ([3b6296b](https://github.com/firetower-cloud/firetower/commit/3b6296b302aa79fda36080cf6b15110a9dcae284))
+
 ## [0.49.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.48.0...firetower-v0.49.0) (2026-10-28)
 
 
