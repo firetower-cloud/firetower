@@ -400,6 +400,10 @@ pub struct NewSession {
     /// session has run a turn, its own choices are what a restart remembers.
     #[serde(default)]
     pub settings: crate::controls::Preferred,
+    /// The skills to start with, by id. Omit (null) to take your defaults for
+    /// the repositories; a list — including an empty one — overrides them.
+    #[serde(default)]
+    pub skills: Option<Vec<String>>,
 }
 
 /// One repository to check out, as the API accepts it.

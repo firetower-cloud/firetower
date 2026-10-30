@@ -15,8 +15,10 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  ArrowUp,
   Check,
   ChevronDown,
+  Diamond,
   FolderGit2,
   Plus,
   Search,
@@ -28,6 +30,9 @@ import { Icon } from "~/components/ui";
 import { FiretowerMark } from "~/components/ui/Brand";
 import { AgentMark } from "~/components/AgentMark";
 import { RunPicker } from "~/ui/RunPicker";
+import { Mic } from "~/ui/voice/Mic";
+import { VoiceDialog } from "~/ui/voice/Dialogs";
+import { useVoice } from "~/ui/voice/useVoice";
 import { useAgentControls } from "~/api/generated/agents/agents";
 import { useMe } from "~/api/generated/auth/auth";
 import { Pop } from "~/ui/Pop";
@@ -38,7 +43,7 @@ import { useCreateSession } from "~/api/generated/sessions/sessions";
 import { machineLabel, machines } from "~/api/environments";
 import { canRun, resolve, type Where } from "~/components/WhereItRuns";
 import { usable } from "~/api/accounts";
-import { useAccounts, useAgents, useHosts, useRepos } from "~/data";
+import { useAccounts, useAgents, useHosts, useRepos, useSkills } from "~/data";
 import { ConnectAccount } from "~/ui/config/ConnectAccount";
 import { navigate } from "~/shims/next-navigation";
 import { leaveDraft } from "~/workspace/draft";
@@ -63,6 +68,7 @@ export function NewPage() {
   const who = me?.slug ? me.slug.charAt(0).toUpperCase() + me.slug.slice(1) : me?.username;
 
   const { data: repos } = useRepos();
+  const { data: allSkills } = useSkills();
   const { data: hosts } = useHosts();
   const { data: agents } = useAgents();
   const { data: accounts } = useAccounts();
@@ -77,6 +83,9 @@ export function NewPage() {
   const [connecting, setConnecting] = useState(false);
   const [open, setOpen] = useState<{ which: string; at: HTMLElement } | null>(null);
   const box = useRef<HTMLTextAreaElement>(null);
+  // Dictation writes into the prompt like a second pair of hands, the same way
+  // the conversation's composer takes it.
+  const voice = useVoice({ text: prompt, setText: setPrompt, box });
 
   /* A task seeds the repository once the server has mapped its slug to an id. */
   useEffect(() => {
@@ -91,6 +100,18 @@ export function NewPage() {
     all.find((m) => m.key === where.machine) ??
     (host ? all.find((m) => m.hosts.some((h) => h.id === host.id)) : undefined) ??
     all[0];
+
+  // Skills: the ones that apply by default — always-on, or a default in a
+  // repository you've added — unless you change the set.
+  const defaultSkillIds = useMemo(
+    () =>
+      allSkills
+        .filter((s) => s.alwaysOn || s.defaultIn.some((r) => checkouts.some((c) => c.id === r)))
+        .map((s) => s.id),
+    [allSkills, checkouts],
+  );
+  const [skillIds, setSkillIds] = useState<string[] | null>(null);
+  const selectedSkills = skillIds ?? defaultSkillIds;
 
   const profile = profiles.find((p) => p.id === profileId);
   const pinned = (profile?.agent ?? undefined) as Agent | undefined;
@@ -150,6 +171,7 @@ export function NewPage() {
           accountId: account.id,
           branch,
           hostId: host?.id,
+          skills: selectedSkills,
           settings: {
             model: chosen.model,
             effort: chosen.effort,
@@ -192,6 +214,7 @@ export function NewPage() {
             value={prompt}
             onChange={(e) => {
               setPrompt(e.target.value);
+              voice.typed(e.target.value);
               const el = e.target;
               el.style.height = "auto";
               el.style.height = Math.min(el.scrollHeight, 240) + "px";
@@ -200,7 +223,19 @@ export function NewPage() {
             rows={2}
             className="scroll-slim w-full resize-none bg-transparent text-read leading-relaxed text-bone placeholder:text-mute/80 focus:outline-none"
           />
-          <div className="mt-2.5 flex items-center gap-3">
+          <div className="mt-2.5 flex items-center gap-1.5">
+            {voice.possible && <Mic state={voice.state} onStart={voice.start} onStop={voice.stop} />}
+            {allSkills.length > 0 && (
+              <button
+                onClick={(e) => toggle("skills", e.currentTarget)}
+                title="Which skills this agent reads"
+                className="control shrink-0 gap-1.5 text-mute hover:bg-raise hover:text-bone"
+              >
+                <Diamond className="h-3.5 w-3.5" strokeWidth={1.75} />
+                <span className="tabular-nums">{selectedSkills.length}</span>
+                <span>{selectedSkills.length === 1 ? "skill" : "skills"}</span>
+              </button>
+            )}
             {kind && (
               <RunPicker
                 agent={kind}
@@ -216,17 +251,13 @@ export function NewPage() {
                 onPickControl={(k, v) => setChosen((p) => ({ ...p, [k]: v }))}
               />
             )}
-            <span className="flex-1" />
-            <span className="text-micro text-mute">Starts a workspace</span>
             <button
               onClick={go}
               disabled={!ready}
-              className="inline-flex h-8 items-center gap-2 rounded-full bg-bone pr-2.5 pl-3.5 text-ui font-medium text-ground transition enabled:hover:bg-white disabled:cursor-default disabled:bg-overlay disabled:text-mute"
+              title="Start the workspace"
+              className="ml-auto grid h-8 w-8 place-items-center rounded-full bg-bone text-ground transition-opacity duration-150 hover:opacity-90 disabled:bg-overlay disabled:text-mute"
             >
-              Start
-              <span className={`font-mono text-micro ${ready ? "opacity-50" : "opacity-40"}`}>
-                {isMac ? "⌘↵" : "Ctrl↵"}
-              </span>
+              <ArrowUp className="h-4 w-4" strokeWidth={2.5} />
             </button>
           </div>
         </div>
@@ -394,10 +425,46 @@ export function NewPage() {
         </Pop>
       )}
 
+      {open?.which === "skills" && (
+        <Pop anchor={open.at} onClose={close} width={340}>
+          <Menu>
+            <Head>Skills this agent reads</Head>
+            {allSkills.map((s) => {
+              const on = selectedSkills.includes(s.id);
+              return (
+                <Opt
+                  key={s.id}
+                  on={on}
+                  keepOpen
+                  onPick={() =>
+                    setSkillIds(
+                      on
+                        ? selectedSkills.filter((x) => x !== s.id)
+                        : [...selectedSkills, s.id],
+                    )
+                  }
+                  icon={<Diamond className="h-4 w-4" strokeWidth={1.75} />}
+                  title={s.name}
+                  sub={s.alwaysOn ? "always on" : (s.description || undefined)}
+                />
+              );
+            })}
+          </Menu>
+        </Pop>
+      )}
+
       {connecting && kind && agents.some((a) => a.kind === kind) && (
         <ConnectAccount
           agent={agents.find((a) => a.kind === kind)!}
           onClose={() => setConnecting(false)}
+        />
+      )}
+
+      {voice.blocked && (
+        <VoiceDialog
+          blocked={voice.blocked}
+          onDismiss={voice.dismiss}
+          onConfigure={voice.configure}
         />
       )}
     </div>

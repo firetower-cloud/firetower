@@ -92,6 +92,12 @@ export interface NewSession {
   share?: Share;
   size?: WorkspaceSize;
   /**
+     * The skills to start with, by id. Omit (null) to take your defaults for
+     * the repositories; a list — including an empty one — overrides them.
+     * @nullable
+     */
+  skills?: string[] | null;
+  /**
      * The task this is for, when it was started from one.
      * @nullable
      */

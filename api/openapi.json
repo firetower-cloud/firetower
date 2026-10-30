@@ -12211,6 +12211,16 @@
           "size": {
             "$ref": "#/components/schemas/WorkspaceSize"
           },
+          "skills": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "The skills to start with, by id. Omit (null) to take your defaults for\nthe repositories; a list — including an empty one — overrides them."
+          },
           "taskKey": {
             "type": [
               "string",

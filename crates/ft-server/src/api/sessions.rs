@@ -697,18 +697,27 @@ pub(crate) async fn create_session_as(
     // somebody can fix in one click; one that refuses to start because a
     // default could not be read is not.
     let on_these: Vec<String> = repos.iter().map(|(r, _)| r.id.to_string()).collect();
-    match state.skills.defaults_for(&owner, &on_these).await {
-        Ok(wanted) if !wanted.is_empty() => {
-            if let Err(e) = state
-                .skills
-                .set_for_session(id.as_str(), &owner, &wanted)
-                .await
-            {
-                tracing::warn!("seeding this session's skills: {e:#}");
-            }
+    // What this session reads: the explicit selection the New page sent, or —
+    // when none was named — this person's defaults for these repositories.
+    let wanted = match &req.skills {
+        Some(chosen) => chosen.clone(),
+        None => state
+            .skills
+            .defaults_for(&owner, &on_these)
+            .await
+            .unwrap_or_else(|e| {
+                tracing::warn!("reading default skills: {e:#}");
+                Vec::new()
+            }),
+    };
+    if !wanted.is_empty() {
+        if let Err(e) = state
+            .skills
+            .set_for_session(id.as_str(), &owner, &wanted)
+            .await
+        {
+            tracing::warn!("seeding this session's skills: {e:#}");
         }
-        Ok(_) => {}
-        Err(e) => tracing::warn!("reading default skills: {e:#}"),
     }
 
     // The bundles themselves, each from the version its pin names. Best

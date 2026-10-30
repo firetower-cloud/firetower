@@ -109,6 +109,7 @@ export const CreateSessionBody = zod.object({
 }).optional().describe('Model, effort, permissions and sandbox to start with, overriding what\nthis person last used. What the New page\'s picker sends; once the\nsession has run a turn, its own choices are what a restart remembers.'),
   "share": zod.enum(['yields', 'equal', 'takesMore']).optional().describe('How this workspace competes when the machine is busy.\n\nDefaulted, so a caller that has never heard of it opens a workspace that\ntakes its turn — which is what every workspace did before there was a\nchoice.'),
   "size": zod.enum(['Small', 'Medium', 'Large']).optional(),
+  "skills": zod.array(zod.string()).nullish().describe('The skills to start with, by id. Omit (null) to take your defaults for\nthe repositories; a list — including an empty one — overrides them.'),
   "taskKey": zod.string().nullish().describe('The task this is for, when it was started from one.'),
   "taskUrl": zod.string().nullish(),
   "workspaceId": zod.union([zod.null(),zod.string().describe('A workspace to start this agent in, instead of making one.\n\nThe place already exists — its host, its repositories, its branch and\nits directory — so all of those are read from it and anything sent\nalongside is ignored. What is left is the agent and what to ask it.\n\nThis is how a workspace comes to hold two agents: they are two sessions\nnaming one `workspace_id`, each with its own conversation.')]).optional()
