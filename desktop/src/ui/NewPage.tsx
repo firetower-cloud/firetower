@@ -53,6 +53,26 @@ import type { Agent, Control, ControlKind } from "~/api/generated/model";
 
 type Checkout = { id: string; slug: string };
 
+/* The engine and account last started with, kept on this machine so the New
+   page opens on them. Model, effort and permissions already come back through
+   the agent's remembered controls, so only these two need a home here. */
+const LAST_AGENT = "ft:new:agent";
+const LAST_ACCOUNT = "ft:new:account";
+const remember = (key: string, value: string) => {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    /* private mode, or no storage — not worth failing a start over. */
+  }
+};
+const recall = (key: string) => {
+  try {
+    return localStorage.getItem(key) ?? "";
+  } catch {
+    return "";
+  }
+};
+
 const slug = (s: string) =>
   s.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48);
 
@@ -77,9 +97,13 @@ export function NewPage() {
 
   const [prompt, setPrompt] = useState("");
   const [checkouts, setCheckouts] = useState<Checkout[]>([]);
-  const [where, setWhere] = useState<Where>({ machine: "", hostId: "", agent: "" });
+  const [where, setWhere] = useState<Where>(() => ({
+    machine: "",
+    hostId: "",
+    agent: recall(LAST_AGENT) as Where["agent"],
+  }));
   const [profileId, setProfileId] = useState<string | null>(null);
-  const [accountId, setAccountId] = useState("");
+  const [accountId, setAccountId] = useState(() => recall(LAST_ACCOUNT));
   const [connecting, setConnecting] = useState(false);
   const [open, setOpen] = useState<{ which: string; at: HTMLElement } | null>(null);
   const box = useRef<HTMLTextAreaElement>(null);
@@ -115,8 +139,11 @@ export function NewPage() {
 
   const profile = profiles.find((p) => p.id === profileId);
   const pinned = (profile?.agent ?? undefined) as Agent | undefined;
+  // A saved engine is used only while it still exists and is supported — one
+  // that was uninstalled falls back rather than leaving a dead selection.
+  const picked = agents.some((a) => a.kind === where.agent) ? (where.agent as Agent) : undefined;
   const kind = (pinned ||
-    where.agent ||
+    picked ||
     agents.find((a) => host && canRun(a, host.id))?.kind ||
     agents[0]?.kind) as Agent | undefined;
 
@@ -154,6 +181,9 @@ export function NewPage() {
 
   const go = () => {
     if (!ready || !kind || !account) return;
+    // What was actually used, so the next New page opens on it.
+    remember(LAST_AGENT, kind);
+    remember(LAST_ACCOUNT, account.id);
     const first = prompt.split("\n")[0].trim();
     const name = (seed?.title || first || checkouts[0]?.slug || "Workspace").slice(0, 80);
     const branch = checkouts.length ? `agent/${slug(first || name) || "work"}` : undefined;
