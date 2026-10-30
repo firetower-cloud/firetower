@@ -28,6 +28,7 @@ import { Icon } from "~/components/ui";
 import { AgentMark } from "~/components/AgentMark";
 import { RunPicker } from "~/ui/RunPicker";
 import { useAgentControls } from "~/api/generated/agents/agents";
+import { useMe } from "~/api/generated/auth/auth";
 import { Pop } from "~/ui/Pop";
 import { Readout, isReady } from "~/components/HostReadiness";
 import { useHostReadiness } from "~/api/generated/hosts/hosts";
@@ -49,8 +50,16 @@ type Checkout = { id: string; slug: string };
 const slug = (s: string) =>
   s.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48);
 
+/** "Good morning/afternoon/evening", by the clock on this machine. */
+function timeOfDay(): string {
+  const h = new Date().getHours();
+  return h < 12 ? "morning" : h < 18 ? "afternoon" : "evening";
+}
+
 export function NewPage() {
   const seed = useMemo(() => consumeSeed(), []);
+  const me = useMe().data?.user;
+  const who = me?.slug ? me.slug.charAt(0).toUpperCase() + me.slug.slice(1) : me?.username;
 
   const { data: repos } = useRepos();
   const { data: hosts } = useHosts();
@@ -110,7 +119,8 @@ export function NewPage() {
     { agent: kind },
     { query: { enabled: !!host && !!kind, retry: false, staleTime: 5000 } },
   );
-  const ready = !!host && !!kind && !!account && isReady(readiness.data) && !create.isPending;
+  const hostReady = !!host && !!kind && isReady(readiness.data);
+  const ready = hostReady && !!account && !create.isPending;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -170,7 +180,7 @@ export function NewPage() {
     <div className="flex min-w-0 flex-1 flex-col overflow-auto">
       <div className="m-auto w-full max-w-[680px] px-7 py-10">
         <h1 className="mb-8 text-center text-[1.6rem] font-normal leading-snug tracking-[-0.02em] text-bone/90">
-          What are we building?
+          Good {timeOfDay()}{who ? `, ${who}` : ""}
         </h1>
 
         {/* composer */}
@@ -220,7 +230,7 @@ export function NewPage() {
         </div>
 
         {/* the four decisions */}
-        <div className="mt-3.5 flex flex-wrap gap-2 px-0.5">
+        <div className="mt-3 flex flex-wrap gap-0.5">
           {/* Profile */}
           <Pill
             icon={
@@ -254,21 +264,20 @@ export function NewPage() {
             icon={<Server className="h-[15px] w-[15px]" strokeWidth={1.8} />}
             label={machine ? machineLabel(machine) : "Where it runs"}
             set={!!where.machine}
+            after={
+              host && kind ? (
+                <span
+                  className={`h-1.5 w-1.5 rounded-full ${hostReady ? "bg-sage" : "bg-kind-data"}`}
+                  title={hostReady ? "Ready" : "Needs setup — open to see"}
+                />
+              ) : undefined
+            }
             onClick={(e) => toggle("machine", e)}
           />
         </div>
 
-        {/* readiness / connect, shown only when there is something to say */}
-        {host && kind && mine.length > 0 && (
-          <div className="mt-2 overflow-hidden rounded-lg border border-line bg-panel">
-            <Readout
-              key={`${host.id}:${kind}`}
-              host={host}
-              agent={kind}
-              agentLabel={agents.find((a) => a.kind === kind)?.label}
-            />
-          </div>
-        )}
+        {/* Readiness lives in the machine dropdown now; only a blocker that
+            needs you — no account to run on — surfaces here. */}
         {host && kind && mine.length === 0 && (
           <div className="mt-2 flex items-center gap-3 rounded-lg border border-line bg-panel px-3 py-2">
             <span className="min-w-0 flex-1 text-meta text-kind-data">
@@ -352,7 +361,7 @@ export function NewPage() {
       )}
 
       {open?.which === "machine" && (
-        <Pop anchor={open.at} onClose={close} width={300}>
+        <Pop anchor={open.at} onClose={close} width={340}>
           <Menu>
             {all.length === 0 && (
               <p className="px-3 py-2 text-meta text-mute">No machine connected.</p>
@@ -369,6 +378,16 @@ export function NewPage() {
                 title={machineLabel(m)}
               />
             ))}
+            {host && kind && (
+              <div className="mt-1 border-t border-line-soft pt-1">
+                <Readout
+                  key={`${host.id}:${kind}`}
+                  host={host}
+                  agent={kind}
+                  agentLabel={agents.find((a) => a.kind === kind)?.label}
+                />
+              </div>
+            )}
           </Menu>
         </Pop>
       )}
@@ -391,6 +410,7 @@ function Pill({
   sub,
   lock,
   set,
+  after,
   onClick,
 }: {
   icon: React.ReactNode;
@@ -398,22 +418,20 @@ function Pill({
   sub?: string;
   lock?: string;
   set?: boolean;
+  after?: React.ReactNode;
   onClick: (el: HTMLElement) => void;
 }) {
   return (
     <button
       onClick={(e) => onClick(e.currentTarget)}
-      className={`inline-flex h-[30px] items-center gap-2 rounded-full border px-3 text-meta transition-colors ${
-        set
-          ? "border-slate-deep/70 bg-slate-tint text-bone"
-          : "border-line bg-transparent text-dim hover:border-dim hover:text-text"
-      }`}
+      className="group inline-flex h-8 items-center gap-2 rounded-lg px-2 text-meta transition-colors hover:bg-raise/60"
     >
-      <span className={set ? "text-slate" : "text-dim"}>{icon}</span>
-      <span className={set ? "text-bone" : "text-text"}>{label}</span>
+      <span className={set ? "text-slate" : "text-mute"}>{icon}</span>
+      <span className={set ? "text-bone" : "text-dim group-hover:text-text"}>{label}</span>
       {sub && <span className="text-mute">{sub}</span>}
       {lock && <span className="text-sage/90">· {lock}</span>}
-      <ChevronDown className="h-3 w-3 text-mute/70" strokeWidth={2} />
+      {after}
+      <ChevronDown className="h-3 w-3 text-mute/60 transition-colors group-hover:text-mute" strokeWidth={2} />
     </button>
   );
 }
