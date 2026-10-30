@@ -301,12 +301,16 @@ pub(super) async fn agent_controls(
     let pairs = state.db.preferred_controls(me, agent).await.unwrap_or_default();
     let pref = ft_core::controls::Preferred::from_pairs(pairs);
     for c in &mut controls {
-        c.current = match c.kind {
+        let remembered = match c.kind {
             ControlKind::Model => pref.model.clone(),
             ControlKind::Effort => pref.effort.clone(),
             ControlKind::Mode => pref.mode.clone(),
             ControlKind::Sandbox => pref.sandbox.clone(),
         };
+        // What you last used, or — with nothing remembered — the agent's own
+        // default, so the picker opens on a real combo rather than a blank.
+        c.current = remembered
+            .or_else(|| ft_core::controls::default_value(agent, c.kind).map(String::from));
     }
     Ok(Json(controls))
 }

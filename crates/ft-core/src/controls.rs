@@ -422,6 +422,24 @@ pub fn for_agent(agent: crate::Agent, models: Vec<Choice>, efforts: Vec<Choice>)
     }
 }
 
+/// What a control starts on when nothing has been chosen — the same default
+/// `launch_headless` and the agents' own launchers apply.
+///
+/// So a picker with no remembered choice shows what will actually run rather
+/// than a blank. `None` where the answer is not fixed: Codex's model is the one
+/// it lists once running, not something known here.
+pub fn default_value(agent: crate::Agent, kind: ControlKind) -> Option<&'static str> {
+    use crate::Agent;
+    match (agent, kind) {
+        (Agent::ClaudeCode, ControlKind::Model) => Some(crate::BIGGEST),
+        (Agent::ClaudeCode, ControlKind::Effort) => Some(crate::EFFORT),
+        (Agent::ClaudeCode, ControlKind::Mode) => Some(crate::ASKING_MODE),
+        (Agent::Codex, ControlKind::Mode) => Some(crate::codex::DEFAULT_MODE),
+        (Agent::Codex, ControlKind::Sandbox) => Some(SANDBOX_WORKSPACE_NETWORK),
+        _ => None,
+    }
+}
+
 /// What to send to put one into force, for the agent that is told rather than
 /// asked.
 ///
