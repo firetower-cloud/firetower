@@ -181,7 +181,7 @@ export function NewPage() {
     <div className="flex min-w-0 flex-1 flex-col overflow-auto">
       <div className="m-auto w-full max-w-[680px] px-7 py-10">
         <h1 className="mb-8 flex items-center justify-center gap-2.5 text-[1.6rem] font-normal leading-snug tracking-[-0.02em] text-bone/90">
-          <FiretowerMark size={24} className="text-bone" />
+          <FiretowerMark size={22} />
           Good {timeOfDay()}{who ? `, ${who}` : ""}
         </h1>
 

@@ -136,24 +136,24 @@ export function LinearMark({ size = 14, className = "" }: { size?: number; class
 }
 
 /**
- * Firetower's own mark: a four-point beacon.
+ * Firetower's own mark: the orange dot.
  *
- * A watchtower's job is the signal fire, so the mark is the spark, not the
- * tower. Drawn as a single filled star with a soft inner cut, monochrome so it
- * takes the colour of wherever it sits — the one place orange is spent is the
- * ember that says something is waiting, and a logo is not that.
+ * A solid circle in the brand orange — fixed, not `currentColor`, because the
+ * colour is the logo. This is the one place the hue is spent on identity; the
+ * ember that means "a session is waiting on you" is a different, reserved tone.
  */
+export const FIRETOWER_ORANGE = "#FF5A00";
+
 export function FiretowerMark({ size = 18, className = "" }: { size?: number; className?: string }) {
   return (
     <svg
       width={size}
       height={size}
       viewBox="0 0 24 24"
-      fill="currentColor"
       aria-hidden
       className={`shrink-0 ${className}`}
     >
-      <path d="M12 1.5c.35 4.17 1.26 6.4 2.74 7.76C16.1 10.74 18.33 11.65 22.5 12c-4.17.35-6.4 1.26-7.76 2.74C13.26 16.1 12.35 18.33 12 22.5c-.35-4.17-1.26-6.4-2.74-7.76C7.9 13.26 5.67 12.35 1.5 12c4.17-.35 6.4-1.26 7.76-2.74C10.74 7.9 11.65 5.67 12 1.5Z" />
+      <circle cx="12" cy="12" r="10" fill={FIRETOWER_ORANGE} />
     </svg>
   );
 }
