@@ -25,6 +25,7 @@ import {
   X,
 } from "lucide-react";
 import { Icon } from "~/components/ui";
+import { FiretowerMark } from "~/components/ui/Brand";
 import { AgentMark } from "~/components/AgentMark";
 import { RunPicker } from "~/ui/RunPicker";
 import { useAgentControls } from "~/api/generated/agents/agents";
@@ -179,7 +180,8 @@ export function NewPage() {
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-auto">
       <div className="m-auto w-full max-w-[680px] px-7 py-10">
-        <h1 className="mb-8 text-center text-[1.6rem] font-normal leading-snug tracking-[-0.02em] text-bone/90">
+        <h1 className="mb-8 flex items-center justify-center gap-2.5 text-[1.6rem] font-normal leading-snug tracking-[-0.02em] text-bone/90">
+          <FiretowerMark size={24} className="text-bone" />
           Good {timeOfDay()}{who ? `, ${who}` : ""}
         </h1>
 

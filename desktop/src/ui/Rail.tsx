@@ -14,7 +14,6 @@ import type { LucideIcon } from "lucide-react";
 import { AgentMark } from "~/components/AgentMark";
 import { Blocks } from "~/island/Blocks";
 import { HostMark, Icon } from "~/components/ui";
-import { FiretowerMark } from "~/components/ui/Brand";
 import { childrenOf, childrenWorking, doing, group, isChild, rowLabel, shortRepo, type Repositories, type Workspace } from "~/api/workspaces";
 import { beatOf, elapsed, minutesSince } from "~/api/view";
 import type { Backend } from "~/fleet";
@@ -65,14 +64,6 @@ export function Rail({ backend }: { backend: Backend }) {
 
   return (
     <aside className="flex w-[16rem] shrink-0 flex-col overflow-hidden border-r border-line bg-(--color-panel-vibrant)">
-      <button
-        onClick={() => navigate("/")}
-        className="flex items-center gap-2 px-3 pt-3 pb-1 text-left"
-        title="Firetower"
-      >
-        <FiretowerMark size={17} className="text-bone" />
-        <span className="text-ui font-semibold tracking-[-0.01em] text-bone">Firetower</span>
-      </button>
       {inConfig ? (
         <Settings path={path} />
       ) : (
