@@ -21,13 +21,12 @@ import {
   Plus,
   Search,
   Server,
-  Sparkles,
   UserRound,
   X,
 } from "lucide-react";
 import { Icon } from "~/components/ui";
-import { AgentMark, AGENT_LABEL } from "~/components/AgentMark";
-import { AgentPicker } from "~/ui/AgentPicker";
+import { AgentMark } from "~/components/AgentMark";
+import { RunPicker } from "~/ui/RunPicker";
 import { useAgentControls } from "~/api/generated/agents/agents";
 import { Pop } from "~/ui/Pop";
 import { Readout, isReady } from "~/components/HostReadiness";
@@ -82,10 +81,6 @@ export function NewPage() {
     all.find((m) => m.key === where.machine) ??
     (host ? all.find((m) => m.hosts.some((h) => h.id === host.id)) : undefined) ??
     all[0];
-  const runsHere = (k: Agent) => {
-    const a = agents.find((x) => x.kind === k);
-    return !!a && !!host && canRun(a, host.id);
-  };
 
   const profile = profiles.find((p) => p.id === profileId);
   const pinned = (profile?.agent ?? undefined) as Agent | undefined;
@@ -171,8 +166,6 @@ export function NewPage() {
   const toggle = (which: string, at: HTMLElement) =>
     setOpen((o) => (o?.which === which ? null : { which, at }));
 
-  const accountLabel = account ? account.name : mine.length === 0 ? "connect an account" : "";
-
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-auto">
       <div className="m-auto w-full max-w-[680px] px-7 py-10">
@@ -196,13 +189,19 @@ export function NewPage() {
             className="scroll-slim w-full resize-none bg-transparent text-read leading-relaxed text-bone placeholder:text-mute/80 focus:outline-none"
           />
           <div className="mt-2.5 flex items-center gap-3">
-            {kind && controls.length > 0 && (
-              <AgentPicker
+            {kind && (
+              <RunPicker
                 agent={kind}
                 agentLabel={agents.find((a) => a.kind === kind)?.label}
+                agents={agents.filter((a) => a.supported).map((a) => ({ kind: a.kind, label: a.label }))}
+                accounts={mine.map((a) => ({ id: a.id, name: a.name, isDefault: a.isDefault }))}
+                accountId={account?.id ?? ""}
+                agentLocked={!!pinned}
                 controls={controls}
                 valueOf={valueOf}
-                onPick={(k, v) => setChosen((p) => ({ ...p, [k]: v }))}
+                onPickAgent={(k) => setWhere({ ...where, agent: k })}
+                onPickAccount={(id) => setAccountId(id)}
+                onPickControl={(k, v) => setChosen((p) => ({ ...p, [k]: v }))}
               />
             )}
             <span className="flex-1" />
@@ -250,15 +249,6 @@ export function NewPage() {
             set={checkouts.length > 0}
             onClick={(e) => toggle("repo", e)}
           />
-          {/* Agent · Account */}
-          <Pill
-            icon={kind ? <AgentMark agent={kind} size={15} /> : <Sparkles className="h-[15px] w-[15px]" />}
-            label={kind ? AGENT_LABEL[kind] : "Agent"}
-            sub={accountLabel ? `· ${accountLabel}` : undefined}
-            lock={pinned ? "from profile" : undefined}
-            set={!!where.agent || !!pinned}
-            onClick={(e) => toggle("agent", e)}
-          />
           {/* Where it runs */}
           <Pill
             icon={<Server className="h-[15px] w-[15px]" strokeWidth={1.8} />}
@@ -282,7 +272,7 @@ export function NewPage() {
         {host && kind && mine.length === 0 && (
           <div className="mt-2 flex items-center gap-3 rounded-lg border border-line bg-panel px-3 py-2">
             <span className="min-w-0 flex-1 text-meta text-kind-data">
-              No {AGENT_LABEL[kind]} account connected.
+              No {agents.find((a) => a.kind === kind)?.label ?? kind} account connected.
             </span>
             <button
               onClick={() => setConnecting(true)}
@@ -357,48 +347,6 @@ export function NewPage() {
                 sub={r.defaultBranch ?? undefined}
               />
             ))}
-          </Menu>
-        </Pop>
-      )}
-
-      {open?.which === "agent" && (
-        <Pop anchor={open.at} onClose={close} width={300}>
-          <Menu>
-            <Head>{pinned ? "Set by the profile" : "Agent"}</Head>
-            {agents
-              .filter((a) => a.supported)
-              .map((a) => (
-                <Opt
-                  key={a.kind}
-                  on={kind === a.kind}
-                  disabled={!!pinned && a.kind !== pinned}
-                  onPick={() => {
-                    setWhere({ ...where, agent: a.kind });
-                    close();
-                  }}
-                  icon={<AgentMark agent={a.kind} size={16} />}
-                  title={a.label}
-                  sub={runsHere(a.kind) ? undefined : "not installed here, or no account"}
-                />
-              ))}
-            {mine.length > 1 && (
-              <>
-                <Head>Account</Head>
-                {mine.map((a) => (
-                  <Opt
-                    key={a.id}
-                    on={a.id === account?.id}
-                    onPick={() => {
-                      setAccountId(a.id);
-                      close();
-                    }}
-                    icon={<span className="inline-block h-2 w-2 rounded-full bg-slate" />}
-                    title={a.name}
-                    sub={a.isDefault ? "default" : undefined}
-                  />
-                ))}
-              </>
-            )}
           </Menu>
         </Pop>
       )}
