@@ -74,6 +74,20 @@ export function Roles() {
   const [editing, setEditing] = useState<{ id?: string; path?: string; draft: NewRole } | null>(
     null,
   );
+  const cache = useQueryClient();
+  const confirm = useConfirm();
+
+  const removeRole = async (role: Role) => {
+    const ok = await confirm({
+      title: `Delete "${role.name}"?`,
+      body: "You can no longer start a workspace as it, and leads lose it from their reach. Agents already running are untouched.",
+      action: "Delete profile",
+      tone: "danger",
+    });
+    if (!ok) return;
+    await deleteRole(role.id);
+    await cache.invalidateQueries({ queryKey: getListRolesQueryKey() });
+  };
 
   if (editing) {
     return <Editor state={editing} all={rows.data} onClose={() => setEditing(null)} />;
@@ -82,7 +96,7 @@ export function Roles() {
   return (
     <Section
       title="Profiles"
-      note="A saved persona any agent can run — a lead, a developer, a reviewer, a QA. Each carries what it does, where it runs, its instructions, and the team it may hand work to."
+      note="A saved persona any agent can run — a lead, a developer, a reviewer, a QA. Each carries what it does, where it runs, its instructions, and whether it may hand work off."
       action={
         <button
           onClick={() => setEditing({ draft: { ...BLANK } })}
@@ -99,6 +113,7 @@ export function Roles() {
             key={role.id}
             role={role}
             onOpen={() => setEditing({ id: role.id, path: role.path, draft: toDraft(role) })}
+            onDelete={() => removeRole(role)}
           />
         ))}
       </Rows>
@@ -120,7 +135,15 @@ function toDraft(r: Role): NewRole {
 }
 
 /** One role in the list: its name, what it does, and the shape of it as chips. */
-function RoleRow({ role, onOpen }: { role: Role; onOpen: () => void }) {
+function RoleRow({
+  role,
+  onOpen,
+  onDelete,
+}: {
+  role: Role;
+  onOpen: () => void;
+  onDelete: () => void;
+}) {
   const place =
     role.placement === "here"
       ? "same workspace"
@@ -130,34 +153,45 @@ function RoleRow({ role, onOpen }: { role: Role; onOpen: () => void }) {
   const agent = role.agent as Agent | null;
 
   return (
-    <button
-      onClick={onOpen}
-      className="flex w-full items-start gap-3 border-b border-line-soft px-3.5 py-3 text-left last:border-0 hover:bg-raise/50"
-    >
-      <UsersRound className="mt-0.5 h-4 w-4 shrink-0 text-mute" strokeWidth={1.75} />
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <span className="truncate text-ui text-bone">{role.name}</span>
-          {!role.mayWrite && <span className="shrink-0 text-micro text-mute">shared with you</span>}
+    <div className="group flex w-full items-start gap-3 border-b border-line-soft px-3.5 py-3 last:border-0 hover:bg-raise/50">
+      <button onClick={onOpen} className="flex min-w-0 flex-1 items-start gap-3 text-left">
+        <UsersRound className="mt-0.5 h-4 w-4 shrink-0 text-mute" strokeWidth={1.75} />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="truncate text-ui text-bone">{role.name}</span>
+            {!role.mayWrite && (
+              <span className="shrink-0 text-micro text-mute">shared with you</span>
+            )}
+          </div>
+          <p className="mt-0.5 truncate text-meta text-dim">{role.does}</p>
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+            {role.canDelegate && (
+              <span className="inline-flex items-center gap-1 rounded bg-sage-tint px-1.5 py-0.5 text-micro text-sage">
+                <Users className="h-3 w-3" strokeWidth={1.75} />
+                manager
+              </span>
+            )}
+            <Chip>{place}</Chip>
+            {agent && (
+              <Chip>
+                <AgentMark agent={agent} size={11} className="text-dim" />
+                {AGENT_LABEL[agent]}
+              </Chip>
+            )}
+          </div>
         </div>
-        <p className="mt-0.5 truncate text-meta text-dim">{role.does}</p>
-        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-          {role.canDelegate && (
-            <span className="inline-flex items-center gap-1 rounded bg-sage-tint px-1.5 py-0.5 text-micro text-sage">
-              <Users className="h-3 w-3" strokeWidth={1.75} />
-              manager
-            </span>
-          )}
-          <Chip>{place}</Chip>
-          {agent && (
-            <Chip>
-              <AgentMark agent={agent} size={11} className="text-dim" />
-              {AGENT_LABEL[agent]}
-            </Chip>
-          )}
-        </div>
-      </div>
-    </button>
+      </button>
+      {role.mayWrite && (
+        <button
+          onClick={onDelete}
+          aria-label={`Delete ${role.name}`}
+          title="Delete profile"
+          className="shrink-0 rounded p-1.5 text-mute transition hover:bg-brick-tint hover:text-brick"
+        >
+          <Trash2 className="h-4 w-4" strokeWidth={1.75} />
+        </button>
+      )}
+    </div>
   );
 }
 
