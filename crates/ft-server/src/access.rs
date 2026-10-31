@@ -961,6 +961,10 @@ impl Access {
              SELECT 'repository', r.id, r.path::text, r.slug, r.remote, u.name
                FROM repos r LEFT JOIN principals u ON u.id = r.added_by
               WHERE r.path <@ $1::ltree
+             UNION ALL
+             SELECT 'artifact', x.id, x.path::text, x.title, x.from_workspace_name, u.name
+               FROM artifacts x LEFT JOIN principals u ON u.id = x.created_by
+              WHERE x.path <@ $1::ltree
              ORDER BY kind, name",
         )
         .bind(under)
@@ -1232,7 +1236,10 @@ impl Access {
                FROM secrets s WHERE s.extra_perms ? $1
              UNION ALL
              SELECT 'skill', k.id, k.name, k.extra_perms ->> $1
-               FROM skills k WHERE k.extra_perms ? $1",
+               FROM skills k WHERE k.extra_perms ? $1
+             UNION ALL
+             SELECT 'artifact', x.id, x.title, x.extra_perms ->> $1
+               FROM artifacts x WHERE x.extra_perms ? $1",
         )
         .bind(key)
         .fetch_all(&self.pool)
@@ -1729,7 +1736,14 @@ impl Access {
     /// is ever added and forgotten here, the cost is a dead entry rather than a
     /// stranger's access.
     pub async fn forget_exceptions(tx: &mut Transaction<'_, Postgres>, key: &str) -> Result<()> {
-        for table in ["workspaces", "hosts", "agent_accounts", "secrets", "skills"] {
+        for table in [
+            "workspaces",
+            "hosts",
+            "agent_accounts",
+            "secrets",
+            "skills",
+            "artifacts",
+        ] {
             sqlx::query(&format!(
                 "UPDATE {table} SET extra_perms = extra_perms - $1::text WHERE extra_perms ? $1"
             ))
