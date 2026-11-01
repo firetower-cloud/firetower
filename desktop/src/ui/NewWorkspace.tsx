@@ -42,6 +42,9 @@ export type Seed = {
   issue?: string;
   taskKey?: string;
   taskUrl?: string;
+  /** The composer, pre-filled — how "Create with AI" arrives from a config
+   *  screen, with a line like "I want to create a skill that " already typed. */
+  prompt?: string;
   /** Another agent in an existing workspace rather than a new one. */
   workspaceId?: string;
 };

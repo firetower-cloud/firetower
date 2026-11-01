@@ -1,0 +1,24 @@
+-- A skill the owner hasn't reviewed yet, because an agent wrote it and it runs.
+--
+-- An agent may now author a skill (the `create_skill` tool), and most are
+-- words — a SKILL.md and some references, visible and reversible the instant
+-- they land, same as a profile. But a skill can carry a `scripts/` file, and
+-- that file is written `0o755` onto the disk of every session that uses it and
+-- runs. When a person hand-copied a skill, reading it was the review; an agent
+-- writing it removes that moment, so we put it back — and only where it is
+-- earned, for a bundle that ships an executable.
+--
+-- `held_version_id` is that pending version: written, fingerprinted, and
+-- filed, but pointed at from here rather than from `current_version_id`, so
+-- nothing that materialises a skill (`set_for_session`, `bundles_for_session`,
+-- the share copy — all of which read `current_version_id`) can ever reach it.
+-- Approving flips the pointer to `current`; discarding deletes the version and
+-- the `on delete set null` clears this. A held *new* skill has a null
+-- `current_version_id` until then: it is in the library, badged, and runs
+-- nowhere.
+--
+-- A foreign key is safe here where `current_version_id` could not have one:
+-- the version is inserted first and this is set second, so there is no
+-- insert-time cycle to satisfy.
+alter table skills
+    add column held_version_id text references skill_versions(id) on delete set null;

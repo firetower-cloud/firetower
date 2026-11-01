@@ -21,22 +21,32 @@ export interface Role {
      */
   canDelegate: boolean;
   createdAt: string;
-  /** One line: what this kind of agent does. */
+  /**
+     * What it does and when to reach for it — the one line a lead reads to
+     * decide whether to hand it work, the way a skill's `description` is read.
+     */
   does: string;
   id: string;
   /** Composed into the child's instructions. */
   instructions: string;
+  /**
+     * Whether this person starts a new workspace as this profile by default.
+     * At most one of theirs is, so setting another unsets this one.
+     */
+  isDefault: boolean;
+  /**
+     * The machine its own workspace runs on, by host id, or absent to let the
+     * lead choose. Meaningful only when `placement` is `new`.
+     * @nullable
+     */
+  machine?: string | null;
   /** Whether they may move it into a directory, or out of one. */
   mayShare: boolean;
   /** Whether the person asking may edit or delete it. */
   mayWrite: boolean;
   name: string;
-  /** When it should not — the line that says "you can do this yourself". */
-  notWhen: string;
   path: string;
   /** `lead` (let the lead choose) | `here` | `new`. */
   placement: string;
   updatedAt: string;
-  /** When a lead should reach for it. */
-  useWhen: string;
 }

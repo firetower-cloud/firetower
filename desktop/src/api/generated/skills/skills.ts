@@ -40,6 +40,7 @@ import type {
   SkillDetail,
   SkillIds,
   SkillNaming,
+  SkillReview,
   SkillVersion
 } from '../model';
 
@@ -950,6 +951,73 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
       > => {
       return useMutation(getRenameSkillMutationOptions(options), queryClient);
     }
+    export const getApproveSkillUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/skills/${id}/approve`
+}
+
+export const approveSkill = async (id: string, options?: Parameters<typeof http>[1]): Promise<Skill> => {
+
+  return http<Skill>(getApproveSkillUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getApproveSkillMutationKey = () => ['approveSkill'] as const;
+
+export const getApproveSkillMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof approveSkill>>, TError,ApproveSkillMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof approveSkill>>, TError,ApproveSkillMutationVariables, TContext> => {
+
+const mutationKey = getApproveSkillMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof approveSkill>>, ApproveSkillMutationVariables> = (props) => {
+          const {id} = props ?? {};
+
+          return  approveSkill(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ApproveSkillMutationResult = NonNullable<Awaited<ReturnType<typeof approveSkill>>>
+
+    export type ApproveSkillMutationError = ApiError
+    export type ApproveSkillMutationVariables = {id: string}
+
+    export const useApproveSkill = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof approveSkill>>, TError,ApproveSkillMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof approveSkill>>,
+        TError,
+        ApproveSkillMutationVariables,
+        TContext
+      > => {
+      return useMutation(getApproveSkillMutationOptions(options), queryClient);
+    }
     export const getSetDefaultUrl = (id: string,) => {
 
 
@@ -1134,6 +1202,178 @@ export const useGetSkillDetailQueryData = () => {
   const queryClient = useQueryClient();
   return (id: string,) =>
     queryClient.getQueryData<Awaited<ReturnType<typeof skillDetail>>>(getSkillDetailQueryKey(id));
+}
+
+
+export const getDiscardSkillUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/skills/${id}/discard`
+}
+
+export const discardSkill = async (id: string, options?: Parameters<typeof http>[1]): Promise<void> => {
+
+  return http<void>(getDiscardSkillUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getDiscardSkillMutationKey = () => ['discardSkill'] as const;
+
+export const getDiscardSkillMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof discardSkill>>, TError,DiscardSkillMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof discardSkill>>, TError,DiscardSkillMutationVariables, TContext> => {
+
+const mutationKey = getDiscardSkillMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof discardSkill>>, DiscardSkillMutationVariables> = (props) => {
+          const {id} = props ?? {};
+
+          return  discardSkill(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DiscardSkillMutationResult = NonNullable<Awaited<ReturnType<typeof discardSkill>>>
+
+    export type DiscardSkillMutationError = ApiError
+    export type DiscardSkillMutationVariables = {id: string}
+
+    export const useDiscardSkill = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof discardSkill>>, TError,DiscardSkillMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof discardSkill>>,
+        TError,
+        DiscardSkillMutationVariables,
+        TContext
+      > => {
+      return useMutation(getDiscardSkillMutationOptions(options), queryClient);
+    }
+    export const getReviewSkillUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/skills/${id}/review`
+}
+
+export const reviewSkill = async (id: string, options?: Parameters<typeof http>[1]): Promise<SkillReview> => {
+
+  return http<SkillReview>(getReviewSkillUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getReviewSkillQueryKey = (id: string,) => {
+    return [
+    `/api/v1/skills/${id}/review`
+    ] as const;
+    }
+
+
+export const getReviewSkillQueryOptions = <TData = Awaited<ReturnType<typeof reviewSkill>>, TError = ApiError>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof reviewSkill>>, TError, TData>>, request?: SecondParameter<typeof http>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getReviewSkillQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof reviewSkill>>> = ({ signal }) => reviewSkill(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof reviewSkill>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ReviewSkillQueryResult = NonNullable<Awaited<ReturnType<typeof reviewSkill>>>
+export type ReviewSkillQueryError = ApiError
+
+
+export function useReviewSkill<TData = Awaited<ReturnType<typeof reviewSkill>>, TError = ApiError>(
+ id: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof reviewSkill>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof reviewSkill>>,
+          TError,
+          Awaited<ReturnType<typeof reviewSkill>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useReviewSkill<TData = Awaited<ReturnType<typeof reviewSkill>>, TError = ApiError>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof reviewSkill>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof reviewSkill>>,
+          TError,
+          Awaited<ReturnType<typeof reviewSkill>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useReviewSkill<TData = Awaited<ReturnType<typeof reviewSkill>>, TError = ApiError>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof reviewSkill>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+
+export function useReviewSkill<TData = Awaited<ReturnType<typeof reviewSkill>>, TError = ApiError>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof reviewSkill>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getReviewSkillQueryOptions(id,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+export const useSetReviewSkillQueryData = () => {
+  const queryClient = useQueryClient();
+  return (id: string,updater: Awaited<ReturnType<typeof reviewSkill>> | undefined | ((old: Awaited<ReturnType<typeof reviewSkill>> | undefined) => Awaited<ReturnType<typeof reviewSkill>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof reviewSkill>>>({ exact: $exactMatch, queryKey: getReviewSkillQueryKey(id) }, updater);
+  };
+}
+
+export const useGetReviewSkillQueryData = () => {
+  const queryClient = useQueryClient();
+  return (id: string,) =>
+    queryClient.getQueryData<Awaited<ReturnType<typeof reviewSkill>>>(getReviewSkillQueryKey(id));
 }
 
 

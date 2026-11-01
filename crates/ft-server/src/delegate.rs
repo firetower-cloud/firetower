@@ -90,8 +90,31 @@ async fn handle(state: &AppState, request: &AgentRequest) -> Result<String> {
     match request.tool.as_str() {
         "spawn" => spawn(state, request).await,
         "children" => children(state, request).await,
+        "create_profile" => create_profile(state, request).await,
+        "update_profile" => update_profile(state, request).await,
+        "list_profiles" => list_profiles(state, request).await,
+        "create_skill" => create_skill(state, request).await,
+        "update_skill" => update_skill(state, request).await,
+        "list_skills" => list_skills(state, request).await,
         other => bail!("`{other}` is not something a session can ask Firetower for"),
     }
+}
+
+/// The session behind a configuration call, refusing one that may not make it.
+///
+/// Configuring Firetower is the lead's job: a child is doing a piece of work,
+/// not setting the place up, and the same flat rule that stops it spawning
+/// stops it here. Everything it does runs as this session's owner.
+async fn authoring_session(state: &AppState, request: &AgentRequest) -> Result<Session> {
+    let session = state
+        .db
+        .session(&request.session_id)
+        .await?
+        .context("the session that asked no longer exists")?;
+    if session.parent_id.is_some() {
+        bail!("this session is itself a child; configuring Firetower is the lead's to do");
+    }
+    Ok(session)
 }
 
 /// A string argument, or nothing — blank counts as nothing.
@@ -251,11 +274,15 @@ async fn spawn(state: &AppState, request: &AgentRequest) -> Result<String> {
             .branch
             .as_deref()
             .map(|b| format!("{b}-{}", ft_core::slugify(&what)));
+        // The machine the profile pins for its own workspace, if it named one;
+        // otherwise absent, and the scheduler picks as it does for a person.
+        let host = role.as_ref().and_then(|r| r.machine.clone());
         serde_json::from_value(json!({
             "repoId": repo,
             "prompt": prompt,
             "agent": agent,
             "branch": branch,
+            "hostId": host,
             "name": format!("{} / {what}", lead.name),
         }))?
     };
@@ -393,6 +420,429 @@ async fn children(state: &AppState, request: &AgentRequest) -> Result<String> {
         }
         other => bail!("action must be list, steer or stop, not \"{other}\""),
     }
+}
+
+/// Build the fields of a profile from a tool call's arguments.
+fn new_role_from(input: &Value) -> Result<crate::roles::NewRole> {
+    let name = text(input, "name").context("a profile needs a name")?;
+    let does = text(input, "does")
+        .context("a profile needs a line saying what it does and when to reach for it")?;
+    Ok(crate::roles::NewRole {
+        name,
+        does,
+        placement: text(input, "placement").unwrap_or_else(|| "lead".into()),
+        agent: text(input, "agent"),
+        machine: text(input, "machine"),
+        instructions: text(input, "instructions").unwrap_or_default(),
+        can_delegate: input
+            .get("can_delegate")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        // Resolved and filed separately below: the agent names a directory, not
+        // an id, so the service's `directory` field is left out here.
+        directory: None,
+    })
+}
+
+/// File a just-made profile in a named directory, when the agent named one.
+///
+/// Returns where it ended up, in words for the agent to repeat. The agent says
+/// a directory's name; it is resolved, checked that this person may write
+/// there, and moved with the same transfer the sharing sheet uses.
+async fn file_profile(
+    state: &AppState,
+    role_id: &str,
+    input: &Value,
+    owner: &str,
+    whose: &str,
+) -> Result<String> {
+    let Some(name) = text(input, "directory") else {
+        return Ok("your own space".into());
+    };
+    let org = state.db.org().await?;
+    let target = state
+        .access
+        .directory_by_slug(&org, &name)
+        .await?
+        .with_context(|| format!("there is no directory called \"{name}\" you can file it in"))?;
+    let may = matches!(
+        state.access.level_on(owner, target.id.as_str()).await?,
+        Some(level) if level >= crate::access::Level::Writer
+    );
+    if !may {
+        bail!("you cannot file a profile in the \"{}\" directory", target.slug);
+    }
+    let from = state
+        .access
+        .path_of(crate::access::FiledKind::Role, role_id)
+        .await?
+        .context("the profile that was just made could not be found to file it")?;
+    state
+        .access
+        .transfer(
+            &state.vault,
+            crate::access::FiledKind::Role,
+            role_id,
+            &from.moved_to(ft_core::path::DIRECTORY, &target.slug),
+            whose,
+        )
+        .await?;
+    Ok(format!("the \"{}\" directory", target.slug))
+}
+
+/// The slug and username of a session's owner, for filing and the vault log.
+async fn owner_of(state: &AppState, session: &Session) -> Result<(String, String)> {
+    let owner = session.owner.as_str();
+    let slug = state.access.personal_root(owner).await?;
+    let whose = session.owner_name.clone().unwrap_or_else(|| slug.clone());
+    Ok((slug, whose))
+}
+
+/// Save a new profile for the session's owner.
+async fn create_profile(state: &AppState, request: &AgentRequest) -> Result<String> {
+    let session = authoring_session(state, request).await?;
+    let owner = session.owner.as_str();
+    let new = new_role_from(&request.input)?;
+    crate::roles::check(&new).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let org = state.db.org().await?;
+    let (slug, whose) = owner_of(state, &session).await?;
+    let id = state.roles.create(&org, owner, &slug, &new).await?;
+    let where_it_is = file_profile(state, id.as_str(), &request.input, owner, &whose).await?;
+    Ok(format!(
+        "Created the \"{}\" profile in {where_it_is}. It's on the Profiles screen now — start a \
+         workspace as it, or {}.",
+        new.name.trim(),
+        if new.can_delegate {
+            "have a lead delegate to it"
+        } else {
+            "a Manager can delegate to it"
+        }
+    ))
+}
+
+/// Change a profile the session's owner may write, by name.
+async fn update_profile(state: &AppState, request: &AgentRequest) -> Result<String> {
+    let session = authoring_session(state, request).await?;
+    let owner = session.owner.as_str();
+    let wanted = text(&request.input, "name").context("name the profile to change")?;
+    let existing = state
+        .roles
+        .by_name(owner, &wanted)
+        .await?
+        .with_context(|| format!("you have no profile called \"{wanted}\""))?;
+    // Only what was named changes; everything else stays as it is.
+    let get_str = |key: &str, now: &str| text(&request.input, key).unwrap_or_else(|| now.to_string());
+    let new = crate::roles::NewRole {
+        name: get_str("new_name", &existing.name),
+        does: get_str("does", &existing.does),
+        placement: get_str("placement", &existing.placement),
+        agent: text(&request.input, "agent").or(existing.agent.clone()),
+        machine: text(&request.input, "machine").or(existing.machine.clone()),
+        instructions: get_str("instructions", &existing.instructions),
+        can_delegate: request
+            .input
+            .get("can_delegate")
+            .and_then(Value::as_bool)
+            .unwrap_or(existing.can_delegate),
+        directory: None,
+    };
+    crate::roles::check(&new).map_err(|e| anyhow::anyhow!("{e}"))?;
+    if !state.roles.update(owner, existing.id.as_str(), &new).await? {
+        bail!("you cannot change the \"{wanted}\" profile");
+    }
+    Ok(format!("Updated the \"{}\" profile.", new.name.trim()))
+}
+
+/// The profiles the session's owner can see, so the agent builds on them.
+async fn list_profiles(state: &AppState, request: &AgentRequest) -> Result<String> {
+    let session = authoring_session(state, request).await?;
+    let roles = state
+        .roles
+        .visible(session.owner.as_str(), crate::access::Level::Viewer)
+        .await?;
+    if roles.is_empty() {
+        return Ok("There are no profiles yet.".into());
+    }
+    let lines: Vec<String> = roles
+        .iter()
+        .map(|r| {
+            format!(
+                "- {}{}: {}",
+                r.name,
+                if r.can_delegate { " (Manager)" } else { "" },
+                r.does
+            )
+        })
+        .collect();
+    Ok(format!("The profiles you can see:\n{}", lines.join("\n")))
+}
+
+// ── skills ──────────────────────────────────────────────────────────────
+//
+// The same road as the profile tools, with `state.skills` in place of
+// `state.roles`. The one difference a skill carries that a profile does not is
+// an executable: a `scripts/` file lands `0o755` on a session's disk and runs.
+// So a skill the agent writes that ships one is created **held** — in the
+// library, badged, but materialised nowhere — until the owner approves it. The
+// control plane decides that here, from the bundle, not from anything the agent
+// asserts.
+
+/// Whether a bundle ships anything that runs, which is what holds it for review.
+fn ships_an_executable(files: &[crate::skills::IncomingFile]) -> bool {
+    files
+        .iter()
+        .any(|f| f.executable || f.path.starts_with("scripts/"))
+}
+
+/// Compose a SKILL.md from the pieces an agent sends as plain text.
+///
+/// The frontmatter is written here rather than trusted from the agent, so the
+/// name and description the library reads are the ones the checks saw. A body
+/// that arrived with its own frontmatter has it stripped first, so the file
+/// never ends up with two.
+fn compose_skill_md(name: &str, description: &str, body: &str) -> String {
+    let (_, clean, _) = crate::skills::read_frontmatter(body);
+    let description = description.replace(['\r', '\n'], " ");
+    format!(
+        "---\nname: {}\ndescription: {}\n---\n\n{}\n",
+        name.trim(),
+        description.trim(),
+        clean.trim()
+    )
+}
+
+/// The bundled files an agent sent, as `scripts/`, `references/`, `assets/`.
+/// Contents arrive as plain text — natural for an agent to write — and are
+/// encoded here into the form the library stores.
+fn incoming_files(input: &Value) -> Vec<crate::skills::IncomingFile> {
+    input
+        .get("files")
+        .and_then(Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|f| {
+                    let path = f.get("path").and_then(Value::as_str)?.to_string();
+                    let contents = f.get("contents").and_then(Value::as_str).unwrap_or("");
+                    Some(crate::skills::IncomingFile {
+                        path,
+                        contents: ft_proto::encode(contents.as_bytes()),
+                        executable: f
+                            .get("executable")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Build the whole bundle from a `create_skill` call.
+fn new_skill_from(input: &Value) -> Result<crate::skills::NewSkill> {
+    let name = text(input, "name").context("a skill needs a name")?;
+    let description =
+        text(input, "description").context("a skill needs a description — what it does and when to use it")?;
+    let body = text(input, "body").unwrap_or_default();
+    let mut files = vec![crate::skills::IncomingFile {
+        path: "SKILL.md".to_string(),
+        contents: ft_proto::encode(compose_skill_md(&name, &description, &body).as_bytes()),
+        executable: false,
+    }];
+    files.extend(incoming_files(input).into_iter().filter(|f| f.path != "SKILL.md"));
+    Ok(crate::skills::NewSkill {
+        frontmatter: serde_json::json!({ "name": name, "description": description }),
+        body,
+        name,
+        description,
+        files,
+        notes: None,
+    })
+}
+
+/// File a just-made skill in a named directory, when the agent named one. The
+/// same transfer the sharing sheet uses — see [`file_profile`].
+async fn file_skill(
+    state: &AppState,
+    skill_id: &str,
+    input: &Value,
+    owner: &str,
+    whose: &str,
+) -> Result<String> {
+    let Some(name) = text(input, "directory") else {
+        return Ok("your own space".into());
+    };
+    let org = state.db.org().await?;
+    let target = state
+        .access
+        .directory_by_slug(&org, &name)
+        .await?
+        .with_context(|| format!("there is no directory called \"{name}\" you can file it in"))?;
+    let may = matches!(
+        state.access.level_on(owner, target.id.as_str()).await?,
+        Some(level) if level >= crate::access::Level::Writer
+    );
+    if !may {
+        bail!("you cannot file a skill in the \"{}\" directory", target.slug);
+    }
+    let from = state
+        .access
+        .path_of(crate::access::FiledKind::Skill, skill_id)
+        .await?
+        .context("the skill that was just made could not be found to file it")?;
+    state
+        .access
+        .transfer(
+            &state.vault,
+            crate::access::FiledKind::Skill,
+            skill_id,
+            &from.moved_to(ft_core::path::DIRECTORY, &target.slug),
+            whose,
+        )
+        .await?;
+    Ok(format!("the \"{}\" directory", target.slug))
+}
+
+/// Save a new skill for the session's owner.
+async fn create_skill(state: &AppState, request: &AgentRequest) -> Result<String> {
+    let session = authoring_session(state, request).await?;
+    let owner = session.owner.as_str();
+    let new = new_skill_from(&request.input)?;
+    crate::skills::check(&new).map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    if let Some(existing) = state.skills.by_name(owner, &new.name).await? {
+        bail!(
+            "you already have a skill called \"{}\" — change it with update_skill, \
+             or give this one a name of its own",
+            existing.name
+        );
+    }
+
+    let hold = ships_an_executable(&new.files);
+    let org = state.db.org().await?;
+    let (slug, whose) = owner_of(state, &session).await?;
+    let id = state.skills.create(&org, owner, &slug, &new, hold).await?;
+    let where_it_is = file_skill(state, id.as_str(), &request.input, owner, &whose).await?;
+
+    if hold {
+        Ok(format!(
+            "Wrote the \"{}\" skill into {where_it_is} — but it ships a script, so it's held \
+             for your review. Open it on the Skills screen, read what it runs, and approve it; \
+             it runs nowhere until you do.",
+            new.name.trim()
+        ))
+    } else {
+        Ok(format!(
+            "Created the \"{}\" skill in {where_it_is}. It's on the Skills screen now, ready to \
+             turn on for a workspace.",
+            new.name.trim()
+        ))
+    }
+}
+
+/// Change a skill the session's owner may write, by name. A change to the
+/// instructions is a new version; the folder's other files carry forward
+/// unless the call sends a new set.
+async fn update_skill(state: &AppState, request: &AgentRequest) -> Result<String> {
+    let session = authoring_session(state, request).await?;
+    let owner = session.owner.as_str();
+    let wanted = text(&request.input, "name").context("name the skill to change")?;
+    let existing = state
+        .skills
+        .by_name(owner, &wanted)
+        .await?
+        .with_context(|| format!("you have no skill called \"{wanted}\""))?;
+    if existing.builtin {
+        bail!("\"{}\" is one Firetower ships; it cannot be changed", existing.name);
+    }
+    if existing.version == 0 {
+        bail!(
+            "\"{}\" is still waiting for your review — approve or discard it first",
+            existing.name
+        );
+    }
+
+    let detail = state
+        .skills
+        .detail(owner, existing.id.as_str())
+        .await?
+        .context("the skill to change could not be read")?;
+    let old_description = detail
+        .frontmatter
+        .get("description")
+        .and_then(|v| v.as_str())
+        .unwrap_or(&existing.description)
+        .to_string();
+
+    let name = text(&request.input, "new_name").unwrap_or_else(|| existing.name.clone());
+    let description = text(&request.input, "description").unwrap_or(old_description);
+    let body = text(&request.input, "body").unwrap_or(detail.body);
+
+    // The other files: a fresh set if the call sent one, otherwise the ones
+    // the current version already holds, carried forward unchanged.
+    let carried = if request.input.get("files").is_some() {
+        incoming_files(&request.input)
+    } else {
+        state
+            .skills
+            .files_with_contents(existing.version_id.as_str())
+            .await?
+    };
+    let mut files = vec![crate::skills::IncomingFile {
+        path: "SKILL.md".to_string(),
+        contents: ft_proto::encode(compose_skill_md(&name, &description, &body).as_bytes()),
+        executable: false,
+    }];
+    files.extend(carried.into_iter().filter(|f| f.path != "SKILL.md"));
+
+    let new = crate::skills::NewSkill {
+        frontmatter: serde_json::json!({ "name": name, "description": description }),
+        body,
+        name: name.clone(),
+        description,
+        files,
+        notes: None,
+    };
+    crate::skills::check(&new).map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    let hold = ships_an_executable(&new.files);
+    state
+        .skills
+        .add_version(existing.id.as_str(), owner, &new, hold)
+        .await?;
+    if hold {
+        Ok(format!(
+            "Wrote a new version of \"{}\" — it ships a script, so it's held for your review on \
+             the Skills screen. What's running now is unchanged until you approve it.",
+            name.trim()
+        ))
+    } else {
+        Ok(format!("Updated the \"{}\" skill.", name.trim()))
+    }
+}
+
+/// The skills the session's owner can see, so the agent builds on them.
+async fn list_skills(state: &AppState, request: &AgentRequest) -> Result<String> {
+    let session = authoring_session(state, request).await?;
+    let skills = state
+        .skills
+        .visible(session.owner.as_str(), crate::access::Level::Viewer)
+        .await?;
+    if skills.is_empty() {
+        return Ok("There are no skills yet.".into());
+    }
+    let lines: Vec<String> = skills
+        .iter()
+        .map(|s| {
+            let scripts = if s.risk.iter().any(|r| r == "scripts") {
+                " (ships a script)"
+            } else {
+                ""
+            };
+            let held = if s.held { " (held, pending your review)" } else { "" };
+            format!("- {}{}{}: {}", s.name, scripts, held, s.description)
+        })
+        .collect();
+    Ok(format!("The skills you can see:\n{}", lines.join("\n")))
 }
 
 /// One child, as a line the lead can read.
@@ -554,14 +1004,14 @@ mod tests {
             path: "u/kevin/reviewer".into(),
             name: "reviewer".into(),
             does: "reads a branch and reports problems".into(),
-            use_when: String::new(),
-            not_when: String::new(),
             placement: "here".into(),
             agent: None,
+            machine: None,
             instructions: "Report findings as path:line.".into(),
             can_delegate: false,
             may_write: true,
             may_share: true,
+            is_default: false,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };

@@ -28,7 +28,8 @@ import type {
 import type {
   ApiError,
   NewRole,
-  Role
+  Role,
+  RoleDefault
 } from '../model';
 
 import { http } from '../../http';
@@ -387,4 +388,86 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
         TContext
       > => {
       return useMutation(getDeleteRoleMutationOptions(options), queryClient);
+    }
+    export const getSetDefaultRoleUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/roles/${id}/default`
+}
+
+export const setDefaultRole = async (id: string,
+    roleDefault: RoleDefault, options?: Parameters<typeof http>[1]): Promise<void> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return http<void>(getSetDefaultRoleUrl(id),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(roleDefault)
+  }
+);}
+
+
+
+
+
+export const getSetDefaultRoleMutationKey = () => ['setDefaultRole'] as const;
+
+export const getSetDefaultRoleMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setDefaultRole>>, TError,SetDefaultRoleMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof setDefaultRole>>, TError,SetDefaultRoleMutationVariables, TContext> => {
+
+const mutationKey = getSetDefaultRoleMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setDefaultRole>>, SetDefaultRoleMutationVariables> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  setDefaultRole(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SetDefaultRoleMutationResult = NonNullable<Awaited<ReturnType<typeof setDefaultRole>>>
+    export type SetDefaultRoleMutationBody = RoleDefault
+    export type SetDefaultRoleMutationError = ApiError
+    export type SetDefaultRoleMutationVariables = {id: string;data: RoleDefault}
+
+    export const useSetDefaultRole = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setDefaultRole>>, TError,SetDefaultRoleMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof setDefaultRole>>,
+        TError,
+        SetDefaultRoleMutationVariables,
+        TContext
+      > => {
+      return useMutation(getSetDefaultRoleMutationOptions(options), queryClient);
     }

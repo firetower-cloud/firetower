@@ -49,7 +49,7 @@ import { navigate } from "~/shims/next-navigation";
 import { leaveDraft } from "~/workspace/draft";
 import { isMac } from "~/platform";
 import { consumeSeed } from "~/start";
-import type { Agent, Control, ControlKind } from "~/api/generated/model";
+import type { Agent, Control, ControlKind, Role } from "~/api/generated/model";
 
 type Checkout = { id: string; slug: string };
 
@@ -95,7 +95,7 @@ export function NewPage() {
   const profiles = useListRoles().data ?? [];
   const create = useCreateSession();
 
-  const [prompt, setPrompt] = useState("");
+  const [prompt, setPrompt] = useState(seed?.prompt ?? "");
   const [checkouts, setCheckouts] = useState<Checkout[]>([]);
   const [where, setWhere] = useState<Where>(() => ({
     machine: "",
@@ -103,6 +103,15 @@ export function NewPage() {
     agent: recall(LAST_AGENT) as Where["agent"],
   }));
   const [profileId, setProfileId] = useState<string | null>(null);
+  // Start as the profile the person marked default, once the list is in — but
+  // only the first time, so changing it here afterwards sticks.
+  const defaulted = useRef(false);
+  useEffect(() => {
+    if (defaulted.current || profiles.length === 0) return;
+    defaulted.current = true;
+    const def = profiles.find((p) => p.isDefault);
+    if (def) setProfileId(def.id);
+  }, [profiles]);
   const [accountId, setAccountId] = useState(() => recall(LAST_ACCOUNT));
   const [connecting, setConnecting] = useState(false);
   const [open, setOpen] = useState<{ which: string; at: HTMLElement } | null>(null);
@@ -110,6 +119,17 @@ export function NewPage() {
   // Dictation writes into the prompt like a second pair of hands, the same way
   // the conversation's composer takes it.
   const voice = useVoice({ text: prompt, setText: setPrompt, box });
+
+  // Arriving from "Create with AI", the composer is already half-written — put
+  // the cursor after it and grow the box, so the person just keeps typing.
+  useEffect(() => {
+    const el = box.current;
+    if (!el || !seed?.prompt) return;
+    el.focus();
+    el.setSelectionRange(el.value.length, el.value.length);
+    el.style.height = "auto";
+    el.style.height = Math.min(el.scrollHeight, 240) + "px";
+  }, [seed?.prompt]);
 
   /* A task seeds the repository once the server has mapped its slug to an id. */
   useEffect(() => {
@@ -249,6 +269,30 @@ export function NewPage() {
               el.style.height = "auto";
               el.style.height = Math.min(el.scrollHeight, 240) + "px";
             }}
+            onKeyDown={(e) => {
+              if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
+              // Enter sends; a modifier makes a newline. Cmd/Ctrl+Enter is the
+              // one asked for; Shift+Enter keeps its native newline so it never
+              // sends by surprise.
+              if (e.shiftKey) return;
+              if (e.metaKey || e.ctrlKey) {
+                e.preventDefault();
+                const el = e.currentTarget;
+                const at = el.selectionStart ?? prompt.length;
+                const end = el.selectionEnd ?? at;
+                const next = prompt.slice(0, at) + "\n" + prompt.slice(end);
+                setPrompt(next);
+                voice.typed(next);
+                requestAnimationFrame(() => {
+                  el.selectionStart = el.selectionEnd = at + 1;
+                  el.style.height = "auto";
+                  el.style.height = Math.min(el.scrollHeight, 240) + "px";
+                });
+                return;
+              }
+              e.preventDefault();
+              go();
+            }}
             placeholder="Describe the task, or start empty and say what you want in the conversation."
             rows={2}
             className="scroll-slim w-full resize-none bg-transparent text-read leading-relaxed text-bone placeholder:text-mute/80 focus:outline-none"
@@ -368,38 +412,14 @@ export function NewPage() {
       {/* ---------- the pill menus ---------- */}
       {open?.which === "profile" && (
         <Pop anchor={open.at} onClose={close} width={320}>
-          <Menu>
-            <Opt
-              on={!profile}
-              onPick={() => {
-                setProfileId(null);
-                close();
-              }}
-              icon={<UserRound className="h-4 w-4" strokeWidth={1.8} />}
-              title="Just an agent"
-              sub="No profile — a plain workspace"
-            />
-            {profiles.map((p) => (
-              <Opt
-                key={p.id}
-                on={p.id === profileId}
-                onPick={() => {
-                  setProfileId(p.id);
-                  close();
-                }}
-                icon={
-                  p.agent ? (
-                    <AgentMark agent={p.agent as Agent} size={16} />
-                  ) : (
-                    <UserRound className="h-4 w-4" strokeWidth={1.8} />
-                  )
-                }
-                title={p.name}
-                sub={p.does}
-                chip={p.canDelegate ? "manager" : undefined}
-              />
-            ))}
-          </Menu>
+          <ProfileMenu
+            profiles={profiles}
+            profileId={profileId}
+            onPick={(id) => {
+              setProfileId(id);
+              close();
+            }}
+          />
         </Pop>
       )}
 
@@ -538,6 +558,94 @@ function Pill({
 
 function Menu({ children }: { children: React.ReactNode }) {
   return <div className="max-h-80 overflow-y-auto py-1">{children}</div>;
+}
+
+/**
+ * The profile list, which grows: a person accumulates roles, so once there are
+ * more than a handful this filters, and it always floats the Managers to the
+ * top — the lead you'd start a board as is the one you reach for most.
+ * Remounts each time the menu opens, so the search box starts empty.
+ */
+function ProfileMenu({
+  profiles,
+  profileId,
+  onPick,
+}: {
+  profiles: Role[];
+  profileId: string | null;
+  onPick: (id: string | null) => void;
+}) {
+  const [q, setQ] = useState("");
+  const query = q.trim().toLowerCase();
+
+  const ordered = useMemo(
+    () =>
+      [...profiles].sort(
+        (a, b) =>
+          Number(b.canDelegate) - Number(a.canDelegate) ||
+          a.name.localeCompare(b.name),
+      ),
+    [profiles],
+  );
+  const shown = query
+    ? ordered.filter(
+        (p) =>
+          p.name.toLowerCase().includes(query) ||
+          (p.does ?? "").toLowerCase().includes(query),
+      )
+    : ordered;
+
+  return (
+    <>
+      {profiles.length > 3 && (
+        <div className="border-b border-line-soft p-2">
+          <div className="flex items-center gap-2 rounded-md bg-ground px-2.5 py-1.5">
+            <Search className="h-3.5 w-3.5 shrink-0 text-mute" strokeWidth={1.8} />
+            <input
+              autoFocus
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search profiles"
+              className="w-full bg-transparent text-meta text-bone placeholder:text-mute focus:outline-none"
+            />
+          </div>
+        </div>
+      )}
+      <Menu>
+        {!query && (
+          <Opt
+            on={!profileId}
+            onPick={() => onPick(null)}
+            icon={<UserRound className="h-4 w-4" strokeWidth={1.8} />}
+            title="Just an agent"
+            sub="No profile — a plain workspace"
+          />
+        )}
+        {shown.map((p) => (
+          <Opt
+            key={p.id}
+            on={p.id === profileId}
+            onPick={() => onPick(p.id)}
+            icon={
+              p.agent ? (
+                <AgentMark agent={p.agent as Agent} size={16} />
+              ) : (
+                <UserRound className="h-4 w-4" strokeWidth={1.8} />
+              )
+            }
+            title={p.name}
+            sub={p.does}
+            chip={p.canDelegate ? "manager" : undefined}
+          />
+        ))}
+        {query && shown.length === 0 && (
+          <div className="px-3 py-3 text-center text-micro text-mute">
+            No profile matches “{q}”.
+          </div>
+        )}
+      </Menu>
+    </>
+  );
 }
 
 function Head({ children }: { children: React.ReactNode }) {

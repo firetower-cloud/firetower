@@ -14,10 +14,20 @@ export interface NewRole {
   agent?: string | null;
   /** Whether it is a Manager. Defaults to an Operator. */
   canDelegate?: boolean;
+  /**
+     * A directory to file it in, by id, so a teammate can reach it. Omit for
+     * your own space. Only honoured at creation; move it later with sharing.
+     * @nullable
+     */
+  directory?: string | null;
   does: string;
   instructions?: string;
+  /**
+     * The machine its own workspace runs on, by host id. Omit to let the lead
+     * choose. Only applies when placement is `new`.
+     * @nullable
+     */
+  machine?: string | null;
   name: string;
-  notWhen?: string;
   placement?: string;
-  useWhen?: string;
 }

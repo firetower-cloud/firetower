@@ -1,0 +1,11 @@
+-- Which machine a profile's own workspace runs on.
+--
+-- Only meaningful for a profile whose placement is "its own workspace" — a
+-- child that shares the lead's runs where the lead does. Null is the open
+-- default: the scheduler picks a machine that can run it, the same as a person
+-- starting a workspace and naming no host.
+--
+-- `set null`, not `cascade`: removing a machine must not take the profiles that
+-- named it with it — they fall back to the scheduler's choice, which is what
+-- they had before anyone pinned one.
+alter table roles add column host_id text references hosts(id) on delete set null;

@@ -46,17 +46,18 @@ pub struct Role {
     pub id: String,
     pub path: String,
     pub name: String,
-    /// One line: what this kind of agent does.
+    /// What it does and when to reach for it — the one line a lead reads to
+    /// decide whether to hand it work, the way a skill's `description` is read.
     pub does: String,
-    /// When a lead should reach for it.
-    pub use_when: String,
-    /// When it should not — the line that says "you can do this yourself".
-    pub not_when: String,
     /// `lead` (let the lead choose) | `here` | `new`.
     pub placement: String,
     /// Which agent runs it, or absent to let the lead choose.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent: Option<String>,
+    /// The machine its own workspace runs on, by host id, or absent to let the
+    /// lead choose. Meaningful only when `placement` is `new`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub machine: Option<String>,
     /// Composed into the child's instructions.
     pub instructions: String,
     /// A Manager (true) gets the spawn tool and may hand work to any profile it
@@ -66,6 +67,9 @@ pub struct Role {
     pub may_write: bool,
     /// Whether they may move it into a directory, or out of one.
     pub may_share: bool,
+    /// Whether this person starts a new workspace as this profile by default.
+    /// At most one of theirs is, so setting another unsets this one.
+    pub is_default: bool,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
@@ -76,19 +80,23 @@ pub struct Role {
 pub struct NewRole {
     pub name: String,
     pub does: String,
-    #[serde(default)]
-    pub use_when: String,
-    #[serde(default)]
-    pub not_when: String,
     #[serde(default = "lead")]
     pub placement: String,
     #[serde(default)]
     pub agent: Option<String>,
+    /// The machine its own workspace runs on, by host id. Omit to let the lead
+    /// choose. Only applies when placement is `new`.
+    #[serde(default)]
+    pub machine: Option<String>,
     #[serde(default)]
     pub instructions: String,
     /// Whether it is a Manager. Defaults to an Operator.
     #[serde(default)]
     pub can_delegate: bool,
+    /// A directory to file it in, by id, so a teammate can reach it. Omit for
+    /// your own space. Only honoured at creation; move it later with sharing.
+    #[serde(default)]
+    pub directory: Option<String>,
 }
 
 fn lead() -> String {
@@ -146,24 +154,27 @@ fn slug_of(name: &str, id: &str) -> String {
     format!("{base}_{}", &id[id.len().saturating_sub(8)..])
 }
 
-const FIELDS: &str = "r.id, r.path::text AS path, r.name, r.does, r.use_when, r.not_when, \
-                      r.placement, r.agent, r.instructions, r.can_delegate, \
+const FIELDS: &str = "r.id, r.path::text AS path, r.name, r.does, \
+                      r.placement, r.agent, r.host_id, r.instructions, r.can_delegate, \
                       r.created_at, r.updated_at";
 
 fn read(row: sqlx::postgres::PgRow) -> Result<Role> {
     Ok(Role {
         id: row.get("id"),
-        path: row.get("path"),
+        // Slashes on the wire, dots in the database — the same conversion every
+        // other Placed kind makes, so the sharing sheet reads a role's path the
+        // way it reads a skill's rather than seeing `d.backend.x` and giving up.
+        path: ft_core::ResourcePath::from_stored(row.get::<String, _>("path")).to_string(),
         name: row.get("name"),
         does: row.get("does"),
-        use_when: row.get("use_when"),
-        not_when: row.get("not_when"),
         placement: row.get("placement"),
         agent: row.get("agent"),
+        machine: row.get("host_id"),
         instructions: row.get("instructions"),
         can_delegate: row.get("can_delegate"),
         may_write: row.get("may_write"),
         may_share: row.get("may_share"),
+        is_default: row.try_get("is_default").unwrap_or(false),
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
     })
@@ -182,7 +193,9 @@ impl Roles {
     /// Every role this person may see, at the given level or better.
     pub async fn visible(&self, person: &str, at_least: Level) -> Result<Vec<Role>> {
         let sql = format!(
-            "SELECT {FIELDS}, {writable} AS may_write, {shareable} AS may_share \
+            "SELECT {FIELDS}, {writable} AS may_write, {shareable} AS may_share, \
+                    EXISTS (SELECT 1 FROM role_defaults d \
+                             WHERE d.role_id = r.id AND d.user_id = $1) AS is_default \
                FROM roles r WHERE {visible} ORDER BY r.name",
             visible = filed_where("r", 1, at_least),
             writable = filed_where("r", 1, Level::Writer),
@@ -199,7 +212,9 @@ impl Roles {
     /// One role, if this person may see it.
     pub async fn one(&self, person: &str, id: &str, at_least: Level) -> Result<Option<Role>> {
         let sql = format!(
-            "SELECT {FIELDS}, {writable} AS may_write, {shareable} AS may_share \
+            "SELECT {FIELDS}, {writable} AS may_write, {shareable} AS may_share, \
+                    EXISTS (SELECT 1 FROM role_defaults d \
+                             WHERE d.role_id = r.id AND d.user_id = $1) AS is_default \
                FROM roles r WHERE r.id = $2 AND {visible}",
             visible = filed_where("r", 1, at_least),
             writable = filed_where("r", 1, Level::Writer),
@@ -212,6 +227,36 @@ impl Roles {
             .await
             .context("reading a role")?;
         row.map(read).transpose()
+    }
+
+    /// Make this the person's default profile for a new workspace, or clear it.
+    ///
+    /// One per person — `user_id` is the key, so setting another replaces it,
+    /// which is how "only one" holds without a second write to unset the old.
+    /// They must be able to see the role to default to it.
+    pub async fn set_default(&self, person: &str, id: &str, on: bool) -> Result<bool> {
+        if self.one(person, id, Level::Viewer).await?.is_none() {
+            return Ok(false);
+        }
+        if on {
+            sqlx::query(
+                "INSERT INTO role_defaults (user_id, role_id) VALUES ($1, $2) \
+                 ON CONFLICT (user_id) DO UPDATE SET role_id = EXCLUDED.role_id, at = now()",
+            )
+            .bind(person)
+            .bind(id)
+            .execute(&self.pool)
+            .await
+            .context("setting a default profile")?;
+        } else {
+            sqlx::query("DELETE FROM role_defaults WHERE user_id = $1 AND role_id = $2")
+                .bind(person)
+                .bind(id)
+                .execute(&self.pool)
+                .await
+                .context("clearing a default profile")?;
+        }
+        Ok(true)
     }
 
     /// The role of this name this person may use, if there is one.
@@ -242,9 +287,9 @@ impl Roles {
         let path = format!("u.{person_slug}.{slug}");
         sqlx::query(
             "INSERT INTO roles \
-               (id, org_id, path, created_by, name, slug, does, use_when, not_when, \
-                placement, agent, instructions, can_delegate) \
-             VALUES ($1, $2, $3::ltree, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
+               (id, org_id, path, created_by, name, slug, does, \
+                placement, agent, host_id, instructions, can_delegate) \
+             VALUES ($1, $2, $3::ltree, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
         )
         .bind(id.as_str())
         .bind(org)
@@ -253,10 +298,9 @@ impl Roles {
         .bind(new.name.trim())
         .bind(&slug)
         .bind(new.does.trim())
-        .bind(new.use_when.trim())
-        .bind(new.not_when.trim())
         .bind(&new.placement)
         .bind(&new.agent)
+        .bind(new.machine.as_deref().filter(|m| !m.is_empty()))
         .bind(&new.instructions)
         .bind(new.can_delegate)
         .execute(&self.pool)
@@ -274,17 +318,16 @@ impl Roles {
             return Ok(false);
         }
         sqlx::query(
-            "UPDATE roles SET name=$2, does=$3, use_when=$4, not_when=$5, \
-               placement=$6, agent=$7, instructions=$8, can_delegate=$9, \
+            "UPDATE roles SET name=$2, does=$3, \
+               placement=$4, agent=$5, host_id=$6, instructions=$7, can_delegate=$8, \
                updated_at=now() WHERE id=$1",
         )
         .bind(id)
         .bind(new.name.trim())
         .bind(new.does.trim())
-        .bind(new.use_when.trim())
-        .bind(new.not_when.trim())
         .bind(&new.placement)
         .bind(&new.agent)
+        .bind(new.machine.as_deref().filter(|m| !m.is_empty()))
         .bind(&new.instructions)
         .bind(new.can_delegate)
         .execute(&self.pool)
@@ -315,13 +358,13 @@ mod tests {
     fn new(name: &str) -> NewRole {
         NewRole {
             name: name.into(),
-            does: "reads a branch and reports problems".into(),
-            use_when: "after a developer hands back".into(),
-            not_when: "a one-line fix".into(),
+            does: "reads a branch and reports problems; reach for it after a developer hands back, not for a one-line fix".into(),
             placement: "here".into(),
             agent: None,
+            machine: None,
             instructions: "Report findings as path:line.".into(),
             can_delegate: false,
+            directory: None,
         }
     }
 

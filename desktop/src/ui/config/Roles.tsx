@@ -16,10 +16,14 @@ import {
   Check,
   ChevronDown,
   ChevronLeft,
+  FolderGit2,
   GitBranch,
   GitBranchPlus,
   Plus,
+  Server,
   Sparkles,
+  SquarePen,
+  Star,
   Trash2,
   User,
   Users,
@@ -29,6 +33,8 @@ import {
 import { Rows, Section } from "~/ui/config/bits";
 import { WhoCanAccess } from "~/ui/Sharing";
 import { Pop } from "~/ui/Pop";
+import { CreateMenu } from "~/ui/config/CreateMenu";
+import { useStart } from "~/start";
 import { AgentMark, AGENT_LABEL } from "~/components/AgentMark";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -37,8 +43,10 @@ import {
   createRole,
   updateRole,
   deleteRole,
+  setDefaultRole,
 } from "~/api/generated/roles/roles";
-import { useAgents, why } from "~/data";
+import { useAgents, useDirectories, useHosts, why } from "~/data";
+import { machineLabel, machines } from "~/api/environments";
 import type { Agent, Role, NewRole } from "~/api/generated/model";
 import { useConfirm } from "~/ui/Confirm";
 
@@ -56,15 +64,16 @@ const PLACEMENTS: { value: string; icon: LucideIcon; label: string; note: string
 const BLANK: NewRole = {
   name: "",
   does: "",
-  useWhen: "",
-  notWhen: "",
   placement: "lead",
   agent: null,
+  machine: null,
   instructions: "",
   canDelegate: false,
+  directory: null,
 };
 
 export function Roles() {
+  const start = useStart();
   const feed = useListRoles();
   const rows = {
     data: feed.data ?? [],
@@ -98,13 +107,23 @@ export function Roles() {
       title="Profiles"
       note="A saved persona any agent can run — a lead, a developer, a reviewer, a QA. Each carries what it does, where it runs, its instructions, and whether it may hand work off."
       action={
-        <button
-          onClick={() => setEditing({ draft: { ...BLANK } })}
-          className="control border border-line bg-raise text-ui text-text hover:border-dim hover:text-bone"
-        >
-          <Plus className="h-3.5 w-3.5" strokeWidth={2} />
-          New profile
-        </button>
+        <CreateMenu
+          label="New profile"
+          choices={[
+            {
+              icon: Sparkles,
+              label: "Create with AI",
+              note: "Describe it; an agent writes it for you.",
+              onPick: () => start({ prompt: "Create a Firetower agent profile that " }),
+            },
+            {
+              icon: SquarePen,
+              label: "Write it myself",
+              note: "Fill in the form by hand.",
+              onPick: () => setEditing({ draft: { ...BLANK } }),
+            },
+          ]}
+        />
       }
     >
       <Rows feed={rows} empty="No profiles yet. Make one, and you can start a workspace as it or a lead can delegate to it.">
@@ -125,12 +144,12 @@ function toDraft(r: Role): NewRole {
   return {
     name: r.name,
     does: r.does,
-    useWhen: r.useWhen,
-    notWhen: r.notWhen,
     placement: r.placement,
     agent: r.agent ?? null,
+    machine: r.machine ?? null,
     instructions: r.instructions,
     canDelegate: r.canDelegate,
+    directory: null,
   };
 }
 
@@ -159,6 +178,12 @@ function RoleRow({
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span className="truncate text-ui text-bone">{role.name}</span>
+            {role.isDefault && (
+              <span className="inline-flex shrink-0 items-center gap-1 rounded bg-slate-tint px-1.5 py-0.5 text-micro text-slate">
+                <Star className="h-3 w-3" strokeWidth={1.75} />
+                default
+              </span>
+            )}
             {!role.mayWrite && (
               <span className="shrink-0 text-micro text-mute">shared with you</span>
             )}
@@ -220,6 +245,29 @@ function Editor({
   const confirm = useConfirm();
   const existing = !!state.id;
 
+  // The default is its own action, saved the instant it is flipped rather than
+  // on "Save changes" — it is a fact about this person, not a field of the
+  // profile, and only one profile can hold it.
+  const [isDefault, setIsDefault] = useState(
+    () => all.find((r) => r.id === state.id)?.isDefault ?? false,
+  );
+  const [defaulting, setDefaulting] = useState(false);
+  const toggleDefault = async () => {
+    if (!state.id) return;
+    const next = !isDefault;
+    setDefaulting(true);
+    setTrouble(null);
+    try {
+      await setDefaultRole(state.id, { on: next });
+      setIsDefault(next);
+      await cache.invalidateQueries({ queryKey: getListRolesQueryKey() });
+    } catch (e) {
+      setTrouble(why(e));
+    } finally {
+      setDefaulting(false);
+    }
+  };
+
   // The agents to pin to are the ones Firetower can actually drive, read from
   // the server rather than listed here — so a fourth or a tenth agent turns up
   // in this menu the moment it is supported, without a change to this screen.
@@ -244,6 +292,32 @@ function Editor({
       label: AGENT_LABEL[pinned] ?? pinned,
     });
   }
+
+  // The machines its own workspace can be pinned to, and the directories it
+  // can be filed in at creation — both read from the server, both optional.
+  const { data: hosts } = useHosts();
+  const machineOptions: Opt[] = [
+    { value: null, icon: <Sparkles className="h-4 w-4" strokeWidth={1.75} />, label: "Let the lead choose", note: "The scheduler picks a machine that can run it." },
+    ...machines(hosts)
+      .map((m) => ({ m, host: m.hosts[0]?.id }))
+      .filter((x) => !!x.host)
+      .map((x) => ({
+        value: x.host!,
+        icon: <Server className="h-4 w-4" strokeWidth={1.75} />,
+        label: machineLabel(x.m),
+      })),
+  ];
+  const { data: dirs } = useDirectories();
+  const dirOptions: Opt[] = [
+    { value: null, icon: <User className="h-4 w-4" strokeWidth={1.75} />, label: "Yours", note: "Only you, until you share it." },
+    ...dirs
+      .filter((d) => d.level === "writer" || d.level === "admin")
+      .map((d) => ({
+        value: d.id,
+        icon: <FolderGit2 className="h-4 w-4" strokeWidth={1.75} />,
+        label: d.name,
+      })),
+  ];
 
   const set = <K extends keyof NewRole>(k: K, v: NewRole[K]) => setDraft((d) => ({ ...d, [k]: v }));
   const refresh = () => cache.invalidateQueries({ queryKey: getListRolesQueryKey() });
@@ -304,33 +378,18 @@ function Editor({
           />
         </Field>
 
-        <Field label="Does" hint="One line. The lead reads this to choose it.">
-          <input
+        <Field
+          label="Description"
+          hint="What it does and when to reach for it — the line a lead reads to decide whether to hand it work, like a skill's description. Name the trigger, and the case to skip it."
+        >
+          <textarea
             value={draft.does}
             onChange={(e) => set("does", e.target.value)}
-            placeholder="Reads a branch and reports problems with file:line. Never writes."
-            className="w-full rounded-md border border-line bg-ground px-3 py-2 text-ui text-bone placeholder:text-mute focus:border-dim focus:outline-none"
+            rows={2}
+            placeholder="Reviews a finished branch and reports problems as file:line. Use after a developer hands back — not for a one-line fix."
+            className="w-full resize-y rounded-md border border-line bg-ground px-3 py-2 text-ui text-bone placeholder:text-mute focus:border-dim focus:outline-none"
           />
         </Field>
-
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Use when">
-            <input
-              value={draft.useWhen}
-              onChange={(e) => set("useWhen", e.target.value)}
-              placeholder="A developer has handed back."
-              className="w-full rounded-md border border-line bg-ground px-3 py-2 text-meta text-bone placeholder:text-mute focus:border-dim focus:outline-none"
-            />
-          </Field>
-          <Field label="Not when">
-            <input
-              value={draft.notWhen}
-              onChange={(e) => set("notWhen", e.target.value)}
-              placeholder="The diff is small enough to read yourself."
-              className="w-full rounded-md border border-line bg-ground px-3 py-2 text-meta text-bone placeholder:text-mute focus:border-dim focus:outline-none"
-            />
-          </Field>
-        </div>
 
         <Group
           label="Placement"
@@ -348,6 +407,20 @@ function Editor({
             onChange={(v) => set("placement", v ?? OPEN)}
           />
         </Group>
+
+        {draft.placement === "new" && (
+          <Group
+            label="Machine"
+            hint="Which machine its workspace runs on. Leave it open, or pin one."
+          >
+            <Select
+              ariaLabel="Machine"
+              value={draft.machine ?? null}
+              options={machineOptions}
+              onChange={(v) => set("machine", v)}
+            />
+          </Group>
+        )}
 
         <Group
           label="Agent"
@@ -397,10 +470,50 @@ function Editor({
           />
         </Field>
 
-        {existing && (
-          <Field label="Who can use it" hint="A profile in a directory can be used by anyone who can reach it.">
-            <WhoCanAccess kind="role" id={state.id!} path={state.path} look="chip" />
-          </Field>
+        {existing ? (
+          <>
+            <Field label="Who can use it" hint="A profile in a directory can be used by anyone who can reach it.">
+              <WhoCanAccess kind="role" id={state.id!} path={state.path} look="chip" />
+            </Field>
+            <Field
+              label="Default"
+              hint="Start new workspaces as this profile unless you pick another. Only one profile can be the default."
+            >
+              <button
+                type="button"
+                role="switch"
+                aria-checked={isDefault}
+                onClick={toggleDefault}
+                disabled={defaulting}
+                className={`flex items-center gap-2.5 rounded-md border px-3 py-2 text-left text-ui transition-colors disabled:opacity-60 ${
+                  isDefault
+                    ? "border-sage-deep bg-sage-tint text-sage"
+                    : "border-line bg-ground text-dim hover:border-dim hover:text-bone"
+                }`}
+              >
+                <span
+                  className={`grid h-4 w-4 place-items-center rounded-full border ${
+                    isDefault ? "border-sage bg-sage text-ground" : "border-mute"
+                  }`}
+                >
+                  {isDefault && <Check className="h-3 w-3" strokeWidth={3.5} />}
+                </span>
+                {isDefault ? "Your default for new workspaces" : "Make this the default"}
+              </button>
+            </Field>
+          </>
+        ) : (
+          <Group
+            label="Where it lives"
+            hint="Keep it yours, or file it in a directory so your team can use it too."
+          >
+            <Select
+              ariaLabel="Where it lives"
+              value={draft.directory ?? null}
+              options={dirOptions}
+              onChange={(v) => set("directory", v)}
+            />
+          </Group>
         )}
 
         {trouble && (

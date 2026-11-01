@@ -12,46 +12,46 @@ export const ListRolesResponseItem = zod.object({
   "agent": zod.string().nullish().describe('Which agent runs it, or absent to let the lead choose.'),
   "canDelegate": zod.boolean().describe('A Manager (true) gets the spawn tool and may hand work to any profile it\ncan see; an Operator (false) does the work and reports back.'),
   "createdAt": zod.iso.datetime({"offset":true}),
-  "does": zod.string().describe('One line: what this kind of agent does.'),
+  "does": zod.string().describe('What it does and when to reach for it — the one line a lead reads to\ndecide whether to hand it work, the way a skill\'s `description` is read.'),
   "id": zod.string(),
   "instructions": zod.string().describe('Composed into the child\'s instructions.'),
+  "isDefault": zod.boolean().describe('Whether this person starts a new workspace as this profile by default.\nAt most one of theirs is, so setting another unsets this one.'),
+  "machine": zod.string().nullish().describe('The machine its own workspace runs on, by host id, or absent to let the\nlead choose. Meaningful only when `placement` is `new`.'),
   "mayShare": zod.boolean().describe('Whether they may move it into a directory, or out of one.'),
   "mayWrite": zod.boolean().describe('Whether the person asking may edit or delete it.'),
   "name": zod.string(),
-  "notWhen": zod.string().describe('When it should not — the line that says "you can do this yourself".'),
   "path": zod.string(),
   "placement": zod.string().describe('`lead` (let the lead choose) | `here` | `new`.'),
-  "updatedAt": zod.iso.datetime({"offset":true}),
-  "useWhen": zod.string().describe('When a lead should reach for it.')
+  "updatedAt": zod.iso.datetime({"offset":true})
 }).describe('A role, as the interface and the spawn tool read it.')
 export const ListRolesResponse = zod.array(ListRolesResponseItem)
 
 export const CreateRoleBody = zod.object({
   "agent": zod.string().nullish(),
   "canDelegate": zod.boolean().optional().describe('Whether it is a Manager. Defaults to an Operator.'),
+  "directory": zod.string().nullish().describe('A directory to file it in, by id, so a teammate can reach it. Omit for\nyour own space. Only honoured at creation; move it later with sharing.'),
   "does": zod.string(),
   "instructions": zod.string().optional(),
+  "machine": zod.string().nullish().describe('The machine its own workspace runs on, by host id. Omit to let the lead\nchoose. Only applies when placement is `new`.'),
   "name": zod.string(),
-  "notWhen": zod.string().optional(),
-  "placement": zod.string().optional(),
-  "useWhen": zod.string().optional()
+  "placement": zod.string().optional()
 }).describe('What the API accepts to create or change a role.')
 
 export const CreateRoleResponse = zod.object({
   "agent": zod.string().nullish().describe('Which agent runs it, or absent to let the lead choose.'),
   "canDelegate": zod.boolean().describe('A Manager (true) gets the spawn tool and may hand work to any profile it\ncan see; an Operator (false) does the work and reports back.'),
   "createdAt": zod.iso.datetime({"offset":true}),
-  "does": zod.string().describe('One line: what this kind of agent does.'),
+  "does": zod.string().describe('What it does and when to reach for it — the one line a lead reads to\ndecide whether to hand it work, the way a skill\'s `description` is read.'),
   "id": zod.string(),
   "instructions": zod.string().describe('Composed into the child\'s instructions.'),
+  "isDefault": zod.boolean().describe('Whether this person starts a new workspace as this profile by default.\nAt most one of theirs is, so setting another unsets this one.'),
+  "machine": zod.string().nullish().describe('The machine its own workspace runs on, by host id, or absent to let the\nlead choose. Meaningful only when `placement` is `new`.'),
   "mayShare": zod.boolean().describe('Whether they may move it into a directory, or out of one.'),
   "mayWrite": zod.boolean().describe('Whether the person asking may edit or delete it.'),
   "name": zod.string(),
-  "notWhen": zod.string().describe('When it should not — the line that says "you can do this yourself".'),
   "path": zod.string(),
   "placement": zod.string().describe('`lead` (let the lead choose) | `here` | `new`.'),
-  "updatedAt": zod.iso.datetime({"offset":true}),
-  "useWhen": zod.string().describe('When a lead should reach for it.')
+  "updatedAt": zod.iso.datetime({"offset":true})
 }).describe('A role, as the interface and the spawn tool read it.')
 
 export const UpdateRoleParams = zod.object({
@@ -61,29 +61,29 @@ export const UpdateRoleParams = zod.object({
 export const UpdateRoleBody = zod.object({
   "agent": zod.string().nullish(),
   "canDelegate": zod.boolean().optional().describe('Whether it is a Manager. Defaults to an Operator.'),
+  "directory": zod.string().nullish().describe('A directory to file it in, by id, so a teammate can reach it. Omit for\nyour own space. Only honoured at creation; move it later with sharing.'),
   "does": zod.string(),
   "instructions": zod.string().optional(),
+  "machine": zod.string().nullish().describe('The machine its own workspace runs on, by host id. Omit to let the lead\nchoose. Only applies when placement is `new`.'),
   "name": zod.string(),
-  "notWhen": zod.string().optional(),
-  "placement": zod.string().optional(),
-  "useWhen": zod.string().optional()
+  "placement": zod.string().optional()
 }).describe('What the API accepts to create or change a role.')
 
 export const UpdateRoleResponse = zod.object({
   "agent": zod.string().nullish().describe('Which agent runs it, or absent to let the lead choose.'),
   "canDelegate": zod.boolean().describe('A Manager (true) gets the spawn tool and may hand work to any profile it\ncan see; an Operator (false) does the work and reports back.'),
   "createdAt": zod.iso.datetime({"offset":true}),
-  "does": zod.string().describe('One line: what this kind of agent does.'),
+  "does": zod.string().describe('What it does and when to reach for it — the one line a lead reads to\ndecide whether to hand it work, the way a skill\'s `description` is read.'),
   "id": zod.string(),
   "instructions": zod.string().describe('Composed into the child\'s instructions.'),
+  "isDefault": zod.boolean().describe('Whether this person starts a new workspace as this profile by default.\nAt most one of theirs is, so setting another unsets this one.'),
+  "machine": zod.string().nullish().describe('The machine its own workspace runs on, by host id, or absent to let the\nlead choose. Meaningful only when `placement` is `new`.'),
   "mayShare": zod.boolean().describe('Whether they may move it into a directory, or out of one.'),
   "mayWrite": zod.boolean().describe('Whether the person asking may edit or delete it.'),
   "name": zod.string(),
-  "notWhen": zod.string().describe('When it should not — the line that says "you can do this yourself".'),
   "path": zod.string(),
   "placement": zod.string().describe('`lead` (let the lead choose) | `here` | `new`.'),
-  "updatedAt": zod.iso.datetime({"offset":true}),
-  "useWhen": zod.string().describe('When a lead should reach for it.')
+  "updatedAt": zod.iso.datetime({"offset":true})
 }).describe('A role, as the interface and the spawn tool read it.')
 
 export const DeleteRoleParams = zod.object({
@@ -91,4 +91,14 @@ export const DeleteRoleParams = zod.object({
 })
 
 export const DeleteRoleResponse = zod.void()
+
+export const SetDefaultRoleParams = zod.object({
+  "id": zod.string().describe('Role id')
+})
+
+export const SetDefaultRoleBody = zod.object({
+  "on": zod.boolean()
+}).describe('Turn this profile into the person\'s default for new workspaces, or off.')
+
+export const SetDefaultRoleResponse = zod.void()
 

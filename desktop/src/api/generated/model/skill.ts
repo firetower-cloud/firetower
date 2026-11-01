@@ -33,6 +33,13 @@ export interface Skill {
   defaultIn: string[];
   description: string;
   files: number;
+  /**
+     * An agent wrote a version of this that ships an executable, and it is
+     * waiting for the owner to approve it. Held content is never the current
+     * version, so it runs nowhere until then — this is only here so a list can
+     * badge it. See `review`, `approve`, `discard`.
+     */
+  held: boolean;
   id: SkillId;
   /**
      * Whether this person may move it to another directory or delete it.

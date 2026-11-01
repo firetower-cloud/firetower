@@ -9,7 +9,7 @@ use super::access::whoever;
 use super::{ApiError, ApiResult, ErrorCode};
 use crate::auth::Principal;
 use crate::skills::{
-    Asking, Collision, Match, NewSkill, Resolve, Skill, SkillDetail, SkillVersion,
+    Asking, Collision, Match, NewSkill, Resolve, Skill, SkillDetail, SkillReview, SkillVersion,
 };
 use crate::AppState;
 use axum::{
@@ -96,7 +96,7 @@ pub(super) async fn create_skill(
 
     let id = state
         .skills
-        .create(me.org_id.as_str(), me.id.as_str(), &me.slug, &new)
+        .create(me.org_id.as_str(), me.id.as_str(), &me.slug, &new, false)
         .await?;
 
     let made = state
@@ -305,13 +305,71 @@ pub(super) async fn add_version(
         ));
     }
 
-    state.skills.add_version(&id, me.id.as_str(), &new).await?;
+    state.skills.add_version(&id, me.id.as_str(), &new, false).await?;
     let made = state
         .skills
         .one(me.id.as_str(), &id, Level::Viewer)
         .await?
         .ok_or_else(|| ApiError::not_found("skill"))?;
     Ok((StatusCode::CREATED, Json(made)))
+}
+
+#[utoipa::path(
+    get, path = "/api/v1/skills/{id}/review", tag = "skills",
+    params(("id" = String, Path, description = "The skill")),
+    responses((status = 200, body = SkillReview), (status = 404, body = ApiError)),
+)]
+pub(super) async fn review_skill(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<SkillReview>> {
+    let me = whoever(&principal)?;
+    state
+        .skills
+        .review(me.id.as_str(), &id)
+        .await?
+        .map(Json)
+        .ok_or_else(|| ApiError::not_found("held skill"))
+}
+
+#[utoipa::path(
+    post, path = "/api/v1/skills/{id}/approve", tag = "skills",
+    params(("id" = String, Path, description = "The skill")),
+    responses((status = 200, body = Skill), (status = 404, body = ApiError)),
+)]
+pub(super) async fn approve_skill(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Skill>> {
+    let me = whoever(&principal)?;
+    if !state.skills.approve(me.id.as_str(), &id).await? {
+        return Err(ApiError::not_found("held skill"));
+    }
+    state
+        .skills
+        .one(me.id.as_str(), &id, Level::Viewer)
+        .await?
+        .map(Json)
+        .ok_or_else(|| ApiError::not_found("skill"))
+}
+
+#[utoipa::path(
+    post, path = "/api/v1/skills/{id}/discard", tag = "skills",
+    params(("id" = String, Path, description = "The skill")),
+    responses((status = 204), (status = 404, body = ApiError)),
+)]
+pub(super) async fn discard_skill(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(id): Path<String>,
+) -> ApiResult<StatusCode> {
+    let me = whoever(&principal)?;
+    if !state.skills.discard(me.id.as_str(), &id).await? {
+        return Err(ApiError::not_found("held skill"));
+    }
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// Turning a default on or off, for one repository or for everywhere.
@@ -676,6 +734,17 @@ pub(super) async fn share_skills(
             .one(me.id.as_str(), &one.id, Level::Viewer)
             .await?
             .ok_or_else(|| ApiError::not_found("skill"))?;
+        // A draft an agent wrote and nobody has approved has no current
+        // version to copy — review it before it can be handed to anyone.
+        if skill.version == 0 {
+            return Err(ApiError::new(
+                ErrorCode::InvalidRequest,
+                format!(
+                    "{} is waiting for your review — approve it before sharing it",
+                    skill.name
+                ),
+            ));
+        }
         // Two going in under one name would collide with each other.
         if one.resolve != Some(Resolve::Keep) && !names.insert(skill.name.clone()) {
             return Err(ApiError::new(

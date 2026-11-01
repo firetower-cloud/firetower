@@ -53,6 +53,46 @@ pub(super) async fn create_role(
         .roles
         .create(me.org_id.as_str(), me.id.as_str(), &me.slug, &new)
         .await?;
+
+    // Hand it to a directory, when one was named — the same operation the
+    // sharing sheet performs later, at the one moment nobody has to be told it
+    // changed hands. Only where this person may write; a directory they cannot
+    // reach is "not found" rather than a different error.
+    if let Some(directory) = new.directory.as_deref().filter(|d| !d.is_empty()) {
+        let target = state
+            .access
+            .directory(directory)
+            .await?
+            .ok_or_else(|| ApiError::not_found("directory"))?;
+        let may = matches!(
+            state.access.level_on(me.id.as_str(), directory).await?,
+            Some(level) if level >= Level::Writer
+        );
+        if !may {
+            return Err(ApiError::not_found("directory"));
+        }
+        let from = state
+            .access
+            .path_of(crate::access::FiledKind::Role, id.as_str())
+            .await?
+            .ok_or_else(|| ApiError::not_found("role"))?;
+        let whose = principal
+            .user
+            .as_ref()
+            .map(|u| u.username.clone())
+            .unwrap_or_else(|| me.id.as_str().to_string());
+        state
+            .access
+            .transfer(
+                &state.vault,
+                crate::access::FiledKind::Role,
+                id.as_str(),
+                &from.moved_to(ft_core::path::DIRECTORY, &target.slug),
+                &whose,
+            )
+            .await?;
+    }
+
     let made = state
         .roles
         .one(me.id.as_str(), id.as_str(), Level::Viewer)
@@ -88,6 +128,32 @@ pub(super) async fn update_role(
         .await?
         .ok_or_else(|| ApiError::not_found("role"))?;
     Ok(Json(now))
+}
+
+/// Turn this profile into the person's default for new workspaces, or off.
+#[derive(Debug, serde::Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RoleDefault {
+    pub on: bool,
+}
+
+#[utoipa::path(
+    put, path = "/api/v1/roles/{id}/default", tag = "roles",
+    params(("id" = String, Path, description = "Role id")),
+    request_body = RoleDefault,
+    responses((status = 204), (status = 404, body = ApiError)),
+)]
+pub(super) async fn set_default_role(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(id): Path<String>,
+    Json(body): Json<RoleDefault>,
+) -> ApiResult<StatusCode> {
+    let me = whoever(&principal)?;
+    if !state.roles.set_default(me.id.as_str(), &id, body.on).await? {
+        return Err(ApiError::not_found("role"));
+    }
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[utoipa::path(

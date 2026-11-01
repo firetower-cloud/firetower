@@ -3610,6 +3610,50 @@
         }
       }
     },
+    "/api/v1/roles/{id}/default": {
+      "put": {
+        "tags": [
+          "roles"
+        ],
+        "operationId": "set_default_role",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Role id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoleDefault"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/secrets": {
       "get": {
         "tags": [
@@ -6522,6 +6566,47 @@
         }
       }
     },
+    "/api/v1/skills/{id}/approve": {
+      "post": {
+        "tags": [
+          "skills"
+        ],
+        "operationId": "approve_skill",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The skill",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Skill"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/skills/{id}/default": {
       "put": {
         "tags": [
@@ -6590,6 +6675,81 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SkillDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/skills/{id}/discard": {
+      "post": {
+        "tags": [
+          "skills"
+        ],
+        "operationId": "discard_skill",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The skill",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/skills/{id}/review": {
+      "get": {
+        "tags": [
+          "skills"
+        ],
+        "operationId": "review_skill",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The skill",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillReview"
                 }
               }
             }
@@ -12056,22 +12216,30 @@
             "type": "boolean",
             "description": "Whether it is a Manager. Defaults to an Operator."
           },
+          "directory": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A directory to file it in, by id, so a teammate can reach it. Omit for\nyour own space. Only honoured at creation; move it later with sharing."
+          },
           "does": {
             "type": "string"
           },
           "instructions": {
             "type": "string"
           },
+          "machine": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The machine its own workspace runs on, by host id. Omit to let the lead\nchoose. Only applies when placement is `new`."
+          },
           "name": {
             "type": "string"
           },
-          "notWhen": {
-            "type": "string"
-          },
           "placement": {
-            "type": "string"
-          },
-          "useWhen": {
             "type": "string"
           }
         }
@@ -13573,6 +13741,34 @@
           }
         }
       },
+      "ReviewFile": {
+        "type": "object",
+        "description": "One file of a held bundle, shown for review.",
+        "required": [
+          "path",
+          "executable",
+          "size"
+        ],
+        "properties": {
+          "executable": {
+            "type": "boolean"
+          },
+          "path": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "text": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The decoded contents when the file is UTF-8 — a script, a doc, the\nSKILL.md. Absent for binary (a font, an image): the card names it but\ncannot show it."
+          }
+        }
+      },
       "Role": {
         "type": "object",
         "description": "A role, as the interface and the spawn tool read it.",
@@ -13581,13 +13777,12 @@
           "path",
           "name",
           "does",
-          "useWhen",
-          "notWhen",
           "placement",
           "instructions",
           "canDelegate",
           "mayWrite",
           "mayShare",
+          "isDefault",
           "createdAt",
           "updatedAt"
         ],
@@ -13609,7 +13804,7 @@
           },
           "does": {
             "type": "string",
-            "description": "One line: what this kind of agent does."
+            "description": "What it does and when to reach for it — the one line a lead reads to\ndecide whether to hand it work, the way a skill's `description` is read."
           },
           "id": {
             "type": "string"
@@ -13617,6 +13812,17 @@
           "instructions": {
             "type": "string",
             "description": "Composed into the child's instructions."
+          },
+          "isDefault": {
+            "type": "boolean",
+            "description": "Whether this person starts a new workspace as this profile by default.\nAt most one of theirs is, so setting another unsets this one."
+          },
+          "machine": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The machine its own workspace runs on, by host id, or absent to let the\nlead choose. Meaningful only when `placement` is `new`."
           },
           "mayShare": {
             "type": "boolean",
@@ -13629,10 +13835,6 @@
           "name": {
             "type": "string"
           },
-          "notWhen": {
-            "type": "string",
-            "description": "When it should not — the line that says \"you can do this yourself\"."
-          },
           "path": {
             "type": "string"
           },
@@ -13643,10 +13845,18 @@
           "updatedAt": {
             "type": "string",
             "format": "date-time"
-          },
-          "useWhen": {
-            "type": "string",
-            "description": "When a lead should reach for it."
+          }
+        }
+      },
+      "RoleDefault": {
+        "type": "object",
+        "description": "Turn this profile into the person's default for new workspaces, or off.",
+        "required": [
+          "on"
+        ],
+        "properties": {
+          "on": {
+            "type": "boolean"
           }
         }
       },
@@ -14377,6 +14587,7 @@
           "bytes",
           "risk",
           "builtin",
+          "held",
           "updatedAt",
           "mayWrite",
           "mayShare",
@@ -14416,6 +14627,10 @@
           "files": {
             "type": "integer",
             "format": "int32"
+          },
+          "held": {
+            "type": "boolean",
+            "description": "An agent wrote a version of this that ships an executable, and it is\nwaiting for the owner to approve it. Held content is never the current\nversion, so it runs nowhere until then — this is only here so a list can\nbadge it. See `review`, `approve`, `discard`."
           },
           "id": {
             "$ref": "#/components/schemas/SkillId"
@@ -14539,6 +14754,33 @@
         "properties": {
           "description": {
             "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "SkillReview": {
+        "type": "object",
+        "description": "A held version with its files' bytes, for the review that decides whether\nit may run. Unlike [`SkillDetail`] this carries contents — the whole point\nis to put the script in front of the owner before it is written anywhere.",
+        "required": [
+          "name",
+          "description",
+          "body",
+          "files"
+        ],
+        "properties": {
+          "body": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReviewFile"
+            }
           },
           "name": {
             "type": "string"
