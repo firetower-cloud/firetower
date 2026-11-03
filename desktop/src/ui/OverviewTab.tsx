@@ -106,7 +106,7 @@ function ManagerRow({ manager, active, tokens, total }: { manager: Session; acti
   return active ? (
     <div className={`${ROW} ${tone(true, false)}`}>{inner}</div>
   ) : (
-    <button onClick={() => navigate(`/sessions/${manager.workspaceId ?? manager.id}`)} className={`${ROW} ${tone(false, true)}`}>
+    <button onClick={() => navigate(`/sessions/${manager.id}`)} className={`${ROW} ${tone(false, true)}`}>
       {inner}
     </button>
   );
@@ -137,7 +137,7 @@ function MemberRow({ member, active, shared, checkIn, tokens, total }: { member:
   return active ? (
     <div className={`${ROW} ${tone(true, false)}`}>{inner}</div>
   ) : (
-    <button onClick={() => navigate(`/sessions/${member.workspaceId ?? member.id}`)} className={`${ROW} ${tone(false, true)}`}>
+    <button onClick={() => navigate(`/sessions/${member.id}`)} className={`${ROW} ${tone(false, true)}`}>
       {inner}
     </button>
   );
