@@ -25,6 +25,7 @@ import {
   ShieldCheck,
   Plus,
   KeyRound,
+  Search,
   Server,
   Sparkles,
   SquarePen,
@@ -99,8 +100,16 @@ export function Roles() {
   const [editing, setEditing] = useState<{ id?: string; path?: string; draft: NewRole } | null>(
     null,
   );
+  const [q, setQ] = useState("");
   const cache = useQueryClient();
   const confirm = useConfirm();
+
+  // Managers first — they're the ones a person reaches for to lead a team —
+  // then alphabetical; narrowed by the search over name and what it does.
+  const needle = q.trim().toLowerCase();
+  const shown = rows.data
+    .filter((r) => !needle || r.name.toLowerCase().includes(needle) || r.does.toLowerCase().includes(needle))
+    .sort((a, b) => Number(b.canDelegate) - Number(a.canDelegate) || a.name.localeCompare(b.name));
 
   const removeRole = async (role: Role) => {
     const ok = await confirm({
@@ -141,9 +150,26 @@ export function Roles() {
           ]}
         />
       }
+      controls={
+        rows.data.length > 0 ? (
+          <div className="relative w-full max-w-xs">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-mute" strokeWidth={1.75} />
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search profiles…"
+              aria-label="Search profiles"
+              className="w-full rounded-md border border-line bg-ground py-1.5 pr-2.5 pl-8 text-ui text-bone transition-colors placeholder:text-mute focus:border-dim focus:outline-none"
+            />
+          </div>
+        ) : undefined
+      }
     >
-      <Rows feed={rows} empty="No profiles yet. Make one, and you can start a workspace as it or a lead can delegate to it.">
-        {rows.data.map((role) => (
+      <Rows
+        feed={{ data: shown, loading: rows.loading, error: rows.error }}
+        empty={needle ? `No profiles match "${q.trim()}".` : "No profiles yet. Make one, and you can start a workspace as it or a lead can delegate to it."}
+      >
+        {shown.map((role) => (
           <RoleRow
             key={role.id}
             role={role}

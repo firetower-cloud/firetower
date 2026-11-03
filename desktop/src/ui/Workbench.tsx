@@ -6,7 +6,7 @@
  * away. The earlier arrangement made both of them tabs, which meant reviewing a
  * diff hid the conversation that explained it. They are two halves of one job.
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Globe, PanelRight, Pencil, Share2, SquareTerminal, Trash2, X } from "lucide-react";
 import { WhoCanAccess } from "~/ui/Sharing";
 import { useQueryClient } from "@tanstack/react-query";
@@ -258,15 +258,9 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
       ? { id: workspace, name: opened.data.name, branch: opened.data.branch ?? undefined, runs: [opened.data] }
       : undefined);
 
-  /* The Overview tab's artifacts: everything this workspace's runs produced.
-     Computed here, above the `!place` guard, so the hook count never changes
-     between renders. The Overview's *team* is derived below, from `run`, since
-     it depends on which agent is being read. */
-  const myRunIds = useMemo(() => new Set((place?.runs ?? []).map((r) => r.id)), [place?.runs]);
-  const myArtifacts = useMemo(
-    () => (artifacts.data ?? []).filter((a) => a.fromSessionId && myRunIds.has(a.fromSessionId)),
-    [artifacts.data, myRunIds],
-  );
+  /* The Overview tab's team and artifacts are derived below, from `run`, since
+     they depend on which agent is being read — the manager and everyone under
+     it, which is not the same as the runs in this one workspace. */
 
   /* The session to publish from, derived here rather than from `run` below.
      `run` is computed after an early return, and a hook may not live there —
@@ -420,6 +414,12 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
   const lead = run.parentId ? (sessions?.find((s) => s.id === run.parentId) ?? null) : null;
   const managerRunId = run.parentId ?? run.id;
   const team = (sessions ?? []).filter((s) => s.parentId === managerRunId);
+  /* Artifacts from the whole team — the manager and every agent under it,
+     wherever they ran — not just the runs in this one workspace. A sibling off
+     in its own workspace produced its artifact there, so scoping to this
+     workspace's runs hid all but the one made here. */
+  const familyIds = new Set<string>([managerRunId, ...team.map((t) => t.id)]);
+  const myArtifacts = (artifacts.data ?? []).filter((a) => a.fromSessionId && familyIds.has(a.fromSessionId));
 
   /* Checkouts belong to the workspace rather than to whichever agent is being
      read, so take them from the one the list is freshest on. */
