@@ -68,6 +68,16 @@
   --color-slate-tint: #161d26;
   --color-slate-deep: #35485c;
 
+  /* Series: one hue per member, and the only place data wears colour. A
+     namespace of its own because the signals above are semantic and the file
+     kinds below are deliberately too quiet to carry a chart — reusing
+     sage/brick for a stacked bar makes it read "done"/"broke" when it means
+     neither. Ember is absent on purpose: it means something is waiting on you. */
+  --color-series-1: #3f86cf;
+  --color-series-2: #1f9b74;
+  --color-series-3: #8b7ad8;
+  --color-series-4: #cc5c86;
+
   /* File kinds: what a file *is*, in the tree and nowhere else. A separate
      namespace from the signals above, and deliberately below them in
      saturation: a panel of four hundred rows must not be able to out-shout the

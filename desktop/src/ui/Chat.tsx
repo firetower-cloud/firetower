@@ -447,7 +447,7 @@ export function Chat({
       <div
         ref={scroller}
         onMouseUp={takeSelection}
-        className="scroll-slim min-h-0 flex-1 overflow-y-auto"
+        className="scroll-slim min-h-0 flex-1 overflow-y-auto overflow-x-hidden"
         onScroll={(e) => {
           const el = e.currentTarget;
           following.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
@@ -1140,7 +1140,8 @@ function Relayed({ relay }: { relay: Relay }) {
             e.stopPropagation();
             navigate(`/sessions/${relay.id}`);
           }}
-          className="shrink-0 font-mono text-code text-bone hover:underline"
+          className="min-w-0 max-w-[60%] shrink truncate font-mono text-code text-bone hover:underline"
+          title={relay.name}
         >
           {relay.name}
         </button>
