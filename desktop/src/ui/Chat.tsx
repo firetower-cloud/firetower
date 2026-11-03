@@ -27,6 +27,7 @@ import {
   Check,
   ChevronRight,
   CornerDownLeft,
+  CornerUpLeft,
   CornerUpRight,
   Copy,
   Eye,
@@ -475,19 +476,20 @@ export function Chat({
               because what it says when it finishes goes to that session, not
               to the inbox. */}
           {session.parentId && (
-            <div className="mt-3 flex items-center gap-2 rounded-md border border-line bg-slate-tint px-3 py-2 text-meta">
-              <span className="text-dim">Started by</span>
-              <button
-                onClick={() => navigate(`/sessions/${lead?.workspaceId ?? session.parentId}`)}
-                className="font-medium text-bone hover:underline"
-              >
+            <button
+              onClick={() => navigate(`/sessions/${lead?.workspaceId ?? session.parentId}`)}
+              title={`Started by ${lead?.name ?? "another session"}${session.spawnReason ? ` — ${session.spawnReason}` : ""}. It reports back here.`}
+              className="group mt-3 flex w-full items-center gap-2 rounded-lg border border-line-soft bg-raise/40 px-3 py-1.5 text-left text-meta transition-colors hover:border-dim hover:bg-raise"
+            >
+              <CornerUpLeft className="h-3.5 w-3.5 shrink-0 text-slate" strokeWidth={1.75} />
+              <span className="shrink-0 text-mute">from</span>
+              <span className="min-w-0 max-w-[45%] shrink truncate font-medium text-bone">
                 {lead?.name ?? "another session"}
-              </button>
+              </span>
               {session.spawnReason && (
-                <span className="min-w-0 truncate text-dim">— {session.spawnReason}</span>
+                <span className="min-w-0 flex-1 truncate text-mute">— {session.spawnReason}</span>
               )}
-              <span className="ml-auto shrink-0 text-mute">hands back to it</span>
-            </div>
+            </button>
           )}
 
           {steps.length > 0 && <BringUp steps={steps} />}
