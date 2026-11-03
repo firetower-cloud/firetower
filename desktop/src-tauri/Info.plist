@@ -12,5 +12,29 @@
        to, when, and what comes of it. -->
   <key>NSMicrophoneUsageDescription</key>
   <string>Firetower listens only while you hold the microphone button in the composer, to write what you say into the agent's prompt.</string>
+
+  <!-- Let the webview load an artifact or preview served over plain http.
+       Those live on a *signed subdomain of `localhost`*
+       (`<id>-<sig>.localhost`), and in local development the control plane
+       serves them over http. App Transport Security exempts bare `localhost`
+       by default — which is why the app itself loads — but not a subdomain of
+       it, so WKWebView silently refused the iframe and every artifact came up
+       blank. (Chrome ignores ATS, which is why it renders there.) Scoped to
+       `localhost` and its subdomains, so nothing on the public internet is
+       weakened; a hosted deployment serves these over https and never touches
+       this exception. -->
+  <key>NSAppTransportSecurity</key>
+  <dict>
+    <key>NSExceptionDomains</key>
+    <dict>
+      <key>localhost</key>
+      <dict>
+        <key>NSExceptionAllowsInsecureHTTPLoads</key>
+        <true/>
+        <key>NSIncludesSubdomains</key>
+        <true/>
+      </dict>
+    </dict>
+  </dict>
 </dict>
 </plist>
