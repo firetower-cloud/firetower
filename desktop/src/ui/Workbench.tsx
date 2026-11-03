@@ -140,6 +140,12 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
     handle.addEventListener("pointerup", up);
   };
   const [reading, setReading] = useState<string | null>(null);
+  /* `reading` is which agent you switched to with a chip, within one
+     workspace. Navigating is a fresh choice of what to read — so clear it when
+     the address changes, or opening a same-workspace sibling from the Overview
+     would land on the agent the last chip pointed at (its lead) instead of the
+     one you clicked. Chip-switching doesn't navigate, so it is untouched. */
+  useEffect(() => setReading(null), [workspace]);
   const [tabs, setTabs] = useState<Tab[]>([{ id: "chat" }]);
   const [active, setActive] = useState("chat");
   const activeRef = useRef(active);
