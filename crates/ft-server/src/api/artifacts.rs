@@ -382,6 +382,22 @@ pub(super) async fn publish_artifact(
         )
         .await?;
 
+    // Version 0: the slug is tombstoned — the person deleted it, and the folder
+    // the agent left behind must not bring it back. Report it as published, so
+    // the client's watcher marks it done and stops retrying, but keep it
+    // deleted. `artifact_of_any` finds the tombstoned row to hand back.
+    if version == 0 {
+        let row = state
+            .db
+            .artifact_of_any(&owner, &artifact)
+            .await?
+            .ok_or_else(|| ApiError::not_found("artifact"))?;
+        return Ok((
+            axum::http::StatusCode::OK,
+            Json(present(&state, &headers, row)),
+        ));
+    }
+
     tracing::info!(artifact = %artifact, version, files = files.len(), "published an artifact");
 
     let row = state
@@ -496,6 +512,9 @@ pub(crate) async fn capture_session_artifacts(
             )
             .await
         {
+            // Version 0 means the slug is tombstoned — deleted by the person.
+            // Leave it; the hand-back must not resurrect what they removed.
+            Ok((_artifact, 0)) => {}
             Ok((artifact, version)) => {
                 tracing::info!(%artifact, version, slug, "captured an artifact on hand-back")
             }
@@ -1055,6 +1074,47 @@ mod tests {
         assert_eq!(mentioned.path, ".firetower/artifacts/checkout/index.html");
         assert_eq!(mentioned.version, 1);
         assert!(worker.actions.lock().unwrap().is_empty());
+    }
+
+    /// Deleting an artifact is final. The agent's folder is still on disk, so
+    /// the watcher — or a hand-back — publishes the slug again; it must not
+    /// come back.
+    #[tokio::test]
+    async fn a_deleted_artifact_is_not_resurrected() {
+        let (state, principal, session, _worker) = fixture().await;
+        let owner = principal.owner().unwrap().to_string();
+        let org = state.db.org_of_user(&owner).await.unwrap().unwrap();
+
+        let artifact = publish(&state, &owner, "ghost", vec![page(b"<p>boo")], Some(&session)).await;
+        assert_eq!(state.db.artifacts_of(&owner).await.unwrap().len(), 1);
+
+        assert!(state.db.delete_artifact(&owner, &artifact).await.unwrap());
+        assert!(
+            state.db.artifacts_of(&owner).await.unwrap().is_empty(),
+            "the list still shows a deleted artifact"
+        );
+
+        // The republish that used to resurrect it: same slug, same bytes.
+        let (again, version) = state
+            .db
+            .publish_artifact(
+                &owner,
+                &org,
+                "ghost",
+                "Pricing, three tiers",
+                "index.html",
+                &[page(b"<p>boo")],
+                Some(session.as_str()),
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(version, 0, "a tombstoned slug was published again");
+        assert_eq!(again, artifact, "the tombstone kept its id");
+        assert!(
+            state.db.artifacts_of(&owner).await.unwrap().is_empty(),
+            "a deleted artifact came back"
+        );
     }
 
     /// A page with assets beside it goes as one zip, with every file in it.

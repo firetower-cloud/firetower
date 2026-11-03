@@ -7603,12 +7603,22 @@ impl Db {
     ) -> Result<(ft_core::ArtifactId, i32)> {
         let mut tx = self.pool.begin().await?;
 
-        let existing: Option<String> =
-            sqlx::query_scalar("SELECT id FROM artifacts WHERE owner_id = $1 AND slug = $2")
+        let existing: Option<(String, Option<chrono::DateTime<chrono::Utc>>)> =
+            sqlx::query_as("SELECT id, deleted_at FROM artifacts WHERE owner_id = $1 AND slug = $2")
                 .bind(owner)
                 .bind(slug)
                 .fetch_optional(&mut *tx)
                 .await?;
+
+        // Tombstoned — the person deleted this slug. Do not resurrect it from
+        // the folder the agent left on disk; version 0 tells the caller nothing
+        // was published and it should leave the slug alone.
+        if let Some((id, Some(_deleted_at))) = &existing {
+            let id = ft_core::ArtifactId::from_stored(id.clone());
+            tx.rollback().await.ok();
+            return Ok((id, 0));
+        }
+        let existing: Option<String> = existing.map(|(id, _)| id);
 
         let artifact = match existing {
             // Nothing is written yet. An identical republish must leave this
@@ -7788,16 +7798,28 @@ impl Db {
     /// directory has to appear for everybody with a grant on it. Writing a
     /// second predicate here is how two answers come to disagree.
     pub async fn artifacts_of(&self, person: &str) -> Result<Vec<ArtifactRow>> {
-        self.artifacts_where(person, None).await
+        self.artifacts_where(person, None, false).await
     }
 
     /// Every artifact this person may see, or the one of them named.
     ///
     /// One query behind both so the access predicate cannot come to mean two
     /// different things depending on which handler asked.
-    async fn artifacts_where(&self, person: &str, one: Option<&str>) -> Result<Vec<ArtifactRow>> {
+    async fn artifacts_where(
+        &self,
+        person: &str,
+        one: Option<&str>,
+        include_deleted: bool,
+    ) -> Result<Vec<ArtifactRow>> {
         use crate::access::{filed_where, Level};
         let only = if one.is_some() { "AND a.id = $2" } else { "" };
+        // A tombstoned artifact is gone to everyone but `publish_artifact`,
+        // which reads it to refuse resurrecting the slug.
+        let alive = if include_deleted {
+            ""
+        } else {
+            "AND a.deleted_at IS NULL"
+        };
         let sql = format!(
             "SELECT a.id, a.first_seen_line, a.path::text AS path, a.current_version_id,
                     a.title, a.slug,
@@ -7807,7 +7829,7 @@ impl Db {
                     {shareable} AS may_share
                FROM artifacts a
                LEFT JOIN artifact_versions v ON v.id = a.current_version_id
-              WHERE {visible} {only}
+              WHERE {visible} {only} {alive}
               ORDER BY a.updated_at DESC",
             visible = filed_where("a", 1, Level::Viewer),
             shareable = filed_where("a", 1, Level::Writer),
@@ -7852,7 +7874,22 @@ impl Db {
         id: &ft_core::ArtifactId,
     ) -> Result<Option<ArtifactRow>> {
         Ok(self
-            .artifacts_where(person, Some(id.as_str()))
+            .artifacts_where(person, Some(id.as_str()), false)
+            .await?
+            .into_iter()
+            .next())
+    }
+
+    /// Like [`Self::artifact_of`] but finds a tombstoned one too. For the
+    /// publish handler, so it can hand a deleted slug's row back to a watcher
+    /// instead of recreating it.
+    pub async fn artifact_of_any(
+        &self,
+        person: &str,
+        id: &ft_core::ArtifactId,
+    ) -> Result<Option<ArtifactRow>> {
+        Ok(self
+            .artifacts_where(person, Some(id.as_str()), true)
             .await?
             .into_iter()
             .next())
@@ -7893,18 +7930,34 @@ impl Db {
     /// Writer, like renaming. The versions and their bytes go with it by
     /// cascade, and so does any note anchored to one — which is the whole of
     /// what deleting an artifact means, and why it is asked about first.
+    /// Tombstone an artifact: mark it deleted and free its bytes, but keep the
+    /// row. The agent's folder is still on disk, and the auto-publisher would
+    /// recreate the artifact from it; a row that remains, marked `deleted_at`,
+    /// is what `publish_artifact` reads to refuse that. The versions and their
+    /// files go, so nothing is stored for a page nobody will see again.
     pub async fn delete_artifact(&self, person: &str, id: &ft_core::ArtifactId) -> Result<bool> {
         use crate::access::{filed_where, Level};
+        let mut tx = self.pool.begin().await?;
         let sql = format!(
-            "DELETE FROM artifacts a WHERE a.id = $2 AND {allowed}",
+            "UPDATE artifacts a SET deleted_at = now(), current_version_id = NULL \
+               WHERE a.id = $2 AND a.deleted_at IS NULL AND {allowed}",
             allowed = filed_where("a", 1, Level::Writer),
         );
         let done = sqlx::query(&sql)
             .bind(person)
             .bind(id.as_str())
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await
             .context("deleting an artifact")?;
+        if done.rows_affected() > 0 {
+            // `on delete cascade` from versions takes the files with them.
+            sqlx::query("DELETE FROM artifact_versions WHERE artifact_id = $1")
+                .bind(id.as_str())
+                .execute(&mut *tx)
+                .await
+                .context("freeing a deleted artifact's bytes")?;
+        }
+        tx.commit().await?;
         Ok(done.rows_affected() > 0)
     }
 
