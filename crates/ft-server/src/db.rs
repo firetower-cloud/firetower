@@ -449,6 +449,28 @@ impl Db {
     /// `ON CONFLICT DO NOTHING` against `(session_id, turn_id, model)`: a line
     /// replayed after a reconnect reports a turn that was already billed, and
     /// billing it twice would be worse than missing it.
+    /// Total tokens each of these sessions has spent — input, output and cache,
+    /// the sum `record_consumption` itself counts. Scoped to the org, so a
+    /// session id from another is simply absent. For the Overview tab's budget.
+    pub async fn token_usage(&self, org: &str, ids: &[String]) -> Result<Vec<(String, i64)>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let rows: Vec<(String, i64)> = sqlx::query_as(
+            "SELECT session_id, \
+                    sum(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens)::bigint \
+               FROM consumption_events \
+              WHERE org_id = $1 AND session_id = ANY($2) \
+              GROUP BY session_id",
+        )
+        .bind(org)
+        .bind(ids)
+        .fetch_all(&self.pool)
+        .await
+        .context("reading token usage")?;
+        Ok(rows)
+    }
+
     pub async fn record_consumption(
         &self,
         session_id: &SessionId,

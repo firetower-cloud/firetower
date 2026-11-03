@@ -5,11 +5,19 @@
  * The Firetower control plane: API, scheduling, and worker transports.
  * OpenAPI spec version: 0
  */
+import type { Preferred } from './preferred.ts';
 
 /**
  * A role, as the interface and the spawn tool read it.
  */
 export interface Role {
+  /**
+     * The subscription it runs its agent on, by account id. Absent means the
+     * owner's default for the engine resolves at launch — which is what an
+     * agent-authored profile gets, since it cannot see account ids.
+     * @nullable
+     */
+  account?: string | null;
   /**
      * Which agent runs it, or absent to let the lead choose.
      * @nullable
@@ -21,6 +29,11 @@ export interface Role {
      */
   canDelegate: boolean;
   createdAt: string;
+  /**
+     * The subagents a Manager may delegate to, by id. Empty means any the owner
+     * can see — scope is opt-in. Everything off the list is invisible to it.
+     */
+  delegateScope: string[];
   /**
      * What it does and when to reach for it — the one line a lead reads to
      * decide whether to hand it work, the way a skill's `description` is read.
@@ -48,5 +61,15 @@ export interface Role {
   path: string;
   /** `lead` (let the lead choose) | `here` | `new`. */
   placement: string;
+  /**
+     * How it runs its agent — model, effort, mode, sandbox. Each unset falls
+     * back to the engine's default at launch, so a profile need not pin all.
+     */
+  settings: Preferred;
+  /**
+     * The skills it may load, by id. Empty means any the owner can use; an
+     * off-list skill is never written to its workspace.
+     */
+  skillScope: string[];
   updatedAt: string;
 }

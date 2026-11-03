@@ -29,7 +29,8 @@ import {
   useSessionDiff,
 } from "~/api/generated/sessions/sessions";
 import { useMemo } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { tokenUsage } from "~/api/generated/sessions/sessions";
 import type {
   DiffSince,
   FileDiff,
@@ -370,4 +371,24 @@ export function useDiff(
     return files.map((d) => ({ ...d, at: only && !d.path.startsWith(`${only}/`) ? `${only}/${d.path}` : d.path }));
   }, [q.data, session?.checkouts]);
   return { data, loading: on && q.isPending, error: q.error ? why(q.error) : null };
+}
+
+/**
+ * Tokens spent by each of these sessions — a workspace and its children — for
+ * the Overview tab's budget. One request for the whole set, keyed on the sorted
+ * ids so it dedupes, refetched on a slow beat while a team is at work.
+ */
+export function useTokenUsage(ids: string[]) {
+  const key = useMemo(() => [...ids].sort(), [ids]);
+  const q = useQuery({
+    queryKey: ["token-usage", key],
+    queryFn: () => tokenUsage({ ids: key }),
+    enabled: key.length > 0,
+    refetchInterval: 15000,
+  });
+  return useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of q.data ?? []) m.set(r.sessionId, r.tokens);
+    return m;
+  }, [q.data]);
 }

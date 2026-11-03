@@ -21,6 +21,12 @@ describe("relays", () => {
     expect(r.body).toBe("Use the fixture db.");
   });
 
+  it("reads a child's mid-task check-in", () => {
+    const [r] = relays("⟦ft:update:s_kid:reviewer⟧\n\nRepro'd the failing test.\n\n(phase: building)");
+    expect(r).toMatchObject({ kind: "update", id: "s_kid", name: "reviewer" });
+    expect(r.body).toBe("Repro'd the failing test.\n\n(phase: building)");
+  });
+
   it("splits several results joined into one turn into one card each", () => {
     const text =
       "⟦ft:handback:s_a:reviewer⟧\n\nFindings here.\n\n---\n\n⟦ft:handback:s_b:qa⟧\n\n1 failing.";

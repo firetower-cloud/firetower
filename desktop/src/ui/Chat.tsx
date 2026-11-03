@@ -1099,22 +1099,29 @@ function Delegated({ item, items, tasks, onOpenDiff, onOpenFile }: { item: Item;
 /**
  * A message from another agent, drawn so it is not mistaken for yours.
  *
- * A child's hand-back or a lead's steer reaches the agent as a user turn, so
- * the transcript would otherwise draw it as a bubble from you — which is a lie
- * about who spoke. Left of the thread, with the other session named and a line
- * down the side in the tone its direction carries: sage for a child reporting
- * back, slate for a lead steering. Collapsed to a line by default — the summary
- * is the agent's to read, and yours to open when you want it.
+ * A child's hand-back, a child's mid-task check-in, or a lead's steer reaches
+ * the agent as a user turn, so the transcript would otherwise draw it as a
+ * bubble from you — which is a lie about who spoke. Left of the thread, with
+ * the other session named and a line down the side in the tone its direction
+ * carries: sage for a child reporting a result, slate for a check-in or a lead
+ * steering. Collapsed to a line by default — the summary is the agent's to
+ * read, and yours to open when you want it.
  */
 function Relayed({ relay }: { relay: Relay }) {
   const [open, setOpen] = useState(false);
-  const back = relay.kind === "handback";
-  const label = back ? "handed back" : "steered";
+  // A hand-back and a check-in both come *in* from a child; a steer goes out.
+  const incoming = relay.kind === "handback" || relay.kind === "update";
+  const tone =
+    relay.kind === "handback"
+      ? { border: "border-sage-deep", icon: "text-sage", label: "handed back" }
+      : relay.kind === "update"
+        ? { border: "border-slate-deep", icon: "text-slate", label: "checked in" }
+        : { border: "border-slate-deep", icon: "text-slate", label: "steered" };
   const preview = relay.body.split("\n").find((l) => l.trim())?.trim() ?? "";
   const rendered = useMemo(() => <Markdown>{relay.body}</Markdown>, [relay.body]);
 
   return (
-    <li className={`border-l-2 pl-3 ${back ? "border-sage-deep" : "border-slate-deep"}`}>
+    <li className={`border-l-2 pl-3 ${tone.border}`}>
       <div
         role="button"
         tabIndex={0}
@@ -1123,7 +1130,7 @@ function Relayed({ relay }: { relay: Relay }) {
         className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 hover:bg-raise/60"
       >
         <ChevronRight className={`h-3.5 w-3.5 shrink-0 text-mute transition-transform duration-150 ${open ? "rotate-90" : ""}`} strokeWidth={1.75} />
-        <Icon of={back ? CornerDownLeft : CornerUpRight} size={14} className={back ? "text-sage" : "text-slate"} />
+        <Icon of={incoming ? CornerDownLeft : CornerUpRight} size={14} className={tone.icon} />
         {/* The other session's name, a way into it. A button, not nested in the
             row's button — this is a div with a click, so that is allowed. */}
         <button
@@ -1135,7 +1142,7 @@ function Relayed({ relay }: { relay: Relay }) {
         >
           {relay.name}
         </button>
-        <span className="shrink-0 text-meta text-mute">{label}</span>
+        <span className="shrink-0 text-meta text-mute">{tone.label}</span>
         {!open && preview && <span className="min-w-0 flex-1 truncate text-meta text-dim">{preview}</span>}
       </div>
       {open && (

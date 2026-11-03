@@ -58,6 +58,8 @@ pub const TOOL: &str = "approve";
 pub const SPAWN: &str = "spawn";
 /// List, steer or stop the children this session started.
 pub const CHILDREN: &str = "children";
+/// A child's short progress note to its lead, posted without ending its turn.
+pub const UPDATE: &str = "update";
 /// Save a reusable agent profile, so a person can ask for one in words rather
 /// than filling the form in by hand.
 pub const CREATE_PROFILE: &str = "create_profile";
@@ -115,6 +117,18 @@ The children this session started. `list` says what each is doing and \
 whether it is waiting on someone. `steer` sends `message` into one child's \
 conversation mid-run, without stopping it. `stop` ends the turn a child is \
 in; what it has done so far stays.";
+
+/// What `update` does, as a child reads it. Only a child may call it — the
+/// control plane refuses it from a lead — so the text speaks to a child
+/// directly, and carries the rhythm the way spawn's and children's do.
+const UPDATE_DESCRIPTION: &str = "\
+Post a short progress note to the agent that started you — your lead — while \
+you keep working. Use it at a real milestone: a plan settled, a surprise \
+found, a phase finished. It does NOT pause you, and it is NOT a way to ask a \
+blocking question — it is one-way, and the lead reads it between its own \
+turns. Keep a casual check-in to a line or two; go longer only when the lead \
+has asked you for detail. If you are truly blocked and cannot go on without an \
+answer, hand back instead.";
 
 /// The configuration file that tells an agent to start this.
 pub fn mcp_config(exe: &std::path::Path, session_id: &str, workspace: &std::path::Path) -> Value {
@@ -287,21 +301,38 @@ async fn answer(
                         "required": ["action"],
                     },
                 }, {
+                    "name": UPDATE,
+                    "description": UPDATE_DESCRIPTION,
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "note": {
+                                "type": "string",
+                                "description": "What's happening, in your words. A line or two for a casual check-in; longer only if the lead has asked for detail.",
+                            },
+                            "phase": {
+                                "type": "string",
+                                "description": "Optional one-word stage, e.g. \"planning\", \"building\", \"reviewing\". Shown as a tag.",
+                            },
+                        },
+                        "required": ["note"],
+                    },
+                }, {
                     "name": CREATE_PROFILE,
-                    "description": "Save a reusable agent profile — a persona a workspace can be started as, or a lead can delegate to. A profile has several axes the person may care about, and most requests (\"make me a QA profile\") pin none of them. So unless they have already said otherwise, AGREE ON THE SHAPE BEFORE YOU CALL THIS — don't silently assume. In one short, plain-language exchange, put the choices to them with a recommended default each, and let them correct you: (1) what it does and when to reach for it; (2) its goal and how it should work (the instructions); (3) Operator or Manager — may it hand work to other profiles, and if so which; (4) a pinned engine, or left open; (5) placement — lead's choice, the same workspace, or its own (and on which machine); (6) kept yours, or filed in a directory a teammate can reach. Take anything they already specified and don't re-ask it. Then call this once. It appears on the Profiles screen immediately, theirs to edit or delete. Check `list_profiles` first so you refine an existing one rather than duplicate it.",
+                    "description": "Save a reusable agent profile — a persona a workspace can be started as, or a lead can delegate to. A profile fully specifies where and what it runs: there is no \"let the lead choose\", so you must settle the engine and the placement (and, for its own workspace, the machine). Unless they have already said otherwise, AGREE ON THE SHAPE BEFORE YOU CALL THIS — don't silently assume. In one short, plain-language exchange, put the choices to them with a recommended default each, and let them correct you: (1) what it does and when to reach for it; (2) its goal and how it should work (the instructions); (3) Operator or Manager — may it hand work to other profiles, and if so which; (4) which engine it runs on; (5) placement — the lead's own workspace (`here`) or its own (`new`); (6) for `new`, which machine — you can't see the host ids, so either the person gives you one or you create it as `here` and tell them to set the machine on the Profiles screen; (7) kept yours, or filed in a directory a teammate can reach. It runs on the owner's default subscription for the chosen engine — you can't pick a subscription here, so if they want a specific one, tell them to set it on the Profiles screen. Take anything they already specified and don't re-ask it. Then call this once. It appears on the Profiles screen immediately, theirs to edit or delete. Check `list_profiles` first so you refine an existing one rather than duplicate it.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
                             "name": { "type": "string", "description": "What it's called and started by, e.g. \"QA\" or \"Reviewer\"." },
                             "does": { "type": "string", "description": "One line: what it does AND when to reach for it — like a skill's description. A lead reads this to decide whether to hand it work, so include the trigger (\"after a developer hands back\") and any anti-trigger (\"not for a one-line fix\"). e.g. \"Reviews a finished branch and reports problems; use after a hand-back, not for trivial diffs.\"" },
                             "instructions": { "type": "string", "description": "The persona, as markdown — how it should work, step by step. Composed into the agent's prompt once it's chosen (the body, not the when-to-use line)." },
-                            "agent": { "type": "string", "enum": ["ClaudeCode", "Codex", "KimiCode", "CursorAgent"], "description": "Pin the engine it runs on, or omit to let the lead choose." },
-                            "placement": { "type": "string", "enum": ["lead", "here", "new"], "description": "Where a delegated child runs: `here` shares the lead's workspace, `new` gets its own, `lead` lets the lead choose. Default `lead`." },
-                            "machine": { "type": "string", "description": "For `new` placement: the host id of a machine to pin, or omit to let the scheduler choose." },
+                            "agent": { "type": "string", "enum": ["ClaudeCode", "Codex", "KimiCode", "CursorAgent"], "description": "Required. The engine it runs on — a profile always pins one." },
+                            "placement": { "type": "string", "enum": ["here", "new"], "description": "Required. Where a delegated child runs: `here` shares the lead's workspace and branch, `new` gets its own." },
+                            "machine": { "type": "string", "description": "Required when placement is `new`: the host id of the machine its own workspace runs on." },
                             "can_delegate": { "type": "boolean", "description": "true makes it a Manager that can hand work to other profiles; false (default) an Operator that does the work itself." },
                             "directory": { "type": "string", "description": "A directory to file it in, by name, so a teammate can reach it. Omit for the person's own space." },
                         },
-                        "required": ["name", "does"],
+                        "required": ["name", "does", "agent", "placement"],
                     },
                 }, {
                     "name": UPDATE_PROFILE,
@@ -314,7 +345,7 @@ async fn answer(
                             "does": { "type": "string" },
                             "instructions": { "type": "string" },
                             "agent": { "type": "string", "enum": ["ClaudeCode", "Codex", "KimiCode", "CursorAgent"] },
-                            "placement": { "type": "string", "enum": ["lead", "here", "new"] },
+                            "placement": { "type": "string", "enum": ["here", "new"] },
                             "machine": { "type": "string" },
                             "can_delegate": { "type": "boolean" },
                         },
@@ -396,7 +427,7 @@ async fn answer(
                 .and_then(Value::as_str)
                 .unwrap_or(TOOL);
             let text = match name {
-                SPAWN | CHILDREN | CREATE_PROFILE | UPDATE_PROFILE | LIST_PROFILES
+                SPAWN | CHILDREN | UPDATE | CREATE_PROFILE | UPDATE_PROFILE | LIST_PROFILES
                 | CREATE_SKILL | UPDATE_SKILL | LIST_SKILLS => {
                     delegate(session_id, name, &id, &arguments).await
                 }

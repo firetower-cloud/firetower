@@ -13,7 +13,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight, FileCode2, FileDiff, FolderDown, FolderTree, Loader2, MessageSquarePlus, PanelRightClose, Ship as ShipIcon } from "lucide-react";
 import { useListFiles } from "~/api/generated/sessions/sessions";
-import type { FileEntry, Session } from "~/api/generated/model";
+import type { Artifact, FileEntry, Session } from "~/api/generated/model";
+import { OverviewTab, OverviewIcon } from "~/ui/OverviewTab";
 import { sendTurn } from "~/api/generated/sessions/sessions";
 import { asMessage } from "~/api/notes";
 import { useDiff } from "~/data";
@@ -25,6 +26,7 @@ import { ContextMenu, useMenu } from "~/ui/ContextMenu";
 import { downloadArchive, downloadFile, type SavePhase } from "~/api/download";
 
 const TABS = [
+  { id: "overview", label: "Overview", icon: OverviewIcon },
   { id: "diff", label: "Diff", icon: FileDiff },
   { id: "files", label: "Files", icon: FolderTree },
   { id: "ship", label: "Commit", icon: ShipIcon },
@@ -46,6 +48,11 @@ export type TabId = (typeof TABS)[number]["id"];
  *
  * `ship` additionally wants `mayAct`: committing goes out under the session
  * owner's git identity, so it is the owner's and not the workspace's.
+ *
+ * **Overview is on every workspace**, and comes first. There is always
+ * something for it to hold — the plan the agent is following, the branch, the
+ * links — and once a workspace delegates, its team and their spend as well. So
+ * it is the one tab that is never gated, and the one a workspace opens on.
  */
 export function tabsFor(hasRepo: boolean, mayAct: boolean): typeof TABS[number][] {
   return TABS.filter((t) => {
@@ -76,6 +83,10 @@ export function Inspector({
   onOpenFile,
   onClose,
   width,
+  lead = null,
+  team = [],
+  artifacts = [],
+  onOpenArtifact,
 }: {
   session: Session;
   workspace: string;
@@ -85,6 +96,13 @@ export function Inspector({
   onOpenFile: (path: string, keep?: boolean) => void;
   onClose: () => void;
   width?: number;
+  /** The manager that started this one, when it is a child — the level up. */
+  lead?: Session | null;
+  /** The children this workspace spawned, for the Overview tab. */
+  team?: Session[];
+  /** Artifacts this workspace produced, for the Overview tab. */
+  artifacts?: Artifact[];
+  onOpenArtifact?: (id: string, title: string) => void;
 }) {
   /* Committing, pushing a branch and opening a pull request all go out under
      the *session owner's* git identity, so they are the owner's and not the
@@ -163,6 +181,7 @@ export function Inspector({
         {shown === "diff" && <DiffList session={session} files={files} loading={diff.loading} error={diff.error} onOpenFile={onOpenFile} scroller={scroller} />}
         {shown === "files" && <LiveTree sessionId={session.id} changed={changed} onOpenFile={onOpenFile} />}
         {shown === "ship" && <Ship session={session} branch={branch} files={uncommitted} />}
+        {shown === "overview" && <OverviewTab session={session} lead={lead} team={team} artifacts={artifacts} onOpenArtifact={onOpenArtifact ?? (() => {})} />}
       </div>
     </aside>
   );

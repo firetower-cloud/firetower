@@ -5,15 +5,24 @@
  * The Firetower control plane: API, scheduling, and worker transports.
  * OpenAPI spec version: 0
  */
+import type { Preferred } from './preferred';
 
 /**
  * What the API accepts to create or change a role.
  */
 export interface NewRole {
+  /**
+     * The subscription its agent runs on, by account id. Omit to run on the
+     * owner's default for the engine.
+     * @nullable
+     */
+  account?: string | null;
   /** @nullable */
   agent?: string | null;
   /** Whether it is a Manager. Defaults to an Operator. */
   canDelegate?: boolean;
+  /** The subagents it may delegate to, by id. Empty = any the owner can see. */
+  delegateScope?: string[];
   /**
      * A directory to file it in, by id, so a teammate can reach it. Omit for
      * your own space. Only honoured at creation; move it later with sharing.
@@ -23,11 +32,16 @@ export interface NewRole {
   does: string;
   instructions?: string;
   /**
-     * The machine its own workspace runs on, by host id. Omit to let the lead
-     * choose. Only applies when placement is `new`.
+     * The machine its own workspace runs on, by host id. Required when
+     * placement is `new`.
      * @nullable
      */
   machine?: string | null;
   name: string;
+  /** Required: "here" or "new". Empty when omitted, so `check` says so. */
   placement?: string;
+  /** How it runs its agent — model, effort, mode, sandbox. Each optional. */
+  settings?: Preferred;
+  /** The skills it may load, by id. Empty = any the owner can use. */
+  skillScope?: string[];
 }

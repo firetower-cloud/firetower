@@ -12,9 +12,10 @@
  */
 
 export type Relay = {
-  /** `handback` — a child reporting to its lead. `steer` — a lead to a child. */
-  kind: "handback" | "steer";
-  /** The other session: the child for a hand-back, the lead for a steer. */
+  /** `handback` — a child reporting its result. `update` — a child checking in
+   *  mid-task, without stopping. `steer` — a lead to a child. */
+  kind: "handback" | "update" | "steer";
+  /** The other session: the child for a hand-back or update, the lead for a steer. */
   id: string;
   /** What that session is called, for the card's label. */
   name: string;
@@ -24,7 +25,7 @@ export type Relay = {
 
 // The name runs to the closing bracket, so a name with spaces or a slash is
 // fine; only `⟧` or a newline ends it, and nothing names a session that.
-const MARK = /⟦ft:(handback|steer):(s_[a-z0-9]+):([^⟧\n]*)⟧\n?/g;
+const MARK = /⟦ft:(handback|update|steer):(s_[a-z0-9]+):([^⟧\n]*)⟧\n?/g;
 
 /**
  * Every relayed message in one user turn, in order.

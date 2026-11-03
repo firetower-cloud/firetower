@@ -639,6 +639,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         ))
         .routes(routes!(providers::list_provider_repos))
         .routes(routes!(sessions::list_sessions, sessions::create_session))
+        .routes(routes!(sessions::token_usage))
         .routes(routes!(sessions::end_all_sessions))
         .routes(routes!(sessions::get_session, sessions::destroy_session))
         .routes(routes!(events::list_events))

@@ -180,7 +180,19 @@ export function NewPage() {
   const controlsQ = useAgentControls(kind ?? "", { query: { enabled: !!kind } });
   const controls = (kind ? (controlsQ.data ?? []) : []) as Control[];
   const [chosen, setChosen] = useState<Partial<Record<ControlKind, string>>>({});
-  useEffect(() => setChosen({}), [kind]);
+  // Start from what the profile pins, when one is chosen and runs this engine —
+  // the person can still change any of them before starting. Otherwise a clean
+  // slate, so a change of engine never carries a stale model forward.
+  useEffect(() => {
+    const pins = profile?.agent === kind ? profile?.settings : undefined;
+    const seed: Partial<Record<ControlKind, string>> = {};
+    if (pins) {
+      (["model", "effort", "mode", "sandbox"] as ControlKind[]).forEach((k) => {
+        if (pins[k]) seed[k] = pins[k]!;
+      });
+    }
+    setChosen(seed);
+  }, [kind, profileId]);
   const valueOf = (c: Control) => chosen[c.kind] ?? c.current ?? undefined;
 
   const readiness = useHostReadiness(

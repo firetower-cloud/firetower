@@ -3943,6 +3943,49 @@
         }
       }
     },
+    "/api/v1/sessions/token-usage": {
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "operationId": "token_usage",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UsageQuery"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SessionTokens"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/sessions/{id}": {
       "get": {
         "tags": [
@@ -12206,6 +12249,13 @@
           "does"
         ],
         "properties": {
+          "account": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The subscription its agent runs on, by account id. Omit to run on the\nowner's default for the engine."
+          },
           "agent": {
             "type": [
               "string",
@@ -12215,6 +12265,13 @@
           "canDelegate": {
             "type": "boolean",
             "description": "Whether it is a Manager. Defaults to an Operator."
+          },
+          "delegateScope": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The subagents it may delegate to, by id. Empty = any the owner can see."
           },
           "directory": {
             "type": [
@@ -12234,13 +12291,25 @@
               "string",
               "null"
             ],
-            "description": "The machine its own workspace runs on, by host id. Omit to let the lead\nchoose. Only applies when placement is `new`."
+            "description": "The machine its own workspace runs on, by host id. Required when\nplacement is `new`."
           },
           "name": {
             "type": "string"
           },
           "placement": {
-            "type": "string"
+            "type": "string",
+            "description": "Required: \"here\" or \"new\". Empty when omitted, so `check` says so."
+          },
+          "settings": {
+            "$ref": "#/components/schemas/Preferred",
+            "description": "How it runs its agent — model, effort, mode, sandbox. Each optional."
+          },
+          "skillScope": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The skills it may load, by id. Empty = any the owner can use."
           }
         }
       },
@@ -13778,8 +13847,11 @@
           "name",
           "does",
           "placement",
+          "settings",
           "instructions",
           "canDelegate",
+          "delegateScope",
+          "skillScope",
           "mayWrite",
           "mayShare",
           "isDefault",
@@ -13787,6 +13859,13 @@
           "updatedAt"
         ],
         "properties": {
+          "account": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The subscription it runs its agent on, by account id. Absent means the\nowner's default for the engine resolves at launch — which is what an\nagent-authored profile gets, since it cannot see account ids."
+          },
           "agent": {
             "type": [
               "string",
@@ -13801,6 +13880,13 @@
           "createdAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "delegateScope": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The subagents a Manager may delegate to, by id. Empty means any the owner\ncan see — scope is opt-in. Everything off the list is invisible to it."
           },
           "does": {
             "type": "string",
@@ -13841,6 +13927,17 @@
           "placement": {
             "type": "string",
             "description": "`lead` (let the lead choose) | `here` | `new`."
+          },
+          "settings": {
+            "$ref": "#/components/schemas/Preferred",
+            "description": "How it runs its agent — model, effort, mode, sandbox. Each unset falls\nback to the engine's default at launch, so a profile need not pin all."
+          },
+          "skillScope": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The skills it may load, by id. Empty means any the owner can use; an\noff-list skill is never written to its workspace."
           },
           "updatedAt": {
             "type": "string",
@@ -14377,6 +14474,23 @@
           "Failed",
           "Ended"
         ]
+      },
+      "SessionTokens": {
+        "type": "object",
+        "description": "One session's token spend, as the Overview tab reads it.",
+        "required": [
+          "sessionId",
+          "tokens"
+        ],
+        "properties": {
+          "sessionId": {
+            "type": "string"
+          },
+          "tokens": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
       },
       "SetIdentity": {
         "type": "object",
@@ -16393,6 +16507,21 @@
             "format": "int64",
             "description": "Of the output, how much was reasoning rather than answer.",
             "minimum": 0
+          }
+        }
+      },
+      "UsageQuery": {
+        "type": "object",
+        "description": "Which sessions to total tokens for — a workspace and its children, say.",
+        "required": [
+          "ids"
+        ],
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
       },

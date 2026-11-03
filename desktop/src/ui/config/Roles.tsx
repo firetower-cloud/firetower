@@ -11,7 +11,7 @@
  * thing that makes one a manager.
  */
 import type { ReactNode } from "react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Check,
   ChevronDown,
@@ -19,7 +19,12 @@ import {
   FolderGit2,
   GitBranch,
   GitBranchPlus,
+  Box,
+  Cpu,
+  Gauge,
+  ShieldCheck,
   Plus,
+  KeyRound,
   Server,
   Sparkles,
   SquarePen,
@@ -45,30 +50,41 @@ import {
   deleteRole,
   setDefaultRole,
 } from "~/api/generated/roles/roles";
-import { useAgents, useDirectories, useHosts, why } from "~/data";
+import { useAgentControls } from "~/api/generated/agents/agents";
+import { useAccounts, useAgents, useDirectories, useHosts, useSkills, why } from "~/data";
+import { usable } from "~/api/accounts";
+import { ScopePicker, type ScopeItem } from "~/ui/config/ScopePicker";
 import { machineLabel, machines } from "~/api/environments";
-import type { Agent, Role, NewRole } from "~/api/generated/model";
+import type { Agent, Control, ControlKind, Role, NewRole } from "~/api/generated/model";
 import { useConfirm } from "~/ui/Confirm";
 
-/** The open "let the lead choose" state, as placement stores it. */
-const OPEN = "lead";
-
-/** Where a child runs — the fixed set, each with the line that explains it. */
+/** Where a child runs — a profile pins one. No "let the lead choose". */
 const PLACEMENTS: { value: string; icon: LucideIcon; label: string; note: string }[] = [
-  { value: OPEN, icon: Sparkles, label: "Let the lead choose", note: "The lead decides where each child runs." },
-  { value: "here", icon: GitBranch, label: "Same workspace", note: "Shares this directory and branch." },
-  { value: "new", icon: GitBranchPlus, label: "Its own workspace", note: "A fresh branch off the default." },
+  { value: "here", icon: GitBranch, label: "Same workspace", note: "Shares the lead's directory and branch." },
+  { value: "new", icon: GitBranchPlus, label: "Its own workspace", note: "A fresh branch, on the machine you pin below." },
 ];
+
+/** A mark for each run control, so its picker reads like the others. */
+const CONTROL_ICON: Record<ControlKind, LucideIcon> = {
+  model: Cpu,
+  effort: Gauge,
+  mode: ShieldCheck,
+  sandbox: Box,
+};
 
 /** An empty profile, for a new one. An Operator until made a Manager. */
 const BLANK: NewRole = {
   name: "",
   does: "",
-  placement: "lead",
+  placement: "here",
   agent: null,
   machine: null,
+  account: null,
+  settings: {},
   instructions: "",
   canDelegate: false,
+  delegateScope: [],
+  skillScope: [],
   directory: null,
 };
 
@@ -147,8 +163,12 @@ function toDraft(r: Role): NewRole {
     placement: r.placement,
     agent: r.agent ?? null,
     machine: r.machine ?? null,
+    account: r.account ?? null,
+    settings: r.settings ?? {},
     instructions: r.instructions,
     canDelegate: r.canDelegate,
+    delegateScope: r.delegateScope ?? [],
+    skillScope: r.skillScope ?? [],
     directory: null,
   };
 }
@@ -272,18 +292,15 @@ function Editor({
   // the server rather than listed here — so a fourth or a tenth agent turns up
   // in this menu the moment it is supported, without a change to this screen.
   const agents = useAgents();
-  const agentOptions: Opt[] = [
-    { value: null, icon: <Sparkles className="h-4 w-4" strokeWidth={1.75} />, label: "Let the lead choose", note: "The lead picks — its own agent, by default." },
-    ...agents.data
-      .filter((a) => a.supported)
-      .map((a) => ({
-        value: a.kind,
-        icon: <AgentMark agent={a.kind} size={16} />,
-        label: a.label,
-      })),
-  ];
+  const agentOptions: Opt[] = agents.data
+    .filter((a) => a.supported)
+    .map((a) => ({
+      value: a.kind as string | null,
+      icon: <AgentMark agent={a.kind} size={16} />,
+      label: a.label,
+    }));
   // A role may already pin an agent that is no longer on offer; keep it
-  // nameable rather than silently reading as "let the lead choose".
+  // nameable rather than dropping the pin.
   if (draft.agent && !agentOptions.some((o) => o.value === draft.agent)) {
     const pinned = draft.agent as Agent;
     agentOptions.push({
@@ -296,17 +313,33 @@ function Editor({
   // The machines its own workspace can be pinned to, and the directories it
   // can be filed in at creation — both read from the server, both optional.
   const { data: hosts } = useHosts();
-  const machineOptions: Opt[] = [
-    { value: null, icon: <Sparkles className="h-4 w-4" strokeWidth={1.75} />, label: "Let the lead choose", note: "The scheduler picks a machine that can run it." },
-    ...machines(hosts)
-      .map((m) => ({ m, host: m.hosts[0]?.id }))
-      .filter((x) => !!x.host)
-      .map((x) => ({
-        value: x.host!,
-        icon: <Server className="h-4 w-4" strokeWidth={1.75} />,
-        label: machineLabel(x.m),
-      })),
-  ];
+  const machineOptions: Opt[] = machines(hosts)
+    .map((m) => ({ m, host: m.hosts[0]?.id }))
+    .filter((x) => !!x.host)
+    .map((x) => ({
+      value: x.host! as string | null,
+      icon: <Server className="h-4 w-4" strokeWidth={1.75} />,
+      label: machineLabel(x.m),
+    }));
+  // The subscriptions it can run its engine on — the owner's own plus any lent
+  // to them — narrowed to the chosen engine, since an account is per-engine.
+  const { data: accounts } = useAccounts();
+  const accountOptions: Opt[] = accounts
+    .filter((a) => a.kind === draft.agent && usable(a))
+    .map((a) => ({
+      value: a.id as string | null,
+      icon: <KeyRound className="h-4 w-4" strokeWidth={1.75} />,
+      label: a.name,
+      note: a.ownerName ? `${a.ownerName}'s subscription` : undefined,
+    }));
+
+  // The run controls the chosen engine offers — model, effort, permissions,
+  // sandbox. A profile may pin any of them or leave each on the engine's own
+  // default; what it pins becomes the child's starting settings. Read per
+  // engine, so the pickers match whatever that agent actually supports.
+  const controlsQ = useAgentControls(draft.agent ?? "", { query: { enabled: !!draft.agent } });
+  const controls = (draft.agent ? (controlsQ.data ?? []) : []) as Control[];
+
   const { data: dirs } = useDirectories();
   const dirOptions: Opt[] = [
     { value: null, icon: <User className="h-4 w-4" strokeWidth={1.75} />, label: "Yours", note: "Only you, until you share it." },
@@ -319,9 +352,85 @@ function Editor({
       })),
   ];
 
+  // What this profile can be scoped to reach — other profiles, and skills —
+  // each tagged with the directory it's filed in so the picker can group them.
+  const groupOf = (path: string) => {
+    const [root, label] = path.split("/");
+    return root === "u" ? "yours" : `d/${label}`;
+  };
+  const { data: skillList } = useSkills();
+  const delegationItems: ScopeItem[] = all
+    .filter((r) => r.id !== state.id)
+    .map((r) => ({
+      id: r.id,
+      name: r.name,
+      desc: r.does,
+      group: groupOf(r.path),
+      badge: r.canDelegate ? { text: "manager", tone: "sage" } : undefined,
+    }));
+  const skillItems: ScopeItem[] = skillList.map((s) => ({
+    id: s.id,
+    name: s.name,
+    desc: s.description,
+    group: groupOf(s.path),
+    badge: s.risk?.includes("scripts") ? { text: "scripts", tone: "brick" } : undefined,
+  }));
+
   const set = <K extends keyof NewRole>(k: K, v: NewRole[K]) => setDraft((d) => ({ ...d, [k]: v }));
+  // Pin one run control, or clear it back to the engine's default (null).
+  const setSetting = (kind: ControlKind, v: string | null) =>
+    setDraft((d) => {
+      const next = { ...(d.settings ?? {}) };
+      if (v == null) delete next[kind];
+      else next[kind] = v;
+      return { ...d, settings: next };
+    });
   const refresh = () => cache.invalidateQueries({ queryKey: getListRolesQueryKey() });
-  const valid = draft.name.trim().length > 0 && draft.does.trim().length > 0;
+
+  // Every profile pins an engine, and a new-workspace one pins a machine —
+  // there is no open option, so default each to the first on offer the moment
+  // it's needed and empty, and let the person change it.
+  const firstAgent = agentOptions[0]?.value ?? null;
+  useEffect(() => {
+    if (!draft.agent && firstAgent) set("agent", firstAgent);
+  }, [firstAgent, draft.agent]);
+  const firstMachine = machineOptions[0]?.value ?? null;
+  useEffect(() => {
+    if (draft.placement === "new" && !draft.machine && firstMachine) set("machine", firstMachine);
+  }, [draft.placement, draft.machine, firstMachine]);
+
+  // An older profile may hold the retired "lead" placement; coerce it to a
+  // concrete one so the draft matches what the picker shows and can be saved.
+  useEffect(() => {
+    if (draft.placement !== "here" && draft.placement !== "new") set("placement", "here");
+  }, [draft.placement]);
+
+  // A subscription belongs to one engine, so when the engine changes (or the
+  // list loads) make the pick a valid one — kept if it still fits, else the
+  // engine's default. Not keyed on the account itself, so a manual pick sticks.
+  useEffect(() => {
+    const forEngine = accounts.filter((a) => a.kind === draft.agent && usable(a));
+    if (!forEngine.some((a) => a.id === draft.account)) {
+      set("account", (forEngine.find((a) => a.isDefault) ?? forEngine[0])?.id ?? null);
+    }
+  }, [draft.agent, accounts]);
+
+  // Run controls are per-engine, so a pin for one agent means nothing to
+  // another. When the person switches engines, drop the pins — but not on the
+  // first render (an existing profile loads its own), nor when a blank draft is
+  // handed its first agent. A ref remembers the last engine to tell these apart.
+  const lastAgent = useRef(draft.agent);
+  useEffect(() => {
+    if (lastAgent.current && lastAgent.current !== draft.agent) set("settings", {});
+    lastAgent.current = draft.agent;
+  }, [draft.agent]);
+
+  const valid =
+    draft.name.trim().length > 0 &&
+    draft.does.trim().length > 0 &&
+    !!draft.agent &&
+    !!draft.account &&
+    (draft.placement !== "new" || !!draft.machine);
 
   const save = async () => {
     setBusy(true);
@@ -393,38 +502,44 @@ function Editor({
 
         <Group
           label="Placement"
-          hint="Where the child runs. Leave it open, or pin it so every spawn runs the same way."
+          hint="Where a child runs when a lead delegates to it. Every spawn runs the same way."
         >
           <Select
             ariaLabel="Placement"
-            value={draft.placement ?? OPEN}
+            value={draft.placement ?? "here"}
             options={PLACEMENTS.map((p) => ({
               value: p.value,
               icon: <p.icon className="h-4 w-4" strokeWidth={1.75} />,
               label: p.label,
               note: p.note,
             }))}
-            onChange={(v) => set("placement", v ?? OPEN)}
+            onChange={(v) => set("placement", v ?? "here")}
           />
         </Group>
 
         {draft.placement === "new" && (
           <Group
             label="Machine"
-            hint="Which machine its workspace runs on. Leave it open, or pin one."
+            hint="Which machine its own workspace runs on."
           >
-            <Select
-              ariaLabel="Machine"
-              value={draft.machine ?? null}
-              options={machineOptions}
-              onChange={(v) => set("machine", v)}
-            />
+            {machineOptions.length > 0 ? (
+              <Select
+                ariaLabel="Machine"
+                value={draft.machine ?? null}
+                options={machineOptions}
+                onChange={(v) => set("machine", v)}
+              />
+            ) : (
+              <p className="rounded-md border border-line bg-ground px-3 py-2 text-meta text-mute">
+                No machine is connected. Add one under Machines, or use the same workspace.
+              </p>
+            )}
           </Group>
         )}
 
         <Group
           label="Agent"
-          hint="Which agent runs it. Leave it open, or pin one so every spawn uses it."
+          hint="Which engine it runs on. Every spawn uses it."
         >
           <Select
             ariaLabel="Agent"
@@ -433,6 +548,62 @@ function Editor({
             onChange={(v) => set("agent", v)}
           />
         </Group>
+
+        <Group
+          label="Subscription"
+          hint="Which subscription its engine authenticates with when it runs."
+        >
+          {accountOptions.length > 0 ? (
+            <Select
+              ariaLabel="Subscription"
+              value={draft.account ?? null}
+              options={accountOptions}
+              onChange={(v) => set("account", v)}
+            />
+          ) : (
+            <p className="rounded-md border border-line bg-ground px-3 py-2 text-meta text-mute">
+              No connected subscription for this agent. Connect one under Accounts.
+            </p>
+          )}
+        </Group>
+
+        {controls.length > 0 && (
+          <Group
+            label="How it runs"
+            hint="Pin the model and run settings, or leave any on the engine's default. These override what you last used when a workspace starts as this profile."
+          >
+            <div className="flex flex-col gap-3">
+              {controls.map((c) => {
+                const Icon = CONTROL_ICON[c.kind];
+                const options: Opt[] = [
+                  {
+                    value: null,
+                    icon: <Icon className="h-4 w-4" strokeWidth={1.75} />,
+                    label: "Engine default",
+                    note: "Whatever the agent starts on.",
+                  },
+                  ...c.choices.map((ch) => ({
+                    value: ch.value,
+                    icon: <Icon className="h-4 w-4" strokeWidth={1.75} />,
+                    label: ch.label,
+                    note: ch.note ?? undefined,
+                  })),
+                ];
+                return (
+                  <div key={c.kind} className="flex flex-col gap-1.5">
+                    <span className="text-micro font-medium uppercase tracking-wide text-mute">{c.fallback}</span>
+                    <Select
+                      ariaLabel={c.fallback}
+                      value={draft.settings?.[c.kind] ?? null}
+                      options={options}
+                      onChange={(v) => setSetting(c.kind, v)}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          </Group>
+        )}
 
         <Group
           label="Delegation"
@@ -457,8 +628,29 @@ function Editor({
             ]}
             onChange={(v) => set("canDelegate", v === "manager")}
           />
-          {draft.canDelegate && <CanReach all={all} selfId={state.id} />}
         </Group>
+
+        {draft.canDelegate && (
+          <ScopePicker
+            label="Can delegate to"
+            hint="The subagents this Manager may hand work to. Anything off the list it can't see at all."
+            items={delegationItems}
+            selected={draft.delegateScope ?? []}
+            onChange={(ids) => set("delegateScope", ids)}
+            searchPlaceholder="Search profiles…"
+            allNote="Any profile you can reach — and any you add later."
+          />
+        )}
+
+        <ScopePicker
+          label="Skills it can load"
+          hint="What it may load into context. Off the list means never written to its workspace."
+          items={skillItems}
+          selected={draft.skillScope ?? []}
+          onChange={(ids) => set("skillScope", ids)}
+          searchPlaceholder="Search skills…"
+          allNote="Any skill you can use — and any you add later."
+        />
 
         <Field label="Instructions" hint="Composed into its prompt. Markdown; the agent reads all of it. A Manager names its delegates here.">
           <textarea
@@ -603,28 +795,6 @@ function Group({
  * so you know what handles exist to write down. It reaches out of the card the
  * way the lead reaches out of its own: by what the person can see.
  */
-function CanReach({ all, selfId }: { all: Role[]; selfId?: string }) {
-  const reachable = all.filter((r) => r.id !== selfId);
-  return (
-    <p className="text-micro text-mute">
-      {reachable.length > 0 ? (
-        <>
-          Can reach:{" "}
-          {reachable.map((r, i) => (
-            <span key={r.id}>
-              {i > 0 && <span className="text-line"> · </span>}
-              <span className="font-mono text-dim">{r.name}</span>
-            </span>
-          ))}
-          . Name the ones it should use in the instructions.
-        </>
-      ) : (
-        <>No other profiles to reach yet — make some, and this Manager can name them.</>
-      )}
-    </p>
-  );
-}
-
 /** One option in a {@link Select}: what it is worth, and how it reads. */
 type Opt = { value: string | null; icon: ReactNode; label: string; note?: string };
 
@@ -650,6 +820,16 @@ function Select({
 }) {
   const [open, setOpen] = useState<HTMLElement | null>(null);
   const current = options.find((o) => o.value === value) ?? options[0];
+
+  // Nothing to pick yet — the list is still loading, or there is genuinely
+  // nothing. A placeholder rather than a crash on `current.icon`.
+  if (!current) {
+    return (
+      <div className="flex w-full items-center rounded-md border border-line bg-ground px-3 py-2 text-ui text-mute">
+        —
+      </div>
+    );
+  }
 
   return (
     <>

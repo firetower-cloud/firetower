@@ -6,7 +6,7 @@
  * away. The earlier arrangement made both of them tabs, which meant reviewing a
  * diff hid the conversation that explained it. They are two halves of one job.
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Globe, PanelRight, Pencil, Share2, SquareTerminal, Trash2, X } from "lucide-react";
 import { WhoCanAccess } from "~/ui/Sharing";
 import { useQueryClient } from "@tanstack/react-query";
@@ -54,13 +54,13 @@ const RAIL_DEFAULT = 368;
 const TERM_MIN = 120;
 const TERM_DEFAULT = 256;
 
-type Side = "diff" | "files" | "ship";
+type Side = "diff" | "files" | "ship" | "overview";
 
 export function Workbench({ backend, workspace }: { backend: Backend; workspace: string }) {
   const hostOf = useHostOf();
   const { data: sessions } = useSessions();
   const opened = useSession(workspace);
-  const [side, setSide] = useState<Side>("diff");
+  const [side, setSide] = useState<Side>("overview");
   const [open, setOpen] = useState(true);
   const [width, setWidth] = useState(() => {
     try {
@@ -252,6 +252,16 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
       ? { id: workspace, name: opened.data.name, branch: opened.data.branch ?? undefined, runs: [opened.data] }
       : undefined);
 
+  /* The Overview tab's artifacts: everything this workspace's runs produced.
+     Computed here, above the `!place` guard, so the hook count never changes
+     between renders. The Overview's *team* is derived below, from `run`, since
+     it depends on which agent is being read. */
+  const myRunIds = useMemo(() => new Set((place?.runs ?? []).map((r) => r.id)), [place?.runs]);
+  const myArtifacts = useMemo(
+    () => (artifacts.data ?? []).filter((a) => a.fromSessionId && myRunIds.has(a.fromSessionId)),
+    [artifacts.data, myRunIds],
+  );
+
   /* The session to publish from, derived here rather than from `run` below.
      `run` is computed after an early return, and a hook may not live there —
      putting these below it meant the hook count changed between the render
@@ -396,6 +406,15 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
     place.runs.find((r) => r.id === reading) ??
     place.runs.find((r) => r.id === workspace) ??
     primary;
+
+  /* The Overview's team, from the point of view of the agent being read: the
+     manager is this run when it leads, or the one that started it when this is
+     a child — one level up. The team is every agent under that manager, so a
+     child sees the whole team it belongs to (its siblings), not just itself. */
+  const lead = run.parentId ? (sessions?.find((s) => s.id === run.parentId) ?? null) : null;
+  const managerRunId = run.parentId ?? run.id;
+  const team = (sessions ?? []).filter((s) => s.parentId === managerRunId);
+
   /* Checkouts belong to the workspace rather than to whichever agent is being
      read, so take them from the one the list is freshest on. */
   const checkouts = run.checkouts ?? [];
@@ -672,6 +691,10 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
             onTab={setSide}
             onOpenFile={openFile}
             onClose={() => setOpen(false)}
+            lead={lead}
+            team={team}
+            artifacts={myArtifacts}
+            onOpenArtifact={openArtifact}
           />
         )}
       </div>

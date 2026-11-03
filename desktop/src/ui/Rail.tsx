@@ -57,8 +57,22 @@ export function Rail({ backend }: { backend: Backend }) {
      own space, or in a place somebody shared with you. Both are grouped by
      repository inside, because that is what makes a long list readable — the
      split is about whose work it is, not about how it is sorted. */
-  const mine = group(running.filter((s) => isPersonal(s.path, me.data?.user)));
-  const theirs = group(running.filter((s) => !isPersonal(s.path, me.data?.user)));
+  const mineRaw = group(running.filter((s) => isPersonal(s.path, me.data?.user)));
+  const theirsRaw = group(running.filter((s) => !isPersonal(s.path, me.data?.user)));
+  /* A child spawned in its own workspace does not get its own row here: it
+     lives under its lead in the Overview tab, as part of that manager's team.
+     So drop children from the rail — the lead's row keeps its delegated-count,
+     so the team is still visible at a glance, and the rail stays a list of
+     top-level workspaces. */
+  const everyPlace = [...mineRaw.groups.flatMap(([, p]) => p), ...theirsRaw.groups.flatMap(([, p]) => p)];
+  const topOnly = (r: Repositories): Repositories => ({
+    total: r.total,
+    groups: r.groups
+      .map(([repo, places]) => [repo, places.filter((p) => !isChild(p, everyPlace))] as [string, Workspace[]])
+      .filter(([, places]) => places.length > 0),
+  });
+  const mine = topOnly(mineRaw);
+  const theirs = topOnly(theirsRaw);
   const nothing = mine.groups.length === 0 && theirs.groups.length === 0;
   const dark = backend.reach === "unreachable";
 
@@ -273,7 +287,6 @@ function Row({
   place,
   on,
   label,
-  child = false,
   working = 0,
   delegated = 0,
 }: {
@@ -281,7 +294,6 @@ function Row({
   on: boolean;
   /** What to call it here: a child's own part, the lead prefix dropped. */
   label?: string;
-  child?: boolean;
   working?: number;
   /** Agents it started and has not ended; ending this place ends them too. */
   delegated?: number;
@@ -315,9 +327,9 @@ function Row({
     <button
       onClick={() => navigate(`/sessions/${place.id}`)}
       onContextMenu={(e) => menu.show(e, null)}
-      className={`block rounded-md px-2.5 py-1.5 text-left transition-colors duration-150 select-none ${
-        child ? "ml-3 w-[calc(100%-0.75rem)] border-l border-line-soft" : "w-full"
-      } ${on ? "bg-overlay shadow-(--shadow-raise)" : "hover:bg-raise/60"}`}
+      className={`block w-full rounded-md px-2.5 py-1.5 text-left transition-colors duration-150 select-none ${
+        on ? "bg-overlay shadow-(--shadow-raise)" : "hover:bg-raise/60"
+      }`}
     >
       <div className="flex items-center gap-2">
         {/* The island's mark, at nine pixels instead of eleven. One alphabet
@@ -413,7 +425,6 @@ function Repos({ repos, path }: { repos: Repositories; path: string }) {
               place={place}
               on={path === `/sessions/${place.id}`}
               label={rowLabel(place, places)}
-              child={isChild(place, places)}
               working={childrenWorking(place, places)}
               delegated={childrenOf(place, places)}
             />

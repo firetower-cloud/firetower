@@ -90,6 +90,7 @@ async fn handle(state: &AppState, request: &AgentRequest) -> Result<String> {
     match request.tool.as_str() {
         "spawn" => spawn(state, request).await,
         "children" => children(state, request).await,
+        "update" => update(state, request).await,
         "create_profile" => create_profile(state, request).await,
         "update_profile" => update_profile(state, request).await,
         "list_profiles" => list_profiles(state, request).await,
@@ -144,17 +145,19 @@ async fn spawn(state: &AppState, request: &AgentRequest) -> Result<String> {
 
     // Only a Manager delegates. A session started as an Operator profile — or
     // as no profile at all — does the work itself rather than handing it off,
-    // which is the whole of what the distinction means.
-    let is_manager = match &lead.profile_id {
-        Some(pid) => state
-            .roles
-            .one(lead.owner.as_str(), pid, crate::access::Level::Viewer)
-            .await?
-            .map(|p| p.can_delegate)
-            .unwrap_or(false),
-        None => false,
+    // which is the whole of what the distinction means. Load the whole profile,
+    // not just the flag: its `delegate_scope` decides which subagents it may
+    // even see.
+    let manager = match &lead.profile_id {
+        Some(pid) => {
+            state
+                .roles
+                .one(lead.owner.as_str(), pid, crate::access::Level::Viewer)
+                .await?
+        }
+        None => None,
     };
-    if !is_manager {
+    if !manager.as_ref().map(|p| p.can_delegate).unwrap_or(false) {
         bail!(
             "this session is not a Manager, so it does the work itself. Start the workspace as a \
              Manager profile to hand work off."
@@ -171,25 +174,35 @@ async fn spawn(state: &AppState, request: &AgentRequest) -> Result<String> {
     let goal = text(&request.input, "goal")
         .context("spawn needs a `goal`: what the child should accomplish")?;
 
-    // A saved kind of agent, if one was named. Resolved against what the
-    // lead's owner may see, so a lead can never reach a role filed where its
-    // owner cannot — and an unknown name is refused with the ones that exist,
-    // which is the whole of discovery in this first cut.
+    // The subagents this Manager may delegate to: what its owner can see,
+    // narrowed to its `delegate_scope` when it has one. An empty scope is "any",
+    // which is the default. Everything outside is invisible — a name off this
+    // list is refused exactly as a name that was never defined, so an out-of-
+    // scope profile reads as *does not exist* rather than *not allowed*.
+    let team: Vec<crate::roles::Role> = {
+        let visible = state
+            .roles
+            .visible(lead.owner.as_str(), crate::access::Level::Viewer)
+            .await?;
+        let scope = manager
+            .as_ref()
+            .map(|m| &m.delegate_scope)
+            .filter(|s| !s.is_empty());
+        match scope {
+            Some(scope) => visible.into_iter().filter(|r| scope.contains(&r.id)).collect(),
+            None => visible,
+        }
+    };
     let role = match text(&request.input, "role") {
-        Some(wanted) => match state.roles.by_name(lead.owner.as_str(), &wanted).await? {
-            Some(found) => Some(found),
+        Some(wanted) => match team.iter().find(|r| r.name.eq_ignore_ascii_case(wanted.trim())) {
+            Some(found) => Some(found.clone()),
             None => {
-                let names: Vec<String> = state
-                    .roles
-                    .visible(lead.owner.as_str(), crate::access::Level::Viewer)
-                    .await?
-                    .into_iter()
-                    .map(|r| r.name)
-                    .collect();
+                let names: Vec<String> = team.iter().map(|r| r.name.clone()).collect();
                 bail!(
                     "no subagent called \"{wanted}\". {}",
                     if names.is_empty() {
-                        "No subagents are defined yet — make one under Configuration → Subagents."
+                        "No subagents are on this profile's team — widen its scope, or make one \
+                         under Configuration → Profiles."
                             .to_string()
                     } else {
                         format!("Subagents you can use: {}.", names.join(", "))
@@ -258,18 +271,66 @@ async fn spawn(state: &AppState, request: &AgentRequest) -> Result<String> {
         "new" => false,
         other => bail!("placement must be \"here\" or \"new\", not \"{other}\""),
     };
+    // The subscription the profile pins for its agent, if it named one;
+    // otherwise absent, and the owner's default for the engine resolves at
+    // launch, as it does for a person who names no account.
+    let account = role.as_ref().and_then(|r| r.account.clone());
+
+    // How the profile pins the agent — model, effort, mode, sandbox. Each unset
+    // field resolves to the engine's default at launch, the same as for a
+    // person who left the picker alone.
+    let settings = role.as_ref().map(|r| r.settings.clone()).unwrap_or_default();
+
+    // The child's skills, scoped the way a "start as" session's are — the
+    // owner's defaults, kept to the profile's skill_scope when it has one. A
+    // delegated child carries its persona in the brief rather than a
+    // profile_id, so the session layer cannot look the scope up: we hand it the
+    // already-filtered set. An unscoped profile (or an ad-hoc child) passes
+    // nothing and gets the owner's defaults, exactly as before.
+    let skills: Option<Vec<String>> = match role.as_ref() {
+        Some(r) if !r.skill_scope.is_empty() => {
+            let repos: Vec<String> = lead
+                .checkouts
+                .iter()
+                .filter_map(|c| c.repo_id.as_ref().map(|r| r.as_str().to_string()))
+                .collect();
+            let defaults = state
+                .skills
+                .defaults_for(lead.owner.as_str(), &repos)
+                .await
+                .unwrap_or_default();
+            Some(
+                defaults
+                    .into_iter()
+                    .filter(|id| r.skill_scope.contains(id))
+                    .collect(),
+            )
+        }
+        _ => None,
+    };
+    // What the child is called. A child in its own workspace is named
+    // `"<lead> / <what>"`, so the two sort together and the interface drops the
+    // prefix to show just `what`. A child that *shares* the lead's workspace
+    // shares its name too — so there the name becomes the child's session
+    // title instead (`start_another_agent` reads it off `name`), which is what
+    // tells it apart from the lead; `what` alone, clean, since there is no lead
+    // name to strip.
+    let what = name.clone().unwrap_or_else(|| "child".into());
     let req: NewSession = if shares {
         serde_json::from_value(json!({
             "workspaceId": lead.workspace_id,
             "prompt": prompt,
             "agent": agent,
+            "accountId": account,
+            "settings": settings,
+            "skills": skills,
+            "name": what,
         }))?
     } else {
         // Its own branch, named after the lead's so the two sort together,
         // in the lead's first repository. A lead with nothing checked out
         // gets a child with nothing checked out, which is still a workspace.
         let repo = lead.checkouts.first().and_then(|c| c.repo_id.clone());
-        let what = name.clone().unwrap_or_else(|| "child".into());
         let branch = lead
             .branch
             .as_deref()
@@ -283,6 +344,9 @@ async fn spawn(state: &AppState, request: &AgentRequest) -> Result<String> {
             "agent": agent,
             "branch": branch,
             "hostId": host,
+            "accountId": account,
+            "settings": settings,
+            "skills": skills,
             "name": format!("{} / {what}", lead.name),
         }))?
     };
@@ -344,6 +408,11 @@ fn brief(
          questions: if something is unclear, say what you assumed and carry on.",
         lead.name
     ));
+    text.push_str(
+        "\n\nWhile you work you may post a short progress note to it with `update` — at a real \
+         milestone, not every step, and it does not pause you. Keep it to a line unless it has \
+         asked for detail. Save the full account for when you finish.",
+    );
     text
 }
 
@@ -362,6 +431,36 @@ fn started(child: &Session, shares_workspace: bool) -> String {
          does not depend on it, then end your turn.",
         child.name, child.id
     )
+}
+
+/// A child's progress note to its lead, mid-task.
+///
+/// The one child→lead message that does not end the child's turn: it drops a
+/// note on the same rail a hand-back rides and returns at once, so the child
+/// carries on. Only a child may call it, and only its own lead hears it — the
+/// note is held and delivered between the lead's turns, several joined into
+/// one, exactly as a hand-back is. No caps in this version: how often and how
+/// long is the child's judgement, steered by the tool's description and the
+/// brief, and bursts cost the lead one message because the rail coalesces.
+async fn update(state: &AppState, request: &AgentRequest) -> Result<String> {
+    let child = state
+        .db
+        .session(&request.session_id)
+        .await?
+        .context("the session that asked no longer exists")?;
+    let Some(lead) = child.parent_id.clone() else {
+        bail!("only a child reports to a lead, and this session has none — it is the lead");
+    };
+    let note = text(&request.input, "note").context("`note` is what to tell your lead")?;
+    let phase = text(&request.input, "phase");
+    let body = update_body(&child, &note, phase.as_deref());
+
+    state.db.queue_delivery(&lead, Some(&child.id), &body).await?;
+    state.fleet.drain_deliveries(&lead).await;
+    Ok(format!(
+        "Told {}. Carry on — it reads this between its turns.",
+        child.name
+    ))
 }
 
 /// List, steer or stop the children of the session that asked.
@@ -430,14 +529,20 @@ fn new_role_from(input: &Value) -> Result<crate::roles::NewRole> {
     Ok(crate::roles::NewRole {
         name,
         does,
-        placement: text(input, "placement").unwrap_or_else(|| "lead".into()),
+        // Required now, and left empty when absent so `check` says so plainly
+        // rather than a silent default standing in for a decision not made.
+        placement: text(input, "placement").unwrap_or_default(),
         agent: text(input, "agent"),
         machine: text(input, "machine"),
+        account: None,
         instructions: text(input, "instructions").unwrap_or_default(),
         can_delegate: input
             .get("can_delegate")
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        delegate_scope: vec![],
+        skill_scope: vec![],
+        settings: Default::default(),
         // Resolved and filed separately below: the agent names a directory, not
         // an id, so the service's `directory` field is left out here.
         directory: None,
@@ -538,12 +643,16 @@ async fn update_profile(state: &AppState, request: &AgentRequest) -> Result<Stri
         placement: get_str("placement", &existing.placement),
         agent: text(&request.input, "agent").or(existing.agent.clone()),
         machine: text(&request.input, "machine").or(existing.machine.clone()),
+        account: existing.account.clone(),
         instructions: get_str("instructions", &existing.instructions),
         can_delegate: request
             .input
             .get("can_delegate")
             .and_then(Value::as_bool)
             .unwrap_or(existing.can_delegate),
+        delegate_scope: existing.delegate_scope.clone(),
+        skill_scope: existing.skill_scope.clone(),
+        settings: existing.settings.clone(),
         directory: None,
     };
     crate::roles::check(&new).map_err(|e| anyhow::anyhow!("{e}"))?;
@@ -906,6 +1015,20 @@ pub fn hand_back_body(child: &Session, said: Option<&str>, note: Option<&str>) -
     body
 }
 
+/// A child's mid-task check-in, marked for its lead.
+///
+/// Its own relay kind — `update`, not `handback` — so the desktop draws a
+/// quiet check-in rather than a result, and the lead still reads which child
+/// it is from. No cap on the note: how long it runs is the child's judgement,
+/// and a full account belongs in the hand-back, not here.
+pub fn update_body(child: &Session, note: &str, phase: Option<&str>) -> String {
+    let mut body = format!("{}\n\n{note}", relay_marker("update", &child.id, &child.name));
+    if let Some(phase) = phase.map(str::trim).filter(|p| !p.is_empty()) {
+        body.push_str(&format!("\n\n(phase: {phase})"));
+    }
+    body
+}
+
 /// Several results held for one lead, as one message.
 ///
 /// One turn rather than one per result: each would start a turn of its own,
@@ -944,6 +1067,18 @@ mod tests {
         assert!(body.starts_with("⟦ft:handback:s_child:reviewer⟧"), "{body}");
         assert!(body.contains("Two findings."));
         assert!(body.ends_with("(branch `agent/x-reviewer`)"), "{body}");
+    }
+
+    #[test]
+    fn an_update_is_marked_as_its_own_kind_and_carries_its_phase() {
+        let body = update_body(&child("reviewer", None), "Repro'd the failing test.", Some("building"));
+        // Its own kind, so the interface draws a check-in and not a hand-back.
+        assert!(body.starts_with("⟦ft:update:s_child:reviewer⟧"), "{body}");
+        assert!(body.contains("Repro'd the failing test."));
+        assert!(body.ends_with("(phase: building)"), "{body}");
+        // A blank phase is dropped rather than drawn as an empty tag.
+        let plain = update_body(&child("reviewer", None), "Still going.", Some("  "));
+        assert!(!plain.contains("phase:"), "{plain}");
     }
 
     #[test]
@@ -1007,8 +1142,12 @@ mod tests {
             placement: "here".into(),
             agent: None,
             machine: None,
+            account: None,
             instructions: "Report findings as path:line.".into(),
             can_delegate: false,
+            delegate_scope: vec![],
+            skill_scope: vec![],
+            settings: Default::default(),
             may_write: true,
             may_share: true,
             is_default: false,

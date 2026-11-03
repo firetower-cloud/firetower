@@ -64,8 +64,10 @@ import type {
   Session,
   SessionDiffParams,
   SessionPtyParams,
+  SessionTokens,
   SetShare,
-  Turn
+  Turn,
+  UsageQuery
 } from '../model';
 
 import { http } from '../../http';
@@ -391,6 +393,87 @@ export const useEndAllSessions = <TError = unknown,
         TContext
       > => {
       return useMutation(getEndAllSessionsMutationOptions(options), queryClient);
+    }
+    export const getTokenUsageUrl = () => {
+
+
+
+
+  return `/api/v1/sessions/token-usage`
+}
+
+export const tokenUsage = async (usageQuery: UsageQuery, options?: Parameters<typeof http>[1]): Promise<SessionTokens[]> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return http<SessionTokens[]>(getTokenUsageUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(usageQuery)
+  }
+);}
+
+
+
+
+
+export const getTokenUsageMutationKey = () => ['tokenUsage'] as const;
+
+export const getTokenUsageMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof tokenUsage>>, TError,TokenUsageMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof tokenUsage>>, TError,TokenUsageMutationVariables, TContext> => {
+
+const mutationKey = getTokenUsageMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof tokenUsage>>, TokenUsageMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  tokenUsage(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type TokenUsageMutationResult = NonNullable<Awaited<ReturnType<typeof tokenUsage>>>
+    export type TokenUsageMutationBody = UsageQuery
+    export type TokenUsageMutationError = ApiError
+    export type TokenUsageMutationVariables = {data: UsageQuery}
+
+    export const useTokenUsage = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof tokenUsage>>, TError,TokenUsageMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof tokenUsage>>,
+        TError,
+        TokenUsageMutationVariables,
+        TContext
+      > => {
+      return useMutation(getTokenUsageMutationOptions(options), queryClient);
     }
     export const getGetSessionUrl = (id: string,) => {
 

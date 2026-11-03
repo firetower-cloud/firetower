@@ -89,6 +89,10 @@ export function group(sessions: Session[]): Repositories {
   for (const places of byRepo.values()) {
     for (const place of places.values()) {
       const founder = place.runs.find((r) => r.id === place.id);
+      // Named after its founder, not whichever run was seen first: a workspace
+      // with a same-workspace child in it must keep the lead's name, not take
+      // the child's. Only when the founder is still around to say.
+      if (founder) place.name = founder.name;
       const lead = founder?.parentId ?? undefined;
       place.leadOf = lead && !place.runs.some((r) => r.id === lead) ? lead : undefined;
     }
@@ -129,7 +133,7 @@ function underTheirLeads(places: Workspace[]): Workspace[] {
 }
 
 /** The place whose session started this one, if it is on the list. */
-function leadPlace(place: Workspace, places: Workspace[]): Workspace | undefined {
+export function leadPlace(place: Workspace, places: Workspace[]): Workspace | undefined {
   if (!place.leadOf) return undefined;
   return places.find((other) => other.id !== place.id && other.runs.some((r) => r.id === place.leadOf));
 }

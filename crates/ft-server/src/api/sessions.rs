@@ -64,6 +64,41 @@ pub(super) async fn list_sessions(
     Ok(Json(sessions))
 }
 
+/// Which sessions to total tokens for — a workspace and its children, say.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageQuery {
+    pub ids: Vec<String>,
+}
+
+/// One session's token spend, as the Overview tab reads it.
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionTokens {
+    pub session_id: String,
+    pub tokens: i64,
+}
+
+#[utoipa::path(
+    post, path = "/api/v1/sessions/token-usage", tag = "sessions",
+    request_body = UsageQuery,
+    responses((status = 200, body = Vec<SessionTokens>), (status = 401, body = ApiError)),
+)]
+pub(super) async fn token_usage(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Json(q): Json<UsageQuery>,
+) -> ApiResult<Json<Vec<SessionTokens>>> {
+    owner(&principal)?;
+    let org = state.db.org().await?;
+    let rows = state.db.token_usage(&org, &q.ids).await?;
+    Ok(Json(
+        rows.into_iter()
+            .map(|(session_id, tokens)| SessionTokens { session_id, tokens })
+            .collect(),
+    ))
+}
+
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct Page {
     #[serde(default)]
@@ -710,6 +745,13 @@ pub(crate) async fn create_session_as(
                 Vec::new()
             }),
     };
+    // When this session runs as a profile that scopes its skills, keep only the
+    // ones on that list. Off-scope skills are never pinned, so they are never
+    // materialised into the workspace and never reach the agent.
+    let wanted: Vec<String> = match profile.as_ref().map(|p| &p.skill_scope).filter(|s| !s.is_empty()) {
+        Some(scope) => wanted.into_iter().filter(|id| scope.contains(id)).collect(),
+        None => wanted,
+    };
     if !wanted.is_empty() {
         if let Err(e) = state
             .skills
@@ -953,12 +995,18 @@ async fn persona_for(
     if profile.can_delegate {
         text.push('\n');
         text.push_str(ft_core::DELEGATION_GUIDANCE);
+        // Its team: what the owner can see, minus itself, narrowed to the
+        // profile's `delegate_scope` when it has one. An off-team profile is
+        // never named here, so the agent cannot ask for it — the scope is
+        // enforced by what the prompt does and does not contain.
+        let scoped = !profile.delegate_scope.is_empty();
         let mut others: Vec<_> = state
             .roles
             .visible(owner, crate::access::Level::Viewer)
             .await?
             .into_iter()
             .filter(|r| r.id != profile.id)
+            .filter(|r| !scoped || profile.delegate_scope.contains(&r.id))
             .collect();
         others.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
         if others.is_empty() {
@@ -1223,10 +1271,15 @@ async fn start_another_agent(
 
     let prompt = req.prompt.as_deref().map(str::trim).unwrap_or_default();
     let id = SessionId::new();
-    let title = if prompt.is_empty() {
-        req.agent.label().to_string()
-    } else {
-        title_from(prompt)
+    // A second agent in a workspace shares the workspace's name, so that is not
+    // what tells it apart — its own `title` is. A delegated child is handed a
+    // name ("<lead> / <what>"); use it, so the Overview can show "what" instead
+    // of a near-copy of the lead's name. A plain second agent falls back to a
+    // title cut from its prompt, as before.
+    let title = match req.name.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        Some(name) => name.to_string(),
+        None if prompt.is_empty() => req.agent.label().to_string(),
+        None => title_from(prompt),
     };
 
     // The directory the workspace occupies, derived the same way it was when it

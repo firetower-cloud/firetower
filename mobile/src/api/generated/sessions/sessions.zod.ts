@@ -202,6 +202,16 @@ export const EndAllSessionsResponse = zod.object({
   "unreachable": zod.int().min(endAllSessionsResponseUnreachableMin).describe('Left alone because their host wasn\'t answering.')
 })
 
+export const TokenUsageBody = zod.object({
+  "ids": zod.array(zod.string())
+}).describe('Which sessions to total tokens for — a workspace and its children, say.')
+
+export const TokenUsageResponseItem = zod.object({
+  "sessionId": zod.string(),
+  "tokens": zod.int()
+}).describe('One session\'s token spend, as the Overview tab reads it.')
+export const TokenUsageResponse = zod.array(TokenUsageResponseItem)
+
 export const GetSessionParams = zod.object({
   "id": zod.string().describe('Session id')
 })

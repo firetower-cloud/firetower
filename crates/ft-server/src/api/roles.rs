@@ -22,6 +22,22 @@ fn refused(e: crate::roles::Refused) -> ApiError {
     ApiError::new(ErrorCode::InvalidRequest, e.to_string())
 }
 
+/// A pinned subscription has to be one this person may use and has to be for
+/// the profile's engine. Absent is fine — it means the owner's default at
+/// launch, which is what an agent-authored profile gets.
+async fn check_account(state: &AppState, owner: &str, new: &crate::roles::NewRole) -> ApiResult<()> {
+    let Some(account) = new.account.as_deref().filter(|a| !a.is_empty()) else {
+        return Ok(());
+    };
+    let agent = new
+        .agent
+        .as_deref()
+        .and_then(ft_core::Agent::from_name)
+        .ok_or_else(|| ApiError::new(ErrorCode::InvalidRequest, "pick an agent first"))?;
+    super::accounts::validate(state, owner, account, agent).await?;
+    Ok(())
+}
+
 #[utoipa::path(
     get, path = "/api/v1/roles", tag = "roles",
     responses((status = 200, body = Vec<Role>), (status = 401, body = ApiError)),
@@ -48,6 +64,7 @@ pub(super) async fn create_role(
 ) -> ApiResult<(StatusCode, Json<Role>)> {
     let me = whoever(&principal)?;
     crate::roles::check(&new).map_err(refused)?;
+    check_account(&state, me.id.as_str(), &new).await?;
 
     let id = state
         .roles
@@ -115,6 +132,7 @@ pub(super) async fn update_role(
 ) -> ApiResult<Json<Role>> {
     let me = whoever(&principal)?;
     crate::roles::check(&new).map_err(refused)?;
+    check_account(&state, me.id.as_str(), &new).await?;
 
     // Absent rather than refused when they may not change it, for the reason
     // every other read gives: a role you cannot reach is one you are not told

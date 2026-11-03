@@ -9,9 +9,11 @@ import * as zod from 'zod';
 
 
 export const ListRolesResponseItem = zod.object({
+  "account": zod.string().nullish().describe('The subscription it runs its agent on, by account id. Absent means the\nowner\'s default for the engine resolves at launch — which is what an\nagent-authored profile gets, since it cannot see account ids.'),
   "agent": zod.string().nullish().describe('Which agent runs it, or absent to let the lead choose.'),
   "canDelegate": zod.boolean().describe('A Manager (true) gets the spawn tool and may hand work to any profile it\ncan see; an Operator (false) does the work and reports back.'),
   "createdAt": zod.iso.datetime({"offset":true}),
+  "delegateScope": zod.array(zod.string()).describe('The subagents a Manager may delegate to, by id. Empty means any the owner\ncan see — scope is opt-in. Everything off the list is invisible to it.'),
   "does": zod.string().describe('What it does and when to reach for it — the one line a lead reads to\ndecide whether to hand it work, the way a skill\'s `description` is read.'),
   "id": zod.string(),
   "instructions": zod.string().describe('Composed into the child\'s instructions.'),
@@ -22,25 +24,43 @@ export const ListRolesResponseItem = zod.object({
   "name": zod.string(),
   "path": zod.string(),
   "placement": zod.string().describe('`lead` (let the lead choose) | `here` | `new`.'),
+  "settings": zod.object({
+  "effort": zod.string().nullish(),
+  "mode": zod.string().nullish(),
+  "model": zod.string().nullish(),
+  "sandbox": zod.string().nullish()
+}).describe('How it runs its agent — model, effort, mode, sandbox. Each unset falls\nback to the engine\'s default at launch, so a profile need not pin all.'),
+  "skillScope": zod.array(zod.string()).describe('The skills it may load, by id. Empty means any the owner can use; an\noff-list skill is never written to its workspace.'),
   "updatedAt": zod.iso.datetime({"offset":true})
 }).describe('A role, as the interface and the spawn tool read it.')
 export const ListRolesResponse = zod.array(ListRolesResponseItem)
 
 export const CreateRoleBody = zod.object({
+  "account": zod.string().nullish().describe('The subscription its agent runs on, by account id. Omit to run on the\nowner\'s default for the engine.'),
   "agent": zod.string().nullish(),
   "canDelegate": zod.boolean().optional().describe('Whether it is a Manager. Defaults to an Operator.'),
+  "delegateScope": zod.array(zod.string()).optional().describe('The subagents it may delegate to, by id. Empty = any the owner can see.'),
   "directory": zod.string().nullish().describe('A directory to file it in, by id, so a teammate can reach it. Omit for\nyour own space. Only honoured at creation; move it later with sharing.'),
   "does": zod.string(),
   "instructions": zod.string().optional(),
-  "machine": zod.string().nullish().describe('The machine its own workspace runs on, by host id. Omit to let the lead\nchoose. Only applies when placement is `new`.'),
+  "machine": zod.string().nullish().describe('The machine its own workspace runs on, by host id. Required when\nplacement is `new`.'),
   "name": zod.string(),
-  "placement": zod.string().optional()
+  "placement": zod.string().optional().describe('Required: "here" or "new". Empty when omitted, so `check` says so.'),
+  "settings": zod.object({
+  "effort": zod.string().nullish(),
+  "mode": zod.string().nullish(),
+  "model": zod.string().nullish(),
+  "sandbox": zod.string().nullish()
+}).optional().describe('How it runs its agent — model, effort, mode, sandbox. Each optional.'),
+  "skillScope": zod.array(zod.string()).optional().describe('The skills it may load, by id. Empty = any the owner can use.')
 }).describe('What the API accepts to create or change a role.')
 
 export const CreateRoleResponse = zod.object({
+  "account": zod.string().nullish().describe('The subscription it runs its agent on, by account id. Absent means the\nowner\'s default for the engine resolves at launch — which is what an\nagent-authored profile gets, since it cannot see account ids.'),
   "agent": zod.string().nullish().describe('Which agent runs it, or absent to let the lead choose.'),
   "canDelegate": zod.boolean().describe('A Manager (true) gets the spawn tool and may hand work to any profile it\ncan see; an Operator (false) does the work and reports back.'),
   "createdAt": zod.iso.datetime({"offset":true}),
+  "delegateScope": zod.array(zod.string()).describe('The subagents a Manager may delegate to, by id. Empty means any the owner\ncan see — scope is opt-in. Everything off the list is invisible to it.'),
   "does": zod.string().describe('What it does and when to reach for it — the one line a lead reads to\ndecide whether to hand it work, the way a skill\'s `description` is read.'),
   "id": zod.string(),
   "instructions": zod.string().describe('Composed into the child\'s instructions.'),
@@ -51,6 +71,13 @@ export const CreateRoleResponse = zod.object({
   "name": zod.string(),
   "path": zod.string(),
   "placement": zod.string().describe('`lead` (let the lead choose) | `here` | `new`.'),
+  "settings": zod.object({
+  "effort": zod.string().nullish(),
+  "mode": zod.string().nullish(),
+  "model": zod.string().nullish(),
+  "sandbox": zod.string().nullish()
+}).describe('How it runs its agent — model, effort, mode, sandbox. Each unset falls\nback to the engine\'s default at launch, so a profile need not pin all.'),
+  "skillScope": zod.array(zod.string()).describe('The skills it may load, by id. Empty means any the owner can use; an\noff-list skill is never written to its workspace.'),
   "updatedAt": zod.iso.datetime({"offset":true})
 }).describe('A role, as the interface and the spawn tool read it.')
 
@@ -59,20 +86,31 @@ export const UpdateRoleParams = zod.object({
 })
 
 export const UpdateRoleBody = zod.object({
+  "account": zod.string().nullish().describe('The subscription its agent runs on, by account id. Omit to run on the\nowner\'s default for the engine.'),
   "agent": zod.string().nullish(),
   "canDelegate": zod.boolean().optional().describe('Whether it is a Manager. Defaults to an Operator.'),
+  "delegateScope": zod.array(zod.string()).optional().describe('The subagents it may delegate to, by id. Empty = any the owner can see.'),
   "directory": zod.string().nullish().describe('A directory to file it in, by id, so a teammate can reach it. Omit for\nyour own space. Only honoured at creation; move it later with sharing.'),
   "does": zod.string(),
   "instructions": zod.string().optional(),
-  "machine": zod.string().nullish().describe('The machine its own workspace runs on, by host id. Omit to let the lead\nchoose. Only applies when placement is `new`.'),
+  "machine": zod.string().nullish().describe('The machine its own workspace runs on, by host id. Required when\nplacement is `new`.'),
   "name": zod.string(),
-  "placement": zod.string().optional()
+  "placement": zod.string().optional().describe('Required: "here" or "new". Empty when omitted, so `check` says so.'),
+  "settings": zod.object({
+  "effort": zod.string().nullish(),
+  "mode": zod.string().nullish(),
+  "model": zod.string().nullish(),
+  "sandbox": zod.string().nullish()
+}).optional().describe('How it runs its agent — model, effort, mode, sandbox. Each optional.'),
+  "skillScope": zod.array(zod.string()).optional().describe('The skills it may load, by id. Empty = any the owner can use.')
 }).describe('What the API accepts to create or change a role.')
 
 export const UpdateRoleResponse = zod.object({
+  "account": zod.string().nullish().describe('The subscription it runs its agent on, by account id. Absent means the\nowner\'s default for the engine resolves at launch — which is what an\nagent-authored profile gets, since it cannot see account ids.'),
   "agent": zod.string().nullish().describe('Which agent runs it, or absent to let the lead choose.'),
   "canDelegate": zod.boolean().describe('A Manager (true) gets the spawn tool and may hand work to any profile it\ncan see; an Operator (false) does the work and reports back.'),
   "createdAt": zod.iso.datetime({"offset":true}),
+  "delegateScope": zod.array(zod.string()).describe('The subagents a Manager may delegate to, by id. Empty means any the owner\ncan see — scope is opt-in. Everything off the list is invisible to it.'),
   "does": zod.string().describe('What it does and when to reach for it — the one line a lead reads to\ndecide whether to hand it work, the way a skill\'s `description` is read.'),
   "id": zod.string(),
   "instructions": zod.string().describe('Composed into the child\'s instructions.'),
@@ -83,6 +121,13 @@ export const UpdateRoleResponse = zod.object({
   "name": zod.string(),
   "path": zod.string(),
   "placement": zod.string().describe('`lead` (let the lead choose) | `here` | `new`.'),
+  "settings": zod.object({
+  "effort": zod.string().nullish(),
+  "mode": zod.string().nullish(),
+  "model": zod.string().nullish(),
+  "sandbox": zod.string().nullish()
+}).describe('How it runs its agent — model, effort, mode, sandbox. Each unset falls\nback to the engine\'s default at launch, so a profile need not pin all.'),
+  "skillScope": zod.array(zod.string()).describe('The skills it may load, by id. Empty means any the owner can use; an\noff-list skill is never written to its workspace.'),
   "updatedAt": zod.iso.datetime({"offset":true})
 }).describe('A role, as the interface and the spawn tool read it.')
 
