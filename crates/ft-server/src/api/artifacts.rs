@@ -396,6 +396,114 @@ pub(super) async fn publish_artifact(
     ))
 }
 
+/// Publish every artifact folder a session has written, as its finished bytes.
+///
+/// The client-side watcher only publishes the workspace a person is *looking
+/// at*, and it fingerprints a folder once — so a child off in its own
+/// workspace, or one captured a beat before it finished writing `index.html`,
+/// ends up unpublished or blank and never re-captured. This runs when a session
+/// hands back, from the control plane, for whatever it is reading: the agent is
+/// done, so the bytes are complete, and `db.publish_artifact` drops a version
+/// identical to the current one — so calling it on every hand-back is cheap and
+/// supersedes a stale blank version with the real page.
+///
+/// Best effort throughout: a missing folder, an unreachable host or a file that
+/// will not read is skipped, not surfaced. Nobody asked for this directly.
+pub(crate) async fn capture_session_artifacts(
+    fleet: &crate::fleet::Fleet,
+    db: &crate::db::Db,
+    host: &ft_core::HostId,
+    session: &ft_core::SessionId,
+) {
+    let Ok(Some(row)) = db.session(session).await else { return };
+    let owner = row.owner.as_str();
+    let Ok(Some(org)) = db.org_of_user(owner).await else { return };
+
+    let folders = match fleet.list_files(host, session, DIR).await {
+        Ok(Ok(entries)) => entries,
+        _ => return,
+    };
+
+    for dir in folders.into_iter().filter(|e| e.directory && !e.link) {
+        let slug = dir.name.clone();
+        // The same shape a slug must be, so a stray directory name is passed
+        // over rather than rejected loudly.
+        if slug.is_empty()
+            || slug.len() > 64
+            || !slug
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+        {
+            continue;
+        }
+
+        let root = format!("{DIR}/{slug}");
+        let Ok(Ok(listing)) = fleet.list_files(host, session, &root).await else {
+            continue;
+        };
+
+        let mut files = Vec::new();
+        let mut total = 0u64;
+        let mut over = false;
+        for entry in listing.iter().filter(|e| !e.directory && !e.link) {
+            if files.len() >= MOST_FILES {
+                break;
+            }
+            total += entry.size;
+            if total > BIGGEST {
+                over = true;
+                break;
+            }
+            let path = format!("{root}/{}", entry.name);
+            let Ok(Ok((_, mut chunks))) = fleet.read_file(host, session, &path).await else {
+                continue;
+            };
+            let mut body = Vec::new();
+            while let Some(chunk) = chunks.recv().await {
+                body.extend_from_slice(&chunk);
+            }
+            files.push((
+                entry.name.clone(),
+                crate::artifact::content_type_of(&entry.name),
+                body,
+            ));
+        }
+        // A folder that is only assets, too heavy, or has no page is not an
+        // artifact — leave it for the person to publish by hand if they meant it.
+        if over || files.is_empty() {
+            continue;
+        }
+        let entry = if files.iter().any(|(p, _, _)| p == "index.html") {
+            "index.html".to_string()
+        } else {
+            match files.iter().find(|(p, _, _)| p.ends_with(".html")) {
+                Some((p, _, _)) => p.clone(),
+                None => continue,
+            }
+        };
+
+        let title = slug.replace('-', " ");
+        match db
+            .publish_artifact(
+                owner,
+                &org,
+                &slug,
+                &title,
+                &entry,
+                &files,
+                Some(session.as_str()),
+                Some(row.name.as_str()),
+            )
+            .await
+        {
+            Ok((artifact, version)) => {
+                tracing::info!(%artifact, version, slug, "captured an artifact on hand-back")
+            }
+            Err(e) => tracing::warn!("capturing artifact {slug} on hand-back: {e:#}"),
+        }
+    }
+}
+
 /// Every file of a version in one archive, deflated.
 ///
 /// What Download sends, and what a mention of a page with assets beside it

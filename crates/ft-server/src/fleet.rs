@@ -2364,6 +2364,16 @@ impl Fleet {
                                     let host_id = host_id.clone();
                                     tokio::spawn(async move {
                                         describe(&describing, &db, &host_id, &session_id).await;
+                                        // Now the agent is done, capture anything it
+                                        // published — with its finished bytes, from
+                                        // the control plane, whoever is watching.
+                                        crate::api::artifacts::capture_session_artifacts(
+                                            &describing,
+                                            &db,
+                                            &host_id,
+                                            &session_id,
+                                        )
+                                        .await;
                                     });
                                 }
 

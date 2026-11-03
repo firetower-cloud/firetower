@@ -13,7 +13,7 @@ pub(crate) mod access;
 pub(crate) mod accounts;
 pub(crate) mod agents;
 mod annotations;
-mod artifacts;
+pub(crate) mod artifacts;
 mod auth;
 mod consumption;
 mod conversation;
