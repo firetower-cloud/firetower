@@ -30,10 +30,16 @@ pub struct Builtin {
     pub markdown: &'static str,
 }
 
-pub const ALL: &[Builtin] = &[Builtin {
-    slug: "firetower-artifacts",
-    markdown: include_str!("../../skills/firetower-artifacts/SKILL.md"),
-}];
+pub const ALL: &[Builtin] = &[
+    Builtin {
+        slug: "firetower-artifacts",
+        markdown: include_str!("../../skills/firetower-artifacts/SKILL.md"),
+    },
+    Builtin {
+        slug: "skill-creator",
+        markdown: include_str!("../../skills/skill-creator/SKILL.md"),
+    },
+];
 
 /// Name, description and body, out of the frontmatter.
 ///

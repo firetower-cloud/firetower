@@ -8,6 +8,7 @@
  * same fleet without one of them being a smaller copy of the other.
  */
 import { Dashboard } from "~/ui/Dashboard";
+import { NewPage } from "~/ui/NewPage";
 import { TasksPage } from "~/ui/TasksPage";
 import { ArtifactsPage } from "~/ui/ArtifactsPage";
 import { Workbench } from "~/ui/Workbench";
@@ -22,6 +23,7 @@ import { usePathname } from "~/shims/next-navigation";
 export function Routes({ backend, onForgot }: { backend: Backend; onForgot: () => void }) {
   const path = usePathname();
 
+  if (path.startsWith("/new")) return <NewPage />;
   if (path.startsWith("/tasks")) return <TasksPage backend={backend} />;
   if (path.startsWith("/artifacts")) return <ArtifactsPage />;
   if (path.startsWith("/configuration")) return <Configuration backend={backend} onForgot={onForgot} />;

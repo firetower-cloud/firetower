@@ -382,6 +382,22 @@ pub(super) async fn publish_artifact(
         )
         .await?;
 
+    // Version 0: the slug is tombstoned — the person deleted it, and the folder
+    // the agent left behind must not bring it back. Report it as published, so
+    // the client's watcher marks it done and stops retrying, but keep it
+    // deleted. `artifact_of_any` finds the tombstoned row to hand back.
+    if version == 0 {
+        let row = state
+            .db
+            .artifact_of_any(&owner, &artifact)
+            .await?
+            .ok_or_else(|| ApiError::not_found("artifact"))?;
+        return Ok((
+            axum::http::StatusCode::OK,
+            Json(present(&state, &headers, row)),
+        ));
+    }
+
     tracing::info!(artifact = %artifact, version, files = files.len(), "published an artifact");
 
     let row = state
@@ -394,6 +410,121 @@ pub(super) async fn publish_artifact(
         axum::http::StatusCode::CREATED,
         Json(present(&state, &headers, row)),
     ))
+}
+
+/// Publish every artifact folder a session has written, as its finished bytes.
+///
+/// The client-side watcher only publishes the workspace a person is *looking
+/// at*, and it fingerprints a folder once — so a child off in its own
+/// workspace, or one captured a beat before it finished writing `index.html`,
+/// ends up unpublished or blank and never re-captured. This runs when a session
+/// hands back, from the control plane, for whatever it is reading: the agent is
+/// done, so the bytes are complete, and `db.publish_artifact` drops a version
+/// identical to the current one — so calling it on every hand-back is cheap and
+/// supersedes a stale blank version with the real page.
+///
+/// Best effort throughout: a missing folder, an unreachable host or a file that
+/// will not read is skipped, not surfaced. Nobody asked for this directly.
+pub(crate) async fn capture_session_artifacts(
+    fleet: &crate::fleet::Fleet,
+    db: &crate::db::Db,
+    host: &ft_core::HostId,
+    session: &ft_core::SessionId,
+) {
+    let Ok(Some(row)) = db.session(session).await else {
+        return;
+    };
+    let owner = row.owner.as_str();
+    let Ok(Some(org)) = db.org_of_user(owner).await else {
+        return;
+    };
+
+    let folders = match fleet.list_files(host, session, DIR).await {
+        Ok(Ok(entries)) => entries,
+        _ => return,
+    };
+
+    for dir in folders.into_iter().filter(|e| e.directory && !e.link) {
+        let slug = dir.name.clone();
+        // The same shape a slug must be, so a stray directory name is passed
+        // over rather than rejected loudly.
+        if slug.is_empty()
+            || slug.len() > 64
+            || !slug
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+        {
+            continue;
+        }
+
+        let root = format!("{DIR}/{slug}");
+        let Ok(Ok(listing)) = fleet.list_files(host, session, &root).await else {
+            continue;
+        };
+
+        let mut files = Vec::new();
+        let mut total = 0u64;
+        let mut over = false;
+        for entry in listing.iter().filter(|e| !e.directory && !e.link) {
+            if files.len() >= MOST_FILES {
+                break;
+            }
+            total += entry.size;
+            if total > BIGGEST {
+                over = true;
+                break;
+            }
+            let path = format!("{root}/{}", entry.name);
+            let Ok(Ok((_, mut chunks))) = fleet.read_file(host, session, &path).await else {
+                continue;
+            };
+            let mut body = Vec::new();
+            while let Some(chunk) = chunks.recv().await {
+                body.extend_from_slice(&chunk);
+            }
+            files.push((
+                entry.name.clone(),
+                crate::artifact::content_type_of(&entry.name),
+                body,
+            ));
+        }
+        // A folder that is only assets, too heavy, or has no page is not an
+        // artifact — leave it for the person to publish by hand if they meant it.
+        if over || files.is_empty() {
+            continue;
+        }
+        let entry = if files.iter().any(|(p, _, _)| p == "index.html") {
+            "index.html".to_string()
+        } else {
+            match files.iter().find(|(p, _, _)| p.ends_with(".html")) {
+                Some((p, _, _)) => p.clone(),
+                None => continue,
+            }
+        };
+
+        let title = slug.replace('-', " ");
+        match db
+            .publish_artifact(
+                owner,
+                &org,
+                &slug,
+                &title,
+                &entry,
+                &files,
+                Some(session.as_str()),
+                Some(row.name.as_str()),
+            )
+            .await
+        {
+            // Version 0 means the slug is tombstoned — deleted by the person.
+            // Leave it; the hand-back must not resurrect what they removed.
+            Ok((_artifact, 0)) => {}
+            Ok((artifact, version)) => {
+                tracing::info!(%artifact, version, slug, "captured an artifact on hand-back")
+            }
+            Err(e) => tracing::warn!("capturing artifact {slug} on hand-back: {e:#}"),
+        }
+    }
 }
 
 /// Every file of a version in one archive, deflated.
@@ -813,6 +944,7 @@ mod tests {
         (
             AppState {
                 skills: crate::skills::Skills::new(db.pool().clone()),
+                roles: crate::roles::Roles::new(db.pool().clone()),
                 updates: crate::updates::Updates::new(db.pool().clone()),
                 policy: crate::auth::Policy::open(),
                 access: crate::access::Access::new(db.pool().clone()),
@@ -946,6 +1078,54 @@ mod tests {
         assert_eq!(mentioned.path, ".firetower/artifacts/checkout/index.html");
         assert_eq!(mentioned.version, 1);
         assert!(worker.actions.lock().unwrap().is_empty());
+    }
+
+    /// Deleting an artifact is final. The agent's folder is still on disk, so
+    /// the watcher — or a hand-back — publishes the slug again; it must not
+    /// come back.
+    #[tokio::test]
+    async fn a_deleted_artifact_is_not_resurrected() {
+        let (state, principal, session, _worker) = fixture().await;
+        let owner = principal.owner().unwrap().to_string();
+        let org = state.db.org_of_user(&owner).await.unwrap().unwrap();
+
+        let artifact = publish(
+            &state,
+            &owner,
+            "ghost",
+            vec![page(b"<p>boo")],
+            Some(&session),
+        )
+        .await;
+        assert_eq!(state.db.artifacts_of(&owner).await.unwrap().len(), 1);
+
+        assert!(state.db.delete_artifact(&owner, &artifact).await.unwrap());
+        assert!(
+            state.db.artifacts_of(&owner).await.unwrap().is_empty(),
+            "the list still shows a deleted artifact"
+        );
+
+        // The republish that used to resurrect it: same slug, same bytes.
+        let (again, version) = state
+            .db
+            .publish_artifact(
+                &owner,
+                &org,
+                "ghost",
+                "Pricing, three tiers",
+                "index.html",
+                &[page(b"<p>boo")],
+                Some(session.as_str()),
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(version, 0, "a tombstoned slug was published again");
+        assert_eq!(again, artifact, "the tombstone kept its id");
+        assert!(
+            state.db.artifacts_of(&owner).await.unwrap().is_empty(),
+            "a deleted artifact came back"
+        );
     }
 
     /// A page with assets beside it goes as one zip, with every file in it.

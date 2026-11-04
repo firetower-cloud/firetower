@@ -50,10 +50,101 @@ use crate::agentd::{AgentClient, FromAgent, ToAgent};
 pub const SERVER: &str = "firetower";
 pub const TOOL: &str = "approve";
 
+/// Start another agent for part of the task, as a child of this session.
+///
+/// Served here rather than by a server of its own because this process is the
+/// one thing in the agent's tree that already has the session's socket, and a
+/// second process would need the same socket for the same reason.
+pub const SPAWN: &str = "spawn";
+/// List, steer or stop the children this session started.
+pub const CHILDREN: &str = "children";
+/// A child's short progress note to its lead, posted without ending its turn.
+pub const UPDATE: &str = "update";
+/// The plan the agent is keeping, drawn live in the workspace.
+pub const PLAN: &str = "plan";
+/// Save a reusable agent profile, so a person can ask for one in words rather
+/// than filling the form in by hand.
+pub const CREATE_PROFILE: &str = "create_profile";
+/// Change a saved profile, by name.
+pub const UPDATE_PROFILE: &str = "update_profile";
+/// List the saved profiles, so the agent builds on them rather than beside.
+pub const LIST_PROFILES: &str = "list_profiles";
+/// Write a skill into the person's library, so they can ask for one in words
+/// rather than hand-copying a folder into the editor.
+pub const CREATE_SKILL: &str = "create_skill";
+/// Change a saved skill, by name — a new version of its instructions.
+pub const UPDATE_SKILL: &str = "update_skill";
+/// List the saved skills, so the agent builds on them rather than beside.
+pub const LIST_SKILLS: &str = "list_skills";
+
+/// What a delegation call is named on its way to the control plane.
+///
+/// It travels the path a permission question takes — the socket, then the
+/// worker's `AgentAsks` frame — because that path already exists and already
+/// carries an id, a name and some arguments to somebody who can answer. The
+/// prefix is what tells the control plane this is a call to act on rather than
+/// a question to put to a person, and it cannot collide with a real tool's
+/// permission name, which the agent spells `mcp__firetower__spawn`.
+pub const DELEGATION: &str = "firetower:";
+
 /// The full name the agent uses, which is how MCP addresses any tool.
 pub fn tool_name() -> String {
     format!("mcp__{SERVER}__{TOOL}")
 }
+
+/// What `spawn` and `children` do, as the agent reads it.
+///
+/// The one place the agent learns delegation exists, so it carries the rules
+/// rather than pointing at them: when to use which placement, that a result
+/// arrives between turns, and what a child may not do.
+const SPAWN_DESCRIPTION: &str = "\
+Start another agent to work on part of this task, as a child of this session. \
+It gets its own conversation and knows nothing of yours: put everything it \
+needs in `goal` and `context`. \
+`placement: \"here\"` starts it in this workspace, sharing the directory and \
+the branch — cheap, and right for a reviewer or a second pair of eyes on what \
+you are doing. `placement: \"new\"` gives it a workspace and a branch of its \
+own, cut from the repository's default branch, for independent work. \
+Returns the child's id and name at once; the child takes its own time. \
+Its result arrives in THIS conversation as a message when it hands back — \
+between your turns, never inside one — so dispatch, do what does not depend \
+on it, then end your turn with a one-line status. \
+A child cannot spawn, cannot ask the person, and cannot message or schedule. \
+A question it has comes to you as a message; a command it needs permission \
+for goes to the person. At most 4 children may be live at once and 8 per \
+session; a refusal says which limit and why.";
+
+const CHILDREN_DESCRIPTION: &str = "\
+The children this session started. `list` says what each is doing and \
+whether it is waiting on someone. `steer` sends `message` into one child's \
+conversation mid-run, without stopping it. `stop` ends the turn a child is \
+in; what it has done so far stays.";
+
+/// What `update` does, as a child reads it. Only a child may call it — the
+/// control plane refuses it from a lead — so the text speaks to a child
+/// directly, and carries the rhythm the way spawn's and children's do.
+const UPDATE_DESCRIPTION: &str = "\
+Post a short progress note to the agent that started you — your lead — while \
+you keep working. Use it at a real milestone: a plan settled, a surprise \
+found, a phase finished. It does NOT pause you, and it is NOT a way to ask a \
+blocking question — it is one-way, and the lead reads it between its own \
+turns. Keep a casual check-in to a line or two; go longer only when the lead \
+has asked you for detail. If you are truly blocked and cannot go on without an \
+answer, hand back instead.";
+
+/// What `plan` does, as the agent reads it.
+///
+/// This description is also where every agent — on any engine, in any session —
+/// is told that its plan is on screen. An agent whose engine keeps its own todo
+/// list never has to call this; being told the list is watched is the point.
+const PLAN_DESCRIPTION: &str = "\
+Keep a short plan of what you are doing, drawn live in the workspace so the \
+person watching can follow without reading the whole transcript. \
+IF YOUR ENGINE HAS ITS OWN TODO OR PLAN TOOL, USE THAT INSTEAD — it already \
+feeds the same panel, and this exists for engines that have none. \
+Restate the whole plan each call, like a todo list: 3-8 steps, one \
+`doing` at a time, the rest `pending` or `done`. Update it when a step starts \
+or finishes. It does not pause you and nobody is asked to approve it.";
 
 /// The configuration file that tells an agent to start this.
 pub fn mcp_config(exe: &std::path::Path, session_id: &str, workspace: &std::path::Path) -> Value {
@@ -139,23 +230,230 @@ async fn answer(
             }),
         )),
 
-        "tools/list" => Some(reply(
-            id?,
-            json!({
-                "tools": [{
-                    "name": TOOL,
-                    "description": "Decide whether a tool call may proceed.",
-                    // Deliberately open. The shape is the agent's to choose and
-                    // it has changed before; refusing an argument we did not
-                    // expect would block the call rather than ask about it.
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {},
-                        "additionalProperties": true,
-                    },
-                }]
-            }),
-        )),
+        "tools/list" => {
+            // Built from the agents Firetower can drive, not spelled out here,
+            // so the list the lead is offered never falls behind the ones that
+            // exist — the whole of `Agent::all()`, labels and names together.
+            let agent_names: Vec<String> = ft_core::Agent::all()
+                .iter()
+                .map(|a| format!("{a:?}"))
+                .collect();
+            let agent_labels = ft_core::Agent::all()
+                .iter()
+                .map(|a| a.label())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let agent_desc = format!(
+                "Which agent runs it — one of {agent_labels}. NOT a saved subagent — use \
+                 `role` for that. Omit for the same as you."
+            );
+            Some(reply(
+                id?,
+                json!({
+                    "tools": [{
+                        "name": TOOL,
+                        "description": "Decide whether a tool call may proceed.",
+                        // Deliberately open. The shape is the agent's to choose and
+                        // it has changed before; refusing an argument we did not
+                        // expect would block the call rather than ask about it.
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {},
+                            "additionalProperties": true,
+                        },
+                    }, {
+                        "name": SPAWN,
+                        "description": SPAWN_DESCRIPTION,
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "goal": {
+                                    "type": "string",
+                                    "description": "What the child should accomplish. Self-contained: it has not seen this conversation.",
+                                },
+                                "context": {
+                                    "type": "string",
+                                    "description": "Background it needs: file paths, constraints, what has been tried, what to hand back.",
+                                },
+                                "role": {
+                                    "type": "string",
+                                    "description": "A saved subagent to start, by name — e.g. \"reviewer\" or \"developer\" (what the person defines on the Subagents screen). It supplies the instructions and may pin the agent and placement; where it pins one, that wins over what you pass. Naming one that does not exist is refused with the ones that do. Omit for an ad-hoc child.",
+                                },
+                                "placement": {
+                                    "type": "string",
+                                    "enum": ["here", "new"],
+                                    "description": "\"here\" shares this workspace and branch; \"new\" gets its own. Default \"here\".",
+                                },
+                                "agent": {
+                                    "type": "string",
+                                    "enum": agent_names,
+                                    "description": agent_desc,
+                                },
+                                "name": {
+                                    "type": "string",
+                                    "description": "A short name for the child, like \"reviewer\" or \"developer\".",
+                                },
+                                "reason": {
+                                    "type": "string",
+                                    "description": "One line on why this is being delegated. Shown on the child.",
+                                },
+                            },
+                            "required": ["goal"],
+                        },
+                    }, {
+                        "name": CHILDREN,
+                        "description": CHILDREN_DESCRIPTION,
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "action": { "type": "string", "enum": ["list", "steer", "stop"] },
+                                "id": {
+                                    "type": "string",
+                                    "description": "The child's session id, from spawn or list. For steer and stop.",
+                                },
+                                "message": {
+                                    "type": "string",
+                                    "description": "For steer: what to tell the child. Lands in its conversation as a message from you.",
+                                },
+                            },
+                            "required": ["action"],
+                        },
+                    }, {
+                        "name": UPDATE,
+                        "description": UPDATE_DESCRIPTION,
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "note": {
+                                    "type": "string",
+                                    "description": "What's happening, in your words. A line or two for a casual check-in; longer only if the lead has asked for detail.",
+                                },
+                                "phase": {
+                                    "type": "string",
+                                    "description": "Optional one-word stage, e.g. \"planning\", \"building\", \"reviewing\". Shown as a tag.",
+                                },
+                            },
+                            "required": ["note"],
+                        },
+                    }, {
+                        "name": PLAN,
+                        "description": PLAN_DESCRIPTION,
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "steps": {
+                                    "type": "array",
+                                    "description": "The whole plan, in order. Each item is {step, status} with status one of \"pending\", \"doing\", \"done\" — or a bare string, which is taken as pending.",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "step": { "type": "string", "description": "What this step is, in a few words." },
+                                            "status": { "type": "string", "enum": ["pending", "doing", "done"] },
+                                        },
+                                        "required": ["step"],
+                                    },
+                                },
+                            },
+                            "required": ["steps"],
+                        },
+                    }, {
+                        "name": CREATE_PROFILE,
+                        "description": "Save a reusable agent profile — a persona a workspace can be started as, or a lead can delegate to. A profile fully specifies where and what it runs: there is no \"let the lead choose\", so you must settle the engine and the placement (and, for its own workspace, the machine). Unless they have already said otherwise, AGREE ON THE SHAPE BEFORE YOU CALL THIS — don't silently assume. In one short, plain-language exchange, put the choices to them with a recommended default each, and let them correct you: (1) what it does and when to reach for it; (2) its goal and how it should work (the instructions); (3) Operator or Manager — may it hand work to other profiles, and if so which; (4) which engine it runs on; (5) placement — the lead's own workspace (`here`) or its own (`new`); (6) for `new`, which machine — you cannot see the machines, so unless they hand you a host id this profile is not yours to finish: SAY THAT rather than quietly filing it as `here`, and offer `here` for now with the real placement set on Settings → Harness → Profiles; (7) kept yours, or filed in a directory a teammate can reach. You cannot set the subscription: it runs on the owner's default for the chosen engine, whatever they asked for. If they named one, create the profile and then SAY YOU COULD NOT APPLY IT and that it is set on Settings → Harness → Profiles — never let silence read as \"applied\". Take anything they already specified and don't re-ask it. Then call this once. It appears on the Profiles screen immediately, theirs to edit or delete. Check `list_profiles` first so you refine an existing one rather than duplicate it.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "name": { "type": "string", "description": "What it's called and started by, e.g. \"QA\" or \"Reviewer\"." },
+                                "does": { "type": "string", "description": "One line: what it does AND when to reach for it — like a skill's description. A lead reads this to decide whether to hand it work, so include the trigger (\"after a developer hands back\") and any anti-trigger (\"not for a one-line fix\"). e.g. \"Reviews a finished branch and reports problems; use after a hand-back, not for trivial diffs.\"" },
+                                "instructions": { "type": "string", "description": "The persona, as markdown — how it should work, step by step. Composed into the agent's prompt once it's chosen (the body, not the when-to-use line)." },
+                                "agent": { "type": "string", "enum": ["ClaudeCode", "Codex", "KimiCode", "CursorAgent"], "description": "Required. The engine it runs on — a profile always pins one." },
+                                "placement": { "type": "string", "enum": ["here", "new"], "description": "Required. Where a delegated child runs: `here` shares the lead's workspace and branch, `new` gets its own." },
+                                "machine": { "type": "string", "description": "Required when placement is `new`: the host id of the machine its own workspace runs on." },
+                                "can_delegate": { "type": "boolean", "description": "true makes it a Manager that can hand work to other profiles; false (default) an Operator that does the work itself." },
+                                "directory": { "type": "string", "description": "A directory to file it in, by name, so a teammate can reach it. Omit for the person's own space." },
+                            },
+                            "required": ["name", "does", "agent", "placement"],
+                        },
+                    }, {
+                        "name": UPDATE_PROFILE,
+                        "description": "Change a saved profile, by name — \"make the reviewer stricter\", \"run QA on Codex\". Only the fields you pass change; everything else stays. Rename with `new_name`. When what they want changed is ambiguous, confirm it before you apply — a profile is something they rely on, not a scratch edit. TWO THINGS THIS CANNOT CHANGE: the subscription, and `placement` to `new` for a profile with no machine (that is a host id you cannot see). If they ask for either, say so and point them at Settings → Harness → Profiles instead of reporting a change you did not make.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "name": { "type": "string", "description": "The profile to change, by its current name." },
+                                "new_name": { "type": "string", "description": "A new name, to rename it." },
+                                "does": { "type": "string" },
+                                "instructions": { "type": "string" },
+                                "agent": { "type": "string", "enum": ["ClaudeCode", "Codex", "KimiCode", "CursorAgent"] },
+                                "placement": { "type": "string", "enum": ["here", "new"] },
+                                "machine": { "type": "string" },
+                                "can_delegate": { "type": "boolean" },
+                            },
+                            "required": ["name"],
+                        },
+                    }, {
+                        "name": LIST_PROFILES,
+                        "description": "List the saved profiles the person can see — name, whether it's a Manager, and what it does. Read this before creating one, to build on what exists rather than make a near-duplicate.",
+                        "inputSchema": { "type": "object", "properties": {} },
+                    }, {
+                        "name": CREATE_SKILL,
+                        "description": "Write a skill into the person's library — a SKILL.md and, if it needs them, bundled files — so they don't have to hand-copy what you wrote into the editor. Use it when they ask you to make them a skill (\"turn this into a skill\", \"make me a changelog skill\"). It appears on their Skills screen at once. A skill that ships a script (anything under scripts/, or a file marked executable) is held for the person's review before it can run — say so when that happens. Check list_skills first so you refine an existing one rather than duplicate it.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "name": { "type": "string", "description": "Lowercase handle: letters, digits, hyphens. e.g. \"changelog-helper\". Not \"claude\" or \"anthropic\"." },
+                                "description": { "type": "string", "description": "What it does AND when to fire — this is the whole triggering mechanism, so be specific and a little pushy: \"...Use this whenever the user mentions a changelog or release notes, even if they don't say 'skill'.\"" },
+                                "body": { "type": "string", "description": "The SKILL.md instructions, as markdown (no frontmatter — that's composed from name and description). Keep it to a page; put long reference material in a references/ file." },
+                                "files": {
+                                    "type": "array",
+                                    "description": "Optional bundled files. Contents are plain text (not base64). A file under scripts/, or one with executable:true, makes the skill held for review.",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "path": { "type": "string", "description": "Relative, e.g. \"references/format.md\" or \"scripts/build.sh\". Never absolute, never ..." },
+                                            "contents": { "type": "string" },
+                                            "executable": { "type": "boolean" },
+                                        },
+                                        "required": ["path", "contents"],
+                                    },
+                                },
+                                "directory": { "type": "string", "description": "A directory to file it in, by name, so a teammate can reach it. Omit for the person's own space." },
+                            },
+                            "required": ["name", "description"],
+                        },
+                    }, {
+                        "name": UPDATE_SKILL,
+                        "description": "Change a saved skill, by name — \"make the changelog skill terser\", \"add an example\". Writes a new version; a running session keeps the one it started with. Only the fields you pass change; the bundled files carry forward unless you send a new set. A change that ships a script is held for review.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "name": { "type": "string", "description": "The skill to change, by its current name." },
+                                "new_name": { "type": "string", "description": "A new name, to rename it." },
+                                "description": { "type": "string" },
+                                "body": { "type": "string" },
+                                "files": {
+                                    "type": "array",
+                                    "description": "Replaces the bundled files (besides SKILL.md). Omit to leave them as they are.",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "path": { "type": "string" },
+                                            "contents": { "type": "string" },
+                                            "executable": { "type": "boolean" },
+                                        },
+                                        "required": ["path", "contents"],
+                                    },
+                                },
+                            },
+                            "required": ["name"],
+                        },
+                    }, {
+                        "name": LIST_SKILLS,
+                        "description": "List the skills the person can see — name, description, whether it ships a script, and whether it's held for their review. Read this before creating one, to build on what exists rather than make a near-duplicate.",
+                        "inputSchema": { "type": "object", "properties": {} },
+                    }]
+                }),
+            ))
+        }
 
         "tools/call" => {
             let id = id?;
@@ -163,7 +461,22 @@ async fn answer(
                 .pointer("/params/arguments")
                 .cloned()
                 .unwrap_or(json!({}));
-            let decision = ask(session_id, workspace, settled, &arguments).await;
+            let name = request
+                .pointer("/params/name")
+                .and_then(Value::as_str)
+                .unwrap_or(TOOL);
+            let text = match name {
+                SPAWN | CHILDREN | UPDATE | PLAN | CREATE_PROFILE | UPDATE_PROFILE
+                | LIST_PROFILES | CREATE_SKILL | UPDATE_SKILL | LIST_SKILLS => {
+                    delegate(session_id, name, &id, &arguments).await
+                }
+                // Every call used to be a permission question, and an agent
+                // from before the other tools existed still only knows this
+                // one — so anything unnamed is still that.
+                _ => ask(session_id, workspace, settled, &arguments)
+                    .await
+                    .to_string(),
+            };
             Some(reply(
                 id,
                 json!({
@@ -171,7 +484,7 @@ async fn answer(
                         "type": "text",
                         // The decision travels as text because that is what a
                         // tool result carries. The agent parses it back.
-                        "text": decision.to_string(),
+                        "text": text,
                     }]
                 }),
             ))
@@ -235,6 +548,38 @@ async fn ask(
                 "message": format!("Firetower could not ask anyone about this: {e:#}"),
             })
         }
+    }
+}
+
+/// Carry a delegation call to the control plane, and bring its answer back.
+///
+/// The same road a permission question takes, with the name prefixed so the
+/// far end acts on it rather than asking somebody. The request id has to be
+/// unique for as long as the lead session exists: a worker that reconnects
+/// re-announces every call still waiting, and the control plane answers a
+/// repeat with the child the first arrival made — so an id that repeated
+/// across agent restarts would hand a new spawn an old child. JSON-RPC ids
+/// start again at one each time the agent starts, which is why this process's
+/// own start is part of the name.
+async fn delegate(session_id: &str, name: &str, id: &Value, arguments: &Value) -> String {
+    use std::sync::OnceLock;
+    static STARTED: OnceLock<u128> = OnceLock::new();
+    let started = STARTED.get_or_init(|| {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    });
+    let req = format!("{name}-{started}-{}", id.to_string().trim_matches('"'));
+
+    match wait_for_a_decision(session_id, &req, &format!("{DELEGATION}{name}"), arguments).await {
+        // The control plane answers in words, for the agent to read; anything
+        // else it sends is handed over verbatim rather than guessed at.
+        Ok(result) => match result.get("text").and_then(Value::as_str) {
+            Some(text) => text.to_string(),
+            None => result.to_string(),
+        },
+        Err(e) => format!("Firetower could not reach anyone to {name}: {e:#}"),
     }
 }
 
@@ -402,15 +747,66 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn it_offers_exactly_one_tool_and_the_agent_is_told_its_full_name() {
+    async fn it_offers_the_permission_tool_first_and_the_agent_is_told_its_full_name() {
         let request = json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" });
         let response = answer(&request, "s_test", nowhere(), &none())
             .await
             .unwrap();
         let tools = response["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 1);
-        assert_eq!(tools[0]["name"], TOOL);
+        let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
+        // The permission tool first: it is the one the launch flags name, and
+        // the one an older agent only knows.
+        assert_eq!(
+            names,
+            [
+                TOOL,
+                SPAWN,
+                CHILDREN,
+                UPDATE,
+                PLAN,
+                CREATE_PROFILE,
+                UPDATE_PROFILE,
+                LIST_PROFILES,
+                CREATE_SKILL,
+                UPDATE_SKILL,
+                LIST_SKILLS
+            ]
+        );
         assert_eq!(tool_name(), "mcp__firetower__approve");
+        // A child's goal is the one thing a spawn cannot do without.
+        assert_eq!(tools[1]["inputSchema"]["required"], json!(["goal"]));
+    }
+
+    #[tokio::test]
+    async fn a_spawn_nobody_can_carry_is_refused_in_words() {
+        // The same safe end as a permission nobody can answer: the agent reads
+        // why, rather than seeing a tool that silently did nothing.
+        let request = json!({
+            "jsonrpc": "2.0", "id": 4, "method": "tools/call",
+            "params": { "name": SPAWN, "arguments": { "goal": "review the diff" } },
+        });
+        let response = answer(&request, "s_no-such-session-at-all", nowhere(), &none())
+            .await
+            .unwrap();
+        let text = response["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("Firetower"), "{text}");
+        assert!(text.contains("spawn"), "{text}");
+    }
+
+    #[tokio::test]
+    async fn a_call_without_a_name_is_still_a_permission_question() {
+        // An agent from before `spawn` existed calls the only tool it knows,
+        // and what it gets back has to parse as a decision.
+        let request = json!({
+            "jsonrpc": "2.0", "id": 5, "method": "tools/call",
+            "params": { "arguments": { "tool_name": "Write", "input": {}, "tool_use_id": "toolu_y" } },
+        });
+        let response = answer(&request, "s_no-such-session-at-all", nowhere(), &none())
+            .await
+            .unwrap();
+        let text = response["result"]["content"][0]["text"].as_str().unwrap();
+        let decision: Value = serde_json::from_str(text).unwrap();
+        assert_eq!(decision["behavior"], "deny");
     }
 
     #[tokio::test]

@@ -134,3 +134,43 @@ export function LinearMark({ size = 14, className = "" }: { size?: number; class
     </svg>
   );
 }
+
+/**
+ * Firetower's own mark: the watchtower, with the beacon lit.
+ *
+ * The tower is drawn in `currentColor`, so it takes the colour of wherever it
+ * sits — bone on the dark app. The one fixed hue is the beacon in the cabin,
+ * the brand orange: the single place that colour is spent on identity, apart
+ * from the ember that means a session is waiting on you.
+ *
+ * Portrait (809 × 1335 in the source), so `size` is the mark's **height** and
+ * the width follows, rather than squaring a tall shape into a box.
+ */
+export const FIRETOWER_ORANGE = "#FF5E00";
+
+export function FiretowerMark({ size = 22, className = "" }: { size?: number; className?: string }) {
+  const width = Math.round((size * 809) / 1335);
+  return (
+    <svg
+      width={width}
+      height={size}
+      viewBox="0 0 809 1335"
+      fill="none"
+      aria-hidden
+      className={`shrink-0 ${className}`}
+    >
+      <g stroke="currentColor" strokeWidth={65} strokeLinecap="round">
+        <path d="M32.5 404.5 404.5 32.5" />
+        <path d="M404.5 32.5 776.5 404.5" />
+        <path d="M32.5 404.5h744" />
+        <path d="M154.5 992.5h499" />
+        <path d="M69.5 1302.5 218.5 683.5" />
+        <path d="M739.5 1302.5 590.5 683.5" />
+        <path d="M154.5 646.5h499" />
+        <path d="M154.5 431.5v204" />
+        <path d="M653.5 442.5v204" />
+      </g>
+      <circle cx="404.5" cy="519.5" r="115.5" fill={FIRETOWER_ORANGE} />
+    </svg>
+  );
+}

@@ -11,6 +11,7 @@ export * from './meta/meta.zod';
 export * from './organization/organization.zod';
 export * from './providers/providers.zod';
 export * from './repos/repos.zod';
+export * from './roles/roles.zod';
 export * from './secrets/secrets.zod';
 export * from './sessions/sessions.zod';
 export * from './setup/setup.zod';

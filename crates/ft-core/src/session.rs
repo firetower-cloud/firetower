@@ -276,6 +276,33 @@ pub struct Session {
     pub proposed_title: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proposed_body: Option<String>,
+    /// The session that asked for this one, when a session did.
+    ///
+    /// Absent for everything a person started, which is every session there
+    /// was until a lead could ask for a child. What hangs off this edge is in
+    /// the control plane: a child's hand-back goes to its lead rather than
+    /// into the inbox, and ending the lead ends the tree.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<SessionId>,
+    /// The profile this session was started as, by id, when it was started as
+    /// one. What decides whether it may delegate — a Manager may — and what the
+    /// rail reads to say which kind of agent a workspace holds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_id: Option<String>,
+    /// What the lead said this child was for, in its own words.
+    ///
+    /// Carried so the child's own screen can say why it exists — the first
+    /// question anyone asks about a workspace they did not open.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spawn_reason: Option<String>,
+    /// The plan the agent is keeping, when it set one through `firetower:plan`.
+    ///
+    /// The cross-engine fallback. Claude Code's todo list and Codex's own plan
+    /// already arrive live on the turn stream and are what the rail prefers;
+    /// this is for an engine with no plan tool of its own, and is read only
+    /// when the live one is empty.
+    #[serde(default)]
+    pub plan: Vec<crate::turn::PlanStep>,
     pub host_id: HostId,
     pub workspace_id: Option<WorkspaceId>,
     /// What this session is going to do, in order, decided when it was created.
@@ -369,6 +396,22 @@ pub struct NewSession {
     /// choice.
     #[serde(default)]
     pub share: Share,
+    /// The profile to start as, by id. Omit for a plain agent with no persona.
+    ///
+    /// It shapes the agent's system prompt, pins the engine when it names one,
+    /// and decides whether this session may delegate — a Manager may, an
+    /// Operator does the work itself.
+    #[serde(default)]
+    pub profile: Option<String>,
+    /// Model, effort, permissions and sandbox to start with, overriding what
+    /// this person last used. What the New page's picker sends; once the
+    /// session has run a turn, its own choices are what a restart remembers.
+    #[serde(default)]
+    pub settings: crate::controls::Preferred,
+    /// The skills to start with, by id. Omit (null) to take your defaults for
+    /// the repositories; a list — including an empty one — overrides them.
+    #[serde(default)]
+    pub skills: Option<Vec<String>>,
 }
 
 /// One repository to check out, as the API accepts it.

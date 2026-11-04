@@ -365,6 +365,52 @@
         }
       }
     },
+    "/api/v1/agents/{kind}/controls": {
+      "get": {
+        "tags": [
+          "agents"
+        ],
+        "summary": "What an agent can be asked to change, before there is a session to ask.",
+        "description": "So the New page can offer the model and effort you'll start with. The\nchoices Firetower knows on its own — Claude Code's are fixed; Codex lists\nits own only once it is running, so its model is absent here until then —\nand each one's `current` is what this person last used, so the picker opens\non it rather than blank.",
+        "operationId": "agent_controls",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "description": "Agent kind, e.g. ClaudeCode",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Control"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/agents/{kind}/install": {
       "post": {
         "tags": [
@@ -3400,6 +3446,214 @@
         }
       }
     },
+    "/api/v1/roles": {
+      "get": {
+        "tags": [
+          "roles"
+        ],
+        "operationId": "list_roles",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Role"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "roles"
+        ],
+        "operationId": "create_role",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewRole"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Role"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/roles/{id}": {
+      "put": {
+        "tags": [
+          "roles"
+        ],
+        "operationId": "update_role",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Role id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewRole"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Role"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "roles"
+        ],
+        "operationId": "delete_role",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Role id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/roles/{id}/default": {
+      "put": {
+        "tags": [
+          "roles"
+        ],
+        "operationId": "set_default_role",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Role id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoleDefault"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/secrets": {
       "get": {
         "tags": [
@@ -3682,6 +3936,49 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/EndedAll"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/token-usage": {
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "operationId": "token_usage",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UsageQuery"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SessionTokens"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
                 }
               }
             }
@@ -6312,6 +6609,47 @@
         }
       }
     },
+    "/api/v1/skills/{id}/approve": {
+      "post": {
+        "tags": [
+          "skills"
+        ],
+        "operationId": "approve_skill",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The skill",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Skill"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/skills/{id}/default": {
       "put": {
         "tags": [
@@ -6380,6 +6718,81 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SkillDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/skills/{id}/discard": {
+      "post": {
+        "tags": [
+          "skills"
+        ],
+        "operationId": "discard_skill",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The skill",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/skills/{id}/review": {
+      "get": {
+        "tags": [
+          "skills"
+        ],
+        "operationId": "review_skill",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The skill",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillReview"
                 }
               }
             }
@@ -10630,6 +11043,7 @@
           "secret",
           "skill",
           "artifact",
+          "role",
           "repository"
         ]
       },
@@ -11827,6 +12241,78 @@
           }
         }
       },
+      "NewRole": {
+        "type": "object",
+        "description": "What the API accepts to create or change a role.",
+        "required": [
+          "name",
+          "does"
+        ],
+        "properties": {
+          "account": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The subscription its agent runs on, by account id. Omit to run on the\nowner's default for the engine."
+          },
+          "agent": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "canDelegate": {
+            "type": "boolean",
+            "description": "Whether it is a Manager. Defaults to an Operator."
+          },
+          "delegateScope": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The subagents it may delegate to, by id. Empty = any the owner can see."
+          },
+          "directory": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A directory to file it in, by id, so a teammate can reach it. Omit for\nyour own space. Only honoured at creation; move it later with sharing."
+          },
+          "does": {
+            "type": "string"
+          },
+          "instructions": {
+            "type": "string"
+          },
+          "machine": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The machine its own workspace runs on, by host id. Required when\nplacement is `new`."
+          },
+          "name": {
+            "type": "string"
+          },
+          "placement": {
+            "type": "string",
+            "description": "Required: \"here\" or \"new\". Empty when omitted, so `check` says so."
+          },
+          "settings": {
+            "$ref": "#/components/schemas/Preferred",
+            "description": "How it runs its agent — model, effort, mode, sandbox. Each optional."
+          },
+          "skillScope": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The skills it may load, by id. Empty = any the owner can use."
+          }
+        }
+      },
       "NewRun": {
         "type": "object",
         "required": [
@@ -11919,6 +12405,13 @@
             ],
             "description": "What to call the workspace. Omit to derive one from the branch.\n\nThe name a person reads in the rail, not an identifier: it is free text,\nit can be changed afterwards, and two workspaces may share one. The\nbranch is what has to be unique, and git enforces that itself."
           },
+          "profile": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The profile to start as, by id. Omit for a plain agent with no persona.\n\nIt shapes the agent's system prompt, pins the engine when it names one,\nand decides whether this session may delegate — a Manager may, an\nOperator does the work itself."
+          },
           "prompt": {
             "type": [
               "string",
@@ -11944,12 +12437,26 @@
             },
             "description": "Every repository to check out, in the order they should appear.\n\nEach may name its own base branch; the working branch is the session's\nand is the same in all of them, which is what makes a change across two\nrepositories reviewable."
           },
+          "settings": {
+            "$ref": "#/components/schemas/Preferred",
+            "description": "Model, effort, permissions and sandbox to start with, overriding what\nthis person last used. What the New page's picker sends; once the\nsession has run a turn, its own choices are what a restart remembers."
+          },
           "share": {
             "$ref": "#/components/schemas/Share",
             "description": "How this workspace competes when the machine is busy.\n\nDefaulted, so a caller that has never heard of it opens a workspace that\ntakes its turn — which is what every workspace did before there was a\nchoice."
           },
           "size": {
             "$ref": "#/components/schemas/WorkspaceSize"
+          },
+          "skills": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "The skills to start with, by id. Omit (null) to take your defaults for\nthe repositories; a list — including an empty one — overrides them."
           },
           "taskKey": {
             "type": [
@@ -12312,6 +12819,36 @@
               "$ref": "#/components/schemas/Forwarded"
             },
             "description": "Ports already open on this machine for this session."
+          }
+        }
+      },
+      "Preferred": {
+        "type": "object",
+        "description": "What somebody last chose about an agent, to open their next session on.\n\nThe rule, in one place: **a session starts on the settings you were last\nworking with.** A default you have already corrected once should not come\nback on the next session, and before this one did — every session opened on\nthe flagship model at the house effort, whatever you had switched to.\n\nEvery field optional, because \"never chosen\" is the ordinary state and the\nagent's own default is the right answer then. A value that is no longer\noffered is dropped rather than sent: see [`Preferred::keeping_only`].",
+        "properties": {
+          "effort": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "mode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sandbox": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -13273,6 +13810,153 @@
           }
         }
       },
+      "ReviewFile": {
+        "type": "object",
+        "description": "One file of a held bundle, shown for review.",
+        "required": [
+          "path",
+          "executable",
+          "size"
+        ],
+        "properties": {
+          "executable": {
+            "type": "boolean"
+          },
+          "path": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "text": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The decoded contents when the file is UTF-8 — a script, a doc, the\nSKILL.md. Absent for binary (a font, an image): the card names it but\ncannot show it."
+          }
+        }
+      },
+      "Role": {
+        "type": "object",
+        "description": "A role, as the interface and the spawn tool read it.",
+        "required": [
+          "id",
+          "path",
+          "name",
+          "does",
+          "placement",
+          "settings",
+          "instructions",
+          "canDelegate",
+          "delegateScope",
+          "skillScope",
+          "mayWrite",
+          "mayShare",
+          "isDefault",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "account": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The subscription it runs its agent on, by account id. Absent means the\nowner's default for the engine resolves at launch — which is what an\nagent-authored profile gets, since it cannot see account ids."
+          },
+          "agent": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Which agent runs it, or absent to let the lead choose."
+          },
+          "canDelegate": {
+            "type": "boolean",
+            "description": "A Manager (true) gets the spawn tool and may hand work to any profile it\ncan see; an Operator (false) does the work and reports back."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "delegateScope": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The subagents a Manager may delegate to, by id. Empty means any the owner\ncan see — scope is opt-in. Everything off the list is invisible to it."
+          },
+          "does": {
+            "type": "string",
+            "description": "What it does and when to reach for it — the one line a lead reads to\ndecide whether to hand it work, the way a skill's `description` is read."
+          },
+          "id": {
+            "type": "string"
+          },
+          "instructions": {
+            "type": "string",
+            "description": "Composed into the child's instructions."
+          },
+          "isDefault": {
+            "type": "boolean",
+            "description": "Whether this person starts a new workspace as this profile by default.\nAt most one of theirs is, so setting another unsets this one."
+          },
+          "machine": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The machine its own workspace runs on, by host id, or absent to let the\nlead choose. Meaningful only when `placement` is `new`."
+          },
+          "mayShare": {
+            "type": "boolean",
+            "description": "Whether they may move it into a directory, or out of one."
+          },
+          "mayWrite": {
+            "type": "boolean",
+            "description": "Whether the person asking may edit or delete it."
+          },
+          "name": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "placement": {
+            "type": "string",
+            "description": "`lead` (let the lead choose) | `here` | `new`."
+          },
+          "settings": {
+            "$ref": "#/components/schemas/Preferred",
+            "description": "How it runs its agent — model, effort, mode, sandbox. Each unset falls\nback to the engine's default at launch, so a profile need not pin all."
+          },
+          "skillScope": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The skills it may load, by id. Empty means any the owner can use; an\noff-list skill is never written to its workspace."
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "RoleDefault": {
+        "type": "object",
+        "description": "Turn this profile into the person's default for new workspaces, or off.",
+        "required": [
+          "on"
+        ],
+        "properties": {
+          "on": {
+            "type": "boolean"
+          }
+        }
+      },
       "Rotated": {
         "type": "object",
         "description": "What the browser that changed a password gets back.",
@@ -13596,9 +14280,34 @@
             ],
             "description": "What to call the owner, so a shared list can say whose this is.\n\nSent because it cannot be looked up: listing the people in an\norganisation is an administrator's request, and a member seeing a\ncolleague's workspace still has to be told a name rather than an id."
           },
+          "parentId": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SessionId",
+                "description": "The session that asked for this one, when a session did.\n\nAbsent for everything a person started, which is every session there\nwas until a lead could ask for a child. What hangs off this edge is in\nthe control plane: a child's hand-back goes to its lead rather than\ninto the inbox, and ending the lead ends the tree."
+              }
+            ]
+          },
           "path": {
             "$ref": "#/components/schemas/ResourcePath",
             "description": "Which directory the workspace is filed in — `u/kevin/…` for somebody's\nown, `d/backend/…` once it has been handed to a directory."
+          },
+          "plan": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PlanStep"
+            },
+            "description": "The plan the agent is keeping, when it set one through `firetower:plan`.\n\nThe cross-engine fallback. Claude Code's todo list and Codex's own plan\nalready arrive live on the turn stream and are what the rail prefers;\nthis is for an engine with no plan tool of its own, and is read only\nwhen the live one is empty."
+          },
+          "profileId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The profile this session was started as, by id, when it was started as\none. What decides whether it may delegate — a Manager may — and what the\nrail reads to say which kind of agent a workspace holds."
           },
           "prompt": {
             "type": "string"
@@ -13635,6 +14344,13 @@
           },
           "size": {
             "$ref": "#/components/schemas/WorkspaceSize"
+          },
+          "spawnReason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What the lead said this child was for, in its own words.\n\nCarried so the child's own screen can say why it exists — the first\nquestion anyone asks about a workspace they did not open."
           },
           "status": {
             "$ref": "#/components/schemas/SessionStatus"
@@ -13765,6 +14481,23 @@
           "Failed",
           "Ended"
         ]
+      },
+      "SessionTokens": {
+        "type": "object",
+        "description": "One session's token spend, as the Overview tab reads it.",
+        "required": [
+          "sessionId",
+          "tokens"
+        ],
+        "properties": {
+          "sessionId": {
+            "type": "string"
+          },
+          "tokens": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
       },
       "SetIdentity": {
         "type": "object",
@@ -13975,6 +14708,7 @@
           "bytes",
           "risk",
           "builtin",
+          "held",
           "updatedAt",
           "mayWrite",
           "mayShare",
@@ -14014,6 +14748,10 @@
           "files": {
             "type": "integer",
             "format": "int32"
+          },
+          "held": {
+            "type": "boolean",
+            "description": "An agent wrote a version of this that ships an executable, and it is\nwaiting for the owner to approve it. Held content is never the current\nversion, so it runs nowhere until then — this is only here so a list can\nbadge it. See `review`, `approve`, `discard`."
           },
           "id": {
             "$ref": "#/components/schemas/SkillId"
@@ -14137,6 +14875,33 @@
         "properties": {
           "description": {
             "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "SkillReview": {
+        "type": "object",
+        "description": "A held version with its files' bytes, for the review that decides whether\nit may run. Unlike [`SkillDetail`] this carries contents — the whole point\nis to put the script in front of the owner before it is written anywhere.",
+        "required": [
+          "name",
+          "description",
+          "body",
+          "files"
+        ],
+        "properties": {
+          "body": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReviewFile"
+            }
           },
           "name": {
             "type": "string"
@@ -15749,6 +16514,21 @@
             "format": "int64",
             "description": "Of the output, how much was reasoning rather than answer.",
             "minimum": 0
+          }
+        }
+      },
+      "UsageQuery": {
+        "type": "object",
+        "description": "Which sessions to total tokens for — a workspace and its children, say.",
+        "required": [
+          "ids"
+        ],
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
       },

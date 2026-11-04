@@ -90,6 +90,31 @@ export const ForgetAgentParams = zod.object({
 export const ForgetAgentResponse = zod.void()
 
 /**
+ * So the New page can offer the model and effort you'll start with. The
+ * choices Firetower knows on its own — Claude Code's are fixed; Codex lists
+ * its own only once it is running, so its model is absent here until then —
+ * and each one's `current` is what this person last used, so the picker opens
+ * on it rather than blank.
+ * @summary What an agent can be asked to change, before there is a session to ask.
+ */
+export const AgentControlsParams = zod.object({
+  "kind": zod.string().describe('Agent kind, e.g. ClaudeCode')
+})
+
+export const AgentControlsResponseItem = zod.object({
+  "choices": zod.array(zod.object({
+  "caution": zod.union([zod.null(),zod.enum(['grants', 'neverAsks']).describe('Why this one is drawn apart from the rest, when it is.')]).optional(),
+  "label": zod.string().describe('What the picker shows when this is in force.'),
+  "note": zod.string().nullish().describe('Why somebody would pick it, when that is not obvious.'),
+  "value": zod.string().describe('What gets sent.')
+}).describe('One option in a picker.')),
+  "current": zod.string().nullish().describe('What is in force, when the agent has said.'),
+  "fallback": zod.string().describe('Shown when nothing is in force yet.'),
+  "kind": zod.enum(['model', 'mode', 'effort', 'sandbox']).describe('Which setting a picker changes.')
+}).describe('One picker: what it changes, what it offers, and what is in force.')
+export const AgentControlsResponse = zod.array(AgentControlsResponseItem)
+
+/**
  * The alternative was a shell command on the machine itself, which is fine
  * for a server somebody is already logged in to and useless for the container
  * Firetower is running inside. The work happens on the host either way — this

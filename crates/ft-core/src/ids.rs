@@ -73,6 +73,16 @@ id_type!(
     "Identifies a workspace — the compute a session runs on."
 );
 id_type!(HostId, "h", "Identifies a host.");
+id_type!(
+    DeliveryId,
+    "d",
+    "Identifies a result held for a lead session until it is between turns."
+);
+id_type!(
+    RoleId,
+    "role",
+    "Identifies a role — a saved kind of agent a lead can start."
+);
 id_type!(RepoId, "r", "Identifies a connected repository.");
 id_type!(UserId, "u", "Identifies someone who can sign in.");
 id_type!(OrgId, "o", "Identifies an organisation.");

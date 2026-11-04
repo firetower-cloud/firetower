@@ -924,6 +924,15 @@ fn note_for(code: &str, message: &str) -> String {
 
 /// A question, short enough for a card in the inbox.
 fn asking_about(tool: &str, args: &serde_json::Value) -> String {
+    // A lead asking leave to start a child: say what for, not which tool.
+    // The agent spells the permission name `mcp__firetower__spawn`, which
+    // tells somebody on a phone nothing about what is being asked.
+    if tool.ends_with("__spawn") {
+        return match args.get("goal").and_then(|v| v.as_str()) {
+            Some(goal) => format!("start a child agent: {goal}"),
+            None => "start a child agent".to_string(),
+        };
+    }
     for key in ["command", "file_path", "path", "url"] {
         if let Some(value) = args.get(key).and_then(|v| v.as_str()) {
             return format!("{tool}: {value}");
@@ -1335,6 +1344,14 @@ pub struct Fleet {
     /// is what tells "we are trying and it isn't answering yet" apart from "we
     /// stopped trying". Dropping the sender ends its supervisor.
     supervised: Arc<RwLock<HashMap<String, mpsc::Sender<Nudge>>>>,
+    /// Where a session's own requests go: a lead asking for a child, or for
+    /// news of one.
+    ///
+    /// Set once the rest of the control plane exists, because answering one
+    /// takes everything starting a session takes, and none of that is here.
+    /// `None` — a fleet built for a test, or before start-up finishes —
+    /// refuses the call in words rather than leaving the agent waiting.
+    delegate: Arc<RwLock<Option<mpsc::Sender<crate::delegate::AgentRequest>>>>,
 }
 
 /// A word to a supervisor between attempts.
@@ -1397,6 +1414,131 @@ impl Fleet {
             notify: crate::notify::Notifier::from_env(),
             supervised: Arc::new(RwLock::new(HashMap::new())),
             vault: None,
+            delegate: Arc::new(RwLock::new(None)),
+        }
+    }
+
+    /// Hand delegation calls to whoever can answer them, from now on.
+    pub async fn serve_delegations(&self, to: mpsc::Sender<crate::delegate::AgentRequest>) {
+        *self.delegate.write().await = Some(to);
+    }
+
+    /// A session's agent asked Firetower for something — a child, or news of
+    /// one — down the road a permission question takes.
+    ///
+    /// Handed over rather than done here: the connection loop that received
+    /// it holds a database and a channel to one worker, and starting a
+    /// session takes a good deal more. When nobody is serving these, the
+    /// agent is told so in words, which it reads; a call left unanswered would
+    /// sit in its transcript as a tool that did nothing.
+    pub async fn delegated(
+        &self,
+        host_id: &HostId,
+        session_id: &SessionId,
+        req: String,
+        tool: String,
+        input: serde_json::Value,
+    ) {
+        let handed = match self.delegate.read().await.clone() {
+            Some(to) => to
+                .send(crate::delegate::AgentRequest {
+                    host_id: host_id.clone(),
+                    session_id: session_id.clone(),
+                    req: req.clone(),
+                    tool,
+                    input,
+                })
+                .await
+                .is_ok(),
+            None => false,
+        };
+        if !handed {
+            let result = serde_json::json!({
+                "text": "Firetower is not serving delegation on this control plane.",
+            });
+            if let Err(e) = self
+                .send(
+                    host_id,
+                    ToWorker::Answer {
+                        session_id: session_id.clone(),
+                        req,
+                        result,
+                    },
+                )
+                .await
+            {
+                tracing::warn!(session = %session_id, "refusing a delegation call: {e:#}");
+            }
+        }
+    }
+
+    /// A child handed back: tell its lead, between the lead's turns.
+    ///
+    /// Held first and sent second, always, so that a result arriving while an
+    /// earlier one is still waiting goes out after it rather than around it.
+    pub async fn hand_back_to_lead(
+        &self,
+        lead: &SessionId,
+        child: &SessionId,
+        said: Option<String>,
+        note: Option<String>,
+    ) {
+        let Ok(Some(child_row)) = self.db.session(child).await else {
+            return;
+        };
+        let body = crate::delegate::hand_back_body(&child_row, said.as_deref(), note.as_deref());
+        if let Err(e) = self.db.queue_delivery(lead, Some(child), &body).await {
+            tracing::warn!(session = %lead, "holding a child's result: {e:#}");
+            return;
+        }
+        self.drain_deliveries(lead).await;
+    }
+
+    /// Send a lead everything waiting for it, if it is between turns.
+    ///
+    /// Mid-turn, it waits: the status change that ends the turn calls this
+    /// again. Everything waiting goes as one message, because each message
+    /// starts a turn and the second would otherwise land inside the first.
+    /// A lead that has ended keeps its rows until the cascade takes them,
+    /// which is the record of what it was never told.
+    pub async fn drain_deliveries(&self, lead: &SessionId) {
+        let Ok(Some(lead_row)) = self.db.session(lead).await else {
+            return;
+        };
+        if lead_row.status == SessionStatus::Ended {
+            return;
+        }
+        // Mid-turn is the *agent's* turn, not the session's status. A lead
+        // waiting on its children is `Working` with an idle agent, and that is
+        // exactly the moment a result should go in; a lead whose agent is
+        // actually mid-turn gets it when that turn ends.
+        let mid_turn = self
+            .progress
+            .read()
+            .await
+            .get(lead.as_str())
+            .is_some_and(|p| p.in_turn);
+        if mid_turn {
+            return;
+        }
+        let waiting = match self.db.take_deliveries(lead).await {
+            Ok(waiting) => waiting,
+            Err(e) => {
+                tracing::warn!(session = %lead, "reading what is waiting for it: {e:#}");
+                return;
+            }
+        };
+        if waiting.is_empty() {
+            return;
+        }
+        let body = crate::delegate::joined(waiting);
+        if let Err(e) = self.send_turn(&lead_row.host_id, lead, &body, &[]).await {
+            tracing::warn!(session = %lead, "delivering to a lead: {e:#}");
+            // Back in the queue for the next moment it stops, rather than
+            // lost: the child did the work and said so.
+            if let Err(e) = self.db.queue_delivery(lead, None, &body).await {
+                tracing::warn!(session = %lead, "re-holding a result: {e:#}");
+            }
         }
     }
 
@@ -2163,6 +2305,23 @@ impl Fleet {
                             }
 
                             if let Some((status, note)) = read.moved {
+                                // A lead whose own turn ended while the agents
+                                // it started are still at work is waiting,
+                                // not resting: nothing is for the person yet,
+                                // and the next thing to happen is a child
+                                // handing back into this conversation. The
+                                // breathing dot already means exactly this.
+                                let (status, note) = if status == SessionStatus::HandedBack
+                                    && db.children_in_flight(&session_id).await.unwrap_or(0) > 0
+                                {
+                                    (
+                                        SessionStatus::Working,
+                                        Some("Waiting on the agents it started.".to_string()),
+                                    )
+                                } else {
+                                    (status, note)
+                                };
+
                                 let was_waiting = db
                                     .session_status(&session_id)
                                     .await
@@ -2170,9 +2329,26 @@ impl Fleet {
                                     .flatten()
                                     .is_some_and(|s| s.needs_you());
                                 announce_status(&db, &events, &session_id, status, note.as_deref()).await;
+
+                                // A child's hand-back is its lead's to hear,
+                                // not the person's: that is what delegating
+                                // meant. So is a child breaking — a lead
+                                // waiting on it has to be told why nothing is
+                                // coming. A child blocked on a permission still
+                                // reaches the person: a lead may not approve
+                                // on anybody's behalf.
+                                let lead = if matches!(
+                                    status,
+                                    SessionStatus::HandedBack | SessionStatus::Failed
+                                ) {
+                                    db.parent_of(&session_id).await.ok().flatten()
+                                } else {
+                                    None
+                                };
+
                                 // On the change into needing somebody, not
                                 // every time we are told it still does.
-                                if status.needs_you() && !was_waiting {
+                                if status.needs_you() && !was_waiting && lead.is_none() {
                                     tell(&db, &notify, &session_id, note.as_deref()).await;
                                 }
 
@@ -2188,6 +2364,43 @@ impl Fleet {
                                     let host_id = host_id.clone();
                                     tokio::spawn(async move {
                                         describe(&describing, &db, &host_id, &session_id).await;
+                                        // Now the agent is done, capture anything it
+                                        // published — with its finished bytes, from
+                                        // the control plane, whoever is watching.
+                                        crate::api::artifacts::capture_session_artifacts(
+                                            &describing,
+                                            &db,
+                                            &host_id,
+                                            &session_id,
+                                        )
+                                        .await;
+                                    });
+                                }
+
+                                if let Some(lead) = lead {
+                                    // What it said this turn, read now: the
+                                    // next turn clears it, and a lead's reply
+                                    // is what starts the next turn.
+                                    let said = progress
+                                        .read()
+                                        .await
+                                        .get(session_id.as_str())
+                                        .map(|p| p.said.clone());
+                                    let fleet = replying.clone();
+                                    let child = session_id.clone();
+                                    tokio::spawn(async move {
+                                        fleet.hand_back_to_lead(&lead, &child, said, note).await;
+                                    });
+                                } else {
+                                    // Its status moved, which is as often as
+                                    // not a turn ending — so anything its own
+                                    // children handed back meanwhile can go.
+                                    // Harmless when the turn has only just
+                                    // started: the drain checks for itself.
+                                    let fleet = replying.clone();
+                                    let this = session_id.clone();
+                                    tokio::spawn(async move {
+                                        fleet.drain_deliveries(&this).await;
                                     });
                                 }
                             }
@@ -2198,10 +2411,17 @@ impl Fleet {
                             }
                         }
                         Ok(ToServer::AgentAsks { session_id, req, tool_name, input }) => {
-                            blocked(
-                                &db, &events, &notify, &asked, &conversations, &session_id,
-                                AgentSpeech::Asks { req, tool_name, input },
-                            ).await;
+                            // A call to act on, not a question to put to a
+                            // person: a lead asking for a child, or for news
+                            // of one. Same road, different far end.
+                            if let Some(tool) = tool_name.strip_prefix(crate::delegate::PREFIX) {
+                                replying.delegated(&host_id, &session_id, req, tool.to_string(), input).await;
+                            } else {
+                                blocked(
+                                    &db, &events, &notify, &asked, &conversations, &session_id,
+                                    AgentSpeech::Asks { req, tool_name, input },
+                                ).await;
+                            }
                         }
                         Ok(ToServer::AgentClosed { session_id }) => {
                             replying.agent_closed(&session_id).await;
@@ -3842,6 +4062,28 @@ impl Fleet {
 #[cfg(test)]
 mod progress_tests {
     use super::*;
+
+    /// A permission card about starting a child says what the child is for.
+    /// The agent's own name for the tool tells a phone nothing.
+    #[test]
+    fn a_card_about_spawning_names_the_goal() {
+        assert_eq!(
+            asking_about(
+                "mcp__firetower__spawn",
+                &serde_json::json!({ "goal": "review the diff" })
+            ),
+            "start a child agent: review the diff"
+        );
+        assert_eq!(
+            asking_about("mcp__firetower__spawn", &serde_json::json!({})),
+            "start a child agent"
+        );
+        // Everything else is as it was.
+        assert_eq!(
+            asking_about("Bash", &serde_json::json!({ "command": "ls" })),
+            "Bash: ls"
+        );
+    }
 
     /// Stopping a session is not the same as a session breaking.
     ///

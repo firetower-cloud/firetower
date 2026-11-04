@@ -64,6 +64,41 @@ pub(super) async fn list_sessions(
     Ok(Json(sessions))
 }
 
+/// Which sessions to total tokens for — a workspace and its children, say.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageQuery {
+    pub ids: Vec<String>,
+}
+
+/// One session's token spend, as the Overview tab reads it.
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionTokens {
+    pub session_id: String,
+    pub tokens: i64,
+}
+
+#[utoipa::path(
+    post, path = "/api/v1/sessions/token-usage", tag = "sessions",
+    request_body = UsageQuery,
+    responses((status = 200, body = Vec<SessionTokens>), (status = 401, body = ApiError)),
+)]
+pub(super) async fn token_usage(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Json(q): Json<UsageQuery>,
+) -> ApiResult<Json<Vec<SessionTokens>>> {
+    owner(&principal)?;
+    let org = state.db.org().await?;
+    let rows = state.db.token_usage(&org, &q.ids).await?;
+    Ok(Json(
+        rows.into_iter()
+            .map(|(session_id, tokens)| SessionTokens { session_id, tokens })
+            .collect(),
+    ))
+}
+
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct Page {
     #[serde(default)]
@@ -236,12 +271,75 @@ pub(super) async fn create_session(
         .map(|u| u.username.clone())
         .unwrap_or_else(|| owner.clone());
 
+    let session = create_session_as(state, owner, whose, req, None).await?;
+    Ok((StatusCode::CREATED, Json(session)))
+}
+
+/// Which session asked for the one being made, when a session did.
+///
+/// Carried into creation rather than written afterwards by the caller, so the
+/// child is a child from the moment it has a row — a lead listing its children
+/// between the two writes would otherwise not find the one it just made.
+pub(crate) struct Lineage {
+    pub parent: SessionId,
+    /// What the lead said this was for, in its own words.
+    pub reason: Option<String>,
+    /// The lead's own id for the call that asked, so the same call arriving
+    /// twice finds this child rather than making a second.
+    pub req: Option<String>,
+}
+
+/// Start a session as somebody — whether they asked in person, or a session
+/// of theirs did.
+///
+/// The handler above is this with a principal unwrapped. A lead delegating
+/// part of its task comes through here directly, as its owner, carrying the
+/// lineage that makes the child a child. Nothing about who may do what is
+/// different between the two: the owner is the owner either way, and every
+/// check below is made against them.
+pub(crate) async fn create_session_as(
+    state: AppState,
+    owner: String,
+    whose: String,
+    mut req: NewSession,
+    lineage: Option<Lineage>,
+) -> ApiResult<Session> {
     // Another agent in a place that already exists, which is a different job
     // from making one: the host, the repositories, the branch and the directory
     // are all decided, and everything below about choosing them does not apply.
     if let Some(workspace_id) = req.workspace_id.clone() {
-        return start_another_agent(state, owner, workspace_id, req).await;
+        return start_another_agent(state, owner, workspace_id, req, lineage).await;
     }
+
+    // The profile this is started as, if any. Resolved before anything is
+    // chosen, because it may pin the engine — which the rest of this function
+    // reads off `req.agent` — and it composes the persona the session carries.
+    let profile = match &req.profile {
+        Some(id) => Some(
+            state
+                .roles
+                .one(&owner, id, crate::access::Level::Viewer)
+                .await?
+                .ok_or_else(|| {
+                    ApiError::new(
+                        ErrorCode::InvalidRequest,
+                        "that profile isn't one you can start a workspace as",
+                    )
+                })?,
+        ),
+        None => None,
+    };
+    if let Some(pinned) = profile
+        .as_ref()
+        .and_then(|p| p.agent.as_deref())
+        .and_then(ft_core::Agent::from_name)
+    {
+        req.agent = pinned;
+    }
+    let persona = match &profile {
+        Some(p) => Some(persona_for(&state, &owner, p).await?),
+        None => None,
+    };
 
     // What was actually asked for, if anything. A workspace may be created
     // empty — a branch, a checkout and an agent waiting in it — so the only
@@ -560,6 +658,25 @@ pub(super) async fn create_session(
         state.db.bind_task(&id, key, url).await?;
     }
 
+    // Whose child this is, for the same reason and at the same moment.
+    if let Some(lineage) = &lineage {
+        state
+            .db
+            .set_lineage(
+                &id,
+                &lineage.parent,
+                lineage.reason.as_deref(),
+                lineage.req.as_deref(),
+            )
+            .await?;
+    }
+
+    // Which profile it was started as, for the same reason: one more thing a
+    // session may have, recorded once the row exists.
+    if let Some(profile) = &profile {
+        state.db.set_profile(&id, &profile.id).await?;
+    }
+
     // Shared from the start, when that is what was asked for. `insert_session`
     // files it in the creator's own space; this hands it to a directory, which
     // is the same operation the Access screen performs later — at the one
@@ -615,18 +732,38 @@ pub(super) async fn create_session(
     // somebody can fix in one click; one that refuses to start because a
     // default could not be read is not.
     let on_these: Vec<String> = repos.iter().map(|(r, _)| r.id.to_string()).collect();
-    match state.skills.defaults_for(&owner, &on_these).await {
-        Ok(wanted) if !wanted.is_empty() => {
-            if let Err(e) = state
-                .skills
-                .set_for_session(id.as_str(), &owner, &wanted)
-                .await
-            {
-                tracing::warn!("seeding this session's skills: {e:#}");
-            }
+    // What this session reads: the explicit selection the New page sent, or —
+    // when none was named — this person's defaults for these repositories.
+    let wanted = match &req.skills {
+        Some(chosen) => chosen.clone(),
+        None => state
+            .skills
+            .defaults_for(&owner, &on_these)
+            .await
+            .unwrap_or_else(|e| {
+                tracing::warn!("reading default skills: {e:#}");
+                Vec::new()
+            }),
+    };
+    // When this session runs as a profile that scopes its skills, keep only the
+    // ones on that list. Off-scope skills are never pinned, so they are never
+    // materialised into the workspace and never reach the agent.
+    let wanted: Vec<String> = match profile
+        .as_ref()
+        .map(|p| &p.skill_scope)
+        .filter(|s| !s.is_empty())
+    {
+        Some(scope) => wanted.into_iter().filter(|id| scope.contains(id)).collect(),
+        None => wanted,
+    };
+    if !wanted.is_empty() {
+        if let Err(e) = state
+            .skills
+            .set_for_session(id.as_str(), &owner, &wanted)
+            .await
+        {
+            tracing::warn!("seeding this session's skills: {e:#}");
         }
-        Ok(_) => {}
-        Err(e) => tracing::warn!("reading default skills: {e:#}"),
     }
 
     // The bundles themselves, each from the version its pin names. Best
@@ -658,7 +795,10 @@ pub(super) async fn create_session(
     // there is nothing better to do: one process, one environment. What each
     // repository asked for in a *file* stays its own, inside its own checkout.
     let mut env: Vec<(String, String)> = Vec::new();
-    carry_preferences(&state, &mut env, &owner, req.agent).await;
+    carry_preferences(&state, &mut env, &owner, req.agent, &req.settings).await;
+    if let Some(persona) = &persona {
+        env.push((ft_core::PERSONA_ENV.to_string(), persona.clone()));
+    }
     for vars in &per_repo_env {
         for v in vars {
             env.retain(|(existing, _)| *existing != v.name);
@@ -784,7 +924,7 @@ pub(super) async fn create_session(
         .await?
         .ok_or_else(|| ApiError::not_found("session"))?;
 
-    Ok((StatusCode::CREATED, Json(session)))
+    Ok(session)
 }
 
 /// Start this session's agent again, in the workspace it already has.
@@ -839,20 +979,87 @@ pub(super) async fn relaunch_session(
 /// Nothing chosen means nothing added, and the agent's own defaults apply. A
 /// read that fails is the same as nothing chosen: starting a session on the
 /// defaults is a small surprise, and refusing to start one is not.
+/// The system-prompt a session started as a profile carries.
+///
+/// Composed here, in the control plane, because it is the only place that can
+/// see both the profile and everything its owner can reach. The identity and
+/// the instructions always; the delegation guidance and the list of profiles
+/// to hand to only for a Manager, so an Operator is never told it can delegate.
+async fn persona_for(
+    state: &AppState,
+    owner: &str,
+    profile: &crate::roles::Role,
+) -> ApiResult<String> {
+    let mut text = format!(
+        "# You are the \"{}\" profile\n\n{}\n",
+        profile.name, profile.does
+    );
+    if !profile.instructions.trim().is_empty() {
+        text.push('\n');
+        text.push_str(profile.instructions.trim());
+        text.push('\n');
+    }
+    if profile.can_delegate {
+        text.push('\n');
+        text.push_str(ft_core::DELEGATION_GUIDANCE);
+        // Its team: what the owner can see, minus itself, narrowed to the
+        // profile's `delegate_scope` when it has one. An off-team profile is
+        // never named here, so the agent cannot ask for it — the scope is
+        // enforced by what the prompt does and does not contain.
+        let scoped = !profile.delegate_scope.is_empty();
+        let mut others: Vec<_> = state
+            .roles
+            .visible(owner, crate::access::Level::Viewer)
+            .await?
+            .into_iter()
+            .filter(|r| r.id != profile.id)
+            .filter(|r| !scoped || profile.delegate_scope.contains(&r.id))
+            .collect();
+        others.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        if others.is_empty() {
+            text.push_str(
+                "\n\nThere are no other profiles to hand to yet, so describe any one-off work \
+                 in `goal`.",
+            );
+        } else {
+            text.push_str("\n\nThe profiles you can hand work to — pass the name as `role`:\n");
+            for r in &others {
+                text.push_str(&format!("- **{}** — {}\n", r.name, r.does));
+            }
+        }
+    }
+    Ok(text)
+}
+
 async fn carry_preferences(
     state: &AppState,
     env: &mut Vec<(String, String)>,
     user_id: &str,
     agent: ft_core::Agent,
+    overrides: &ft_core::controls::Preferred,
 ) {
     let pairs = match state.db.preferred_controls(user_id, agent).await {
         Ok(pairs) => pairs,
         Err(e) => {
             tracing::warn!("reading remembered settings for {}: {e:#}", agent.label());
-            return;
+            Vec::new()
         }
     };
-    let preferred = ft_core::controls::Preferred::from_pairs(pairs);
+    // What was remembered, then whatever this start chose on top — the New
+    // page's picker wins over the last session's, field by field.
+    let mut preferred = ft_core::controls::Preferred::from_pairs(pairs);
+    if overrides.model.is_some() {
+        preferred.model = overrides.model.clone();
+    }
+    if overrides.effort.is_some() {
+        preferred.effort = overrides.effort.clone();
+    }
+    if overrides.mode.is_some() {
+        preferred.mode = overrides.mode.clone();
+    }
+    if overrides.sandbox.is_some() {
+        preferred.sandbox = overrides.sandbox.clone();
+    }
     if preferred.is_empty() {
         return;
     }
@@ -924,7 +1131,21 @@ pub(crate) async fn relaunch(
     };
 
     let mut env: Vec<(String, String)> = Vec::new();
-    carry_preferences(state, &mut env, owner, session.agent).await;
+    carry_preferences(state, &mut env, owner, session.agent, &Default::default()).await;
+    // Re-composed from the stored profile, so a session that resumes after a
+    // restart comes back as the profile it was started as. Best effort: a
+    // persona that cannot be read is a plain restart, not a refusal to restart.
+    if let Some(pid) = &session.profile_id {
+        if let Ok(Some(profile)) = state
+            .roles
+            .one(owner, pid, crate::access::Level::Viewer)
+            .await
+        {
+            if let Ok(persona) = persona_for(state, owner, &profile).await {
+                env.push((ft_core::PERSONA_ENV.to_string(), persona));
+            }
+        }
+    }
     for (name, value) in agent_env(state, session.agent, &session.id, owner).await? {
         env.retain(|(existing, _)| *existing != name);
         env.push((name, value));
@@ -993,7 +1214,8 @@ async fn start_another_agent(
     owner: String,
     workspace_id: ft_core::WorkspaceId,
     req: NewSession,
-) -> ApiResult<(StatusCode, Json<Session>)> {
+    lineage: Option<Lineage>,
+) -> ApiResult<Session> {
     if !req.agent.speaks_a_protocol() {
         return Err(ApiError::new(
             ErrorCode::InvalidRequest,
@@ -1060,10 +1282,15 @@ async fn start_another_agent(
 
     let prompt = req.prompt.as_deref().map(str::trim).unwrap_or_default();
     let id = SessionId::new();
-    let title = if prompt.is_empty() {
-        req.agent.label().to_string()
-    } else {
-        title_from(prompt)
+    // A second agent in a workspace shares the workspace's name, so that is not
+    // what tells it apart — its own `title` is. A delegated child is handed a
+    // name ("<lead> / <what>"); use it, so the Overview can show "what" instead
+    // of a near-copy of the lead's name. A plain second agent falls back to a
+    // title cut from its prompt, as before.
+    let title = match req.name.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        Some(name) => name.to_string(),
+        None if prompt.is_empty() => req.agent.label().to_string(),
+        None => title_from(prompt),
     };
 
     // The directory the workspace occupies, derived the same way it was when it
@@ -1096,10 +1323,24 @@ async fn start_another_agent(
         })
         .await?;
 
+    // A second agent a lead asked for, sharing the lead's own directory, is
+    // still that lead's child.
+    if let Some(lineage) = &lineage {
+        state
+            .db
+            .set_lineage(
+                &id,
+                &lineage.parent,
+                lineage.reason.as_deref(),
+                lineage.req.as_deref(),
+            )
+            .await?;
+    }
+
     // Its own credential and its own environment, resolved against this session
     // so the vault's log names the run that spent it.
     let mut env: Vec<(String, String)> = Vec::new();
-    carry_preferences(&state, &mut env, &owner, req.agent).await;
+    carry_preferences(&state, &mut env, &owner, req.agent, &req.settings).await;
     if let Some(account) = &req.account_id {
         super::accounts::pin(&state, &owner, &id, account, req.agent).await?;
     }
@@ -1161,7 +1402,7 @@ async fn start_another_agent(
         .await?
         .ok_or_else(|| ApiError::not_found("session"))?;
 
-    Ok((StatusCode::CREATED, Json(session)))
+    Ok(session)
 }
 
 #[utoipa::path(
@@ -1265,6 +1506,12 @@ pub(super) async fn destroy_session(
             ));
         }
 
+        // Ending a lead ends what it delegated, and only once we are past the
+        // point of turning back: a lead whose own host is away but which the
+        // caller did not force stays, so its children must stay too. Here it
+        // is forced, so they go — each the way this one is going.
+        end_children(&state, &id).await?;
+
         // Removed here, and owed a teardown there. The debt is paid the next
         // time that host connects; see `Fleet`'s reconnect.
         //
@@ -1287,6 +1534,12 @@ pub(super) async fn destroy_session(
         state.db.forget_session(&id).await?;
         return Ok(StatusCode::ACCEPTED);
     }
+
+    // Its host answers, so it is being torn down for real: end what it
+    // delegated the same way. A child in this very workspace is also a
+    // sibling, and the sibling teardown below reaches it too — ending it here
+    // first is the same end, asked once.
+    end_children(&state, &id).await?;
 
     // Ending the *place* takes the other agents in it with it. They share its
     // directory, and it is about to be reclaimed; left running they would be
@@ -1328,6 +1581,40 @@ pub(super) async fn destroy_session(
         .await?;
 
     Ok(StatusCode::ACCEPTED)
+}
+
+/// End every child of a session that is being ended.
+///
+/// Best effort per child and none of it fatal to ending the lead: a child
+/// whose host is away is forgotten here and owed a teardown there, exactly
+/// as the lead would be on that path.
+async fn end_children(state: &AppState, lead: &SessionId) -> ApiResult<()> {
+    for child in state.db.children_of(lead).await? {
+        if child.status == SessionStatus::Ended {
+            continue;
+        }
+        state.forwards.stop_session(&child.id).await;
+        state.previews.forget(&child.id);
+        if state.fleet.is_connected(&child.host_id).await {
+            if let Err(e) = state
+                .fleet
+                .send(
+                    &child.host_id,
+                    ToWorker::Destroy {
+                        session_id: child.id.clone(),
+                        force: false,
+                    },
+                )
+                .await
+            {
+                tracing::warn!(session = %child.id, "ending a child with its lead: {e:#}");
+                state.db.forget_session(&child.id).await?;
+            }
+        } else {
+            state.db.forget_session(&child.id).await?;
+        }
+    }
+    Ok(())
 }
 
 /// Removing a session whose host has stopped answering.
@@ -3423,8 +3710,9 @@ pub(super) async fn continue_with_account(
         .workspace_id
         .clone()
         .ok_or_else(|| ApiError::new(ErrorCode::InvalidRequest, "this session has no workspace"))?;
-    let (_, Json(next)) =
-        start_another_agent(state.clone(), owner.to_string(), workspace, req).await?;
+    // A hand-over between agents, not a delegation: the new run is a root
+    // like the one it continues, and nobody is told when it hands back.
+    let next = start_another_agent(state.clone(), owner.to_string(), workspace, req, None).await?;
     Ok(next.id)
 }
 

@@ -74,6 +74,29 @@ export function ArtifactTab({
   onExpanded: (v: boolean) => void;
 }) {
   const origin = useMemo(() => (artifact.url ? new URL(artifact.url).origin : null), [artifact.url]);
+
+  /* **The native shell cannot frame a plain-http artifact.** It is a secure
+     context, a dev artifact is served over http, and a secure page refuses an
+     insecure subresource — mixed content — so `src` comes up blank. When the
+     shell can read bytes for us (and the URL is that http case), fetch the page
+     without its picker (`ft-shot`) and show it in a `srcdoc` frame, which
+     inherits the shell's own origin and so loads nothing insecure. A browser
+     tab and a production https artifact keep the live `src` and the picker. */
+  const viaDoc = !!shell.loadArtifact && artifact.url.startsWith("http://");
+  const [doc, setDoc] = useState<string | null>(null);
+  useEffect(() => {
+    if (!viaDoc || !shell.loadArtifact) return;
+    let live = true;
+    const shot = artifact.url + (artifact.url.includes("?") ? "&" : "?") + "ft-shot";
+    setDoc(null);
+    shell
+      .loadArtifact(shot)
+      .then((html) => live && setDoc(html))
+      .catch((e) => live && setDoc(`<!doctype html><p style="font:14px system-ui;padding:24px;color:#888">Could not load this artifact: ${why(e)}`));
+    return () => {
+      live = false;
+    };
+  }, [viaDoc, artifact.url]);
   const frame = useRef<HTMLIFrameElement>(null);
   const [notes, setNotes] = useState<Note[]>([]);
   const [showNotes, setShowNotes] = useState(false);
@@ -439,7 +462,16 @@ export function ArtifactTab({
         {/* Relative so the find bar floats over the page itself, clear of the
             header and of the notes beside it. */}
         <div className="relative min-h-0 min-w-0 flex-1">
-          <iframe ref={frame} src={src} title={artifact.title} className="h-full w-full border-0 bg-white" />
+          {viaDoc ? (
+            <iframe
+              ref={frame}
+              srcDoc={doc ?? "<!doctype html><body style=\"background:#fff\">"}
+              title={artifact.title}
+              className="h-full w-full border-0 bg-white"
+            />
+          ) : (
+            <iframe ref={frame} src={src} title={artifact.title} className="h-full w-full border-0 bg-white" />
+          )}
           {finding && (
             <FindBar
               query={query}

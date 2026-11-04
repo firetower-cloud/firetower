@@ -108,6 +108,11 @@ pub struct Skill {
     /// Firetower ships this one. Filed in `d/firetower`, which nobody holds
     /// writer on — so it is readable by everybody and deletable by nobody.
     pub builtin: bool,
+    /// An agent wrote a version of this that ships an executable, and it is
+    /// waiting for the owner to approve it. Held content is never the current
+    /// version, so it runs nowhere until then — this is only here so a list can
+    /// badge it. See `review`, `approve`, `discard`.
+    pub held: bool,
     pub updated_at: DateTime<Utc>,
     /// Whether this person may make a version of it or rename it.
     pub may_write: bool,
@@ -242,6 +247,32 @@ pub struct SkillDetail {
     pub body: String,
     pub frontmatter: serde_json::Value,
     pub files: Vec<SkillFile>,
+}
+
+/// A held version with its files' bytes, for the review that decides whether
+/// it may run. Unlike [`SkillDetail`] this carries contents — the whole point
+/// is to put the script in front of the owner before it is written anywhere.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillReview {
+    pub name: String,
+    pub description: String,
+    pub body: String,
+    pub files: Vec<ReviewFile>,
+}
+
+/// One file of a held bundle, shown for review.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewFile {
+    pub path: String,
+    pub executable: bool,
+    pub size: i64,
+    /// The decoded contents when the file is UTF-8 — a script, a doc, the
+    /// SKILL.md. Absent for binary (a font, an image): the card names it but
+    /// cannot show it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
 }
 
 /// A file arriving from a drop.
@@ -1048,6 +1079,7 @@ const COLUMNS: &str = "k.id, k.path::text AS path, k.name, k.slug, k.description
      EXISTS (SELECT 1 FROM skill_files f \
               WHERE f.version_id = v.id AND f.path LIKE 'scripts/%') AS has_scripts, \
      (k.path <@ 'd.firetower'::ltree) AS builtin, \
+     (k.held_version_id IS NOT NULL) AS held, \
      u.name AS author";
 
 const FROM: &str = "FROM skills k \
@@ -1156,6 +1188,137 @@ impl Skills {
         .collect())
     }
 
+    /// A skill this person can see, by name. The agent names skills, not ids.
+    pub async fn by_name(&self, person: &str, name: &str) -> Result<Option<Skill>> {
+        let wanted = name.trim();
+        Ok(self
+            .visible(person, Level::Viewer)
+            .await?
+            .into_iter()
+            .find(|s| s.name.eq_ignore_ascii_case(wanted)))
+    }
+
+    /// One version's files with their bytes, as a bundle ready to re-drop.
+    /// How an update that changes only the instructions carries the rest of the
+    /// folder forward unchanged.
+    pub async fn files_with_contents(&self, version_id: &str) -> Result<Vec<IncomingFile>> {
+        Ok(sqlx::query(
+            "SELECT f.path, f.executable, b.bytes \
+               FROM skill_files f JOIN blobs b ON b.hash = f.hash \
+              WHERE f.version_id = $1 ORDER BY f.path",
+        )
+        .bind(version_id)
+        .fetch_all(&self.pool)
+        .await
+        .context("reading a bundle's bytes")?
+        .into_iter()
+        .map(|r| IncomingFile {
+            path: r.get("path"),
+            contents: ft_proto::encode(&r.get::<Vec<u8>, _>("bytes")),
+            executable: r.get("executable"),
+        })
+        .collect())
+    }
+
+    /// The held version of a skill, with contents, for the review screen.
+    ///
+    /// Viewer is enough to look; `approve`/`discard` take Writer. The bytes are
+    /// decoded here so the card can show the script that is waiting to run.
+    pub async fn review(&self, person: &str, id: &str) -> Result<Option<SkillReview>> {
+        let sql = format!(
+            "SELECT v.id AS version_id, v.body, v.frontmatter \
+               FROM skills k JOIN skill_versions v ON v.id = k.held_version_id \
+              WHERE k.id = $2 AND {visible}",
+            visible = filed_where("k", 1, Level::Viewer),
+        );
+        let Some(row) = sqlx::query(&sql)
+            .bind(person)
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await
+            .context("reading a held skill")?
+        else {
+            return Ok(None);
+        };
+        let version_id: String = row.get("version_id");
+        let frontmatter: serde_json::Value = row.get("frontmatter");
+        let files = sqlx::query(
+            "SELECT f.path, f.executable, f.size, b.bytes \
+               FROM skill_files f JOIN blobs b ON b.hash = f.hash \
+              WHERE f.version_id = $1 ORDER BY f.path",
+        )
+        .bind(&version_id)
+        .fetch_all(&self.pool)
+        .await?
+        .into_iter()
+        .map(|r| ReviewFile {
+            path: r.get("path"),
+            executable: r.get("executable"),
+            size: r.get("size"),
+            text: String::from_utf8(r.get::<Vec<u8>, _>("bytes")).ok(),
+        })
+        .collect();
+        let field = |k: &str| {
+            frontmatter
+                .get(k)
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string()
+        };
+        Ok(Some(SkillReview {
+            name: field("name"),
+            description: field("description"),
+            body: row.get("body"),
+            files,
+        }))
+    }
+
+    /// Approve the held version: make it current, copy its name and
+    /// description down, clear the hold. Writer only.
+    pub async fn approve(&self, person: &str, id: &str) -> Result<bool> {
+        if self.one(person, id, Level::Writer).await?.is_none() {
+            return Ok(false);
+        }
+        let done = sqlx::query(
+            "UPDATE skills k SET current_version_id = v.id, \
+                name = coalesce(v.frontmatter->>'name', k.name), \
+                description = coalesce(v.frontmatter->>'description', k.description), \
+                held_version_id = NULL, updated_at = now() \
+             FROM skill_versions v \
+             WHERE k.id = $1 AND v.id = k.held_version_id",
+        )
+        .bind(id)
+        .execute(&self.pool)
+        .await
+        .context("approving a held skill")?;
+        Ok(done.rows_affected() > 0)
+    }
+
+    /// Discard the held version. A skill that never had an approved version —
+    /// a draft an agent wrote and the owner turned down — goes with it. Writer
+    /// only.
+    pub async fn discard(&self, person: &str, id: &str) -> Result<bool> {
+        if self.one(person, id, Level::Writer).await?.is_none() {
+            return Ok(false);
+        }
+        let mut tx = self.pool.begin().await?;
+        // Deleting the version clears `held_version_id` through the foreign key.
+        let done = sqlx::query(
+            "DELETE FROM skill_versions \
+              WHERE id = (SELECT held_version_id FROM skills WHERE id = $1)",
+        )
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .context("discarding a held version")?;
+        sqlx::query("DELETE FROM skills WHERE id = $1 AND current_version_id IS NULL")
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(done.rows_affected() > 0)
+    }
+
     /// Every version of a skill, newest first.
     pub async fn versions(&self, person: &str, id: &str) -> Result<Vec<SkillVersion>> {
         let sql = format!(
@@ -1196,6 +1359,10 @@ impl Skills {
         person: &str,
         person_slug: &str,
         new: &NewSkill,
+        // Hold it for review rather than make it live. An agent authoring a
+        // skill that ships an executable passes true; the editor, where a
+        // person is already looking at what they wrote, passes false.
+        hold: bool,
     ) -> Result<SkillId> {
         let id = SkillId::new();
         // A discriminator, because two people may well both have a
@@ -1223,13 +1390,23 @@ impl Skills {
         .await
         .context("writing a skill")?;
 
-        write_version(&mut tx, id.as_str(), person, new, 1).await?;
+        write_version(&mut tx, id.as_str(), person, new, 1, hold).await?;
         tx.commit().await?;
         Ok(id)
     }
 
     /// Add a version to a skill that already exists.
-    pub async fn add_version(&self, id: &str, person: &str, new: &NewSkill) -> Result<i32> {
+    ///
+    /// When `hold`, the version is held for review and the two editable fields
+    /// stay as they were — the live skill keeps its name and description until
+    /// the pending version is approved.
+    pub async fn add_version(
+        &self,
+        id: &str,
+        person: &str,
+        new: &NewSkill,
+        hold: bool,
+    ) -> Result<i32> {
         let mut tx = self.pool.begin().await?;
         let last: Option<i32> =
             sqlx::query_scalar("SELECT max(version) FROM skill_versions WHERE skill_id = $1")
@@ -1237,16 +1414,18 @@ impl Skills {
                 .fetch_one(&mut *tx)
                 .await?;
         let version = last.unwrap_or(0) + 1;
-        write_version(&mut tx, id, person, new, version).await?;
-        // The two editable fields follow the version that introduced them.
-        sqlx::query(
-            "UPDATE skills SET name = $2, description = $3, updated_at = now() WHERE id = $1",
-        )
-        .bind(id)
-        .bind(&new.name)
-        .bind(&new.description)
-        .execute(&mut *tx)
-        .await?;
+        write_version(&mut tx, id, person, new, version, hold).await?;
+        if !hold {
+            // The two editable fields follow the version that introduced them.
+            sqlx::query(
+                "UPDATE skills SET name = $2, description = $3, updated_at = now() WHERE id = $1",
+            )
+            .bind(id)
+            .bind(&new.name)
+            .bind(&new.description)
+            .execute(&mut *tx)
+            .await?;
+        }
         tx.commit().await?;
         Ok(version)
     }
@@ -1417,7 +1596,7 @@ impl Skills {
             .await
             .context("writing a built-in skill")?;
             // No `created_by`: nobody made this, Firetower ships it.
-            write_version(&mut tx, id.as_str(), "", &new, 1).await?;
+            write_version(&mut tx, id.as_str(), "", &new, 1, false).await?;
             tx.commit().await?;
             return Ok(true);
         };
@@ -1427,7 +1606,7 @@ impl Skills {
         if self.current_digest(&id).await?.as_deref() == Some(want.as_str()) {
             return Ok(false);
         }
-        self.add_version(&id, "", &new).await?;
+        self.add_version(&id, "", &new, false).await?;
         Ok(true)
     }
 
@@ -1995,6 +2174,11 @@ async fn write_version(
     person: &str,
     new: &NewSkill,
     version: i32,
+    // When held, this version becomes the skill's `held_version_id` — pending
+    // the owner's review — rather than its `current_version_id`. Nothing that
+    // materialises a skill reads `held_version_id`, so held content runs
+    // nowhere. See the `skill_hold` migration.
+    hold: bool,
 ) -> Result<()> {
     let vid = SkillVersionId::new();
     let paths: Vec<String> = new.files.iter().map(|f| f.path.clone()).collect();
@@ -2065,7 +2249,12 @@ async fn write_version(
         .execute(&mut **tx)
         .await?;
 
-    sqlx::query("UPDATE skills SET current_version_id = $2, updated_at = now() WHERE id = $1")
+    let pointer = if hold {
+        "UPDATE skills SET held_version_id = $2, updated_at = now() WHERE id = $1"
+    } else {
+        "UPDATE skills SET current_version_id = $2, updated_at = now() WHERE id = $1"
+    };
+    sqlx::query(pointer)
         .bind(skill)
         .bind(vid.as_str())
         .execute(&mut **tx)
@@ -2134,6 +2323,7 @@ fn read_skill(r: sqlx::postgres::PgRow) -> Result<Skill> {
         ),
         author: r.try_get("author").ok().flatten(),
         builtin: r.try_get("builtin").unwrap_or(false),
+        held: r.try_get("held").unwrap_or(false),
         updated_at: r.get("updated_at"),
         may_write: r.try_get("may_write").unwrap_or(false),
         may_share: r.try_get("may_share").unwrap_or(false),
@@ -2213,10 +2403,12 @@ mod tests {
         }
 
         // Ana decides against it. A second boot must leave that alone.
-        skills
-            .set_default(ana.id.as_str(), &shipped[0], None, false)
-            .await
-            .unwrap();
+        for id in &shipped {
+            skills
+                .set_default(ana.id.as_str(), id, None, false)
+                .await
+                .unwrap();
+        }
         skills.offer_builtins_once(&accounts).await.unwrap();
         assert!(
             skills.always_on(ana.id.as_str()).await.unwrap().is_empty(),
@@ -2340,6 +2532,149 @@ mod tests {
         assert!(n > 5 && n < 40, "{n} tokens is not a plausible count");
     }
 
+    /// A skill an agent writes that ships a script is held: in the library,
+    /// but on no session's disk, until the owner has read it and approved it.
+    #[tokio::test]
+    async fn a_held_skill_runs_nowhere_until_approved() {
+        use crate::accounts::Accounts;
+        use crate::db::Db;
+
+        let (db, _admin) = Db::open_for_test_owned().await.unwrap();
+        let pool = db.pool().clone();
+        let skills = Skills::new(pool.clone());
+        let accounts = Accounts::new(pool.clone());
+        let org = db.org().await.unwrap();
+        let org_id = ft_core::OrgId::from_stored(org.clone());
+        let ana = accounts
+            .create_user(&org_id, "ana", "ana@example.test", "member")
+            .await
+            .unwrap()
+            .0
+            .id;
+
+        let exec = |name: &str| {
+            let body = "# Deployer\n\nShips it.";
+            let md = format!("---\nname: {name}\ndescription: Ships it.\n---\n\n{body}");
+            NewSkill {
+                name: name.into(),
+                description: "Ships it.".into(),
+                frontmatter: serde_json::json!({"name": name, "description": "Ships it."}),
+                body: body.into(),
+                files: vec![
+                    IncomingFile {
+                        path: "SKILL.md".into(),
+                        contents: ft_proto::encode(md.as_bytes()),
+                        executable: false,
+                    },
+                    IncomingFile {
+                        path: "scripts/go.sh".into(),
+                        contents: ft_proto::encode(b"#!/bin/sh\necho hi\n"),
+                        executable: true,
+                    },
+                ],
+                notes: None,
+            }
+        };
+
+        // Written held: it is in the library, badged, with no current version.
+        let id = skills
+            .create(&org, ana.as_str(), "ana", &exec("deployer"), true)
+            .await
+            .unwrap();
+        let s = skills
+            .one(ana.as_str(), id.as_str(), Level::Viewer)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(s.held, "a held skill says so");
+        assert_eq!(s.version, 0, "nothing is current while it is held");
+
+        // A session that selects it gets nothing: held content is on no disk.
+        let host = db
+            .ensure_host("fire-01", ft_core::Compute::Local, ana.as_str())
+            .await
+            .unwrap();
+        let session = ft_core::SessionId::new();
+        db.insert_session(
+            &session,
+            &host.id,
+            ana.as_str(),
+            None,
+            "Deploying",
+            "",
+            None,
+            None,
+            "Shell",
+            ft_core::WorkspaceSize::Medium,
+            ft_core::Share::Equal,
+            &[],
+            None,
+        )
+        .await
+        .unwrap();
+        skills
+            .set_for_session(session.as_str(), ana.as_str(), &[id.as_str().to_string()])
+            .await
+            .unwrap();
+        assert!(
+            skills
+                .bundles_for_session(session.as_str())
+                .await
+                .unwrap()
+                .is_empty(),
+            "a held skill reaches no session"
+        );
+
+        // The review shows the owner exactly what would run.
+        let review = skills
+            .review(ana.as_str(), id.as_str())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            review.files.iter().any(|f| f.path == "scripts/go.sh"
+                && f.executable
+                && f.text.as_deref() == Some("#!/bin/sh\necho hi\n")),
+            "the script is there to read, verbatim"
+        );
+
+        // Approved, it becomes current and now materialises.
+        assert!(skills.approve(ana.as_str(), id.as_str()).await.unwrap());
+        let s = skills
+            .one(ana.as_str(), id.as_str(), Level::Viewer)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(!s.held, "approving clears the hold");
+        assert_eq!(s.version, 1, "the held version is now the current one");
+        skills
+            .set_for_session(session.as_str(), ana.as_str(), &[id.as_str().to_string()])
+            .await
+            .unwrap();
+        let bundles = skills.bundles_for_session(session.as_str()).await.unwrap();
+        assert!(
+            bundles
+                .iter()
+                .any(|b| b.files.iter().any(|f| f.path == "scripts/go.sh")),
+            "once approved, the script materialises"
+        );
+
+        // A different draft, discarded, is gone entirely — it was never live.
+        let other = skills
+            .create(&org, ana.as_str(), "ana", &exec("cleaner"), true)
+            .await
+            .unwrap();
+        assert!(skills.discard(ana.as_str(), other.as_str()).await.unwrap());
+        assert!(
+            skills
+                .one(ana.as_str(), other.as_str(), Level::Viewer)
+                .await
+                .unwrap()
+                .is_none(),
+            "a discarded draft that was never approved is removed"
+        );
+    }
+
     /// The same skill, imported by two people, meeting in one directory.
     ///
     /// The team's copy is in `d/shared`; Ana has her own. Moving hers in
@@ -2382,7 +2717,7 @@ mod tests {
 
         // The team's copy, filed into the directory everybody works in.
         let team = skills
-            .create(&org, &admin, "admin", &bundle("v1"))
+            .create(&org, &admin, "admin", &bundle("v1"), false)
             .await
             .unwrap();
         let at = access
@@ -2403,7 +2738,7 @@ mod tests {
 
         // Ana's identical copy, on in one of her sessions.
         let hers = skills
-            .create(&org, ana.as_str(), "ana", &bundle("v1"))
+            .create(&org, ana.as_str(), "ana", &bundle("v1"), false)
             .await
             .unwrap();
         let host = db
@@ -2463,7 +2798,7 @@ mod tests {
 
         // A different copy, added as the team's next version.
         let changed = skills
-            .create(&org, ana.as_str(), "ana", &bundle("v2"))
+            .create(&org, ana.as_str(), "ana", &bundle("v2"), false)
             .await
             .unwrap();
         let found = skills

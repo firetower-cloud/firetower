@@ -24,10 +24,14 @@ export function Pop({
   anchor,
   onClose,
   children,
+  width,
 }: {
   anchor: HTMLElement;
   onClose: () => void;
   children: React.ReactNode;
+  /** A fixed width, for a menu that should match whatever it drops from — a
+   *  field-wide select rather than a small row menu. Defaults to `w-44`. */
+  width?: number;
 }) {
   const box = useRef<HTMLDivElement>(null);
   const [at, setAt] = useState<{ top: number; left: number } | null>(null);
@@ -77,10 +81,10 @@ export function Pop({
     <div
       ref={box}
       role="menu"
-      style={{ position: "fixed", top: at?.top ?? -9999, left: at?.left ?? -9999 }}
-      className={`z-[70] w-44 overflow-hidden rounded-lg border border-line bg-panel shadow-(--shadow-float) ${
-        at ? "" : "invisible"
-      }`}
+      style={{ position: "fixed", top: at?.top ?? -9999, left: at?.left ?? -9999, width }}
+      className={`z-[70] overflow-hidden rounded-lg border border-line bg-panel shadow-(--shadow-float) ${
+        width == null ? "w-44" : ""
+      } ${at ? "" : "invisible"}`}
     >
       {children}
     </div>,

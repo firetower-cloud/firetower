@@ -20,11 +20,15 @@
  * hours; the session picks up where it was.
  */
 import { createContext, Fragment, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { navigate } from "~/shims/next-navigation";
 import {
   AlertTriangle,
   Bot,
   Check,
   ChevronRight,
+  CornerDownLeft,
+  CornerUpLeft,
+  CornerUpRight,
   Copy,
   Eye,
   FileText,
@@ -49,6 +53,7 @@ import { editFrom } from "~/components/EditCard";
 import { stepLines } from "~/components/Steps";
 import { delegating, useConversation, type Asked, type Item, type Questionnaire, type Task } from "~/api/conversation";
 import { delegated, fold, mainline, summarise } from "~/api/steps";
+import { relays, type Relay } from "~/api/relay";
 import type { Artifact as ArtifactModel, Decision, Event, ItemKind, PlanStep, RequestKind, Session } from "~/api/generated/model";
 import { useAnswerRequest, useRelaunchSession, getGetSessionQueryKey, sendTurn } from "~/api/generated/sessions/sessions";
 import { asMessage, useNotes, type Note } from "~/api/notes";
@@ -116,6 +121,7 @@ type Open = { onOpenDiff: () => void; onOpenFile: (path: string, keep?: boolean,
 
 export function Chat({
   session,
+  lead = null,
   branch,
   onOpenDiff,
   onOpenFile,
@@ -123,6 +129,8 @@ export function Chat({
   onOpenArtifact,
 }: {
   session: Session;
+  /** The session that asked for this one, when one did and it is still listed. */
+  lead?: Session | null;
   branch?: string;
   artifacts?: ArtifactModel[];
   onOpenArtifact?: (id: string, title: string) => void;
@@ -439,7 +447,7 @@ export function Chat({
       <div
         ref={scroller}
         onMouseUp={takeSelection}
-        className="scroll-slim min-h-0 flex-1 overflow-y-auto"
+        className="scroll-slim min-h-0 flex-1 overflow-y-auto overflow-x-hidden"
         onScroll={(e) => {
           const el = e.currentTarget;
           following.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
@@ -461,6 +469,28 @@ export function Chat({
             <span>started {elapsed(minutesSince(session.createdAt))} ago</span>
             {conversation.model && <span className="font-mono">{conversation.model}</span>}
           </div>
+
+          {/* Whose work this is part of. A session another session asked for
+              says so at the top, because "why does this exist" is the first
+              question anyone asks about a workspace they did not open — and
+              because what it says when it finishes goes to that session, not
+              to the inbox. */}
+          {session.parentId && (
+            <button
+              onClick={() => navigate(`/sessions/${lead?.workspaceId ?? session.parentId}`)}
+              title={`Started by ${lead?.name ?? "another session"}${session.spawnReason ? ` — ${session.spawnReason}` : ""}. It reports back here.`}
+              className="group mt-3 flex w-full items-center gap-2 rounded-lg border border-line-soft bg-raise/40 px-3 py-1.5 text-left text-meta transition-colors hover:border-dim hover:bg-raise"
+            >
+              <CornerUpLeft className="h-3.5 w-3.5 shrink-0 text-slate" strokeWidth={1.75} />
+              <span className="shrink-0 text-mute">from</span>
+              <span className="min-w-0 max-w-[45%] shrink truncate font-medium text-bone">
+                {lead?.name ?? "another session"}
+              </span>
+              {session.spawnReason && (
+                <span className="min-w-0 flex-1 truncate text-mute">— {session.spawnReason}</span>
+              )}
+            </button>
+          )}
 
           {steps.length > 0 && <BringUp steps={steps} />}
 
@@ -622,6 +652,21 @@ function Node({
   onOpenFile,
 }: { item: Item; items: Item[]; tasks: Task[] } & Open) {
   if (item.kind === "UserMessage") {
+    /* A result a child handed back, or a steer from a lead, arrives as a user
+       turn — the only thing an agent reads as input — so without this it would
+       draw as a bubble from you. Drawn instead as a card from the other agent.
+       Usually one; a lead that was mid-turn when several children reported gets
+       them in one turn, so there can be more. */
+    const relayed = relays(item.text);
+    if (relayed.length > 0) {
+      return (
+        <>
+          {relayed.map((r, i) => (
+            <Relayed key={i} relay={r} />
+          ))}
+        </>
+      );
+    }
     /* The block the composer wrote under the message comes back out as
        chips, and the handles in the sentence are drawn as handles. The text
        is still what the agent read; nothing here is a second copy of it. */
@@ -1048,6 +1093,63 @@ function Delegated({ item, items, tasks, onOpenDiff, onOpenFile }: { item: Item;
           )}
           {rows.length === 0 && !task?.summary && <p className="text-meta text-mute">Nothing back yet.</p>}
         </div>
+      )}
+    </li>
+  );
+}
+
+/**
+ * A message from another agent, drawn so it is not mistaken for yours.
+ *
+ * A child's hand-back, a child's mid-task check-in, or a lead's steer reaches
+ * the agent as a user turn, so the transcript would otherwise draw it as a
+ * bubble from you — which is a lie about who spoke. Left of the thread, with
+ * the other session named and a line down the side in the tone its direction
+ * carries: sage for a child reporting a result, slate for a check-in or a lead
+ * steering. Collapsed to a line by default — the summary is the agent's to
+ * read, and yours to open when you want it.
+ */
+function Relayed({ relay }: { relay: Relay }) {
+  const [open, setOpen] = useState(false);
+  // A hand-back and a check-in both come *in* from a child; a steer goes out.
+  const incoming = relay.kind === "handback" || relay.kind === "update";
+  const tone =
+    relay.kind === "handback"
+      ? { border: "border-sage-deep", icon: "text-sage", label: "handed back" }
+      : relay.kind === "update"
+        ? { border: "border-slate-deep", icon: "text-slate", label: "checked in" }
+        : { border: "border-slate-deep", icon: "text-slate", label: "steered" };
+  const preview = relay.body.split("\n").find((l) => l.trim())?.trim() ?? "";
+  const rendered = useMemo(() => <Markdown>{relay.body}</Markdown>, [relay.body]);
+
+  return (
+    <li className={`border-l-2 pl-3 ${tone.border}`}>
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={() => setOpen(!open)}
+        onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && setOpen(!open)}
+        className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 hover:bg-raise/60"
+      >
+        <ChevronRight className={`h-3.5 w-3.5 shrink-0 text-mute transition-transform duration-150 ${open ? "rotate-90" : ""}`} strokeWidth={1.75} />
+        <Icon of={incoming ? CornerDownLeft : CornerUpRight} size={14} className={tone.icon} />
+        {/* The other session's name, a way into it. A button, not nested in the
+            row's button — this is a div with a click, so that is allowed. */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            navigate(`/sessions/${relay.id}`);
+          }}
+          className="min-w-0 max-w-[60%] shrink truncate font-mono text-code text-bone hover:underline"
+          title={relay.name}
+        >
+          {relay.name}
+        </button>
+        <span className="shrink-0 text-meta text-mute">{tone.label}</span>
+        {!open && preview && <span className="min-w-0 flex-1 truncate text-meta text-dim">{preview}</span>}
+      </div>
+      {open && (
+        <div className="prose-desk mt-1 pl-1">{rendered}</div>
       )}
     </li>
   );

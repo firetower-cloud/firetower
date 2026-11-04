@@ -93,7 +93,7 @@ impl Choice {
 /// Every field optional, because "never chosen" is the ordinary state and the
 /// agent's own default is the right answer then. A value that is no longer
 /// offered is dropped rather than sent: see [`Preferred::keeping_only`].
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Preferred {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -419,6 +419,24 @@ pub fn for_agent(agent: crate::Agent, models: Vec<Choice>, efforts: Vec<Choice>)
         }
         // Nothing to change about a shell.
         crate::Agent::KimiCode | crate::Agent::CursorAgent | crate::Agent::Shell => Vec::new(),
+    }
+}
+
+/// What a control starts on when nothing has been chosen — the same default
+/// `launch_headless` and the agents' own launchers apply.
+///
+/// So a picker with no remembered choice shows what will actually run rather
+/// than a blank. `None` where the answer is not fixed: Codex's model is the one
+/// it lists once running, not something known here.
+pub fn default_value(agent: crate::Agent, kind: ControlKind) -> Option<&'static str> {
+    use crate::Agent;
+    match (agent, kind) {
+        (Agent::ClaudeCode, ControlKind::Model) => Some(crate::BIGGEST),
+        (Agent::ClaudeCode, ControlKind::Effort) => Some(crate::EFFORT),
+        (Agent::ClaudeCode, ControlKind::Mode) => Some(crate::ASKING_MODE),
+        (Agent::Codex, ControlKind::Mode) => Some(crate::codex::DEFAULT_MODE),
+        (Agent::Codex, ControlKind::Sandbox) => Some(SANDBOX_WORKSPACE_NETWORK),
+        _ => None,
     }
 }
 

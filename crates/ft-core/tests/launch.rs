@@ -15,6 +15,7 @@ fn argv(start: Start) -> Vec<String> {
             &Asking::CannotAsk,
             start,
             &Default::default(),
+            None,
         )
         .expect("Claude Code is driven headless")
 }
@@ -88,6 +89,7 @@ fn a_restarted_agent_is_handed_the_conversation() {
             &Asking::CannotAsk,
             Start::Carrying("they asked for drawings".into()),
             &Default::default(),
+            None,
         )
         .expect("Claude Code is driven headless");
 
@@ -115,12 +117,14 @@ fn codex_takes_no_flags_either_way() {
         &Asking::CannotAsk,
         Start::Fresh,
         &Default::default(),
+        None,
     );
     let resumed = Agent::Codex.launch_headless(
         "s_01example",
         &Asking::CannotAsk,
         Start::Resume,
         &Default::default(),
+        None,
     );
     assert_eq!(fresh, resumed);
 }
@@ -143,6 +147,7 @@ fn claude_is_launched_with_the_settings_its_pickers_show() {
             },
             ft_core::Start::Fresh,
             &Default::default(),
+            None,
         )
         .expect("Claude Code is driven");
 
@@ -176,6 +181,7 @@ fn every_agent_is_told_where_an_artifact_goes() {
                 &Asking::CannotAsk,
                 start,
                 &Default::default(),
+                None,
             )
             .expect("Claude Code is driven headless");
 

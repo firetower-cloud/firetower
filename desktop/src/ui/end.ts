@@ -16,7 +16,10 @@ export function useEndWorkspace() {
   const confirm = useConfirm();
   const cache = useQueryClient();
 
-  return async (place: Workspace): Promise<{ ended: boolean; trouble?: string }> => {
+  /* `delegated` is how many agents this place started elsewhere and has not
+     ended: they go with it, and the question has to say so. The caller counts,
+     because only a list of places knows which ones belong under this one. */
+  return async (place: Workspace, delegated = 0): Promise<{ ended: boolean; trouble?: string }> => {
     const work = await sessionWork(place.id).catch(() => null);
     const uncommitted = (work ?? []).reduce((n, c) => n + (c.uncommitted ?? 0), 0);
     const unpushed = (work ?? []).reduce((n, c) => n + ((c.ahead ?? 0) > 0 && c.pushed === false ? c.ahead ?? 0 : 0), 0);
@@ -41,7 +44,9 @@ export function useEndWorkspace() {
     const ok = await confirm({
       title: `End "${place.name}"?`,
       body:
-        `${agents === 1 ? "The agent stops" : `${agents} agents stop`}. ` +
+        `${agents === 1 ? "The agent stops" : `${agents} agents stop`}` +
+        (delegated > 0 ? `, and so ${delegated === 1 ? "does the agent" : `do the ${delegated} agents`} it started elsewhere` : "") +
+        ". " +
         (bare
           ? "Nothing is checked out here, so every file in this workspace is deleted with it. Download anything worth keeping first."
           : (losing.length ? `${losing.join(" and ")} on ${place.branch ?? "its branch"} would be lost. ` : work === null ? "What is uncommitted there could not be read and would be lost. " : "Nothing uncommitted is in it. ") +

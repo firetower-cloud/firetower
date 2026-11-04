@@ -82,6 +82,16 @@ export interface Bridge {
    * which is the same thing it draws before a picture has been taken.
    */
   shoot(url: string): Promise<ArrayBuffer | null>;
+  /**
+   * An artifact's HTML, read natively so a secure webview can show it.
+   *
+   * A browser tab (`null`) loads the artifact URL straight into the iframe and
+   * keeps the annotation picker. The native shell is a *secure* context and a
+   * dev artifact is plain http, which a secure page refuses to frame — mixed
+   * content — so the shell fetches the bytes here, where that rule does not
+   * apply, and the renderer drops them into a `srcdoc` frame instead.
+   */
+  loadArtifact: ((url: string) => Promise<string>) | null;
   /** The OS keychain, for tokens. A browser tab has none and keeps them beside the registry. */
   secrets: {
     get(key: string): Promise<string | null>;
@@ -144,6 +154,7 @@ const browser: Bridge = {
     return suggested;
   },
   shoot: async () => null,
+  loadArtifact: null,
   secrets: null,
   island: null,
 };
@@ -183,6 +194,7 @@ function tauri(): Bridge | null {
         throw asError(e);
       }
     },
+    loadArtifact: (url) => invoke("load_artifact", { url }) as Promise<string>,
     shoot: async (url) => {
       const bytes = await invoke("capture_poster", { url });
       /* Tauri hands a `Response` back as an ArrayBuffer, but a failure that

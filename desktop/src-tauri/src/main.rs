@@ -241,6 +241,33 @@ fn zoom<R: Runtime>(window: WebviewWindow<R>) {
     };
 }
 
+/// Fetch an artifact's HTML, for the renderer to show in an `srcdoc` iframe.
+///
+/// In local development an artifact is served over plain `http` on a signed
+/// subdomain of `localhost`. The native shell is a *secure* context, and a
+/// secure page refuses an insecure `http` subresource — mixed content — so an
+/// `<iframe src="http://…">` comes up blank and no webview toggle changes that.
+///
+/// So the renderer reads the bytes here instead, where the mixed-content rule
+/// does not exist, and drops them into an `srcdoc` iframe — whose document
+/// inherits the shell's own (secure) origin, so nothing insecure is ever
+/// loaded. Production serves artifacts over `https`, which frames directly, so
+/// the renderer only takes this path for an `http` URL. The `?ft-shot` the
+/// renderer appends asks the control plane for the page without its annotation
+/// picker, which an `srcdoc` document cannot host anyway.
+#[tauri::command]
+async fn load_artifact(url: String) -> Result<String, String> {
+    let resp = reqwest::get(&url)
+        .await
+        .map_err(|e| format!("could not reach the artifact: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("the artifact server answered {}", resp.status()));
+    }
+    resp.text()
+        .await
+        .map_err(|e| format!("could not read the artifact: {e}"))
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
@@ -316,6 +343,7 @@ fn main() {
             secret_get,
             secret_set,
             secret_delete,
+            load_artifact,
             island::island_screens,
             island::island_place,
             island::island_bounds,

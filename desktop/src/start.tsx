@@ -5,30 +5,39 @@
  * only in how much they already know. Routing them through one place is what
  * keeps a task's Start one click rather than a second form that happens to
  * look similar.
+ *
+ * It used to open a sheet; it now goes to the New page (`/new`). What little a
+ * caller already knows — a task's title and repository — rides in a module
+ * variable the page reads once, because a hash route carries no state of its
+ * own and a task's Start should stay one click.
  */
-import { createContext, useContext, useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
+import { navigate } from "~/shims/next-navigation";
 import type { Seed } from "~/ui/NewWorkspace";
 
-const Ctx = createContext<((seed?: Seed) => void) | null>(null);
+export type { Seed };
 
-export function StartProvider({
-  children,
-  render,
-}: {
-  children: ReactNode;
-  render: (seed: Seed | undefined, close: () => void) => ReactNode;
-}) {
-  const [asking, setAsking] = useState<{ seed?: Seed } | null>(null);
-  return (
-    <Ctx.Provider value={(seed) => setAsking({ seed })}>
-      {children}
-      {asking && render(asking.seed, () => setAsking(null))}
-    </Ctx.Provider>
-  );
+let pending: Seed | undefined;
+
+/** Read and clear whatever a `start(seed)` left for the New page. */
+export function consumeSeed(): Seed | undefined {
+  const seed = pending;
+  pending = undefined;
+  return seed;
 }
 
+/** Start a workspace: carry any seed, then go to the New page. */
 export function useStart() {
-  const start = useContext(Ctx);
-  if (!start) throw new Error("useStart outside StartProvider");
-  return start;
+  return (seed?: Seed) => {
+    pending = seed;
+    navigate("/new");
+  };
+}
+
+/**
+ * Kept so the tree that wrapped the old sheet needs no restructuring; it now
+ * renders only its children, since the New page is a route rather than a layer.
+ */
+export function StartProvider({ children }: { children: ReactNode }) {
+  return <>{children}</>;
 }

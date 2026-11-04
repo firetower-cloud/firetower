@@ -277,6 +277,48 @@ fn agent_from_path(kind: &str) -> Result<Agent, ApiError> {
     Agent::from_name(kind).ok_or_else(|| ApiError::not_found("agent"))
 }
 
+/// What an agent can be asked to change, before there is a session to ask.
+///
+/// So the New page can offer the model and effort you'll start with. The
+/// choices Firetower knows on its own — Claude Code's are fixed; Codex lists
+/// its own only once it is running, so its model is absent here until then —
+/// and each one's `current` is what this person last used, so the picker opens
+/// on it rather than blank.
+#[utoipa::path(
+    get, path = "/api/v1/agents/{kind}/controls", tag = "agents",
+    params(("kind" = String, Path, description = "Agent kind, e.g. ClaudeCode")),
+    responses((status = 200, body = Vec<ft_core::controls::Control>), (status = 404, body = ApiError)),
+)]
+pub(super) async fn agent_controls(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(kind): Path<String>,
+) -> ApiResult<Json<Vec<ft_core::controls::Control>>> {
+    use ft_core::controls::ControlKind;
+    let agent = agent_from_path(&kind)?;
+    let mut controls = ft_core::controls::for_agent(agent, Vec::new(), Vec::new());
+    let me = owner(&principal)?;
+    let pairs = state
+        .db
+        .preferred_controls(me, agent)
+        .await
+        .unwrap_or_default();
+    let pref = ft_core::controls::Preferred::from_pairs(pairs);
+    for c in &mut controls {
+        let remembered = match c.kind {
+            ControlKind::Model => pref.model.clone(),
+            ControlKind::Effort => pref.effort.clone(),
+            ControlKind::Mode => pref.mode.clone(),
+            ControlKind::Sandbox => pref.sandbox.clone(),
+        };
+        // What you last used, or — with nothing remembered — the agent's own
+        // default, so the picker opens on a real combo rather than a blank.
+        c.current = remembered
+            .or_else(|| ft_core::controls::default_value(agent, c.kind).map(String::from));
+    }
+    Ok(Json(controls))
+}
+
 #[utoipa::path(
     get, path = "/api/v1/agents", tag = "agents",
     responses((status = 200, body = Vec<AgentView>)),

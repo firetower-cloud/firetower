@@ -29,6 +29,7 @@ import type {
   AgentView,
   ApiError,
   ConfigureAgent,
+  Control,
   InstallAgent,
   PendingAuth,
   SignIn,
@@ -398,7 +399,129 @@ export const useForgetAgent = <TError = ApiError,
       > => {
       return useMutation(getForgetAgentMutationOptions(options), queryClient);
     }
-    export const getInstallAgentUrl = (kind: string,) => {
+    export const getAgentControlsUrl = (kind: string,) => {
+
+
+
+
+  return `/api/v1/agents/${kind}/controls`
+}
+
+/**
+ * So the New page can offer the model and effort you'll start with. The
+ * choices Firetower knows on its own — Claude Code's are fixed; Codex lists
+ * its own only once it is running, so its model is absent here until then —
+ * and each one's `current` is what this person last used, so the picker opens
+ * on it rather than blank.
+ * @summary What an agent can be asked to change, before there is a session to ask.
+ */
+export const agentControls = async (kind: string, options?: Parameters<typeof http>[1]): Promise<Control[]> => {
+
+  return http<Control[]>(getAgentControlsUrl(kind),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getAgentControlsQueryKey = (kind: string,) => {
+    return [
+    `/api/v1/agents/${kind}/controls`
+    ] as const;
+    }
+
+
+export const getAgentControlsQueryOptions = <TData = Awaited<ReturnType<typeof agentControls>>, TError = ApiError>(kind: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof agentControls>>, TError, TData>>, request?: SecondParameter<typeof http>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getAgentControlsQueryKey(kind);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof agentControls>>> = ({ signal }) => agentControls(kind, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: kind !== null && kind !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof agentControls>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type AgentControlsQueryResult = NonNullable<Awaited<ReturnType<typeof agentControls>>>
+export type AgentControlsQueryError = ApiError
+
+
+export function useAgentControls<TData = Awaited<ReturnType<typeof agentControls>>, TError = ApiError>(
+ kind: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof agentControls>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof agentControls>>,
+          TError,
+          Awaited<ReturnType<typeof agentControls>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useAgentControls<TData = Awaited<ReturnType<typeof agentControls>>, TError = ApiError>(
+ kind: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof agentControls>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof agentControls>>,
+          TError,
+          Awaited<ReturnType<typeof agentControls>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useAgentControls<TData = Awaited<ReturnType<typeof agentControls>>, TError = ApiError>(
+ kind: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof agentControls>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary What an agent can be asked to change, before there is a session to ask.
+ */
+
+export function useAgentControls<TData = Awaited<ReturnType<typeof agentControls>>, TError = ApiError>(
+ kind: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof agentControls>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getAgentControlsQueryOptions(kind,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+/**
+ * @summary What an agent can be asked to change, before there is a session to ask.
+ */
+export const useSetAgentControlsQueryData = () => {
+  const queryClient = useQueryClient();
+  return (kind: string,updater: Awaited<ReturnType<typeof agentControls>> | undefined | ((old: Awaited<ReturnType<typeof agentControls>> | undefined) => Awaited<ReturnType<typeof agentControls>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof agentControls>>>({ exact: $exactMatch, queryKey: getAgentControlsQueryKey(kind) }, updater);
+  };
+}
+
+/**
+ * @summary What an agent can be asked to change, before there is a session to ask.
+ */
+export const useGetAgentControlsQueryData = () => {
+  const queryClient = useQueryClient();
+  return (kind: string,) =>
+    queryClient.getQueryData<Awaited<ReturnType<typeof agentControls>>>(getAgentControlsQueryKey(kind));
+}
+
+
+export const getInstallAgentUrl = (kind: string,) => {
 
 
 

@@ -14,7 +14,7 @@ import type { LucideIcon } from "lucide-react";
 import { AgentMark } from "~/components/AgentMark";
 import { Blocks } from "~/island/Blocks";
 import { HostMark, Icon } from "~/components/ui";
-import { doing, group, shortRepo, type Repositories, type Workspace } from "~/api/workspaces";
+import { childrenOf, childrenWorking, doing, group, isChild, rowLabel, shortRepo, type Repositories, type Workspace } from "~/api/workspaces";
 import { beatOf, elapsed, minutesSince } from "~/api/view";
 import type { Backend } from "~/fleet";
 import { useHostOf, useSessions, useUpdatesRow } from "~/data";
@@ -57,8 +57,22 @@ export function Rail({ backend }: { backend: Backend }) {
      own space, or in a place somebody shared with you. Both are grouped by
      repository inside, because that is what makes a long list readable — the
      split is about whose work it is, not about how it is sorted. */
-  const mine = group(running.filter((s) => isPersonal(s.path, me.data?.user)));
-  const theirs = group(running.filter((s) => !isPersonal(s.path, me.data?.user)));
+  const mineRaw = group(running.filter((s) => isPersonal(s.path, me.data?.user)));
+  const theirsRaw = group(running.filter((s) => !isPersonal(s.path, me.data?.user)));
+  /* A child spawned in its own workspace does not get its own row here: it
+     lives under its lead in the Overview tab, as part of that manager's team.
+     So drop children from the rail — the lead's row keeps its delegated-count,
+     so the team is still visible at a glance, and the rail stays a list of
+     top-level workspaces. */
+  const everyPlace = [...mineRaw.groups.flatMap(([, p]) => p), ...theirsRaw.groups.flatMap(([, p]) => p)];
+  const topOnly = (r: Repositories): Repositories => ({
+    total: r.total,
+    groups: r.groups
+      .map(([repo, places]) => [repo, places.filter((p) => !isChild(p, everyPlace))] as [string, Workspace[]])
+      .filter(([, places]) => places.length > 0),
+  });
+  const mine = topOnly(mineRaw);
+  const theirs = topOnly(theirsRaw);
   const nothing = mine.groups.length === 0 && theirs.groups.length === 0;
   const dark = backend.reach === "unreachable";
 
@@ -68,6 +82,18 @@ export function Rail({ backend }: { backend: Backend }) {
         <Settings path={path} />
       ) : (
         <nav className="flex shrink-0 flex-col gap-0.5 px-2 pt-2">
+          <button
+            onClick={() => start()}
+            title={`New workspace  ${key("N")}`}
+            className={`mb-0.5 flex h-8 items-center gap-2.5 rounded-md px-2.5 text-ui transition-colors duration-150 ${
+              path.startsWith("/new")
+                ? "bg-overlay text-bone shadow-(--shadow-raise)"
+                : "text-bone hover:bg-raise/60"
+            }`}
+          >
+            <Icon of={Plus} size={16} />
+            New
+          </button>
           {NAV.map((n) => (
             <NavLink
               key={n.href}
@@ -249,8 +275,29 @@ function RepoTally({ places }: { places: Workspace[] }) {
   );
 }
 
-/** One workspace: its branch, and what is happening in it. */
-function Row({ place, on }: { place: Workspace; on: boolean }) {
+/**
+ * One workspace: its branch, and what is happening in it.
+ *
+ * `child` draws it under the row before it, which is its lead's: indented,
+ * with a rule down its left — position and weight, not a colour. `working`
+ * is how many of a place's own children are still at it, which is what a
+ * lead's row says while its agent sits idle between a dispatch and a result.
+ */
+function Row({
+  place,
+  on,
+  label,
+  working = 0,
+  delegated = 0,
+}: {
+  place: Workspace;
+  on: boolean;
+  /** What to call it here: a child's own part, the lead prefix dropped. */
+  label?: string;
+  working?: number;
+  /** Agents it started and has not ended; ending this place ends them too. */
+  delegated?: number;
+}) {
   const state = doing(place);
   const menu = useMenu<null>();
   const prompt = usePrompt();
@@ -273,7 +320,7 @@ function Row({ place, on }: { place: Workspace; on: boolean }) {
           { label: "Open", onPick: () => navigate(`/sessions/${place.id}`) },
           { label: "Rename…", onPick: () => void rename() },
           "-",
-          { label: "End workspace", tone: "danger", onPick: () => void endWorkspace(place).then(({ ended }) => ended && on && navigate("/")) },
+          { label: "End workspace", tone: "danger", onPick: () => void endWorkspace(place, delegated).then(({ ended }) => ended && on && navigate("/")) },
         ]}
       />
     )}
@@ -295,13 +342,20 @@ function Row({ place, on }: { place: Workspace; on: boolean }) {
             a finished workspace drew sage and then ember, a failed one brick
             and then ember. The mark is the only thing that speaks now. */}
         <Blocks beat={beatOf(place.runs[0])} size={9} />
-        <span className={`min-w-0 flex-1 truncate text-ui ${on ? "text-bone" : "text-dim"}`}>{place.name}</span>
+        <span className={`min-w-0 flex-1 truncate text-ui ${on ? "text-bone" : "text-dim"}`}>{label ?? place.name}</span>
         <span className="shrink-0 font-mono text-micro text-mute">
           {elapsed(minutesSince(place.runs[0].createdAt))}
         </span>
       </div>
       <div className="flex items-center gap-1.5 pl-[12px]">
         <span className="min-w-0 flex-1 truncate font-mono text-micro text-mute">{place.branch ?? "—"}</span>
+        {/* Slate, which already means "in flight" beside this row: the agent
+            here may be idle, but what it delegated is not. */}
+        {working > 0 && (
+          <span className="shrink-0 font-mono text-micro tabular-nums text-slate" title={`${working} delegated and still working`}>
+            ↳{working}
+          </span>
+        )}
         {state === "working" &&
           place.runs.slice(0, 3).map((run) => (
             <AgentMark key={run.id} agent={run.agent} size={10} className="shrink-0 text-mute" />
@@ -366,7 +420,14 @@ function Repos({ repos, path }: { repos: Repositories; path: string }) {
             <RepoTally places={places} />
           </div>
           {places.map((place) => (
-            <Row key={place.id} place={place} on={path === `/sessions/${place.id}`} />
+            <Row
+              key={place.id}
+              place={place}
+              on={path === `/sessions/${place.id}`}
+              label={rowLabel(place, places)}
+              working={childrenWorking(place, places)}
+              delegated={childrenOf(place, places)}
+            />
           ))}
         </div>
       ))}
