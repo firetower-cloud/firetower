@@ -168,7 +168,14 @@ pub fn check(new: &NewRole) -> Result<(), Refused> {
             ))
         }
     }
-    if new.placement == "new" && new.machine.as_deref().map(str::trim).unwrap_or("").is_empty() {
+    if new.placement == "new"
+        && new
+            .machine
+            .as_deref()
+            .map(str::trim)
+            .unwrap_or("")
+            .is_empty()
+    {
         return Err(Refused(
             "a profile whose child gets its own workspace sets the machine it runs on".into(),
         ));
@@ -581,15 +588,26 @@ mod tests {
         let (roles, me, org, slug) = setup().await;
 
         // A new profile is an Operator — it does the work, it does not delegate.
-        let id = roles.create(&org, &me, &slug, &new("reviewer")).await.unwrap();
-        let made = roles.one(&me, id.as_str(), Level::Viewer).await.unwrap().unwrap();
+        let id = roles
+            .create(&org, &me, &slug, &new("reviewer"))
+            .await
+            .unwrap();
+        let made = roles
+            .one(&me, id.as_str(), Level::Viewer)
+            .await
+            .unwrap()
+            .unwrap();
         assert!(!made.can_delegate);
 
         // Made a Manager, and it reads back as one.
         let mut manager = new("reviewer");
         manager.can_delegate = true;
         assert!(roles.update(&me, id.as_str(), &manager).await.unwrap());
-        let now = roles.one(&me, id.as_str(), Level::Viewer).await.unwrap().unwrap();
+        let now = roles
+            .one(&me, id.as_str(), Level::Viewer)
+            .await
+            .unwrap()
+            .unwrap();
         assert!(now.can_delegate);
     }
 }

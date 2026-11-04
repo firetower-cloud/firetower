@@ -748,7 +748,11 @@ pub(crate) async fn create_session_as(
     // When this session runs as a profile that scopes its skills, keep only the
     // ones on that list. Off-scope skills are never pinned, so they are never
     // materialised into the workspace and never reach the agent.
-    let wanted: Vec<String> = match profile.as_ref().map(|p| &p.skill_scope).filter(|s| !s.is_empty()) {
+    let wanted: Vec<String> = match profile
+        .as_ref()
+        .map(|p| &p.skill_scope)
+        .filter(|s| !s.is_empty())
+    {
         Some(scope) => wanted.into_iter().filter(|id| scope.contains(id)).collect(),
         None => wanted,
     };
@@ -986,7 +990,10 @@ async fn persona_for(
     owner: &str,
     profile: &crate::roles::Role,
 ) -> ApiResult<String> {
-    let mut text = format!("# You are the \"{}\" profile\n\n{}\n", profile.name, profile.does);
+    let mut text = format!(
+        "# You are the \"{}\" profile\n\n{}\n",
+        profile.name, profile.does
+    );
     if !profile.instructions.trim().is_empty() {
         text.push('\n');
         text.push_str(profile.instructions.trim());
@@ -1129,7 +1136,11 @@ pub(crate) async fn relaunch(
     // restart comes back as the profile it was started as. Best effort: a
     // persona that cannot be read is a plain restart, not a refusal to restart.
     if let Some(pid) = &session.profile_id {
-        if let Ok(Some(profile)) = state.roles.one(owner, pid, crate::access::Level::Viewer).await {
+        if let Ok(Some(profile)) = state
+            .roles
+            .one(owner, pid, crate::access::Level::Viewer)
+            .await
+        {
             if let Ok(persona) = persona_for(state, owner, &profile).await {
                 env.push((ft_core::PERSONA_ENV.to_string(), persona));
             }

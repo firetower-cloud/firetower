@@ -7630,12 +7630,13 @@ impl Db {
     ) -> Result<(ft_core::ArtifactId, i32)> {
         let mut tx = self.pool.begin().await?;
 
-        let existing: Option<(String, Option<chrono::DateTime<chrono::Utc>>)> =
-            sqlx::query_as("SELECT id, deleted_at FROM artifacts WHERE owner_id = $1 AND slug = $2")
-                .bind(owner)
-                .bind(slug)
-                .fetch_optional(&mut *tx)
-                .await?;
+        let existing: Option<(String, Option<chrono::DateTime<chrono::Utc>>)> = sqlx::query_as(
+            "SELECT id, deleted_at FROM artifacts WHERE owner_id = $1 AND slug = $2",
+        )
+        .bind(owner)
+        .bind(slug)
+        .fetch_optional(&mut *tx)
+        .await?;
 
         // Tombstoned — the person deleted this slug. Do not resurrect it from
         // the folder the agent left on disk; version 0 tells the caller nothing

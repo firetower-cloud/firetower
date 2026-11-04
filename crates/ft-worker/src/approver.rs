@@ -234,8 +234,10 @@ async fn answer(
             // Built from the agents Firetower can drive, not spelled out here,
             // so the list the lead is offered never falls behind the ones that
             // exist — the whole of `Agent::all()`, labels and names together.
-            let agent_names: Vec<String> =
-                ft_core::Agent::all().iter().map(|a| format!("{a:?}")).collect();
+            let agent_names: Vec<String> = ft_core::Agent::all()
+                .iter()
+                .map(|a| format!("{a:?}"))
+                .collect();
             let agent_labels = ft_core::Agent::all()
                 .iter()
                 .map(|a| a.label())
@@ -246,211 +248,211 @@ async fn answer(
                  `role` for that. Omit for the same as you."
             );
             Some(reply(
-            id?,
-            json!({
-                "tools": [{
-                    "name": TOOL,
-                    "description": "Decide whether a tool call may proceed.",
-                    // Deliberately open. The shape is the agent's to choose and
-                    // it has changed before; refusing an argument we did not
-                    // expect would block the call rather than ask about it.
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {},
-                        "additionalProperties": true,
-                    },
-                }, {
-                    "name": SPAWN,
-                    "description": SPAWN_DESCRIPTION,
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "goal": {
-                                "type": "string",
-                                "description": "What the child should accomplish. Self-contained: it has not seen this conversation.",
-                            },
-                            "context": {
-                                "type": "string",
-                                "description": "Background it needs: file paths, constraints, what has been tried, what to hand back.",
-                            },
-                            "role": {
-                                "type": "string",
-                                "description": "A saved subagent to start, by name — e.g. \"reviewer\" or \"developer\" (what the person defines on the Subagents screen). It supplies the instructions and may pin the agent and placement; where it pins one, that wins over what you pass. Naming one that does not exist is refused with the ones that do. Omit for an ad-hoc child.",
-                            },
-                            "placement": {
-                                "type": "string",
-                                "enum": ["here", "new"],
-                                "description": "\"here\" shares this workspace and branch; \"new\" gets its own. Default \"here\".",
-                            },
-                            "agent": {
-                                "type": "string",
-                                "enum": agent_names,
-                                "description": agent_desc,
-                            },
-                            "name": {
-                                "type": "string",
-                                "description": "A short name for the child, like \"reviewer\" or \"developer\".",
-                            },
-                            "reason": {
-                                "type": "string",
-                                "description": "One line on why this is being delegated. Shown on the child.",
-                            },
+                id?,
+                json!({
+                    "tools": [{
+                        "name": TOOL,
+                        "description": "Decide whether a tool call may proceed.",
+                        // Deliberately open. The shape is the agent's to choose and
+                        // it has changed before; refusing an argument we did not
+                        // expect would block the call rather than ask about it.
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {},
+                            "additionalProperties": true,
                         },
-                        "required": ["goal"],
-                    },
-                }, {
-                    "name": CHILDREN,
-                    "description": CHILDREN_DESCRIPTION,
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "action": { "type": "string", "enum": ["list", "steer", "stop"] },
-                            "id": {
-                                "type": "string",
-                                "description": "The child's session id, from spawn or list. For steer and stop.",
-                            },
-                            "message": {
-                                "type": "string",
-                                "description": "For steer: what to tell the child. Lands in its conversation as a message from you.",
-                            },
-                        },
-                        "required": ["action"],
-                    },
-                }, {
-                    "name": UPDATE,
-                    "description": UPDATE_DESCRIPTION,
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "note": {
-                                "type": "string",
-                                "description": "What's happening, in your words. A line or two for a casual check-in; longer only if the lead has asked for detail.",
-                            },
-                            "phase": {
-                                "type": "string",
-                                "description": "Optional one-word stage, e.g. \"planning\", \"building\", \"reviewing\". Shown as a tag.",
-                            },
-                        },
-                        "required": ["note"],
-                    },
-                }, {
-                    "name": PLAN,
-                    "description": PLAN_DESCRIPTION,
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "steps": {
-                                "type": "array",
-                                "description": "The whole plan, in order. Each item is {step, status} with status one of \"pending\", \"doing\", \"done\" — or a bare string, which is taken as pending.",
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "step": { "type": "string", "description": "What this step is, in a few words." },
-                                        "status": { "type": "string", "enum": ["pending", "doing", "done"] },
-                                    },
-                                    "required": ["step"],
+                    }, {
+                        "name": SPAWN,
+                        "description": SPAWN_DESCRIPTION,
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "goal": {
+                                    "type": "string",
+                                    "description": "What the child should accomplish. Self-contained: it has not seen this conversation.",
+                                },
+                                "context": {
+                                    "type": "string",
+                                    "description": "Background it needs: file paths, constraints, what has been tried, what to hand back.",
+                                },
+                                "role": {
+                                    "type": "string",
+                                    "description": "A saved subagent to start, by name — e.g. \"reviewer\" or \"developer\" (what the person defines on the Subagents screen). It supplies the instructions and may pin the agent and placement; where it pins one, that wins over what you pass. Naming one that does not exist is refused with the ones that do. Omit for an ad-hoc child.",
+                                },
+                                "placement": {
+                                    "type": "string",
+                                    "enum": ["here", "new"],
+                                    "description": "\"here\" shares this workspace and branch; \"new\" gets its own. Default \"here\".",
+                                },
+                                "agent": {
+                                    "type": "string",
+                                    "enum": agent_names,
+                                    "description": agent_desc,
+                                },
+                                "name": {
+                                    "type": "string",
+                                    "description": "A short name for the child, like \"reviewer\" or \"developer\".",
+                                },
+                                "reason": {
+                                    "type": "string",
+                                    "description": "One line on why this is being delegated. Shown on the child.",
                                 },
                             },
+                            "required": ["goal"],
                         },
-                        "required": ["steps"],
-                    },
-                }, {
-                    "name": CREATE_PROFILE,
-                    "description": "Save a reusable agent profile — a persona a workspace can be started as, or a lead can delegate to. A profile fully specifies where and what it runs: there is no \"let the lead choose\", so you must settle the engine and the placement (and, for its own workspace, the machine). Unless they have already said otherwise, AGREE ON THE SHAPE BEFORE YOU CALL THIS — don't silently assume. In one short, plain-language exchange, put the choices to them with a recommended default each, and let them correct you: (1) what it does and when to reach for it; (2) its goal and how it should work (the instructions); (3) Operator or Manager — may it hand work to other profiles, and if so which; (4) which engine it runs on; (5) placement — the lead's own workspace (`here`) or its own (`new`); (6) for `new`, which machine — you cannot see the machines, so unless they hand you a host id this profile is not yours to finish: SAY THAT rather than quietly filing it as `here`, and offer `here` for now with the real placement set on Settings → Harness → Profiles; (7) kept yours, or filed in a directory a teammate can reach. You cannot set the subscription: it runs on the owner's default for the chosen engine, whatever they asked for. If they named one, create the profile and then SAY YOU COULD NOT APPLY IT and that it is set on Settings → Harness → Profiles — never let silence read as \"applied\". Take anything they already specified and don't re-ask it. Then call this once. It appears on the Profiles screen immediately, theirs to edit or delete. Check `list_profiles` first so you refine an existing one rather than duplicate it.",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "name": { "type": "string", "description": "What it's called and started by, e.g. \"QA\" or \"Reviewer\"." },
-                            "does": { "type": "string", "description": "One line: what it does AND when to reach for it — like a skill's description. A lead reads this to decide whether to hand it work, so include the trigger (\"after a developer hands back\") and any anti-trigger (\"not for a one-line fix\"). e.g. \"Reviews a finished branch and reports problems; use after a hand-back, not for trivial diffs.\"" },
-                            "instructions": { "type": "string", "description": "The persona, as markdown — how it should work, step by step. Composed into the agent's prompt once it's chosen (the body, not the when-to-use line)." },
-                            "agent": { "type": "string", "enum": ["ClaudeCode", "Codex", "KimiCode", "CursorAgent"], "description": "Required. The engine it runs on — a profile always pins one." },
-                            "placement": { "type": "string", "enum": ["here", "new"], "description": "Required. Where a delegated child runs: `here` shares the lead's workspace and branch, `new` gets its own." },
-                            "machine": { "type": "string", "description": "Required when placement is `new`: the host id of the machine its own workspace runs on." },
-                            "can_delegate": { "type": "boolean", "description": "true makes it a Manager that can hand work to other profiles; false (default) an Operator that does the work itself." },
-                            "directory": { "type": "string", "description": "A directory to file it in, by name, so a teammate can reach it. Omit for the person's own space." },
-                        },
-                        "required": ["name", "does", "agent", "placement"],
-                    },
-                }, {
-                    "name": UPDATE_PROFILE,
-                    "description": "Change a saved profile, by name — \"make the reviewer stricter\", \"run QA on Codex\". Only the fields you pass change; everything else stays. Rename with `new_name`. When what they want changed is ambiguous, confirm it before you apply — a profile is something they rely on, not a scratch edit. TWO THINGS THIS CANNOT CHANGE: the subscription, and `placement` to `new` for a profile with no machine (that is a host id you cannot see). If they ask for either, say so and point them at Settings → Harness → Profiles instead of reporting a change you did not make.",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "name": { "type": "string", "description": "The profile to change, by its current name." },
-                            "new_name": { "type": "string", "description": "A new name, to rename it." },
-                            "does": { "type": "string" },
-                            "instructions": { "type": "string" },
-                            "agent": { "type": "string", "enum": ["ClaudeCode", "Codex", "KimiCode", "CursorAgent"] },
-                            "placement": { "type": "string", "enum": ["here", "new"] },
-                            "machine": { "type": "string" },
-                            "can_delegate": { "type": "boolean" },
-                        },
-                        "required": ["name"],
-                    },
-                }, {
-                    "name": LIST_PROFILES,
-                    "description": "List the saved profiles the person can see — name, whether it's a Manager, and what it does. Read this before creating one, to build on what exists rather than make a near-duplicate.",
-                    "inputSchema": { "type": "object", "properties": {} },
-                }, {
-                    "name": CREATE_SKILL,
-                    "description": "Write a skill into the person's library — a SKILL.md and, if it needs them, bundled files — so they don't have to hand-copy what you wrote into the editor. Use it when they ask you to make them a skill (\"turn this into a skill\", \"make me a changelog skill\"). It appears on their Skills screen at once. A skill that ships a script (anything under scripts/, or a file marked executable) is held for the person's review before it can run — say so when that happens. Check list_skills first so you refine an existing one rather than duplicate it.",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "name": { "type": "string", "description": "Lowercase handle: letters, digits, hyphens. e.g. \"changelog-helper\". Not \"claude\" or \"anthropic\"." },
-                            "description": { "type": "string", "description": "What it does AND when to fire — this is the whole triggering mechanism, so be specific and a little pushy: \"...Use this whenever the user mentions a changelog or release notes, even if they don't say 'skill'.\"" },
-                            "body": { "type": "string", "description": "The SKILL.md instructions, as markdown (no frontmatter — that's composed from name and description). Keep it to a page; put long reference material in a references/ file." },
-                            "files": {
-                                "type": "array",
-                                "description": "Optional bundled files. Contents are plain text (not base64). A file under scripts/, or one with executable:true, makes the skill held for review.",
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "path": { "type": "string", "description": "Relative, e.g. \"references/format.md\" or \"scripts/build.sh\". Never absolute, never ..." },
-                                        "contents": { "type": "string" },
-                                        "executable": { "type": "boolean" },
-                                    },
-                                    "required": ["path", "contents"],
+                    }, {
+                        "name": CHILDREN,
+                        "description": CHILDREN_DESCRIPTION,
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "action": { "type": "string", "enum": ["list", "steer", "stop"] },
+                                "id": {
+                                    "type": "string",
+                                    "description": "The child's session id, from spawn or list. For steer and stop.",
+                                },
+                                "message": {
+                                    "type": "string",
+                                    "description": "For steer: what to tell the child. Lands in its conversation as a message from you.",
                                 },
                             },
-                            "directory": { "type": "string", "description": "A directory to file it in, by name, so a teammate can reach it. Omit for the person's own space." },
+                            "required": ["action"],
                         },
-                        "required": ["name", "description"],
-                    },
-                }, {
-                    "name": UPDATE_SKILL,
-                    "description": "Change a saved skill, by name — \"make the changelog skill terser\", \"add an example\". Writes a new version; a running session keeps the one it started with. Only the fields you pass change; the bundled files carry forward unless you send a new set. A change that ships a script is held for review.",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "name": { "type": "string", "description": "The skill to change, by its current name." },
-                            "new_name": { "type": "string", "description": "A new name, to rename it." },
-                            "description": { "type": "string" },
-                            "body": { "type": "string" },
-                            "files": {
-                                "type": "array",
-                                "description": "Replaces the bundled files (besides SKILL.md). Omit to leave them as they are.",
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "path": { "type": "string" },
-                                        "contents": { "type": "string" },
-                                        "executable": { "type": "boolean" },
-                                    },
-                                    "required": ["path", "contents"],
+                    }, {
+                        "name": UPDATE,
+                        "description": UPDATE_DESCRIPTION,
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "note": {
+                                    "type": "string",
+                                    "description": "What's happening, in your words. A line or two for a casual check-in; longer only if the lead has asked for detail.",
+                                },
+                                "phase": {
+                                    "type": "string",
+                                    "description": "Optional one-word stage, e.g. \"planning\", \"building\", \"reviewing\". Shown as a tag.",
                                 },
                             },
+                            "required": ["note"],
                         },
-                        "required": ["name"],
-                    },
-                }, {
-                    "name": LIST_SKILLS,
-                    "description": "List the skills the person can see — name, description, whether it ships a script, and whether it's held for their review. Read this before creating one, to build on what exists rather than make a near-duplicate.",
-                    "inputSchema": { "type": "object", "properties": {} },
-                }]
-            }),
-        ))
+                    }, {
+                        "name": PLAN,
+                        "description": PLAN_DESCRIPTION,
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "steps": {
+                                    "type": "array",
+                                    "description": "The whole plan, in order. Each item is {step, status} with status one of \"pending\", \"doing\", \"done\" — or a bare string, which is taken as pending.",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "step": { "type": "string", "description": "What this step is, in a few words." },
+                                            "status": { "type": "string", "enum": ["pending", "doing", "done"] },
+                                        },
+                                        "required": ["step"],
+                                    },
+                                },
+                            },
+                            "required": ["steps"],
+                        },
+                    }, {
+                        "name": CREATE_PROFILE,
+                        "description": "Save a reusable agent profile — a persona a workspace can be started as, or a lead can delegate to. A profile fully specifies where and what it runs: there is no \"let the lead choose\", so you must settle the engine and the placement (and, for its own workspace, the machine). Unless they have already said otherwise, AGREE ON THE SHAPE BEFORE YOU CALL THIS — don't silently assume. In one short, plain-language exchange, put the choices to them with a recommended default each, and let them correct you: (1) what it does and when to reach for it; (2) its goal and how it should work (the instructions); (3) Operator or Manager — may it hand work to other profiles, and if so which; (4) which engine it runs on; (5) placement — the lead's own workspace (`here`) or its own (`new`); (6) for `new`, which machine — you cannot see the machines, so unless they hand you a host id this profile is not yours to finish: SAY THAT rather than quietly filing it as `here`, and offer `here` for now with the real placement set on Settings → Harness → Profiles; (7) kept yours, or filed in a directory a teammate can reach. You cannot set the subscription: it runs on the owner's default for the chosen engine, whatever they asked for. If they named one, create the profile and then SAY YOU COULD NOT APPLY IT and that it is set on Settings → Harness → Profiles — never let silence read as \"applied\". Take anything they already specified and don't re-ask it. Then call this once. It appears on the Profiles screen immediately, theirs to edit or delete. Check `list_profiles` first so you refine an existing one rather than duplicate it.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "name": { "type": "string", "description": "What it's called and started by, e.g. \"QA\" or \"Reviewer\"." },
+                                "does": { "type": "string", "description": "One line: what it does AND when to reach for it — like a skill's description. A lead reads this to decide whether to hand it work, so include the trigger (\"after a developer hands back\") and any anti-trigger (\"not for a one-line fix\"). e.g. \"Reviews a finished branch and reports problems; use after a hand-back, not for trivial diffs.\"" },
+                                "instructions": { "type": "string", "description": "The persona, as markdown — how it should work, step by step. Composed into the agent's prompt once it's chosen (the body, not the when-to-use line)." },
+                                "agent": { "type": "string", "enum": ["ClaudeCode", "Codex", "KimiCode", "CursorAgent"], "description": "Required. The engine it runs on — a profile always pins one." },
+                                "placement": { "type": "string", "enum": ["here", "new"], "description": "Required. Where a delegated child runs: `here` shares the lead's workspace and branch, `new` gets its own." },
+                                "machine": { "type": "string", "description": "Required when placement is `new`: the host id of the machine its own workspace runs on." },
+                                "can_delegate": { "type": "boolean", "description": "true makes it a Manager that can hand work to other profiles; false (default) an Operator that does the work itself." },
+                                "directory": { "type": "string", "description": "A directory to file it in, by name, so a teammate can reach it. Omit for the person's own space." },
+                            },
+                            "required": ["name", "does", "agent", "placement"],
+                        },
+                    }, {
+                        "name": UPDATE_PROFILE,
+                        "description": "Change a saved profile, by name — \"make the reviewer stricter\", \"run QA on Codex\". Only the fields you pass change; everything else stays. Rename with `new_name`. When what they want changed is ambiguous, confirm it before you apply — a profile is something they rely on, not a scratch edit. TWO THINGS THIS CANNOT CHANGE: the subscription, and `placement` to `new` for a profile with no machine (that is a host id you cannot see). If they ask for either, say so and point them at Settings → Harness → Profiles instead of reporting a change you did not make.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "name": { "type": "string", "description": "The profile to change, by its current name." },
+                                "new_name": { "type": "string", "description": "A new name, to rename it." },
+                                "does": { "type": "string" },
+                                "instructions": { "type": "string" },
+                                "agent": { "type": "string", "enum": ["ClaudeCode", "Codex", "KimiCode", "CursorAgent"] },
+                                "placement": { "type": "string", "enum": ["here", "new"] },
+                                "machine": { "type": "string" },
+                                "can_delegate": { "type": "boolean" },
+                            },
+                            "required": ["name"],
+                        },
+                    }, {
+                        "name": LIST_PROFILES,
+                        "description": "List the saved profiles the person can see — name, whether it's a Manager, and what it does. Read this before creating one, to build on what exists rather than make a near-duplicate.",
+                        "inputSchema": { "type": "object", "properties": {} },
+                    }, {
+                        "name": CREATE_SKILL,
+                        "description": "Write a skill into the person's library — a SKILL.md and, if it needs them, bundled files — so they don't have to hand-copy what you wrote into the editor. Use it when they ask you to make them a skill (\"turn this into a skill\", \"make me a changelog skill\"). It appears on their Skills screen at once. A skill that ships a script (anything under scripts/, or a file marked executable) is held for the person's review before it can run — say so when that happens. Check list_skills first so you refine an existing one rather than duplicate it.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "name": { "type": "string", "description": "Lowercase handle: letters, digits, hyphens. e.g. \"changelog-helper\". Not \"claude\" or \"anthropic\"." },
+                                "description": { "type": "string", "description": "What it does AND when to fire — this is the whole triggering mechanism, so be specific and a little pushy: \"...Use this whenever the user mentions a changelog or release notes, even if they don't say 'skill'.\"" },
+                                "body": { "type": "string", "description": "The SKILL.md instructions, as markdown (no frontmatter — that's composed from name and description). Keep it to a page; put long reference material in a references/ file." },
+                                "files": {
+                                    "type": "array",
+                                    "description": "Optional bundled files. Contents are plain text (not base64). A file under scripts/, or one with executable:true, makes the skill held for review.",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "path": { "type": "string", "description": "Relative, e.g. \"references/format.md\" or \"scripts/build.sh\". Never absolute, never ..." },
+                                            "contents": { "type": "string" },
+                                            "executable": { "type": "boolean" },
+                                        },
+                                        "required": ["path", "contents"],
+                                    },
+                                },
+                                "directory": { "type": "string", "description": "A directory to file it in, by name, so a teammate can reach it. Omit for the person's own space." },
+                            },
+                            "required": ["name", "description"],
+                        },
+                    }, {
+                        "name": UPDATE_SKILL,
+                        "description": "Change a saved skill, by name — \"make the changelog skill terser\", \"add an example\". Writes a new version; a running session keeps the one it started with. Only the fields you pass change; the bundled files carry forward unless you send a new set. A change that ships a script is held for review.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "name": { "type": "string", "description": "The skill to change, by its current name." },
+                                "new_name": { "type": "string", "description": "A new name, to rename it." },
+                                "description": { "type": "string" },
+                                "body": { "type": "string" },
+                                "files": {
+                                    "type": "array",
+                                    "description": "Replaces the bundled files (besides SKILL.md). Omit to leave them as they are.",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "path": { "type": "string" },
+                                            "contents": { "type": "string" },
+                                            "executable": { "type": "boolean" },
+                                        },
+                                        "required": ["path", "contents"],
+                                    },
+                                },
+                            },
+                            "required": ["name"],
+                        },
+                    }, {
+                        "name": LIST_SKILLS,
+                        "description": "List the skills the person can see — name, description, whether it ships a script, and whether it's held for their review. Read this before creating one, to build on what exists rather than make a near-duplicate.",
+                        "inputSchema": { "type": "object", "properties": {} },
+                    }]
+                }),
+            ))
         }
 
         "tools/call" => {
@@ -464,8 +466,8 @@ async fn answer(
                 .and_then(Value::as_str)
                 .unwrap_or(TOOL);
             let text = match name {
-                SPAWN | CHILDREN | UPDATE | PLAN | CREATE_PROFILE | UPDATE_PROFILE | LIST_PROFILES
-                | CREATE_SKILL | UPDATE_SKILL | LIST_SKILLS => {
+                SPAWN | CHILDREN | UPDATE | PLAN | CREATE_PROFILE | UPDATE_PROFILE
+                | LIST_PROFILES | CREATE_SKILL | UPDATE_SKILL | LIST_SKILLS => {
                     delegate(session_id, name, &id, &arguments).await
                 }
                 // Every call used to be a permission question, and an agent

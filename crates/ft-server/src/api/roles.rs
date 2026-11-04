@@ -25,7 +25,11 @@ fn refused(e: crate::roles::Refused) -> ApiError {
 /// A pinned subscription has to be one this person may use and has to be for
 /// the profile's engine. Absent is fine — it means the owner's default at
 /// launch, which is what an agent-authored profile gets.
-async fn check_account(state: &AppState, owner: &str, new: &crate::roles::NewRole) -> ApiResult<()> {
+async fn check_account(
+    state: &AppState,
+    owner: &str,
+    new: &crate::roles::NewRole,
+) -> ApiResult<()> {
     let Some(account) = new.account.as_deref().filter(|a| !a.is_empty()) else {
         return Ok(());
     };
@@ -168,7 +172,11 @@ pub(super) async fn set_default_role(
     Json(body): Json<RoleDefault>,
 ) -> ApiResult<StatusCode> {
     let me = whoever(&principal)?;
-    if !state.roles.set_default(me.id.as_str(), &id, body.on).await? {
+    if !state
+        .roles
+        .set_default(me.id.as_str(), &id, body.on)
+        .await?
+    {
         return Err(ApiError::not_found("role"));
     }
     Ok(StatusCode::NO_CONTENT)

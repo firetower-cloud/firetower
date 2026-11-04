@@ -305,7 +305,10 @@ pub(super) async fn add_version(
         ));
     }
 
-    state.skills.add_version(&id, me.id.as_str(), &new, false).await?;
+    state
+        .skills
+        .add_version(&id, me.id.as_str(), &new, false)
+        .await?;
     let made = state
         .skills
         .one(me.id.as_str(), &id, Level::Viewer)

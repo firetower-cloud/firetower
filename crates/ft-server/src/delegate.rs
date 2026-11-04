@@ -190,12 +190,18 @@ async fn spawn(state: &AppState, request: &AgentRequest) -> Result<String> {
             .map(|m| &m.delegate_scope)
             .filter(|s| !s.is_empty());
         match scope {
-            Some(scope) => visible.into_iter().filter(|r| scope.contains(&r.id)).collect(),
+            Some(scope) => visible
+                .into_iter()
+                .filter(|r| scope.contains(&r.id))
+                .collect(),
             None => visible,
         }
     };
     let role = match text(&request.input, "role") {
-        Some(wanted) => match team.iter().find(|r| r.name.eq_ignore_ascii_case(wanted.trim())) {
+        Some(wanted) => match team
+            .iter()
+            .find(|r| r.name.eq_ignore_ascii_case(wanted.trim()))
+        {
             Some(found) => Some(found.clone()),
             None => {
                 let names: Vec<String> = team.iter().map(|r| r.name.clone()).collect();
@@ -280,7 +286,10 @@ async fn spawn(state: &AppState, request: &AgentRequest) -> Result<String> {
     // How the profile pins the agent — model, effort, mode, sandbox. Each unset
     // field resolves to the engine's default at launch, the same as for a
     // person who left the picker alone.
-    let settings = role.as_ref().map(|r| r.settings.clone()).unwrap_or_default();
+    let settings = role
+        .as_ref()
+        .map(|r| r.settings.clone())
+        .unwrap_or_default();
 
     // The child's skills, scoped the way a "start as" session's are — the
     // owner's defaults, kept to the profile's skill_scope when it has one. A
@@ -455,7 +464,10 @@ async fn plan(state: &AppState, request: &AgentRequest) -> Result<String> {
         .and_then(Value::as_array)
         .context("`steps` is the plan, start to finish")?;
     if steps.len() > 20 {
-        bail!("a plan is a handful of steps, not {} — keep it readable", steps.len());
+        bail!(
+            "a plan is a handful of steps, not {} — keep it readable",
+            steps.len()
+        );
     }
 
     let mut plan = Vec::new();
@@ -484,7 +496,10 @@ async fn plan(state: &AppState, request: &AgentRequest) -> Result<String> {
         });
     }
 
-    state.db.set_session_plan(&request.session_id, &plan).await?;
+    state
+        .db
+        .set_session_plan(&request.session_id, &plan)
+        .await?;
     let done = plan
         .iter()
         .filter(|s| s.status == ft_core::turn::PlanStepStatus::Completed)
@@ -518,7 +533,10 @@ async fn update(state: &AppState, request: &AgentRequest) -> Result<String> {
     let phase = text(&request.input, "phase");
     let body = update_body(&child, &note, phase.as_deref());
 
-    state.db.queue_delivery(&lead, Some(&child.id), &body).await?;
+    state
+        .db
+        .queue_delivery(&lead, Some(&child.id), &body)
+        .await?;
     state.fleet.drain_deliveries(&lead).await;
     Ok(format!(
         "Told {}. Carry on — it reads this between its turns.",
@@ -638,7 +656,10 @@ async fn file_profile(
         Some(level) if level >= crate::access::Level::Writer
     );
     if !may {
-        bail!("you cannot file a profile in the \"{}\" directory", target.slug);
+        bail!(
+            "you cannot file a profile in the \"{}\" directory",
+            target.slug
+        );
     }
     let from = state
         .access
@@ -674,7 +695,12 @@ async fn owner_of(state: &AppState, session: &Session) -> Result<(String, String
 /// workspace, got a shared one, and was told nothing. Refuse instead, in words
 /// the agent can repeat to them.
 fn machine_it_cannot_pick(new: &crate::roles::NewRole) -> Option<&'static str> {
-    let bare = new.machine.as_deref().map(str::trim).unwrap_or("").is_empty();
+    let bare = new
+        .machine
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or("")
+        .is_empty();
     (new.placement == "new" && bare).then_some(
         "a profile whose child gets its own workspace has to name the machine it runs on, and \
          you cannot see the machines — so this one is not yours to finish. Tell them that, and \
@@ -741,7 +767,8 @@ async fn update_profile(state: &AppState, request: &AgentRequest) -> Result<Stri
         .await?
         .with_context(|| format!("you have no profile called \"{wanted}\""))?;
     // Only what was named changes; everything else stays as it is.
-    let get_str = |key: &str, now: &str| text(&request.input, key).unwrap_or_else(|| now.to_string());
+    let get_str =
+        |key: &str, now: &str| text(&request.input, key).unwrap_or_else(|| now.to_string());
     let new = crate::roles::NewRole {
         name: get_str("new_name", &existing.name),
         does: get_str("does", &existing.does),
@@ -764,7 +791,11 @@ async fn update_profile(state: &AppState, request: &AgentRequest) -> Result<Stri
         bail!("{why}");
     }
     crate::roles::check(&new).map_err(|e| anyhow::anyhow!("{e}"))?;
-    if !state.roles.update(owner, existing.id.as_str(), &new).await? {
+    if !state
+        .roles
+        .update(owner, existing.id.as_str(), &new)
+        .await?
+    {
         bail!("you cannot change the \"{wanted}\" profile");
     }
     Ok(format!(
@@ -862,15 +893,19 @@ fn incoming_files(input: &Value) -> Vec<crate::skills::IncomingFile> {
 /// Build the whole bundle from a `create_skill` call.
 fn new_skill_from(input: &Value) -> Result<crate::skills::NewSkill> {
     let name = text(input, "name").context("a skill needs a name")?;
-    let description =
-        text(input, "description").context("a skill needs a description — what it does and when to use it")?;
+    let description = text(input, "description")
+        .context("a skill needs a description — what it does and when to use it")?;
     let body = text(input, "body").unwrap_or_default();
     let mut files = vec![crate::skills::IncomingFile {
         path: "SKILL.md".to_string(),
         contents: ft_proto::encode(compose_skill_md(&name, &description, &body).as_bytes()),
         executable: false,
     }];
-    files.extend(incoming_files(input).into_iter().filter(|f| f.path != "SKILL.md"));
+    files.extend(
+        incoming_files(input)
+            .into_iter()
+            .filter(|f| f.path != "SKILL.md"),
+    );
     Ok(crate::skills::NewSkill {
         frontmatter: serde_json::json!({ "name": name, "description": description }),
         body,
@@ -904,7 +939,10 @@ async fn file_skill(
         Some(level) if level >= crate::access::Level::Writer
     );
     if !may {
-        bail!("you cannot file a skill in the \"{}\" directory", target.slug);
+        bail!(
+            "you cannot file a skill in the \"{}\" directory",
+            target.slug
+        );
     }
     let from = state
         .access
@@ -974,7 +1012,10 @@ async fn update_skill(state: &AppState, request: &AgentRequest) -> Result<String
         .await?
         .with_context(|| format!("you have no skill called \"{wanted}\""))?;
     if existing.builtin {
-        bail!("\"{}\" is one Firetower ships; it cannot be changed", existing.name);
+        bail!(
+            "\"{}\" is one Firetower ships; it cannot be changed",
+            existing.name
+        );
     }
     if existing.version == 0 {
         bail!(
@@ -1060,7 +1101,11 @@ async fn list_skills(state: &AppState, request: &AgentRequest) -> Result<String>
             } else {
                 ""
             };
-            let held = if s.held { " (held, pending your review)" } else { "" };
+            let held = if s.held {
+                " (held, pending your review)"
+            } else {
+                ""
+            };
             format!("- {}{}{}: {}", s.name, scripts, held, s.description)
         })
         .collect();
@@ -1135,7 +1180,10 @@ pub fn hand_back_body(child: &Session, said: Option<&str>, note: Option<&str>) -
 /// it is from. No cap on the note: how long it runs is the child's judgement,
 /// and a full account belongs in the hand-back, not here.
 pub fn update_body(child: &Session, note: &str, phase: Option<&str>) -> String {
-    let mut body = format!("{}\n\n{note}", relay_marker("update", &child.id, &child.name));
+    let mut body = format!(
+        "{}\n\n{note}",
+        relay_marker("update", &child.id, &child.name)
+    );
     if let Some(phase) = phase.map(str::trim).filter(|p| !p.is_empty()) {
         body.push_str(&format!("\n\n(phase: {phase})"));
     }
@@ -1184,7 +1232,11 @@ mod tests {
 
     #[test]
     fn an_update_is_marked_as_its_own_kind_and_carries_its_phase() {
-        let body = update_body(&child("reviewer", None), "Repro'd the failing test.", Some("building"));
+        let body = update_body(
+            &child("reviewer", None),
+            "Repro'd the failing test.",
+            Some("building"),
+        );
         // Its own kind, so the interface draws a check-in and not a hand-back.
         assert!(body.starts_with("⟦ft:update:s_child:reviewer⟧"), "{body}");
         assert!(body.contains("Repro'd the failing test."));

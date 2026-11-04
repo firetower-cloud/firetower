@@ -431,9 +431,13 @@ pub(crate) async fn capture_session_artifacts(
     host: &ft_core::HostId,
     session: &ft_core::SessionId,
 ) {
-    let Ok(Some(row)) = db.session(session).await else { return };
+    let Ok(Some(row)) = db.session(session).await else {
+        return;
+    };
     let owner = row.owner.as_str();
-    let Ok(Some(org)) = db.org_of_user(owner).await else { return };
+    let Ok(Some(org)) = db.org_of_user(owner).await else {
+        return;
+    };
 
     let folders = match fleet.list_files(host, session, DIR).await {
         Ok(Ok(entries)) => entries,
@@ -1085,7 +1089,14 @@ mod tests {
         let owner = principal.owner().unwrap().to_string();
         let org = state.db.org_of_user(&owner).await.unwrap().unwrap();
 
-        let artifact = publish(&state, &owner, "ghost", vec![page(b"<p>boo")], Some(&session)).await;
+        let artifact = publish(
+            &state,
+            &owner,
+            "ghost",
+            vec![page(b"<p>boo")],
+            Some(&session),
+        )
+        .await;
         assert_eq!(state.db.artifacts_of(&owner).await.unwrap().len(), 1);
 
         assert!(state.db.delete_artifact(&owner, &artifact).await.unwrap());

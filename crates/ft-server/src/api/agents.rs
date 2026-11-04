@@ -298,7 +298,11 @@ pub(super) async fn agent_controls(
     let agent = agent_from_path(&kind)?;
     let mut controls = ft_core::controls::for_agent(agent, Vec::new(), Vec::new());
     let me = owner(&principal)?;
-    let pairs = state.db.preferred_controls(me, agent).await.unwrap_or_default();
+    let pairs = state
+        .db
+        .preferred_controls(me, agent)
+        .await
+        .unwrap_or_default();
     let pref = ft_core::controls::Preferred::from_pairs(pairs);
     for c in &mut controls {
         let remembered = match c.kind {

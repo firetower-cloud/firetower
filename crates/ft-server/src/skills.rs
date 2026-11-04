@@ -1400,7 +1400,13 @@ impl Skills {
     /// When `hold`, the version is held for review and the two editable fields
     /// stay as they were — the live skill keeps its name and description until
     /// the pending version is approved.
-    pub async fn add_version(&self, id: &str, person: &str, new: &NewSkill, hold: bool) -> Result<i32> {
+    pub async fn add_version(
+        &self,
+        id: &str,
+        person: &str,
+        new: &NewSkill,
+        hold: bool,
+    ) -> Result<i32> {
         let mut tx = self.pool.begin().await?;
         let last: Option<i32> =
             sqlx::query_scalar("SELECT max(version) FROM skill_versions WHERE skill_id = $1")
@@ -2611,7 +2617,11 @@ mod tests {
             .await
             .unwrap();
         assert!(
-            skills.bundles_for_session(session.as_str()).await.unwrap().is_empty(),
+            skills
+                .bundles_for_session(session.as_str())
+                .await
+                .unwrap()
+                .is_empty(),
             "a held skill reaches no session"
         );
 
