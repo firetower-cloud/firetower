@@ -97,7 +97,7 @@ export default function Tasks() {
   const count = feed.total ?? feed.data.length;
 
   return (
-    <View className="flex-1 bg-ground" style={{ paddingTop: insets.top }}>
+    <View className="flex-1 bg-ground" style={{ paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }}>
       <View className="px-4 pb-3 pt-2">
         <Text className="font-semibold text-display text-bone">Tasks</Text>
         <Text className="mt-0.5 font-sans text-ui text-dim">

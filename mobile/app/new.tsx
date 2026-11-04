@@ -155,7 +155,7 @@ export default function NewWorkspace() {
     && !create.isPending;
 
   return (
-    <View className="flex-1 bg-ground" style={{ paddingTop: insets.top }}>
+    <View className="flex-1 bg-ground" style={{ paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }}>
       <View className="flex-row items-center justify-between px-2 pb-2 pt-1">
         <Pressable
           onPress={() => router.back()}

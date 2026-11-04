@@ -219,7 +219,7 @@ export function WorkspaceMenu({
       <Pressable className="flex-1 bg-black/60" onPress={onClose} />
       <View
         className="rounded-t-2xl border-t border-line bg-panel"
-        style={{ paddingBottom: insets.bottom + 8 }}
+        style={{ paddingBottom: insets.bottom + 8, marginLeft: insets.left, marginRight: insets.right }}
       >
         <View className="items-center pb-1 pt-2.5">
           <View className="h-1 w-9 rounded-full bg-mute" />

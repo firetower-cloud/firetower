@@ -10,6 +10,9 @@
  */
 import { useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
+/* React Native 0.88 split the component type from the instance type: `ScrollView`
+   now names the component, so a ref wants `ScrollViewInstance`. */
+import type { ScrollViewInstance } from "react-native";
 import Animated, { useAnimatedStyle } from "react-native-reanimated";
 import { useReanimatedKeyboardAnimation } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -17,6 +20,7 @@ import { router, useLocalSearchParams } from "expo-router";
 import { ChevronLeft, Eye, MoreHorizontal } from "lucide-react-native";
 import { delegating, interruptible, useConversation } from "~/api/conversation";
 import { useListEvents } from "~/api/generated/events/events";
+import { useListArtifacts } from "~/api/generated/artifacts/artifacts";
 import type { Attached, Event } from "~/api/generated/model";
 import { ready, stepLines } from "~/api/steps-bringup";
 import { Bringup } from "~/ui/Bringup";
@@ -37,6 +41,7 @@ import { Composer } from "~/ui/Composer";
 import { Sheen } from "~/ui/Sheen";
 import { Signal } from "~/ui/Signal";
 import { Transcript } from "~/ui/Transcript";
+import { ArtifactCard } from "~/ui/ArtifactCard";
 import { ImagesFrom } from "~/ui/WorkspaceImage";
 import { Waiting } from "~/ui/Waiting";
 import { color } from "~/design/tokens.generated";
@@ -80,7 +85,7 @@ export default function WorkspaceScreen() {
 
 function Conversation({ place }: { place: Workspace }) {
   const insets = useSafeAreaInsets();
-  const scroller = useRef<ScrollView>(null);
+  const scroller = useRef<ScrollViewInstance>(null);
   const [atEnd, setAtEnd] = useState(true);
 
   const speaker = lead(place);
@@ -99,6 +104,28 @@ function Conversation({ place }: { place: Workspace }) {
   const bringup = useMemo(
     () => stepLines(session ?? speaker, (events.data ?? []) as Event[]),
     [session, speaker, events.data],
+  );
+
+  /**
+   * The artifacts this session published.
+   *
+   * Owned by a person rather than by the workspace — `reclaim.rs` deletes a
+   * workspace within a minute of its last session ending and the cascade
+   * takes the conversation with it, so these rows deliberately sit outside
+   * it. That is why they are fetched separately rather than folded into the
+   * conversation.
+   *
+   * **Grouped at the end rather than anchored inline.** The desktop places
+   * each card at its `firstSeenLine`; the phone's fold does not carry a line
+   * number onto an `Item`, and threading one through would change a contract
+   * shared with two other clients. The end of the transcript is the fallback
+   * the server already documents for rows with no line, so it is the same
+   * behaviour rather than a new one.
+   */
+  const { data: everyArtifact } = useListArtifacts();
+  const artifacts = useMemo(
+    () => (everyArtifact ?? []).filter((a) => a.fromSessionId === speaker.id),
+    [everyArtifact, speaker.id],
   );
 
   const { conversation, echo, settle, remember, stopping, reread, older } = useConversation(speaker.id);
@@ -128,7 +155,7 @@ function Conversation({ place }: { place: Workspace }) {
   };
 
   return (
-    <View className="flex-1 bg-ground" style={{ paddingTop: insets.top }}>
+    <View className="flex-1 bg-ground" style={{ paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }}>
       <View className="flex-row items-center gap-1 border-b border-line-soft px-1 pb-2.5 pt-1">
         <Pressable onPress={() => router.back()} className="h-10 w-10 items-center justify-center" hitSlop={8}>
           <ChevronLeft color={color.bone} size={22} />
@@ -248,11 +275,15 @@ function Conversation({ place }: { place: Workspace }) {
           ) : null}
 
           {conversation.items.length > 0 ? (
-            /* Which workspace the pictures in the agent's prose are read from.
-               Without this a `![shot](docs/shot.png)` has nowhere to look. */
-            <ImagesFrom.Provider value={{ session: speaker.id }}>
-              <Transcript items={conversation.items} tasks={conversation.tasks} />
-            </ImagesFrom.Provider>
+            <>
+              {/* Which workspace the pictures in the agent's prose are read
+                  from. Without this a `![shot](docs/shot.png)` has nowhere to
+                  look. */}
+              <ImagesFrom.Provider value={{ session: speaker.id }}>
+                <Transcript items={conversation.items} tasks={conversation.tasks} />
+              </ImagesFrom.Provider>
+
+            </>
           ) : conversation.trouble ? (
             <Text className="mt-2 font-sans text-meta text-brick">{conversation.trouble}</Text>
           ) : !conversation.arrived ? (
@@ -267,6 +298,19 @@ function Conversation({ place }: { place: Workspace }) {
                waiting for you to open the conversation. */
             <Text className="mt-2 font-sans text-meta text-mute">Nothing has been said yet.</Text>
           )}
+
+          {/* Outside the conditional above on purpose. An artifact is owned by
+              a person and outlives the workspace that made it, so a session
+              whose transcript is empty — or has not arrived — can still have
+              published one. Nesting these in the transcript branch hid them
+              exactly when the card was the only thing worth seeing. */}
+          {artifacts.map((a) => (
+            <ArtifactCard
+              key={a.id}
+              artifact={a}
+              onOpen={() => router.push({ pathname: "/workspace/artifact", params: { id: a.id } })}
+            />
+          ))}
 
           {/* A gap that admits it is one. Before `foldAll` this was the
               silent case: the transcript stopped at whatever line could not

@@ -83,6 +83,8 @@ export default function Connect() {
         paddingHorizontal: 24,
         paddingTop: insets.top + 24,
         paddingBottom: insets.bottom + 24,
+        paddingLeft: insets.left,
+        paddingRight: insets.right,
       }}
       keyboardShouldPersistTaps="handled"
     >

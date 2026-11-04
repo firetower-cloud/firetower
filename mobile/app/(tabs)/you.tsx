@@ -14,9 +14,10 @@ import { useSyncExternalStore } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Check, Plus } from "lucide-react-native";
+import { Check, ChevronRight, Plus, Shapes } from "lucide-react-native";
 import { forget, onServers, servers, type Connected } from "~/native/servers";
 import { choose, useServer } from "~/native/current";
+import { useListArtifacts } from "~/api/generated/artifacts/artifacts";
 import { color } from "~/design/tokens.generated";
 
 export default function You() {
@@ -25,11 +26,19 @@ export default function You() {
      genuinely the phone's rather than any server's. */
   const known = useSyncExternalStore(onServers, servers, servers);
   const current = useServer()?.serverId;
+  /* Only for the count beside the row. The list itself is read on the
+     screen it belongs to. */
+  const { data: shelf = [] } = useListArtifacts();
 
   return (
     <ScrollView
       className="flex-1 bg-ground"
-      contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: insets.bottom + 24 }}
+      contentContainerStyle={{
+        paddingTop: insets.top + 8,
+        paddingBottom: insets.bottom + 24,
+        paddingLeft: insets.left,
+        paddingRight: insets.right,
+      }}
     >
       <Text className="px-4 font-semibold text-display text-bone">You</Text>
 
@@ -89,6 +98,27 @@ export default function You() {
         Account
       </Text>
       <View className="px-2">
+        {/* The artifacts shelf hangs off the account rather than off a
+            workspace, because that is who owns it: `artifacts` has foreign
+            keys to `users` and `organizations` and to nothing else. A
+            workspace is reclaimed within a minute of its last session ending
+            and the cascade takes the conversation with it — a list spanning
+            conversations can only exist outside that. And it is a row here
+            rather than a fifth tab, because there are four tabs. */}
+        <Pressable
+          testID="artifacts"
+          onPress={() => router.push("/artifacts")}
+          className="flex-row items-center gap-3 rounded-lg px-3 py-3"
+          android_ripple={{ color: color.overlay }}
+        >
+          <View className="h-10 w-10 items-center justify-center rounded-md bg-raise">
+            <Shapes color={color.bone} size={18} />
+          </View>
+          <Text className="flex-1 font-medium text-title text-bone">Artifacts</Text>
+          {shelf.length ? <Text className="font-mono text-meta text-mute">{shelf.length}</Text> : null}
+          <ChevronRight color={color.mute} size={16} />
+        </Pressable>
+
         <View className="rounded-lg px-3 py-3">
           <Text className="font-sans text-ui text-text">
             {current ? `Signed in as ${known.find((s) => s.serverId === current)?.user}` : "Not signed in anywhere"}

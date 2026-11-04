@@ -33,6 +33,15 @@ const config: ExpoConfig = {
     infoPlist: {
       NSAppTransportSecurity: {
         NSAllowsLocalNetworking: true,
+        /* And the same again for web content, which is a separate switch.
+           `NSAllowsLocalNetworking` covers what the app fetches; a
+           `WKWebView` is governed on its own, so without this the artifact
+           viewer fails with `-1022` against the very control plane the rest
+           of the app is already talking to. Artifacts are served from that
+           same origin — on a per-artifact hostname, which is what makes them
+           separate origins to a browser — so this grants nothing the app
+           does not already reach. */
+        NSAllowsArbitraryLoadsInWebContent: true,
       },
       NSLocalNetworkUsageDescription:
         "Firetower connects to control planes you run — including ones on this network.",
@@ -63,6 +72,9 @@ const config: ExpoConfig = {
     "expo-router",
     "expo-secure-store",
     "expo-font",
+    /* SDK 58 moved the status bar to a config plugin; `expo install --fix`
+       asks for it by name and cannot write a dynamic config itself. */
+    "expo-status-bar",
     /* The image is not optional: without one the plugin still writes a
        `@drawable/splashscreen_logo` reference into values.xml and the Android
        resource link fails on a symbol nothing generated. */

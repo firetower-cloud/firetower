@@ -15,11 +15,11 @@
  *
  * The tab bar gets no ember. It is furniture, and ember answers one question.
  */
-import { Redirect, Tabs } from "expo-router";
+import { Redirect } from "expo-router";
+import { NativeTabs } from "expo-router/native-tabs";
 import { useServer } from "~/native/current";
 import { useGate } from "~/data";
-import { Inbox, ListTodo, Settings2, User } from "lucide-react-native";
-import { color, size } from "~/design/tokens.generated";
+import { color } from "~/design/tokens.generated";
 
 export default function TabLayout() {
   /**
@@ -51,43 +51,52 @@ function Signed() {
      leaves the router with a child route and nowhere to put it. */
   if (ready && locked) return <Redirect href="/locked" />;
 
+  /**
+   * `NativeTabs`, not `Tabs`, and that is the whole point.
+   *
+   * On iPhone Duo the system lifts navigation and tab bars out of the bottom
+   * and lays them vertically down the trailing edge — but it can only move a
+   * bar it owns. A JavaScript tab bar stays where it was drawn, which on a
+   * folded Duo is a row of furniture across the narrow end of the screen.
+   *
+   * The cost is the hand-styled `tabBarStyle` that used to be here. A system
+   * bar takes the system's colours, and that is the trade: the tab bar was
+   * never carrying meaning — it is furniture, and ember answers one question.
+   *
+   * Every trigger has an icon as well as a label on purpose. Apple's rule for
+   * a vertical bar is that an item with a title and no icon is not presented
+   * vertically at all, so a label-only tab would silently fall out of the rail.
+   */
   return (
-    <Tabs
-      screenOptions={{
-        headerShown: false,
-        tabBarActiveTintColor: color.bone,
-        tabBarInactiveTintColor: color.mute,
-        tabBarStyle: {
-          backgroundColor: color.panel,
-          borderTopColor: color["line-soft"],
-          borderTopWidth: 1,
-        },
-        tabBarLabelStyle: {
-          fontFamily: "Archivo_500Medium",
-          fontSize: size.micro,
-          letterSpacing: 0.2,
-        },
-      }}
+    /* The system owns the shape and the material — `backgroundColor` is a no-op
+       from iOS 26 on, because the bar is drawn by the OS. What it does hand over
+       is the ink, so the rail takes bone-on-mute like the rest of the app
+       instead of the stock accent blue. */
+    <NativeTabs
+      tintColor={color.bone}
+      iconColor={{ default: color.mute, selected: color.bone }}
+      labelStyle={{ default: { color: color.mute }, selected: { color: color.bone } }}
     >
-      <Tabs.Screen
-        name="index"
-        options={{ title: "Inbox", tabBarIcon: ({ color: c, size: s }) => <Inbox color={c} size={s - 2} /> }}
-      />
-      <Tabs.Screen
-        name="tasks"
-        options={{ title: "Tasks", tabBarIcon: ({ color: c, size: s }) => <ListTodo color={c} size={s - 2} /> }}
-      />
-      {/* Named and drawn the way the desk names and draws it — `Settings2` is
-          what its rail carries for Configuration. Three clients, one word for
-          the same place. */}
-      <Tabs.Screen
-        name="config"
-        options={{ title: "Config", tabBarIcon: ({ color: c, size: s }) => <Settings2 color={c} size={s - 2} /> }}
-      />
-      <Tabs.Screen
-        name="you"
-        options={{ title: "You", tabBarIcon: ({ color: c, size: s }) => <User color={c} size={s - 2} /> }}
-      />
-    </Tabs>
+      <NativeTabs.Trigger name="index">
+        <NativeTabs.Trigger.Icon sf="tray" md="inbox" />
+        <NativeTabs.Trigger.Label>Inbox</NativeTabs.Trigger.Label>
+      </NativeTabs.Trigger>
+
+      <NativeTabs.Trigger name="tasks">
+        <NativeTabs.Trigger.Icon sf="checklist" md="checklist" />
+        <NativeTabs.Trigger.Label>Tasks</NativeTabs.Trigger.Label>
+      </NativeTabs.Trigger>
+
+      {/* Named and drawn the way the desk names it — Configuration, one word. */}
+      <NativeTabs.Trigger name="config">
+        <NativeTabs.Trigger.Icon sf="slider.horizontal.3" md="tune" />
+        <NativeTabs.Trigger.Label>Config</NativeTabs.Trigger.Label>
+      </NativeTabs.Trigger>
+
+      <NativeTabs.Trigger name="you">
+        <NativeTabs.Trigger.Icon sf="person" md="person" />
+        <NativeTabs.Trigger.Label>You</NativeTabs.Trigger.Label>
+      </NativeTabs.Trigger>
+    </NativeTabs>
   );
 }

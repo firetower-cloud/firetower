@@ -50,7 +50,7 @@ export default function Inbox() {
     .filter(([, places]) => places.length > 0);
 
   return (
-    <View className="flex-1 bg-ground" style={{ paddingTop: insets.top }}>
+    <View className="flex-1 bg-ground" style={{ paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }}>
       <View className="flex-row items-center justify-between px-4 pb-3 pt-2">
         <ServerChip org={here?.org ?? "—"} reach={error ? "unreachable" : "live"} onPress={() => router.push("/you")} />
         <Pressable
