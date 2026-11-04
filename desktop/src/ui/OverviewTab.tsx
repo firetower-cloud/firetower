@@ -12,7 +12,7 @@
  * (`consumption_events`) but not yet exposed per session, so it isn't drawn.
  */
 import { useMemo } from "react";
-import { ExternalLink, FileText, GitBranch, GitPullRequest, LayoutList, Link2 } from "lucide-react";
+import { Check, ExternalLink, FileText, GitBranch, GitPullRequest, LayoutList, Link2 } from "lucide-react";
 import { navigate } from "~/shims/next-navigation";
 import { AgentMark } from "~/components/AgentMark";
 import { Blocks } from "~/island/Blocks";
@@ -62,11 +62,27 @@ function agentName(name: string): string {
   return at >= 0 ? name.slice(at + 3) : name;
 }
 
-function Panel({ title, note, children }: { title: string; note?: string; children: React.ReactNode }) {
+function Panel({
+  title,
+  note,
+  lit,
+  children,
+}: {
+  title: string;
+  note?: string;
+  /** The live one. A faint wash from the top and a slate heading, so the eye
+   *  lands on the thing that is still moving rather than on the record of
+   *  what already happened. */
+  lit?: boolean;
+  children: React.ReactNode;
+}) {
   return (
-    <section className="px-3 py-3">
+    <section
+      className="px-3 py-3"
+      style={lit ? { background: "linear-gradient(180deg, rgb(63 134 207 / 0.06), transparent 60%)" } : undefined}
+    >
       <div className="mb-2 flex items-center gap-2">
-        <h4 className="text-micro font-semibold uppercase tracking-wide text-mute">{title}</h4>
+        <h4 className={`text-micro font-semibold uppercase tracking-wide ${lit ? "text-slate" : "text-mute"}`}>{title}</h4>
         {note && <span className="ml-auto font-mono text-micro text-mute">{note}</span>}
       </div>
       {children}
@@ -162,7 +178,12 @@ export function OverviewTab({
   onOpenArtifact: (id: string, title: string) => void;
 }) {
   const conversation = useConversation(session.id).conversation;
-  const plan: PlanStep[] = conversation.plan;
+  // The live one first: Claude Code's todo list and Codex's own plan arrive on
+  // the turn stream and update as the agent works. Only when there is none do
+  // we fall back to what an agent set through `firetower:plan` — the
+  // cross-engine path, which rides on the session and so lands a poll later.
+  const live: PlanStep[] = conversation.plan;
+  const plan: PlanStep[] = live.length > 0 ? live : (session.plan ?? []);
   // The latest check-in each child has posted, read straight out of this
   // workspace's own transcript — every update arrived here as a relay-marked
   // turn, so nothing new is fetched. Items are chronological, so the last one
@@ -269,6 +290,41 @@ export function OverviewTab({
         </Panel>
       )}
 
+      {/* ── Plan ── Between the team and what they produced: the live thing,
+          above the record of what already came out. Only when there is one —
+          an agent that keeps no plan is not nagged with an empty panel. */}
+      {plan.length > 0 && (
+        <Panel title="Plan" lit note={`${done} / ${plan.length} · live`}>
+          <div className="mb-2.5 h-1 overflow-hidden rounded-full bg-ground">
+            <div
+              className="h-full rounded-full bg-sage transition-[width] duration-500"
+              style={{ width: `${Math.round((done / plan.length) * 100)}%` }}
+            />
+          </div>
+          <ol className="space-y-1.5">
+            {plan.map((s, i) => {
+              const state = String(s.status);
+              const finished = state === "Completed";
+              const doing = state === "InProgress";
+              return (
+                <li key={i} className="flex items-start gap-2.5 text-meta">
+                  <span
+                    className={`mt-[3px] grid h-3 w-3 shrink-0 place-items-center rounded-full ${
+                      finished ? "bg-sage" : doing ? "animate-pulse border-2 border-slate" : "border border-line"
+                    }`}
+                  >
+                    {finished && <Check className="h-2 w-2 text-ground" strokeWidth={4} />}
+                  </span>
+                  <span className={finished ? "text-mute line-through" : doing ? "text-bone" : "text-text"}>
+                    {s.step}
+                  </span>
+                </li>
+              );
+            })}
+          </ol>
+        </Panel>
+      )}
+
       {/* ── Artifacts & links ── */}
       {(artifacts.length > 0 || links.length > 0) && (
         <Panel title="Artifacts & links">
@@ -313,32 +369,6 @@ export function OverviewTab({
               )}
             </>
           )}
-        </Panel>
-      )}
-
-      {/* ── Plan ── */}
-      {plan.length > 0 && (
-        <Panel title="Plan" note={`${done} / ${plan.length}`}>
-          <div className="mb-2 h-1 overflow-hidden rounded-full bg-ground">
-            <div className="h-full bg-sage" style={{ width: `${Math.round((done / plan.length) * 100)}%` }} />
-          </div>
-          <ol className="space-y-1">
-            {plan.map((s, i) => {
-              const state = String(s.status);
-              return (
-                <li key={i} className="flex items-start gap-2.5 text-meta">
-                  <span
-                    className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${
-                      state === "Completed" ? "bg-sage" : state === "InProgress" ? "bg-slate animate-pulse" : "bg-line"
-                    }`}
-                  />
-                  <span className={state === "Completed" ? "text-mute line-through" : state === "InProgress" ? "text-bone" : "text-text"}>
-                    {s.step}
-                  </span>
-                </li>
-              );
-            })}
-          </ol>
         </Panel>
       )}
 

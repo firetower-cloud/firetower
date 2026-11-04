@@ -8,6 +8,7 @@
 import type { Agent } from './agent';
 import type { Checkout } from './checkout';
 import type { HostId } from './hostId';
+import type { PlanStep } from './planStep';
 import type { ResourcePath } from './resourcePath';
 import type { SessionId } from './sessionId';
 import type { SessionStatus } from './sessionStatus';
@@ -139,6 +140,15 @@ export interface Session {
      * own, `d/backend/…` once it has been handed to a directory.
      */
   path: ResourcePath;
+  /**
+     * The plan the agent is keeping, when it set one through `firetower:plan`.
+     *
+     * The cross-engine fallback. Claude Code's todo list and Codex's own plan
+     * already arrive live on the turn stream and are what the rail prefers;
+     * this is for an engine with no plan tool of its own, and is read only
+     * when the live one is empty.
+     */
+  plan?: PlanStep[];
   /**
      * The profile this session was started as, by id, when it was started as
      * one. What decides whether it may delegate — a Manager may — and what the

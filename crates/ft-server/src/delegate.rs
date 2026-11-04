@@ -91,6 +91,7 @@ async fn handle(state: &AppState, request: &AgentRequest) -> Result<String> {
         "spawn" => spawn(state, request).await,
         "children" => children(state, request).await,
         "update" => update(state, request).await,
+        "plan" => plan(state, request).await,
         "create_profile" => create_profile(state, request).await,
         "update_profile" => update_profile(state, request).await,
         "list_profiles" => list_profiles(state, request).await,
@@ -413,6 +414,11 @@ fn brief(
          milestone, not every step, and it does not pause you. Keep it to a line unless it has \
          asked for detail. Save the full account for when you finish.",
     );
+    text.push_str(
+        "\n\nKeep a short plan as you go — your own todo list if you have one, otherwise `plan`. \
+         It is drawn live in the workspace, so whoever is watching can follow what you are on \
+         without reading the whole transcript. A handful of steps, one in progress at a time.",
+    );
     text
 }
 
@@ -431,6 +437,63 @@ fn started(child: &Session, shares_workspace: bool) -> String {
          does not depend on it, then end your turn.",
         child.name, child.id
     )
+}
+
+/// The plan the agent is keeping, for the person watching the workspace.
+///
+/// The cross-engine half of the plan: Claude Code's todo list and Codex's own
+/// plan already arrive on the turn stream and are what the rail draws, so an
+/// agent on either of those need never call this. It is here so an engine with
+/// no plan tool of its own can still leave a trail, and so that *every* agent
+/// is told — in the tool's description — that its plan is on screen.
+///
+/// Restated whole each call, like a todo list: this replaces the stored plan.
+async fn plan(state: &AppState, request: &AgentRequest) -> Result<String> {
+    let steps = request
+        .input
+        .get("steps")
+        .and_then(Value::as_array)
+        .context("`steps` is the plan, start to finish")?;
+    if steps.len() > 20 {
+        bail!("a plan is a handful of steps, not {} — keep it readable", steps.len());
+    }
+
+    let mut plan = Vec::new();
+    for step in steps {
+        // A bare string is accepted as well as `{step, status}`: the shape an
+        // agent reaches for first should not be a refusal.
+        let (what, status) = match step {
+            Value::String(what) => (what.clone(), "pending".to_string()),
+            _ => (
+                text(step, "step").context("each step needs a `step`")?,
+                step.get("status")
+                    .and_then(Value::as_str)
+                    .unwrap_or("pending")
+                    .to_string(),
+            ),
+        };
+        plan.push(ft_core::turn::PlanStep {
+            step: what,
+            status: match status.to_ascii_lowercase().as_str() {
+                "done" | "completed" | "complete" => ft_core::turn::PlanStepStatus::Completed,
+                "doing" | "inprogress" | "in_progress" | "active" => {
+                    ft_core::turn::PlanStepStatus::InProgress
+                }
+                _ => ft_core::turn::PlanStepStatus::Pending,
+            },
+        });
+    }
+
+    state.db.set_session_plan(&request.session_id, &plan).await?;
+    let done = plan
+        .iter()
+        .filter(|s| s.status == ft_core::turn::PlanStepStatus::Completed)
+        .count();
+    Ok(format!(
+        "Plan saved — {done} of {} done. It is on screen in the workspace; restate it whenever a \
+         step starts or finishes.",
+        plan.len()
+    ))
 }
 
 /// A child's progress note to its lead, mid-task.

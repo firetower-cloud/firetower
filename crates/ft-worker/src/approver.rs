@@ -60,6 +60,8 @@ pub const SPAWN: &str = "spawn";
 pub const CHILDREN: &str = "children";
 /// A child's short progress note to its lead, posted without ending its turn.
 pub const UPDATE: &str = "update";
+/// The plan the agent is keeping, drawn live in the workspace.
+pub const PLAN: &str = "plan";
 /// Save a reusable agent profile, so a person can ask for one in words rather
 /// than filling the form in by hand.
 pub const CREATE_PROFILE: &str = "create_profile";
@@ -129,6 +131,20 @@ blocking question — it is one-way, and the lead reads it between its own \
 turns. Keep a casual check-in to a line or two; go longer only when the lead \
 has asked you for detail. If you are truly blocked and cannot go on without an \
 answer, hand back instead.";
+
+/// What `plan` does, as the agent reads it.
+///
+/// This description is also where every agent — on any engine, in any session —
+/// is told that its plan is on screen. An agent whose engine keeps its own todo
+/// list never has to call this; being told the list is watched is the point.
+const PLAN_DESCRIPTION: &str = "\
+Keep a short plan of what you are doing, drawn live in the workspace so the \
+person watching can follow without reading the whole transcript. \
+IF YOUR ENGINE HAS ITS OWN TODO OR PLAN TOOL, USE THAT INSTEAD — it already \
+feeds the same panel, and this exists for engines that have none. \
+Restate the whole plan each call, like a todo list: 3-8 steps, one \
+`doing` at a time, the rest `pending` or `done`. Update it when a step starts \
+or finishes. It does not pause you and nobody is asked to approve it.";
 
 /// The configuration file that tells an agent to start this.
 pub fn mcp_config(exe: &std::path::Path, session_id: &str, workspace: &std::path::Path) -> Value {
@@ -318,6 +334,27 @@ async fn answer(
                         "required": ["note"],
                     },
                 }, {
+                    "name": PLAN,
+                    "description": PLAN_DESCRIPTION,
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "steps": {
+                                "type": "array",
+                                "description": "The whole plan, in order. Each item is {step, status} with status one of \"pending\", \"doing\", \"done\" — or a bare string, which is taken as pending.",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "step": { "type": "string", "description": "What this step is, in a few words." },
+                                        "status": { "type": "string", "enum": ["pending", "doing", "done"] },
+                                    },
+                                    "required": ["step"],
+                                },
+                            },
+                        },
+                        "required": ["steps"],
+                    },
+                }, {
                     "name": CREATE_PROFILE,
                     "description": "Save a reusable agent profile — a persona a workspace can be started as, or a lead can delegate to. A profile fully specifies where and what it runs: there is no \"let the lead choose\", so you must settle the engine and the placement (and, for its own workspace, the machine). Unless they have already said otherwise, AGREE ON THE SHAPE BEFORE YOU CALL THIS — don't silently assume. In one short, plain-language exchange, put the choices to them with a recommended default each, and let them correct you: (1) what it does and when to reach for it; (2) its goal and how it should work (the instructions); (3) Operator or Manager — may it hand work to other profiles, and if so which; (4) which engine it runs on; (5) placement — the lead's own workspace (`here`) or its own (`new`); (6) for `new`, which machine — you can't see the host ids, so either the person gives you one or you create it as `here` and tell them to set the machine on the Profiles screen; (7) kept yours, or filed in a directory a teammate can reach. It runs on the owner's default subscription for the chosen engine — you can't pick a subscription here, so if they want a specific one, tell them to set it on the Profiles screen. Take anything they already specified and don't re-ask it. Then call this once. It appears on the Profiles screen immediately, theirs to edit or delete. Check `list_profiles` first so you refine an existing one rather than duplicate it.",
                     "inputSchema": {
@@ -427,7 +464,7 @@ async fn answer(
                 .and_then(Value::as_str)
                 .unwrap_or(TOOL);
             let text = match name {
-                SPAWN | CHILDREN | UPDATE | CREATE_PROFILE | UPDATE_PROFILE | LIST_PROFILES
+                SPAWN | CHILDREN | UPDATE | PLAN | CREATE_PROFILE | UPDATE_PROFILE | LIST_PROFILES
                 | CREATE_SKILL | UPDATE_SKILL | LIST_SKILLS => {
                     delegate(session_id, name, &id, &arguments).await
                 }

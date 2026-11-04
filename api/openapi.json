@@ -14295,6 +14295,13 @@
             "$ref": "#/components/schemas/ResourcePath",
             "description": "Which directory the workspace is filed in — `u/kevin/…` for somebody's\nown, `d/backend/…` once it has been handed to a directory."
           },
+          "plan": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PlanStep"
+            },
+            "description": "The plan the agent is keeping, when it set one through `firetower:plan`.\n\nThe cross-engine fallback. Claude Code's todo list and Codex's own plan\nalready arrive live on the turn stream and are what the rail prefers;\nthis is for an engine with no plan tool of its own, and is read only\nwhen the live one is empty."
+          },
           "profileId": {
             "type": [
               "string",

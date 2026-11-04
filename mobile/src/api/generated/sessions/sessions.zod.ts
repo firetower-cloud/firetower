@@ -60,6 +60,10 @@ export const ListSessionsResponseItem = zod.object({
   "ownerName": zod.string().nullish().describe('What to call the owner, so a shared list can say whose this is.\n\nSent because it cannot be looked up: listing the people in an\norganisation is an administrator\'s request, and a member seeing a\ncolleague\'s workspace still has to be told a name rather than an id.'),
   "parentId": zod.union([zod.null(),zod.string().describe('The session that asked for this one, when a session did.\n\nAbsent for everything a person started, which is every session there\nwas until a lead could ask for a child. What hangs off this edge is in\nthe control plane: a child\'s hand-back goes to its lead rather than\ninto the inbox, and ending the lead ends the tree.')]).optional(),
   "path": zod.string().describe('Which directory the workspace is filed in — `u/kevin/…` for somebody\'s\nown, `d/backend/…` once it has been handed to a directory.'),
+  "plan": zod.array(zod.object({
+  "status": zod.enum(['Pending', 'InProgress', 'Completed']),
+  "step": zod.string()
+}).describe('One line of the agent\'s plan.')).optional().describe('The plan the agent is keeping, when it set one through `firetower:plan`.\n\nThe cross-engine fallback. Claude Code\'s todo list and Codex\'s own plan\nalready arrive live on the turn stream and are what the rail prefers;\nthis is for an engine with no plan tool of its own, and is read only\nwhen the live one is empty.'),
   "profileId": zod.string().nullish().describe('The profile this session was started as, by id, when it was started as\none. What decides whether it may delegate — a Manager may — and what the\nrail reads to say which kind of agent a workspace holds.'),
   "prompt": zod.string(),
   "proposedBody": zod.string().nullish(),
@@ -152,6 +156,10 @@ export const CreateSessionResponse = zod.object({
   "ownerName": zod.string().nullish().describe('What to call the owner, so a shared list can say whose this is.\n\nSent because it cannot be looked up: listing the people in an\norganisation is an administrator\'s request, and a member seeing a\ncolleague\'s workspace still has to be told a name rather than an id.'),
   "parentId": zod.union([zod.null(),zod.string().describe('The session that asked for this one, when a session did.\n\nAbsent for everything a person started, which is every session there\nwas until a lead could ask for a child. What hangs off this edge is in\nthe control plane: a child\'s hand-back goes to its lead rather than\ninto the inbox, and ending the lead ends the tree.')]).optional(),
   "path": zod.string().describe('Which directory the workspace is filed in — `u/kevin/…` for somebody\'s\nown, `d/backend/…` once it has been handed to a directory.'),
+  "plan": zod.array(zod.object({
+  "status": zod.enum(['Pending', 'InProgress', 'Completed']),
+  "step": zod.string()
+}).describe('One line of the agent\'s plan.')).optional().describe('The plan the agent is keeping, when it set one through `firetower:plan`.\n\nThe cross-engine fallback. Claude Code\'s todo list and Codex\'s own plan\nalready arrive live on the turn stream and are what the rail prefers;\nthis is for an engine with no plan tool of its own, and is read only\nwhen the live one is empty.'),
   "profileId": zod.string().nullish().describe('The profile this session was started as, by id, when it was started as\none. What decides whether it may delegate — a Manager may — and what the\nrail reads to say which kind of agent a workspace holds.'),
   "prompt": zod.string(),
   "proposedBody": zod.string().nullish(),
@@ -253,6 +261,10 @@ export const GetSessionResponse = zod.object({
   "ownerName": zod.string().nullish().describe('What to call the owner, so a shared list can say whose this is.\n\nSent because it cannot be looked up: listing the people in an\norganisation is an administrator\'s request, and a member seeing a\ncolleague\'s workspace still has to be told a name rather than an id.'),
   "parentId": zod.union([zod.null(),zod.string().describe('The session that asked for this one, when a session did.\n\nAbsent for everything a person started, which is every session there\nwas until a lead could ask for a child. What hangs off this edge is in\nthe control plane: a child\'s hand-back goes to its lead rather than\ninto the inbox, and ending the lead ends the tree.')]).optional(),
   "path": zod.string().describe('Which directory the workspace is filed in — `u/kevin/…` for somebody\'s\nown, `d/backend/…` once it has been handed to a directory.'),
+  "plan": zod.array(zod.object({
+  "status": zod.enum(['Pending', 'InProgress', 'Completed']),
+  "step": zod.string()
+}).describe('One line of the agent\'s plan.')).optional().describe('The plan the agent is keeping, when it set one through `firetower:plan`.\n\nThe cross-engine fallback. Claude Code\'s todo list and Codex\'s own plan\nalready arrive live on the turn stream and are what the rail prefers;\nthis is for an engine with no plan tool of its own, and is read only\nwhen the live one is empty.'),
   "profileId": zod.string().nullish().describe('The profile this session was started as, by id, when it was started as\none. What decides whether it may delegate — a Manager may — and what the\nrail reads to say which kind of agent a workspace holds.'),
   "prompt": zod.string(),
   "proposedBody": zod.string().nullish(),
@@ -340,6 +352,10 @@ export const RenameSessionResponse = zod.object({
   "ownerName": zod.string().nullish().describe('What to call the owner, so a shared list can say whose this is.\n\nSent because it cannot be looked up: listing the people in an\norganisation is an administrator\'s request, and a member seeing a\ncolleague\'s workspace still has to be told a name rather than an id.'),
   "parentId": zod.union([zod.null(),zod.string().describe('The session that asked for this one, when a session did.\n\nAbsent for everything a person started, which is every session there\nwas until a lead could ask for a child. What hangs off this edge is in\nthe control plane: a child\'s hand-back goes to its lead rather than\ninto the inbox, and ending the lead ends the tree.')]).optional(),
   "path": zod.string().describe('Which directory the workspace is filed in — `u/kevin/…` for somebody\'s\nown, `d/backend/…` once it has been handed to a directory.'),
+  "plan": zod.array(zod.object({
+  "status": zod.enum(['Pending', 'InProgress', 'Completed']),
+  "step": zod.string()
+}).describe('One line of the agent\'s plan.')).optional().describe('The plan the agent is keeping, when it set one through `firetower:plan`.\n\nThe cross-engine fallback. Claude Code\'s todo list and Codex\'s own plan\nalready arrive live on the turn stream and are what the rail prefers;\nthis is for an engine with no plan tool of its own, and is read only\nwhen the live one is empty.'),
   "profileId": zod.string().nullish().describe('The profile this session was started as, by id, when it was started as\none. What decides whether it may delegate — a Manager may — and what the\nrail reads to say which kind of agent a workspace holds.'),
   "prompt": zod.string(),
   "proposedBody": zod.string().nullish(),
@@ -1173,6 +1189,10 @@ export const SetShareResponse = zod.object({
   "ownerName": zod.string().nullish().describe('What to call the owner, so a shared list can say whose this is.\n\nSent because it cannot be looked up: listing the people in an\norganisation is an administrator\'s request, and a member seeing a\ncolleague\'s workspace still has to be told a name rather than an id.'),
   "parentId": zod.union([zod.null(),zod.string().describe('The session that asked for this one, when a session did.\n\nAbsent for everything a person started, which is every session there\nwas until a lead could ask for a child. What hangs off this edge is in\nthe control plane: a child\'s hand-back goes to its lead rather than\ninto the inbox, and ending the lead ends the tree.')]).optional(),
   "path": zod.string().describe('Which directory the workspace is filed in — `u/kevin/…` for somebody\'s\nown, `d/backend/…` once it has been handed to a directory.'),
+  "plan": zod.array(zod.object({
+  "status": zod.enum(['Pending', 'InProgress', 'Completed']),
+  "step": zod.string()
+}).describe('One line of the agent\'s plan.')).optional().describe('The plan the agent is keeping, when it set one through `firetower:plan`.\n\nThe cross-engine fallback. Claude Code\'s todo list and Codex\'s own plan\nalready arrive live on the turn stream and are what the rail prefers;\nthis is for an engine with no plan tool of its own, and is read only\nwhen the live one is empty.'),
   "profileId": zod.string().nullish().describe('The profile this session was started as, by id, when it was started as\none. What decides whether it may delegate — a Manager may — and what the\nrail reads to say which kind of agent a workspace holds.'),
   "prompt": zod.string(),
   "proposedBody": zod.string().nullish(),

@@ -2323,6 +2323,24 @@ impl Db {
         Ok(stored.rows_affected() > 0)
     }
 
+    /// Keep the plan an agent set through `firetower:plan`.
+    ///
+    /// Restated whole each time, like a todo list, so this replaces rather than
+    /// merges — there is no "half a plan".
+    pub async fn set_session_plan(
+        &self,
+        session_id: &SessionId,
+        plan: &[ft_core::turn::PlanStep],
+    ) -> Result<()> {
+        sqlx::query("UPDATE sessions SET plan = $1, updated_at = now() WHERE id = $2")
+            .bind(serde_json::to_value(plan)?)
+            .bind(session_id.as_str())
+            .execute(&self.pool)
+            .await
+            .context("storing a session's plan")?;
+        Ok(())
+    }
+
     /// Remember where a session's pull request is.
     ///
     /// Written once it exists, so a screen can tell "pushed" from "already
@@ -2893,6 +2911,15 @@ fn session_from_row(r: sqlx::postgres::PgRow) -> Result<Session> {
             .map(SessionId::from_stored),
         profile_id: r.get::<Option<String>, _>("profile_id"),
         spawn_reason: r.get("spawn_reason"),
+        // Null for every session whose agent never set one through the plan
+        // tool — which is most of them, since the two engines we drive keep
+        // their own and it arrives live instead.
+        plan: r
+            .try_get::<Option<serde_json::Value>, _>("plan")
+            .ok()
+            .flatten()
+            .and_then(|v| serde_json::from_value(v).ok())
+            .unwrap_or_default(),
         host_id: HostId::from_stored(r.get::<String, _>("host_id")),
         // A real id now, rather than the `None` it was while a session and the
         // place it runs in were the same row.

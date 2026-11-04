@@ -295,6 +295,14 @@ pub struct Session {
     /// question anyone asks about a workspace they did not open.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spawn_reason: Option<String>,
+    /// The plan the agent is keeping, when it set one through `firetower:plan`.
+    ///
+    /// The cross-engine fallback. Claude Code's todo list and Codex's own plan
+    /// already arrive live on the turn stream and are what the rail prefers;
+    /// this is for an engine with no plan tool of its own, and is read only
+    /// when the live one is empty.
+    #[serde(default)]
+    pub plan: Vec<crate::turn::PlanStep>,
     pub host_id: HostId,
     pub workspace_id: Option<WorkspaceId>,
     /// What this session is going to do, in order, decided when it was created.
