@@ -666,25 +666,67 @@ async fn owner_of(state: &AppState, session: &Session) -> Result<(String, String
     Ok((slug, whose))
 }
 
+/// Why a profile that wants its own workspace cannot be finished from here.
+///
+/// `placement: "new"` needs the host id of a machine, and nothing shows an
+/// agent the host ids — so this is a wall, not a validation slip it can fix by
+/// trying again. It used to end as `here`: the person asked for its own
+/// workspace, got a shared one, and was told nothing. Refuse instead, in words
+/// the agent can repeat to them.
+fn machine_it_cannot_pick(new: &crate::roles::NewRole) -> Option<&'static str> {
+    let bare = new.machine.as_deref().map(str::trim).unwrap_or("").is_empty();
+    (new.placement == "new" && bare).then_some(
+        "a profile whose child gets its own workspace has to name the machine it runs on, and \
+         you cannot see the machines — so this one is not yours to finish. Tell them that, and \
+         offer either a host id from Settings → Compute → Machines, or `here` for now with the \
+         placement changed on Settings → Harness → Profiles. Do not file it as `here` and leave \
+         them thinking they got what they asked for.",
+    )
+}
+
+/// What this tool settled, as the agent reads it back.
+///
+/// Said whole on purpose. The subscription cannot be set from here and the
+/// machine often cannot either, and those are the two things a person names
+/// most — so the ack states what landed rather than letting "Created it" stand
+/// in for "created it the way you asked".
+fn profile_shape(new: &crate::roles::NewRole) -> String {
+    format!(
+        "{}, {}, {}",
+        new.agent.as_deref().unwrap_or("its engine"),
+        if new.placement == "new" {
+            "its own workspace"
+        } else {
+            "sharing the lead's workspace"
+        },
+        if new.can_delegate {
+            "a Manager that can delegate to other profiles"
+        } else {
+            "an Operator that does the work itself"
+        },
+    )
+}
+
 /// Save a new profile for the session's owner.
 async fn create_profile(state: &AppState, request: &AgentRequest) -> Result<String> {
     let session = authoring_session(state, request).await?;
     let owner = session.owner.as_str();
     let new = new_role_from(&request.input)?;
+    if let Some(why) = machine_it_cannot_pick(&new) {
+        bail!("{why}");
+    }
     crate::roles::check(&new).map_err(|e| anyhow::anyhow!("{e}"))?;
     let org = state.db.org().await?;
     let (slug, whose) = owner_of(state, &session).await?;
     let id = state.roles.create(&org, owner, &slug, &new).await?;
     let where_it_is = file_profile(state, id.as_str(), &request.input, owner, &whose).await?;
     Ok(format!(
-        "Created the \"{}\" profile in {where_it_is}. It's on the Profiles screen now — start a \
-         workspace as it, or {}.",
+        "Created the \"{}\" profile in {where_it_is} — {}. It runs on the owner's default \
+         subscription for that engine: this tool cannot pin a particular one, so if they asked \
+         for a subscription, tell them it is unset and set on Settings → Harness → Profiles. \
+         It's on the Profiles screen now.",
         new.name.trim(),
-        if new.can_delegate {
-            "have a lead delegate to it"
-        } else {
-            "a Manager can delegate to it"
-        }
+        profile_shape(&new),
     ))
 }
 
@@ -718,11 +760,19 @@ async fn update_profile(state: &AppState, request: &AgentRequest) -> Result<Stri
         settings: existing.settings.clone(),
         directory: None,
     };
+    if let Some(why) = machine_it_cannot_pick(&new) {
+        bail!("{why}");
+    }
     crate::roles::check(&new).map_err(|e| anyhow::anyhow!("{e}"))?;
     if !state.roles.update(owner, existing.id.as_str(), &new).await? {
         bail!("you cannot change the \"{wanted}\" profile");
     }
-    Ok(format!("Updated the \"{}\" profile.", new.name.trim()))
+    Ok(format!(
+        "Updated the \"{}\" profile — {}. Its subscription is untouched: that one is set on \
+         Settings → Harness → Profiles, not from here.",
+        new.name.trim(),
+        profile_shape(&new),
+    ))
 }
 
 /// The profiles the session's owner can see, so the agent builds on them.
@@ -1230,5 +1280,51 @@ mod tests {
     fn several_results_travel_as_one_message() {
         let one = joined(vec![(None, "first".into()), (None, "second".into())]);
         assert_eq!(one, "first\n\n---\n\nsecond");
+    }
+
+    fn asked_for(placement: &str, machine: Option<&str>) -> crate::roles::NewRole {
+        let mut input = json!({
+            "name": "QA",
+            "does": "runs the suite and reports what broke; after a hand-back",
+            "agent": "ClaudeCode",
+            "placement": placement,
+        });
+        if let Some(m) = machine {
+            input["machine"] = json!(m);
+        }
+        new_role_from(&input).unwrap()
+    }
+
+    #[test]
+    fn its_own_workspace_without_a_machine_is_refused_rather_than_quietly_shared() {
+        // The bug this exists for: the person asks for its own workspace, the
+        // agent cannot see the host ids, and the profile used to be filed as
+        // `here` with nobody told. Now the agent is handed the sentence.
+        let why = machine_it_cannot_pick(&asked_for("new", None)).expect("refused");
+        assert!(why.contains("cannot see the machines"));
+        assert!(why.contains("Machines"));
+        assert!(why.contains("Profiles"));
+    }
+
+    #[test]
+    fn a_machine_the_person_handed_over_is_taken() {
+        assert!(machine_it_cannot_pick(&asked_for("new", Some("h_1"))).is_none());
+        // Whitespace is not a machine.
+        assert!(machine_it_cannot_pick(&asked_for("new", Some("   "))).is_some());
+    }
+
+    #[test]
+    fn a_shared_workspace_never_needed_a_machine() {
+        assert!(machine_it_cannot_pick(&asked_for("here", None)).is_none());
+    }
+
+    #[test]
+    fn the_ack_says_what_landed_so_silence_cannot_read_as_applied() {
+        let shape = profile_shape(&asked_for("here", None));
+        assert_eq!(
+            shape,
+            "ClaudeCode, sharing the lead's workspace, an Operator that does the work itself"
+        );
+        assert!(profile_shape(&asked_for("new", Some("h_1"))).contains("its own workspace"));
     }
 }

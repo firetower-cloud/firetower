@@ -356,7 +356,7 @@ async fn answer(
                     },
                 }, {
                     "name": CREATE_PROFILE,
-                    "description": "Save a reusable agent profile — a persona a workspace can be started as, or a lead can delegate to. A profile fully specifies where and what it runs: there is no \"let the lead choose\", so you must settle the engine and the placement (and, for its own workspace, the machine). Unless they have already said otherwise, AGREE ON THE SHAPE BEFORE YOU CALL THIS — don't silently assume. In one short, plain-language exchange, put the choices to them with a recommended default each, and let them correct you: (1) what it does and when to reach for it; (2) its goal and how it should work (the instructions); (3) Operator or Manager — may it hand work to other profiles, and if so which; (4) which engine it runs on; (5) placement — the lead's own workspace (`here`) or its own (`new`); (6) for `new`, which machine — you can't see the host ids, so either the person gives you one or you create it as `here` and tell them to set the machine on the Profiles screen; (7) kept yours, or filed in a directory a teammate can reach. It runs on the owner's default subscription for the chosen engine — you can't pick a subscription here, so if they want a specific one, tell them to set it on the Profiles screen. Take anything they already specified and don't re-ask it. Then call this once. It appears on the Profiles screen immediately, theirs to edit or delete. Check `list_profiles` first so you refine an existing one rather than duplicate it.",
+                    "description": "Save a reusable agent profile — a persona a workspace can be started as, or a lead can delegate to. A profile fully specifies where and what it runs: there is no \"let the lead choose\", so you must settle the engine and the placement (and, for its own workspace, the machine). Unless they have already said otherwise, AGREE ON THE SHAPE BEFORE YOU CALL THIS — don't silently assume. In one short, plain-language exchange, put the choices to them with a recommended default each, and let them correct you: (1) what it does and when to reach for it; (2) its goal and how it should work (the instructions); (3) Operator or Manager — may it hand work to other profiles, and if so which; (4) which engine it runs on; (5) placement — the lead's own workspace (`here`) or its own (`new`); (6) for `new`, which machine — you cannot see the machines, so unless they hand you a host id this profile is not yours to finish: SAY THAT rather than quietly filing it as `here`, and offer `here` for now with the real placement set on Settings → Harness → Profiles; (7) kept yours, or filed in a directory a teammate can reach. You cannot set the subscription: it runs on the owner's default for the chosen engine, whatever they asked for. If they named one, create the profile and then SAY YOU COULD NOT APPLY IT and that it is set on Settings → Harness → Profiles — never let silence read as \"applied\". Take anything they already specified and don't re-ask it. Then call this once. It appears on the Profiles screen immediately, theirs to edit or delete. Check `list_profiles` first so you refine an existing one rather than duplicate it.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -373,7 +373,7 @@ async fn answer(
                     },
                 }, {
                     "name": UPDATE_PROFILE,
-                    "description": "Change a saved profile, by name — \"make the reviewer stricter\", \"run QA on Codex\". Only the fields you pass change; everything else stays. Rename with `new_name`. When what they want changed is ambiguous, confirm it before you apply — a profile is something they rely on, not a scratch edit.",
+                    "description": "Change a saved profile, by name — \"make the reviewer stricter\", \"run QA on Codex\". Only the fields you pass change; everything else stays. Rename with `new_name`. When what they want changed is ambiguous, confirm it before you apply — a profile is something they rely on, not a scratch edit. TWO THINGS THIS CANNOT CHANGE: the subscription, and `placement` to `new` for a profile with no machine (that is a host id you cannot see). If they ask for either, say so and point them at Settings → Harness → Profiles instead of reporting a change you did not make.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -760,6 +760,8 @@ mod tests {
                 TOOL,
                 SPAWN,
                 CHILDREN,
+                UPDATE,
+                PLAN,
                 CREATE_PROFILE,
                 UPDATE_PROFILE,
                 LIST_PROFILES,
