@@ -24,6 +24,7 @@ import { Segmented } from "~/ui/Segmented";
 import { ServerChip } from "~/ui/ServerChip";
 import { WorkspaceRow } from "~/ui/WorkspaceRow";
 import { Waiting } from "~/ui/Waiting";
+import { COLUMN } from "~/ui/measure";
 import { color, size } from "~/design/tokens.generated";
 
 type Filter = "all" | "waiting" | "working" | "idle";
@@ -51,7 +52,7 @@ export default function Inbox() {
 
   return (
     <View className="flex-1 bg-ground" style={{ paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }}>
-      <View className="flex-row items-center justify-between px-4 pb-3 pt-2">
+      <View className="flex-row items-center justify-between px-4 pb-3 pt-2" style={COLUMN}>
         <ServerChip org={here?.org ?? "—"} reach={error ? "unreachable" : "live"} onPress={() => router.push("/you")} />
         <Pressable
           testID="new-workspace"
@@ -64,7 +65,7 @@ export default function Inbox() {
         </Pressable>
       </View>
 
-      <View className="px-4 pb-3">
+      <View className="px-4 pb-3" style={COLUMN}>
         <Text className="font-semibold text-display text-bone">Inbox</Text>
         {waiting > 0 ? (
           <Text className="mt-0.5 font-medium text-ui text-ember">{waiting} waiting on you</Text>
@@ -79,12 +80,12 @@ export default function Inbox() {
         )}
       </View>
 
-      <View className="px-4 pb-2">
+      <View className="px-4 pb-2" style={COLUMN}>
         <Segmented options={FILTERS} value={filter} onChange={setFilter} />
       </View>
 
       <ScrollView
-        contentContainerStyle={{ paddingBottom: insets.bottom + 24, paddingHorizontal: 8, flexGrow: 1 }}
+        contentContainerStyle={{ paddingBottom: insets.bottom + 24, paddingHorizontal: 8, flexGrow: 1, ...COLUMN }}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl

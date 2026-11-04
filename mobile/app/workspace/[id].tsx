@@ -144,18 +144,38 @@ function Conversation({ place }: { place: Workspace }) {
   /* Beside the conversation when the display is wide enough to hold both —
      the Duo's inner panel is the first phone screen that is — and a pushed
      route when it is not. One component, two placements. */
-  const { width } = useWindowDimensions();
-  const beside = width >= 700;
   /**
-   * How wide the panel gets, as a rule rather than a constant.
+   * Where the overview goes, which is three answers and not two.
    *
-   * It used to take a flat 320 whatever was left, which is fine at 951 and
-   * ruinous below it — the conversation got 146 pt and wrapped to one
-   * character a line. The threshold hid that rather than preventing it, so
-   * the panel now yields: the conversation keeps at least 400 pt and the
-   * panel takes what remains, up to 340.
+   * The conversation is never squeezed — that is the whole rule, and the
+   * widths decide which way of keeping it applies:
+   *
+   * - **push**, under 600. There is no room for a rail at all; it is its own
+   *   screen, one back-gesture away. The phone at 390 and the Duo's front
+   *   panel at 466.
+   * - **float**, 600 to 820. Wide enough to want the rail, too narrow to
+   *   split: 669 minus a 340 rail leaves 329, which is less than the phone
+   *   this app was designed for. So it comes over the top and the
+   *   conversation keeps its full width underneath. The Duo's inner panel
+   *   in portrait, which an earlier single threshold of 700 missed entirely.
+   * - **dock**, 820 and over. Room for both, so the rail sits beside and the
+   *   conversation takes the majority — 611 of the Duo's 951 in landscape.
+   *
+   * Collapsible in both of the last two, from one control, so rotating the
+   * device never changes what the button does — only where the rail lands.
    */
-  const panel = Math.min(340, Math.max(280, width - 400));
+  const { width } = useWindowDimensions();
+  const rail: "push" | "float" | "dock" = width >= 820 ? "dock" : width >= 600 ? "float" : "push";
+
+  /* Docked starts open because it costs the conversation nothing it needs;
+     floated starts closed because it costs the conversation all of it. */
+  const [railOpen, setRailOpen] = useState(rail === "dock");
+
+  /* Only the docked rail yields — a floated one is over the top, so there is
+     nothing to take width from. */
+  const panel = rail === "dock" ? Math.min(340, Math.max(280, width - 400)) : 340;
+  const beside = rail === "dock" && railOpen;
+  const floating = rail === "float" && railOpen;
 
   const { data: everyArtifact } = useListArtifacts();
   const family = useMemo(() => new Set([managerId, ...team.map((t) => t.id)]), [managerId, team]);
@@ -201,6 +221,19 @@ function Conversation({ place }: { place: Workspace }) {
     await attach.mutateAsync({ id: speaker.id, data: { name, data } });
   };
 
+  /* Named once: the docked column and the floated sheet draw the same thing
+     and must not drift apart. */
+  const overview = session ? (
+    <Overview
+      session={session}
+      lead={above}
+      team={team}
+      plan={plan}
+      artifacts={artifacts}
+      onOpenArtifact={(id) => router.push({ pathname: "/workspace/artifact", params: { id } })}
+    />
+  ) : null;
+
   return (
     <View className="flex-1 bg-ground" style={{ paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }}>
       <View className="flex-row items-center gap-1 border-b border-line-soft px-1 pb-2.5 pt-1">
@@ -230,16 +263,20 @@ function Conversation({ place }: { place: Workspace }) {
         {/* Only when the overview cannot sit beside the conversation. On a
             wide display it is already on screen and a button to it would open
             a second copy of what you are looking at. */}
-        {!beside ? (
-          <Pressable
-            testID="overview"
-            onPress={() => router.push({ pathname: "/workspace/overview", params: { id: place.id } })}
-            className="h-10 w-10 items-center justify-center"
-            hitSlop={8}
-          >
-            <PanelRight color={color.dim} size={19} />
-          </Pressable>
-        ) : null}
+        {/* One control, three meanings — and it reads the same in all of them:
+            "show me the overview". Only where it lands differs. */}
+        <Pressable
+          testID="overview"
+          onPress={() =>
+            rail === "push"
+              ? router.push({ pathname: "/workspace/overview", params: { id: place.id } })
+              : setRailOpen((open) => !open)
+          }
+          className={`h-10 w-10 items-center justify-center rounded-md ${railOpen && rail !== "push" ? "bg-raise" : ""}`}
+          hitSlop={8}
+        >
+          <PanelRight color={railOpen && rail !== "push" ? color.bone : color.dim} size={19} />
+        </Pressable>
 
         <Pressable
           testID="workspace-menu"
@@ -472,24 +509,33 @@ function Conversation({ place }: { place: Workspace }) {
       )}
       </View>
 
-      {/* The overview, beside the conversation rather than behind a button.
-          This is the layout the desk has always had and the phone never had
-          room for; the Duo's inner panel is the first screen that does. */}
+      {/* Docked: a sibling column, so the conversation reflows to what is
+          left — 611 of the Duo's 951, which is wider than any phone. */}
       {beside ? (
         <View className="border-l border-line-soft" style={{ width: panel }}>
-          <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}>
-            {session ? (
-              <Overview
-                session={session}
-                lead={above}
-                team={team}
-                plan={plan}
-                artifacts={artifacts}
-                onOpenArtifact={(id) => router.push({ pathname: "/workspace/artifact", params: { id } })}
-              />
-            ) : null}
-          </ScrollView>
+          <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}>{overview}</ScrollView>
         </View>
+      ) : null}
+
+      {/* Floated: over the top, so the conversation keeps its full width and
+          dismissing costs no reflow. The scrim is the dismiss target — a
+          panel you can only close from the control that opened it is a trap
+          on a screen you are holding in one hand. */}
+      {floating ? (
+        <>
+          <Pressable
+            testID="overview-scrim"
+            onPress={() => setRailOpen(false)}
+            className="absolute bottom-0 left-0 right-0 top-0"
+            style={{ backgroundColor: "rgba(0,0,0,0.45)" }}
+          />
+          <View
+            className="absolute bottom-0 right-0 top-0 border-l border-line bg-panel"
+            style={{ width: panel, shadowColor: "#000", shadowOpacity: 0.5, shadowRadius: 18, shadowOffset: { width: -8, height: 0 } }}
+          >
+            <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}>{overview}</ScrollView>
+          </View>
+        </>
       ) : null}
       </View>
     </View>
