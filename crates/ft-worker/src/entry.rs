@@ -52,7 +52,10 @@ pub async fn run_agent(session: &str, workspace: PathBuf, agent: &str) -> Result
         // What this person last chose, off the session's own environment —
         // see `ft_core::PREFERRED_ENV`.
         let preferred = ft_core::controls::Preferred::from_env();
-        kind.launch_headless(session, &asking, start, &preferred)
+        // The profile this session was started as, if any, composed by the
+        // control plane and carried in the environment — see `PERSONA_ENV`.
+        let persona = std::env::var(ft_core::PERSONA_ENV).ok();
+        kind.launch_headless(session, &asking, start, &preferred, persona.as_deref())
             .map(|mut argv| {
                 // Claude Code has no home of its own here, so the directory
                 // holding this session's skills is named on the command line.

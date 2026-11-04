@@ -349,6 +349,8 @@ pub enum FiledKind {
     Skill,
     /// A page an agent published for somebody to look at.
     Artifact,
+    /// A saved kind of agent a lead can start.
+    Role,
     /// The one kind that is never in a directory.
     ///
     /// It is in this enum because the screens that list what somebody owns,
@@ -367,6 +369,7 @@ impl FiledKind {
             "secret" => FiledKind::Secret,
             "skill" => FiledKind::Skill,
             "artifact" => FiledKind::Artifact,
+            "role" => FiledKind::Role,
             "repository" => FiledKind::Repository,
             other => bail!("{other} is not something a directory holds"),
         })
@@ -381,6 +384,7 @@ impl FiledKind {
             FiledKind::Secret => "secret",
             FiledKind::Skill => "skill",
             FiledKind::Artifact => "artifact",
+            FiledKind::Role => "role",
             FiledKind::Repository => "repository",
         }
     }
@@ -904,6 +908,7 @@ impl Access {
             FiledKind::Secret => "secrets",
             FiledKind::Skill => "skills",
             FiledKind::Artifact => "artifacts",
+            FiledKind::Role => "roles",
             // Never reached by a move: `is_filable` refuses before this, and
             // `may_share` would refuse again on the personal path. Named
             // anyway, because the one place a kind becomes a table name should

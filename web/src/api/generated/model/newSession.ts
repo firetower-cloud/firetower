@@ -9,6 +9,7 @@ import type { Agent } from './agent';
 import type { DirectoryId } from './directoryId';
 import type { HostId } from './hostId';
 import type { NewCheckout } from './newCheckout';
+import type { Preferred } from './preferred';
 import type { RepoId } from './repoId';
 import type { Share } from './share';
 import type { WorkspaceId } from './workspaceId';
@@ -49,6 +50,15 @@ export interface NewSession {
      */
   name?: string | null;
   /**
+     * The profile to start as, by id. Omit for a plain agent with no persona.
+     *
+     * It shapes the agent's system prompt, pins the engine when it names one,
+     * and decides whether this session may delegate — a Manager may, an
+     * Operator does the work itself.
+     * @nullable
+     */
+  profile?: string | null;
+  /**
      * What to ask for first. Optional, because a workspace is a place before
      * it is a task: you may want the branch checked out and an agent waiting
      * in it, and to say what you want once you are looking at the files.
@@ -67,6 +77,12 @@ export interface NewSession {
      */
   repos?: NewCheckout[];
   /**
+     * Model, effort, permissions and sandbox to start with, overriding what
+     * this person last used. What the New page's picker sends; once the
+     * session has run a turn, its own choices are what a restart remembers.
+     */
+  settings?: Preferred;
+  /**
      * How this workspace competes when the machine is busy.
      *
      * Defaulted, so a caller that has never heard of it opens a workspace that
@@ -75,6 +91,12 @@ export interface NewSession {
      */
   share?: Share;
   size?: WorkspaceSize;
+  /**
+     * The skills to start with, by id. Omit (null) to take your defaults for
+     * the repositories; a list — including an empty one — overrides them.
+     * @nullable
+     */
+  skills?: string[] | null;
   /**
      * The task this is for, when it was started from one.
      * @nullable

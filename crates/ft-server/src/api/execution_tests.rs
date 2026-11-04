@@ -124,6 +124,7 @@ async fn fixture() -> (
         policy: crate::auth::Policy::open(),
         access: crate::access::Access::new(db.pool().clone()),
         skills: crate::skills::Skills::new(db.pool().clone()),
+        roles: crate::roles::Roles::new(db.pool().clone()),
         connections,
         db,
         accounts,

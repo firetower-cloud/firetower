@@ -18,13 +18,21 @@
  * control beside a fact invites somebody to change what they have no say over.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronLeft, FolderDown, Plus, Search, Trash2, UserPlus } from "lucide-react";
+import { Check, ChevronLeft, FolderDown, Plus, Search, ShieldAlert, Sparkles, Trash2, UserPlus } from "lucide-react";
 import { Rows, Section } from "~/ui/config/bits";
 import { ShareMany, WhoCanAccess } from "~/ui/Sharing";
 import { AddSkill } from "~/ui/AddSkill";
+import { CreateMenu } from "~/ui/config/CreateMenu";
+import { useStart } from "~/start";
 import { useSkills, useSkillDetail, useSkillVersions, why } from "~/data";
 import { useRepos } from "~/data";
-import { deleteSkill, setDefault } from "~/api/generated/skills/skills";
+import {
+  deleteSkill,
+  setDefault,
+  approveSkill,
+  discardSkill,
+  useReviewSkill,
+} from "~/api/generated/skills/skills";
 import { useQueryClient } from "@tanstack/react-query";
 import { useMe } from "~/api/generated/auth/auth";
 import { getListSkillsQueryKey } from "~/api/generated/skills/skills";
@@ -46,6 +54,7 @@ export function Skills() {
   const feed = useSkills();
   const cache = useQueryClient();
   const confirm = useConfirm();
+  const start = useStart();
   const me = useMe();
   // An organisation admin may move anything filed in a directory, so the
   // first section holds more for them, and its note says why.
@@ -157,10 +166,13 @@ export function Skills() {
         <span className="min-w-0 flex-1">
           <span className="flex items-baseline gap-2">
             <span className="truncate font-mono text-ui text-bone">{s.name}</span>
-            <span className="shrink-0 text-micro tabular-nums text-mute">v{s.version}</span>
+            {s.version > 0 && (
+              <span className="shrink-0 text-micro tabular-nums text-mute">v{s.version}</span>
+            )}
           </span>
           <span className="mt-0.5 line-clamp-2 block text-meta text-mute">{s.description}</span>
           <span className="mt-1.5 flex flex-wrap items-center gap-2">
+            {s.held && <Tag tone="amber">needs review</Tag>}
             {s.author && <Tag>{s.author}</Tag>}
             <Tag>{s.tokens} tokens</Tag>
             {s.defaultIn.map((r) => (
@@ -200,7 +212,11 @@ export function Skills() {
   if (!feed.loading && !feed.error && feed.data.length === 0)
     return (
       <section {...surface}>
-        <Empty over={over} onAdd={add} />
+        <Empty
+          over={over}
+          onAdd={add}
+          onCreateWithAI={() => start({ prompt: "Create a Firetower skill that " })}
+        />
       </section>
     );
 
@@ -214,10 +230,23 @@ export function Skills() {
           : "Yours, or in a directory you administer. Select several to share or delete them together."
       }
       action={
-        <button className="control border border-line bg-raise text-ui text-dim hover:bg-overlay hover:text-bone" onClick={() => add()}>
-          <Plus className="h-3.5 w-3.5" strokeWidth={2} />
-          Add a skill
-        </button>
+        <CreateMenu
+          label="Add a skill"
+          choices={[
+            {
+              icon: Sparkles,
+              label: "Create with AI",
+              note: "Describe it; an agent writes it for you.",
+              onPick: () => start({ prompt: "Create a Firetower skill that " }),
+            },
+            {
+              icon: FolderDown,
+              label: "Upload a folder",
+              note: "A skill you already have, dropped in.",
+              onPick: () => add(),
+            },
+          ]}
+        />
       }
     >
       {(feed.data.length > 6 || tickable.length > 0) && (
@@ -353,7 +382,15 @@ function Tick({
  * An empty screen is an invitation to act: one button to choose a folder, and
  * the pane itself takes a drop.
  */
-function Empty({ over, onAdd }: { over: boolean; onAdd: (d?: ReturnType<typeof readDrop>) => void }) {
+function Empty({
+  over,
+  onAdd,
+  onCreateWithAI,
+}: {
+  over: boolean;
+  onAdd: (d?: ReturnType<typeof readDrop>) => void;
+  onCreateWithAI: () => void;
+}) {
   const picker = useRef<HTMLInputElement>(null);
   return (
     <div
@@ -366,15 +403,24 @@ function Empty({ over, onAdd }: { over: boolean; onAdd: (d?: ReturnType<typeof r
       </span>
       <h2 className="mt-3.5 text-lede text-bone">No skills yet</h2>
       <p className="mt-1.5 max-w-sm text-meta leading-relaxed text-mute">
-        Import your skills by dropping one or many skills folders here.
+        Ask an agent to write one for you, or drop in a skill folder you already have.
       </p>
-      <button
-        onClick={() => picker.current?.click()}
-        className="control mt-5 bg-overlay text-ui font-semibold text-bone shadow-raise hover:bg-[#26262c]"
-      >
-        Choose a folder
-      </button>
-      <p className="mt-4 text-micro text-mute">Or drop them here</p>
+      <div className="mt-5 flex items-center gap-2">
+        <button
+          onClick={onCreateWithAI}
+          className="control bg-overlay text-ui font-semibold text-bone shadow-raise hover:bg-[#26262c]"
+        >
+          <Sparkles className="h-3.5 w-3.5" strokeWidth={1.75} />
+          Create with AI
+        </button>
+        <button
+          onClick={() => picker.current?.click()}
+          className="control border border-line bg-raise text-ui text-dim hover:bg-overlay hover:text-bone"
+        >
+          Choose a folder
+        </button>
+      </div>
+      <p className="mt-4 text-micro text-mute">Or drop one here</p>
       <input
         ref={picker}
         type="file"
@@ -399,11 +445,15 @@ function Mark({ name }: { name: string }) {
   );
 }
 
-function Tag({ children, tone }: { children: React.ReactNode; tone?: "brick" }) {
+function Tag({ children, tone }: { children: React.ReactNode; tone?: "brick" | "amber" }) {
   return (
     <span
       className={`rounded-full border px-1.5 py-px text-micro ${
-        tone === "brick" ? "border-brick-deep text-brick" : "border-line-soft text-mute"
+        tone === "brick"
+          ? "border-brick-deep text-brick"
+          : tone === "amber"
+            ? "border-amber-deep bg-amber-tint text-amber"
+            : "border-line-soft text-mute"
       }`}
     >
       {children}
@@ -474,7 +524,7 @@ function Detail({
           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-meta text-dim">
             <span>{skill.builtin ? "Firetower" : (skill.author ?? "somebody who has left")}</span>
             <span className="h-3 w-px bg-line" />
-            <span className="tabular-nums">v{skill.version}</span>
+            <span className="tabular-nums">{skill.version > 0 ? `v${skill.version}` : "pending review"}</span>
             <span className="h-3 w-px bg-line" />
             <span className="font-mono">{where}</span>
           </div>
@@ -493,6 +543,11 @@ function Detail({
 
       </div>
 
+      {skill.held && (
+        <Review skill={skill} onBack={onBack} onChanged={onChanged} />
+      )}
+
+      {!skill.held && (<>
       <div className="mt-6 border-b border-line-soft px-8 pb-2">
         <div className="track w-fit">
           {TABS.map((t) => (
@@ -567,7 +622,134 @@ function Detail({
         {tab === "versions" && <Versions id={skill.id} />}
         {tab === "defaults" && <Defaults skill={skill} onChanged={onChanged} />}
       </div>
+      </>)}
     </section>
+  );
+}
+
+/**
+ * The review a held skill waits on. An agent wrote a version that ships a
+ * script, so it is in the library but materialised nowhere — this is where the
+ * owner reads exactly what would run and decides. Approve makes it the current
+ * version; discard deletes it (and the skill too, if nothing was ever live).
+ */
+function Review({
+  skill,
+  onBack,
+  onChanged,
+}: {
+  skill: Skill;
+  onBack: () => void;
+  onChanged: () => void;
+}) {
+  const q = useReviewSkill(skill.id);
+  const confirm = useConfirm();
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const approve = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      await approveSkill(skill.id);
+      onChanged();
+      onBack();
+    } catch (e) {
+      setErr(why(e));
+      setBusy(false);
+    }
+  };
+  const discard = async () => {
+    const ok = await confirm({
+      title: `Discard the pending ${skill.name}?`,
+      body: "The version an agent wrote is deleted. If nothing of this skill was ever approved, the skill goes with it. Nothing that is running changes.",
+      action: "Discard",
+      tone: "danger",
+    });
+    if (!ok) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await discardSkill(skill.id);
+      onChanged();
+      onBack();
+    } catch (e) {
+      setErr(why(e));
+      setBusy(false);
+    }
+  };
+
+  const review = q.data;
+  return (
+    <div className="max-w-[56rem] px-8 py-6">
+      <div className="rounded-xl border border-amber-deep bg-amber-tint/40 px-5 py-4">
+        <div className="flex items-start gap-3">
+          <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-amber" strokeWidth={1.75} />
+          <div className="min-w-0">
+            <h2 className="text-ui font-medium text-bone">An agent wrote this, and it runs code</h2>
+            <p className="mt-1 text-meta text-text">
+              It ships a script that would be written onto the disk of every session that uses
+              this skill, and run. Read it below, then approve it to make it live — or discard it.
+              It runs nowhere until you approve it.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {q.isPending && <p className="mt-5 text-meta text-mute">Reading what's pending…</p>}
+      {q.error && <p className="mt-5 text-meta text-brick">{why(q.error)}</p>}
+
+      {review && (
+        <div className="mt-5 space-y-4">
+          <Facts
+            title="What it says it is"
+            rows={[
+              ["Name", review.name],
+              ["Does", review.description],
+            ]}
+          />
+          <div className="space-y-3">
+            {review.files.map((f) => (
+              <div key={f.path} className="overflow-hidden rounded-lg border border-line bg-panel">
+                <div className="flex items-center gap-2 border-b border-line-soft px-3 py-2">
+                  <span className="font-mono text-meta text-bone">{f.path}</span>
+                  {f.executable && <Tag tone="brick">runs · 0o755</Tag>}
+                  <span className="ml-auto text-micro tabular-nums text-mute">{size(f.size)}</span>
+                </div>
+                {f.text !== undefined ? (
+                  <pre className="scroll-slim overflow-x-auto px-3 py-2.5 font-mono text-code leading-relaxed text-text">
+                    {f.text}
+                  </pre>
+                ) : (
+                  <p className="px-3 py-2.5 text-meta text-mute">Binary — {size(f.size)}, not shown.</p>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {err && <p className="mt-4 text-meta text-brick">{err}</p>}
+
+      <div className="mt-5 flex items-center gap-2">
+        <button
+          onClick={approve}
+          disabled={busy || q.isPending}
+          className="control border border-sage-deep bg-sage-tint font-medium text-sage hover:bg-sage-deep/40 disabled:opacity-50"
+        >
+          <Check className="h-3.5 w-3.5" strokeWidth={2} />
+          Approve &amp; enable
+        </button>
+        <button
+          onClick={discard}
+          disabled={busy}
+          className="control border border-brick-deep text-brick hover:bg-brick-tint disabled:opacity-50"
+        >
+          <Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} />
+          Discard
+        </button>
+      </div>
+    </div>
   );
 }
 

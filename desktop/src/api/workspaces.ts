@@ -19,6 +19,16 @@ export type Workspace = {
   name: string;
   branch?: string;
   runs: Session[];
+  /**
+   * The session that asked for this place, when a session did.
+   *
+   * A child's row is drawn under its lead's and sorts straight after it rather
+   * than by its own age, so a lead and what it delegated read as one piece of
+   * work. Only a child in a workspace of its own has this: one started *in* the
+   * lead's workspace is simply another run of that place, and shows as another
+   * mark on the lead's row.
+   */
+  leadOf?: string;
 };
 
 /** Repositories, each with the workspaces cut from it. */
@@ -67,15 +77,115 @@ export function group(sessions: Session[]): Repositories {
       name: session.name,
       branch: session.branch ?? undefined,
       runs: [session],
+      leadOf: session.parentId ?? undefined,
     });
+  }
+
+  // Whose place each is. The founding session — the one the place is named
+  // after — says who asked for it; whichever run happened to be seen first
+  // does not. And a lead that is one of the place's own runs is no lead at
+  // all: a child started *in* a workspace is a run of it, not a place of its
+  // own, and a place is never under itself.
+  for (const places of byRepo.values()) {
+    for (const place of places.values()) {
+      const founder = place.runs.find((r) => r.id === place.id);
+      // Named after its founder, not whichever run was seen first: a workspace
+      // with a same-workspace child in it must keep the lead's name, not take
+      // the child's. Only when the founder is still around to say.
+      if (founder) place.name = founder.name;
+      const lead = founder?.parentId ?? undefined;
+      place.leadOf = lead && !place.runs.some((r) => r.id === lead) ? lead : undefined;
+    }
   }
 
   const groups: [string, Workspace[]][] = [...byRepo].map(([repo, places]) => [
     repo,
-    [...places.values()],
+    underTheirLeads([...places.values()]),
   ]);
 
   return { groups, total: groups.reduce((n, [, places]) => n + places.length, 0) };
+}
+
+/**
+ * Each child straight after its lead.
+ *
+ * Within one repository: a child cut from a different repository than its
+ * lead is listed under its own, where its branch is. Everything keeps the
+ * order it arrived in — needs-you first, then newest — so children under one
+ * lead still read newest first, and a child whose lead is nowhere in the list
+ * stays where its own age put it.
+ */
+function underTheirLeads(places: Workspace[]): Workspace[] {
+  const placeOfRun = new Map<string, Workspace>();
+  for (const place of places) for (const run of place.runs) placeOfRun.set(run.id, place);
+
+  const under = new Map<string, Workspace[]>();
+  const top: Workspace[] = [];
+  for (const place of places) {
+    const lead = place.leadOf ? placeOfRun.get(place.leadOf) : undefined;
+    if (lead && lead.id !== place.id) {
+      under.set(lead.id, [...(under.get(lead.id) ?? []), place]);
+    } else {
+      top.push(place);
+    }
+  }
+  return top.flatMap((place) => [place, ...(under.get(place.id) ?? [])]);
+}
+
+/** The place whose session started this one, if it is on the list. */
+export function leadPlace(place: Workspace, places: Workspace[]): Workspace | undefined {
+  if (!place.leadOf) return undefined;
+  return places.find((other) => other.id !== place.id && other.runs.some((r) => r.id === place.leadOf));
+}
+
+/** Whether this place was started by a session in another place on the list. */
+export function isChild(place: Workspace, places: Workspace[]): boolean {
+  return !!leadPlace(place, places);
+}
+
+/**
+ * What a row is called where its lead is shown right above it.
+ *
+ * A child is named "<lead> / <what>" so it still reads on its own — in a flat
+ * list, in search, on the child's own page. Drawn nested under its lead, that
+ * prefix is said twice, so drop it and show just the part that differs. Only
+ * when the lead is actually on this list: a flat view keeps the full name,
+ * which is the only thing carrying the association there.
+ */
+export function rowLabel(place: Workspace, places: Workspace[]): string {
+  const lead = leadPlace(place, places);
+  const prefix = lead ? `${lead.name} / ` : "";
+  return prefix && place.name.startsWith(prefix) ? place.name.slice(prefix.length) : place.name;
+}
+
+/**
+ * How many agents a place has delegated to and not yet ended, wherever they
+ * run. What ending the place takes with it.
+ */
+export function childrenOf(place: Workspace, places: Workspace[]): number {
+  const mine = new Set(place.runs.map((r) => r.id));
+  const here = place.runs.filter((r) => r.parentId && mine.has(r.parentId) && r.status !== "Ended").length;
+  const elsewhere = places.filter(
+    (other) => other.id !== place.id && !!other.leadOf && mine.has(other.leadOf),
+  ).length;
+  return here + elsewhere;
+}
+
+/**
+ * How many of a place's children are still at work: runs in this place that
+ * one of its own runs asked for, and places elsewhere on the list it started.
+ *
+ * What a lead's row says while its own agent sits idle between a dispatch and
+ * a result — its breathing dot is honest about the tree, and this is the
+ * number behind it.
+ */
+export function childrenWorking(place: Workspace, places: Workspace[]): number {
+  const mine = new Set(place.runs.map((r) => r.id));
+  const here = place.runs.filter((r) => r.parentId && mine.has(r.parentId) && inFlight(r)).length;
+  const elsewhere = places.filter(
+    (other) => other.id !== place.id && !!other.leadOf && mine.has(other.leadOf) && doing(other) === "working",
+  ).length;
+  return here + elsewhere;
 }
 
 /** The last part of `owner/name`, which is what a rail has room for. */

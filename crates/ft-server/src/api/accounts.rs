@@ -1072,7 +1072,7 @@ mod tests {
         let (db, owner) = Db::open_for_test_owned().await.unwrap();
         // Reconstruct the immediately preceding schema, then apply the exact
         // upgrade SQL to real existing users, encrypted secrets and sessions.
-        sqlx::raw_sql("DROP TABLE agent_fallbacks; DROP TABLE agent_account_limits; DROP TABLE agent_account_switches; DROP TRIGGER pin_agent_account ON sessions; DROP FUNCTION pin_agent_account(); ALTER TABLE sessions DROP COLUMN agent_account_id; DROP TABLE agent_accounts;")
+        sqlx::raw_sql("DROP TABLE agent_fallbacks; DROP TABLE agent_account_limits; DROP TABLE agent_account_switches; DROP TRIGGER pin_agent_account ON sessions; DROP FUNCTION pin_agent_account(); ALTER TABLE sessions DROP COLUMN agent_account_id; ALTER TABLE roles DROP COLUMN agent_account_id; DROP TABLE agent_accounts;")
             .execute(db.pool()).await.unwrap();
         db.set_agent_mode(&owner, Agent::ClaudeCode, AgentMode::Subscription, true)
             .await

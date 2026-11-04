@@ -581,6 +581,11 @@
     font-size: var(--text-read);
     line-height: var(--text-read--line-height);
     color: var(--color-text);
+    /* A long unbreakable run — a URL, a hash, an inline path — wraps rather
+       than pushing the whole conversation wider. Code blocks keep their own
+       horizontal scroll (`pre` above); this is for running text and inline
+       code only. */
+    overflow-wrap: anywhere;
   }
   .prose-desk .ft-md h1 { font-size: var(--text-lede); line-height: 1.4; color: var(--color-bone); font-weight: 600; margin: 1.25rem 0 0.5rem; }
   .prose-desk .ft-md h2 { font-size: var(--text-read); color: var(--color-bone); font-weight: 600; margin: 1.1rem 0 0.4rem; }

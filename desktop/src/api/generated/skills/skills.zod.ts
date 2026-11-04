@@ -106,6 +106,7 @@ export const ListSkillsResponseItem = zod.object({
   "defaultIn": zod.array(zod.string()).describe('The repositories this person has it on by default. Empty for most.'),
   "description": zod.string(),
   "files": zod.int(),
+  "held": zod.boolean().describe('An agent wrote a version of this that ships an executable, and it is\nwaiting for the owner to approve it. Held content is never the current\nversion, so it runs nowhere until then — this is only here so a list can\nbadge it. See `review`, `approve`, `discard`.'),
   "id": zod.string().describe('Identifies a skill — a folder of instructions an agent loads when it needs one.'),
   "mayShare": zod.boolean().describe('Whether this person may move it to another directory or delete it.\nThe same rule as `api::access::may_share`, answered per row so a list\ncan say up front which skills it can act on.'),
   "mayWrite": zod.boolean().describe('Whether this person may make a version of it or rename it.'),
@@ -141,6 +142,7 @@ export const CreateSkillResponse = zod.object({
   "defaultIn": zod.array(zod.string()).describe('The repositories this person has it on by default. Empty for most.'),
   "description": zod.string(),
   "files": zod.int(),
+  "held": zod.boolean().describe('An agent wrote a version of this that ships an executable, and it is\nwaiting for the owner to approve it. Held content is never the current\nversion, so it runs nowhere until then — this is only here so a list can\nbadge it. See `review`, `approve`, `discard`.'),
   "id": zod.string().describe('Identifies a skill — a folder of instructions an agent loads when it needs one.'),
   "mayShare": zod.boolean().describe('Whether this person may move it to another directory or delete it.\nThe same rule as `api::access::may_share`, answered per row so a list\ncan say up front which skills it can act on.'),
   "mayWrite": zod.boolean().describe('Whether this person may make a version of it or rename it.'),
@@ -211,6 +213,33 @@ export const RenameSkillResponse = zod.object({
   "defaultIn": zod.array(zod.string()).describe('The repositories this person has it on by default. Empty for most.'),
   "description": zod.string(),
   "files": zod.int(),
+  "held": zod.boolean().describe('An agent wrote a version of this that ships an executable, and it is\nwaiting for the owner to approve it. Held content is never the current\nversion, so it runs nowhere until then — this is only here so a list can\nbadge it. See `review`, `approve`, `discard`.'),
+  "id": zod.string().describe('Identifies a skill — a folder of instructions an agent loads when it needs one.'),
+  "mayShare": zod.boolean().describe('Whether this person may move it to another directory or delete it.\nThe same rule as `api::access::may_share`, answered per row so a list\ncan say up front which skills it can act on.'),
+  "mayWrite": zod.boolean().describe('Whether this person may make a version of it or rename it.'),
+  "name": zod.string(),
+  "path": zod.string().describe('`u/kevin/rust_review` — slashes on the wire, dots in the database.'),
+  "risk": zod.array(zod.string()).describe('What this skill does to a session, read from the bundle rather than\nfrom what its author said about it. See [`risk_of`].'),
+  "slug": zod.string(),
+  "tokens": zod.int().describe('What the listing entry costs in the model\'s context, every turn.'),
+  "updatedAt": zod.iso.datetime({"offset":true}),
+  "version": zod.int(),
+  "versionId": zod.string().describe('Identifies one version of a skill. Append-only: a session pins one.')
+}).describe('One row of the library.\n\n`name` and `description` are copied down from the current version rather\nthan joined per row: this list is three hundred long and those two fields\nare what every one of them draws.')
+
+export const ApproveSkillParams = zod.object({
+  "id": zod.string().describe('The skill')
+})
+
+export const ApproveSkillResponse = zod.object({
+  "alwaysOn": zod.boolean().describe('On in every workspace this person starts.'),
+  "author": zod.string().nullish().describe('Who wrote it. A fact that outlives them leaving.'),
+  "builtin": zod.boolean().describe('Firetower ships this one. Filed in `d/firetower`, which nobody holds\nwriter on — so it is readable by everybody and deletable by nobody.'),
+  "bytes": zod.int(),
+  "defaultIn": zod.array(zod.string()).describe('The repositories this person has it on by default. Empty for most.'),
+  "description": zod.string(),
+  "files": zod.int(),
+  "held": zod.boolean().describe('An agent wrote a version of this that ships an executable, and it is\nwaiting for the owner to approve it. Held content is never the current\nversion, so it runs nowhere until then — this is only here so a list can\nbadge it. See `review`, `approve`, `discard`.'),
   "id": zod.string().describe('Identifies a skill — a folder of instructions an agent loads when it needs one.'),
   "mayShare": zod.boolean().describe('Whether this person may move it to another directory or delete it.\nThe same rule as `api::access::may_share`, answered per row so a list\ncan say up front which skills it can act on.'),
   "mayWrite": zod.boolean().describe('Whether this person may make a version of it or rename it.'),
@@ -249,6 +278,28 @@ export const SkillDetailResponse = zod.object({
 }).describe('One file of a bundle, without its bytes.')),
   "frontmatter": zod.unknown()
 }).describe('What the instructions say, for the screen that shows them.')
+
+export const DiscardSkillParams = zod.object({
+  "id": zod.string().describe('The skill')
+})
+
+export const DiscardSkillResponse = zod.void()
+
+export const ReviewSkillParams = zod.object({
+  "id": zod.string().describe('The skill')
+})
+
+export const ReviewSkillResponse = zod.object({
+  "body": zod.string(),
+  "description": zod.string(),
+  "files": zod.array(zod.object({
+  "executable": zod.boolean(),
+  "path": zod.string(),
+  "size": zod.int(),
+  "text": zod.string().nullish().describe('The decoded contents when the file is UTF-8 — a script, a doc, the\nSKILL.md. Absent for binary (a font, an image): the card names it but\ncannot show it.')
+}).describe('One file of a held bundle, shown for review.')),
+  "name": zod.string()
+}).describe('A held version with its files\' bytes, for the review that decides whether\nit may run. Unlike [`SkillDetail`] this carries contents — the whole point\nis to put the script in front of the owner before it is written anywhere.')
 
 export const ListVersionsParams = zod.object({
   "id": zod.string().describe('The skill')
@@ -292,6 +343,7 @@ export const AddVersionResponse = zod.object({
   "defaultIn": zod.array(zod.string()).describe('The repositories this person has it on by default. Empty for most.'),
   "description": zod.string(),
   "files": zod.int(),
+  "held": zod.boolean().describe('An agent wrote a version of this that ships an executable, and it is\nwaiting for the owner to approve it. Held content is never the current\nversion, so it runs nowhere until then — this is only here so a list can\nbadge it. See `review`, `approve`, `discard`.'),
   "id": zod.string().describe('Identifies a skill — a folder of instructions an agent loads when it needs one.'),
   "mayShare": zod.boolean().describe('Whether this person may move it to another directory or delete it.\nThe same rule as `api::access::may_share`, answered per row so a list\ncan say up front which skills it can act on.'),
   "mayWrite": zod.boolean().describe('Whether this person may make a version of it or rename it.'),

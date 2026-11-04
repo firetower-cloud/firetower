@@ -13,7 +13,7 @@ pub(crate) mod access;
 pub(crate) mod accounts;
 pub(crate) mod agents;
 mod annotations;
-mod artifacts;
+pub(crate) mod artifacts;
 mod auth;
 mod consumption;
 mod conversation;
@@ -22,8 +22,9 @@ mod forwards;
 pub(crate) mod hosts;
 mod providers;
 mod repos;
+mod roles;
 mod secrets;
-mod sessions;
+pub(crate) mod sessions;
 mod setup;
 mod skills;
 mod stream;
@@ -431,6 +432,8 @@ async fn credential_on(
     // /bootstrap, which is the real answer and is always current.
     info(title = "Firetower", version = "0"),
     components(schemas(
+        crate::roles::Role,
+        crate::roles::NewRole,
         crate::db::Bucket,
         crate::db::Dimension,
         crate::db::Direction,
@@ -447,6 +450,7 @@ async fn credential_on(
         ft_core::controls::Control,
         ft_core::controls::Choice,
         ft_core::controls::ControlKind,
+        ft_core::controls::Preferred,
         RemoteRepo,
         AgentMode,
         AgentPresence,
@@ -576,6 +580,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(accounts::switch_account))
         .routes(routes!(accounts::get_fallback, accounts::set_fallback))
         .routes(routes!(agents::list_agents))
+        .routes(routes!(agents::agent_controls))
         .routes(routes!(agents::configure_agent, agents::forget_agent))
         .routes(routes!(agents::check_agents))
         .routes(routes!(agents::sign_agent_in))
@@ -599,11 +604,17 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(skills::rename_skill, skills::delete_skill))
         .routes(routes!(skills::skill_detail))
         .routes(routes!(skills::list_versions, skills::add_version))
+        .routes(routes!(skills::review_skill))
+        .routes(routes!(skills::approve_skill))
+        .routes(routes!(skills::discard_skill))
         .routes(routes!(skills::set_default))
         .routes(routes!(skills::session_skills, skills::choose_skills))
         .routes(routes!(skills::skill_collisions))
         .routes(routes!(skills::share_skills))
         .routes(routes!(skills::set_repo_defaults))
+        .routes(routes!(roles::list_roles, roles::create_role))
+        .routes(routes!(roles::update_role, roles::delete_role))
+        .routes(routes!(roles::set_default_role))
         .routes(routes!(secrets::list_secrets))
         .routes(routes!(secrets::replace_secret, secrets::remove_secret))
         .routes(routes!(secrets::reveal_secret))
@@ -628,6 +639,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         ))
         .routes(routes!(providers::list_provider_repos))
         .routes(routes!(sessions::list_sessions, sessions::create_session))
+        .routes(routes!(sessions::token_usage))
         .routes(routes!(sessions::end_all_sessions))
         .routes(routes!(sessions::get_session, sessions::destroy_session))
         .routes(routes!(events::list_events))

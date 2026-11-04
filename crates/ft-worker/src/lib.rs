@@ -1916,6 +1916,9 @@ Docker is installed here and the daemon is not answering, so `docker` commands w
     /// instead. For Claude Code the file is now belt and braces: the prompt is
     /// what it actually reads.
     fn artifact_guidance() -> String {
+        // Artifact guidance only. Delegation is no longer told to every
+        // session — it rides a Manager profile's persona, which reaches the
+        // agent through its system prompt rather than this shared file.
         format!("\n{}", ft_core::ARTIFACT_GUIDANCE)
     }
 

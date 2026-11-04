@@ -13,7 +13,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { getListSessionsQueryKey, useRenameSession } from "~/api/generated/sessions/sessions";
 import { Signal } from "~/components/Signal";
 import { AgentMark } from "~/components/AgentMark";
-import { group, placeOf } from "~/api/workspaces";
+import { childrenOf, group, placeOf } from "~/api/workspaces";
 import type { Backend } from "~/fleet";
 import { useHostOf, useSession, useSessions } from "~/data";
 import { navigate } from "~/shims/next-navigation";
@@ -54,13 +54,13 @@ const RAIL_DEFAULT = 368;
 const TERM_MIN = 120;
 const TERM_DEFAULT = 256;
 
-type Side = "diff" | "files" | "ship";
+type Side = "diff" | "files" | "ship" | "overview";
 
 export function Workbench({ backend, workspace }: { backend: Backend; workspace: string }) {
   const hostOf = useHostOf();
   const { data: sessions } = useSessions();
   const opened = useSession(workspace);
-  const [side, setSide] = useState<Side>("diff");
+  const [side, setSide] = useState<Side>("overview");
   const [open, setOpen] = useState(true);
   const [width, setWidth] = useState(() => {
     try {
@@ -140,6 +140,12 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
     handle.addEventListener("pointerup", up);
   };
   const [reading, setReading] = useState<string | null>(null);
+  /* `reading` is which agent you switched to with a chip, within one
+     workspace. Navigating is a fresh choice of what to read — so clear it when
+     the address changes, or opening a same-workspace sibling from the Overview
+     would land on the agent the last chip pointed at (its lead) instead of the
+     one you clicked. Chip-switching doesn't navigate, so it is untouched. */
+  useEffect(() => setReading(null), [workspace]);
   const [tabs, setTabs] = useState<Tab[]>([{ id: "chat" }]);
   const [active, setActive] = useState("chat");
   const activeRef = useRef(active);
@@ -251,6 +257,10 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
     (opened.data
       ? { id: workspace, name: opened.data.name, branch: opened.data.branch ?? undefined, runs: [opened.data] }
       : undefined);
+
+  /* The Overview tab's team and artifacts are derived below, from `run`, since
+     they depend on which agent is being read — the manager and everyone under
+     it, which is not the same as the runs in this one workspace. */
 
   /* The session to publish from, derived here rather than from `run` below.
      `run` is computed after an early return, and a hook may not live there —
@@ -396,6 +406,21 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
     place.runs.find((r) => r.id === reading) ??
     place.runs.find((r) => r.id === workspace) ??
     primary;
+
+  /* The Overview's team, from the point of view of the agent being read: the
+     manager is this run when it leads, or the one that started it when this is
+     a child — one level up. The team is every agent under that manager, so a
+     child sees the whole team it belongs to (its siblings), not just itself. */
+  const lead = run.parentId ? (sessions?.find((s) => s.id === run.parentId) ?? null) : null;
+  const managerRunId = run.parentId ?? run.id;
+  const team = (sessions ?? []).filter((s) => s.parentId === managerRunId);
+  /* Artifacts from the whole team — the manager and every agent under it,
+     wherever they ran — not just the runs in this one workspace. A sibling off
+     in its own workspace produced its artifact there, so scoping to this
+     workspace's runs hid all but the one made here. */
+  const familyIds = new Set<string>([managerRunId, ...team.map((t) => t.id)]);
+  const myArtifacts = (artifacts.data ?? []).filter((a) => a.fromSessionId && familyIds.has(a.fromSessionId));
+
   /* Checkouts belong to the workspace rather than to whichever agent is being
      read, so take them from the one the list is freshest on. */
   const checkouts = run.checkouts ?? [];
@@ -525,8 +550,8 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
               and drawn only to somebody the server will take it from. */}
           {mayEndPlace && (
             <button
-              onClick={() => void endWorkspace(place).then(({ ended, trouble }) => (ended ? navigate("/") : trouble && void confirm({ title: "It did not end.", body: trouble, action: "OK" })))}
-              title="End workspace — every agent in it stops"
+              onClick={() => void endWorkspace(place, childrenOf(place, group(sessions ?? []).groups.flatMap(([, ps]) => ps))).then(({ ended, trouble }) => (ended ? navigate("/") : trouble && void confirm({ title: "It did not end.", body: trouble, action: "OK" })))}
+              title="End workspace — every agent in it stops, and every agent it started"
               className="control text-mute hover:bg-raise hover:text-brick"
             >
               <Trash2 className="h-4 w-4" strokeWidth={1.75} />
@@ -574,6 +599,7 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
             {active === "chat" ? (
               <Chat
                 session={run}
+                lead={run.parentId ? (sessions?.find((s) => s.id === run.parentId) ?? null) : null}
                 branch={place.branch}
                 onOpenFile={openFile}
                 artifacts={artifacts.data ?? []}
@@ -671,6 +697,10 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
             onTab={setSide}
             onOpenFile={openFile}
             onClose={() => setOpen(false)}
+            lead={lead}
+            team={team}
+            artifacts={myArtifacts}
+            onOpenArtifact={openArtifact}
           />
         )}
       </div>

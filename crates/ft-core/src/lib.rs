@@ -26,8 +26,8 @@ pub mod turn;
 
 pub use grants::{Level, SubjectKind};
 pub use ids::{
-    ArtifactId, ArtifactVersionId, DirectoryId, HostId, OrgId, RepoId, SessionId, SkillId,
-    SkillVersionId, TeamId, UserId, WorkspaceId,
+    ArtifactId, ArtifactVersionId, DeliveryId, DirectoryId, HostId, OrgId, RepoId, RoleId,
+    SessionId, SkillId, SkillVersionId, TeamId, UserId, WorkspaceId,
 };
 pub use path::{slug, ResourcePath};
 pub use session::{
@@ -54,6 +54,16 @@ pub const WORKER_ROOT_ENV: &str = "FIRETOWER_WORKER_ROOT";
 /// every worker in a fleet has to be upgraded past. Absent or unreadable means
 /// nobody has chosen anything, which is the ordinary state.
 pub const PREFERRED_ENV: &str = "FIRETOWER_AGENT_SETTINGS";
+
+/// The persona a session was started as, composed into the agent's system
+/// prompt.
+///
+/// Carried in the environment for the same reason the settings above are: the
+/// worker inherits it on every launch, so a session that resumes after a
+/// restart is still the profile it was started as, without a frame to carry it
+/// or a file two sessions in one workspace would fight over. Empty or absent
+/// means a plain agent — no profile — which is the ordinary state.
+pub const PERSONA_ENV: &str = "FIRETOWER_PERSONA";
 
 /// Which agent runs inside a workspace.
 ///
@@ -160,6 +170,7 @@ impl Agent {
         asking: &Asking,
         start: Start,
         preferred: &crate::controls::Preferred,
+        persona: Option<&str>,
     ) -> Option<Vec<String>> {
         let agent_session = agent_session_uuid(session_id);
         match self {
@@ -215,7 +226,14 @@ impl Agent {
                 // one. Two `--append-system-prompt` flags would be the obvious
                 // shape and the agent takes only one, so they are joined here
                 // rather than discovered to be exclusive later.
+                // Artifact guidance is for every session; delegation is not —
+                // it rides the persona now, and only a Manager's persona
+                // carries it. A plain agent is told how to show you something
+                // and nothing about handing work off.
                 let mut appended = vec![ARTIFACT_GUIDANCE.to_string()];
+                if let Some(persona) = persona.map(str::trim).filter(|p| !p.is_empty()) {
+                    appended.push(persona.to_string());
+                }
                 if let Start::Carrying(before) = &start {
                     appended.push(before.clone());
                 }
@@ -334,6 +352,7 @@ impl Agent {
             &Asking::CannotAsk,
             Start::Fresh,
             &crate::controls::Preferred::default(),
+            None,
         )
         .is_some()
     }
@@ -1052,6 +1071,27 @@ Nothing written anywhere else is shown to anybody.
 The `firetower-artifacts` skill has the rest: what the page is rendered inside,
 what makes one good, and how to use a richer artifact skill alongside it.
 ";
+
+/// What a Manager is told about handing work off.
+///
+/// Composed into a Manager profile's persona — only a Manager gets it, because
+/// only a Manager delegates. The profiles it may hand to are listed after this,
+/// by the control plane, from what its owner can see.
+pub const DELEGATION_GUIDANCE: &str = "\
+## Delegating
+
+You are a Manager: you may hand work to other profiles rather than doing all of
+it yourself. `spawn` starts one — in this workspace, sharing its directory and
+branch, or in a workspace of its own on its own branch — and `children` lists,
+steers or stops the ones you started. A child knows nothing of this
+conversation: give it everything in `goal` and `context`. Its result arrives
+here as a message when it hands back, between your turns, so dispatch, do what
+does not depend on it, then end your turn.
+
+To start one of your profiles, pass `role: \"<name>\"` to `spawn` — it supplies
+the instructions and may pin the agent and where it runs. For a one-off, omit
+`role` and describe the work in `goal`. If you name a profile that does not
+exist, the refusal lists the ones that do.";
 
 /// Whether there is anybody to answer a permission prompt.
 ///
