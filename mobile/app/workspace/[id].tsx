@@ -9,7 +9,7 @@
  * The repository is one tap away rather than beside: see `~/ui/Changes`.
  */
 import { useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, View, useWindowDimensions } from "react-native";
 /* React Native 0.88 split the component type from the instance type: `ScrollView`
    now names the component, so a ref wants `ScrollViewInstance`. */
 import type { ScrollViewInstance } from "react-native";
@@ -17,11 +17,11 @@ import Animated, { useAnimatedStyle } from "react-native-reanimated";
 import { useReanimatedKeyboardAnimation } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router, useLocalSearchParams } from "expo-router";
-import { ChevronLeft, Eye, MoreHorizontal } from "lucide-react-native";
+import { ChevronLeft, Eye, MoreHorizontal, PanelRight } from "lucide-react-native";
 import { delegating, interruptible, useConversation } from "~/api/conversation";
 import { useListEvents } from "~/api/generated/events/events";
 import { useListArtifacts } from "~/api/generated/artifacts/artifacts";
-import type { Attached, Event } from "~/api/generated/model";
+import type { Attached, Event, Session } from "~/api/generated/model";
 import { ready, stepLines } from "~/api/steps-bringup";
 import { Bringup } from "~/ui/Bringup";
 import { WorkspaceMenu } from "~/ui/WorkspaceMenu";
@@ -42,6 +42,7 @@ import { Sheen } from "~/ui/Sheen";
 import { Signal } from "~/ui/Signal";
 import { Transcript } from "~/ui/Transcript";
 import { ArtifactCard } from "~/ui/ArtifactCard";
+import { Overview } from "~/ui/Overview";
 import { ImagesFrom } from "~/ui/WorkspaceImage";
 import { Waiting } from "~/ui/Waiting";
 import { color } from "~/design/tokens.generated";
@@ -122,14 +123,60 @@ function Conversation({ place }: { place: Workspace }) {
    * the server already documents for rows with no line, so it is the same
    * behaviour rather than a new one.
    */
+  /**
+   * The team around this workspace, one level up and one level down.
+   *
+   * The manager is this session when it leads and the session that started it
+   * when it is a child; the roster is everyone under that manager, which is
+   * the same set whichever member you are reading. Derived from the list the
+   * inbox already holds rather than fetched — the parent is a field on a run.
+   */
+  /* The same query the inbox reads; react-query hands back the one cache
+     rather than asking twice. */
+  const { data: sessions } = useSessions();
+  const above = useMemo(
+    () => (speaker.parentId ? (sessions.find((s: Session) => s.id === speaker.parentId) ?? null) : null),
+    [sessions, speaker.parentId],
+  );
+  const managerId = above?.id ?? speaker.id;
+  const team = useMemo(() => sessions.filter((s: Session) => s.parentId === managerId), [sessions, managerId]);
+
+  /* Beside the conversation when the display is wide enough to hold both —
+     the Duo's inner panel is the first phone screen that is — and a pushed
+     route when it is not. One component, two placements. */
+  const { width } = useWindowDimensions();
+  const beside = width >= 700;
+  /**
+   * How wide the panel gets, as a rule rather than a constant.
+   *
+   * It used to take a flat 320 whatever was left, which is fine at 951 and
+   * ruinous below it — the conversation got 146 pt and wrapped to one
+   * character a line. The threshold hid that rather than preventing it, so
+   * the panel now yields: the conversation keeps at least 400 pt and the
+   * panel takes what remains, up to 340.
+   */
+  const panel = Math.min(340, Math.max(280, width - 400));
+
   const { data: everyArtifact } = useListArtifacts();
+  const family = useMemo(() => new Set([managerId, ...team.map((t) => t.id)]), [managerId, team]);
   const artifacts = useMemo(
-    () => (everyArtifact ?? []).filter((a) => a.fromSessionId === speaker.id),
-    [everyArtifact, speaker.id],
+    () => (everyArtifact ?? []).filter((a) => a.fromSessionId && family.has(a.fromSessionId)),
+    [everyArtifact, family],
   );
 
   const { conversation, echo, settle, remember, stopping, reread, older } = useConversation(speaker.id);
   const [rereading, setRereading] = useState(false);
+  /* The live one first — a todo list arrives on the turn stream and moves as
+     the agent works. `session.plan` is the cross-engine fallback an agent set
+     through `firetower:plan`, which rides on the session and lands a poll
+     later. */
+  /* The plan is the manager's. `lead()` picks whichever run is *speaking*,
+     which once a team exists is often a subagent — and a subagent keeps no
+     plan, so reading it there emptied the panel exactly when there was a
+     team to show one for. */
+  const plan =
+    conversation.plan.length > 0 ? conversation.plan : ((above ?? session)?.plan ?? []);
+
   const send = useSendTurn();
   const attach = useAttachFile();
   const answer = useAnswerRequest();
@@ -180,6 +227,20 @@ function Conversation({ place }: { place: Workspace }) {
           </View>
         </View>
 
+        {/* Only when the overview cannot sit beside the conversation. On a
+            wide display it is already on screen and a button to it would open
+            a second copy of what you are looking at. */}
+        {!beside ? (
+          <Pressable
+            testID="overview"
+            onPress={() => router.push({ pathname: "/workspace/overview", params: { id: place.id } })}
+            className="h-10 w-10 items-center justify-center"
+            hitSlop={8}
+          >
+            <PanelRight color={color.dim} size={19} />
+          </Pressable>
+        ) : null}
+
         <Pressable
           testID="workspace-menu"
           onPress={() => setMenu(true)}
@@ -208,6 +269,10 @@ function Conversation({ place }: { place: Workspace }) {
         />
       ) : null}
 
+      <View className={beside ? "min-h-0 flex-1 flex-row" : "min-h-0 flex-1"}>
+      {/* The conversation column: transcript, menu and composer together, so
+          the overview sits beside all three rather than between them. */}
+      <View className="min-h-0 flex-1">
       <View className="min-h-0 flex-1">
         <ScrollView
           ref={scroller}
@@ -405,6 +470,28 @@ function Conversation({ place }: { place: Workspace }) {
         ))}
       />
       )}
+      </View>
+
+      {/* The overview, beside the conversation rather than behind a button.
+          This is the layout the desk has always had and the phone never had
+          room for; the Duo's inner panel is the first screen that does. */}
+      {beside ? (
+        <View className="border-l border-line-soft" style={{ width: panel }}>
+          <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}>
+            {session ? (
+              <Overview
+                session={session}
+                lead={above}
+                team={team}
+                plan={plan}
+                artifacts={artifacts}
+                onOpenArtifact={(id) => router.push({ pathname: "/workspace/artifact", params: { id } })}
+              />
+            ) : null}
+          </ScrollView>
+        </View>
+      ) : null}
+      </View>
     </View>
   );
 }
