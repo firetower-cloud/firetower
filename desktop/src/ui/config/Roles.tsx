@@ -104,12 +104,21 @@ export function Roles() {
   const cache = useQueryClient();
   const confirm = useConfirm();
 
-  // Managers first — they're the ones a person reaches for to lead a team —
-  // then alphabetical; narrowed by the search over name and what it does.
+  // Name first: searching a profile by name should narrow to the ones named
+  // that, not every one whose description happens to mention it — these
+  // cross-reference each other ("hand off to the Security Advisor"), so a
+  // description search returns the whole roster. Only when nothing matches a
+  // name does it fall back to what each does. Managers first, then alphabetical.
   const needle = q.trim().toLowerCase();
-  const shown = rows.data
-    .filter((r) => !needle || r.name.toLowerCase().includes(needle) || r.does.toLowerCase().includes(needle))
-    .sort((a, b) => Number(b.canDelegate) - Number(a.canDelegate) || a.name.localeCompare(b.name));
+  const byName = rows.data.filter((r) => r.name.toLowerCase().includes(needle));
+  const matched = !needle
+    ? rows.data
+    : byName.length > 0
+      ? byName
+      : rows.data.filter((r) => r.does.toLowerCase().includes(needle));
+  const shown = [...matched].sort(
+    (a, b) => Number(b.canDelegate) - Number(a.canDelegate) || a.name.localeCompare(b.name),
+  );
 
   const removeRole = async (role: Role) => {
     const ok = await confirm({
