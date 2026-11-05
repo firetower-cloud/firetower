@@ -89,9 +89,9 @@ appearing, the composer's morph — `--ease-swift` at 200ms.
 `Animated` from core. The difference is only visible on the interaction people
 judge the app by, which is exactly why it matters.
 
-`Blocks` — the island's turning glyph — is what an inbox row uses, because the
-inbox is the glanceable surface here the way the island is on a desk. Working
-turns, blocked breathes, done and broken are perfectly still. Movement means
+`Blocks` — the turning status glyph, shared with the desktop client — is what
+an inbox row uses, because the inbox is the glanceable surface here the way
+the rail is on a desk. Working turns, blocked breathes, done and broken are perfectly still. Movement means
 work is happening, which is why the state that is stuck is the one that does
 not move, however loud it is.
 

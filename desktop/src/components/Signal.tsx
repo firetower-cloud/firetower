@@ -6,7 +6,7 @@ import { BEAT, BEAT_TONE } from "~/api/view";
 
    Derived rather than written out, from the one table that says what a status
    means (`BEAT` in `view.ts`). It used to be a list of its own, and it was
-   right — but being right separately from everything else is how the island
+   right — but being right separately from everything else is how `Blocks`
    came to paint a finished agent ember while this painted it sage. */
 export const TONE: Record<SessionStatus, string> = Object.fromEntries(
   (Object.keys(BEAT) as SessionStatus[]).map((status) => [status, BEAT_TONE[BEAT[status]]]),

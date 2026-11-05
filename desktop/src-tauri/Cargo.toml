@@ -35,35 +35,38 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 # gigabytes of it in memory first. Declared for the same reason `reqwest` is.
 tokio = { version = "1", features = ["rt", "fs", "io-util"] }
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
-serde = { version = "1", features = ["derive"] }
+# Reading the `message` out of a refusal from the control plane, which is the
+# difference between saying what went wrong and writing JSON to disk under a
+# `.zip`. Nothing here derives, so `serde` itself is not declared.
 serde_json = "1"
 
-# The translucent sidebar, and the island's four AppKit flags.
+# The translucent sidebar.
 [target.'cfg(target_os = "macos")'.dependencies]
 window-vibrancy = "0.6"
-# Already in the tree — Tauri builds on both. Declared here because `island.rs`
-# reaches for NSScreen and NSWindow directly, and a transitive dependency is
-# not an API you are allowed to call.
+# Already in the tree — Tauri builds on both. Declared here because
+# `capture.rs` reaches for the Objective-C runtime directly, and a transitive
+# dependency is not an API you are allowed to call.
 objc2 = "0.6"
 # `NSImage` and `NSBitmapImageRep` are for `capture.rs`: `takeSnapshot` hands
 # back an NSImage and the only way out of one to PNG bytes is a bitmap rep.
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSBitmapImageRep", "NSEvent", "NSGraphics", "NSImage", "NSImageRep", "NSResponder", "NSRunningApplication", "NSScreen", "NSView", "NSWindow"] }
-# `NSRect`, to set a window's size and origin in one call. Two calls are two
-# frame changes, and the gap between them is a visible flicker.
-# The rest are `capture.rs` again: a width to scale the snapshot to (`NSNumber`,
-# which lives in `NSValue`), the properties dictionary PNG encoding takes, and
-# the `NSData` the bytes come back in.
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSData", "NSDictionary", "NSGeometry", "NSString", "NSValue"] }
+# `capture.rs` names both through `class!` rather than as types, so this is
+# here to link AppKit as much as to import it; the feature list is the set
+# those two classes sit behind and is not worth paring further.
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSBitmapImageRep", "NSGraphics", "NSImage", "NSImageRep", "NSResponder", "NSRunningApplication", "NSView", "NSWindow"] }
+# `capture.rs`: a width to scale the snapshot to (`NSNumber`, which lives in
+# `NSValue`), the properties dictionary PNG encoding takes, and the `NSData`
+# the bytes come back in.
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSData", "NSDictionary", "NSString", "NSValue"] }
 # The completion handler `takeSnapshot` is given. Paired with objc2's major,
 # for the same reason the `windows` crate below is pinned to Tauri's.
 block2 = "0.6"
 
-# The island's window flags on Windows. Pinned to the same major as Tauri's
-# own: `WebviewWindow::hwnd()` hands back a `windows::Win32::Foundation::HWND`
-# from *its* copy of the crate, and two majors in one tree makes that handle a
-# different type that no amount of casting will accept.
+# The in-memory stream `capture.rs` hands WebView2 to write a PNG into.
+# Pinned to the same major as Tauri's own, for the same reason `webview2-com`
+# below is: a handle from *its* copy of the crate is a different type across
+# two majors in one tree, and no amount of casting will accept it.
 [target.'cfg(target_os = "windows")'.dependencies]
-windows = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_System_Com", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+windows = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Com", "Win32_UI_Shell"] }
 # `capture.rs` on Windows. Pinned to the majors Tauri already resolves, for the
 # same reason the `windows` crate is: `PlatformWebview::controller()` hands back
 # an `ICoreWebView2Controller` from *its* copy, and two majors in one tree makes
