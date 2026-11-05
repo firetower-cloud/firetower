@@ -51,7 +51,7 @@ export default function FileScreen() {
   }, [changed, path]);
 
   return (
-    <View className="flex-1 bg-ground" style={{ paddingTop: insets.top }}>
+    <View className="flex-1 bg-ground" style={{ paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }}>
       <View className="flex-row items-center gap-1 pb-1 pl-1">
         <Pressable onPress={() => router.back()} className="h-10 w-10 items-center justify-center" hitSlop={8}>
           <ChevronLeft color={color.bone} size={22} />

@@ -5,19 +5,19 @@
     "development": {
       "developmentClient": true,
       "distribution": "internal",
-      "ios": { "simulator": true },
+      "ios": { "simulator": true, "image": "sdk-58" },
       "android": { "buildType": "apk" }
     },
     "preview": {
       "distribution": "internal",
       "channel": "preview",
-      "ios": { "resourceClass": "m-medium" },
+      "ios": { "resourceClass": "m-medium", "image": "sdk-58" },
       "android": { "buildType": "apk" }
     },
     "production": {
       "channel": "production",
       "autoIncrement": true,
-      "ios": { "resourceClass": "m-medium" },
+      "ios": { "resourceClass": "m-medium", "image": "sdk-58" },
       "android": { "buildType": "apk" }
     }
   },

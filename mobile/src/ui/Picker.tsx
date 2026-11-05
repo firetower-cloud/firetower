@@ -187,7 +187,10 @@ export function Picker({
       <GestureDetector gesture={drag}>
       <Animated.View
         className="rounded-t-2xl border-t border-line bg-panel"
-        style={[{ paddingBottom: insets.bottom + 8, maxHeight: "72%" }, slide]}
+        style={[
+          { paddingBottom: insets.bottom + 8, marginLeft: insets.left, marginRight: insets.right, maxHeight: "72%" },
+          slide,
+        ]}
       >
         {/* A generous target: the bar is 9pt tall and the grab is 28. */}
         <View className="items-center pb-2 pt-3">

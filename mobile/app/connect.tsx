@@ -33,6 +33,7 @@ import { cleartext, reach, signIn, type Bootstrap } from "~/api/probe";
 import { remember } from "~/native/servers";
 import { Mark } from "~/ui/Mark";
 import { ReplacePassword } from "~/ui/ReplacePassword";
+import { READING } from "~/ui/measure";
 import { color, size } from "~/design/tokens.generated";
 
 type Stage =
@@ -83,6 +84,9 @@ export default function Connect() {
         paddingHorizontal: 24,
         paddingTop: insets.top + 24,
         paddingBottom: insets.bottom + 24,
+        paddingLeft: insets.left,
+        paddingRight: insets.right,
+        ...READING,
       }}
       keyboardShouldPersistTaps="handled"
     >

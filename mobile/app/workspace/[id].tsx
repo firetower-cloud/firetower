@@ -9,15 +9,19 @@
  * The repository is one tap away rather than beside: see `~/ui/Changes`.
  */
 import { useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, View, useWindowDimensions } from "react-native";
+/* React Native 0.88 split the component type from the instance type: `ScrollView`
+   now names the component, so a ref wants `ScrollViewInstance`. */
+import type { ScrollViewInstance } from "react-native";
 import Animated, { useAnimatedStyle } from "react-native-reanimated";
 import { useReanimatedKeyboardAnimation } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router, useLocalSearchParams } from "expo-router";
-import { ChevronLeft, Eye, MoreHorizontal } from "lucide-react-native";
+import { ChevronLeft, Eye, MoreHorizontal, PanelRight } from "lucide-react-native";
 import { delegating, interruptible, useConversation } from "~/api/conversation";
 import { useListEvents } from "~/api/generated/events/events";
-import type { Attached, Event } from "~/api/generated/model";
+import { useListArtifacts } from "~/api/generated/artifacts/artifacts";
+import type { Attached, Event, Session } from "~/api/generated/model";
 import { ready, stepLines } from "~/api/steps-bringup";
 import { Bringup } from "~/ui/Bringup";
 import { WorkspaceMenu } from "~/ui/WorkspaceMenu";
@@ -37,6 +41,8 @@ import { Composer } from "~/ui/Composer";
 import { Sheen } from "~/ui/Sheen";
 import { Signal } from "~/ui/Signal";
 import { Transcript } from "~/ui/Transcript";
+import { ArtifactCard } from "~/ui/ArtifactCard";
+import { Overview } from "~/ui/Overview";
 import { ImagesFrom } from "~/ui/WorkspaceImage";
 import { Waiting } from "~/ui/Waiting";
 import { color } from "~/design/tokens.generated";
@@ -80,7 +86,7 @@ export default function WorkspaceScreen() {
 
 function Conversation({ place }: { place: Workspace }) {
   const insets = useSafeAreaInsets();
-  const scroller = useRef<ScrollView>(null);
+  const scroller = useRef<ScrollViewInstance>(null);
   const [atEnd, setAtEnd] = useState(true);
 
   const speaker = lead(place);
@@ -101,8 +107,96 @@ function Conversation({ place }: { place: Workspace }) {
     [session, speaker, events.data],
   );
 
+  /**
+   * The artifacts this session published.
+   *
+   * Owned by a person rather than by the workspace — `reclaim.rs` deletes a
+   * workspace within a minute of its last session ending and the cascade
+   * takes the conversation with it, so these rows deliberately sit outside
+   * it. That is why they are fetched separately rather than folded into the
+   * conversation.
+   *
+   * **Grouped at the end rather than anchored inline.** The desktop places
+   * each card at its `firstSeenLine`; the phone's fold does not carry a line
+   * number onto an `Item`, and threading one through would change a contract
+   * shared with two other clients. The end of the transcript is the fallback
+   * the server already documents for rows with no line, so it is the same
+   * behaviour rather than a new one.
+   */
+  /**
+   * The team around this workspace, one level up and one level down.
+   *
+   * The manager is this session when it leads and the session that started it
+   * when it is a child; the roster is everyone under that manager, which is
+   * the same set whichever member you are reading. Derived from the list the
+   * inbox already holds rather than fetched — the parent is a field on a run.
+   */
+  /* The same query the inbox reads; react-query hands back the one cache
+     rather than asking twice. */
+  const { data: sessions } = useSessions();
+  const above = useMemo(
+    () => (speaker.parentId ? (sessions.find((s: Session) => s.id === speaker.parentId) ?? null) : null),
+    [sessions, speaker.parentId],
+  );
+  const managerId = above?.id ?? speaker.id;
+  const team = useMemo(() => sessions.filter((s: Session) => s.parentId === managerId), [sessions, managerId]);
+
+  /* Beside the conversation when the display is wide enough to hold both —
+     the Duo's inner panel is the first phone screen that is — and a pushed
+     route when it is not. One component, two placements. */
+  /**
+   * Where the overview goes, which is three answers and not two.
+   *
+   * The conversation is never squeezed — that is the whole rule, and the
+   * widths decide which way of keeping it applies:
+   *
+   * - **push**, under 600. There is no room for a rail at all; it is its own
+   *   screen, one back-gesture away. The phone at 390 and the Duo's front
+   *   panel at 466.
+   * - **float**, 600 to 820. Wide enough to want the rail, too narrow to
+   *   split: 669 minus a 340 rail leaves 329, which is less than the phone
+   *   this app was designed for. So it comes over the top and the
+   *   conversation keeps its full width underneath. The Duo's inner panel
+   *   in portrait, which an earlier single threshold of 700 missed entirely.
+   * - **dock**, 820 and over. Room for both, so the rail sits beside and the
+   *   conversation takes the majority — 611 of the Duo's 951 in landscape.
+   *
+   * Collapsible in both of the last two, from one control, so rotating the
+   * device never changes what the button does — only where the rail lands.
+   */
+  const { width } = useWindowDimensions();
+  const rail: "push" | "float" | "dock" = width >= 820 ? "dock" : width >= 600 ? "float" : "push";
+
+  /* Docked starts open because it costs the conversation nothing it needs;
+     floated starts closed because it costs the conversation all of it. */
+  const [railOpen, setRailOpen] = useState(rail === "dock");
+
+  /* Only the docked rail yields — a floated one is over the top, so there is
+     nothing to take width from. */
+  const panel = rail === "dock" ? Math.min(340, Math.max(280, width - 400)) : 340;
+  const beside = rail === "dock" && railOpen;
+  const floating = rail === "float" && railOpen;
+
+  const { data: everyArtifact } = useListArtifacts();
+  const family = useMemo(() => new Set([managerId, ...team.map((t) => t.id)]), [managerId, team]);
+  const artifacts = useMemo(
+    () => (everyArtifact ?? []).filter((a) => a.fromSessionId && family.has(a.fromSessionId)),
+    [everyArtifact, family],
+  );
+
   const { conversation, echo, settle, remember, stopping, reread, older } = useConversation(speaker.id);
   const [rereading, setRereading] = useState(false);
+  /* The live one first — a todo list arrives on the turn stream and moves as
+     the agent works. `session.plan` is the cross-engine fallback an agent set
+     through `firetower:plan`, which rides on the session and lands a poll
+     later. */
+  /* The plan is the manager's. `lead()` picks whichever run is *speaking*,
+     which once a team exists is often a subagent — and a subagent keeps no
+     plan, so reading it there emptied the panel exactly when there was a
+     team to show one for. */
+  const plan =
+    conversation.plan.length > 0 ? conversation.plan : ((above ?? session)?.plan ?? []);
+
   const send = useSendTurn();
   const attach = useAttachFile();
   const answer = useAnswerRequest();
@@ -127,8 +221,21 @@ function Conversation({ place }: { place: Workspace }) {
     await attach.mutateAsync({ id: speaker.id, data: { name, data } });
   };
 
+  /* Named once: the docked column and the floated sheet draw the same thing
+     and must not drift apart. */
+  const overview = session ? (
+    <Overview
+      session={session}
+      lead={above}
+      team={team}
+      plan={plan}
+      artifacts={artifacts}
+      onOpenArtifact={(id) => router.push({ pathname: "/workspace/artifact", params: { id } })}
+    />
+  ) : null;
+
   return (
-    <View className="flex-1 bg-ground" style={{ paddingTop: insets.top }}>
+    <View className="flex-1 bg-ground" style={{ paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }}>
       <View className="flex-row items-center gap-1 border-b border-line-soft px-1 pb-2.5 pt-1">
         <Pressable onPress={() => router.back()} className="h-10 w-10 items-center justify-center" hitSlop={8}>
           <ChevronLeft color={color.bone} size={22} />
@@ -152,6 +259,24 @@ function Conversation({ place }: { place: Workspace }) {
             </View>
           </View>
         </View>
+
+        {/* Only when the overview cannot sit beside the conversation. On a
+            wide display it is already on screen and a button to it would open
+            a second copy of what you are looking at. */}
+        {/* One control, three meanings — and it reads the same in all of them:
+            "show me the overview". Only where it lands differs. */}
+        <Pressable
+          testID="overview"
+          onPress={() =>
+            rail === "push"
+              ? router.push({ pathname: "/workspace/overview", params: { id: place.id } })
+              : setRailOpen((open) => !open)
+          }
+          className={`h-10 w-10 items-center justify-center rounded-md ${railOpen && rail !== "push" ? "bg-raise" : ""}`}
+          hitSlop={8}
+        >
+          <PanelRight color={railOpen && rail !== "push" ? color.bone : color.dim} size={19} />
+        </Pressable>
 
         <Pressable
           testID="workspace-menu"
@@ -181,6 +306,10 @@ function Conversation({ place }: { place: Workspace }) {
         />
       ) : null}
 
+      <View className={beside ? "min-h-0 flex-1 flex-row" : "min-h-0 flex-1"}>
+      {/* The conversation column: transcript, menu and composer together, so
+          the overview sits beside all three rather than between them. */}
+      <View className="min-h-0 flex-1">
       <View className="min-h-0 flex-1">
         <ScrollView
           ref={scroller}
@@ -248,11 +377,15 @@ function Conversation({ place }: { place: Workspace }) {
           ) : null}
 
           {conversation.items.length > 0 ? (
-            /* Which workspace the pictures in the agent's prose are read from.
-               Without this a `![shot](docs/shot.png)` has nowhere to look. */
-            <ImagesFrom.Provider value={{ session: speaker.id }}>
-              <Transcript items={conversation.items} tasks={conversation.tasks} />
-            </ImagesFrom.Provider>
+            <>
+              {/* Which workspace the pictures in the agent's prose are read
+                  from. Without this a `![shot](docs/shot.png)` has nowhere to
+                  look. */}
+              <ImagesFrom.Provider value={{ session: speaker.id }}>
+                <Transcript items={conversation.items} tasks={conversation.tasks} />
+              </ImagesFrom.Provider>
+
+            </>
           ) : conversation.trouble ? (
             <Text className="mt-2 font-sans text-meta text-brick">{conversation.trouble}</Text>
           ) : !conversation.arrived ? (
@@ -267,6 +400,19 @@ function Conversation({ place }: { place: Workspace }) {
                waiting for you to open the conversation. */
             <Text className="mt-2 font-sans text-meta text-mute">Nothing has been said yet.</Text>
           )}
+
+          {/* Outside the conditional above on purpose. An artifact is owned by
+              a person and outlives the workspace that made it, so a session
+              whose transcript is empty — or has not arrived — can still have
+              published one. Nesting these in the transcript branch hid them
+              exactly when the card was the only thing worth seeing. */}
+          {artifacts.map((a) => (
+            <ArtifactCard
+              key={a.id}
+              artifact={a}
+              onOpen={() => router.push({ pathname: "/workspace/artifact", params: { id: a.id } })}
+            />
+          ))}
 
           {/* A gap that admits it is one. Before `foldAll` this was the
               silent case: the transcript stopped at whatever line could not
@@ -361,6 +507,37 @@ function Conversation({ place }: { place: Workspace }) {
         ))}
       />
       )}
+      </View>
+
+      {/* Docked: a sibling column, so the conversation reflows to what is
+          left — 611 of the Duo's 951, which is wider than any phone. */}
+      {beside ? (
+        <View className="border-l border-line-soft" style={{ width: panel }}>
+          <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}>{overview}</ScrollView>
+        </View>
+      ) : null}
+
+      {/* Floated: over the top, so the conversation keeps its full width and
+          dismissing costs no reflow. The scrim is the dismiss target — a
+          panel you can only close from the control that opened it is a trap
+          on a screen you are holding in one hand. */}
+      {floating ? (
+        <>
+          <Pressable
+            testID="overview-scrim"
+            onPress={() => setRailOpen(false)}
+            className="absolute bottom-0 left-0 right-0 top-0"
+            style={{ backgroundColor: "rgba(0,0,0,0.45)" }}
+          />
+          <View
+            className="absolute bottom-0 right-0 top-0 border-l border-line bg-panel"
+            style={{ width: panel, shadowColor: "#000", shadowOpacity: 0.5, shadowRadius: 18, shadowOffset: { width: -8, height: 0 } }}
+          >
+            <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}>{overview}</ScrollView>
+          </View>
+        </>
+      ) : null}
+      </View>
     </View>
   );
 }

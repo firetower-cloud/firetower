@@ -16,3 +16,28 @@ nodeLinker: hoisted
 allowBuilds:
   # the bundler Vite runs on, for vitest and orval
   esbuild: true
+
+minimumReleaseAgeExclude:
+  - '@expo/cli@58.1.19'
+  - '@expo/config-plugins@58.0.12'
+  - '@expo/config@58.0.11'
+  - '@expo/env@2.5.4'
+  - '@expo/fingerprint@0.21.9'
+  - '@expo/inline-modules@0.2.9'
+  - '@expo/local-build-cache-provider@58.0.11'
+  - '@expo/log-box@58.0.15'
+  - '@expo/metro-config@58.0.21'
+  - '@expo/prebuild-config@58.0.19'
+  - '@expo/router-server@58.0.21'
+  - babel-preset-expo@58.0.24
+  - expo-asset@58.0.20
+  - expo-constants@58.0.15
+  - expo-modules-autolinking@58.0.17
+  - expo-modules-core@58.0.30
+  - expo-modules-jsi@58.0.22
+  - expo@58.0.23
+  - '@expo/metro-runtime@58.0.17'
+  - expo-linking@58.0.16
+  - expo-router@58.0.30
+  - expo-splash-screen@58.0.13
+  - expo-updates@58.0.21

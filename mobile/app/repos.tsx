@@ -151,7 +151,7 @@ export default function Repos() {
     setChosen((was) => (was.includes(slug) ? was.filter((s) => s !== slug) : [...was, slug]));
 
   return (
-    <View className="flex-1 bg-ground" style={{ paddingTop: insets.top }}>
+    <View className="flex-1 bg-ground" style={{ paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }}>
       <View className="flex-row items-center gap-1 pb-2 pl-1">
         <Pressable
           onPress={() => router.back()}

@@ -47,6 +47,8 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Image, Keyboard, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+/* See the note in `app/workspace/[id].tsx`: 0.88 wants the instance type on a ref. */
+import type { TextInputInstance } from "react-native";
 import Animated, {
   Easing,
   LinearTransition,
@@ -163,7 +165,7 @@ export function Composer({
   const [chips, setChips] = useState<Picked[]>([]);
   const [busy, setBusy] = useState(false);
   const [more, setMore] = useState(false);
-  const field = useRef<TextInput>(null);
+  const field = useRef<TextInputInstance>(null);
   /** The draft dictation is sitting on top of, in case you cancel. */
   const before = useRef("");
 

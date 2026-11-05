@@ -51,7 +51,12 @@ export default function Config() {
   return (
     <ScrollView
       className="flex-1 bg-ground"
-      contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: insets.bottom + 24 }}
+      contentContainerStyle={{
+        paddingTop: insets.top + 8,
+        paddingBottom: insets.bottom + 24,
+        paddingLeft: insets.left,
+        paddingRight: insets.right,
+      }}
       refreshControl={
         <RefreshControl
           refreshing={false}
