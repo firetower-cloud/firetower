@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.50.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.49.0...firetower-v0.50.0) (2026-11-05)
+
+
+### Features
+
+* a lead waits on its children, and ends with them ([a29b325](https://github.com/firetower-cloud/firetower/commit/a29b32504f039d90299b915c1a9993a34056bbc2))
+* a nested child shows just its own name in the rail ([8647aba](https://github.com/firetower-cloud/firetower/commit/8647abaf350ec71944a23f715cfe9843300c00ec))
+* a session can start children, and hear back from them ([3b6921c](https://github.com/firetower-cloud/firetower/commit/3b6921c8e1112e52dfb11b44815f36c084c846d9))
+* **artifacts:** a page of the application looks like the application ([0844387](https://github.com/firetower-cloud/firetower/commit/08443873e7ab3afb85647ff520a0899b86672978))
+* **artifacts:** a page of the application looks like the application ([3b6296b](https://github.com/firetower-cloud/firetower/commit/3b6296b302aa79fda36080cf6b15110a9dcae284))
+* call the saved kinds "Subagents" in the interface ([cad6dc5](https://github.com/firetower-cloud/firetower/commit/cad6dc5a3463e022e160b6c26a70f7ddcd643f15))
+* draw a relayed agent message as a card, not a bubble from you ([a302b84](https://github.com/firetower-cloud/firetower/commit/a302b844440bb501cf03d3c20f631d7dc567a408))
+* roles — a saved kind of agent a lead can start by name ([21ab82f](https://github.com/firetower-cloud/firetower/commit/21ab82f4d1f3ef4117e7b8188757fb764dbe47c0))
+
+
+### Bug Fixes
+
+* end a lead's children only once ending is certain ([e282e70](https://github.com/firetower-cloud/firetower/commit/e282e701ef914ebac3f7cdaf1acc880f8e6b6c59))
+
 ## [0.49.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.48.0...firetower-v0.49.0) (2026-10-28)
 
 

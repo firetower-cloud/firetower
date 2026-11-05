@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.11.0](https://github.com/firetower-cloud/firetower/compare/mobile-v0.10.0...mobile-v0.11.0) (2026-11-05)
+
+
+### Features
+
+* a session can start children, and hear back from them ([3b6921c](https://github.com/firetower-cloud/firetower/commit/3b6921c8e1112e52dfb11b44815f36c084c846d9))
+* **mobile:** Expo SDK 58, iPhone Duo, and artifacts ([9401667](https://github.com/firetower-cloud/firetower/commit/94016670d3a75fde927cda06b7d7ed759cf3b70c))
+* **mobile:** the Overview rail, beside the conversation or pushed ([9d049de](https://github.com/firetower-cloud/firetower/commit/9d049dec241c6852a007aa5ac1e313d2f99f352e))
+* **mobile:** three rail behaviours, a measure, and the SDK 58 build image ([8bba466](https://github.com/firetower-cloud/firetower/commit/8bba4662ccc405c3719e9eb9bbd0171ad0138ae6))
+* roles — a saved kind of agent a lead can start by name ([21ab82f](https://github.com/firetower-cloud/firetower/commit/21ab82f4d1f3ef4117e7b8188757fb764dbe47c0))
+
 ## [0.10.0](https://github.com/firetower-cloud/firetower/compare/mobile-v0.9.1...mobile-v0.10.0) (2026-10-28)
 
 
