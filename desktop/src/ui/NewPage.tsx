@@ -20,6 +20,7 @@ import {
   ChevronDown,
   Diamond,
   FolderGit2,
+  Paperclip,
   Plus,
   Search,
   Server,
@@ -47,6 +48,9 @@ import { useAccounts, useAgents, useHosts, useRepos, useSkills } from "~/data";
 import { ConnectAccount } from "~/ui/config/ConnectAccount";
 import { navigate } from "~/shims/next-navigation";
 import { leaveDraft } from "~/workspace/draft";
+import { post, whichServer } from "~/workspace/outbox";
+import { base64, chipFor, Chips, Dropping, sift, type Chip } from "~/ui/attach";
+import { folderRefusals, useFileDrop } from "~/ui/drop";
 import { isMac } from "~/platform";
 import { consumeSeed } from "~/start";
 import type { Agent, Control, ControlKind, Role } from "~/api/generated/model";
@@ -119,6 +123,74 @@ export function NewPage() {
   // Dictation writes into the prompt like a second pair of hands, the same way
   // the conversation's composer takes it.
   const voice = useVoice({ text: prompt, setText: setPrompt, box });
+
+  /* What is attached, under the rules in `~/ui/attach` — the same caps and the
+     same refusal lines the conversation's composer applies, because a limit
+     written twice is a limit that disagrees with itself within a release.
+
+     A picture is read here and now: that is arithmetic on bytes the browser
+     already has. Everything else keeps its `File` and goes nowhere yet —
+     `attach_file` needs a workspace, and there is no workspace until `create`
+     has answered and the worker has made one. `~/workspace/outbox` does that
+     part, once there is somewhere to put them. */
+  const [chips, setChips] = useState<Chip[]>([]);
+  const [refused, setRefused] = useState<string | null>(null);
+  const nextId = useRef(0);
+  /* How many are held, read synchronously: two drops in the same tick both
+     have to see the slots the other took, and state would not have landed yet.
+     Reconciled from the real list after every render. */
+  const held = useRef(0);
+  useEffect(() => {
+    held.current = chips.length;
+  }, [chips]);
+
+  const take = async (list: FileList | File[] | null, refusals: string[] = []) => {
+    const offered = [...(list ?? [])];
+    if (offered.length === 0 && refusals.length === 0) return;
+    setRefused(null);
+    const sifted = sift(held.current, offered, refusals);
+    if (sifted.refusals.length) setRefused(sifted.refusals.join(" "));
+    if (sifted.taken.length === 0) return;
+
+    /* A picture's chip is pending until its bytes are read. A file's is not
+       pending at all: nothing is going to happen to it on this page, so a
+       spinner would be promising work that is not being done. */
+    const made = sifted.taken.map((file) => {
+      const picture = file.type.startsWith("image/");
+      return { file, chip: { ...chipFor(nextId.current++, file, picture), file: picture ? undefined : file } };
+    });
+    held.current += made.length;
+    setChips((all) => [...all, ...made.map((m) => m.chip)]);
+
+    for (const { file, chip } of made) {
+      if (chip.kind !== "image") continue;
+      try {
+        const data = await base64(file);
+        setChips((all) =>
+          all.map((c) => (c.id === chip.id ? { ...c, image: { mediaType: file.type, data }, pending: false } : c)),
+        );
+      } catch {
+        setChips((all) => all.filter((c) => c.id !== chip.id));
+        held.current = Math.max(0, held.current - 1);
+        setRefused((was) => [was, `${file.name} could not be read.`].filter(Boolean).join(" "));
+      }
+    }
+  };
+
+  const unattach = (c: Chip) => {
+    setChips((all) => all.filter((x) => x.id !== c.id));
+    held.current = Math.max(0, held.current - 1);
+  };
+
+  /* The whole page, not the box. The composer is a strip in the middle of a
+     tall empty page and the page is where a hand goes — the same reasoning,
+     and the same hook, as the conversation pane. There is exactly one surface,
+     because `drop` bubbles and a second handler inside this one would attach
+     every file twice. */
+  const { over, surface } = useFileDrop(({ files, folders }) => void take(files, folderRefusals(folders)));
+
+  /** A picture still being read. The message is not complete without it. */
+  const busy = chips.some((c) => c.pending);
 
   // Arriving from "Create with AI", the composer is already half-written — put
   // the cursor after it and grow the box, so the person just keeps typing.
@@ -201,7 +273,9 @@ export function NewPage() {
     { query: { enabled: !!host && !!kind, retry: false, staleTime: 5000 } },
   );
   const hostReady = !!host && !!kind && isReady(readiness.data);
-  const ready = hostReady && !!account && !create.isPending;
+  /* `busy`: pressing Start while a picture is still being read would start a
+     workspace and send it a message with the picture missing. */
+  const ready = hostReady && !!account && !create.isPending && !busy;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -211,6 +285,19 @@ export function NewPage() {
     return () => window.removeEventListener("keydown", onKey);
   });
 
+  /* Whether this page is still the one on screen by the time the create
+     answers. It navigates on success, and somebody who has moved on — to
+     another screen, or to another Firetower, which unmounts this — should not
+     be pulled onto a workspace they stopped waiting for. The delivery below
+     does not ask: that happens either way. */
+  const onScreen = useRef(true);
+  useEffect(() => {
+    onScreen.current = true;
+    return () => {
+      onScreen.current = false;
+    };
+  }, []);
+
   const go = () => {
     if (!ready || !kind || !account) return;
     // What was actually used, so the next New page opens on it.
@@ -219,11 +306,39 @@ export function NewPage() {
     const first = prompt.split("\n")[0].trim();
     const name = (seed?.title || first || checkouts[0]?.slug || "Workspace").slice(0, 80);
     const branch = checkouts.length ? `agent/${slug(first || name) || "work"}` : undefined;
-    create.mutate(
-      {
+
+    /* With something attached the prompt cannot ride along with the launch.
+       `NewSession` carries text and nothing else, and the message this has to
+       send is the text *plus* the pictures and the paths of the files — paths
+       that do not exist until there is a workspace to put them in. So the
+       prompt is held back and the whole first message is delivered by
+       `~/workspace/outbox` once the agent is up.
+
+       With nothing attached, none of that applies and this is exactly what it
+       has always been: the prompt goes in the payload and the worker hands it
+       to the agent as its opening prompt. */
+    const images = chips.flatMap((c) => (c.image ? [c.image] : []));
+    const files = chips.flatMap((c) => (c.file ? [c.file] : []));
+    const attached = images.length > 0 || files.length > 0;
+    /* Which Firetower this is being started on, read here rather than when the
+       create answers. The client has one current backend and the sidebar can
+       move it while the request is in flight, so reading it on the way back
+       would address the parcel — the person's file — to the server they
+       switched to. */
+    const server = whichServer();
+
+    /* `mutateAsync` rather than `mutate`'s `onSuccess`: switching Firetower
+       unmounts this page (the provider is keyed on the server), and react-query
+       does not call the callbacks passed to `mutate` once that has happened.
+       The workspace is made regardless, so what was attached and what was typed
+       would have gone nowhere with nobody told. This runs either way, and
+       because the parcel carries the server it was started on, a window that
+       has moved hears about it when it comes back rather than never. */
+    void create
+      .mutateAsync({
         data: {
           name,
-          prompt: prompt.trim() || undefined,
+          prompt: attached ? undefined : prompt.trim() || undefined,
           taskKey: seed?.taskKey,
           taskUrl: seed?.taskUrl,
           workspaceId: seed?.workspaceId as never,
@@ -241,15 +356,39 @@ export function NewPage() {
             sandbox: chosen.sandbox,
           },
         },
-      },
-      {
-        onSuccess: (made) => {
-          const s = made as { id: string; workspaceId?: string | null };
-          if (seed?.taskUrl) leaveDraft(s.id, `${seed.title ?? ""}\n${seed.taskUrl}`.trim());
-          navigate(`/sessions/${s.workspaceId ?? s.id}`);
-        },
-      },
-    );
+      })
+      .then((made) => {
+        const s = made as { id: string; workspaceId?: string | null };
+        /* The words, in `draft.ts` as well as in the outbox. With something
+           attached the prompt is not in the payload above — the first message
+           has to be the text, the pictures and the paths together — so from
+           here until the agent is listening the only copy of what was asked
+           would otherwise be the one `post` holds, and a document that reloads
+           under a long setup script takes it. A sentence is exactly what that
+           handoff is for; the pictures cannot go in it and do not. Written
+           before `post`, which takes it out again as soon as the attempt is
+           over, whichever way it went. */
+        const handoff = [
+          attached ? prompt.trim() : "",
+          seed?.taskUrl ? `${seed.title ?? ""}\n${seed.taskUrl}`.trim() : "",
+        ]
+          .filter(Boolean)
+          .join("\n\n");
+        if (handoff) leaveDraft(s.id, handoff);
+        /* The session's id, not the workspace's: a turn and an attachment are
+           both addressed to the agent running in it. The workspace's too,
+           though, because what gets read is a conversation chosen from the runs
+           in it and a trouble has to reach whichever one that is. And the
+           server, which is the one thing this page knows and the delivery
+           cannot work out for itself. */
+        if (attached) post({ server, sessionId: s.id, workspaceId: s.workspaceId }, { text: prompt.trim(), images, files });
+        if (onScreen.current) navigate(`/sessions/${s.workspaceId ?? s.id}`);
+      })
+      .catch(() => {
+        /* Said under the button, from the mutation's own state — which
+           `mutateAsync` records as `mutate` does. Swallowed here because an
+           unhandled rejection is not a second way of telling anybody. */
+      });
   };
 
   const toggleRepo = (r: { id: string; slug: string }) =>
@@ -262,15 +401,31 @@ export function NewPage() {
     setOpen((o) => (o?.which === which ? null : { which, at }));
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col overflow-auto">
+    /* The surface is this wrapper rather than the scroller inside it: the
+       overlay is positioned against it, and an overlay inside a scroller
+       slides off the top as soon as the page is scrolled. */
+    <div className="relative flex min-w-0 flex-1 flex-col" {...surface}>
+      {over && <Dropping />}
+      <div className="flex min-h-0 flex-1 flex-col overflow-auto">
       <div className="m-auto w-full max-w-[680px] px-7 py-10">
         <h1 className="mb-8 flex items-center justify-center gap-2.5 text-[1.6rem] font-normal leading-snug tracking-[-0.02em] text-bone/90">
           <FiretowerMark size={28} className="text-bone" />
           Good {timeOfDay()}{who ? `, ${who}` : ""}
         </h1>
 
+        {/* What was not taken — too big, too many, a folder — on the line the
+            conversation's composer uses for the same sentences. */}
+        {refused && (
+          <div className="mb-2 flex items-center gap-2 text-meta text-brick">
+            <X className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />
+            {refused}
+          </div>
+        )}
+
         {/* composer */}
         <div className="group rounded-2xl border border-line bg-raise/40 px-5 py-4 transition-colors focus-within:border-slate-deep/80 focus-within:bg-raise/60">
+          {/* The card pads itself here, so the row does not. */}
+          <Chips chips={chips} onDrop={unattach} className="pb-3" />
           <textarea
             ref={box}
             value={prompt}
@@ -305,11 +460,20 @@ export function NewPage() {
               e.preventDefault();
               go();
             }}
+            onPaste={(e) => {
+              // A screenshot straight off the clipboard, as the conversation
+              // takes one. Text pastes are left entirely alone.
+              if (e.clipboardData.files.length) void take(e.clipboardData.files);
+            }}
             placeholder="Describe the task, or start empty and say what you want in the conversation."
             rows={2}
             className="scroll-slim w-full resize-none bg-transparent text-read leading-relaxed text-bone placeholder:text-mute/80 focus:outline-none"
           />
           <div className="mt-2.5 flex items-center gap-1.5">
+            <label className="control shrink-0 cursor-pointer text-mute hover:bg-raise hover:text-bone" title="Attach a file or an image">
+              <Paperclip className="h-4 w-4" strokeWidth={1.75} />
+              <input type="file" multiple className="hidden" onChange={(e) => void take(e.target.files)} />
+            </label>
             {voice.possible && <Mic state={voice.state} onStart={voice.start} onStop={voice.stop} />}
             {allSkills.length > 0 && (
               <button
@@ -340,7 +504,7 @@ export function NewPage() {
             <button
               onClick={go}
               disabled={!ready}
-              title="Start the workspace"
+              title={busy ? "Waiting for the images" : "Start the workspace"}
               className="ml-auto grid h-8 w-8 place-items-center rounded-full bg-bone text-ground transition-opacity duration-150 hover:opacity-90 disabled:bg-overlay disabled:text-mute"
             >
               <ArrowUp className="h-4 w-4" strokeWidth={2.5} />
@@ -420,6 +584,7 @@ export function NewPage() {
           </p>
         )}
       </div>
+      </div>
 
       {/* ---------- the pill menus ---------- */}
       {open?.which === "profile" && (
@@ -437,22 +602,7 @@ export function NewPage() {
 
       {open?.which === "repo" && (
         <Pop anchor={open.at} onClose={close} width={340}>
-          <Menu>
-            {repos.length === 0 && (
-              <p className="px-3 py-2 text-meta text-mute">No repositories connected.</p>
-            )}
-            {repos.map((r) => (
-              <Opt
-                key={r.id}
-                on={checkouts.some((c) => c.id === r.id)}
-                onPick={() => toggleRepo(r)}
-                keepOpen
-                icon={<FolderGit2 className="h-4 w-4" strokeWidth={1.8} />}
-                title={r.slug}
-                sub={r.defaultBranch ?? undefined}
-              />
-            ))}
-          </Menu>
+          <RepoMenu repos={repos} checkouts={checkouts} onToggle={toggleRepo} />
         </Pop>
       )}
 
@@ -474,17 +624,20 @@ export function NewPage() {
                 title={machineLabel(m)}
               />
             ))}
-            {host && kind && (
-              <div className="mt-1 border-t border-line-soft pt-1">
-                <Readout
-                  key={`${host.id}:${kind}`}
-                  host={host}
-                  agent={kind}
-                  agentLabel={agents.find((a) => a.kind === kind)?.label}
-                />
-              </div>
-            )}
           </Menu>
+          {/* Outside the scroller: it is what the machine you picked is up to,
+              not another machine to pick, and it has to stay readable while a
+              long list of them scrolls under the pointer. */}
+          {host && kind && (
+            <div className="shrink-0 border-t border-line-soft py-1">
+              <Readout
+                key={`${host.id}:${kind}`}
+                host={host}
+                agent={kind}
+                agentLabel={agents.find((a) => a.kind === kind)?.label}
+              />
+            </div>
+          )}
         </Pop>
       )}
 
@@ -568,8 +721,104 @@ function Pill({
   );
 }
 
+/**
+ * The scrolling part of a menu, and only that part.
+ *
+ * `min-h-0` because `Pop` caps the card at the room the window actually has
+ * and a flex child refuses to shrink below its content without it — the
+ * flexbox rule in STYLE.md. Anything that should stay put while this scrolls,
+ * a search box or a readiness footer, goes beside it rather than inside it.
+ */
 function Menu({ children }: { children: React.ReactNode }) {
-  return <div className="max-h-80 overflow-y-auto py-1">{children}</div>;
+  return <div className="scroll-slim max-h-80 min-h-0 overflow-y-auto py-1">{children}</div>;
+}
+
+/**
+ * Which repositories a query leaves.
+ *
+ * By slug and case-insensitively, which is how everybody types a repository
+ * name — and on a substring rather than a prefix, because a slug is
+ * `owner/name` and the half anybody remembers is the second one. Exported for
+ * its own test: the rule is one line and silently wrong if the fold or the
+ * trim goes missing.
+ */
+export function matching<T extends { slug: string }>(repos: T[], q: string): T[] {
+  const query = q.trim().toLowerCase();
+  return query ? repos.filter((r) => r.slug.toLowerCase().includes(query)) : repos;
+}
+
+/**
+ * The repository list — the longest list on this page, and the one that was
+ * reported.
+ *
+ * The sheet this page replaced filtered from the first repository and this does
+ * too, because a connected account brings every repository it can see and
+ * scrolling to one by name is not a thing anybody wants to do twice. The only
+ * case without a box is the one with nothing to filter.
+ *
+ * Unlike the profile menu this is a multi-select, so picking leaves the menu
+ * and the query where they are: the row you just ticked stays in front of you.
+ * Remounts each time the menu opens, so the search starts empty.
+ */
+function RepoMenu({
+  repos,
+  checkouts,
+  onToggle,
+}: {
+  repos: { id: string; slug: string; defaultBranch?: string | null }[];
+  checkouts: Checkout[];
+  onToggle: (r: { id: string; slug: string }) => void;
+}) {
+  const [q, setQ] = useState("");
+  const shown = matching(repos, q);
+
+  return (
+    <>
+      {repos.length > 0 && (
+        <div className="shrink-0 border-b border-line-soft p-2">
+          <div className="flex items-center gap-2 rounded-md bg-ground px-2.5 py-1.5">
+            <Search className="h-3.5 w-3.5 shrink-0 text-mute" strokeWidth={1.8} />
+            <input
+              autoFocus
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              onKeyDown={(e) => {
+                // Enter takes the only one left, which is what typing three
+                // characters and reaching for the keyboard means. The old
+                // sheet did this and the habit came with the people.
+                if (e.key !== "Enter" || shown.length !== 1) return;
+                e.preventDefault();
+                onToggle(shown[0]);
+              }}
+              placeholder="Search repositories"
+              className="w-full bg-transparent text-meta text-bone placeholder:text-mute focus:outline-none"
+            />
+          </div>
+        </div>
+      )}
+      <Menu>
+        {repos.length === 0 && (
+          <p className="px-3 py-2 text-meta text-mute">No repositories connected.</p>
+        )}
+        {shown.map((r) => (
+          <Opt
+            key={r.id}
+            on={checkouts.some((c) => c.id === r.id)}
+            onPick={() => onToggle(r)}
+            keepOpen
+            icon={<FolderGit2 className="h-4 w-4" strokeWidth={1.8} />}
+            title={r.slug}
+            sub={r.defaultBranch ?? undefined}
+          />
+        ))}
+        {q.trim() !== "" && shown.length === 0 && (
+          <div className="px-3 py-3 text-center text-micro text-mute">
+            No repository matches “{q}”.
+          </div>
+        )}
+      </Menu>
+    </>
+  );
 }
 
 /**
@@ -610,7 +859,7 @@ function ProfileMenu({
   return (
     <>
       {profiles.length > 3 && (
-        <div className="border-b border-line-soft p-2">
+        <div className="shrink-0 border-b border-line-soft p-2">
           <div className="flex items-center gap-2 rounded-md bg-ground px-2.5 py-1.5">
             <Search className="h-3.5 w-3.5 shrink-0 text-mute" strokeWidth={1.8} />
             <input

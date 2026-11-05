@@ -41,6 +41,23 @@ export function leaveDraft(sessionId: string, text: string) {
 }
 
 /**
+ * Throw it away without reading it.
+ *
+ * The first message a workspace was started with waits here while
+ * `~/workspace/outbox` delivers it, because until it lands the only other copy
+ * is in that module's memory. Once the attempt is over the agent has those
+ * words or the handback does, and a copy left behind would be shown on top of
+ * them.
+ */
+export function dropDraft(sessionId: string) {
+  try {
+    window.sessionStorage.removeItem(KEY + sessionId);
+  } catch {
+    // As in `leaveDraft`: nothing was stored, so there is nothing to remove.
+  }
+}
+
+/**
  * Take it, once.
  *
  * Removed on read so that reloading the page does not put the issue back on

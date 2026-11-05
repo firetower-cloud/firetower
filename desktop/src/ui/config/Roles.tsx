@@ -876,7 +876,7 @@ function Select({
       </button>
       {open && (
         <Pop anchor={open} onClose={() => setOpen(null)} width={open.offsetWidth}>
-          <div role="listbox" className="max-h-72 overflow-y-auto py-1">
+          <div role="listbox" className="max-h-72 min-h-0 overflow-y-auto py-1">
             {options.map((o) => {
               const on = o.value === value;
               return (

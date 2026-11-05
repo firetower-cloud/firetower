@@ -32,7 +32,6 @@ import {
   Copy,
   Eye,
   FileText,
-  FileUp,
   GitBranch,
   Loader2,
   Pencil,
@@ -60,7 +59,8 @@ import { asMessage, useNotes, type Note } from "~/api/notes";
 import { forgetCheckout, landed, refused, settled, useCheckouts, type Run } from "~/api/checkouts";
 import { useListEvents } from "~/api/generated/events/events";
 import { elapsed, minutesSince } from "~/api/view";
-import { Composer, TAKES, type Hand } from "~/ui/Composer";
+import { Composer } from "~/ui/Composer";
+import { Dropping, type Hand } from "~/ui/attach";
 import { folderRefusals, useFileDrop } from "~/ui/drop";
 import { AccountSwitcher } from "~/ui/AccountSwitcher";
 import { Annotate, type Anchor } from "~/ui/Annotate";
@@ -430,19 +430,7 @@ export function Chat({
 
   return (
     <div className="relative flex h-full min-h-0 flex-col" {...surface}>
-      {over && (
-        <div className="pointer-events-none absolute inset-2 z-40 grid place-items-center rounded-2xl border border-slate bg-ground/45">
-          {/* The limit, not the routing. Where a file ends up is shown for
-              real a moment later — the chip names the path it landed at. */}
-          <span className="flex items-center gap-2.5 rounded-xl border border-line bg-overlay px-4 py-2.5 shadow-(--shadow-float)">
-            <FileUp className="h-4 w-4 text-slate" strokeWidth={1.75} />
-            <span>
-              <span className="block text-ui text-bone">Drop to attach</span>
-              <span className="block text-meta text-mute">{TAKES}</span>
-            </span>
-          </span>
-        </div>
-      )}
+      {over && <Dropping />}
       <div className="relative flex min-h-0 flex-1 flex-col">
       <div
         ref={scroller}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { TAKES, roomFor } from "./Composer";
+import { roomFor, sift, TAKES } from "./attach";
 
 /**
  * The cap on a batch, and what it says about the part it would not take.
@@ -59,5 +59,52 @@ describe("what the drop overlay promises", () => {
     // Pinned so the caption cannot quietly disagree with `take`. The file
     // figure must also match `attachments::BIGGEST` on the worker.
     expect(TAKES).toBe("Up to 10 files — images to 5 MB, everything else to 25 MB");
+  });
+});
+
+/** A file of a given size, which is all `sift` reads besides the type. */
+const file = (name: string, bytes: number, type = "") =>
+  ({ name, size: bytes, type }) as unknown as File;
+const MB = 1024 * 1024;
+
+/**
+ * Both caps at once — which is the only way either of them is ever met.
+ *
+ * Two screens now decide what to accept: the conversation's composer, which
+ * uploads straight away, and the New page, which holds the file until there is
+ * a workspace to put it in. They must agree, and they agree by both calling
+ * this.
+ */
+describe("which of a batch is taken", () => {
+  it("takes what fits and says nothing", () => {
+    const { taken, refusals } = sift(0, [file("a.png", 1 * MB, "image/png"), file("b.zip", 9 * MB)]);
+    expect(taken.map((f) => f.name)).toEqual(["a.png", "b.zip"]);
+    expect(refusals).toEqual([]);
+  });
+
+  it("holds an image to 5 MB and everything else to 25", () => {
+    // 10 MB is over for a picture and well under for anything else, which is
+    // the case that proves the cap is chosen per file rather than per batch.
+    const { taken, refusals } = sift(0, [file("big.png", 10 * MB, "image/png"), file("big.zip", 10 * MB)]);
+    expect(taken.map((f) => f.name)).toEqual(["big.zip"]);
+    expect(refusals).toEqual(["big.png is over 5 MB."]);
+  });
+
+  it("refuses an oversize file before counting slots, so the size is what it says", () => {
+    const { taken, refusals } = sift(9, [file("huge.zip", 30 * MB), file("fits.txt", 1)]);
+    expect(taken.map((f) => f.name)).toEqual(["fits.txt"]);
+    expect(refusals).toEqual(["huge.zip is over 25 MB."]);
+  });
+
+  it("counts only the files that passed the size check against the cap", () => {
+    // Nine held, one slot: an oversize file must not eat it and leave the one
+    // that would have fitted refused for being the eleventh.
+    const { taken } = sift(9, [file("huge.png", 9 * MB, "image/png"), file("small.png", 1, "image/png")]);
+    expect(taken.map((f) => f.name)).toEqual(["small.png"]);
+  });
+
+  it("carries a refusal the caller already knew about, first", () => {
+    const { refusals } = sift(0, [file("big.png", 10 * MB, "image/png")], ["src is a folder."]);
+    expect(refusals).toEqual(["src is a folder.", "big.png is over 5 MB."]);
   });
 });
