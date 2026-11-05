@@ -14,7 +14,7 @@ use ft_core::codex::CodexNormaliser;
 
 /// The agent reporting back, which the fixture stops just short of so that it
 /// can stand for both states.
-const REPORTED: &str = r#"{"method":"item/completed","params":{"threadId":"th_main","turnId":"turn_1","completedAtMs":13,"item":{"id":"c2","type":"collabAgentToolCall","tool":"wait","senderThreadId":"th_main","receiverThreadIds":["th_sub"],"agentsStates":{"th_sub":{"status":"completed","message":"Seven surfaces read SessionStatus. Two of them — Signal and the island's blocks — draw the resting tick, and neither consults in-flight tasks."}},"status":"completed"}}}"#;
+const REPORTED: &str = r#"{"method":"item/completed","params":{"threadId":"th_main","turnId":"turn_1","completedAtMs":13,"item":{"id":"c2","type":"collabAgentToolCall","tool":"wait","senderThreadId":"th_main","receiverThreadIds":["th_sub"],"agentsStates":{"th_sub":{"status":"completed","message":"Seven surfaces read SessionStatus. Two of them — Signal and Blocks — draw the resting tick, and neither consults in-flight tasks."}},"status":"completed"}}}"#;
 
 fn main() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

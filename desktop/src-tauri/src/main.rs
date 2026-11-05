@@ -2,8 +2,7 @@
 //!
 //! Everything the window does that a web page cannot: an inset title bar (its
 //! own buttons on Windows), a translucent sidebar on macOS, a badge on the
-//! dock, a notification when an agent stops and asks for you, and the island —
-//! the same ember, on a pill that outlives the window (`island.rs`).
+//! dock, and a notification when an agent stops and asks for you.
 //!
 //! Deliberately thin. The renderer reaches this through `src/bridge.ts`, which
 //! is eight calls wide — small enough that swapping this shell for an Electron
@@ -15,7 +14,6 @@
 use tauri::{Manager, Runtime, WebviewWindow};
 
 mod capture;
-mod island;
 mod tray;
 
 #[cfg(target_os = "macos")]
@@ -273,16 +271,8 @@ fn main() {
         .plugin(tauri_plugin_notification::init())
         // Links leave the app: a pull request opens in the browser, not in here.
         .plugin(tauri_plugin_opener::init())
-        // Apps remember where they were; pages do not. The island is exempt:
-        // it resizes itself on every state change, so a remembered *size*
-        // would be restored over the right one — and its position is
-        // remembered by the renderer, which is the only part that knows
-        // whether the display it was on still exists.
-        .plugin(
-            tauri_plugin_window_state::Builder::default()
-                .with_denylist(&[island::LABEL])
-                .build(),
-        )
+        // Apps remember where they were; pages do not.
+        .plugin(tauri_plugin_window_state::Builder::default().build())
         // A new build is offered from the GitHub release; the renderer asks.
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
@@ -310,19 +300,6 @@ fn main() {
 
             let _ = window.set_title("Firetower");
 
-            // Built hidden. The renderer places it and then asks to be shown,
-            // because where it goes depends on a display it has to check is
-            // still there. A failure here must not take the app down with it:
-            // the island is an addition to the window, never a condition of it.
-            //
-            // Not gated to macOS any more. The pill is the same component and
-            // the same document on both; what differs is four window flags and
-            // where it starts out, and both of those live in `island.rs`.
-            if let Err(e) = island::create(app.handle()) {
-                eprintln!("island: {e}");
-            }
-            island::close_with(&window);
-
             // The taskbar's notification area. Windows only — see `tray.rs`.
             #[cfg(target_os = "windows")]
             if let Err(e) = tray::create(app.handle()) {
@@ -344,18 +321,6 @@ fn main() {
             secret_set,
             secret_delete,
             load_artifact,
-            island::island_screens,
-            island::island_place,
-            island::island_bounds,
-            island::island_visible,
-            island::island_sharing,
-            island::island_push,
-            island::island_open,
-            island::island_pointer,
-            island::island_hit,
-            island::island_activate,
-            island::island_click_through,
-            island::island_note,
         ])
         .run(tauri::generate_context!())
         .expect("firetower failed to start");

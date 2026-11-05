@@ -114,7 +114,7 @@ fn a_running_agent_reports_what_it_is_doing() {
     assert!(
         events.iter().any(|e| matches!(
             e,
-            TurnEvent::TaskProgress { detail, .. } if detail == "Reading desktop/src/island/state.ts"
+            TurnEvent::TaskProgress { detail, .. } if detail == "Reading desktop/src/api/view.ts"
         )),
         "the agent's own message should reach the card, got {detail:?}"
     );
@@ -236,7 +236,7 @@ fn suppressing_those_items_loses_nothing() {
     assert!(
         events.iter().any(|e| matches!(
             e,
-            TurnEvent::TaskProgress { detail, .. } if detail == "Reading desktop/src/island/state.ts"
+            TurnEvent::TaskProgress { detail, .. } if detail == "Reading desktop/src/api/view.ts"
         )),
         "the `wait` call's agentsStates message still reaches the card"
     );

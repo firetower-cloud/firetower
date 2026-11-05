@@ -1,7 +1,7 @@
 /**
  * Three blocks of four, and the empty one walks.
  *
- * Ported from `desktop/src/island/Blocks.tsx` and the `.blocks` rules in
+ * Ported from `desktop/src/components/Blocks.tsx` and the `.blocks` rules in
  * `desktop/src/styles.css`. Four quadrants with one of them away, and which
  * one moves clockwise — so the shape turns without anything rotating. That
  * matters at this size, where a rotating square spends most of every turn as a
@@ -35,10 +35,10 @@ import type { Beat } from "~/api/view";
 import { BEAT_TOKEN } from "~/api/view";
 import { color } from "~/design/tokens.generated";
 
-/* `--dur-island` and `--ease-island`. Not the app's own 200ms/swift: the
-   island's timing is its own and this glyph came from there. */
+/* `--dur-turn` and `--ease-turn`. Not the app's own 200ms/swift: the glyph's
+   timing is its own, and it has to be the same here as on the desk. */
 const TURN = 320;
-const ISLAND = Easing.bezier(0.22, 1, 0.36, 1).factory();
+const EASE_TURN = Easing.bezier(0.22, 1, 0.36, 1).factory();
 
 /** `@keyframes blocks-away`: away for the first 22%, back by 30%. */
 const GONE = 0.22;
@@ -81,7 +81,7 @@ function Quadrant({
     /* The easing shapes the pop, which is the only interval in the keyframes
        where anything changes — the same place CSS applies it. */
     const local = Math.min(1, Math.max(0, (phase - GONE) / (BACK - GONE)));
-    const eased = ISLAND(local);
+    const eased = EASE_TURN(local);
     return { opacity: eased, transform: [{ scale: 0.55 + 0.45 * eased }] };
   }, [moving, hidden, offset]);
 

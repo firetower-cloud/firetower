@@ -12,7 +12,7 @@
 import { BookOpen, ChevronLeft, CircleDashed, CircleFadingArrowUp, LayoutList, ListTodo, Plus, Settings2 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { AgentMark } from "~/components/AgentMark";
-import { Blocks } from "~/island/Blocks";
+import { Blocks } from "~/components/Blocks";
 import { HostMark, Icon } from "~/components/ui";
 import { childrenOf, childrenWorking, doing, group, isChild, rowLabel, shortRepo, type Repositories, type Workspace } from "~/api/workspaces";
 import { beatOf, elapsed, minutesSince } from "~/api/view";
@@ -244,12 +244,12 @@ function NavLink({ href, label, icon, on, dot, loud }: { href: string; label: st
 }
 
 /**
- * What is inside a repository, in the island's counters.
+ * What is inside a repository, counted by state.
  *
  * A bare count said how many workspaces there were, which is the least
  * interesting thing about them — three is three whether they are all finished
- * or all stuck. The same glyphs and the same order as the pill, at eight
- * pixels, so a group that is scrolled past still says what is in it.
+ * or all stuck. The same glyphs and the same order as a row's own mark, at
+ * eight pixels, so a group that is scrolled past still says what is in it.
  */
 function RepoTally({ places }: { places: Workspace[] }) {
   const tally = { working: 0, blocked: 0, done: 0, broken: 0 };
@@ -332,9 +332,9 @@ function Row({
       }`}
     >
       <div className="flex items-center gap-2">
-        {/* The island's mark, at nine pixels instead of eleven. One alphabet
-            for both places, so a workspace reads the same in the menu bar as
-            it does here.
+        {/* The status mark, at nine pixels instead of eleven. One alphabet
+            everywhere it is drawn, so a workspace reads the same in a
+            repository's counters as it does here.
 
             There used to be a second dot after the name — `runs.some(needsYou)`
             in ember — saying again what this already says, and contradicting

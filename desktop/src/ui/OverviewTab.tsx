@@ -15,7 +15,7 @@ import { useMemo } from "react";
 import { Check, ExternalLink, FileText, GitBranch, GitPullRequest, LayoutList, Link2 } from "lucide-react";
 import { navigate } from "~/shims/next-navigation";
 import { AgentMark } from "~/components/AgentMark";
-import { Blocks } from "~/island/Blocks";
+import { Blocks } from "~/components/Blocks";
 import { beatOf } from "~/api/view";
 import { useConversation } from "~/api/conversation";
 import { relays } from "~/api/relay";

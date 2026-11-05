@@ -80,8 +80,8 @@ lead's row, which is what it is. A lead's row shows `↳N` while N of its
 children are at work. A child's conversation opens with who started it and
 why, and links back.
 
-`needsYou` — and so the inbox, the island and the dock badge — does not count
-a child that handed back to its lead.
+`needsYou` — and so the inbox and the dock badge — does not count a child
+that handed back to its lead.
 
 ## Trying it
 
