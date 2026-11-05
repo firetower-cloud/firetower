@@ -11,13 +11,19 @@
  */
 
 import type { Session } from "./generated/model";
-import { inFlight, needsYou } from "./view";
+import { beatOf, inFlight, needsYou, type Beat } from "./view";
 
 /** A workspace: a checkout on a host, and the agents working in it. */
 export type Workspace = {
   id: string;
   name: string;
   branch?: string;
+  /**
+   * When the place was cut — its founding session's clock, not whichever run
+   * sorted to the front. A lead working for an hour that delegates to a child
+   * a minute ago is an hour-old workspace, and used to say "1m".
+   */
+  startedAt: string;
   runs: Session[];
   /**
    * The session that asked for this place, when a session did.
@@ -50,6 +56,96 @@ export function doing(place: Workspace): "waiting" | "working" | "idle" {
   return "idle";
 }
 
+/**
+ * Every agent a place is answerable for: the runs in it, and the runs of any
+ * workspace one of them started.
+ *
+ * `places` is the *whole* list, not the one a screen happens to be drawing. A
+ * child with a workspace of its own is hidden from the rail — it belongs under
+ * its lead in the Overview — which is precisely why the lead's row has to
+ * speak for it. Handed the list it is already drawing, this finds nothing,
+ * because the thing it is looking for is the thing that list left out.
+ *
+ * One hop is the whole of the tree: delegation is flat by construction, and
+ * `delegate.rs` refuses a child that tries to spawn.
+ */
+export function familyOf(place: Workspace, places: Workspace[]): Session[] {
+  const mine = new Set(place.runs.map((r) => r.id));
+  return [
+    ...place.runs,
+    ...places.flatMap((other) =>
+      other.id !== place.id && !!other.leadOf && mine.has(other.leadOf) ? other.runs : [],
+    ),
+  ];
+}
+
+/**
+ * Which beat a place wears when more than one is true of it. First wins.
+ *
+ * - **blocked** first. Ember is spent on being stopped-and-stuck and on
+ *   nothing else (`beat.test.ts`), and a sibling still working does not make
+ *   an unanswered question any less unanswered.
+ * - **working** next: a place is at rest only when nothing in it is going.
+ * - **broken**, then **done** — both at rest, and a failure is the louder of
+ *   the two: it will not finish on its own, whatever else here did.
+ * - **over** only when every one of them has ended.
+ */
+const PRECEDENCE: Beat[] = ["blocked", "working", "broken", "done", "over"];
+
+/** The one of these whose beat comes first. Ties keep the order they arrived
+ *  in, which is the place's own runs before anything it delegated. */
+function loudest(runs: Session[]): Session {
+  let best = runs[0];
+  let rank = PRECEDENCE.indexOf(beatOf(best));
+  for (const run of runs.slice(1)) {
+    const at = PRECEDENCE.indexOf(beatOf(run));
+    if (at < rank) [best, rank] = [run, at];
+  }
+  return best;
+}
+
+/**
+ * The agent that speaks for a place — the one whose status a single mark on a
+ * row should show.
+ *
+ * Its *own* agents, deliberately. The dashboard and the fleet page list every
+ * workspace there is, so a delegated child has a row of its own a line below
+ * its lead; a lead that also spoke for its children would say the same thing
+ * twice. The rail is the one that hides them, and the rail asks `placeBeat`
+ * instead.
+ *
+ * `Signal` draws more than a colour — a tick for a hand-back, a cross for a
+ * failure, a breathing dot for work — so these screens need the run, not the
+ * beat.
+ */
+export function speaksFor(place: Workspace): Session {
+  return loudest(place.runs);
+}
+
+/**
+ * What a place reads as, in one beat — the whole of it, family included.
+ *
+ * The rail drew `beatOf(place.runs[0])`, and `group()` sorts whichever run
+ * wants you to the front. So a manager that had handed back painted its row
+ * sage — *finished, nothing owed* — while an agent it had delegated to was
+ * still typing, and the same workspace's Overview said "2 agents · 1 working"
+ * one panel away. Two screens, one workspace, two answers, and the one that
+ * was wrong was on the screen you glance at rather than the one you open.
+ *
+ * For the rail, which hides a delegated child under its lead: with nothing
+ * else on screen to correct it, this row has to be true of the whole family.
+ * `PRECEDENCE` says which beat wins.
+ *
+ * `doing()` is still the right question for a *word* — "working", "your move"
+ * — and keeps its own order, where in-flight wins. This is the question for a
+ * colour. The split is the one `view.ts` already draws between `needsYou` and
+ * `beatOf`: what wants a human, and what it looks like, are not the same
+ * question.
+ */
+export function placeBeat(place: Workspace, places: Workspace[]): Beat {
+  return beatOf(loudest(familyOf(place, places)));
+}
+
 export function group(sessions: Session[]): Repositories {
   const byRepo = new Map<string, Map<string, Workspace>>();
 
@@ -76,6 +172,7 @@ export function group(sessions: Session[]): Repositories {
       id,
       name: session.name,
       branch: session.branch ?? undefined,
+      startedAt: session.createdAt,
       runs: [session],
       leadOf: session.parentId ?? undefined,
     });
@@ -93,6 +190,9 @@ export function group(sessions: Session[]): Repositories {
       // with a same-workspace child in it must keep the lead's name, not take
       // the child's. Only when the founder is still around to say.
       if (founder) place.name = founder.name;
+      // And aged from it, for the same reason. With the founder gone, the
+      // oldest run still here is the best the place can say for itself.
+      place.startedAt = founder?.createdAt ?? place.runs.reduce((a, r) => (r.createdAt < a ? r.createdAt : a), place.runs[0].createdAt);
       const lead = founder?.parentId ?? undefined;
       place.leadOf = lead && !place.runs.some((r) => r.id === lead) ? lead : undefined;
     }
@@ -159,16 +259,21 @@ export function rowLabel(place: Workspace, places: Workspace[]): string {
 }
 
 /**
- * How many agents a place has delegated to and not yet ended, wherever they
- * run. What ending the place takes with it.
+ * How many agents a place has started **outside itself** and not yet ended.
+ * What ending the place takes with it that is not already in it.
+ *
+ * Elsewhere only, and the word is load-bearing. The one question that asks
+ * this counts the agents in the place first — "3 agents stop, and so do the 2
+ * it started elsewhere" — and this used to add the place's *own* children on
+ * top, so a lead with one child beside it in the same workspace was announced
+ * as two agents stopping and one more somewhere else, which was the same
+ * agent, counted twice and put on a machine it was not on.
  */
-export function childrenOf(place: Workspace, places: Workspace[]): number {
+export function childrenElsewhere(place: Workspace, places: Workspace[]): number {
   const mine = new Set(place.runs.map((r) => r.id));
-  const here = place.runs.filter((r) => r.parentId && mine.has(r.parentId) && r.status !== "Ended").length;
-  const elsewhere = places.filter(
+  return places.filter(
     (other) => other.id !== place.id && !!other.leadOf && mine.has(other.leadOf),
   ).length;
-  return here + elsewhere;
 }
 
 /**

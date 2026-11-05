@@ -11,7 +11,7 @@ import { CircleDashed, Plus } from "lucide-react";
 import { Signal } from "~/components/Signal";
 import { AgentMark } from "~/components/AgentMark";
 import { HostMark, Icon } from "~/components/ui";
-import { doing, group, shortRepo, type Workspace } from "~/api/workspaces";
+import { doing, group, shortRepo, speaksFor, type Workspace } from "~/api/workspaces";
 import { elapsed, minutesSince, needsYou } from "~/api/view";
 import { useNow } from "~/ui/clock";
 import type { Backend } from "~/fleet";
@@ -197,7 +197,13 @@ export function Dashboard({ backend }: { backend: Backend }) {
 
 function Line({ place }: { place: Workspace }) {
   const state = doing(place);
-  const lead = place.runs[0];
+  /* The agent that speaks for the row, rather than whichever run `group()`
+     sorted first: a workspace whose lead had handed back drew the hand-back's
+     green tick while an agent beside it was still working, with this row's own
+     "working" chip two columns along saying otherwise. A delegated child in a
+     workspace of its own has its own line here, so this stays to the agents in
+     this one. */
+  const says = speaksFor(place);
 
   return (
     <button
@@ -205,7 +211,7 @@ function Line({ place }: { place: Workspace }) {
       className="flex h-[var(--row)] w-full items-center gap-3 px-3 text-left transition-colors hover:bg-raise/60"
     >
       <span className="w-[15px] shrink-0">
-        <Signal status={lead.status} size={5} />
+        <Signal status={says.status} size={5} />
       </span>
 
       <span className="min-w-0 flex-1">
@@ -223,7 +229,7 @@ function Line({ place }: { place: Workspace }) {
       </span>
 
       <span className="w-[64px] shrink-0 font-mono text-micro text-mute">
-        {elapsed(minutesSince(lead.createdAt))}
+        {elapsed(minutesSince(place.startedAt))}
       </span>
 
       <span className="w-[84px] shrink-0">
