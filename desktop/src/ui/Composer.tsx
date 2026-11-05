@@ -29,6 +29,7 @@ import { handleFor, mentionBlock, MOST_ARTIFACTS, MOST_ROWS, originOf, rankArtif
 import { useAttachFile, useInterruptSession, useListFiles, useSendTurn } from "~/api/generated/sessions/sessions";
 import { useChooseControl, useSessionControls } from "~/api/generated/conversation/conversation";
 import { takeDraft } from "~/workspace/draft";
+import { forget as forgetUndelivered, useUndelivered } from "~/workspace/outbox";
 import { AccountLine, AccountNotice } from "~/ui/AccountSwitcher";
 import { AgentPicker } from "~/ui/AgentPicker";
 import { Mic } from "~/ui/voice/Mic";
@@ -261,6 +262,26 @@ export function Composer({
   useEffect(() => {
     held.current = chips.length;
   }, [chips]);
+
+  /* The first message the New page could not deliver.
+
+     Starting a workspace with a file attached cannot send anything until the
+     bring-up is over, so `~/workspace/outbox` waits for it off-screen. This is
+     where the waiting is answered for when it did not work: the sentence goes
+     on the line the composer already has for a refusal, and the message —
+     including any paths that did land — goes back in the box, so one press
+     sends all of it without putting a file in the workspace twice. */
+  const undelivered = useUndelivered(session.id);
+  useEffect(() => {
+    if (!undelivered) return;
+    setRefused(undelivered.why);
+    /* Above anything typed since rather than instead of it: both are the same
+       person's words, and dropping either because the other exists would be
+       the silent loss this whole path is here to avoid. */
+    const back = undelivered.text;
+    if (back) setText((was) => (was.trim() ? `${back}\n\n${was}` : back));
+    forgetUndelivered(session.id);
+  }, [undelivered, session.id]);
 
   const take = async (list: FileList | File[] | null, refusals: string[] = []) => {
     const offered = [...(list ?? [])];

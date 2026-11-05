@@ -179,7 +179,17 @@ export function chipFor(id: number, file: File, pending: boolean): Chip {
  * that says what is about to be sent and two of them would disagree about it
  * within a release.
  */
-export function Chips({ chips, onDrop }: { chips: Chip[]; onDrop: (c: Chip) => void }) {
+export function Chips({
+  chips,
+  onDrop,
+  /** Where the row sits in its card. The New page's card pads itself; the
+   *  conversation's does not, so the row supplies it there. */
+  className = "px-3 pt-3",
+}: {
+  chips: Chip[];
+  onDrop: (c: Chip) => void;
+  className?: string;
+}) {
   /* Chips whose thumbnail would not decode. A file can carry an `image/*` type
      and not be a picture — truncated, renamed, or written by something that
      guessed — and the browser's answer to that is a torn-page glyph that reads
@@ -188,7 +198,7 @@ export function Chips({ chips, onDrop }: { chips: Chip[]; onDrop: (c: Chip) => v
   if (chips.length === 0) return null;
 
   return (
-    <div className="flex flex-wrap gap-2 px-3 pt-3">
+    <div className={`flex flex-wrap gap-2 ${className}`}>
       {chips.map((c) => (
         <span key={c.id} className="flex items-center gap-2 rounded-lg border border-line bg-raise py-1 pr-1 pl-2">
           {/* The thumbnail stays visible under the spinner: dimming it
