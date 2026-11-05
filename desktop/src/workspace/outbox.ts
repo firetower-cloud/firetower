@@ -38,14 +38,27 @@
  *
  * That handoff is `sessionStorage`, which is right for a sentence and wrong for
  * a picture: a 5 MB image is about 6.7 MB of base64 and the quota is around
- * five. These wait in memory instead, which is sound because the hash router
- * never reloads the document — see `~/shims/next-navigation`.
+ * five. The pictures wait in memory instead, which is sound because the hash
+ * router never reloads the document — see `~/shims/next-navigation`.
+ *
+ * ## Why the server is part of every key
+ *
+ * The generated client has one *current* backend and resolves it when the call
+ * is made, from module state the sidebar changes (`~/client/http`). So a
+ * session id on its own does not say where to send anything: a window pointed
+ * at another Firetower while a workspace comes up would have these calls made
+ * against a server the person attached nothing on, and a server that answers
+ * for an id it never minted would be handed their file. A parcel therefore
+ * belongs to one server, every key here carries it, and every call that leaves
+ * the machine is guarded by `mine`. Same reason `~/api/conversation` keys its
+ * transcripts `server:session` and `~/backend` keeps a QueryClient each.
  */
 import { useSyncExternalStore } from "react";
 import type { Attached, Event, Session } from "~/api/generated/model";
 import { attachFile, getSession, sendTurn } from "~/api/generated/sessions/sessions";
 import { listEvents } from "~/api/generated/events/events";
 import { ready, stepLines } from "~/components/Steps";
+import { currentBackend } from "~/client/http";
 import { base64 } from "~/ui/attach";
 import { why } from "~/data";
 
@@ -70,13 +83,31 @@ export type Parcel = {
  */
 export type Trouble = { why: string; text?: string };
 
+/**
+ * Where a parcel is addressed.
+ *
+ * The server, because a session id only means anything on the one that minted
+ * it — see the header. The workspace, because the conversation a person ends
+ * up reading is chosen from the runs in it (`Workbench`) and that is not
+ * always the run this was started for: a second agent added during the
+ * bring-up, or this run ending, is enough to put another one on screen.
+ */
+export type Address = { server: string; sessionId: string; workspaceId?: string | null };
+
 const held = new Map<string, Trouble>();
 const watchers = new Set<() => void>();
 /** Which sessions are already being delivered to, so nothing is sent twice. */
 const going = new Set<string>();
 
-function hold(sessionId: string, trouble: Trouble) {
-  held.set(sessionId, trouble);
+const keyFor = (server: string, id: string) => `${server}:${id}`;
+
+function hold(to: Address, trouble: Trouble) {
+  /* Under the workspace as well as the session. `Composer` asks about the one
+     run it is drawing, so a trouble filed only under the run that was started
+     is a trouble nobody is ever shown — which is the silent loss this whole
+     path exists to avoid. */
+  held.set(keyFor(to.server, to.sessionId), trouble);
+  if (to.workspaceId) held.set(keyFor(to.server, to.workspaceId), trouble);
   watchers.forEach((w) => w());
 }
 
@@ -85,9 +116,25 @@ export function watch(listener: () => void): () => void {
   return () => watchers.delete(listener);
 }
 
+/**
+ * What could not be delivered to a conversation on a server, if anything.
+ *
+ * By either of the ids it can be asked for by: the run, or the workspace the
+ * run belongs to. Separate from the hook below so that both the server and the
+ * workspace are testable without a window.
+ */
+export function undelivered(server: string, sessionId: string, workspaceId?: string | null): Trouble | undefined {
+  return held.get(keyFor(server, sessionId)) ?? (workspaceId ? held.get(keyFor(server, workspaceId)) : undefined);
+}
+
 /** Said once. Taken by the composer that said it, so it is not said again. */
-export function forget(sessionId: string) {
-  if (!held.delete(sessionId)) return;
+export function forget(sessionId: string, workspaceId?: string | null) {
+  const said = undelivered(currentBackend() ?? "", sessionId, workspaceId);
+  if (!said) return;
+  /* By what it is rather than by the keys it was asked for by: whoever read it
+     knows the run it is drawing and the workspace that run is in, which are
+     not necessarily the ids the parcel was filed under. */
+  for (const [k, v] of held) if (v === said) held.delete(k);
   watchers.forEach((w) => w());
 }
 
@@ -99,10 +146,13 @@ export function forget(sessionId: string) {
  * else when it fails hears about it when they next open the workspace, which
  * is the first moment there is anywhere to say it.
  */
-export function useUndelivered(sessionId: string): Trouble | undefined {
+export function useUndelivered(sessionId: string, workspaceId?: string | null): Trouble | undefined {
   return useSyncExternalStore(
     watch,
-    () => held.get(sessionId),
+    // The server is read rather than subscribed to, as every generated request
+    // reads it: the provider is keyed on the server, so changing one remounts
+    // this anyway.
+    () => undelivered(currentBackend() ?? "", sessionId, workspaceId),
     () => undefined,
   );
 }
@@ -116,6 +166,9 @@ const nap = (ms: number) => new Promise<void>((done) => setTimeout(done, ms));
 /** The bring-up is over and it did not work. Not worth waiting out. */
 class Stopped extends Error {}
 
+/** What the window is pointed at now is not where this was going. */
+const MOVED = "the window moved to another Firetower";
+
 /**
  * Wait until the agent is listening.
  *
@@ -124,17 +177,25 @@ class Stopped extends Error {}
  * would be giving up on the commonest slow case. A bring-up that *failed* is
  * not waited out at all — the failed step is in the same lines this reads.
  *
- * A read that itself fails is not an answer and does not end the wait. The
- * window can be pointed at another server for a minute — the generated client
- * has one current backend (`~/client/http`) — and a self-hosted control plane
- * can be restarted while a workspace is coming up. Both look like a 404 or a
- * dropped connection, and neither means the message cannot be delivered. So
- * the last thing that went wrong is kept and only reported if it never clears.
+ * A read that itself fails is not an answer and does not end the wait: a
+ * self-hosted control plane can be restarted while a workspace is coming up,
+ * which looks like a 404 or a dropped connection and does not mean the message
+ * cannot be delivered. So the last thing that went wrong is kept and only
+ * reported if it never clears.
+ *
+ * The window being pointed at another Firetower is different in kind, and ends
+ * the wait at once — there is nothing there to read and nothing there that may
+ * be written.
  */
-async function untilReady(sessionId: string): Promise<void> {
+export async function untilReady(sessionId: string, mine: () => boolean): Promise<void> {
   const until = Date.now() + GIVE_UP;
   let unread: unknown = null;
   for (;;) {
+    /* Asked of nobody else. The client picks its server when the call is made,
+       so this would otherwise ask whatever Firetower is current about a
+       session it never minted — and one that answers anyway, with a single
+       `AgentLaunched` of its own, would be handed the person's file. */
+    if (!mine()) throw new Stopped(MOVED);
     try {
       const session = (await getSession(sessionId)) as Session;
       const events = (await listEvents({ sessionId } as Parameters<typeof listEvents>[0])) as Event[];
@@ -166,17 +227,30 @@ async function untilReady(sessionId: string): Promise<void> {
  * which should need a control plane to exercise.
  */
 export type Ports = {
+  /** Whether the window is still pointed at the server this parcel is for. */
+  mine: () => boolean;
   until: (sessionId: string) => Promise<void>;
   place: (sessionId: string, file: File) => Promise<string>;
   send: (sessionId: string, text: string, images: Attached[]) => Promise<void>;
 };
 
-const real: Ports = {
-  until: untilReady,
-  place: async (sessionId, file) =>
-    (await attachFile(sessionId, { name: file.name, data: await base64(file) })).path,
-  send: async (sessionId, text, images) => void (await sendTurn(sessionId, { text, images })),
-};
+/**
+ * The real ones, for one server.
+ *
+ * Each call below resolves its server from module state when it is made rather
+ * than from this closure, which is why `mine` exists: it is the whole of what
+ * stands between a slow bring-up on one Firetower and an upload to another.
+ */
+function portsFor(server: string): Ports {
+  const mine = () => currentBackend() === server;
+  return {
+    mine,
+    until: (sessionId) => untilReady(sessionId, mine),
+    place: async (sessionId, file) =>
+      (await attachFile(sessionId, { name: file.name, data: await base64(file) })).path,
+    send: async (sessionId, text, images) => void (await sendTurn(sessionId, { text, images })),
+  };
+}
 
 /** What a file that could not be placed is worth saying. */
 export function lost(names: string[]): string {
@@ -221,12 +295,16 @@ export function firstMessage(text: string, paths: string[]): string {
  * file that will not go is named and the rest carry on — losing the whole
  * message because one attachment failed would be the worse of the two.
  */
-export async function run(sessionId: string, parcel: Parcel, ports: Ports = real): Promise<Trouble | null> {
+export async function run(sessionId: string, parcel: Parcel, ports: Ports): Promise<Trouble | null> {
   const placed: string[] = [];
   const missing: string[] = [];
 
   try {
     await ports.until(sessionId);
+    /* And still ours now it has answered: the window can move between the last
+       poll and the first upload, and `attach_file` would then be asked of
+       whichever Firetower is current. */
+    if (!ports.mine()) throw new Stopped(MOVED);
   } catch (e) {
     /* Nothing has moved, so nothing is half-sent. The words go back to the
        composer, and the attachments can only be named: there was never a
@@ -236,6 +314,13 @@ export async function run(sessionId: string, parcel: Parcel, ports: Ports = real
   }
 
   for (const file of parcel.files) {
+    /* Ten uploads of twenty-five megabytes is minutes, so this is asked again
+       for each one rather than once for the loop. A file not sent is a file to
+       name, which is what `missing` already says. */
+    if (!ports.mine()) {
+      missing.push(file.name);
+      continue;
+    }
     try {
       placed.push(await ports.place(sessionId, file));
     } catch {
@@ -245,6 +330,11 @@ export async function run(sessionId: string, parcel: Parcel, ports: Ports = real
 
   const text = firstMessage(parcel.text, placed);
   if (!text && parcel.images.length === 0) return missing.length ? { why: lost(missing) } : null;
+
+  /* The files that did land are named in this text and are on the server this
+     parcel is for, so handing it back is what lets a second press — made while
+     looking at that workspace — finish the job rather than start it again. */
+  if (!ports.mine()) return { text, why: `Your first message was not sent — ${MOVED}. ${lost(missing)}`.trim() };
 
   try {
     /* Once, never twice. A socket that has accepted the frame has delivered it
@@ -263,20 +353,41 @@ export async function run(sessionId: string, parcel: Parcel, ports: Ports = real
 }
 
 /**
+ * One attempt, from the server it belongs to.
+ *
+ * Named so that `post` can be tested: which server a parcel is for, and what
+ * becomes of the words when the attempt ends, are the two things worth
+ * exercising here and neither should need a control plane.
+ */
+export async function deliver(to: Address, parcel: Parcel, ports: Ports): Promise<void> {
+  const one = keyFor(to.server, to.sessionId);
+  if (going.has(one)) return;
+  going.add(one);
+  try {
+    const trouble = await run(to.sessionId, parcel, ports).catch((e) => ({
+      text: parcel.text,
+      why: `Your first message was not sent — ${why(e)}.`,
+    }));
+    if (trouble) hold(to, trouble);
+  } finally {
+    going.delete(one);
+  }
+}
+
+/**
  * Hand a first message to a session that is still coming up.
  *
  * Returns at once: the waiting happens here, not on the page that called.
  * Posting twice for one session does nothing the second time, because the
  * worker gives a second copy of a file a name of its own and the person would
  * end up with both.
+ *
+ * The server is taken now rather than when a call is made, which is the whole
+ * of the difference between delivering this to the workspace it was attached
+ * on and delivering it to whatever the sidebar is pointed at ten minutes
+ * later.
  */
-export function post(sessionId: string, parcel: Parcel) {
-  if (going.has(sessionId)) return;
-  going.add(sessionId);
-  void run(sessionId, parcel)
-    .then((trouble) => {
-      if (trouble) hold(sessionId, trouble);
-    })
-    .catch((e) => hold(sessionId, { text: parcel.text, why: `Your first message was not sent — ${why(e)}.` }))
-    .finally(() => going.delete(sessionId));
+export function post(sessionId: string, parcel: Parcel, workspaceId?: string | null) {
+  const server = currentBackend() ?? "";
+  void deliver({ server, sessionId, workspaceId }, parcel, portsFor(server));
 }

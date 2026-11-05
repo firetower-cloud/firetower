@@ -1,5 +1,17 @@
-import { describe, expect, it } from "vitest";
-import { firstMessage, lost, nothingAttached, run, type Parcel, type Ports } from "./outbox";
+import { beforeEach, describe, expect, it } from "vitest";
+import { useBackendId } from "~/client/http";
+import {
+  deliver,
+  firstMessage,
+  forget,
+  lost,
+  nothingAttached,
+  run,
+  undelivered,
+  untilReady,
+  type Parcel,
+  type Ports,
+} from "./outbox";
 
 /**
  * Delivering the first message to a workspace that was still being built.
@@ -14,7 +26,16 @@ import { firstMessage, lost, nothingAttached, run, type Parcel, type Ports } fro
  *   and already named in the text, so what comes back must be *that* text —
  *   pressing send again has to deliver all of it without putting a single file
  *   in the workspace twice.
+ * - **The window moved to another Firetower.** A session id means nothing on a
+ *   server that did not mint it, and the generated client picks its server when
+ *   the call is made — so every call that leaves the machine has to be asked
+ *   for again, and none of them may happen against the wrong one.
  */
+
+/* One server, the way the provider sets it for every generated call. `forget`
+   and `delivering` read it, so the ambient one and the one parcels are
+   addressed to are deliberately the same here. */
+useBackendId("a");
 
 const file = (name: string) => ({ name }) as unknown as File;
 const picture = { mediaType: "image/png", data: "aaaa" };
@@ -30,6 +51,7 @@ const parcel = (over: Partial<Parcel> = {}): Parcel => ({
 function working(log: string[] = []): Ports & { log: string[] } {
   return {
     log,
+    mine: () => true,
     until: async () => void log.push("waited"),
     place: async (_id, f) => {
       log.push(`placed ${f.name}`);
@@ -176,5 +198,120 @@ describe("the sentences", () => {
     expect(firstMessage("  hello  ", ["a", "b"])).toBe("hello\n\na\nb");
     expect(firstMessage("hello", [])).toBe("hello");
     expect(firstMessage("   ", ["a"])).toBe("a");
+  });
+});
+
+/** A bring-up that never finishes, for the blocks below. */
+const never: Pick<Ports, "until"> = {
+  until: async () => {
+    throw new Error("the workspace failed to start");
+  },
+};
+
+/** A wait held open, for the tests that look at an attempt in flight. */
+function gated(): { until: () => Promise<void>; open: () => void } {
+  let open!: () => void;
+  const held = new Promise<void>((done) => {
+    open = done;
+  });
+  return { until: () => held, open: () => open() };
+}
+
+describe("which Firetower a parcel belongs to", () => {
+  /* The failure this is here for: a person starts a workspace on A with a file
+     attached, the bring-up is minutes, and they look at B in the sidebar. The
+     client resolves its server when the call is made, so without this the wait
+     polls B for a session B never minted — and a B that answers with one
+     `AgentLaunched` of its own is handed the file. */
+  it("never asks another one about a session it did not mint", async () => {
+    // Nothing is read: the guard is before the first request, not after it.
+    await expect(untilReady("s_1", () => false)).rejects.toThrow("the window moved to another Firetower");
+  });
+
+  it("stops rather than uploading to whatever server is current now", async () => {
+    const log: string[] = [];
+    const trouble = await run("s_1", parcel({ files: [file("salaries.xlsx")] }), {
+      ...working(log),
+      mine: () => false,
+    });
+    expect(log).toEqual(["waited"]);
+    expect(trouble?.text).toBe("look at this");
+    expect(trouble?.why).toContain("the window moved to another Firetower");
+    // The same handback as a bring-up that never finished: nothing moved.
+    expect(trouble?.why).toContain("Nothing was attached: salaries.xlsx.");
+  });
+
+  it("keeps the files that landed before it moved and names the ones that did not", async () => {
+    const log: string[] = [];
+    let moved = false;
+    const trouble = await run("s_1", parcel({ files: [file("a.csv"), file("b.csv")] }), {
+      ...working(log),
+      mine: () => !moved,
+      place: async (_id, f) => {
+        moved = true;
+        log.push(`placed ${f.name}`);
+        return `.firetower/attachments/${f.name}`;
+      },
+    });
+    // a.csv went in; b.csv was never offered to anybody, and neither was the
+    // message — which comes back naming the path that does exist.
+    expect(log).toEqual(["waited", "placed a.csv"]);
+    expect(trouble?.text).toBe("look at this\n\n.firetower/attachments/a.csv");
+    expect(trouble?.why).toContain("the window moved to another Firetower");
+    expect(trouble?.why).toContain("b.csv could not be put in the workspace");
+  });
+
+  it("files what could not be delivered under the server it was for", async () => {
+    await deliver({ server: "a", sessionId: "s_key" }, parcel(), { ...working(), until: never.until });
+    expect(undelivered("a", "s_key")?.text).toBe("look at this");
+    // The same id on another Firetower is another session, or nobody's.
+    expect(undelivered("b", "s_key")).toBeUndefined();
+  });
+
+  it("treats the same session id on two servers as two parcels", async () => {
+    const mine: string[] = [];
+    const theirs: string[] = [];
+    const slow = gated();
+    const first = deliver({ server: "a", sessionId: "s_two" }, parcel(), { ...working(mine), until: slow.until });
+    // Not swallowed by the one still in flight: `going` is per server too.
+    await deliver({ server: "b", sessionId: "s_two" }, parcel(), working(theirs));
+    expect(theirs).toContain('sent "look at this"');
+    slow.open();
+    await first;
+    expect(mine).toContain('sent "look at this"');
+  });
+});
+
+describe("the conversation a trouble has to reach", () => {
+  /* `Workbench` draws whichever of a workspace's runs it judges you came to
+     read, and `Composer` asks about that one. A second agent added during the
+     bring-up, or the started run ending, is enough for that to be a different
+     run — and a trouble filed only under the run that was started is then a
+     sentence nobody is ever shown. */
+  const where = { server: "a", sessionId: "s_started", workspaceId: "w_1" };
+
+  beforeEach(async () => {
+    forget("s_started", "w_1");
+    await deliver(where, parcel(), { ...working(), until: never.until });
+  });
+
+  it("can be asked for by the run that was started", () => {
+    expect(undelivered("a", "s_started")?.text).toBe("look at this");
+  });
+
+  it("can be asked for by another run in the same workspace", () => {
+    expect(undelivered("a", "s_second", "w_1")?.text).toBe("look at this");
+  });
+
+  it("is not offered to a workspace it was not for", () => {
+    expect(undelivered("a", "s_second", "w_other")).toBeUndefined();
+  });
+
+  it("is said once, whichever run said it", () => {
+    // The run on screen is not the one the parcel was filed under, so forgetting
+    // by its ids has to clear the other key too or the next run says it again.
+    forget("s_second", "w_1");
+    expect(undelivered("a", "s_second", "w_1")).toBeUndefined();
+    expect(undelivered("a", "s_started")).toBeUndefined();
   });
 });

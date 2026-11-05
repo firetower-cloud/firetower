@@ -270,8 +270,14 @@ export function Composer({
      where the waiting is answered for when it did not work: the sentence goes
      on the line the composer already has for a refusal, and the message —
      including any paths that did land — goes back in the box, so one press
-     sends all of it without putting a file in the workspace twice. */
-  const undelivered = useUndelivered(session.id);
+     sends all of it without putting a file in the workspace twice.
+
+     The workspace is asked about as well as the run: the New page starts one
+     run, and `Workbench` draws whichever of the workspace's runs it judges you
+     came to read — which, once a second agent has been added or this run has
+     ended, is not the same one. Keyed on the run alone, this is a sentence
+     nobody is ever shown. */
+  const undelivered = useUndelivered(session.id, session.workspaceId);
   useEffect(() => {
     if (!undelivered) return;
     setRefused(undelivered.why);
@@ -280,8 +286,8 @@ export function Composer({
        the silent loss this whole path is here to avoid. */
     const back = undelivered.text;
     if (back) setText((was) => (was.trim() ? `${back}\n\n${was}` : back));
-    forgetUndelivered(session.id);
-  }, [undelivered, session.id]);
+    forgetUndelivered(session.id, session.workspaceId);
+  }, [undelivered, session.id, session.workspaceId]);
 
   const take = async (list: FileList | File[] | null, refusals: string[] = []) => {
     const offered = [...(list ?? [])];
