@@ -1460,6 +1460,35 @@ impl Db {
         Ok(())
     }
 
+    /// Keep the system prompt a session was launched with.
+    ///
+    /// Written whenever a run is launched or relaunched, because a relaunch
+    /// composes the persona again and the profile may have been edited since.
+    /// What is stored is always what was last sent to the worker, which is
+    /// what the agent is working from.
+    pub async fn set_persona(&self, session: &SessionId, persona: &str) -> Result<()> {
+        sqlx::query("UPDATE sessions SET persona = $1 WHERE id = $2")
+            .bind(persona)
+            .bind(session.as_str())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// What a session is running as, or `None` for a plain agent.
+    ///
+    /// Read on its own rather than carried on [`Session`]: a persona is pages
+    /// of text, every list of sessions would carry one per row, and the one
+    /// place that wants it is the screen somebody opened to read it.
+    pub async fn persona(&self, session: &SessionId) -> Result<Option<String>> {
+        let text: Option<Option<String>> =
+            sqlx::query_scalar("SELECT persona FROM sessions WHERE id = $1")
+                .bind(session.as_str())
+                .fetch_optional(&self.pool)
+                .await?;
+        Ok(text.flatten().filter(|t| !t.trim().is_empty()))
+    }
+
     /// How many of this session's children are still starting or working.
     ///
     /// What decides whether a lead that has ended its turn is resting or

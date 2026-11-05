@@ -166,6 +166,7 @@ export * from './pendingAuth';
 export * from './pendingParams';
 export * from './pendingPayload';
 export * from './person';
+export * from './persona';
 export * from './placed';
 export * from './placement';
 export * from './planRequest';

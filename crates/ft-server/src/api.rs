@@ -663,6 +663,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(annotations::send_annotations))
         .routes(routes!(sessions::stop_session))
         .routes(routes!(sessions::relaunch_session))
+        .routes(routes!(sessions::session_persona))
         .routes(routes!(sessions::rename_session))
         .routes(routes!(sessions::set_share))
         .routes(routes!(sessions::push_session))

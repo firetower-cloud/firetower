@@ -52,6 +52,7 @@ import type {
   NewPullRequest,
   NewSession,
   Only,
+  Persona,
   Placed,
   Ports,
   PreviewAddress,
@@ -2779,7 +2780,129 @@ export const useInterruptSession = <TError = ApiError,
       > => {
       return useMutation(getInterruptSessionMutationOptions(options), queryClient);
     }
-    export const getPreviewAddressUrl = (id: string,
+    export const getSessionPersonaUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/sessions/${id}/persona`
+}
+
+/**
+ * As it was sent, not as the profile stands now — the two part company the
+ * moment somebody edits the profile, and what explains an agent's behaviour
+ * is the text it was actually given. A session that is no profile answers
+ * with an empty one rather than a 404: "this run has no persona" is an
+ * ordinary answer, not a missing page.
+ * @summary The system prompt this session is working from.
+ */
+export const sessionPersona = async (id: string, options?: Parameters<typeof http>[1]): Promise<Persona> => {
+
+  return http<Persona>(getSessionPersonaUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getSessionPersonaQueryKey = (id: string,) => {
+    return [
+    `/api/v1/sessions/${id}/persona`
+    ] as const;
+    }
+
+
+export const getSessionPersonaQueryOptions = <TData = Awaited<ReturnType<typeof sessionPersona>>, TError = ApiError>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof sessionPersona>>, TError, TData>>, request?: SecondParameter<typeof http>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getSessionPersonaQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof sessionPersona>>> = ({ signal }) => sessionPersona(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof sessionPersona>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type SessionPersonaQueryResult = NonNullable<Awaited<ReturnType<typeof sessionPersona>>>
+export type SessionPersonaQueryError = ApiError
+
+
+export function useSessionPersona<TData = Awaited<ReturnType<typeof sessionPersona>>, TError = ApiError>(
+ id: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof sessionPersona>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof sessionPersona>>,
+          TError,
+          Awaited<ReturnType<typeof sessionPersona>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useSessionPersona<TData = Awaited<ReturnType<typeof sessionPersona>>, TError = ApiError>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof sessionPersona>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof sessionPersona>>,
+          TError,
+          Awaited<ReturnType<typeof sessionPersona>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useSessionPersona<TData = Awaited<ReturnType<typeof sessionPersona>>, TError = ApiError>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof sessionPersona>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary The system prompt this session is working from.
+ */
+
+export function useSessionPersona<TData = Awaited<ReturnType<typeof sessionPersona>>, TError = ApiError>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof sessionPersona>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getSessionPersonaQueryOptions(id,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+/**
+ * @summary The system prompt this session is working from.
+ */
+export const useSetSessionPersonaQueryData = () => {
+  const queryClient = useQueryClient();
+  return (id: string,updater: Awaited<ReturnType<typeof sessionPersona>> | undefined | ((old: Awaited<ReturnType<typeof sessionPersona>> | undefined) => Awaited<ReturnType<typeof sessionPersona>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof sessionPersona>>>({ exact: $exactMatch, queryKey: getSessionPersonaQueryKey(id) }, updater);
+  };
+}
+
+/**
+ * @summary The system prompt this session is working from.
+ */
+export const useGetSessionPersonaQueryData = () => {
+  const queryClient = useQueryClient();
+  return (id: string,) =>
+    queryClient.getQueryData<Awaited<ReturnType<typeof sessionPersona>>>(getSessionPersonaQueryKey(id));
+}
+
+
+export const getPreviewAddressUrl = (id: string,
     params: PreviewAddressParams,) => {
   const normalizedParams = new URLSearchParams();
 
