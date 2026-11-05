@@ -48,7 +48,7 @@ import { useAccounts, useAgents, useHosts, useRepos, useSkills } from "~/data";
 import { ConnectAccount } from "~/ui/config/ConnectAccount";
 import { navigate } from "~/shims/next-navigation";
 import { leaveDraft } from "~/workspace/draft";
-import { post } from "~/workspace/outbox";
+import { post, whichServer } from "~/workspace/outbox";
 import { base64, chipFor, Chips, Dropping, sift, type Chip } from "~/ui/attach";
 import { folderRefusals, useFileDrop } from "~/ui/drop";
 import { isMac } from "~/platform";
@@ -285,6 +285,19 @@ export function NewPage() {
     return () => window.removeEventListener("keydown", onKey);
   });
 
+  /* Whether this page is still the one on screen by the time the create
+     answers. It navigates on success, and somebody who has moved on — to
+     another screen, or to another Firetower, which unmounts this — should not
+     be pulled onto a workspace they stopped waiting for. The delivery below
+     does not ask: that happens either way. */
+  const onScreen = useRef(true);
+  useEffect(() => {
+    onScreen.current = true;
+    return () => {
+      onScreen.current = false;
+    };
+  }, []);
+
   const go = () => {
     if (!ready || !kind || !account) return;
     // What was actually used, so the next New page opens on it.
@@ -307,9 +320,22 @@ export function NewPage() {
     const images = chips.flatMap((c) => (c.image ? [c.image] : []));
     const files = chips.flatMap((c) => (c.file ? [c.file] : []));
     const attached = images.length > 0 || files.length > 0;
+    /* Which Firetower this is being started on, read here rather than when the
+       create answers. The client has one current backend and the sidebar can
+       move it while the request is in flight, so reading it on the way back
+       would address the parcel — the person's file — to the server they
+       switched to. */
+    const server = whichServer();
 
-    create.mutate(
-      {
+    /* `mutateAsync` rather than `mutate`'s `onSuccess`: switching Firetower
+       unmounts this page (the provider is keyed on the server), and react-query
+       does not call the callbacks passed to `mutate` once that has happened.
+       The workspace is made regardless, so what was attached and what was typed
+       would have gone nowhere with nobody told. This runs either way, and
+       because the parcel carries the server it was started on, a window that
+       has moved hears about it when it comes back rather than never. */
+    void create
+      .mutateAsync({
         data: {
           name,
           prompt: attached ? undefined : prompt.trim() || undefined,
@@ -330,35 +356,39 @@ export function NewPage() {
             sandbox: chosen.sandbox,
           },
         },
-      },
-      {
-        onSuccess: (made) => {
-          const s = made as { id: string; workspaceId?: string | null };
-          /* The words, in `draft.ts` as well as in the outbox. With something
-             attached the prompt is not in the payload above — the first message
-             has to be the text, the pictures and the paths together — so from
-             here until the agent is listening the only copy of what was asked
-             would otherwise be the one `post` holds, and a document that
-             reloads under a long setup script takes it. A sentence is exactly
-             what that handoff is for; the pictures cannot go in it and do not.
-             Written before `post`, which takes it out again as soon as the
-             attempt is over, whichever way it went. */
-          const handoff = [
-            attached ? prompt.trim() : "",
-            seed?.taskUrl ? `${seed.title ?? ""}\n${seed.taskUrl}`.trim() : "",
-          ]
-            .filter(Boolean)
-            .join("\n\n");
-          if (handoff) leaveDraft(s.id, handoff);
-          /* The session's id, not the workspace's: a turn and an attachment are
-             both addressed to the agent running in it. The workspace's too,
-             though, because what gets read is a conversation chosen from the
-             runs in it and a trouble has to reach whichever one that is. */
-          if (attached) post(s.id, { text: prompt.trim(), images, files }, s.workspaceId);
-          navigate(`/sessions/${s.workspaceId ?? s.id}`);
-        },
-      },
-    );
+      })
+      .then((made) => {
+        const s = made as { id: string; workspaceId?: string | null };
+        /* The words, in `draft.ts` as well as in the outbox. With something
+           attached the prompt is not in the payload above — the first message
+           has to be the text, the pictures and the paths together — so from
+           here until the agent is listening the only copy of what was asked
+           would otherwise be the one `post` holds, and a document that reloads
+           under a long setup script takes it. A sentence is exactly what that
+           handoff is for; the pictures cannot go in it and do not. Written
+           before `post`, which takes it out again as soon as the attempt is
+           over, whichever way it went. */
+        const handoff = [
+          attached ? prompt.trim() : "",
+          seed?.taskUrl ? `${seed.title ?? ""}\n${seed.taskUrl}`.trim() : "",
+        ]
+          .filter(Boolean)
+          .join("\n\n");
+        if (handoff) leaveDraft(s.id, handoff);
+        /* The session's id, not the workspace's: a turn and an attachment are
+           both addressed to the agent running in it. The workspace's too,
+           though, because what gets read is a conversation chosen from the runs
+           in it and a trouble has to reach whichever one that is. And the
+           server, which is the one thing this page knows and the delivery
+           cannot work out for itself. */
+        if (attached) post({ server, sessionId: s.id, workspaceId: s.workspaceId }, { text: prompt.trim(), images, files });
+        if (onScreen.current) navigate(`/sessions/${s.workspaceId ?? s.id}`);
+      })
+      .catch(() => {
+        /* Said under the button, from the mutation's own state — which
+           `mutateAsync` records as `mutate` does. Swallowed here because an
+           unhandled rejection is not a second way of telling anybody. */
+      });
   };
 
   const toggleRepo = (r: { id: string; slug: string }) =>

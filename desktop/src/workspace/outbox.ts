@@ -263,8 +263,10 @@ export type Ports = {
  * Each call below resolves its server from module state when it is made rather
  * than from this closure, which is why `mine` exists: it is the whole of what
  * stands between a slow bring-up on one Firetower and an upload to another.
+ * Exported so that `mine` can be exercised as the app has it, rather than as a
+ * test writes it.
  */
-function portsFor(server: string): Ports {
+export function portsFor(server: string): Ports {
   const mine = () => currentBackend() === server;
   return {
     mine,
@@ -403,6 +405,16 @@ export async function deliver(to: Address, parcel: Parcel, ports: Ports): Promis
 }
 
 /**
+ * Which Firetower is being looked at, for a parcel about to be addressed.
+ *
+ * Read when Start is pressed rather than when `create_session` answers: the
+ * sidebar can move the client's one current backend while that request is in
+ * flight, and a parcel addressed on the way out of that window would be
+ * addressed to the server somebody switched *to*.
+ */
+export const whichServer = () => currentBackend() ?? "";
+
+/**
  * Hand a first message to a session that is still coming up.
  *
  * Returns at once: the waiting happens here, not on the page that called.
@@ -410,12 +422,10 @@ export async function deliver(to: Address, parcel: Parcel, ports: Ports): Promis
  * worker gives a second copy of a file a name of its own and the person would
  * end up with both.
  *
- * The server is taken now rather than when a call is made, which is the whole
- * of the difference between delivering this to the workspace it was attached
- * on and delivering it to whatever the sidebar is pointed at ten minutes
- * later.
+ * Addressed by the caller, which is the whole of the difference between
+ * delivering this to the workspace the file was attached on and delivering it
+ * to whatever the sidebar is pointed at by the time it lands.
  */
-export function post(sessionId: string, parcel: Parcel, workspaceId?: string | null) {
-  const server = currentBackend() ?? "";
-  void deliver({ server, sessionId, workspaceId }, parcel, portsFor(server));
+export function post(to: Address, parcel: Parcel) {
+  void deliver(to, parcel, portsFor(to.server));
 }

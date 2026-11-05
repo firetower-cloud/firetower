@@ -8,6 +8,7 @@ import {
   forget,
   lost,
   nothingAttached,
+  portsFor,
   run,
   undelivered,
   untilReady,
@@ -34,17 +35,16 @@ import {
  *   for again, and none of them may happen against the wrong one.
  */
 
-/* One server, the way the provider sets it for every generated call. `forget`
-   and `delivering` read it, so the ambient one and the one parcels are
-   addressed to are deliberately the same here. */
-useBackendId("a");
-
 /* `sessionStorage`, as `draft.ts` reaches for it. The draft is read back
    through its own key rather than with `takeDraft`, which would remove the
    thing under test. */
 const store = new Map<string, string>();
 const kept = (sessionId: string) => store.get(`firetower.draft.${sessionId}`) ?? null;
 beforeEach(() => {
+  /* One server, the way the provider sets it for every generated call. `forget`
+     and `delivering` read it, so the ambient one and the one parcels are
+     addressed to are the same here — except where a test moves it. */
+  useBackendId("a");
   store.clear();
   vi.stubGlobal("window", {
     sessionStorage: {
@@ -366,5 +366,28 @@ describe("the words, while they are still only here", () => {
     // *and* a draft on top of it at the next mount.
     expect(undelivered("a", "s_failed")?.text).toBe("look at this");
     expect(kept("s_failed")).toBeNull();
+  });
+});
+
+describe("the Firetower a parcel was addressed to", () => {
+  /* Start is pressed on A, and the sidebar moves to B while `create_session`
+     is still in flight — which unmounts the New page, so this is also the case
+     where the create's own callbacks no longer run. The address is read when
+     Start is pressed, so the parcel still says A; `portsFor` is the real thing
+     rather than a `mine` written here, and it refuses before a single request
+     is made. */
+  it("is the one Start was pressed on, not the one current when the create answers", async () => {
+    useBackendId("b");
+    await deliver(
+      { server: "a", sessionId: "s_addressed" },
+      parcel({ files: [file("salaries.xlsx")] }),
+      portsFor("a"),
+    );
+    const trouble = undelivered("a", "s_addressed");
+    // Filed under A, where the person sees it when they go back to it — and
+    // naming the file, which is still theirs and still nowhere.
+    expect(trouble?.text).toBe("look at this");
+    expect(trouble?.why).toContain("the window moved to another Firetower");
+    expect(trouble?.why).toContain("Nothing was attached: salaries.xlsx.");
   });
 });
