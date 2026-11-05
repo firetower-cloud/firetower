@@ -287,16 +287,16 @@ describe("which Firetower a parcel belongs to", () => {
   });
 
   it("treats the same session id on two servers as two parcels", async () => {
-    const mine: string[] = [];
-    const theirs: string[] = [];
+    const onA: string[] = [];
+    const onB: string[] = [];
     const slow = gated();
-    const first = deliver({ server: "a", sessionId: "s_two" }, parcel(), { ...working(mine), until: slow.until });
+    const first = deliver({ server: "a", sessionId: "s_two" }, parcel(), { ...working(onA), until: slow.until });
     // Not swallowed by the one still in flight: `going` is per server too.
-    await deliver({ server: "b", sessionId: "s_two" }, parcel(), working(theirs));
-    expect(theirs).toContain('sent "look at this"');
+    await deliver({ server: "b", sessionId: "s_two" }, parcel(), working(onB));
+    expect(onB).toContain('sent "look at this"');
     slow.open();
     await first;
-    expect(mine).toContain('sent "look at this"');
+    expect(onA).toContain('sent "look at this"');
   });
 });
 
