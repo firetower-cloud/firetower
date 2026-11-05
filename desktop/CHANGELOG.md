@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.25.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.24.0...desktop-v0.25.0) (2026-11-05)
+
+
+### Features
+
+* **desktop:** the New page takes dropped files, pasted images and a paperclip ([5e46263](https://github.com/firetower-cloud/firetower/commit/5e46263bd07e8dbadf20407ebf8f718d7f5b2e99))
+* **desktop:** the New page's repository picker gets its search back ([d3e50ce](https://github.com/firetower-cloud/firetower/commit/d3e50ceb66fe2f2cdc1e9a473ae522ff5607ba57))
+
+
+### Bug Fixes
+
+* **desktop:** a dropdown that scrolls its own list stays open ([800103b](https://github.com/firetower-cloud/firetower/commit/800103b2f734ea72a603aebd6622dc3573a82bc5))
+* **desktop:** a first message is for one server and one workspace ([fc0cd7a](https://github.com/firetower-cloud/firetower/commit/fc0cd7adb104ec4cebd175ce72afb5854830e53f))
+* **desktop:** a menu with no scroller of its own still fits the window ([c148f10](https://github.com/firetower-cloud/firetower/commit/c148f1039b0ec923c65f11e45ff16eb1cdd32f8f))
+* **desktop:** a parcel is addressed when Start is pressed, not when it lands ([d125783](https://github.com/firetower-cloud/firetower/commit/d125783692bdff30fb150bace5469db4da1070cb))
+* **desktop:** the New page's pickers scroll and search, and its composer takes attachments ([150f124](https://github.com/firetower-cloud/firetower/commit/150f124f01c1f9eab0ed5e6bf0539dc61f15c19e))
+* **desktop:** the typed first message is not only in the outbox's memory ([c19aad3](https://github.com/firetower-cloud/firetower/commit/c19aad31bf44a2adc62b5b2f2b03557ab6c10591))
+
 ## [0.24.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.23.0...desktop-v0.24.0) (2026-11-05)
 
 
