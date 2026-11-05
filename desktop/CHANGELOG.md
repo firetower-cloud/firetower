@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.24.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.23.0...desktop-v0.24.0) (2026-11-05)
+
+
+### Features
+
+* a lead waits on its children, and ends with them ([a29b325](https://github.com/firetower-cloud/firetower/commit/a29b32504f039d90299b915c1a9993a34056bbc2))
+* a nested child shows just its own name in the rail ([8647aba](https://github.com/firetower-cloud/firetower/commit/8647abaf350ec71944a23f715cfe9843300c00ec))
+* a session can start children, and hear back from them ([3b6921c](https://github.com/firetower-cloud/firetower/commit/3b6921c8e1112e52dfb11b44815f36c084c846d9))
+* call the saved kinds "Subagents" in the interface ([cad6dc5](https://github.com/firetower-cloud/firetower/commit/cad6dc5a3463e022e160b6c26a70f7ddcd643f15))
+* Configuration → Roles, to create and edit roles ([3c6f15b](https://github.com/firetower-cloud/firetower/commit/3c6f15b586566a1bb8e5d92689d22863be4ff0fb))
+* draw a relayed agent message as a card, not a bubble from you ([a302b84](https://github.com/firetower-cloud/firetower/commit/a302b844440bb501cf03d3c20f631d7dc567a408))
+* group Agents, Subagents and Skills under Harness ([ae51908](https://github.com/firetower-cloud/firetower/commit/ae51908231d6f180e2d7e0cc6743386058d947fe))
+* roles — a saved kind of agent a lead can start by name ([21ab82f](https://github.com/firetower-cloud/firetower/commit/21ab82f4d1f3ef4117e7b8188757fb764dbe47c0))
+
 ## [0.23.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.22.1...desktop-v0.23.0) (2026-10-28)
 
 
