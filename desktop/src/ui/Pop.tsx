@@ -1,12 +1,11 @@
 /**
  * A menu that gets out of whatever is clipping it.
  *
- * The rows live in an `overflow-y-auto` column inside an `overflow-hidden`
- * card, and a clipping ancestor clips whatever its descendants' `z-index` say
- * — the sharing sheet's level menu came out cut in half, and no stacking would
- * have saved it. So it is not a descendant: it goes into `document.body` at
- * coordinates read off the button, and flips above when the room below has run
- * out.
+ * The rows live in an `overflow-y-auto` column inside a card that clips, and a
+ * clipping ancestor clips whatever its descendants' `z-index` say — the sharing
+ * sheet's level menu came out cut in half, and no stacking would have saved it.
+ * So it is not a descendant: it goes into `document.body` at coordinates read
+ * off the button, and flips above when the room below has run out.
  *
  * The price of coordinates is that they stop being true. Anything that could
  * move the button underneath it — a scroll, a resize — closes it rather than
@@ -162,8 +161,14 @@ export function Pop({
       /* A column, because `room` is a cap on the card and the list inside has
          to give way to it — a `min-h-0` scrolling child shrinks to what is
          left while a search header above it stays put. That is the flexbox
-         rule in STYLE.md, and the reason the header is not in the scroller. */
-      className={`z-[70] flex flex-col overflow-hidden rounded-lg border border-line bg-panel shadow-(--shadow-float) ${
+         rule in STYLE.md, and the reason the header is not in the scroller.
+
+         `overflow-y-auto` rather than `hidden` is for the menus with no
+         scroller of their own: a short window caps them too, and a row that
+         has been clipped off the bottom of the card is exactly as unreachable
+         as one that ran off the window. A menu whose list does scroll never
+         reaches this, so its header still does not move. */
+      className={`scroll-slim z-[70] flex flex-col overflow-x-hidden overflow-y-auto rounded-lg border border-line bg-panel shadow-(--shadow-float) ${
         width == null ? "w-44" : ""
       } ${spot ? "" : "invisible"}`}
     >
