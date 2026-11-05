@@ -1,7 +1,9 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useBackendId } from "~/client/http";
+import { leaveDraft } from "./draft";
 import {
   deliver,
+  delivering,
   firstMessage,
   forget,
   lost,
@@ -36,6 +38,22 @@ import {
    and `delivering` read it, so the ambient one and the one parcels are
    addressed to are deliberately the same here. */
 useBackendId("a");
+
+/* `sessionStorage`, as `draft.ts` reaches for it. The draft is read back
+   through its own key rather than with `takeDraft`, which would remove the
+   thing under test. */
+const store = new Map<string, string>();
+const kept = (sessionId: string) => store.get(`firetower.draft.${sessionId}`) ?? null;
+beforeEach(() => {
+  store.clear();
+  vi.stubGlobal("window", {
+    sessionStorage: {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+      removeItem: (k: string) => void store.delete(k),
+    },
+  });
+});
 
 const file = (name: string) => ({ name }) as unknown as File;
 const picture = { mediaType: "image/png", data: "aaaa" };
@@ -313,5 +331,40 @@ describe("the conversation a trouble has to reach", () => {
     forget("s_second", "w_1");
     expect(undelivered("a", "s_second", "w_1")).toBeUndefined();
     expect(undelivered("a", "s_started")).toBeUndefined();
+  });
+});
+
+describe("the words, while they are still only here", () => {
+  /* With something attached the prompt is held back out of `CreateWorkspace` —
+     the first message has to be text, pictures and paths together — so until
+     this lands the only other copy of it is the one the New page leaves in
+     `draft.ts`. Which is to say: it is there to be taken out again, and when. */
+  it("leaves the New page's copy alone while the attempt is in flight", async () => {
+    leaveDraft("s_flight", "look at this");
+    const slow = gated();
+    const attempt = deliver({ server: "a", sessionId: "s_flight" }, parcel(), { ...working(), until: slow.until });
+    // The composer asks this before it takes a draft: the draft is a copy of
+    // the message being sent, and offering it would invite giving the agent the
+    // same first words a second time.
+    expect(delivering("s_flight")).toBe(true);
+    expect(kept("s_flight")).toBe("look at this");
+    slow.open();
+    await attempt;
+  });
+
+  it("takes it out once the agent has them", async () => {
+    leaveDraft("s_landed", "look at this");
+    await deliver({ server: "a", sessionId: "s_landed" }, parcel(), working());
+    expect(delivering("s_landed")).toBe(false);
+    expect(kept("s_landed")).toBeNull();
+  });
+
+  it("takes it out when it hands them back instead, so they are not offered twice", async () => {
+    leaveDraft("s_failed", "look at this");
+    await deliver({ server: "a", sessionId: "s_failed" }, parcel(), { ...working(), until: never.until });
+    // One copy, in the handback the composer puts in the box — not that one
+    // *and* a draft on top of it at the next mount.
+    expect(undelivered("a", "s_failed")?.text).toBe("look at this");
+    expect(kept("s_failed")).toBeNull();
   });
 });

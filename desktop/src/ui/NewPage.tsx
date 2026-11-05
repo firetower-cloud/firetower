@@ -334,10 +334,27 @@ export function NewPage() {
       {
         onSuccess: (made) => {
           const s = made as { id: string; workspaceId?: string | null };
+          /* The words, in `draft.ts` as well as in the outbox. With something
+             attached the prompt is not in the payload above — the first message
+             has to be the text, the pictures and the paths together — so from
+             here until the agent is listening the only copy of what was asked
+             would otherwise be the one `post` holds, and a document that
+             reloads under a long setup script takes it. A sentence is exactly
+             what that handoff is for; the pictures cannot go in it and do not.
+             Written before `post`, which takes it out again as soon as the
+             attempt is over, whichever way it went. */
+          const handoff = [
+            attached ? prompt.trim() : "",
+            seed?.taskUrl ? `${seed.title ?? ""}\n${seed.taskUrl}`.trim() : "",
+          ]
+            .filter(Boolean)
+            .join("\n\n");
+          if (handoff) leaveDraft(s.id, handoff);
           /* The session's id, not the workspace's: a turn and an attachment are
-             both addressed to the agent running in it. */
-          if (attached) post(s.id, { text: prompt.trim(), images, files });
-          if (seed?.taskUrl) leaveDraft(s.id, `${seed.title ?? ""}\n${seed.taskUrl}`.trim());
+             both addressed to the agent running in it. The workspace's too,
+             though, because what gets read is a conversation chosen from the
+             runs in it and a trouble has to reach whichever one that is. */
+          if (attached) post(s.id, { text: prompt.trim(), images, files }, s.workspaceId);
           navigate(`/sessions/${s.workspaceId ?? s.id}`);
         },
       },

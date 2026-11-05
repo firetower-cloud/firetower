@@ -29,7 +29,7 @@ import { handleFor, mentionBlock, MOST_ARTIFACTS, MOST_ROWS, originOf, rankArtif
 import { useAttachFile, useInterruptSession, useListFiles, useSendTurn } from "~/api/generated/sessions/sessions";
 import { useChooseControl, useSessionControls } from "~/api/generated/conversation/conversation";
 import { takeDraft } from "~/workspace/draft";
-import { forget as forgetUndelivered, useUndelivered } from "~/workspace/outbox";
+import { delivering, forget as forgetUndelivered, useUndelivered } from "~/workspace/outbox";
 import { AccountLine, AccountNotice } from "~/ui/AccountSwitcher";
 import { AgentPicker } from "~/ui/AgentPicker";
 import { Mic } from "~/ui/voice/Mic";
@@ -110,7 +110,12 @@ export function Composer({
     askAgain();
   }, [model, askAgain]);
 
-  const [text, setText] = useState(() => takeDraft(session.id) ?? "");
+  /* The draft is taken once, at mount — unless the New page's first message is
+     still on its way here, in which case the draft is a copy of *that* message
+     and putting it in the box would invite giving the agent the same first
+     words twice. `~/workspace/outbox` takes it out of storage when the attempt
+     ends; if it never arrived the words come back below as a handback instead. */
+  const [text, setText] = useState(() => (delivering(session.id) ? "" : (takeDraft(session.id) ?? "")));
   /* Which skills this session is reading. The chip is an indicator and the
      modal is the control; the count is read from the server rather than kept
      here, so two windows on one session agree. */

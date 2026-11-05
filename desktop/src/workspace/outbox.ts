@@ -41,6 +41,16 @@
  * five. The pictures wait in memory instead, which is sound because the hash
  * router never reloads the document — see `~/shims/next-navigation`.
  *
+ * The *words* are in both. Withholding the prompt from `CreateWorkspace` is
+ * what makes the first message atomic — text, pictures and paths, or nothing —
+ * but it also moves the only copy of it into this module, where before the
+ * control plane had it the moment it answered. So the New page leaves a copy
+ * in `draft.ts` beside its `post` and `deliver` takes that copy out the moment
+ * the attempt ends, whichever way it went: by then the agent has those words
+ * or the handback does, and a copy left behind would be offered on top of
+ * them. `Composer` leaves it alone while an attempt is in flight — see
+ * `delivering`.
+ *
  * ## Why the server is part of every key
  *
  * The generated client has one *current* backend and resolves it when the call
@@ -60,6 +70,7 @@ import { listEvents } from "~/api/generated/events/events";
 import { ready, stepLines } from "~/components/Steps";
 import { currentBackend } from "~/client/http";
 import { base64 } from "~/ui/attach";
+import { dropDraft } from "~/workspace/draft";
 import { why } from "~/data";
 
 /** A first message, waiting for somewhere to go. */
@@ -155,6 +166,18 @@ export function useUndelivered(sessionId: string, workspaceId?: string | null): 
     () => undelivered(currentBackend() ?? "", sessionId, workspaceId),
     () => undefined,
   );
+}
+
+/**
+ * Whether the New page's first message is still on its way to this session.
+ *
+ * The composer asks before it takes the draft, because while an attempt is in
+ * flight the draft *is* that message: showing it in the box would invite
+ * giving the agent the same first words a second time. Once the attempt is
+ * over the words are the agent's or the handback's, and the draft is gone.
+ */
+export function delivering(sessionId: string): boolean {
+  return going.has(keyFor(currentBackend() ?? "", sessionId));
 }
 
 /** How often the bring-up is asked about, and how long before giving up on it. */
@@ -368,6 +391,11 @@ export async function deliver(to: Address, parcel: Parcel, ports: Ports): Promis
       text: parcel.text,
       why: `Your first message was not sent — ${why(e)}.`,
     }));
+    /* The words are somewhere else now — the agent's, or the trouble below's —
+       so the copy the New page left beside this comes out before anybody can be
+       offered it on top of them. Before `hold`, so that a composer reading the
+       handback never finds both. */
+    dropDraft(to.sessionId);
     if (trouble) hold(to, trouble);
   } finally {
     going.delete(one);
