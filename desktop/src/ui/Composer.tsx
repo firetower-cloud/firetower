@@ -31,6 +31,7 @@ import { useChooseControl, useSessionControls } from "~/api/generated/conversati
 import { takeDraft } from "~/workspace/draft";
 import { delivering, forget as forgetUndelivered, useUndelivered } from "~/workspace/outbox";
 import { AccountLine, AccountNotice } from "~/ui/AccountSwitcher";
+import { PersonaLine } from "~/ui/Persona";
 import { AgentPicker } from "~/ui/AgentPicker";
 import { Mic } from "~/ui/voice/Mic";
 import { VoiceDialog } from "~/ui/voice/Dialogs";
@@ -673,6 +674,11 @@ export function Composer({
           {conversation.limits && conversation.limits.status !== "allowed" && (
             <span className="ml-auto text-ember-soft">{conversation.limits.window}: {conversation.limits.status}</span>
           )}
+          {/* Beside the subscription, because the two answer neighbouring
+              questions: what this session is, and whose allowance it spends.
+              Its own `ml-auto` rather than a shared group, which is how the
+              limit above already joins this row. */}
+          <PersonaLine sessionId={session.id} profileId={session.profileId} />
           <AccountLine />
         </div>
       </div>
