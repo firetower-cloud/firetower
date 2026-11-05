@@ -437,22 +437,7 @@ export function NewPage() {
 
       {open?.which === "repo" && (
         <Pop anchor={open.at} onClose={close} width={340}>
-          <Menu>
-            {repos.length === 0 && (
-              <p className="px-3 py-2 text-meta text-mute">No repositories connected.</p>
-            )}
-            {repos.map((r) => (
-              <Opt
-                key={r.id}
-                on={checkouts.some((c) => c.id === r.id)}
-                onPick={() => toggleRepo(r)}
-                keepOpen
-                icon={<FolderGit2 className="h-4 w-4" strokeWidth={1.8} />}
-                title={r.slug}
-                sub={r.defaultBranch ?? undefined}
-              />
-            ))}
-          </Menu>
+          <RepoMenu repos={repos} checkouts={checkouts} onToggle={toggleRepo} />
         </Pop>
       )}
 
@@ -474,17 +459,20 @@ export function NewPage() {
                 title={machineLabel(m)}
               />
             ))}
-            {host && kind && (
-              <div className="mt-1 border-t border-line-soft pt-1">
-                <Readout
-                  key={`${host.id}:${kind}`}
-                  host={host}
-                  agent={kind}
-                  agentLabel={agents.find((a) => a.kind === kind)?.label}
-                />
-              </div>
-            )}
           </Menu>
+          {/* Outside the scroller: it is what the machine you picked is up to,
+              not another machine to pick, and it has to stay readable while a
+              long list of them scrolls under the pointer. */}
+          {host && kind && (
+            <div className="shrink-0 border-t border-line-soft py-1">
+              <Readout
+                key={`${host.id}:${kind}`}
+                host={host}
+                agent={kind}
+                agentLabel={agents.find((a) => a.kind === kind)?.label}
+              />
+            </div>
+          )}
         </Pop>
       )}
 
@@ -568,8 +556,104 @@ function Pill({
   );
 }
 
+/**
+ * The scrolling part of a menu, and only that part.
+ *
+ * `min-h-0` because `Pop` caps the card at the room the window actually has
+ * and a flex child refuses to shrink below its content without it — the
+ * flexbox rule in STYLE.md. Anything that should stay put while this scrolls,
+ * a search box or a readiness footer, goes beside it rather than inside it.
+ */
 function Menu({ children }: { children: React.ReactNode }) {
-  return <div className="max-h-80 overflow-y-auto py-1">{children}</div>;
+  return <div className="scroll-slim max-h-80 min-h-0 overflow-y-auto py-1">{children}</div>;
+}
+
+/**
+ * Which repositories a query leaves.
+ *
+ * By slug and case-insensitively, which is how everybody types a repository
+ * name — and on a substring rather than a prefix, because a slug is
+ * `owner/name` and the half anybody remembers is the second one. Exported for
+ * its own test: the rule is one line and silently wrong if the fold or the
+ * trim goes missing.
+ */
+export function matching<T extends { slug: string }>(repos: T[], q: string): T[] {
+  const query = q.trim().toLowerCase();
+  return query ? repos.filter((r) => r.slug.toLowerCase().includes(query)) : repos;
+}
+
+/**
+ * The repository list — the longest list on this page, and the one that was
+ * reported.
+ *
+ * The sheet this page replaced filtered from the first repository and this does
+ * too, because a connected account brings every repository it can see and
+ * scrolling to one by name is not a thing anybody wants to do twice. The only
+ * case without a box is the one with nothing to filter.
+ *
+ * Unlike the profile menu this is a multi-select, so picking leaves the menu
+ * and the query where they are: the row you just ticked stays in front of you.
+ * Remounts each time the menu opens, so the search starts empty.
+ */
+function RepoMenu({
+  repos,
+  checkouts,
+  onToggle,
+}: {
+  repos: { id: string; slug: string; defaultBranch?: string | null }[];
+  checkouts: Checkout[];
+  onToggle: (r: { id: string; slug: string }) => void;
+}) {
+  const [q, setQ] = useState("");
+  const shown = matching(repos, q);
+
+  return (
+    <>
+      {repos.length > 0 && (
+        <div className="shrink-0 border-b border-line-soft p-2">
+          <div className="flex items-center gap-2 rounded-md bg-ground px-2.5 py-1.5">
+            <Search className="h-3.5 w-3.5 shrink-0 text-mute" strokeWidth={1.8} />
+            <input
+              autoFocus
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              onKeyDown={(e) => {
+                // Enter takes the only one left, which is what typing three
+                // characters and reaching for the keyboard means. The old
+                // sheet did this and the habit came with the people.
+                if (e.key !== "Enter" || shown.length !== 1) return;
+                e.preventDefault();
+                onToggle(shown[0]);
+              }}
+              placeholder="Search repositories"
+              className="w-full bg-transparent text-meta text-bone placeholder:text-mute focus:outline-none"
+            />
+          </div>
+        </div>
+      )}
+      <Menu>
+        {repos.length === 0 && (
+          <p className="px-3 py-2 text-meta text-mute">No repositories connected.</p>
+        )}
+        {shown.map((r) => (
+          <Opt
+            key={r.id}
+            on={checkouts.some((c) => c.id === r.id)}
+            onPick={() => onToggle(r)}
+            keepOpen
+            icon={<FolderGit2 className="h-4 w-4" strokeWidth={1.8} />}
+            title={r.slug}
+            sub={r.defaultBranch ?? undefined}
+          />
+        ))}
+        {q.trim() !== "" && shown.length === 0 && (
+          <div className="px-3 py-3 text-center text-micro text-mute">
+            No repository matches “{q}”.
+          </div>
+        )}
+      </Menu>
+    </>
+  );
 }
 
 /**
@@ -610,7 +694,7 @@ function ProfileMenu({
   return (
     <>
       {profiles.length > 3 && (
-        <div className="border-b border-line-soft p-2">
+        <div className="shrink-0 border-b border-line-soft p-2">
           <div className="flex items-center gap-2 rounded-md bg-ground px-2.5 py-1.5">
             <Search className="h-3.5 w-3.5 shrink-0 text-mute" strokeWidth={1.8} />
             <input
