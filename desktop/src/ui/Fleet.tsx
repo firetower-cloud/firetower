@@ -15,7 +15,7 @@ import { Signal } from "~/components/Signal";
 import { AgentMark } from "~/components/AgentMark";
 import { HostMark, Icon, PageHead } from "~/components/ui";
 import { useHostOf } from "~/data";
-import { doing, group, shortRepo, type Workspace } from "~/api/workspaces";
+import { doing, group, shortRepo, speaksFor, type Workspace } from "~/api/workspaces";
 import { elapsed, minutesSince, needsYou } from "~/api/view";
 import type { Backend } from "~/fleet";
 import { useFleet, waitingIn } from "~/fleet";
@@ -96,14 +96,17 @@ export function Fleet() {
  */
 function Place({ place, backend }: { place: Workspace; backend: Backend }) {
   const state = doing(place);
-  const lead = place.runs[0];
+  /* The same row as the rail's, and the same rule about who speaks for it —
+     see `speaksFor`. A child with a workspace of its own is listed here in its
+     own right, so this row answers only for the agents in this place. */
+  const says = speaksFor(place);
 
   return (
     <button
       onClick={() => navigate(`/sessions/${place.id}`)}
       className="flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left transition-colors duration-150 hover:bg-raise/60"
     >
-      <Signal status={lead.status} size={6} />
+      <Signal status={says.status} size={6} />
 
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-2">
@@ -128,7 +131,7 @@ function Place({ place, backend }: { place: Workspace; backend: Backend }) {
       </span>
 
       <span className="w-[48px] shrink-0 text-right font-mono text-micro text-mute">
-        {elapsed(minutesSince(lead.createdAt))}
+        {elapsed(minutesSince(place.startedAt))}
       </span>
     </button>
   );

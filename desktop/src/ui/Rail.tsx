@@ -14,7 +14,7 @@ import type { LucideIcon } from "lucide-react";
 import { AgentMark } from "~/components/AgentMark";
 import { Blocks } from "~/island/Blocks";
 import { HostMark, Icon } from "~/components/ui";
-import { childrenOf, childrenWorking, doing, group, isChild, placeBeat, rowLabel, shortRepo, type Repositories, type Workspace } from "~/api/workspaces";
+import { childrenElsewhere, childrenWorking, doing, group, isChild, placeBeat, rowLabel, shortRepo, type Repositories, type Workspace } from "~/api/workspaces";
 import { elapsed, minutesSince, type Beat } from "~/api/view";
 import type { Backend } from "~/fleet";
 import { useHostOf, useSessions, useUpdatesRow } from "~/data";
@@ -353,7 +353,7 @@ function Row({
         <Blocks beat={beat} size={9} />
         <span className={`min-w-0 flex-1 truncate text-ui ${on ? "text-bone" : "text-dim"}`}>{label ?? place.name}</span>
         <span className="shrink-0 font-mono text-micro text-mute">
-          {elapsed(minutesSince(place.runs[0].createdAt))}
+          {elapsed(minutesSince(place.startedAt))}
         </span>
       </div>
       <div className="flex items-center gap-1.5 pl-[12px]">
@@ -442,7 +442,7 @@ function Repos({ repos, path, all }: { repos: Repositories; path: string; all: W
               label={rowLabel(place, places)}
               beat={placeBeat(place, all)}
               working={childrenWorking(place, all)}
-              delegated={childrenOf(place, all)}
+              delegated={childrenElsewhere(place, all)}
             />
           ))}
         </div>

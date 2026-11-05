@@ -6,7 +6,7 @@
  * the address having ended.
  */
 import { describe, expect, it } from "vitest";
-import { childrenOf, childrenWorking, doing, group, isChild, placeBeat, placeOf, rowLabel } from "./workspaces";
+import { childrenElsewhere, childrenWorking, doing, group, isChild, placeBeat, placeOf, rowLabel, speaksFor } from "./workspaces";
 import type { Session } from "~/api/generated/model";
 
 const run = (id: string, workspaceId: string, status = "Ready"): Session =>
@@ -103,16 +103,23 @@ describe("leads and children", () => {
   });
 });
 
-describe("childrenOf", () => {
+describe("childrenElsewhere", () => {
   const child = (id: string, parentId: string, workspaceId = id, status = "Working"): Session =>
     ({ ...run(id, workspaceId, status), parentId }) as unknown as Session;
 
-  it("counts what ending the place takes with it, and not what has already ended", () => {
-    const all = [run("s_1", "s_1"), child("s_2", "s_1"), child("s_3", "s_1", "s_1"), child("s_4", "s_1", "s_4", "Ended")];
-    // An ended session is not listed by the rail at all; here it is, and it
-    // still must not count.
+  it("counts what ending the place takes with it beyond the agents in it", () => {
+    const all = [run("s_1", "s_1"), child("s_2", "s_1"), child("s_3", "s_1", "s_1"), child("s_4", "s_4", "s_4", "Ended")];
     const lead = placeOf(places(all), "s_1")!;
-    expect(childrenOf(lead, places(all))).toBe(3);
+    // s_3 is a child *in* this workspace: it is already one of the agents the
+    // question counts, and adding it here announced it twice, the second time
+    // as being somewhere it is not. s_4 has ended and goes with nobody.
+    expect(lead.runs.map((r) => r.id).sort()).toEqual(["s_1", "s_3"]);
+    expect(childrenElsewhere(lead, places(all))).toBe(1);
+  });
+
+  it("counts nothing for a place that delegated nothing", () => {
+    const all = [run("s_1", "s_1"), run("s_9", "s_9")];
+    expect(childrenElsewhere(placeOf(places(all), "s_1")!, places(all))).toBe(0);
   });
 });
 
@@ -208,5 +215,57 @@ describe("placeBeat", () => {
       expect(childrenWorking(lead, every)).toBe(1);
       expect(["working", "blocked"]).toContain(placeBeat(lead, every));
     }
+  });
+});
+
+/**
+ * Who speaks for a row that has room for one mark and one age.
+ *
+ * `group()` sorts whichever run wants you to the front, so `place.runs[0]` is
+ * a run, not the place: on the dashboard it drew a hand-back's green tick
+ * beside this row's own "working" chip, and it aged an hour-old workspace by
+ * the child started in it a minute ago.
+ */
+describe("what a row says about a place", () => {
+  const child = (id: string, parentId: string, workspaceId = id, status = "Working"): Session =>
+    ({ ...run(id, workspaceId, status), parentId }) as unknown as Session;
+
+  it("does not let a lead's hand-back speak over an agent still working", () => {
+    const all = [run("s_1", "s_1", "HandedBack"), child("s_2", "s_1", "s_1")];
+    const place = placeOf(places(all), "s_1")!;
+    expect(place.runs[0].status).toBe("HandedBack");
+    expect(speaksFor(place).status).toBe("Working");
+    // And it agrees with the word printed beside it on the same row.
+    expect(doing(place)).toBe("working");
+  });
+
+  it("keeps a question in front of work going on beside it", () => {
+    const all = [run("s_1", "s_1", "NeedsYou"), child("s_2", "s_1", "s_1")];
+    expect(speaksFor(placeOf(places(all), "s_1")!).status).toBe("NeedsYou");
+  });
+
+  /** The dashboard lists the child's workspace in its own right, so a lead
+   *  that spoke for it as well would say the same thing twice. */
+  it("speaks only for the agents in this place", () => {
+    const all = [run("s_1", "s_1", "HandedBack"), child("s_2", "s_1")];
+    const every = places(all);
+    const lead = every.find((p) => p.id === "s_1")!;
+    expect(speaksFor(lead).status).toBe("HandedBack");
+    // The rail, which hides that child, asks the other question.
+    expect(placeBeat(lead, every)).toBe("working");
+  });
+
+  it("is as old as the place, not as the newest thing in it", () => {
+    // s_1 cut the workspace; s_5 is a child started in it long after.
+    const all = [run("s_1", "s_1", "Working"), child("s_5", "s_1", "s_1", "NeedsYou")];
+    const place = placeOf(places(all), "s_1")!;
+    expect(place.runs[0].id, "the needs-you child sorts to the front").toBe("s_5");
+    expect(place.startedAt).toBe(run("s_1", "s_1").createdAt);
+  });
+
+  it("falls back to the oldest run still here when the founder has gone", () => {
+    const all = [child("s_5", "s_1", "s_1"), child("s_3", "s_1", "s_1")];
+    const place = placeOf(places(all), "s_1")!;
+    expect(place.startedAt).toBe(run("s_3", "s_1").createdAt);
   });
 });
