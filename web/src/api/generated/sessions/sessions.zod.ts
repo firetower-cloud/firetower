@@ -1002,6 +1002,23 @@ export const InterruptSessionResponse = zod.object({
 })
 
 /**
+ * As it was sent, not as the profile stands now — the two part company the
+ * moment somebody edits the profile, and what explains an agent's behaviour
+ * is the text it was actually given. A session that is no profile answers
+ * with an empty one rather than a 404: "this run has no persona" is an
+ * ordinary answer, not a missing page.
+ * @summary The system prompt this session is working from.
+ */
+export const SessionPersonaParams = zod.object({
+  "id": zod.string().describe('Session id')
+})
+
+export const SessionPersonaResponse = zod.object({
+  "profile": zod.string().nullish().describe('The profile\'s name as it stands now, when it still exists. A profile\ndeleted since the session started leaves the text and loses the name.'),
+  "text": zod.string().describe('The system prompt the agent was handed, composed when this run\nlaunched. Empty for a plain agent, which is most of them.')
+}).describe('What a session is running as.')
+
+/**
  * Signed rather than stored, so it survives a restart of the control plane and
  * there is nothing to expire. Nothing is opened by asking: the tunnel is built
  * when the browser actually arrives, which is also when "nothing is listening

@@ -248,8 +248,8 @@ fn is_bulk(frame: &ToServer) -> bool {
 
 /// One agent, and where to put it.
 ///
-/// A struct because these six travel together and mean one thing: this agent,
-/// in this directory, under this tmux session, with this environment. As
+/// A struct because these travel together and mean one thing: this agent, in
+/// this directory, under this tmux session, with this environment. As
 /// arguments they were an unlabelled row that two callers had to get in the
 /// same order — and clippy was right that eight of them is too many.
 struct Launch<'a> {
@@ -259,6 +259,9 @@ struct Launch<'a> {
     env: &'a [(String, String)],
     agent: ft_core::Agent,
     prompt: &'a str,
+    /// The profile's system prompt, or empty for a plain agent. Written to the
+    /// workspace rather than carried in `env` — see [`agentd::persona_path`].
+    persona: &'a str,
 }
 
 impl Worker {
@@ -2069,6 +2072,7 @@ You are in the directory that holds them, not inside one of them.              P
             env,
             agent,
             prompt,
+            persona,
         } = into;
         // Take out anything a previous version installed. The agent reports its
         // own lifecycle now, so a hook doing the same job is a second writer of
@@ -2138,7 +2142,30 @@ You are in the directory that holds them, not inside one of them.              P
                 }
             }
         }
-        tmux.start(path, &command, env)
+
+        // The persona goes to the workspace, and whatever an older control
+        // plane put in the environment comes back out of it.
+        //
+        // Both halves matter. A control plane that knows about the field sends
+        // the persona beside the environment and nothing here has to be
+        // undone; one that does not still sends it as `FIRETOWER_PERSONA`, and
+        // leaving it there is the launch failing on a command line too long to
+        // pass to tmux. Taking it out is not a loss: `agent-run` reads the
+        // file first and the variable only if there is no file, so either way
+        // the agent is handed the same text.
+        let mut env = env.to_vec();
+        let carried = env
+            .iter()
+            .find(|(key, _)| key == ft_core::PERSONA_ENV)
+            .map(|(_, value)| value.clone());
+        env.retain(|(key, _)| key != ft_core::PERSONA_ENV);
+        let persona = match persona.trim().is_empty() {
+            false => persona,
+            true => carried.as_deref().unwrap_or_default(),
+        };
+        write_persona(path, id, persona).await?;
+
+        tmux.start(path, &command, &env)
             .await
             .with_context(|| format!("starting {}", agent.label()))?;
 
@@ -2423,6 +2450,7 @@ You are in the directory that holds them, not inside one of them.              P
                 env: &env,
                 agent: spec.agent,
                 prompt: &spec.prompt,
+                persona: &spec.persona,
             },
             out,
         )
@@ -2646,6 +2674,7 @@ You are in the directory that holds them, not inside one of them.              P
                 env: &env,
                 agent: spec.agent,
                 prompt: &spec.prompt,
+                persona: &spec.persona,
             },
             out,
         )
@@ -3835,6 +3864,46 @@ async fn prepare_agent_home(
     Ok(())
 }
 
+/// Put this session's persona where its supervisor will look for it.
+///
+/// `0600`, like the credentials next to it: a profile is not a secret, but it
+/// is this person's writing and the workspace is shared with whatever the
+/// agent runs.
+///
+/// An empty persona removes the file rather than writing nothing into it. A
+/// run that is no longer a profile — relaunched after the profile was taken
+/// off it — would otherwise come back as a profile it is no longer, because
+/// what the supervisor reads is whatever is on disk.
+async fn write_persona(workspace: &std::path::Path, id: &SessionId, persona: &str) -> Result<()> {
+    let path = agentd::persona_path(workspace, id.as_str());
+    if persona.trim().is_empty() {
+        match tokio::fs::remove_file(&path).await {
+            Ok(()) => (),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
+            Err(e) => return Err(e).with_context(|| format!("clearing {}", path.display())),
+        }
+        return Ok(());
+    }
+
+    let dir = agentd::dir_for(workspace);
+    tokio::fs::create_dir_all(&dir)
+        .await
+        .with_context(|| format!("making {}", dir.display()))?;
+    tokio::fs::write(&path, persona)
+        .await
+        .with_context(|| format!("writing {}", path.display()))?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        tokio::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+            .await
+            .with_context(|| format!("locking {}", path.display()))?;
+    }
+
+    Ok(())
+}
+
 async fn write_agent_home(home: &std::path::Path, files: &[(String, String)]) -> Result<()> {
     tokio::fs::create_dir_all(home)
         .await
@@ -4074,6 +4143,44 @@ mod tests {
     use super::*;
     use ft_core::{Agent, WorkspaceSize};
     use tempfile::TempDir;
+
+    /// A profile reaches its agent on disk, which is what keeps it off the
+    /// command line tmux has to carry.
+    ///
+    /// And goes again when there is none: what the supervisor reads is
+    /// whatever is in the file, so a run that stopped being a profile has to
+    /// stop having one here too.
+    #[tokio::test]
+    async fn a_persona_is_left_for_the_supervisor_and_cleared_when_there_is_none() {
+        let workspace = TempDir::new().unwrap();
+        let id = SessionId::from_stored("s_01persona".to_string());
+        let path = agentd::persona_path(workspace.path(), id.as_str());
+
+        write_persona(
+            workspace.path(),
+            &id,
+            "# You are the \"Orchestrator\" profile",
+        )
+        .await
+        .unwrap();
+        assert!(std::fs::read_to_string(&path)
+            .unwrap()
+            .contains("Orchestrator"));
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+            assert_eq!(
+                mode & 0o777,
+                0o600,
+                "a person's writing, not world-readable"
+            );
+        }
+
+        write_persona(workspace.path(), &id, "   ").await.unwrap();
+        assert!(!path.exists(), "an empty persona leaves nothing behind");
+    }
 
     /// The refusal somebody actually reads.
     ///
@@ -5277,6 +5384,7 @@ mod tests {
             env: vec![],
             agent_home: vec![],
             skills: vec![],
+            persona: String::new(),
         }))
     }
 
@@ -5515,6 +5623,7 @@ mod tests {
                     env: vec![],
                     agent_home: vec![],
                     skills: vec![],
+                    persona: String::new(),
                 })),
             ],
         )
@@ -5571,6 +5680,7 @@ mod tests {
                     env: vec![],
                     agent_home: vec![],
                     skills: vec![],
+                    persona: String::new(),
                 })),
             ],
         )
@@ -5608,6 +5718,7 @@ mod tests {
                             env: vec![],
                             agent_home: vec![],
                             skills: vec![],
+                            persona: String::new(),
                             workspace_session: None,
                         }),
                     },
@@ -5671,6 +5782,7 @@ mod tests {
                     env: vec![],
                     agent_home: vec![],
                     skills: vec![],
+                    persona: String::new(),
                 })),
             ],
         )
@@ -5702,6 +5814,7 @@ mod tests {
                     env: vec![],
                     agent_home: vec![],
                     skills: vec![],
+                    persona: String::new(),
                     workspace_session: None,
                 })),
             ],

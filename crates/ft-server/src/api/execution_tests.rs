@@ -1067,6 +1067,80 @@ async fn an_empty_repository_is_connected_rather_than_refused() {
     state.fleet.stop_supervising(&host.id).await;
 }
 
+/// A second agent in a profile's workspace is that profile; a delegated child
+/// in the same workspace is not.
+///
+/// The first half is what went wrong in the field: an agent added to an
+/// Orchestrator's workspace came up with no profile and no persona, could not
+/// delegate, and said nothing about why — which reads as the profile having
+/// stopped working rather than as a run that was never given one.
+///
+/// The second half is what must not happen now: a child's instructions are in
+/// its brief already, and the lead's persona on top of them would tell it that
+/// it is the lead.
+#[tokio::test]
+async fn a_second_agent_takes_the_workspaces_profile_and_a_child_does_not() {
+    let (state, _principal, host, _ready, owner) = fixture().await;
+    let org = state.db.org().await.unwrap();
+    let slug = state.access.personal_root(&owner).await.unwrap();
+    let new: crate::roles::NewRole = serde_json::from_value(serde_json::json!({
+        "name": "Orchestrator",
+        "does": "Leads a feature end to end",
+        "placement": "here",
+        "instructions": "Scope it, hand it out, say when it is ready.",
+        "canDelegate": true,
+    }))
+    .unwrap();
+    let profile = state.roles.create(&org, &owner, &slug, &new).await.unwrap();
+
+    let lead = ft_core::SessionId::new();
+    state
+        .db
+        .insert_session(
+            &lead,
+            &host.id,
+            &owner,
+            None,
+            "The one that cut it",
+            "do a thing",
+            Some("agent/x"),
+            Some("main"),
+            "ClaudeCode",
+            ft_core::WorkspaceSize::Medium,
+            ft_core::Share::Equal,
+            &ft_core::Step::plan(true, false),
+            None,
+        )
+        .await
+        .unwrap();
+    state.db.set_profile(&lead, profile.as_str()).await.unwrap();
+    let workspace = state
+        .db
+        .session(&lead)
+        .await
+        .unwrap()
+        .unwrap()
+        .workspace_id
+        .unwrap();
+
+    let taken = super::sessions::profile_for_run(&state, &owner, &workspace, None, false)
+        .await
+        .unwrap();
+    assert_eq!(
+        taken.map(|p| p.name).as_deref(),
+        Some("Orchestrator"),
+        "an agent added by hand is the workspace's profile"
+    );
+
+    let child = super::sessions::profile_for_run(&state, &owner, &workspace, None, true)
+        .await
+        .unwrap();
+    assert!(
+        child.is_none(),
+        "a delegated child carries its brief, not the lead's persona"
+    );
+}
+
 // ── What a workspace's `gh` is handed ───────────────────────────────────
 //
 // `gh_vars` is checked without a database in `sessions::gh_tests`. These are

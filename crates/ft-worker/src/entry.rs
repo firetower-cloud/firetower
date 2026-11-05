@@ -10,6 +10,23 @@
 use anyhow::{Context, Result};
 use std::path::PathBuf;
 
+/// The system prompt this session runs as, if it has one.
+///
+/// The file first, the environment second — see `agentd::persona_path` for why
+/// there is a file at all. Unreadable is the same as absent: a session that
+/// starts as a plain agent is a smaller surprise than one that refuses to
+/// start, and the control plane's copy is what the interface shows either way.
+fn persona_for(workspace: &std::path::Path, session: &str) -> Option<String> {
+    let written = std::fs::read_to_string(crate::agentd::persona_path(workspace, session))
+        .ok()
+        .filter(|text| !text.trim().is_empty());
+    written.or_else(|| {
+        std::env::var(ft_core::PERSONA_ENV)
+            .ok()
+            .filter(|text| !text.trim().is_empty())
+    })
+}
+
 /// Supervise one session's agent until it exits.
 pub async fn run_agent(session: &str, workspace: PathBuf, agent: &str) -> Result<()> {
     let kind =
@@ -53,8 +70,14 @@ pub async fn run_agent(session: &str, workspace: PathBuf, agent: &str) -> Result
         // see `ft_core::PREFERRED_ENV`.
         let preferred = ft_core::controls::Preferred::from_env();
         // The profile this session was started as, if any, composed by the
-        // control plane and carried in the environment — see `PERSONA_ENV`.
-        let persona = std::env::var(ft_core::PERSONA_ENV).ok();
+        // control plane and left in the workspace for us — see
+        // `agentd::persona_path`.
+        //
+        // The variable is still read, and only when there is no file: a
+        // session started by a control plane older than the field is carrying
+        // its persona the way that one knows how, and coming up as a plain
+        // agent would be the profile quietly going missing.
+        let persona = persona_for(&workspace, session);
         kind.launch_headless(session, &asking, start, &preferred, persona.as_deref())
             .map(|mut argv| {
                 // Claude Code has no home of its own here, so the directory

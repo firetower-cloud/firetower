@@ -58,11 +58,17 @@ pub const PREFERRED_ENV: &str = "FIRETOWER_AGENT_SETTINGS";
 /// The persona a session was started as, composed into the agent's system
 /// prompt.
 ///
-/// Carried in the environment for the same reason the settings above are: the
-/// worker inherits it on every launch, so a session that resumes after a
-/// restart is still the profile it was started as, without a frame to carry it
-/// or a file two sessions in one workspace would fight over. Empty or absent
-/// means a plain agent — no profile — which is the ordinary state.
+/// Read only when a session has no persona file beside it — see
+/// `agentd::persona_path`. It was carried here first, and a control plane
+/// older than the frame field still carries it here, so a worker that finds
+/// it takes it rather than starting a profile session as a plain agent.
+///
+/// It stopped being the way this travels because a session's environment
+/// reaches the agent along a tmux command line, and tmux takes one of those
+/// whole: about 16 kB, with the environment in it twice. Every other variable
+/// has a shape — a path, a token, a name — and a persona is a person's
+/// writing, so it was the one that could pass that on its own and fail the
+/// launch with `command too long`.
 pub const PERSONA_ENV: &str = "FIRETOWER_PERSONA";
 
 /// Which agent runs inside a workspace.

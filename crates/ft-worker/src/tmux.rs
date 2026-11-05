@@ -87,18 +87,17 @@ impl Tmux {
             bail!("{} is already running", self.name);
         }
 
-        let mut tmux = Command::new("tmux");
-        tmux.args([
-            "new-session",
-            "-d",
-            "-s",
-            &self.name,
-            "-c",
-            cwd.to_str().unwrap_or("."),
-        ]);
+        let mut args: Vec<String> = ["new-session", "-d", "-s"]
+            .iter()
+            .map(|a| a.to_string())
+            .collect();
+        args.push(self.name.clone());
+        args.push("-c".into());
+        args.push(cwd.to_str().unwrap_or(".").to_string());
 
         for (key, value) in env {
-            tmux.arg("-e").arg(format!("{key}={value}"));
+            args.push("-e".into());
+            args.push(format!("{key}={value}"));
         }
 
         // And again, in front of the command itself.
@@ -125,14 +124,25 @@ impl Tmux {
         // in a workspace's directory, which is the one thing that says which
         // workspace it belongs to — see `cgroup::join_command` for why the
         // pane has to move itself rather than be moved.
-        tmux.arg(format!(
+        args.push(format!(
             "{} {} {}",
             crate::cgroup::join_command(cwd),
             env_prefix(env),
             command
         ));
 
-        let output = tmux.output().await.context("starting tmux")?;
+        // Before tmux is asked, because what tmux says when this is too big is
+        // `command too long` — four words that name neither the session, nor
+        // the environment, nor the variable that did it. This says all three.
+        if let Some(why) = too_long(&args, env) {
+            bail!("{} cannot be started: {why}", self.name);
+        }
+
+        let output = Command::new("tmux")
+            .args(&args)
+            .output()
+            .await
+            .context("starting tmux")?;
         if !output.status.success() {
             bail!(
                 "tmux couldn't start {}: {}",
@@ -241,6 +251,63 @@ impl Tmux {
     }
 }
 
+/// What one tmux command line holds, in bytes.
+///
+/// A tmux client packs the whole of `argv` into a single message to its
+/// server, and that message is capped: `MAX_IMSGSIZE` (16384) less the header
+/// (16) less the argument count (4). Measured against tmux 3.3a, which takes
+/// 16364 bytes of packed arguments and refuses 16365 with `command too long`.
+///
+/// Nothing here can raise it. What a session can do is stay under it, which is
+/// why the one value with no ceiling — a profile's system prompt — travels as
+/// a file now rather than as a variable. See `agentd::persona_path`.
+const COMMAND_LIMIT: usize = 16_364;
+
+/// Why this launch will not fit, if it will not.
+///
+/// The environment is counted twice on purpose: it is in `argv` twice, once
+/// as `-e` arguments and once inlined in front of the command, and somebody
+/// reading "9 kB of environment, 16 kB of room" would otherwise be right to
+/// think there was space. Naming the largest variable is the whole point —
+/// it is almost always one value rather than a hundred small ones.
+fn too_long(args: &[String], env: &[(String, String)]) -> Option<String> {
+    // A packed argument is its bytes and a terminator, which is what tmux
+    // measures.
+    let packed: usize = args.iter().map(|arg| arg.len() + 1).sum();
+    if packed <= COMMAND_LIMIT {
+        return None;
+    }
+
+    let biggest = env
+        .iter()
+        .max_by_key(|(key, value)| key.len() + value.len())
+        .map(|(key, value)| {
+            format!(
+                ", the largest being {key} at {}",
+                size(key.len() + value.len() + 1)
+            )
+        });
+
+    Some(format!(
+        "its environment does not fit in a tmux command line. tmux takes {} and this launch is \
+         {}, because a session's environment travels in it twice — {} of variables{}. Shorten \
+         what this session carries: a profile's instructions, or a repository variable holding a \
+         key or a file.",
+        size(COMMAND_LIMIT),
+        size(packed),
+        size(env.iter().map(|(k, v)| k.len() + v.len() + 1).sum()),
+        biggest.unwrap_or_default(),
+    ))
+}
+
+/// Bytes, as somebody reading an error wants them.
+fn size(bytes: usize) -> String {
+    match bytes < 1024 {
+        true => format!("{bytes} B"),
+        false => format!("{:.1} kB", bytes as f64 / 1024.0),
+    }
+}
+
 /// `env 'K=V' 'K=V'` — the environment, set by the shell tmux runs the command
 /// with rather than by tmux itself.
 ///
@@ -298,6 +365,63 @@ mod tests {
     /// Unique per test, so a failure never leaves a name that breaks the next run.
     fn unique(tag: &str) -> Tmux {
         Tmux::for_session(&format!("test-{tag}-{}", std::process::id()))
+    }
+
+    /// An ordinary session is nowhere near the ceiling, and must not be told
+    /// it is.
+    #[test]
+    fn an_ordinary_launch_fits() {
+        let env = vec![
+            ("PATH".to_string(), "/usr/bin:/bin".repeat(10)),
+            (
+                "CLAUDE_CODE_OAUTH_TOKEN".to_string(),
+                "sk-ant-oat".repeat(8),
+            ),
+            (
+                "FIRETOWER_SESSION".to_string(),
+                "s_01m6pbz9p4bn16xpj8".into(),
+            ),
+        ];
+        let args = vec![
+            "new-session".to_string(),
+            "-d".into(),
+            "-s".into(),
+            "firetower-s_01m6pbz9p4bn16xpj8".into(),
+        ];
+        assert!(too_long(&args, &env).is_none());
+    }
+
+    /// And when it does not fit, the sentence has to be the one that saves the
+    /// next hour: which variable, and how big.
+    #[test]
+    fn an_oversized_environment_names_what_filled_it() {
+        let persona = "You are the Orchestrator. ".repeat(400);
+        let env = vec![
+            ("PATH".to_string(), "/usr/bin:/bin".to_string()),
+            ("FIRETOWER_PERSONA".to_string(), persona),
+        ];
+        // What `start` builds: the variables as `-e` arguments, then the same
+        // variables again inlined in front of the command.
+        let mut args = vec!["new-session".to_string()];
+        for (key, value) in &env {
+            args.push("-e".into());
+            args.push(format!("{key}={value}"));
+        }
+        args.push(env_prefix(&env));
+
+        let why = too_long(&args, &env).expect("this does not fit");
+        assert!(why.contains("FIRETOWER_PERSONA"), "{why}");
+        assert!(why.contains("twice"), "{why}");
+    }
+
+    /// Exactly at the ceiling still goes — the limit tmux enforces is the one
+    /// measured against it, not one rounded down for comfort.
+    #[test]
+    fn the_last_byte_that_fits_is_allowed() {
+        let args = vec!["x".repeat(COMMAND_LIMIT - 1)];
+        assert!(too_long(&args, &[]).is_none());
+        let args = vec!["x".repeat(COMMAND_LIMIT)];
+        assert!(too_long(&args, &[]).is_some());
     }
 
     #[test]

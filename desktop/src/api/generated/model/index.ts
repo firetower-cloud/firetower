@@ -166,6 +166,7 @@ export * from './pendingAuth.ts';
 export * from './pendingParams.ts';
 export * from './pendingPayload.ts';
 export * from './person.ts';
+export * from './persona.ts';
 export * from './placed.ts';
 export * from './placement.ts';
 export * from './planRequest.ts';

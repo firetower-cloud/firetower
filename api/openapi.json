@@ -5652,6 +5652,49 @@
         }
       }
     },
+    "/api/v1/sessions/{id}/persona": {
+      "get": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "The system prompt this session is working from.",
+        "description": "As it was sent, not as the profile stands now — the two part company the\nmoment somebody edits the profile, and what explains an agent's behaviour\nis the text it was actually given. A session that is no profile answers\nwith an empty one rather than a 404: \"this run has no persona\" is an\nordinary answer, not a missing page.",
+        "operationId": "session_persona",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Persona"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/sessions/{id}/preview": {
       "get": {
         "tags": [
@@ -12728,6 +12771,26 @@
           },
           "login": {
             "type": "string"
+          }
+        }
+      },
+      "Persona": {
+        "type": "object",
+        "description": "What a session is running as.",
+        "required": [
+          "text"
+        ],
+        "properties": {
+          "profile": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The profile's name as it stands now, when it still exists. A profile\ndeleted since the session started leaves the text and loses the name."
+          },
+          "text": {
+            "type": "string",
+            "description": "The system prompt the agent was handed, composed when this run\nlaunched. Empty for a plain agent, which is most of them."
           }
         }
       },

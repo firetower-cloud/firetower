@@ -60,6 +60,7 @@ import { forgetCheckout, landed, refused, settled, useCheckouts, type Run } from
 import { useListEvents } from "~/api/generated/events/events";
 import { elapsed, minutesSince } from "~/api/view";
 import { Composer } from "~/ui/Composer";
+import { why } from "~/data";
 import { Dropping, type Hand } from "~/ui/attach";
 import { folderRefusals, useFileDrop } from "~/ui/drop";
 import { AccountSwitcher } from "~/ui/AccountSwitcher";
@@ -1418,6 +1419,12 @@ function Relaunch({ session }: { session: Session }) {
         <RotateCcw className="h-3.5 w-3.5" strokeWidth={2} />
         Start it again
       </button>
+      {/* A restart that does not take says why, here and now. The session's
+          note carries the same reason for anybody who arrives later, but this
+          is the person who pressed it: dropping the answer left "it did not
+          restart" as the whole of what they got, which is an invitation to
+          press the button again rather than to fix anything. */}
+      {relaunch.error && <p className="mt-2 text-meta text-brick">{why(relaunch.error)}</p>}
     </div>
   );
 }
