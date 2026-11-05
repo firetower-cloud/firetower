@@ -11,7 +11,7 @@
  */
 
 import type { Session } from "./generated/model";
-import { inFlight, needsYou } from "./view";
+import { beatOf, inFlight, needsYou, type Beat } from "./view";
 
 /** A workspace: a checkout on a host, and the agents working in it. */
 export type Workspace = {
@@ -48,6 +48,66 @@ export function doing(place: Workspace): "waiting" | "working" | "idle" {
   if (place.runs.some(inFlight)) return "working";
   if (place.runs.some(needsYou)) return "waiting";
   return "idle";
+}
+
+/**
+ * Every agent a place is answerable for: the runs in it, and the runs of any
+ * workspace one of them started.
+ *
+ * `places` is the *whole* list, not the one a screen happens to be drawing. A
+ * child with a workspace of its own is hidden from the rail — it belongs under
+ * its lead in the Overview — which is precisely why the lead's row has to
+ * speak for it. Handed the list it is already drawing, this finds nothing,
+ * because the thing it is looking for is the thing that list left out.
+ *
+ * One hop is the whole of the tree: delegation is flat by construction, and
+ * `delegate.rs` refuses a child that tries to spawn.
+ */
+export function familyOf(place: Workspace, places: Workspace[]): Session[] {
+  const mine = new Set(place.runs.map((r) => r.id));
+  return [
+    ...place.runs,
+    ...places.flatMap((other) =>
+      other.id !== place.id && !!other.leadOf && mine.has(other.leadOf) ? other.runs : [],
+    ),
+  ];
+}
+
+/** Which beat a place wears when more than one is true of it. First wins. */
+const PRECEDENCE: Beat[] = ["blocked", "working", "broken", "done", "over"];
+
+/**
+ * What a place reads as, in one beat — the whole of it, not one run of it.
+ *
+ * The rail drew `beatOf(place.runs[0])`, and `group()` sorts whichever run
+ * wants you to the front. So a manager that had handed back painted its row
+ * sage — *finished, nothing owed* — while an agent it had delegated to was
+ * still typing, and the same workspace's Overview said "2 agents · 1 working"
+ * one panel away. Two screens, one workspace, two answers, and the one that
+ * was wrong was on the screen you glance at rather than the one you open.
+ *
+ * So the question is asked of the family rather than of a run: a place is only
+ * at rest when nothing under it is still going.
+ *
+ * The order, and why:
+ *
+ * - **blocked** first. Ember is spent on being stopped-and-stuck and on
+ *   nothing else (`beat.test.ts`), and a sibling still working does not make
+ *   an unanswered question any less unanswered.
+ * - **working** next. This is the one that was missing.
+ * - **broken**, then **done** — both at rest, and a failure is the louder of
+ *   the two: it will not finish on its own, whatever else here did.
+ * - **over** only when every one of them has ended.
+ *
+ * `doing()` is still the right question for a *word* — "working", "your move"
+ * — and keeps its own order, where in-flight wins. This is the question for a
+ * colour. The split is the one `view.ts` already draws between `needsYou` and
+ * `beatOf`: what wants a human, and what it looks like, are not the same
+ * question.
+ */
+export function placeBeat(place: Workspace, places: Workspace[]): Beat {
+  const beats = new Set(familyOf(place, places).map(beatOf));
+  return PRECEDENCE.find((beat) => beats.has(beat)) ?? "over";
 }
 
 export function group(sessions: Session[]): Repositories {

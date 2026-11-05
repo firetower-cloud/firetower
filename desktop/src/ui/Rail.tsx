@@ -14,8 +14,8 @@ import type { LucideIcon } from "lucide-react";
 import { AgentMark } from "~/components/AgentMark";
 import { Blocks } from "~/island/Blocks";
 import { HostMark, Icon } from "~/components/ui";
-import { childrenOf, childrenWorking, doing, group, isChild, rowLabel, shortRepo, type Repositories, type Workspace } from "~/api/workspaces";
-import { beatOf, elapsed, minutesSince } from "~/api/view";
+import { childrenOf, childrenWorking, doing, group, isChild, placeBeat, rowLabel, shortRepo, type Repositories, type Workspace } from "~/api/workspaces";
+import { elapsed, minutesSince, type Beat } from "~/api/view";
 import type { Backend } from "~/fleet";
 import { useHostOf, useSessions, useUpdatesRow } from "~/data";
 import { isPersonal } from "~/filing";
@@ -126,7 +126,7 @@ export function Rail({ backend }: { backend: Backend }) {
               {nothing ? (
                 <p className="px-2.5 py-1 text-ui text-mute">Nothing running.</p>
               ) : (
-                <Repos repos={mine} path={path} />
+                <Repos repos={mine} path={path} all={everyPlace} />
               )}
             </>
           )}
@@ -137,7 +137,7 @@ export function Rail({ backend }: { backend: Backend }) {
                 label="Shared workspaces"
                 onNew={mine.groups.length === 0 && !nothing ? () => start() : undefined}
               />
-              <Repos repos={theirs} path={path} />
+              <Repos repos={theirs} path={path} all={everyPlace} />
             </>
           )}
         </div>
@@ -251,10 +251,10 @@ function NavLink({ href, label, icon, on, dot, loud }: { href: string; label: st
  * or all stuck. The same glyphs and the same order as the pill, at eight
  * pixels, so a group that is scrolled past still says what is in it.
  */
-function RepoTally({ places }: { places: Workspace[] }) {
+function RepoTally({ places, all }: { places: Workspace[]; all: Workspace[] }) {
   const tally = { working: 0, blocked: 0, done: 0, broken: 0 };
   for (const place of places) {
-    const beat = beatOf(place.runs[0]);
+    const beat = placeBeat(place, all);
     if (beat === "over") continue;
     tally[beat] += 1;
   }
@@ -287,6 +287,7 @@ function Row({
   place,
   on,
   label,
+  beat,
   working = 0,
   delegated = 0,
 }: {
@@ -294,6 +295,9 @@ function Row({
   on: boolean;
   /** What to call it here: a child's own part, the lead prefix dropped. */
   label?: string;
+  /** The whole place in one beat — `placeBeat`, worked out by the caller,
+   *  which is the one holding the full list a delegated child is found on. */
+  beat: Beat;
   working?: number;
   /** Agents it started and has not ended; ending this place ends them too. */
   delegated?: number;
@@ -340,8 +344,13 @@ function Row({
             in ember — saying again what this already says, and contradicting
             it for the two statuses where `needsYou` and the colour disagree:
             a finished workspace drew sage and then ember, a failed one brick
-            and then ember. The mark is the only thing that speaks now. */}
-        <Blocks beat={beatOf(place.runs[0])} size={9} />
+            and then ember. The mark is the only thing that speaks now.
+
+            Which is why it reads the whole place rather than `runs[0]`. One
+            mark, no words beside it, and nothing else on this row to correct
+            it: it has to be true of everything under here, including the
+            agents this place delegated to. See `placeBeat`. */}
+        <Blocks beat={beat} size={9} />
         <span className={`min-w-0 flex-1 truncate text-ui ${on ? "text-bone" : "text-dim"}`}>{label ?? place.name}</span>
         <span className="shrink-0 font-mono text-micro text-mute">
           {elapsed(minutesSince(place.runs[0].createdAt))}
@@ -401,8 +410,14 @@ function Where({ place }: { place: Workspace }) {
   );
 }
 
-/** One section's worth: a heading per repository, with its workspaces under it. */
-function Repos({ repos, path }: { repos: Repositories; path: string }) {
+/**
+ * One section's worth: a heading per repository, with its workspaces under it.
+ *
+ * `all` is every place on both sections, children included — the list this one
+ * was cut from. A row's own list cannot answer anything about what it
+ * delegated, because a delegated child is exactly what was filtered out of it.
+ */
+function Repos({ repos, path, all }: { repos: Repositories; path: string; all: Workspace[] }) {
   const hostOf = useHostOf();
   return (
     <>
@@ -417,7 +432,7 @@ function Repos({ repos, path }: { repos: Repositories; path: string }) {
             <span className="min-w-0 flex-1 truncate text-ui font-medium text-bone">
               {shortRepo(repo)}
             </span>
-            <RepoTally places={places} />
+            <RepoTally places={places} all={all} />
           </div>
           {places.map((place) => (
             <Row
@@ -425,8 +440,9 @@ function Repos({ repos, path }: { repos: Repositories; path: string }) {
               place={place}
               on={path === `/sessions/${place.id}`}
               label={rowLabel(place, places)}
-              working={childrenWorking(place, places)}
-              delegated={childrenOf(place, places)}
+              beat={placeBeat(place, all)}
+              working={childrenWorking(place, all)}
+              delegated={childrenOf(place, all)}
             />
           ))}
         </div>

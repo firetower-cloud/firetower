@@ -6,7 +6,7 @@
  * the address having ended.
  */
 import { describe, expect, it } from "vitest";
-import { childrenOf, childrenWorking, doing, group, isChild, placeOf, rowLabel } from "./workspaces";
+import { childrenOf, childrenWorking, doing, group, isChild, placeBeat, placeOf, rowLabel } from "./workspaces";
 import type { Session } from "~/api/generated/model";
 
 const run = (id: string, workspaceId: string, status = "Ready"): Session =>
@@ -135,5 +135,78 @@ describe("rowLabel", () => {
     const ps = places([run("s_9", "s_9"), kid]);
     const row = ps.find((p) => p.id === "s_2")!;
     expect(rowLabel(row, ps)).toBe("Main session / hello-fr");
+  });
+});
+
+/**
+ * One workspace, one answer.
+ *
+ * The rail's mark used to be `beatOf(place.runs[0])`, and `group()` sorts
+ * whichever run wants you to the front — so a manager that had handed back
+ * painted its row sage while an agent it had delegated to was still typing.
+ * The Overview panel, reading the same workspace, said "1 working". These are
+ * the cases where one run cannot speak for the place.
+ */
+describe("placeBeat", () => {
+  const child = (id: string, parentId: string, workspaceId = id, status = "Working"): Session =>
+    ({ ...run(id, workspaceId, status), parentId }) as unknown as Session;
+
+  /** The bug, exactly as it was reported: a lead done, a child not. */
+  it("is working while an agent in the place still is, whatever the lead says", () => {
+    const all = [run("s_1", "s_1", "HandedBack"), child("s_2", "s_1", "s_1")];
+    const lead = placeOf(places(all), "s_1")!;
+    // The run the old mark read, to show it is the one that was lying.
+    expect(lead.runs[0].status).toBe("HandedBack");
+    expect(placeBeat(lead, places(all))).toBe("working");
+  });
+
+  /** The same thing with the child off in a workspace of its own — which the
+   *  rail filters out, so only the full list can answer. */
+  it("is working while a delegated child elsewhere still is", () => {
+    const all = [run("s_1", "s_1", "HandedBack"), child("s_2", "s_1")];
+    const every = places(all);
+    const lead = every.find((p) => p.id === "s_1")!;
+    expect(placeBeat(lead, every)).toBe("working");
+    // Handed the list the rail draws — the one its own child was cut from —
+    // there is nothing left to find, which is how it went wrong.
+    expect(placeBeat(lead, [lead])).toBe("done");
+  });
+
+  it("spends ember even when something beside it is working", () => {
+    const all = [run("s_1", "s_1", "NeedsYou"), child("s_2", "s_1", "s_1")];
+    const lead = placeOf(places(all), "s_1")!;
+    expect(placeBeat(lead, places(all))).toBe("blocked");
+  });
+
+  it("says broken over done: a failure does not finish on its own", () => {
+    const all = [run("s_1", "s_1", "HandedBack"), child("s_2", "s_1", "s_2", "Failed")];
+    const every = places(all);
+    expect(placeBeat(every.find((p) => p.id === "s_1")!, every)).toBe("broken");
+  });
+
+  it("is done only when the whole family is at rest", () => {
+    const all = [run("s_1", "s_1", "HandedBack"), child("s_2", "s_1", "s_2", "HandedBack")];
+    const every = places(all);
+    expect(placeBeat(every.find((p) => p.id === "s_1")!, every)).toBe("done");
+  });
+
+  it("is over when every one of them has ended", () => {
+    const all = [run("s_1", "s_1", "Ended"), child("s_2", "s_1", "s_1", "Ended")];
+    expect(placeBeat(placeOf(places(all), "s_1")!, places(all))).toBe("over");
+  });
+
+  /**
+   * The mark and the `\u21B3n` beside it are one statement: "its breathing dot
+   * is honest about the tree, and this is the number behind it". A row that
+   * counts delegated work still going may not also say it is at rest.
+   */
+  it("never reads at rest on a row that counts work still going", () => {
+    for (const where of ["s_1", "s_2"]) {
+      const all = [run("s_1", "s_1", "HandedBack"), child("s_2", "s_1", where)];
+      const every = places(all);
+      const lead = every.find((p) => p.id === "s_1")!;
+      expect(childrenWorking(lead, every)).toBe(1);
+      expect(["working", "blocked"]).toContain(placeBeat(lead, every));
+    }
   });
 });
