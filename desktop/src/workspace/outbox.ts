@@ -256,7 +256,7 @@ export async function run(sessionId: string, parcel: Parcel, ports: Ports = real
     /* The files that landed are already in the workspace and already named in
        this text, so handing it back is what lets a second press deliver all of
        it without putting anything there twice. */
-    return { text, why: `Your first message was not sent. ${why(e)} ${lost(missing)}`.trim() };
+    return { text, why: `Your first message was not sent — ${why(e)}. ${lost(missing)}`.trim() };
   }
 
   return missing.length ? { why: lost(missing) } : null;
@@ -277,6 +277,6 @@ export function post(sessionId: string, parcel: Parcel) {
     .then((trouble) => {
       if (trouble) hold(sessionId, trouble);
     })
-    .catch((e) => hold(sessionId, { text: parcel.text, why: `Your first message was not sent. ${why(e)}` }))
+    .catch((e) => hold(sessionId, { text: parcel.text, why: `Your first message was not sent — ${why(e)}.` }))
     .finally(() => going.delete(sessionId));
 }
