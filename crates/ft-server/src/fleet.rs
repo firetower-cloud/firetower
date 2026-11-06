@@ -794,15 +794,62 @@ async fn announce_status(
     status: SessionStatus,
     note: Option<&str>,
 ) {
-    let at = chrono::Utc::now();
-    let kind = EventKind::StatusChanged {
-        status,
-        note: note.map(str::to_string),
-    };
-
     // Writing the event *is* writing the status: `write_event` applies a
     // `StatusChanged` to the session row in the same transaction. There is no
     // second call, and so no window where the two disagree.
+    record_and_announce(
+        db,
+        events,
+        session_id,
+        EventKind::StatusChanged {
+            status,
+            note: note.map(str::to_string),
+        },
+    )
+    .await;
+}
+
+/// Say that something went wrong for a session, without saying the session is
+/// over.
+///
+/// The other half of [`announce_status`], and the two are not interchangeable.
+/// A status is a verdict on the whole session; a `Failed` event is one thing
+/// that happened to it, and `write_event` applies only the first to the
+/// session row. A message the worker could not hand over is the second kind —
+/// the agent, the workspace and the branch are all still there — and reporting
+/// it as the first is what put "The agent is not running", with a button
+/// offering to restart it, over agents that were running perfectly.
+async fn trouble(
+    db: &Db,
+    events: &broadcast::Sender<Event>,
+    session_id: &SessionId,
+    code: &str,
+    message: &str,
+) {
+    record_and_announce(
+        db,
+        events,
+        session_id,
+        EventKind::Failed {
+            code: code.to_string(),
+            message: message.to_string(),
+        },
+    )
+    .await;
+}
+
+/// Write one local event down and tell everyone watching, in that order.
+///
+/// Durable first: a subscriber that arrives a moment later replays from the
+/// table, so an event announced and not yet written is one nobody ever sees
+/// again.
+async fn record_and_announce(
+    db: &Db,
+    events: &broadcast::Sender<Event>,
+    session_id: &SessionId,
+    kind: EventKind,
+) {
+    let at = chrono::Utc::now();
     match db.record_local_event(session_id, &kind, at).await {
         Ok(Some(seq)) => {
             // a send failure only means nobody is watching
@@ -817,7 +864,7 @@ async fn announce_status(
         // unreachable rather than ordinary. Said out loud in case that ever
         // stops being true.
         Ok(None) => tracing::warn!(session = %session_id, "a local event was treated as a replay"),
-        Err(e) => tracing::warn!(session = %session_id, "recording a status change: {e:#}"),
+        Err(e) => tracing::warn!(session = %session_id, "recording {}: {e:#}", kind.label()),
     }
 }
 
@@ -918,9 +965,28 @@ async fn tell(
 fn note_for(code: &str, message: &str) -> String {
     match code {
         "AgentUnavailable" => "The agent is not running. Its workspace is still here.".to_string(),
+        // [`UNDELIVERED`] is deliberately not here. This function writes the
+        // note on a *status*, and that code is the one the session's status is
+        // not moved for — the worker's own sentence goes into the timeline
+        // instead, where it names which frame did not go and what tmux said
+        // about the agent afterwards.
         _ => message.to_string(),
     }
 }
+
+/// A frame the worker could not hand to an agent that is still running.
+///
+/// Distinct from `AgentUnavailable`, which the worker now says only once it
+/// has established the agent is gone — and which takes the session to
+/// `Failed`. This one must not: a lead with children sends a `ToWorker::Answer`
+/// for every delegation call it makes, those are the messages most often in
+/// flight when a socket is briefly unavailable, and one of them missing used
+/// to condemn the whole session.
+///
+/// A free string on the frame, so nothing about the protocol changes and
+/// `PROTOCOL_VERSION` stays where it is. Spelled the same in
+/// `ft_worker::deliver_to_agent`, which is the only thing that sends it.
+const UNDELIVERED: &str = "MessageUndelivered";
 
 /// A question, short enough for a card in the inbox.
 fn asking_about(tool: &str, args: &serde_json::Value) -> String {
@@ -1352,6 +1418,24 @@ pub struct Fleet {
     /// `None` — a fleet built for a test, or before start-up finishes —
     /// refuses the call in words rather than leaving the agent waiting.
     delegate: Arc<RwLock<Option<mpsc::Sender<crate::delegate::AgentRequest>>>>,
+    /// What a child handed back that has gone to its lead and not yet visibly
+    /// arrived there.
+    ///
+    /// `take_deliveries` claims a row as it reads it, so from that moment the
+    /// only copy of a child's work is the message on its way to the lead —
+    /// and `send_turn` answers `Ok` for a frame merely *queued* to a host.
+    /// Whether it reached the agent arrives later and separately, as a
+    /// `ToServer::Error`, and when it did not the row was already gone. The
+    /// child's work was dropped and the lead was marked `Failed` for it.
+    ///
+    /// Held here so that later failure has something to restore. An entry
+    /// lives from the send until the lead's agent writes its next line, which
+    /// is proof the message landed: a delivery only goes out when the lead is
+    /// between turns, so the next thing it says is a consequence of this.
+    ///
+    /// In memory, like `typed` above and for the same reason — a thing in
+    /// flight rather than a thing to keep.
+    delivering: Arc<RwLock<HashMap<String, Vec<String>>>>,
 }
 
 /// A word to a supervisor between attempts.
@@ -1415,6 +1499,7 @@ impl Fleet {
             supervised: Arc::new(RwLock::new(HashMap::new())),
             vault: None,
             delegate: Arc::new(RwLock::new(None)),
+            delivering: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -1538,6 +1623,68 @@ impl Fleet {
             // lost: the child did the work and said so.
             if let Err(e) = self.db.queue_delivery(lead, None, &body).await {
                 tracing::warn!(session = %lead, "re-holding a result: {e:#}");
+            }
+            return;
+        }
+
+        // And held, because `Ok` above is not arrival. `send_turn` queues a
+        // frame to a host and answers; whether the agent took it is a separate
+        // sentence that arrives later. Until it does, this is the only copy —
+        // `take_deliveries` claimed the row on the way out. See `delivering`.
+        self.delivering
+            .write()
+            .await
+            .entry(lead.to_string())
+            .or_default()
+            .push(body);
+    }
+
+    /// The lead's agent spoke, so what was sent to it arrived.
+    ///
+    /// Called for every line any agent writes, which is why it reads before it
+    /// writes: almost none of those lines are the first after a delivery, and
+    /// taking the write lock for each of them would put every agent's output
+    /// through one queue.
+    ///
+    /// A line is proof because of when a delivery is allowed to go: only while
+    /// the lead is between turns. An idle agent says nothing until it is given
+    /// something, so the next line out of it is this message being read.
+    pub async fn delivery_arrived(&self, lead: &SessionId) {
+        let nothing_held = match self.delivering.read().await.get(lead.as_str()) {
+            None => true,
+            Some(held) => held.is_empty(),
+        };
+        if nothing_held {
+            return;
+        }
+        self.delivering.write().await.remove(lead.as_str());
+    }
+
+    /// A message to this session could not be handed over: put a child's
+    /// result back.
+    ///
+    /// The failure the queue was always waiting for. `drain_deliveries` has
+    /// re-queued on `Err` from `send_turn` since it was written, and
+    /// `send_turn` does not fail for an undeliverable message — it fails for a
+    /// host that is not connected. An agent that would not take the frame is
+    /// reported minutes later and from the other end, as `ToServer::Error`,
+    /// and by then the row had been claimed and the body was only in memory.
+    ///
+    /// Nothing is re-sent from here. A re-queued row goes out at the next
+    /// moment the lead stops, which is what `drain_deliveries` is called on
+    /// every status change for — and sending again into the agent that has
+    /// just refused one would be a loop of a failure every retry window, for
+    /// as long as it stayed unreachable.
+    pub async fn delivery_failed(&self, lead: &SessionId) {
+        let Some(held) = self.delivering.write().await.remove(lead.as_str()) else {
+            return;
+        };
+        for body in held {
+            if let Err(e) = self.db.queue_delivery(lead, None, &body).await {
+                // Nowhere left to put it. Said at `error` rather than `warn`
+                // because this is the line that explains a child's work
+                // vanishing, and there will be nothing else about it.
+                tracing::error!(session = %lead, "a child's result could not be re-held: {e:#}");
             }
         }
     }
@@ -2214,6 +2361,15 @@ impl Fleet {
                                 }
                                 Ok(true) => {}
                             }
+
+                            // A line is a lead confirming it was given what a
+                            // child handed back. Deliveries only go out while
+                            // a lead is between turns, so an idle agent that
+                            // has started speaking is one that has read its
+                            // message — and from here it is safe to stop
+                            // holding a copy against a failure that is no
+                            // longer coming. See `Fleet::delivering`.
+                            replying.delivery_arrived(&session_id).await;
                             if let Err(e) = crate::api::accounts::record_limits(&db, &session_id, &line).await {
                                 tracing::warn!(session = %session_id, "recording account limits: {e:#}");
                             }
@@ -2690,6 +2846,36 @@ impl Fleet {
                             // A host-level fault names nothing, and must not be
                             // pinned on whichever session went last.
                             if let Some(session_id) = session_id {
+                                // Whichever of the two this is, a frame to this
+                                // session did not arrive — and the frame may
+                                // have been a child's hand-back, whose row was
+                                // claimed out of the queue to send it. Putting
+                                // it back is the whole reason that copy is kept.
+                                replying.delivery_failed(&session_id).await;
+
+                                // And then: has the session ended, or did one
+                                // message merely not arrive? The worker asks
+                                // tmux before it says `AgentUnavailable`, so
+                                // that code now means the agent is genuinely
+                                // gone and `Failed` is the honest answer.
+                                //
+                                // `UNDELIVERED` is the other case, and it is
+                                // the common one since delegation: every tool
+                                // result a lead produces travels as a
+                                // `ToWorker::Answer`, so these are the messages
+                                // in flight when a socket is briefly away. One
+                                // of them missing used to take the whole
+                                // session to `Failed` and show "The agent is
+                                // not running" over an agent that was running —
+                                // which is the fault this split exists to stop.
+                                // It is recorded against the session as
+                                // something that happened to it, and the
+                                // session is left exactly as it was.
+                                if code == UNDELIVERED {
+                                    trouble(&db, &events, &session_id, &code, &message).await;
+                                    continue;
+                                }
+
                                 let note = note_for(&code, &message);
                                 announce_status(&db, &events, &session_id, SessionStatus::Failed, Some(&note)).await;
                                 // So an open browser stops waiting without
@@ -4750,6 +4936,171 @@ mod tests {
             .await
             .unwrap();
         (Fleet::new(db), host.id)
+    }
+
+    /// A lead, its host, and a worker on the far end of a channel.
+    ///
+    /// The worker is a channel rather than a connection because the fault
+    /// under test is exactly that handing a frame to one is not the same as an
+    /// agent receiving it: `send_turn` answers `Ok` for a frame queued here,
+    /// and whether the agent took it comes back later and separately.
+    async fn lead_with_a_worker() -> (Fleet, SessionId, mpsc::Receiver<ToWorker>) {
+        let (db, owner) = Db::open_for_test_owned().await.unwrap();
+        let host = db
+            .ensure_host("fire-01", ft_core::Compute::Local, owner.as_str())
+            .await
+            .unwrap();
+        let lead = SessionId::new();
+        db.insert_session(
+            &lead,
+            &host.id,
+            owner.as_str(),
+            None,
+            "Lead",
+            "delegate something",
+            None,
+            None,
+            "ClaudeCode",
+            ft_core::WorkspaceSize::Medium,
+            ft_core::Share::Equal,
+            &[],
+            None,
+        )
+        .await
+        .unwrap();
+
+        let fleet = Fleet::new(db);
+        let (to_worker, frames) = mpsc::channel(8);
+        fleet
+            .workers
+            .write()
+            .await
+            .insert(host.id.to_string(), to_worker);
+        (fleet, lead, frames)
+    }
+
+    /// A child's hand-back that never reached its lead is held again.
+    ///
+    /// `drain_deliveries` has always re-queued on `Err` from `send_turn`, and
+    /// `send_turn` does not fail for a message an agent would not take — it
+    /// fails for a host that is not connected. `take_deliveries` claims the row
+    /// as it reads it, so from the send onwards the only copy of the child's
+    /// work was the message in flight, and the refusal arrived minutes later
+    /// as a `ToServer::Error` with nothing left to restore. The child's work
+    /// was dropped, and the lead was marked `Failed` for it.
+    #[tokio::test]
+    async fn a_hand_back_that_never_reached_its_lead_is_held_again() {
+        let (fleet, lead, mut frames) = lead_with_a_worker().await;
+
+        fleet
+            .db
+            .queue_delivery(&lead, None, "the child's report")
+            .await
+            .unwrap();
+        fleet.drain_deliveries(&lead).await;
+
+        assert!(
+            matches!(frames.try_recv(), Ok(ToWorker::SendTurn { .. })),
+            "it should have gone to the host"
+        );
+        assert!(
+            fleet.db.take_deliveries(&lead).await.unwrap().is_empty(),
+            "and the row went with it, which is the problem this is about"
+        );
+
+        // What the worker says when the agent would not take it.
+        fleet.delivery_failed(&lead).await;
+
+        let waiting = fleet.db.take_deliveries(&lead).await.unwrap();
+        assert_eq!(
+            waiting
+                .iter()
+                .map(|(_, body)| body.as_str())
+                .collect::<Vec<_>>(),
+            ["the child's report"],
+            "a child did the work and said so; it waits for the lead rather than going"
+        );
+    }
+
+    /// And one the lead has read is not sent to it twice.
+    ///
+    /// A line out of the lead is the proof. A delivery only goes out while a
+    /// lead is between turns, so an idle agent that has started talking is one
+    /// that has read what it was given — and a later failure, about some other
+    /// message, must not put this one back.
+    #[tokio::test]
+    async fn a_hand_back_the_lead_has_read_is_not_held_again() {
+        let (fleet, lead, mut frames) = lead_with_a_worker().await;
+
+        fleet
+            .db
+            .queue_delivery(&lead, None, "the child's report")
+            .await
+            .unwrap();
+        fleet.drain_deliveries(&lead).await;
+        assert!(frames.try_recv().is_ok());
+
+        fleet.delivery_arrived(&lead).await;
+        fleet.delivery_failed(&lead).await;
+
+        assert!(
+            fleet.db.take_deliveries(&lead).await.unwrap().is_empty(),
+            "a result the lead has already read must not be delivered a second time"
+        );
+    }
+
+    /// A message that did not arrive is said, not held against the session.
+    ///
+    /// The whole of the complaint: one undelivered frame took a session to
+    /// `Failed` and drew "The agent is not running" over an agent that was
+    /// running, with a button offering to restart something that never
+    /// stopped. It is recorded as a thing that happened to the session now —
+    /// `write_event` applies only a `StatusChanged` to the session row — and
+    /// the session is left exactly as it was.
+    #[tokio::test]
+    async fn a_message_that_did_not_arrive_does_not_fail_the_session() {
+        let (fleet, lead, _frames) = lead_with_a_worker().await;
+        let before = fleet.db.session_status(&lead).await.unwrap();
+
+        trouble(
+            &fleet.db,
+            &fleet.events,
+            &lead,
+            UNDELIVERED,
+            "a turn did not reach the agent, which is still running on this host",
+        )
+        .await;
+
+        assert_eq!(
+            fleet.db.session_status(&lead).await.unwrap(),
+            before,
+            "an undelivered message is not a verdict on the session"
+        );
+
+        let told = fleet.db.events_since(0).await.unwrap();
+        assert!(
+            told.iter().any(|e| matches!(
+                &e.kind,
+                EventKind::Failed { code, message }
+                    if code == UNDELIVERED && message.contains("still running")
+            )),
+            "and it still has to be written down somewhere somebody can read: {told:?}"
+        );
+
+        // The other code is still a verdict, because by the time the worker
+        // sends it, it has asked tmux and the agent is gone.
+        announce_status(
+            &fleet.db,
+            &fleet.events,
+            &lead,
+            SessionStatus::Failed,
+            Some(&note_for("AgentUnavailable", "no agent is listening")),
+        )
+        .await;
+        assert_eq!(
+            fleet.db.session_status(&lead).await.unwrap(),
+            Some(SessionStatus::Failed)
+        );
     }
 
     /// An install that can't even be sent must not leave the request behind.
