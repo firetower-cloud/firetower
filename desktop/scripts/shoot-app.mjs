@@ -13,7 +13,7 @@
  * that happened to work.
  */
 import { chromium } from "playwright-core";
-import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 
 const OUT = process.env.OUT ?? new URL("../../.firetower/reconcile/app", import.meta.url).pathname;
 const PROTO = new URL("../../.firetower/reconcile/proto", import.meta.url).pathname;
@@ -485,7 +485,11 @@ if (missing.length || extra.length) {
   process.exit(1);
 }
 
-const log = [];
+/* Merged, not overwritten: `ONLY=settings` used to leave the index holding
+   twelve rows and `reconcile.mjs` reporting the other eighty-four as "not in
+   the app's table", which is the one thing this file exists not to do. */
+const before = existsSync(`${OUT}/index.json`) ? JSON.parse(readFileSync(`${OUT}/index.json`, "utf8")) : [];
+const log = ONLY ? before.filter((r) => !r.id.includes(ONLY)) : [];
 let shot = 0,
   skipped = 0,
   broke = 0;
@@ -517,6 +521,8 @@ for (const s of SHOTS) {
   process.stdout.write(`\r  ${shot + broke}/${SHOTS.length - skipped}  ${s.id}`.padEnd(78));
 }
 
+/* Back into the prototype's order, so the file reads as the sheet reads. */
+log.sort((a, b) => want.indexOf(a.id) - want.indexOf(b.id));
 writeFileSync(`${OUT}/index.json`, JSON.stringify(log, null, 2));
 await browser.close();
 console.log(`\n  ${shot} shot · ${skipped} not reachable yet · ${broke} failed → ${OUT}`);
