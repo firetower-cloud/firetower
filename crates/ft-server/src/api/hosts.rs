@@ -146,11 +146,33 @@ fn settled(compute: ft_core::Compute) -> Result<ft_core::Compute, ApiError> {
             // control plane. `SshTransport::command` passes `--` before the
             // destination so this cannot happen whatever is stored; this is the
             // other half, so that nothing of the shape is ever stored at all.
+            //
+            // **The first character, and only the first.** ssh reads an
+            // argument as an option when it *starts* with `-`; a dash anywhere
+            // else is an ordinary character in an ordinary hostname —
+            // `build-box`, `eu-west-1.example.com` — and searching for one
+            // would refuse addresses that are perfectly good.
             if typed.host.starts_with('-') {
                 return Err(ApiError::new(
                     ErrorCode::InvalidRequest,
                     "an address cannot start with `-` — ssh would read it as an option \
                      rather than a machine",
+                ));
+            }
+
+            let user = given(user).or(typed.user);
+
+            // The same refusal for the account, because the destination is
+            // assembled from both: `ssh_destination` is `format!("{user}@{host}")`,
+            // so a user of `-oProxyCommand=…` is the same word in the same
+            // place. Not reachable past the `--` above, and that is the point
+            // of saying it twice — the two halves of this fix should not
+            // depend on each other to hold.
+            if user.as_deref().is_some_and(|u| u.starts_with('-')) {
+                return Err(ApiError::new(
+                    ErrorCode::InvalidRequest,
+                    "an ssh account cannot start with `-` — ssh would read the destination \
+                     as an option rather than a machine",
                 ));
             }
 
@@ -170,7 +192,7 @@ fn settled(compute: ft_core::Compute) -> Result<ft_core::Compute, ApiError> {
 
             Ok(ft_core::Compute::Server {
                 host: typed.host,
-                user: given(user).or(typed.user),
+                user,
                 port: port.or(typed.port),
                 key,
                 host_key: given(host_key),
@@ -706,8 +728,32 @@ mod tests {
             assert!(e.message.contains("cannot start with"), "{}", e.message);
         }
 
-        // And a machine whose name merely contains one is still a machine.
+        // And a machine whose name merely contains one is still a machine:
+        // ssh only reads an argument as an option when it *starts* with `-`.
         assert!(settled(server("fire-01-a", None)).is_ok());
+        assert!(settled(server("eu-west-1.example.com", Some("build-user"))).is_ok());
+    }
+
+    /// The destination is assembled from both parts — `user@host` — so the
+    /// account is the same bug in the same word. Refused in both the field it
+    /// was typed into and the one parsed out of an address.
+    #[test]
+    fn an_account_that_ssh_would_read_as_an_option_is_refused() {
+        let typed =
+            settled(server("fire-01", Some("-oProxyCommand=touch /tmp/pwned"))).unwrap_err();
+        assert!(matches!(typed.code, ErrorCode::InvalidRequest));
+        assert!(
+            typed.message.contains("cannot start with"),
+            "{}",
+            typed.message
+        );
+
+        let pasted = settled(server("-oProxyCommand=id@fire-01", None)).unwrap_err();
+        assert!(
+            matches!(pasted.code, ErrorCode::InvalidRequest),
+            "{}",
+            pasted.message
+        );
     }
 
     #[test]

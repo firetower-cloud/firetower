@@ -413,6 +413,15 @@ async fn an_address_that_is_an_ssh_option_is_refused_at_the_api() {
             "key": { "type": "Default" },
         },
     });
+    // The account as well, because the destination is assembled from both.
+    let as_the_account = serde_json::json!({
+        "compute": {
+            "type": "Server",
+            "host": "fire-01",
+            "user": format!("-oProxyCommand=touch {}", proof.display()),
+            "key": { "type": "Default" },
+        },
+    });
 
     let created = hosts::create_host(
         State(state.clone()),
@@ -430,6 +439,30 @@ async fn an_address_that_is_an_ssh_option_is_refused_at_the_api() {
     .await
     .unwrap_err();
     assert!(matches!(probed.code, ErrorCode::InvalidRequest));
+
+    for door in [
+        hosts::create_host(
+            State(state.clone()),
+            Extension(principal.clone()),
+            Json(serde_json::from_value(as_the_account.clone()).unwrap()),
+        )
+        .await
+        .map(|_| ())
+        .unwrap_err(),
+        hosts::probe_host(
+            State(state.clone()),
+            Json(serde_json::from_value(as_the_account).unwrap()),
+        )
+        .await
+        .map(|_| ())
+        .unwrap_err(),
+    ] {
+        assert!(
+            matches!(door.code, ErrorCode::InvalidRequest),
+            "{}",
+            door.message
+        );
+    }
 
     assert!(!proof.exists(), "nothing was run");
     let Json(listed) = hosts::list_hosts(State(state.clone()), Extension(principal))

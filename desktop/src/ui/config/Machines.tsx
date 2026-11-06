@@ -175,6 +175,25 @@ function Removed() {
   );
 }
 
+/**
+ * Which copy of the session list is open, if either.
+ *
+ * There are two controls for one list — one in the notice, one on the line
+ * under the card — because the notice is the explanation and the line is the
+ * route, and the line has to survive the notice being dismissed. Holding
+ * *where* it is open rather than *whether* means the list is drawn under
+ * whichever control was pressed: never twice, and never nowhere.
+ *
+ * It was a boolean, with the copy under the line gated on there being no
+ * chores left. That is the state QA found: chores outstanding and the notice
+ * dismissed, so neither copy drew and the line's control toggled nothing.
+ */
+export type Listing = "notice" | "foot" | null;
+
+export function toggled(open: Listing, pressed: Exclude<Listing, null>): Listing {
+  return open === pressed ? null : pressed;
+}
+
 function WasHere({ machine }: { machine: RetiredMachine }) {
   const sessions = useSessions();
   const repos = useRepos();
@@ -182,7 +201,7 @@ function WasHere({ machine }: { machine: RetiredMachine }) {
   const cache = useQueryClient();
   const unpin = useUpdateRole();
   const [detail, setDetail] = useState(false);
-  const [listing, setListing] = useState(false);
+  const [listing, setListing] = useState<Listing>(null);
   /* Dismissed on this Mac, per machine. The server is not told: this is
      somebody saying "I have read it", and it is the notice they are hiding
      rather than anything about the machine. */
@@ -340,12 +359,12 @@ function WasHere({ machine }: { machine: RetiredMachine }) {
                 wanted out of one is fetched there by hand.
               </p>
               <button
-                onClick={() => setListing(!listing)}
+                onClick={() => setListing(toggled(listing, "notice"))}
                 className="control mt-2 text-dim hover:text-bone"
               >
-                {listing ? "Hide what was running" : "Show what was running"}
+                {listing === "notice" ? "Hide what was running" : "Show what was running"}
               </button>
-              {listing && <Ran sessions={ran} />}
+              {listing === "notice" && <Ran sessions={ran} />}
             </div>
           )}
         </div>
@@ -361,14 +380,19 @@ function WasHere({ machine }: { machine: RetiredMachine }) {
           {machine.name === "localhost" ? "Firetower's own machine" : machine.name} before it was
           removed. They can be read; they cannot be picked up again.{" "}
           <button
-            onClick={() => setListing(!listing)}
+            onClick={() => setListing(toggled(listing, "foot"))}
             className="underline decoration-line underline-offset-2 hover:text-dim"
           >
-            {listing ? "Hide them" : "Show them"}
+            {listing === "foot" ? "Hide them" : "Show them"}
           </button>
         </p>
       )}
-      {listing && chores === 0 && <Ran sessions={ran} />}
+      {/* One comparison, and nothing else. This was gated on `chores === 0` as
+          well — a guard against drawing the list twice — which meant that
+          dismissing a notice with chores still in it left this control
+          toggling a list nothing drew. Whatever else is on screen, the list
+          belongs under the control that was pressed. */}
+      {listing === "foot" && <Ran sessions={ran} />}
     </>
   );
 }
