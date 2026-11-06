@@ -139,3 +139,39 @@ of its own — but it is not "dark, plus light later".
     is green against the **deployed** server's `openapi.json`. No query hook is
     used that is not in the current generated client.
 53. The app still runs against a control plane at `MIN_SERVER` (`0.34.1`).
+
+---
+
+## Phase 6 — the screens that were specified functionally and not visually
+
+Criteria 33–45 describe what these screens must *do* and where they must *live*.
+They do not say they are restyled, so they were not, and running the build found
+them still wearing the old design. That is a defect in this document, not in the
+build. These criteria say it.
+
+For each screen below: **it matches its drawing in
+`docs/prototypes/redesign/desktop-redesign.html`** — its layout, its type, its
+spacing, its one primary action, its rows carrying a name and a timestamp with
+detail on demand, and its states. Where the build cannot match the drawing, that
+is reported, not reinterpreted.
+
+54. **Artifacts** — the library as a grid of borderless posters with the name on
+    the paper beneath, the list alternative at its 64px floor, and the reading
+    view. `ArtifactsPage.tsx` is untouched by the redesign today.
+55. **Skills** — the gallery: sections, search, one primary action, risk lines as
+    small amber bullets rather than filled blocks, and the held-for-review card
+    with its two-pixel amber rule.
+56. **Agent profiles and Agents** — list, detail, create, and the read-only case
+    that says what the screen is for instead of greying a control out.
+57. **People and Teams** — the reader's view, ending with the line that says
+    where invites, roles and disabling are actually done.
+58. **Directories** — generous by contrast: a primary action, an expander per
+    directory, a level menu per grant, a remove on each.
+59. **Vault** — no primary action, a value as twelve dots at rest, and a line
+    saying the read is in the access log when one is revealed.
+60. **Git hosts** — three providers with their own marks, token pages and scopes.
+61. **Trackers**, **ConnectAccount**, **ScopePicker**, **CreateMenu** — each to
+    its drawing.
+62. **The theme control is reachable from Settings as well as the profile menu.**
+    System, Light and Dark. It was built in one place and a reader looked for it
+    in the other.
