@@ -408,7 +408,7 @@ function Empty({
       <div className="mt-5 flex items-center gap-2">
         <button
           onClick={onCreateWithAI}
-          className="control bg-overlay text-ui font-semibold text-bone shadow-raise hover:bg-[#26262c]"
+          className="control bg-overlay text-ui font-semibold text-bone shadow-raise hover:opacity-90"
         >
           <Sparkles className="h-3.5 w-3.5" strokeWidth={1.75} />
           Create with AI

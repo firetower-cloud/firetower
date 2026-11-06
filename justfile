@@ -300,12 +300,28 @@ check-style:
     # one that got through: the file tree and the diff carried their own sizes
     # for months, so a phone-wide type scale went up around them and left the
     # two screens made entirely of text exactly as small as they were.
+    #
+    # `desktop/src` was missing from this list until the redesign, which is why
+    # it had nine of these in it — including the two screens made entirely of
+    # text, again.
     found=$(grep -rnE 'text-\[[0-9.]+px\]|rounded-\[[0-9]+px\]|(bg|text|border)-\[#[0-9a-fA-F]{3,8}\]|fontSize: *[0-9]' \
-        web/app web/components web/src mobile/app mobile/src --include='*.tsx' || true)
+        web/app web/components web/src mobile/app mobile/src desktop/src --include='*.tsx' || true)
     if [ -n "$found" ]; then
         echo "$found"
         echo
         echo "  Off the scale. Use a token from web/app/globals.css."
+        exit 1
+    fi
+    # And the sheet itself is in two places, because the desk compiles its own
+    # Tailwind and cannot import the web app's. They used to drift — the desk's
+    # copy was missing `--color-amber`, so `text-amber` in `config/Skills.tsx`
+    # resolved to nothing and the *needs review* tag had no colour at all. One
+    # file is the source; the other is a copy and has to prove it.
+    if ! diff -q web/app/globals.css desktop/src/globals.css >/dev/null; then
+        diff -u web/app/globals.css desktop/src/globals.css | head -40
+        echo
+        echo "  desktop/src/globals.css has drifted. Copy web/app/globals.css over it;"
+        echo "  anything the desk alone needs belongs in desktop/src/styles.css."
         exit 1
     fi
     echo "  On the scale."

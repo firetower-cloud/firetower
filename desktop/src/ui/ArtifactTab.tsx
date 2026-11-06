@@ -509,7 +509,7 @@ export function ArtifactTab({
                   <div key={n.id} className="group/note border-b border-line-soft px-3 py-2.5">
                     <div className="flex items-center gap-2">
                       <span
-                        className={`grid h-4 w-4 shrink-0 place-items-center rounded-full font-mono text-[10px] leading-none ${n.sent ? "bg-sage-tint text-sage" : "bg-ember-tint text-ember"}`}
+                        className={`grid h-4 w-4 shrink-0 place-items-center rounded-full font-mono text-micro leading-none ${n.sent ? "bg-sage-tint text-sage" : "bg-ember-tint text-ember"}`}
                       >
                         {i + 1}
                       </span>

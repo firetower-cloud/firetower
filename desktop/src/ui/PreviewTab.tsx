@@ -279,7 +279,7 @@ function Note({ index, note, focused, onLocate, onEdit, onDrop }: { index: numbe
   return (
     <div id={`preview-note-${note.id}`} className={`group/note border-b border-line-soft px-3 py-2.5 ${focused ? "bg-raise/60" : ""}`}>
       <button onClick={onLocate} title={`${note.snapshot.path} · ${note.snapshot.selector}`} className="flex w-full items-center gap-2 text-left">
-        <span className={`grid h-4 w-4 shrink-0 place-items-center rounded-full font-mono text-[10px] leading-none ${sent ? "bg-sage-tint text-sage" : pending ? "bg-slate-tint text-slate" : "bg-ember-tint text-ember"}`}>{index}</span>
+        <span className={`grid h-4 w-4 shrink-0 place-items-center rounded-full font-mono text-micro leading-none ${sent ? "bg-sage-tint text-sage" : pending ? "bg-slate-tint text-slate" : "bg-ember-tint text-ember"}`}>{index}</span>
         <span className="min-w-0 flex-1 truncate font-mono text-micro text-mute">{nameOf(note.snapshot.label, note.snapshot.html)}</span>
       </button>
       {editing !== null ? (

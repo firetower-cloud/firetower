@@ -246,7 +246,7 @@ export function TasksPage({ backend }: { backend: Backend }) {
 
           {/* What was actually sent, in the tracker's own dialect. */}
           <div className="border-b border-line-soft px-3 py-1.5">
-            <span className="font-mono text-[9.5px] text-mute">{sent(ask)}</span>
+            <span className="font-mono text-micro text-mute">{sent(ask)}</span>
           </div>
 
           <div className="flex items-center gap-3 border-b border-line-soft px-3 py-1.5">
@@ -332,14 +332,14 @@ export function TasksPage({ backend }: { backend: Backend }) {
                     {t.labels.map((l) => (
                       <span
                         key={l.name}
-                        className="rounded-sm px-1 text-[9.5px]"
+                        className="rounded-sm px-1 text-micro"
                         style={{ color: l.colour ?? undefined, background: `${l.colour}1a` }}
                       >
                         {l.name}
                       </span>
                     ))}
                     {t.assignees.map((a) => (
-                      <span key={a.login} className="text-[9.5px] text-mute">
+                      <span key={a.login} className="text-micro text-mute">
                         @{a.login}
                       </span>
                     ))}
