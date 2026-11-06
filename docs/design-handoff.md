@@ -85,6 +85,36 @@ runtimes and six sets of timers for a grid of six. So previews are static
 images, and the four degraded states — has one, not yet, not possible, failed —
 are drawn properly rather than left to a broken-image glyph.
 
+### Share the icon table, not a description of it
+
+The icons are lucide's **published markup** — 102 of them at stroke 1.6, with
+real `<circle>` and `<rect>` elements where lucide has them. The mobile work
+hand-approximated about forty as single flattened paths at stroke 1.8, and the
+result read as "older" without anybody being able to say why. No rule had been
+broken: the colour, the size and the spacing were all correct. The *shape* was
+somebody else's, approximated.
+
+> **An approximation of a shared asset is the one drift a style guide cannot
+> catch.**
+
+The fix was to lift the `ICONS` table whole rather than redraw it better. Any
+surface that needs these icons should take that table, not a list of their
+names. The same goes for brand marks — see `Brand.tsx` in §5, which is this
+failure in its mature form.
+
+### The rail's hover preview is a convenience, not a load-bearing thing
+
+Hovering a rail destination expands its panel without navigating. Stated plainly
+because the next surface has to decide whether to build an equivalent: **the
+rail works without it.** Focus previews identically, so it is already reachable
+by keyboard, and pressing a destination navigates whether or not you hovered
+first. What hover buys is one round trip — looking into a destination without
+leaving the one you are in.
+
+So on a surface with no hover, an equivalent is a *new feature* to be argued on
+its own merits, not a port that must happen. It may well be worth it; it is not
+owed.
+
 ### A server is a mark, never a colour
 
 Firetowers are told apart by a monogram, not a hue. There are not enough
@@ -219,6 +249,14 @@ Keep every current value as the **dark branch**. Add light under
 `[data-theme]`, with a `prefers-color-scheme` default. Then neither web nor
 mobile moves until it opts in, and no call site has to change.
 
+**The mechanism leaves a decision, so here is the default.** Opting in is
+expected, not optional-forever: a token set with a light branch that nothing
+uses is a maintenance cost with no return. Mobile should take it and follow the
+system — a phone goes outdoors in sunlight and into bed at midnight, and
+`app.config.ts` pins `userInterfaceStyle: "dark"` for exactly one stated reason,
+that the token set has no light values. This work spends that reason. If the
+answer is no, it is one config line to reverse.
+
 ### The derivation method
 
 Each light value is the dark value with **L\* lowered or raised while a\* and
@@ -258,7 +296,7 @@ it. It is still unmistakably not a string or a keyword, but it no longer reads
 as "yellow". The alternative — letting numbers sit at the set's floor instead of
 their own — is available if that matters more than matching the ratio.
 
-**Amber needed a second step, and it is the one token this work adds.**
+**Amber needed a second step.** It is the first of the two tokens this work adds; the second is below.
 `--color-amber` is used two ways: as *text* on `--color-amber-tint` (the
 *needs review* tag and its `ShieldAlert`, `config/Skills.tsx:455` and `:687`),
 and as a *mark* on the page — a status pip, a meter fill, a 2px rule. In dark
@@ -277,12 +315,37 @@ one signal namespace, so it is not a new namespace.
 The rule for applying it: **`--color-amber` where it is text on
 `--color-amber-tint`; `--color-amber-soft` where it is a mark on the page.**
 
-One more that will come up: in the ember namespace `-soft` is mostly the *text
-on the tint*, which is the reverse of that split. Both are consistent on what
-matters — **`-soft` is the lighter of the pair in either theme** — and the roles
-swap because text on a dark tint has to be lighter while text on a pale tint has
-to be darker. Ember has only ever been dark, so the question has not arisen for
-it. **When ember is re-gated for light it will need the same split.**
+### Ember needs the same thing, and the token for it already exists
+
+This work adds **two** tokens, not one. The second is `--ember-ink`, and it was
+derived into the desktop artifact and never written down — which is how the
+mobile designer hit the problem fresh.
+
+In the ember namespace `-soft` is mostly the *text on the tint* —
+`text-ember-soft` on `bg-ember-tint`, at `Titlebar.tsx:44`, `Chat.tsx:1527` and
+six more. That is the reverse of amber's split. Both are consistent on the thing
+that actually matters:
+
+> **`-soft` is the lighter of the pair in either theme. Where a token is text on
+> its own tint in light, it needs an `-ink` step.**
+
+The roles swap because text on a *dark* tint has to be the lighter value and
+text on a *pale* tint has to be the darker one. So:
+
+| | lighter member | darker member |
+|---|---|---|
+| amber | `--color-amber-soft` — a mark on the page | `--color-amber` — text on its tint |
+| ember | `--color-ember-soft` — text on the dark tint | **`--ember-ink`** — ember where it has to be read in light |
+
+`--ember-ink` is `#BF4714`, measured **5.09:1 on white**. It is in
+`desktop-redesign.html` twice and in `globals.css` zero times; it needs a
+`--color-` prefix and a home in the shared sheet alongside the amber pair.
+
+**And the same honest exception applies.** If a light ember *badge* is ever
+needed — ember text on a pale ember tint — matching the dark pair's 8.34:1
+drives it to `#970100`, a dark red that no longer reads as ember. That is the
+same trade amber made at `#653400`. Whoever needs it should decide knowingly
+rather than discover it.
 
 ### Host marks
 
@@ -337,11 +400,20 @@ all five of which a fresh install hits at once, so none is an edge case ·
 
 ## 6. How to read the artifacts
 
-Both are in `docs/prototypes/redesign/`, self-contained, light by default with a
-theme toggle.
+Both are in `docs/prototypes/redesign/`, self-contained, light by default with
+a theme toggle. Beside them: `measure.py`, which produces the usage counts, and
+`usage.json`, which is its output and the evidence behind every number in the
+component list.
 
-**`desktop-redesign.html`** — fourteen tabs. Ten are mock-ups of a 1280×824
-window; four are documents:
+**`desktop-redesign.html`** — fifteen tabs. Ten are mock-ups of a 1280×824
+window; five are documents:
+
+* **Every screen** — the contact sheet, and **read this one first**. All 96
+  states at a third scale, grouped as Coverage is, each tile a control that
+  opens it full size. It exists because a reader looking for the connect screen
+  could not find it and reported it missing: it is the eleventh of fifteen tabs
+  and they had the document open. **A tab row says where you can go and never
+  what is there.** Any artifact with more than a handful of states wants one.
 
 * **Coverage** — every *feature* the app has and whether this design draws it.
   Feature granularity, not component: "Git hosts ✓" was true of an earlier draft
@@ -360,19 +432,31 @@ window; four are documents:
 **`components.html`** — forty components and six patterns, rendered live on the
 real stylesheet in shadow roots. Ordered by how much the design leans on each.
 
-### The usage counts are measured
+### The usage counts are measured, and the harness is shipped
 
-"Used on 74 screens" is not a claim. A headless browser walks the redesign
+"Used on 50 screens" is not a claim. A headless browser walks the redesign
 artifact — every tab, every view inside it, every overlay opened over each one —
-and records which component appears where. Seven of the forty are not yet
-rendered and say so rather than pretending.
+and records which component appears where. Seven of the forty components are not
+yet rendered and say so rather than pretending.
 
-To re-run it after changing the redesign artifact: the harness drives the
-masthead controls, resets all global state between screens (a latched error
-screen silently poisoned every later measurement the first time), and clicks the
-two in-window triggers the masthead cannot reach — the profile menu and the
-Firetower switcher. Anything added later that only opens by clicking inside the
-window needs the same treatment or it will report as *used once* when it is not.
+**The harness is `docs/prototypes/redesign/measure.py`.** It was described here
+before it was shipped, which meant the next designer rebuilt it; that is the
+kind of gap this document exists to close. Run it after changing the redesign
+artifact and the component list's numbers regenerate.
+
+Three traps in it, all of which cost a measurement before they were found:
+
+* **Reset global state between screens.** `Threw` latches the error screen, and
+  a tab press clears only per-tab state. Once it had been pressed, every later
+  screen in the walk *was* the error screen.
+* **Click the in-window triggers the masthead cannot reach** — the profile menu
+  and the Firetower switcher. Anything added later that only opens by clicking
+  inside the window needs the same treatment or it reports as *used once*.
+* **Skip the document tabs.** They draw no window, and `render()` leaves `#win`
+  holding whatever was last in it — so walking them attributes a stale screen's
+  classes to a screen that has none. This was wrong until late: the count
+  published at first was **74 screens**, of which 24 were documents measured as
+  though they were windows. The true figure is **50**.
 
 ---
 
@@ -408,7 +492,8 @@ this work touched no product code — and they are recorded so they are not lost
 | `ui/Account.tsx:65` | The must-replace-password banner uses `border-ember-deep bg-ember-tint`. Ember means an agent is waiting on you; this is a second meaning. |
 | `desktop/STYLE.md:51,56,105` | Claims a 34px list row three times. The shipped row is 32px. See §3. |
 | `ui/Palette.tsx` | Exists and is **unreferenced** — `grep -rln "Palette" desktop/src` returns only the file itself. Nothing imports it, nothing renders it, no key opens it. The redesign wires it up for the first time, which makes it new work rather than a restyle. |
-| `justfile — check-style` | Greps `web/` and `mobile/` but not `desktop/src`. Three arbitrary values this design needed would have been caught by it. |
+| `justfile — check-style` | Greps `web/app web/components web/src mobile/app mobile/src` but not `desktop/src`. Three arbitrary values this design needed would have been caught by it. |
+| `fleet.ts:49` · `mobile/src/ui/ServerChip.tsx:28` · `mobile/app/(tabs)/you.tsx:67` | All three derive a Firetower's monogram as `org.slice(0, 1)`. Acme and Apex both render "A"; Northwind and Nimbus both render "N". One de-duplicating derivation, used in three places. |
 
 One collision to resolve when the palette is wired: **⌘K is already taken** —
 `ui/Shell.tsx:105` clears the terminal. The resolution follows a precedent the
@@ -419,7 +504,28 @@ palette that was never wired up.
 
 ---
 
-## 9. The working method
+## 9. The backend does not have to change
+
+Checked, because it changes how this work is estimated: **none of this design
+needs a server change.** Three findings worth carrying.
+
+**Artifact posters already exist.** `/api/v1/artifact-versions/{id}/poster`,
+with `posterUrl` and `hasPoster` as two separate fields on the model. The
+schema's own note says why they are two rather than one optional URL: the client
+has to tell *no picture taken* from *no picture possible*, "and only the first
+of those is worth queueing". The four poster states in §1 are drawable today.
+
+**Bulk skill actions are a client gap, not a server one.** `ShareSkills` and
+`SkillIds` are already plural. Skills' multi-select — one of the open Coverage
+rows — is UI work only.
+
+**Light mode is `globals.css` and nothing else.** No endpoint, no stored
+preference, no migration. Which also means the cost of *not* doing it is
+nothing, and the cost of doing it is bounded.
+
+---
+
+## 10. The working method
 
 Three habits, all of which were learned the expensive way. They are worth
 inheriting.
@@ -456,3 +562,22 @@ A last note on checks themselves. The first version of the specimen check asked
 whether a rendered component had height. Every specimen was rendering the
 literal string `undefined`, which has height, and the check passed. **A check
 that cannot fail is worse than no check**, because it is also an assurance.
+
+**Rules do not transfer; pictures do.** The mobile work's first draft satisfied
+every sentence in this document and looked like the old app — it carried a
+repository and a branch under every row, a four-colour glyph on each one, a
+chevron at the end and a segmented filter above the list, every one of which is
+named here or in `STYLE.md` as a thing to remove. It was drawn from reading the
+rules rather than from looking at the screens they produce. What fixed it was
+rendering `docs/prototypes/redesign/` at 2× and counting what is actually in one
+row. It is four things, and two of them are optional.
+
+So: **read this document, then look at the artifacts.** The habit at the top of
+this section applies to reading a handoff as much as to checking your own work.
+
+### One practical note
+
+The three skills the brief for this work names — `firetower-surfaces`,
+`apple-design`, `frontend-design` — are not in this repository. Both designers
+on this work started without them and recovered them separately. If a brief
+names a skill, check it is reachable before concluding a predecessor ignored it.

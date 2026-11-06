@@ -219,11 +219,11 @@ code{font-family:var(--mono);font-size:12.5px;background:var(--raised);border-ra
 <div class="grid">
   <div class="cell"><b>33</b><s>rendered here</s></div>
   <div class="cell"><b>6</b><s>patterns rendered</s></div>
-  <div class="cell"><b>74</b><s>screens walked</s></div>
+  <div class="cell"><b>50</b><s>screens walked</s></div>
   <div class="cell"><b>1</b><s>used on one screen</s></div>
   <div class="cell"><b>19</b><s>shared with web</s></div>
 </div>
-<p>Ordered by how much the design leans on each one, highest first — those are the ones reuse depends on. The counts are measured by walking the redesign artifact: 74 screens, every view and every overlay. Specimens are isolated in shadow roots, so the redesign's class names cannot collide with this page's.</p>
+<p>Ordered by how much the design leans on each one, highest first — those are the ones reuse depends on. The counts are measured by walking the redesign artifact: 50 screens, every view and every overlay. Specimens are isolated in shadow roots, so the redesign's class names cannot collide with this page's.</p>
 
 <h2>The duplication is the bug</h2>
 <p><code>desktop/src/components/ui/</code> and <code>web/components/ui/</code> ship <b>eleven identically named components</b>. <b>Ten are byte-identical.</b> <code>List.tsx</code> differs by exactly one line — its <code>Link</code> import — which is the shim mechanism working as designed. <b>Only <code>Brand.tsx</code> has genuinely diverged</b>: 176 lines against 22.</p>
@@ -233,7 +233,7 @@ code{font-family:var(--mono);font-size:12.5px;background:var(--raised);border-ra
 <article class="ent2" id="c-avatar">
       <header>
         <h3>Avatar</h3>
-        <span class="use"><b>74</b> of 74</span>
+        <span class="use"><b>50</b> of 50</span>
         <span class="sprd">every screen</span>
         <span class="tags"><span class="tag" data-v="changed">survives, changed</span><span class="tag" data-r="shared">shared with web</span></span>
       </header>
@@ -248,7 +248,7 @@ code{font-family:var(--mono);font-size:12.5px;background:var(--raised);border-ra
     </article><article class="ent2" id="c-button">
       <header>
         <h3>Button</h3>
-        <span class="use"><b>74</b> of 74</span>
+        <span class="use"><b>50</b> of 50</span>
         <span class="sprd">every screen</span>
         <span class="tags"><span class="tag" data-v="changed">survives, changed</span><span class="tag" data-r="shared">shared with web</span></span>
       </header>
@@ -263,7 +263,7 @@ code{font-family:var(--mono);font-size:12.5px;background:var(--raised);border-ra
     </article><article class="ent2" id="c-copy">
       <header>
         <h3>Copy</h3>
-        <span class="use"><b>74</b> of 74</span>
+        <span class="use"><b>50</b> of 50</span>
         <span class="sprd">every screen</span>
         <span class="tags"><span class="tag" data-v="unchanged">survives unchanged</span><span class="tag" data-r="shared">shared with web</span></span>
       </header>
@@ -278,7 +278,7 @@ code{font-family:var(--mono);font-size:12.5px;background:var(--raised);border-ra
     </article><article class="ent2" id="c-firetowerid">
       <header>
         <h3>FiretowerId</h3>
-        <span class="use"><b>74</b> of 74</span>
+        <span class="use"><b>50</b> of 50</span>
         <span class="sprd">every screen</span>
         <span class="tags"><span class="tag" data-v="changed">survives, changed</span><span class="tag" data-r="desktop">desktop only</span></span>
       </header>
@@ -293,7 +293,7 @@ code{font-family:var(--mono);font-size:12.5px;background:var(--raised);border-ra
     </article><article class="ent2" id="c-icon">
       <header>
         <h3>Icon</h3>
-        <span class="use"><b>74</b> of 74</span>
+        <span class="use"><b>50</b> of 50</span>
         <span class="sprd">every screen</span>
         <span class="tags"><span class="tag" data-v="unchanged">survives unchanged</span><span class="tag" data-r="shared">shared with web</span></span>
       </header>
@@ -308,7 +308,7 @@ code{font-family:var(--mono);font-size:12.5px;background:var(--raised);border-ra
     </article><article class="ent2" id="c-iconbutton">
       <header>
         <h3>IconButton</h3>
-        <span class="use"><b>74</b> of 74</span>
+        <span class="use"><b>50</b> of 50</span>
         <span class="sprd">every screen</span>
         <span class="tags"><span class="tag" data-v="unchanged">survives unchanged</span><span class="tag" data-r="shared">shared with web</span></span>
       </header>
@@ -323,7 +323,7 @@ code{font-family:var(--mono);font-size:12.5px;background:var(--raised);border-ra
     </article><article class="ent2" id="c-keycap">
       <header>
         <h3>Keycap</h3>
-        <span class="use"><b>74</b> of 74</span>
+        <span class="use"><b>50</b> of 50</span>
         <span class="sprd">every screen</span>
         <span class="tags"><span class="tag" data-v="new">new</span><span class="tag" data-r="desktop">desktop only</span></span>
       </header>
@@ -338,7 +338,7 @@ code{font-family:var(--mono);font-size:12.5px;background:var(--raised);border-ra
     </article><article class="ent2" id="c-rail">
       <header>
         <h3>Rail</h3>
-        <span class="use"><b>74</b> of 74</span>
+        <span class="use"><b>50</b> of 50</span>
         <span class="sprd">every screen</span>
         <span class="tags"><span class="tag" data-v="replaced">replaced</span><span class="tag" data-r="desktop">desktop only</span></span>
       </header>
@@ -353,7 +353,7 @@ code{font-family:var(--mono);font-size:12.5px;background:var(--raised);border-ra
     </article><article class="ent2" id="c-sheet">
       <header>
         <h3>Sheet</h3>
-        <span class="use"><b>74</b> of 74</span>
+        <span class="use"><b>50</b> of 50</span>
         <span class="sprd">every screen</span>
         <span class="tags"><span class="tag" data-v="new">new</span><span class="tag" data-r="desktop">desktop only</span></span>
       </header>
@@ -368,7 +368,7 @@ code{font-family:var(--mono);font-size:12.5px;background:var(--raised);border-ra
     </article><article class="ent2" id="c-signal-ember-dot-">
       <header>
         <h3>Signal (ember dot)</h3>
-        <span class="use"><b>74</b> of 74</span>
+        <span class="use"><b>50</b> of 50</span>
         <span class="sprd">every screen</span>
         <span class="tags"><span class="tag" data-v="changed">survives, changed</span><span class="tag" data-r="shared">shared with web</span></span>
       </header>
@@ -383,7 +383,7 @@ code{font-family:var(--mono);font-size:12.5px;background:var(--raised);border-ra
     </article><article class="ent2" id="c-window">
       <header>
         <h3>Window</h3>
-        <span class="use"><b>74</b> of 74</span>
+        <span class="use"><b>50</b> of 50</span>
         <span class="sprd">every screen</span>
         <span class="tags"><span class="tag" data-v="changed">survives, changed</span><span class="tag" data-r="desktop">desktop only</span></span>
       </header>
@@ -395,41 +395,11 @@ code{font-family:var(--mono);font-size:12.5px;background:var(--raised);border-ra
         <p class="meta2"><b>Section</b> Layout &nbsp;·&nbsp; <code>desktop/src/ui/Shell.tsx</code>
            &nbsp;·&nbsp; .win .titlebar .lights .body</p>
       </footer>
-    </article><article class="ent2" id="c-workspacerow">
-      <header>
-        <h3>WorkspaceRow</h3>
-        <span class="use"><b>68</b> of 74</span>
-        <span class="sprd">13 of the destinations</span>
-        <span class="tags"><span class="tag" data-v="replaced">replaced</span><span class="tag" data-r="desktop">desktop only</span></span>
-      </header>
-      <div class="stage" data-spec="WorkspaceRow"></div>
-      <footer>
-        <p class="for">A workspace in the panel: a name and one timestamp.</p>
-        
-        <p class="meta2"><b>Variants</b> recent · shared with you · current &nbsp;·&nbsp; <b>States</b> rest · hover · current · waiting</p>
-        <p class="meta2"><b>Section</b> Domain &nbsp;·&nbsp; <code>desktop/src/ui/Rail.tsx</code>
-           &nbsp;·&nbsp; .prow .lbl .age</p>
-      </footer>
-    </article><article class="ent2" id="c-panel">
-      <header>
-        <h3>Panel</h3>
-        <span class="use"><b>65</b> of 74</span>
-        <span class="sprd">12 of the destinations</span>
-        <span class="tags"><span class="tag" data-v="replaced">replaced</span><span class="tag" data-r="desktop">desktop only</span></span>
-      </header>
-      <div class="nospec">Not rendered in this round.</div>
-      <footer>
-        <p class="for">The per-destination column beside the rail.</p>
-        
-        <p class="meta2"><b>Variants</b> pinned · floating (when collapsed and previewed) &nbsp;·&nbsp; <b>States</b> rest · current row · empty</p>
-        <p class="meta2"><b>Section</b> Layout &nbsp;·&nbsp; <code>desktop/src/ui/Rail.tsx</code>
-           &nbsp;·&nbsp; .panel .phead .prow .plabel .pscroll .pcol</p>
-      </footer>
     </article><article class="ent2" id="c-listrow">
       <header>
         <h3>ListRow</h3>
-        <span class="use"><b>50</b> of 74</span>
-        <span class="sprd">11 of the destinations</span>
+        <span class="use"><b>44</b> of 50</span>
+        <span class="sprd">10 of the destinations</span>
         <span class="tags"><span class="tag" data-v="changed">survives, changed</span><span class="tag" data-r="shared">shared with web</span></span>
       </header>
       <div class="stage" data-spec="ListRow"></div>
@@ -440,11 +410,26 @@ code{font-family:var(--mono);font-size:12.5px;background:var(--raised);border-ra
         <p class="meta2"><b>Section</b> Domain &nbsp;·&nbsp; <code>components/ui/List.tsx</code>
            &nbsp;·&nbsp; .r .lsec .lrows .tx .path .hov</p>
       </footer>
+    </article><article class="ent2" id="c-workspacerow">
+      <header>
+        <h3>WorkspaceRow</h3>
+        <span class="use"><b>44</b> of 50</span>
+        <span class="sprd">9 of the destinations</span>
+        <span class="tags"><span class="tag" data-v="replaced">replaced</span><span class="tag" data-r="desktop">desktop only</span></span>
+      </header>
+      <div class="stage" data-spec="WorkspaceRow"></div>
+      <footer>
+        <p class="for">A workspace in the panel: a name and one timestamp.</p>
+        
+        <p class="meta2"><b>Variants</b> recent · shared with you · current &nbsp;·&nbsp; <b>States</b> rest · hover · current · waiting</p>
+        <p class="meta2"><b>Section</b> Domain &nbsp;·&nbsp; <code>desktop/src/ui/Rail.tsx</code>
+           &nbsp;·&nbsp; .prow .lbl .age</p>
+      </footer>
     </article><article class="ent2" id="c-badge">
       <header>
         <h3>Badge</h3>
-        <span class="use"><b>48</b> of 74</span>
-        <span class="sprd">10 of the destinations</span>
+        <span class="use"><b>42</b> of 50</span>
+        <span class="sprd">9 of the destinations</span>
         <span class="tags"><span class="tag" data-v="unchanged">survives unchanged</span><span class="tag" data-r="shared">shared with web</span></span>
       </header>
       <div class="stage" data-spec="Badge"></div>
@@ -458,8 +443,8 @@ code{font-family:var(--mono);font-size:12.5px;background:var(--raised);border-ra
     </article><article class="ent2" id="c-dialog">
       <header>
         <h3>Dialog</h3>
-        <span class="use"><b>48</b> of 74</span>
-        <span class="sprd">10 of the destinations</span>
+        <span class="use"><b>42</b> of 50</span>
+        <span class="sprd">9 of the destinations</span>
         <span class="tags"><span class="tag" data-v="new">new</span><span class="tag" data-r="desktop">desktop only</span></span>
       </header>
       <div class="stage" data-spec="Dialog"></div>
@@ -473,8 +458,8 @@ code{font-family:var(--mono);font-size:12.5px;background:var(--raised);border-ra
     </article><article class="ent2" id="c-field">
       <header>
         <h3>Field</h3>
-        <span class="use"><b>48</b> of 74</span>
-        <span class="sprd">10 of the destinations</span>
+        <span class="use"><b>42</b> of 50</span>
+        <span class="sprd">9 of the destinations</span>
         <span class="tags"><span class="tag" data-v="changed">survives, changed</span><span class="tag" data-r="shared">shared with web</span></span>
       </header>
       <div class="stage" data-spec="Field"></div>
@@ -488,8 +473,8 @@ code{font-family:var(--mono);font-size:12.5px;background:var(--raised);border-ra
     </article><article class="ent2" id="c-palette-quickopen">
       <header>
         <h3>Palette / QuickOpen</h3>
-        <span class="use"><b>48</b> of 74</span>
-        <span class="sprd">10 of the destinations</span>
+        <span class="use"><b>42</b> of 50</span>
+        <span class="sprd">9 of the destinations</span>
         <span class="tags"><span class="tag" data-v="new">new</span><span class="tag" data-r="desktop">desktop only</span></span>
       </header>
       <div class="stage" data-spec="Palette / QuickOpen"></div>
@@ -503,8 +488,8 @@ code{font-family:var(--mono);font-size:12.5px;background:var(--raised);border-ra
     </article><article class="ent2" id="c-pop-menu-">
       <header>
         <h3>Pop (menu)</h3>
-        <span class="use"><b>48</b> of 74</span>
-        <span class="sprd">10 of the destinations</span>
+        <span class="use"><b>42</b> of 50</span>
+        <span class="sprd">9 of the destinations</span>
         <span class="tags"><span class="tag" data-v="changed">survives, changed</span><span class="tag" data-r="shared">shared with web</span></span>
       </header>
       <div class="stage" data-spec="Pop (menu)"></div>
@@ -518,8 +503,8 @@ code{font-family:var(--mono);font-size:12.5px;background:var(--raised);border-ra
     </article><article class="ent2" id="c-segmented">
       <header>
         <h3>Segmented</h3>
-        <span class="use"><b>48</b> of 74</span>
-        <span class="sprd">10 of the destinations</span>
+        <span class="use"><b>42</b> of 50</span>
+        <span class="sprd">9 of the destinations</span>
         <span class="tags"><span class="tag" data-v="unchanged">survives unchanged</span><span class="tag" data-r="shared">shared with web</span></span>
       </header>
       <div class="stage" data-spec="Segmented"></div>
@@ -530,41 +515,11 @@ code{font-family:var(--mono);font-size:12.5px;background:var(--raised);border-ra
         <p class="meta2"><b>Section</b> Primitives &nbsp;·&nbsp; <code>components/ui/Segmented.tsx</code>
            &nbsp;·&nbsp; .seg</p>
       </footer>
-    </article><article class="ent2" id="c-stateblock">
-      <header>
-        <h3>StateBlock</h3>
-        <span class="use"><b>48</b> of 74</span>
-        <span class="sprd">11 of the destinations</span>
-        <span class="tags"><span class="tag" data-v="changed">survives, changed</span><span class="tag" data-r="shared">shared with web</span></span>
-      </header>
-      <div class="stage" data-spec="StateBlock"></div>
-      <footer>
-        <p class="for">What a list says when it has nothing to say.</p>
-        <p class="note2"><code>Rows</code> in bits.tsx already does three of the six. This is that component, finished.</p>
-        <p class="meta2"><b>Variants</b> empty · loading · error · denied · server dark · where-this-lives &nbsp;·&nbsp; <b>States</b> —</p>
-        <p class="meta2"><b>Section</b> Domain &nbsp;·&nbsp; <code>desktop/src/ui/config/bits.tsx</code>
-           &nbsp;·&nbsp; .blank .settling .stale2 .whereto</p>
-      </footer>
-    </article><article class="ent2" id="c-veil-sheet-">
-      <header>
-        <h3>Veil + Sheet2</h3>
-        <span class="use"><b>48</b> of 74</span>
-        <span class="sprd">10 of the destinations</span>
-        <span class="tags"><span class="tag" data-v="changed">survives, changed</span><span class="tag" data-r="shared">shared with web</span></span>
-      </header>
-      <div class="nospec">Not rendered in this round.</div>
-      <footer>
-        <p class="for">A centred modal sheet and the scrim that holds the screen behind it.</p>
-        <p class="note2"><b>Modal already exists on web.</b> This is that component with the desktop’s radius and lift.</p>
-        <p class="meta2"><b>Variants</b> 470 · 480 · 520px &nbsp;·&nbsp; <b>States</b> entering · open</p>
-        <p class="meta2"><b>Section</b> Layout &nbsp;·&nbsp; <code>web/components/Modal.tsx</code>
-           &nbsp;·&nbsp; .veil .sheet2 .sh-head .sh-body .sh-foot</p>
-      </footer>
     </article><article class="ent2" id="c-sheetrow">
       <header>
         <h3>SheetRow</h3>
-        <span class="use"><b>45</b> of 74</span>
-        <span class="sprd">10 of the destinations</span>
+        <span class="use"><b>42</b> of 50</span>
+        <span class="sprd">9 of the destinations</span>
         <span class="tags"><span class="tag" data-v="new">new</span><span class="tag" data-r="desktop">desktop only</span></span>
       </header>
       <div class="stage" data-spec="SheetRow"></div>
@@ -575,11 +530,71 @@ code{font-family:var(--mono);font-size:12.5px;background:var(--raised);border-ra
         <p class="meta2"><b>Section</b> Layout &nbsp;·&nbsp; <code>—</code>
            &nbsp;·&nbsp; .sh-row .sh-note .sh-lab .sh-field</p>
       </footer>
+    </article><article class="ent2" id="c-veil-sheet-">
+      <header>
+        <h3>Veil + Sheet2</h3>
+        <span class="use"><b>42</b> of 50</span>
+        <span class="sprd">9 of the destinations</span>
+        <span class="tags"><span class="tag" data-v="changed">survives, changed</span><span class="tag" data-r="shared">shared with web</span></span>
+      </header>
+      <div class="nospec">Not rendered in this round.</div>
+      <footer>
+        <p class="for">A centred modal sheet and the scrim that holds the screen behind it.</p>
+        <p class="note2"><b>Modal already exists on web.</b> This is that component with the desktop’s radius and lift.</p>
+        <p class="meta2"><b>Variants</b> 470 · 480 · 520px &nbsp;·&nbsp; <b>States</b> entering · open</p>
+        <p class="meta2"><b>Section</b> Layout &nbsp;·&nbsp; <code>web/components/Modal.tsx</code>
+           &nbsp;·&nbsp; .veil .sheet2 .sh-head .sh-body .sh-foot</p>
+      </footer>
+    </article><article class="ent2" id="c-panel">
+      <header>
+        <h3>Panel</h3>
+        <span class="use"><b>41</b> of 50</span>
+        <span class="sprd">8 of the destinations</span>
+        <span class="tags"><span class="tag" data-v="replaced">replaced</span><span class="tag" data-r="desktop">desktop only</span></span>
+      </header>
+      <div class="nospec">Not rendered in this round.</div>
+      <footer>
+        <p class="for">The per-destination column beside the rail.</p>
+        
+        <p class="meta2"><b>Variants</b> pinned · floating (when collapsed and previewed) &nbsp;·&nbsp; <b>States</b> rest · current row · empty</p>
+        <p class="meta2"><b>Section</b> Layout &nbsp;·&nbsp; <code>desktop/src/ui/Rail.tsx</code>
+           &nbsp;·&nbsp; .panel .phead .prow .plabel .pscroll .pcol</p>
+      </footer>
+    </article><article class="ent2" id="c-stateblock">
+      <header>
+        <h3>StateBlock</h3>
+        <span class="use"><b>25</b> of 50</span>
+        <span class="sprd">7 of the destinations</span>
+        <span class="tags"><span class="tag" data-v="changed">survives, changed</span><span class="tag" data-r="shared">shared with web</span></span>
+      </header>
+      <div class="stage" data-spec="StateBlock"></div>
+      <footer>
+        <p class="for">What a list says when it has nothing to say.</p>
+        <p class="note2"><code>Rows</code> in bits.tsx already does three of the six. This is that component, finished.</p>
+        <p class="meta2"><b>Variants</b> empty · loading · error · denied · server dark · where-this-lives &nbsp;·&nbsp; <b>States</b> —</p>
+        <p class="meta2"><b>Section</b> Domain &nbsp;·&nbsp; <code>desktop/src/ui/config/bits.tsx</code>
+           &nbsp;·&nbsp; .blank .settling .stale2 .whereto</p>
+      </footer>
+    </article><article class="ent2" id="c-checkbox-tick">
+      <header>
+        <h3>Checkbox / Tick</h3>
+        <span class="use"><b>18</b> of 50</span>
+        <span class="sprd">Customize, Workspace</span>
+        <span class="tags"><span class="tag" data-v="new">new</span><span class="tag" data-r="shared">shared with web</span></span>
+      </header>
+      <div class="stage" data-spec="Checkbox / Tick"></div>
+      <footer>
+        <p class="for">A binary choice, and selecting rows.</p>
+        <p class="note2"><b>Already exists on web and not on desktop.</b> Needed by Skills’ multi-select. Do not redraw it.</p>
+        <p class="meta2"><b>Variants</b> single · select-all with a partial state &nbsp;·&nbsp; <b>States</b> off · on · partly · disabled</p>
+        <p class="meta2"><b>Section</b> Primitives &nbsp;·&nbsp; <code>web/components/ui/Checkbox.tsx</code>
+           &nbsp;·&nbsp; .tick .draftline</p>
+      </footer>
     </article><article class="ent2" id="c-composer">
       <header>
         <h3>Composer</h3>
-        <span class="use"><b>39</b> of 74</span>
-        <span class="sprd">9 of the destinations</span>
+        <span class="use"><b>16</b> of 50</span>
+        <span class="sprd">Artifacts, Customize, Dashboard, First run, Workspace</span>
         <span class="tags"><span class="tag" data-v="changed">survives, changed</span><span class="tag" data-r="desktop">desktop only</span></span>
       </header>
       <div class="stage" data-spec="Composer"></div>
@@ -593,8 +608,8 @@ code{font-family:var(--mono);font-size:12.5px;background:var(--raised);border-ra
     </article><article class="ent2" id="c-card">
       <header>
         <h3>Card</h3>
-        <span class="use"><b>32</b> of 74</span>
-        <span class="sprd">7 of the destinations</span>
+        <span class="use"><b>14</b> of 50</span>
+        <span class="sprd">Account, Artifacts, Customize, First run</span>
         <span class="tags"><span class="tag" data-v="unchanged">survives unchanged</span><span class="tag" data-r="shared">shared with web</span></span>
       </header>
       <div class="stage" data-spec="Card"></div>
@@ -605,26 +620,11 @@ code{font-family:var(--mono);font-size:12.5px;background:var(--raised);border-ra
         <p class="meta2"><b>Section</b> Primitives &nbsp;·&nbsp; <code>components/ui/Card.tsx</code>
            &nbsp;·&nbsp; .card .card1 .plate</p>
       </footer>
-    </article><article class="ent2" id="c-checkbox-tick">
-      <header>
-        <h3>Checkbox / Tick</h3>
-        <span class="use"><b>18</b> of 74</span>
-        <span class="sprd">Customize, Workspace</span>
-        <span class="tags"><span class="tag" data-v="new">new</span><span class="tag" data-r="shared">shared with web</span></span>
-      </header>
-      <div class="stage" data-spec="Checkbox / Tick"></div>
-      <footer>
-        <p class="for">A binary choice, and selecting rows.</p>
-        <p class="note2"><b>Already exists on web and not on desktop.</b> Needed by Skills’ multi-select. Do not redraw it.</p>
-        <p class="meta2"><b>Variants</b> single · select-all with a partial state &nbsp;·&nbsp; <b>States</b> off · on · partly · disabled</p>
-        <p class="meta2"><b>Section</b> Primitives &nbsp;·&nbsp; <code>web/components/ui/Checkbox.tsx</code>
-           &nbsp;·&nbsp; .tick .draftline</p>
-      </footer>
     </article><article class="ent2" id="c-chatturn">
       <header>
         <h3>ChatTurn</h3>
-        <span class="use"><b>14</b> of 74</span>
-        <span class="sprd">6 of the destinations</span>
+        <span class="use"><b>9</b> of 50</span>
+        <span class="sprd">Dashboard, First run, Sources, Updates, Workspace</span>
         <span class="tags"><span class="tag" data-v="changed">survives, changed</span><span class="tag" data-r="desktop">desktop only</span></span>
       </header>
       <div class="stage" data-spec="ChatTurn"></div>
@@ -638,7 +638,7 @@ code{font-family:var(--mono);font-size:12.5px;background:var(--raised);border-ra
     </article><article class="ent2" id="c-diffview">
       <header>
         <h3>DiffView</h3>
-        <span class="use"><b>8</b> of 74</span>
+        <span class="use"><b>8</b> of 50</span>
         <span class="sprd">Customize, Updates, Workspace</span>
         <span class="tags"><span class="tag" data-v="changed">survives, changed</span><span class="tag" data-r="desktop">desktop only</span></span>
       </header>
@@ -653,7 +653,7 @@ code{font-family:var(--mono);font-size:12.5px;background:var(--raised);border-ra
     </article><article class="ent2" id="c-gate">
       <header>
         <h3>Gate</h3>
-        <span class="use"><b>8</b> of 74</span>
+        <span class="use"><b>8</b> of 50</span>
         <span class="sprd">First run — Address, Looking, Name it, No answer, Not a Firetower, Replace password, Set up, Sign in</span>
         <span class="tags"><span class="tag" data-v="changed">survives, changed</span><span class="tag" data-r="desktop">desktop only</span></span>
       </header>
@@ -668,7 +668,7 @@ code{font-family:var(--mono);font-size:12.5px;background:var(--raised);border-ra
     </article><article class="ent2" id="c-codeview">
       <header>
         <h3>CodeView</h3>
-        <span class="use"><b>7</b> of 74</span>
+        <span class="use"><b>7</b> of 50</span>
         <span class="sprd">Workspace — A diff, A file, A picture, Conversation, Notes kept, Noting code, Preview</span>
         <span class="tags"><span class="tag" data-v="changed">survives, changed</span><span class="tag" data-r="desktop">desktop only</span></span>
       </header>
@@ -683,7 +683,7 @@ code{font-family:var(--mono);font-size:12.5px;background:var(--raised);border-ra
     </article><article class="ent2" id="c-contextmenu">
       <header>
         <h3>ContextMenu</h3>
-        <span class="use"><b>7</b> of 74</span>
+        <span class="use"><b>7</b> of 50</span>
         <span class="sprd">Workspace — A diff, A file, A picture, Conversation, Notes kept, Noting code, Preview</span>
         <span class="tags"><span class="tag" data-v="unchanged">survives unchanged</span><span class="tag" data-r="desktop">desktop only</span></span>
       </header>
@@ -698,7 +698,7 @@ code{font-family:var(--mono);font-size:12.5px;background:var(--raised);border-ra
     </article><article class="ent2" id="c-findbar">
       <header>
         <h3>FindBar</h3>
-        <span class="use"><b>7</b> of 74</span>
+        <span class="use"><b>7</b> of 50</span>
         <span class="sprd">Workspace — A diff, A file, A picture, Conversation, Notes kept, Noting code, Preview</span>
         <span class="tags"><span class="tag" data-v="unchanged">survives unchanged</span><span class="tag" data-r="desktop">desktop only</span></span>
       </header>
@@ -713,7 +713,7 @@ code{font-family:var(--mono);font-size:12.5px;background:var(--raised);border-ra
     </article><article class="ent2" id="c-inspector">
       <header>
         <h3>Inspector</h3>
-        <span class="use"><b>7</b> of 74</span>
+        <span class="use"><b>7</b> of 50</span>
         <span class="sprd">Workspace — A diff, A file, A picture, Conversation, Notes kept, Noting code, Preview</span>
         <span class="tags"><span class="tag" data-v="changed">survives, changed</span><span class="tag" data-r="desktop">desktop only</span></span>
       </header>
@@ -728,7 +728,7 @@ code{font-family:var(--mono);font-size:12.5px;background:var(--raised);border-ra
     </article><article class="ent2" id="c-shippanel">
       <header>
         <h3>ShipPanel</h3>
-        <span class="use"><b>7</b> of 74</span>
+        <span class="use"><b>7</b> of 50</span>
         <span class="sprd">Workspace — A diff, A file, A picture, Conversation, Notes kept, Noting code, Preview</span>
         <span class="tags"><span class="tag" data-v="changed">survives, changed</span><span class="tag" data-r="desktop">desktop only</span></span>
       </header>
@@ -743,7 +743,7 @@ code{font-family:var(--mono);font-size:12.5px;background:var(--raised);border-ra
     </article><article class="ent2" id="c-tabs">
       <header>
         <h3>Tabs</h3>
-        <span class="use"><b>7</b> of 74</span>
+        <span class="use"><b>7</b> of 50</span>
         <span class="sprd">Workspace — A diff, A file, A picture, Conversation, Notes kept, Noting code, Preview</span>
         <span class="tags"><span class="tag" data-v="unchanged">survives unchanged</span><span class="tag" data-r="desktop">desktop only</span></span>
       </header>
@@ -758,7 +758,7 @@ code{font-family:var(--mono);font-size:12.5px;background:var(--raised);border-ra
     </article><article class="ent2" id="c-statuspip">
       <header>
         <h3>StatusPip</h3>
-        <span class="use"><b>5</b> of 74</span>
+        <span class="use"><b>5</b> of 50</span>
         <span class="sprd">Customize, Sources</span>
         <span class="tags"><span class="tag" data-v="unchanged">survives unchanged</span><span class="tag" data-r="shared">shared with web</span></span>
       </header>
@@ -773,7 +773,7 @@ code{font-family:var(--mono);font-size:12.5px;background:var(--raised);border-ra
     </article><article class="ent2" id="c-filetree">
       <header>
         <h3>FileTree</h3>
-        <span class="use"><b>4</b> of 74</span>
+        <span class="use"><b>4</b> of 50</span>
         <span class="sprd">Workspace — A file, Conversation, Notes kept, Noting code</span>
         <span class="tags"><span class="tag" data-v="changed">survives, changed</span><span class="tag" data-r="desktop">desktop only</span></span>
       </header>
@@ -788,7 +788,7 @@ code{font-family:var(--mono);font-size:12.5px;background:var(--raised);border-ra
     </article><article class="ent2" id="c-hostmark">
       <header>
         <h3>HostMark</h3>
-        <span class="use"><b>3</b> of 74</span>
+        <span class="use"><b>3</b> of 50</span>
         <span class="sprd">Sources — Git hosts, Repositories, Trackers</span>
         <span class="tags"><span class="tag" data-v="changed">survives, changed</span><span class="tag" data-r="shared">shared with web</span></span>
       </header>
@@ -803,7 +803,7 @@ code{font-family:var(--mono);font-size:12.5px;background:var(--raised);border-ra
     </article><article class="ent2" id="c-poster">
       <header>
         <h3>Poster</h3>
-        <span class="use"><b>1</b> of 74</span>
+        <span class="use"><b>1</b> of 50</span>
         <span class="sprd">Artifacts — Library</span>
         <span class="tags"><span class="tag" data-v="changed">survives, changed</span><span class="tag" data-r="shared">shared with web</span></span>
       </header>
@@ -836,37 +836,37 @@ code{font-family:var(--mono);font-size:12.5px;background:var(--raised);border-ra
 <p>Shapes that recur and are re-implemented each time. <b>This is where reuse is actually lost</b> — nothing is obviously wrong with any single screen. Rendered as miniatures, because a pattern described in prose is exactly the thing that gets built again.</p>
 <article class="ent2">
     <header><h3>List page</h3>
-      <span class="use"><b>25</b> of 74</span>
+      <span class="use"><b>25</b> of 50</span>
       <span class="sprd">instantiated on</span></header>
     <div class="stage" data-pat="List page"></div>
     <footer><p class="for">A title, one sentence, one action, then rows. <b>Eleven configuration screens are this shape</b> and each currently re-implements it.</p><p class="note2"><code>bits.tsx</code> has <code>Section</code> and <code>Rows</code>, which is two thirds of it. The missing third is the page head and the single action.</p></footer>
   </article><article class="ent2">
     <header><h3>Create menu</h3>
-      <span class="use"><b>25</b> of 74</span>
+      <span class="use"><b>7</b> of 50</span>
       <span class="sprd">instantiated on</span></header>
     <div class="stage" data-pat="Create menu"></div>
     <footer><p class="for">“Make one” that offers <i>how</i> — by hand, or by asking an agent.</p><p class="note2"><code>config/CreateMenu.tsx</code> already exists and is used twice (Skills, Profiles). Every other <i>Add</i> on every other screen is a plain button. <b>Audit each one: it either belongs to this pattern or has a reason not to.</b></p></footer>
   </article><article class="ent2">
     <header><h3>Picker sheet</h3>
-      <span class="use"><b>18</b> of 74</span>
+      <span class="use"><b>18</b> of 50</span>
       <span class="sprd">instantiated on</span></header>
     <div class="stage" data-pat="Picker sheet"></div>
     <footer><p class="for">Choose from a list, inside a sheet: find, rows, a tick, a footer that commits.</p><p class="note2">Used by repository, machine, profile, skill, agent, scope and tracker pickers. Seven screens, one shape, no shared component today.</p></footer>
   </article><article class="ent2">
     <header><h3>Refusal dialog</h3>
-      <span class="use"><b>48</b> of 74</span>
+      <span class="use"><b>42</b> of 50</span>
       <span class="sprd">instantiated on</span></header>
     <div class="stage" data-pat="Refusal dialog"></div>
     <footer><p class="for">Something will not work, and the thing to do is elsewhere.</p><p class="note2">The five dictation dialogs are the only ones built this way. The Gate, the limit hand-off and several error states are the same idea drawn differently.</p></footer>
   </article><article class="ent2">
     <header><h3>State set</h3>
-      <span class="use"><b>33</b> of 74</span>
+      <span class="use"><b>10</b> of 50</span>
       <span class="sprd">instantiated on</span></header>
     <div class="stage" data-pat="State set"></div>
     <footer><p class="for">Empty · loading · error · denied · server dark. <b>A fresh install hits every one of these at once</b>, so none is an edge case.</p><p class="note2">Every list needs all five. <code>Rows</code> in bits.tsx does three.</p></footer>
   </article><article class="ent2">
     <header><h3>Where-this-lives note</h3>
-      <span class="use"><b>15</b> of 74</span>
+      <span class="use"><b>15</b> of 50</span>
       <span class="sprd">instantiated on</span></header>
     <div class="stage" data-pat="Where-this-lives note"></div>
     <footer><p class="for">A line saying what this screen does not do, and where it is done instead.</p><p class="note2">People, Teams, Account and Repositories each end with one. It is how the read-only surfaces stay generous instead of looking withheld.</p></footer>

@@ -1712,6 +1712,26 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
 .sh-row .tx s code,.sh-note code{font-family:var(--mono);font-size:11.5px;color:var(--body);
   background:var(--sunk);border-radius:4px;padding:1px 4px}
 </style>
+<style>
+/* ═══ THE CONTACT SHEET ════════════════════════════════════════════ */
+.cs{max-width:1340px;margin:88px auto 0;padding:0 2px}
+.cs h2{font-size:22px;line-height:1.2;letter-spacing:-.02em;font-weight:540;color:var(--ink)}
+.cs-group{margin-top:38px;font-size:15px;font-weight:540;letter-spacing:-.008em;color:var(--ink);
+  display:flex;align-items:baseline;gap:9px}
+.cs-group .n{font-size:12px;font-weight:450;color:var(--hush)}
+.cs-grid{margin-top:12px;display:grid;gap:18px 16px;
+  grid-template-columns:repeat(auto-fill,minmax(384px,1fr))}
+.cs-tile{display:flex;flex-direction:column;gap:8px;text-align:left;cursor:pointer;border-radius:12px}
+.cs-frame{display:block;position:relative;overflow:hidden;border-radius:9px;background:var(--desk);
+  box-shadow:0 0 0 1px var(--hair);transition:box-shadow var(--quick) var(--swift)}
+.cs-tile:hover .cs-frame{box-shadow:0 0 0 1.5px var(--quiet),0 10px 26px -12px rgb(21 22 26 / .3)}
+.cs-tile:focus-visible .cs-frame{box-shadow:0 0 0 2px var(--ink)}
+/* The tile is a picture of a screen, not a screen: nothing inside it is
+   clickable, so a press always means "open this one full size". */
+.cs-inner{position:absolute;top:0;left:0;transform-origin:top left;pointer-events:none}
+.cs-cap{font-size:12.5px;line-height:1.4;color:var(--quiet)}
+.cs-tile:hover .cs-cap{color:var(--ink)}
+</style>
 
 </head>
 <body>
@@ -1727,6 +1747,7 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
   <div id="stage-wrap"><div class="stage" id="stage"><div class="fitbox" id="fitbox"><div class="scaler" id="scaler"><div id="win"></div></div></div></div>
   <div class="caption" id="caption"></div></div>
 
+  <div id="contact"></div>
   <div id="grouping"></div>
   <div id="notes"></div>
 </div>
@@ -5494,8 +5515,176 @@ function scopeSheet(){
 </script>
 
 <script>
+/* ═══════════════════════════════════════════════════════════════════
+   EVERY SCREEN — the contact sheet.
+
+   A tab row says where you can go and never what is there. This
+   document draws ninety-odd states across fourteen tabs, and a reader
+   looking for one of them was reduced to opening tabs until it
+   appeared — which is how a screen that exists gets reported missing.
+   So: every state at a third scale, grouped the way Coverage is
+   grouped, each tile a control that opens it full size.
+
+   Each tile renders from a *reset* state with one patch applied.
+   Rendering them in sequence without resetting is the same bug that
+   poisoned the usage harness: one latched overlay and every later
+   tile is drawn over the wrong screen.
+   ═══════════════════════════════════════════════════════════════════ */
+const BASE = JSON.parse(JSON.stringify(S));
+
+const SHEET = [
+ ["Starting work", [
+  ["Dashboard — two waiting",      {tab:"home", rt:"home", state:"waiting"}],
+  ["Dashboard — nothing waiting",  {tab:"home", rt:"home", state:"calm"}],
+  ["Dashboard — nothing yet",      {tab:"home", rt:"home", state:"empty"}],
+  ["Tasks — has work",             {tab:"tasks", rt:"tasks", tasks:"full"}],
+  ["Tasks — nothing open",         {tab:"tasks", rt:"tasks", tasks:"empty"}],
+  ["Tasks — not connected",        {tab:"tasks", rt:"tasks", tasks:"off"}],
+  ["Agent · model · effort",       {tab:"home", rt:"home", pick:"run"}],
+  ["Which repository",             {tab:"home", rt:"home", pick:"repo"}],
+  ["Which machine",                {tab:"home", rt:"home", pick:"machine"}],
+  ["Which profile",                {tab:"home", rt:"home", pick:"profile"}],
+ ]],
+ ["In a workspace", [
+  ["Conversation",                 {tab:"work", rt:"work", wb:"chat", panel:"collapsed"}],
+  ["A file",                       {tab:"work", rt:"work", wb:"file", panel:"collapsed"}],
+  ["A diff",                       {tab:"work", rt:"work", wb:"diff", panel:"collapsed"}],
+  ["Preview",                      {tab:"work", rt:"work", wb:"pv", panel:"collapsed"}],
+  ["A picture",                    {tab:"work", rt:"work", wb:"image", panel:"collapsed"}],
+  ["Noting code",                  {tab:"work", rt:"work", wb:"noting", panel:"collapsed"}],
+  ["Notes kept",                   {tab:"work", rt:"work", wb:"kept", panel:"collapsed"}],
+  ["Terminal",                     {tab:"work", rt:"work", wb:"chat", term:true, panel:"collapsed"}],
+  ["Find in the conversation",     {tab:"work", rt:"work", wb:"chat", find:"chat", panel:"collapsed"}],
+  ["Right-click a file",           {tab:"work", rt:"work", wb:"file", ctx:true, panel:"collapsed"}],
+  ["Another agent here",           {tab:"work", rt:"work", wb:"chat", addagent:true, panel:"collapsed"}],
+  ["Repositories here",            {tab:"work", rt:"work", wb:"chat", repos:"1", panel:"collapsed"}],
+  ["Ship — uncommitted",           {tab:"work", rt:"work", wb:"chat", itab:"ship", ship:"uncommitted", panel:"collapsed"}],
+  ["Ship — two repositories",      {tab:"work", rt:"work", wb:"chat", itab:"ship", ship:"many", panel:"collapsed"}],
+  ["Ship — merged",                {tab:"work", rt:"work", wb:"chat", itab:"ship", ship:"merged", panel:"collapsed"}],
+  ["Which skills",                 {tab:"work", rt:"work", wb:"chat", pick:"skills", panel:"collapsed"}],
+ ]],
+ ["Artifacts and skills", [
+  ["Artifacts — the library",      {tab:"artifacts", rt:"artifacts", art:"grid"}],
+  ["Reading one",                  {tab:"artifacts", rt:"artifact", art:"read"}],
+  ["Writing a note on one",        {tab:"artifacts", rt:"artifact", art:"noting"}],
+  ["Notes kept",                   {tab:"artifacts", rt:"artifact", art:"kept"}],
+  ["Skills",                       {tab:"customize", rt:"skills", sk:"lib"}],
+  ["One skill",                    {tab:"customize", rt:"skill", sk:"read"}],
+  ["A new version",                {tab:"customize", rt:"skill", sk:"update"}],
+  ["Create with AI",               {tab:"customize", rt:"mkskill", mk:"ai"}],
+  ["Held for review",              {tab:"customize", rt:"mkskill", mk:"held"}],
+  ["Upload a folder",              {tab:"customize", rt:"mkskill", mk:"drop"}],
+ ]],
+ ["Agent profiles and agents", [
+  ["Profiles",                     {tab:"customize", rt:"profiles"}],
+  ["One profile",                  {tab:"customize", rt:"profile", prof:"read"}],
+  ["New profile",                  {tab:"customize", rt:"profile", prof:"new"}],
+  ["Read-only profile",            {tab:"customize", rt:"profile", prof:"ro"}],
+  ["What it may reach",            {tab:"customize", rt:"profile", prof:"read", scopesheet:true}],
+  ["Agents",                       {tab:"customize", rt:"agents"}],
+ ]],
+ ["Sources", [
+  ["Repositories",                 {tab:"sources", rt:"repos"}],
+  ["Git hosts",                    {tab:"sources", rt:"hosts"}],
+  ["Connect — choose a way",       {tab:"sources", rt:"hosts", conn:"how"}],
+  ["Connect — device code",        {tab:"sources", rt:"hosts", conn:"code"}],
+  ["Connect — paste a token",      {tab:"sources", rt:"hosts", conn:"token", connkind:"gitlab"}],
+  ["Connect — connected",          {tab:"sources", rt:"hosts", conn:"done"}],
+  ["Machines",                     {tab:"sources", rt:"machines"}],
+  ["Add a machine",                {tab:"sources", rt:"machines", mach:"where"}],
+  ["Add a machine — probing",      {tab:"sources", rt:"machines", mach:"probing"}],
+  ["Add a machine — no answer",    {tab:"sources", rt:"machines", mach:"failed"}],
+  ["Add a machine — reached it",   {tab:"sources", rt:"machines", mach:"reached"}],
+  ["Trackers",                     {tab:"sources", rt:"trackers"}],
+ ]],
+ ["Settings", [
+  ["People",                       {tab:"settings", rt:"people"}],
+  ["Teams",                        {tab:"settings", rt:"teams"}],
+  ["Directories",                  {tab:"settings", rt:"dirs"}],
+  ["Vault",                        {tab:"settings", rt:"vault"}],
+  ["This Firetower",               {tab:"settings", rt:"server"}],
+  ["Who can access",               {tab:"settings", rt:"dirs", share:"who"}],
+  ["Where it lives",               {tab:"settings", rt:"dirs", share:"where"}],
+  ["New directory",                {tab:"settings", rt:"dirs", share:"newdir"}],
+  ["Account",                      {tab:"account", rt:"account", acct:"plain", panel:"collapsed"}],
+  ["Account — password held",      {tab:"account", rt:"account", acct:"locked", panel:"collapsed"}],
+  ["Updates — what is running",    {tab:"updates", rt:"updates", up:"read"}],
+  ["Updates — what it will write", {tab:"updates", rt:"updates", up:"plan"}],
+  ["Updates — upgrading",          {tab:"updates", rt:"updates", up:"run"}],
+ ]],
+ ["Every list, in all five states", [
+  ["Has things",                   {tab:"sources", rt:"repos", data:"full"}],
+  ["Empty",                        {tab:"sources", rt:"repos", data:"empty"}],
+  ["Slow",                         {tab:"sources", rt:"repos", data:"loading"}],
+  ["Refused",                      {tab:"sources", rt:"repos", data:"error"}],
+  ["Not allowed",                  {tab:"sources", rt:"repos", data:"denied"}],
+  ["Server dark",                  {tab:"sources", rt:"repos", data:"dark"}],
+ ]],
+ ["Getting in, and being held at the door", [
+  ["The address",                  {tab:"first", first:"where"}],
+  ["Looking for it",               {tab:"first", first:"reaching"}],
+  ["No answer",                    {tab:"first", first:"unreachable"}],
+  ["Not a Firetower",              {tab:"first", first:"refused"}],
+  ["Who are you here?",            {tab:"first", first:"who"}],
+  ["Replace this password",        {tab:"first", first:"locked"}],
+  ["Name this Firetower",          {tab:"first", first:"setup"}],
+  ["Set up",                       {tab:"first", first:"done"}],
+  ["Held — password reset",        {tab:"first", gate:"locked"}],
+  ["Held — mid-setup",             {tab:"first", gate:"setup"}],
+ ]],
+ ["Over any screen", [
+  ["⌘K — the palette",             {tab:"home", rt:"home", pal:"k"}],
+  ["⌘P — go to a file",            {tab:"work", rt:"work", wb:"file", pal:"p", panel:"collapsed"}],
+  ["Before something is undone",   {tab:"home", rt:"home", confirm:true}],
+  ["A usage limit is reached",     {tab:"home", rt:"home", hand:"hit"}],
+  ["What happens on a limit",      {tab:"home", rt:"home", hand:"set"}],
+  ["A screen that threw",          {tab:"home", rt:"home", threw:true}],
+  ["Switch Firetower",             {tab:"home", rt:"home", menu:"switch"}],
+  ["The profile menu",             {tab:"home", rt:"home", menu:"profile"}],
+  ["Dictation — blocked",          {tab:"work", rt:"work", wb:"chat", voice:"denied", panel:"collapsed"}],
+  ["Dictation — key refused",      {tab:"work", rt:"work", wb:"chat", voice:"rejected", panel:"collapsed"}],
+  ["Dictation — no key",           {tab:"work", rt:"work", wb:"chat", voice:"unset", panel:"collapsed"}],
+  ["Dictation — server too old",   {tab:"work", rt:"work", wb:"chat", voice:"old", panel:"collapsed"}],
+  ["Dictation — set the key",      {tab:"work", rt:"work", wb:"chat", voice:"key", panel:"collapsed"}],
+ ]],
+];
+
+/* Draw one state without disturbing the one on screen. */
+function tileFor(patch){
+  /* `S` is a const binding, so this mutates in place and puts it back.
+     BASE carries every key, so assigning it is a full reset. */
+  const keep = JSON.parse(JSON.stringify(S));
+  Object.assign(S, BASE, patch);
+  try { return renderWin(); }
+  finally { Object.assign(S, keep); }
+}
+const TILE_W = 1280, TILE_H = 824, TILE_SCALE = 0.3;
+
+function contact(){
+  const n = SHEET.reduce((a,[,r]) => a + r.length, 0);
+  return `<div class="cs">
+    <h2>Every screen</h2>
+    <p class="prose-lead">All <b>${n}</b> states this document draws, at a third scale, grouped as Coverage is grouped. <b>A tab row says where you can go and never what is there</b> — which is how a screen that exists gets reported missing. Press any tile to open it full size.</p>
+    ${SHEET.map(([group, rows]) => `
+      <h3 class="cs-group">${group}<span class="n">${rows.length}</span></h3>
+      <div class="cs-grid">
+        ${rows.map(([label, patch], i) => `
+          <div class="cs-tile" role="button" tabindex="0" data-act="goscreen"
+               data-g="${SHEET.findIndex(x=>x[0]===group)}" data-i="${i}"
+               aria-label="Open ${esc(label)}">
+            <span class="cs-frame" style="width:${Math.round(TILE_W*TILE_SCALE)}px;height:${Math.round(TILE_H*TILE_SCALE)}px">
+              <span class="cs-inner" style="transform:scale(${TILE_SCALE})">${tileFor(patch)}</span>
+            </span>
+            <span class="cs-cap">${label}</span>
+          </div>`).join("")}
+      </div>`).join("")}
+  </div>`;
+}
+</script>
+
+<script>
 /* ── Controls: two, both sentence case ────────────────────────── */
-const TABS=[["home","Dashboard"],["work","Workspace"],["artifacts","Artifacts"],
+const TABS=[["home","Dashboard"],["sheet","Every screen"],["work","Workspace"],["artifacts","Artifacts"],
   ["customize","Customize"],["sources","Sources"],["settings","Settings"],
   ["tasks","Tasks"],["account","Account"],["updates","Updates"],["first","First run"],["coverage","Coverage"],["grouping","Grouping"],["spec","Spec"],["notes","Notes"]];
 const STATES=[["waiting","Two waiting"],["calm","Nothing waiting"],["empty","Nothing yet"]];
@@ -5613,9 +5802,10 @@ function fit(){
 }
 function render(){
   document.documentElement.dataset.theme=S.theme;
-  const doc = S.tab==="grouping"||S.tab==="spec"||S.tab==="coverage";   /* a document, not a mock */
+  const doc = S.tab==="grouping"||S.tab==="spec"||S.tab==="coverage"||S.tab==="sheet";  /* a document, not a mock */
   document.getElementById("stage-wrap").style.display = doc ? "none" : "";
   if(!doc){ winbox.innerHTML=renderWin(); fit(); }
+  document.getElementById("contact").innerHTML = S.tab==="sheet" ? contact() : "";
   chrome(); renderGrouping(); notes();
 }
 let rt; addEventListener("resize",()=>{clearTimeout(rt);rt=setTimeout(fit,60)});
@@ -5686,6 +5876,8 @@ document.addEventListener("click",e=>{
     else if(to==="updates"){S.tab="updates";}
     else S.tab="grouping"===S.tab?"grouping":S.tab; }
   else if(a==="open"){ S.rt="work"; S.tab="work"; S.panel="collapsed"; shut(); }
+  else if(a==="goscreen"){ const [,rows]=SHEET[+b.dataset.g]; const patch=rows[+b.dataset.i][1];
+    Object.assign(S, BASE, patch); }
   else if(a==="itab") S.itab=b.dataset.itab;
   else if(a==="tasks"){ S.tasks=b.dataset.tasks; S.rt="tasks"; S.tab="tasks"; }
   else if(a==="acct"){ S.acct=b.dataset.acct; S.rt="account"; S.tab="account"; S.panel="collapsed"; shut(); }
@@ -5765,6 +5957,8 @@ document.addEventListener("focusin",e=>{
   const again=document.querySelector(`[data-rail="${r.dataset.rail}"]`); if(again) again.focus({preventScroll:true});
 });
 document.addEventListener("keydown",e=>{
+  const tile=e.target.closest?.('[data-act="goscreen"]');
+  if(tile && (e.key==="Enter"||e.key===" ")){ e.preventDefault(); tile.click(); return; }
   if(e.key==="Escape"&&(S.pal||S.share||S.conn||S.mach||S.hand||S.confirm)){
     S.pal=null;S.share=null;S.conn=null;S.mach=null;S.hand=null;S.confirm=false; render(); return; }
   if(e.key==="Escape"&&(S.menu||S.peek||S.pick)){

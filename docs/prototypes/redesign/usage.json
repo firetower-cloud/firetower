@@ -1,0 +1,7971 @@
+{
+"classes": {
+"acts": {
+"max": 3,
+"screens": [
+"Workspace / Conversation",
+"Artifacts / Library",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Held for review",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Updates / What is running",
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Create with AI",
+"Customize / Upload a folder",
+"Customize / Read-only",
+"Sources / Trackers",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What it will write",
+"Updates / Upgrading"
+]
+},
+"add": {
+"max": 4,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept"
+]
+},
+"addr": {
+"max": 1,
+"screens": [
+"Workspace / Preview"
+]
+},
+"ag": {
+"max": 4,
+"screens": [
+"Workspace / Conversation"
+]
+},
+"age": {
+"max": 14,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Workspace / Conversation",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines"
+]
+},
+"ags": {
+"max": 6,
+"screens": [
+"Customize / Skills"
+]
+},
+"all": {
+"max": 1,
+"screens": [
+"Customize / Skills"
+]
+},
+"also": {
+"max": 1,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting"
+]
+},
+"alt": {
+"max": 1,
+"screens": [
+"First run / Address",
+"First run / Sign in",
+"First run / Set up"
+]
+},
+"approval": {
+"max": 1,
+"screens": [
+"Workspace / Conversation"
+]
+},
+"art": {
+"max": 8,
+"screens": [
+"Artifacts / Library"
+]
+},
+"aside1": {
+"max": 2,
+"screens": [
+"Account / Signed in",
+"Account / Password held",
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading"
+]
+},
+"ask": {
+"max": 2,
+"screens": [
+"Dashboard / Two waiting"
+]
+},
+"asks": {
+"max": 1,
+"screens": [
+"Dashboard / Two waiting"
+]
+},
+"atwork": {
+"max": 1,
+"screens": [
+"Workspace / Conversation"
+]
+},
+"avatar": {
+"max": 1,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading",
+"First run / Address",
+"First run / Looking",
+"First run / No answer",
+"First run / Not a Firetower",
+"First run / Sign in",
+"First run / Replace password",
+"First run / Name it",
+"First run / Set up"
+]
+},
+"back": {
+"max": 1,
+"screens": [
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Skills",
+"Customize / Profiles",
+"Customize / Agents"
+]
+},
+"bad": {
+"max": 1,
+"screens": [
+"First run / No answer",
+"First run / Not a Firetower",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers"
+]
+},
+"bar": {
+"max": 3,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Customize / Agents",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"First run / Address",
+"First run / Looking",
+"First run / No answer",
+"First run / Not a Firetower",
+"First run / Sign in",
+"First run / Replace password",
+"First run / Name it",
+"First run / Set up"
+]
+},
+"bare": {
+"max": 1,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept"
+]
+},
+"bars": {
+"max": 1,
+"screens": [
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept"
+]
+},
+"bbody": {
+"max": 2,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept"
+]
+},
+"berth": {
+"max": 2,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept"
+]
+},
+"bhead": {
+"max": 2,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept"
+]
+},
+"bk": {
+"max": 2,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading"
+]
+},
+"blank": {
+"max": 1,
+"screens": [
+"Dashboard / Nothing yet",
+"Tasks / Nothing open",
+"First run / Address",
+"First run / Looking",
+"First run / No answer",
+"First run / Not a Firetower",
+"First run / Sign in",
+"First run / Replace password",
+"First run / Name it",
+"First run / Set up"
+]
+},
+"body": {
+"max": 1,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading",
+"First run / Address",
+"First run / Looking",
+"First run / No answer",
+"First run / Not a Firetower",
+"First run / Sign in",
+"First run / Replace password",
+"First run / Name it",
+"First run / Set up"
+]
+},
+"body2": {
+"max": 1,
+"screens": [
+"Workspace / Preview"
+]
+},
+"box": {
+"max": 5,
+"screens": [
+"Workspace / Conversation",
+"Customize / Create with AI",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Updates / What is running",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / Agents"
+]
+},
+"br": {
+"max": 7,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Workspace / Conversation",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / A file",
+"Workspace / Noting code",
+"Workspace / Notes kept"
+]
+},
+"bstate": {
+"max": 2,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept"
+]
+},
+"btn": {
+"max": 11,
+"screens": [
+"Workspace / Conversation",
+"Artifacts / Library",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / Directories",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading",
+"First run / Address",
+"First run / No answer",
+"First run / Not a Firetower",
+"First run / Sign in",
+"First run / Replace password",
+"First run / Name it",
+"First run / Set up",
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Agents",
+"Settings / People",
+"Settings / Teams",
+"Settings / Vault",
+"First run / Looking"
+]
+},
+"c-attr": {
+"max": 3,
+"screens": [
+"Workspace / A file",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Workspace / Conversation",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture"
+]
+},
+"c-comment": {
+"max": 5,
+"screens": [
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Workspace / Conversation",
+"Workspace / Preview",
+"Workspace / A picture"
+]
+},
+"c-fn": {
+"max": 7,
+"screens": [
+"Workspace / A file",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Workspace / Conversation",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture"
+]
+},
+"c-keyword": {
+"max": 20,
+"screens": [
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Workspace / Conversation",
+"Workspace / Preview",
+"Workspace / A picture"
+]
+},
+"c-number": {
+"max": 3,
+"screens": [
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Workspace / Conversation",
+"Workspace / Preview",
+"Workspace / A picture"
+]
+},
+"c-type": {
+"max": 16,
+"screens": [
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Workspace / Conversation",
+"Workspace / Preview",
+"Workspace / A picture"
+]
+},
+"card": {
+"max": 1,
+"screens": [
+"First run / Address",
+"First run / Looking",
+"First run / No answer",
+"First run / Not a Firetower",
+"First run / Sign in",
+"First run / Replace password",
+"First run / Name it",
+"First run / Set up"
+]
+},
+"card1": {
+"max": 2,
+"screens": [
+"Account / Signed in",
+"Account / Password held"
+]
+},
+"caret": {
+"max": 1,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept"
+]
+},
+"cbox": {
+"max": 1,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading"
+]
+},
+"ccol": {
+"max": 1,
+"screens": [
+"Workspace / Conversation"
+]
+},
+"chg": {
+"max": 1,
+"screens": [
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower"
+]
+},
+"chip": {
+"max": 5,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"First run / Address",
+"First run / Looking",
+"First run / No answer",
+"First run / Not a Firetower",
+"First run / Sign in",
+"First run / Replace password",
+"First run / Name it",
+"First run / Set up"
+]
+},
+"chip3": {
+"max": 2,
+"screens": [
+"Customize / Profiles",
+"Settings / People"
+]
+},
+"code": {
+"max": 1,
+"screens": [
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Workspace / Conversation",
+"Workspace / Preview",
+"Workspace / A picture"
+]
+},
+"col": {
+"max": 1,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting"
+]
+},
+"composer": {
+"max": 1,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"First run / Address",
+"First run / Looking",
+"First run / No answer",
+"First run / Not a Firetower",
+"First run / Sign in",
+"First run / Replace password",
+"First run / Name it",
+"First run / Set up"
+]
+},
+"conv": {
+"max": 1,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept"
+]
+},
+"count": {
+"max": 2,
+"screens": [
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Workspace / Conversation",
+"Workspace / Preview",
+"Workspace / A picture"
+]
+},
+"cscroll": {
+"max": 1,
+"screens": [
+"Workspace / Conversation"
+]
+},
+"ctx": {
+"max": 1,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept"
+]
+},
+"d": {
+"max": 4,
+"screens": [
+"Workspace / A file",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Workspace / Conversation",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture"
+]
+},
+"danger": {
+"max": 1,
+"screens": [
+"Account / Signed in",
+"Account / Password held"
+]
+},
+"del": {
+"max": 4,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept"
+]
+},
+"detail": {
+"max": 1,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading"
+]
+},
+"did": {
+"max": 2,
+"screens": [
+"Workspace / Conversation"
+]
+},
+"difflist": {
+"max": 1,
+"screens": [
+"Customize / A new version",
+"Customize / Held for review"
+]
+},
+"diffrow": {
+"max": 5,
+"screens": [
+"Customize / A new version",
+"Customize / Held for review",
+"Updates / What it will write"
+]
+},
+"dim": {
+"max": 2,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading"
+]
+},
+"dim2": {
+"max": 2,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept"
+]
+},
+"dl": {
+"max": 1,
+"screens": [
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture"
+]
+},
+"dlg": {
+"max": 1,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading"
+]
+},
+"dlgfoot": {
+"max": 1,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading"
+]
+},
+"doc": {
+"max": 1,
+"screens": [
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept"
+]
+},
+"dochead": {
+"max": 1,
+"screens": [
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept"
+]
+},
+"dock": {
+"max": 1,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"First run / Address",
+"First run / Looking",
+"First run / No answer",
+"First run / Not a Firetower",
+"First run / Sign in",
+"First run / Replace password",
+"First run / Name it",
+"First run / Set up"
+]
+},
+"dot": {
+"max": 5,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading",
+"First run / Address",
+"First run / Looking",
+"First run / No answer",
+"First run / Not a Firetower",
+"First run / Sign in",
+"First run / Replace password",
+"First run / Name it",
+"First run / Set up"
+]
+},
+"dot2": {
+"max": 2,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept"
+]
+},
+"dr": {
+"max": 4,
+"screens": [
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture"
+]
+},
+"draftline": {
+"max": 1,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept"
+]
+},
+"ds": {
+"max": 12,
+"screens": [
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version"
+]
+},
+"el": {
+"max": 5,
+"screens": [
+"Workspace / Preview",
+"Updates / Upgrading"
+]
+},
+"elsewhere": {
+"max": 1,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting"
+]
+},
+"ent": {
+"max": 10,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading"
+]
+},
+"face": {
+"max": 10,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading",
+"First run / Address",
+"First run / Looking",
+"First run / No answer",
+"First run / Not a Firetower",
+"First run / Sign in",
+"First run / Replace password",
+"First run / Name it",
+"First run / Set up"
+]
+},
+"face2": {
+"max": 1,
+"screens": [
+"Account / Signed in",
+"Account / Password held"
+]
+},
+"facts": {
+"max": 1,
+"screens": [
+"Customize / One skill",
+"Customize / A new version"
+]
+},
+"facts-card": {
+"max": 4,
+"screens": [
+"Customize / One skill",
+"Customize / A new version"
+]
+},
+"fake": {
+"max": 1,
+"screens": [
+"Workspace / Preview"
+]
+},
+"fhead": {
+"max": 1,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept"
+]
+},
+"fig": {
+"max": 3,
+"screens": [
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept"
+]
+},
+"figrow": {
+"max": 1,
+"screens": [
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept"
+]
+},
+"filehead": {
+"max": 1,
+"screens": [
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Workspace / Conversation",
+"Workspace / Preview",
+"Workspace / A picture"
+]
+},
+"filterline": {
+"max": 1,
+"screens": [
+"Sources / Repositories",
+"Tasks / Has work",
+"Tasks / Nothing open"
+]
+},
+"filters": {
+"max": 1,
+"screens": [
+"Artifacts / Library"
+]
+},
+"fin": {
+"max": 2,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading"
+]
+},
+"find": {
+"max": 1,
+"screens": [
+"Artifacts / Library",
+"Customize / Skills",
+"Sources / Repositories",
+"Settings / People",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents"
+]
+},
+"findbar": {
+"max": 1,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept"
+]
+},
+"first": {
+"max": 1,
+"screens": [
+"First run / Address",
+"First run / Looking",
+"First run / No answer",
+"First run / Not a Firetower",
+"First run / Sign in",
+"First run / Replace password",
+"First run / Name it",
+"First run / Set up",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers"
+]
+},
+"fld": {
+"max": 12,
+"screens": [
+"Customize / Create with AI",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / Agents"
+]
+},
+"fold": {
+"max": 1,
+"screens": [
+"Workspace / Conversation"
+]
+},
+"foot": {
+"max": 1,
+"screens": [
+"Workspace / A picture",
+"Workspace / Noting code",
+"Artifacts / Writing a note"
+]
+},
+"form": {
+"max": 1,
+"screens": [
+"Customize / Create with AI",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / Agents"
+]
+},
+"formfoot": {
+"max": 1,
+"screens": [
+"Customize / Create with AI",
+"Customize / Upload a folder",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Held for review",
+"Customize / Profiles",
+"Customize / Read-only",
+"Customize / Agents"
+]
+},
+"found": {
+"max": 1,
+"screens": [
+"First run / Looking",
+"First run / Sign in"
+]
+},
+"fp": {
+"max": 7,
+"screens": [
+"Artifacts / Library",
+"Sources / Repositories",
+"Tasks / Has work",
+"Tasks / Nothing open"
+]
+},
+"fr": {
+"max": 4,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept"
+]
+},
+"frame": {
+"max": 1,
+"screens": [
+"Workspace / Preview"
+]
+},
+"from": {
+"max": 8,
+"screens": [
+"Artifacts / Library"
+]
+},
+"fsep": {
+"max": 2,
+"screens": [
+"Tasks / Has work",
+"Tasks / Nothing open"
+]
+},
+"fsheet": {
+"max": 1,
+"screens": [
+"Settings / This Firetower"
+]
+},
+"fta": {
+"max": 1,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept"
+]
+},
+"ftid": {
+"max": 1,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading",
+"First run / Address",
+"First run / Looking",
+"First run / No answer",
+"First run / Not a Firetower",
+"First run / Sign in",
+"First run / Replace password",
+"First run / Name it",
+"First run / Set up"
+]
+},
+"g": {
+"max": 24,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / Upgrading",
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / One profile",
+"Customize / New profile",
+"Updates / What it will write",
+"First run / Address",
+"First run / Looking",
+"First run / No answer",
+"First run / Not a Firetower",
+"First run / Sign in",
+"First run / Replace password",
+"First run / Name it",
+"First run / Set up"
+]
+},
+"gal": {
+"max": 1,
+"screens": [
+"Artifacts / Library"
+]
+},
+"gate": {
+"max": 1,
+"screens": [
+"First run / Address",
+"First run / Looking",
+"First run / No answer",
+"First run / Not a Firetower",
+"First run / Sign in",
+"First run / Replace password",
+"First run / Name it",
+"First run / Set up"
+]
+},
+"gateacts": {
+"max": 1,
+"screens": [
+"First run / Address",
+"First run / Looking",
+"First run / No answer",
+"First run / Not a Firetower",
+"First run / Sign in",
+"First run / Replace password",
+"First run / Name it",
+"First run / Set up"
+]
+},
+"gatecard": {
+"max": 1,
+"screens": [
+"First run / Address",
+"First run / Looking",
+"First run / No answer",
+"First run / Not a Firetower",
+"First run / Sign in",
+"First run / Replace password",
+"First run / Name it",
+"First run / Set up"
+]
+},
+"gatefoot": {
+"max": 1,
+"screens": [
+"First run / Address",
+"First run / Looking",
+"First run / No answer",
+"First run / Not a Firetower",
+"First run / Sign in",
+"First run / Replace password",
+"First run / Name it",
+"First run / Set up"
+]
+},
+"gauge": {
+"max": 1,
+"screens": [
+"Workspace / Preview"
+]
+},
+"gbtn": {
+"max": 15,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading",
+"First run / Sign in",
+"First run / Address",
+"First run / Looking",
+"First run / No answer",
+"First run / Not a Firetower",
+"First run / Replace password",
+"First run / Name it",
+"First run / Set up"
+]
+},
+"ghost": {
+"max": 1,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept"
+]
+},
+"glyph": {
+"max": 1,
+"screens": [
+"Dashboard / Nothing yet",
+"First run / Address",
+"First run / Looking",
+"First run / No answer",
+"First run / Not a Firetower",
+"First run / Sign in",
+"First run / Replace password",
+"First run / Name it",
+"First run / Set up"
+]
+},
+"go": {
+"max": 1,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Workspace / Notes kept",
+"Artifacts / Notes kept",
+"First run / Address",
+"First run / No answer",
+"First run / Not a Firetower",
+"First run / Sign in",
+"First run / Replace password",
+"First run / Name it",
+"First run / Set up"
+]
+},
+"grip": {
+"max": 1,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept"
+]
+},
+"hand": {
+"max": 1,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading"
+]
+},
+"handto": {
+"max": 1,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept"
+]
+},
+"harm": {
+"max": 1,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading"
+]
+},
+"hd": {
+"max": 4,
+"screens": [
+"Workspace / Preview",
+"Customize / Skills",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept"
+]
+},
+"here-badge": {
+"max": 1,
+"screens": [
+"Workspace / Conversation"
+]
+},
+"hero-sub": {
+"max": 1,
+"screens": [
+"Dashboard / Nothing waiting"
+]
+},
+"hint": {
+"max": 22,
+"screens": [
+"Customize / Create with AI",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading"
+]
+},
+"hit": {
+"max": 21,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept"
+]
+},
+"hm": {
+"max": 7,
+"screens": [
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Trackers"
+]
+},
+"hot": {
+"max": 2,
+"screens": [
+"Dashboard / Two waiting"
+]
+},
+"hov": {
+"max": 7,
+"screens": [
+"Customize / Profiles",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Settings / Directories",
+"Settings / Vault",
+"Tasks / Has work"
+]
+},
+"ic": {
+"max": 10,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Customize / Create with AI",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading",
+"First run / Address",
+"First run / Looking",
+"First run / No answer",
+"First run / Not a Firetower",
+"First run / Sign in",
+"First run / Replace password",
+"First run / Name it",
+"First run / Set up"
+]
+},
+"if-bar": {
+"max": 1,
+"screens": [
+"Workspace / A picture"
+]
+},
+"if-body": {
+"max": 1,
+"screens": [
+"Workspace / A picture"
+]
+},
+"if-col": {
+"max": 1,
+"screens": [
+"Workspace / A picture"
+]
+},
+"if-h": {
+"max": 1,
+"screens": [
+"Workspace / A picture"
+]
+},
+"if-l": {
+"max": 2,
+"screens": [
+"Workspace / A picture"
+]
+},
+"if-main": {
+"max": 1,
+"screens": [
+"Workspace / A picture"
+]
+},
+"if-meter": {
+"max": 1,
+"screens": [
+"Workspace / A picture"
+]
+},
+"imgfake": {
+"max": 1,
+"screens": [
+"Workspace / A picture"
+]
+},
+"imgfoot": {
+"max": 1,
+"screens": [
+"Workspace / A picture"
+]
+},
+"imghead": {
+"max": 1,
+"screens": [
+"Workspace / A picture"
+]
+},
+"imgstage": {
+"max": 1,
+"screens": [
+"Workspace / A picture"
+]
+},
+"imgwrap": {
+"max": 1,
+"screens": [
+"Workspace / A picture"
+]
+},
+"in": {
+"max": 2,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"First run / Address",
+"First run / Sign in",
+"First run / Replace password",
+"First run / Name it",
+"First run / Looking",
+"First run / No answer",
+"First run / Not a Firetower",
+"First run / Set up"
+]
+},
+"in2": {
+"max": 1,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading"
+]
+},
+"in3": {
+"max": 1,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading"
+]
+},
+"incoming": {
+"max": 1,
+"screens": [
+"Customize / A new version"
+]
+},
+"inner": {
+"max": 3,
+"screens": [
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower"
+]
+},
+"insp": {
+"max": 1,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept"
+]
+},
+"iscroll": {
+"max": 1,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept"
+]
+},
+"isec": {
+"max": 4,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept"
+]
+},
+"itab": {
+"max": 4,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept"
+]
+},
+"itabs": {
+"max": 1,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept"
+]
+},
+"k": {
+"max": 5,
+"screens": [
+"Customize / A new version",
+"Customize / Held for review",
+"Updates / What it will write",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept"
+]
+},
+"kbd": {
+"max": 2,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading",
+"First run / Address",
+"First run / Looking",
+"First run / No answer",
+"First run / Not a Firetower",
+"First run / Sign in",
+"First run / Replace password",
+"First run / Name it",
+"First run / Set up"
+]
+},
+"kbox": {
+"max": 1,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading"
+]
+},
+"keycap": {
+"max": 4,
+"screens": [
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading"
+]
+},
+"kfield": {
+"max": 1,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading"
+]
+},
+"kfoot": {
+"max": 1,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading"
+]
+},
+"ki": {
+"max": 10,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading"
+]
+},
+"kids": {
+"max": 1,
+"screens": [
+"Workspace / Conversation"
+]
+},
+"klab": {
+"max": 3,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading"
+]
+},
+"klist": {
+"max": 1,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading"
+]
+},
+"kveil": {
+"max": 1,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading"
+]
+},
+"l1": {
+"max": 12,
+"screens": [
+"Customize / Skills"
+]
+},
+"lbl": {
+"max": 12,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading",
+"First run / Address",
+"First run / Looking",
+"First run / No answer",
+"First run / Not a Firetower",
+"First run / Sign in",
+"First run / Replace password",
+"First run / Name it",
+"First run / Set up"
+]
+},
+"lbl2": {
+"max": 1,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept"
+]
+},
+"lede": {
+"max": 1,
+"screens": [
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept"
+]
+},
+"lights": {
+"max": 1,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading",
+"First run / Address",
+"First run / Looking",
+"First run / No answer",
+"First run / Not a Firetower",
+"First run / Sign in",
+"First run / Replace password",
+"First run / Name it",
+"First run / Set up"
+]
+},
+"line": {
+"max": 2,
+"screens": [
+"Customize / One skill",
+"Customize / A new version"
+]
+},
+"list": {
+"max": 1,
+"screens": [
+"Workspace / Preview"
+]
+},
+"ln": {
+"max": 35,
+"screens": [
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Workspace / Conversation",
+"Workspace / Preview",
+"Workspace / A picture"
+]
+},
+"logged": {
+"max": 1,
+"screens": [
+"Settings / Vault"
+]
+},
+"lrows": {
+"max": 2,
+"screens": [
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower"
+]
+},
+"lsec": {
+"max": 2,
+"screens": [
+"Customize / Profiles",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Account / Signed in",
+"Account / Password held"
+]
+},
+"lvl": {
+"max": 5,
+"screens": [
+"Settings / Directories",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Vault",
+"Settings / This Firetower"
+]
+},
+"mach": {
+"max": 4,
+"screens": [
+"Updates / What is running"
+]
+},
+"made": {
+"max": 1,
+"screens": [
+"Workspace / Conversation"
+]
+},
+"main": {
+"max": 1,
+"screens": [
+"Workspace / Preview"
+]
+},
+"mark": {
+"max": 9,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading",
+"First run / Sign in",
+"First run / Address",
+"First run / Looking",
+"First run / No answer",
+"First run / Not a Firetower",
+"First run / Replace password",
+"First run / Name it",
+"First run / Set up"
+]
+},
+"marker": {
+"max": 2,
+"screens": [
+"Artifacts / Notes kept"
+]
+},
+"masked": {
+"max": 4,
+"screens": [
+"Settings / Vault"
+]
+},
+"md": {
+"max": 1,
+"screens": [
+"Customize / One skill",
+"Customize / A new version",
+"Updates / What is running"
+]
+},
+"meter": {
+"max": 1,
+"screens": [
+"Workspace / Conversation"
+]
+},
+"mhead": {
+"max": 1,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading"
+]
+},
+"mi": {
+"max": 6,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading"
+]
+},
+"mine": {
+"max": 1,
+"screens": [
+"Workspace / Conversation"
+]
+},
+"minilink": {
+"max": 2,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept"
+]
+},
+"mk": {
+"max": 1,
+"screens": [
+"First run / Address",
+"First run / Looking",
+"First run / No answer",
+"First run / Not a Firetower",
+"First run / Replace password",
+"First run / Name it",
+"First run / Set up"
+]
+},
+"mline": {
+"max": 4,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading"
+]
+},
+"mono": {
+"max": 13,
+"screens": [
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Settings / This Firetower",
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading"
+]
+},
+"more": {
+"max": 4,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting"
+]
+},
+"msg": {
+"max": 1,
+"screens": [
+"Customize / Create with AI",
+"Customize / Upload a folder",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Held for review",
+"Customize / Profiles",
+"Customize / Read-only",
+"Customize / Agents"
+]
+},
+"mt": {
+"max": 8,
+"screens": [
+"Artifacts / Library"
+]
+},
+"n": {
+"max": 8,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Customize / Skills",
+"Customize / A new version",
+"Customize / Held for review",
+"Sources / Repositories",
+"Updates / What it will write",
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / One skill",
+"Customize / Create with AI",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / Upgrading"
+]
+},
+"news": {
+"max": 1,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading",
+"First run / Address",
+"First run / Looking",
+"First run / No answer",
+"First run / Not a Firetower",
+"First run / Sign in",
+"First run / Replace password",
+"First run / Name it",
+"First run / Set up"
+]
+},
+"nm": {
+"max": 16,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading",
+"First run / Address",
+"First run / Looking",
+"First run / No answer",
+"First run / Not a Firetower",
+"First run / Sign in",
+"First run / Replace password",
+"First run / Name it",
+"First run / Set up"
+]
+},
+"note": {
+"max": 3,
+"screens": [
+"Customize / Skills",
+"Sources / Repositories",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running"
+]
+},
+"notecard": {
+"max": 1,
+"screens": [
+"Workspace / Noting code",
+"Artifacts / Writing a note"
+]
+},
+"notecount": {
+"max": 1,
+"screens": [
+"Artifacts / Notes kept"
+]
+},
+"notepill": {
+"max": 1,
+"screens": [
+"Workspace / Notes kept",
+"Artifacts / Notes kept"
+]
+},
+"ok": {
+"max": 1,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Customize / Create with AI",
+"First run / Address",
+"First run / Looking",
+"First run / No answer",
+"First run / Not a Firetower",
+"First run / Sign in",
+"First run / Replace password",
+"First run / Name it",
+"First run / Set up"
+]
+},
+"ok2": {
+"max": 4,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept"
+]
+},
+"open": {
+"max": 4,
+"screens": [
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture"
+]
+},
+"ord": {
+"max": 4,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading"
+]
+},
+"org": {
+"max": 1,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading",
+"First run / Address",
+"First run / Looking",
+"First run / No answer",
+"First run / Not a Firetower",
+"First run / Sign in",
+"First run / Replace password",
+"First run / Name it",
+"First run / Set up"
+]
+},
+"out": {
+"max": 2,
+"screens": [
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Agents",
+"Settings / People",
+"Settings / Teams",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / Read-only"
+]
+},
+"p": {
+"max": 5,
+"screens": [
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Customize / A new version",
+"Customize / Held for review",
+"Updates / What it will write",
+"Workspace / Conversation"
+]
+},
+"pager": {
+"max": 1,
+"screens": [
+"Tasks / Has work"
+]
+},
+"panel": {
+"max": 1,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading",
+"First run / Address",
+"First run / Looking",
+"First run / No answer",
+"First run / Not a Firetower",
+"First run / Sign in",
+"First run / Replace password",
+"First run / Name it",
+"First run / Set up"
+]
+},
+"paper": {
+"max": 1,
+"screens": [
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept"
+]
+},
+"path": {
+"max": 6,
+"screens": [
+"Workspace / Conversation",
+"Customize / Profiles",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Settings / People",
+"Settings / Directories",
+"Settings / Vault"
+]
+},
+"pcol": {
+"max": 1,
+"screens": [
+"Artifacts / Library",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading",
+"Customize / Profiles",
+"Customize / Agents"
+]
+},
+"pending": {
+"max": 1,
+"screens": [
+"Artifacts / Library"
+]
+},
+"pg": {
+"max": 1,
+"screens": [
+"Customize / Profiles",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held"
+]
+},
+"pg-head": {
+"max": 1,
+"screens": [
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version"
+]
+},
+"phead": {
+"max": 1,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading",
+"First run / Address",
+"First run / Looking",
+"First run / No answer",
+"First run / Not a Firetower",
+"First run / Sign in",
+"First run / Replace password",
+"First run / Name it",
+"First run / Set up"
+]
+},
+"phead2": {
+"max": 1,
+"screens": [
+"Artifacts / Library",
+"Customize / Skills"
+]
+},
+"pic": {
+"max": 7,
+"screens": [
+"Artifacts / Library"
+]
+},
+"picked": {
+"max": 1,
+"screens": [
+"Workspace / Preview"
+]
+},
+"pickrow": {
+"max": 9,
+"screens": [
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / Agents"
+]
+},
+"pickrows": {
+"max": 1,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents"
+]
+},
+"pinned": {
+"max": 1,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept"
+]
+},
+"pk": {
+"max": 28,
+"screens": [
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / Agents"
+]
+},
+"plabel": {
+"max": 3,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected"
+]
+},
+"plain": {
+"max": 8,
+"screens": [
+"Workspace / Conversation",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Read-only",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"First run / No answer",
+"First run / Not a Firetower",
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Agents",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Updates / Upgrading",
+"First run / Address",
+"First run / Looking",
+"First run / Sign in",
+"First run / Replace password",
+"First run / Name it",
+"First run / Set up"
+]
+},
+"plan": {
+"max": 1,
+"screens": [
+"Workspace / Conversation"
+]
+},
+"plan-files": {
+"max": 1,
+"screens": [
+"Updates / What it will write"
+]
+},
+"plate": {
+"max": 12,
+"screens": [
+"Artifacts / Library",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version"
+]
+},
+"pop": {
+"max": 1,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading"
+]
+},
+"pr2": {
+"max": 4,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents"
+]
+},
+"primary": {
+"max": 3,
+"screens": [
+"Workspace / Conversation",
+"Artifacts / Library",
+"Customize / Skills",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Sources / Git hosts",
+"Sources / Machines",
+"Settings / Directories",
+"Tasks / Not connected",
+"Updates / What is running",
+"Updates / What it will write",
+"First run / Address",
+"First run / Sign in",
+"First run / Replace password",
+"First run / Name it",
+"First run / Set up",
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / One skill",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Account / Signed in",
+"Account / Password held",
+"Updates / Upgrading",
+"First run / Looking",
+"First run / No answer",
+"First run / Not a Firetower"
+]
+},
+"prlink": {
+"max": 1,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept"
+]
+},
+"prog": {
+"max": 1,
+"screens": [
+"First run / Address",
+"First run / Looking",
+"First run / No answer",
+"First run / Not a Firetower",
+"First run / Sign in",
+"First run / Replace password",
+"First run / Name it",
+"First run / Set up",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers"
+]
+},
+"prow": {
+"max": 12,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading",
+"First run / Address",
+"First run / Looking",
+"First run / No answer",
+"First run / Not a Firetower",
+"First run / Sign in",
+"First run / Replace password",
+"First run / Name it",
+"First run / Set up"
+]
+},
+"ps": {
+"max": 2,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept"
+]
+},
+"pscroll": {
+"max": 1,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading",
+"First run / Address",
+"First run / Looking",
+"First run / No answer",
+"First run / Not a Firetower",
+"First run / Sign in",
+"First run / Replace password",
+"First run / Name it",
+"First run / Set up"
+]
+},
+"pv": {
+"max": 1,
+"screens": [
+"Workspace / Preview"
+]
+},
+"pvbar": {
+"max": 1,
+"screens": [
+"Workspace / Preview"
+]
+},
+"pvnote": {
+"max": 2,
+"screens": [
+"Workspace / Preview"
+]
+},
+"pvside": {
+"max": 1,
+"screens": [
+"Workspace / Preview"
+]
+},
+"pvstage": {
+"max": 1,
+"screens": [
+"Workspace / Preview"
+]
+},
+"q": {
+"max": 2,
+"screens": [
+"Dashboard / Two waiting",
+"Workspace / Conversation"
+]
+},
+"qhead": {
+"max": 1,
+"screens": [
+"Workspace / A picture",
+"Workspace / Noting code",
+"Artifacts / Writing a note"
+]
+},
+"quiet": {
+"max": 5,
+"screens": [
+"Workspace / Conversation",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / One profile",
+"Customize / New profile",
+"Sources / Machines",
+"Tasks / Has work",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading",
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Profiles",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held"
+]
+},
+"quota": {
+"max": 2,
+"screens": [
+"Customize / Agents"
+]
+},
+"quote": {
+"max": 1,
+"screens": [
+"Workspace / Noting code",
+"Artifacts / Writing a note"
+]
+},
+"r": {
+"max": 10,
+"screens": [
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower"
+]
+},
+"rail": {
+"max": 1,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading",
+"First run / Address",
+"First run / Looking",
+"First run / No answer",
+"First run / Not a Firetower",
+"First run / Sign in",
+"First run / Replace password",
+"First run / Name it",
+"First run / Set up"
+]
+},
+"rbtn": {
+"max": 8,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading",
+"First run / Address",
+"First run / Looking",
+"First run / No answer",
+"First run / Not a Firetower",
+"First run / Sign in",
+"First run / Replace password",
+"First run / Name it",
+"First run / Set up"
+]
+},
+"ref": {
+"max": 1,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept"
+]
+},
+"refs": {
+"max": 1,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept"
+]
+},
+"reveal": {
+"max": 2,
+"screens": [
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / Agents"
+]
+},
+"review": {
+"max": 1,
+"screens": [
+"Customize / Skills",
+"Customize / Held for review"
+]
+},
+"rgrow": {
+"max": 1,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading",
+"First run / Address",
+"First run / Looking",
+"First run / No answer",
+"First run / Not a Firetower",
+"First run / Sign in",
+"First run / Replace password",
+"First run / Name it",
+"First run / Set up"
+]
+},
+"right": {
+"max": 2,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept"
+]
+},
+"risk": {
+"max": 7,
+"screens": [
+"Customize / Skills",
+"Customize / Upload a folder"
+]
+},
+"risks": {
+"max": 5,
+"screens": [
+"Customize / Skills",
+"Customize / Upload a folder"
+]
+},
+"ro-note": {
+"max": 1,
+"screens": [
+"Customize / Read-only"
+]
+},
+"row": {
+"max": 5,
+"screens": [
+"Settings / This Firetower"
+]
+},
+"row1": {
+"max": 1,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept"
+]
+},
+"rows": {
+"max": 1,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting"
+]
+},
+"rt": {
+"max": 12,
+"screens": [
+"Workspace / Conversation",
+"Customize / Skills"
+]
+},
+"run": {
+"max": 1,
+"screens": [
+"Updates / What it will write",
+"Updates / Upgrading"
+]
+},
+"said": {
+"max": 14,
+"screens": [
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / Agents",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Settings / Vault",
+"Settings / This Firetower"
+]
+},
+"says": {
+"max": 3,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept"
+]
+},
+"sc": {
+"max": 2,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Customize / Create with AI",
+"First run / Address",
+"First run / Looking",
+"First run / No answer",
+"First run / Not a Firetower",
+"First run / Sign in",
+"First run / Replace password",
+"First run / Name it",
+"First run / Set up"
+]
+},
+"scope": {
+"max": 1,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading"
+]
+},
+"scrim": {
+"max": 1,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading"
+]
+},
+"scroll": {
+"max": 3,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading",
+"Workspace / Conversation",
+"Workspace / A picture"
+]
+},
+"seg": {
+"max": 1,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading"
+]
+},
+"sel": {
+"max": 1,
+"screens": [
+"Artifacts / Writing a note"
+]
+},
+"sel2": {
+"max": 1,
+"screens": [
+"Workspace / Noting code"
+]
+},
+"send": {
+"max": 1,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Artifacts / Writing a note",
+"First run / Address",
+"First run / Looking",
+"First run / No answer",
+"First run / Not a Firetower",
+"First run / Sign in",
+"First run / Replace password",
+"First run / Name it",
+"First run / Set up"
+]
+},
+"sent": {
+"max": 1,
+"screens": [
+"Tasks / Has work",
+"Tasks / Nothing open"
+]
+},
+"sep": {
+"max": 5,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading",
+"First run / Address",
+"First run / Looking",
+"First run / No answer",
+"First run / Not a Firetower",
+"First run / Sign in",
+"First run / Replace password",
+"First run / Name it",
+"First run / Set up"
+]
+},
+"settling": {
+"max": 20,
+"screens": [
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower"
+]
+},
+"sh-body": {
+"max": 1,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading"
+]
+},
+"sh-field": {
+"max": 1,
+"screens": [
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower"
+]
+},
+"sh-foot": {
+"max": 1,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading"
+]
+},
+"sh-head": {
+"max": 1,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading"
+]
+},
+"sh-lab": {
+"max": 3,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading"
+]
+},
+"sh-note": {
+"max": 2,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading"
+]
+},
+"sh-row": {
+"max": 7,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading"
+]
+},
+"sheet": {
+"max": 1,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading",
+"First run / Address",
+"First run / Looking",
+"First run / No answer",
+"First run / Not a Firetower",
+"First run / Sign in",
+"First run / Replace password",
+"First run / Name it",
+"First run / Set up"
+]
+},
+"sheet2": {
+"max": 1,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading"
+]
+},
+"sheetdoc": {
+"max": 1,
+"screens": [
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept"
+]
+},
+"shelf": {
+"max": 1,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Customize / Create with AI",
+"First run / Address",
+"First run / Looking",
+"First run / No answer",
+"First run / Not a Firetower",
+"First run / Sign in",
+"First run / Replace password",
+"First run / Name it",
+"First run / Set up"
+]
+},
+"ship": {
+"max": 1,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept"
+]
+},
+"shipblocked": {
+"max": 1,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept"
+]
+},
+"shipdone": {
+"max": 1,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept"
+]
+},
+"shipfiles": {
+"max": 2,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept"
+]
+},
+"shipform": {
+"max": 1,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept"
+]
+},
+"shot": {
+"max": 8,
+"screens": [
+"Artifacts / Library"
+]
+},
+"shown": {
+"max": 1,
+"screens": [
+"Settings / Vault"
+]
+},
+"sizes": {
+"max": 1,
+"screens": [
+"Workspace / Preview"
+]
+},
+"sk": {
+"max": 12,
+"screens": [
+"Customize / Skills"
+]
+},
+"sk-body": {
+"max": 1,
+"screens": [
+"Customize / One skill",
+"Customize / A new version"
+]
+},
+"sk-head": {
+"max": 1,
+"screens": [
+"Customize / One skill",
+"Customize / A new version"
+]
+},
+"sk-tabs": {
+"max": 1,
+"screens": [
+"Customize / One skill",
+"Customize / A new version"
+]
+},
+"skgrid": {
+"max": 4,
+"screens": [
+"Customize / Skills"
+]
+},
+"sksec": {
+"max": 4,
+"screens": [
+"Customize / Skills"
+]
+},
+"small": {
+"max": 1,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading"
+]
+},
+"spin": {
+"max": 1,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept"
+]
+},
+"spot": {
+"max": 1,
+"screens": [
+"Workspace / A picture"
+]
+},
+"spotnote": {
+"max": 1,
+"screens": [
+"Workspace / A picture"
+]
+},
+"src": {
+"max": 35,
+"screens": [
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Workspace / Conversation",
+"Workspace / Preview",
+"Workspace / A picture"
+]
+},
+"st": {
+"max": 13,
+"screens": [
+"Customize / Agents",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Sources / Repositories"
+]
+},
+"st2": {
+"max": 2,
+"screens": [
+"Workspace / Preview"
+]
+},
+"stale2": {
+"max": 1,
+"screens": [
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower"
+]
+},
+"step": {
+"max": 5,
+"screens": [
+"Workspace / Conversation"
+]
+},
+"stepr": {
+"max": 5,
+"screens": [
+"Updates / Upgrading"
+]
+},
+"steps": {
+"max": 1,
+"screens": [
+"Updates / Upgrading"
+]
+},
+"steps2": {
+"max": 1,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading"
+]
+},
+"strong": {
+"max": 1,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"First run / Address",
+"First run / Looking",
+"First run / No answer",
+"First run / Not a Firetower",
+"First run / Sign in",
+"First run / Replace password",
+"First run / Name it",
+"First run / Set up"
+]
+},
+"sub": {
+"max": 14,
+"screens": [
+"Artifacts / Library",
+"Customize / Skills",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Customize / One skill",
+"Customize / A new version"
+]
+},
+"t": {
+"max": 5,
+"screens": [
+"Updates / Upgrading"
+]
+},
+"t-display": {
+"max": 1,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting"
+]
+},
+"tab": {
+"max": 4,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept"
+]
+},
+"tabs": {
+"max": 1,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept"
+]
+},
+"tag": {
+"max": 2,
+"screens": [
+"Customize / One skill",
+"Customize / A new version"
+]
+},
+"tagrow": {
+"max": 1,
+"screens": [
+"Customize / One skill",
+"Customize / A new version"
+]
+},
+"tb-dest": {
+"max": 1,
+"screens": [
+"First run / Address",
+"First run / Looking",
+"First run / No answer",
+"First run / Not a Firetower",
+"First run / Sign in",
+"First run / Replace password",
+"First run / Name it",
+"First run / Set up"
+]
+},
+"tb-right": {
+"max": 1,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading",
+"First run / Address",
+"First run / Looking",
+"First run / No answer",
+"First run / Not a Firetower",
+"First run / Sign in",
+"First run / Replace password",
+"First run / Name it",
+"First run / Set up"
+]
+},
+"team": {
+"max": 1,
+"screens": [
+"Workspace / Conversation"
+]
+},
+"term": {
+"max": 1,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept"
+]
+},
+"tface": {
+"max": 7,
+"screens": [
+"Settings / Teams",
+"Settings / Directories",
+"Settings / People",
+"Settings / Vault",
+"Settings / This Firetower"
+]
+},
+"thought": {
+"max": 1,
+"screens": [
+"Workspace / Conversation"
+]
+},
+"threw": {
+"max": 1,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading"
+]
+},
+"tick": {
+"max": 4,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents"
+]
+},
+"titlebar": {
+"max": 1,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading",
+"First run / Address",
+"First run / Looking",
+"First run / No answer",
+"First run / Not a Firetower",
+"First run / Sign in",
+"First run / Replace password",
+"First run / Name it",
+"First run / Set up"
+]
+},
+"tlist": {
+"max": 1,
+"screens": [
+"Tasks / Has work"
+]
+},
+"tm": {
+"max": 4,
+"screens": [
+"Workspace / Conversation"
+]
+},
+"to": {
+"max": 1,
+"screens": [
+"Workspace / A picture",
+"Workspace / Noting code",
+"Artifacts / Writing a note"
+]
+},
+"tog": {
+"max": 12,
+"screens": [
+"Customize / Skills"
+]
+},
+"tool": {
+"max": 6,
+"screens": [
+"Workspace / Conversation"
+]
+},
+"top": {
+"max": 6,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Updates / What it will write",
+"Updates / Upgrading"
+]
+},
+"topbar": {
+"max": 1,
+"screens": [
+"Workspace / Preview"
+]
+},
+"tout": {
+"max": 1,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept"
+]
+},
+"tr": {
+"max": 11,
+"screens": [
+"Workspace / A file",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Workspace / Conversation"
+]
+},
+"tree": {
+"max": 1,
+"screens": [
+"Workspace / A file",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Workspace / Conversation"
+]
+},
+"trow": {
+"max": 6,
+"screens": [
+"Tasks / Has work"
+]
+},
+"ttag": {
+"max": 4,
+"screens": [
+"Tasks / Has work"
+]
+},
+"turn": {
+"max": 2,
+"screens": [
+"Workspace / Conversation"
+]
+},
+"tx": {
+"max": 22,
+"screens": [
+"Workspace / Conversation",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Tasks / Has work",
+"Updates / What is running",
+"First run / Looking",
+"First run / Sign in",
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Settings / This Firetower",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What it will write",
+"Updates / Upgrading"
+]
+},
+"typing": {
+"max": 3,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Workspace / Conversation",
+"Updates / Upgrading",
+"First run / Looking",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers"
+]
+},
+"ul": {
+"max": 1,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept"
+]
+},
+"upd-hero": {
+"max": 1,
+"screens": [
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading"
+]
+},
+"upd-row": {
+"max": 2,
+"screens": [
+"Updates / What is running"
+]
+},
+"upd-sec": {
+"max": 2,
+"screens": [
+"Updates / What is running"
+]
+},
+"v": {
+"max": 14,
+"screens": [
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills"
+]
+},
+"veil": {
+"max": 1,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading"
+]
+},
+"ver": {
+"max": 6,
+"screens": [
+"Updates / What is running"
+]
+},
+"verdict": {
+"max": 1,
+"screens": [
+"Customize / A new version"
+]
+},
+"warn": {
+"max": 2,
+"screens": [
+"Customize / One skill",
+"Customize / A new version"
+]
+},
+"warnbar": {
+"max": 1,
+"screens": [
+"Account / Password held"
+]
+},
+"whead": {
+"max": 1,
+"screens": [
+"Workspace / Conversation"
+]
+},
+"where": {
+"max": 4,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / A file",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading"
+]
+},
+"whereto": {
+"max": 2,
+"screens": [
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held"
+]
+},
+"who": {
+"max": 2,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading",
+"First run / Address",
+"First run / Looking",
+"First run / No answer",
+"First run / Not a Firetower",
+"First run / Sign in",
+"First run / Replace password",
+"First run / Name it",
+"First run / Set up"
+]
+},
+"why": {
+"max": 2,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept"
+]
+},
+"win": {
+"max": 1,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading",
+"First run / Address",
+"First run / Looking",
+"First run / No answer",
+"First run / Not a Firetower",
+"First run / Sign in",
+"First run / Replace password",
+"First run / Name it",
+"First run / Set up"
+]
+},
+"wrap": {
+"max": 1,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"First run / Address",
+"First run / Looking",
+"First run / No answer",
+"First run / Not a Firetower",
+"First run / Sign in",
+"First run / Replace password",
+"First run / Name it",
+"First run / Set up"
+]
+},
+"wrow": {
+"max": 4,
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting"
+]
+},
+"wsheet": {
+"max": 1,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept"
+]
+},
+"x": {
+"max": 4,
+"screens": [
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading"
+]
+}
+},
+"fails": [],
+"overlays": {
+"Add a machine": {
+"adds": {
+"bk": true,
+"primary": true,
+"quiet": true,
+"sh-body": true,
+"sh-field": true,
+"sh-foot": true,
+"sh-head": true,
+"sh-lab": true,
+"sh-note": true,
+"sheet2": true,
+"veil": true,
+"where": true
+},
+"on": [
+"Sources"
+]
+},
+"Amends a PR": {
+"adds": {
+"add": true,
+"br": true,
+"btn": true,
+"d": true,
+"del": true,
+"draftline": true,
+"fhead": true,
+"fin": true,
+"fr": true,
+"fta": true,
+"ghost": true,
+"minilink": true,
+"prlink": true,
+"ref": true,
+"refs": true,
+"row1": true,
+"ship": true,
+"shipfiles": true,
+"shipform": true
+},
+"on": [
+"Workspace"
+]
+},
+"Another agent": {
+"adds": {
+"aside1": true,
+"bk": true,
+"btn": true,
+"fta": true,
+"handto": true,
+"lbl2": true,
+"pickrows": true,
+"pr2": true,
+"primary": true,
+"quiet": true,
+"sh-body": true,
+"sh-foot": true,
+"sh-head": true,
+"sheet2": true,
+"tick": true,
+"tx": true,
+"veil": true,
+"why": true
+},
+"on": [
+"Workspace"
+]
+},
+"Check one in": {
+"adds": {
+"aside1": true,
+"bk": true,
+"br": true,
+"btn": true,
+"find": true,
+"pickrows": true,
+"pr2": true,
+"quiet": true,
+"sh-body": true,
+"sh-foot": true,
+"sh-head": true,
+"sheet2": true,
+"tick": true,
+"tx": true,
+"veil": true
+},
+"on": [
+"Workspace"
+]
+},
+"Confirm": {
+"adds": {
+"acts": true,
+"btn": true,
+"cbox": true,
+"harm": true,
+"in2": true,
+"quiet": true,
+"small": true,
+"veil": true
+},
+"on": [
+"Dashboard",
+"Workspace",
+"Artifacts",
+"Customize",
+"Sources",
+"Settings",
+"Tasks",
+"Account",
+"Updates"
+]
+},
+"Connect a host": {
+"adds": {
+"bk": true,
+"sh-body": true,
+"sh-foot": true,
+"sh-head": true,
+"sh-note": true,
+"sh-row": true,
+"sheet2": true,
+"veil": true,
+"where": true
+},
+"on": [
+"Sources"
+]
+},
+"Connected": {
+"adds": {
+"bk": true,
+"lvl": true,
+"primary": true,
+"sh-body": true,
+"sh-foot": true,
+"sh-head": true,
+"sh-lab": true,
+"sh-row": true,
+"sheet2": true,
+"veil": true,
+"where": true
+},
+"on": [
+"Sources"
+]
+},
+"Device code": {
+"adds": {
+"bk": true,
+"sh-body": true,
+"sh-foot": true,
+"sh-head": true,
+"sheet2": true,
+"typing": true,
+"veil": true,
+"where": true
+},
+"on": [
+"Sources"
+]
+},
+"Empty": {
+"adds": {
+"primary": true
+},
+"on": [
+"Sources"
+]
+},
+"GitHub": {
+"adds": {
+"bk": true,
+"sh-body": true,
+"sh-foot": true,
+"sh-head": true,
+"sh-note": true,
+"sh-row": true,
+"sheet2": true,
+"veil": true,
+"where": true
+},
+"on": [
+"Sources"
+]
+},
+"GitLab": {
+"adds": {
+"bk": true,
+"sh-body": true,
+"sh-foot": true,
+"sh-head": true,
+"sh-note": true,
+"sh-row": true,
+"sheet2": true,
+"veil": true,
+"where": true
+},
+"on": [
+"Sources"
+]
+},
+"Gitea": {
+"adds": {
+"bk": true,
+"sh-body": true,
+"sh-foot": true,
+"sh-head": true,
+"sh-note": true,
+"sh-row": true,
+"sheet2": true,
+"veil": true,
+"where": true
+},
+"on": [
+"Sources"
+]
+},
+"Held: mid-setup": {
+"adds": {
+"avatar": true,
+"bar": true,
+"blank": true,
+"btn": true,
+"chip": true,
+"composer": true,
+"dock": true,
+"dot": true,
+"face": true,
+"ftid": true,
+"g": true,
+"gate": true,
+"gateacts": true,
+"gatecard": true,
+"gatefoot": true,
+"gbtn": true,
+"glyph": true,
+"ic": true,
+"in": true,
+"kbd": true,
+"lbl": true,
+"mark": true,
+"news": true,
+"nm": true,
+"ok": true,
+"org": true,
+"panel": true,
+"phead": true,
+"primary": true,
+"prow": true,
+"pscroll": true,
+"rail": true,
+"rbtn": true,
+"rgrow": true,
+"sc": true,
+"send": true,
+"sep": true,
+"sheet": true,
+"shelf": true,
+"strong": true,
+"tb-right": true,
+"who": true,
+"wrap": true
+},
+"on": [
+"First run"
+]
+},
+"Held: password": {
+"adds": {
+"avatar": true,
+"bar": true,
+"blank": true,
+"btn": true,
+"chip": true,
+"composer": true,
+"dock": true,
+"dot": true,
+"face": true,
+"ftid": true,
+"g": true,
+"gate": true,
+"gateacts": true,
+"gatecard": true,
+"gatefoot": true,
+"gbtn": true,
+"glyph": true,
+"ic": true,
+"in": true,
+"kbd": true,
+"lbl": true,
+"mark": true,
+"news": true,
+"nm": true,
+"ok": true,
+"org": true,
+"panel": true,
+"phead": true,
+"plain": true,
+"primary": true,
+"prow": true,
+"pscroll": true,
+"rail": true,
+"rbtn": true,
+"rgrow": true,
+"sc": true,
+"send": true,
+"sep": true,
+"sheet": true,
+"shelf": true,
+"strong": true,
+"tb-right": true,
+"who": true,
+"wrap": true
+},
+"on": [
+"First run"
+]
+},
+"Key refused": {
+"adds": {
+"btn": true,
+"detail": true,
+"dlg": true,
+"dlgfoot": true,
+"primary": true,
+"quiet": true,
+"veil": true,
+"x": true
+},
+"on": [
+"Dashboard",
+"Workspace",
+"Artifacts",
+"Customize",
+"Sources",
+"Settings",
+"Tasks",
+"Account",
+"Updates"
+]
+},
+"Limit hit": {
+"adds": {
+"bk": true,
+"btn": true,
+"g": true,
+"hand": true,
+"primary": true,
+"quiet": true,
+"sh-body": true,
+"sh-foot": true,
+"sh-head": true,
+"sh-lab": true,
+"sh-note": true,
+"sh-row": true,
+"sheet2": true,
+"tx": true,
+"veil": true,
+"where": true
+},
+"on": [
+"Dashboard",
+"Workspace",
+"Artifacts",
+"Customize",
+"Sources",
+"Settings",
+"Tasks",
+"Account",
+"Updates"
+]
+},
+"Merged": {
+"adds": {
+"br": true,
+"btn": true,
+"hd": true,
+"plain": true,
+"shipdone": true
+},
+"on": [
+"Workspace"
+]
+},
+"Mic blocked": {
+"adds": {
+"btn": true,
+"dlg": true,
+"dlgfoot": true,
+"n": true,
+"primary": true,
+"quiet": true,
+"steps2": true,
+"veil": true,
+"x": true
+},
+"on": [
+"Dashboard",
+"Workspace",
+"Artifacts",
+"Customize",
+"Sources",
+"Settings",
+"Tasks",
+"Account",
+"Updates"
+]
+},
+"New directory": {
+"adds": {
+"bk": true,
+"btn": true,
+"primary": true,
+"quiet": true,
+"sh-body": true,
+"sh-field": true,
+"sh-foot": true,
+"sh-head": true,
+"sh-note": true,
+"sheet2": true,
+"veil": true,
+"where": true
+},
+"on": [
+"Settings"
+]
+},
+"No answer": {
+"adds": {
+"bad": true,
+"bk": true,
+"first": true,
+"primary": true,
+"quiet": true,
+"sh-body": true,
+"sh-foot": true,
+"sh-head": true,
+"sh-lab": true,
+"sh-note": true,
+"sheet2": true,
+"veil": true,
+"where": true
+},
+"on": [
+"Sources"
+]
+},
+"No key": {
+"adds": {
+"btn": true,
+"dlg": true,
+"dlgfoot": true,
+"primary": true,
+"veil": true,
+"x": true
+},
+"on": [
+"Dashboard",
+"Workspace",
+"Artifacts",
+"Customize",
+"Sources",
+"Settings",
+"Tasks",
+"Account",
+"Updates"
+]
+},
+"No match": {
+"adds": {
+"count": true,
+"findbar": true
+},
+"on": [
+"Workspace"
+]
+},
+"Not allowed": {
+"adds": {
+"primary": true
+},
+"on": [
+"Sources"
+]
+},
+"On limit\u2026": {
+"adds": {
+"bk": true,
+"btn": true,
+"g": true,
+"ord": true,
+"primary": true,
+"quiet": true,
+"sh-body": true,
+"sh-foot": true,
+"sh-head": true,
+"sh-lab": true,
+"sh-note": true,
+"sh-row": true,
+"sheet2": true,
+"tx": true,
+"veil": true,
+"where": true
+},
+"on": [
+"Dashboard",
+"Workspace",
+"Artifacts",
+"Customize",
+"Sources",
+"Settings",
+"Tasks",
+"Account",
+"Updates"
+]
+},
+"Open, behind": {
+"adds": {
+"add": true,
+"br": true,
+"btn": true,
+"d": true,
+"del": true,
+"draftline": true,
+"fhead": true,
+"fin": true,
+"fr": true,
+"fta": true,
+"ghost": true,
+"minilink": true,
+"prlink": true,
+"ref": true,
+"refs": true,
+"row1": true,
+"ship": true,
+"shipfiles": true,
+"shipform": true
+},
+"on": [
+"Workspace"
+]
+},
+"PR open": {
+"adds": {
+"br": true,
+"btn": true,
+"hd": true,
+"plain": true,
+"shipdone": true
+},
+"on": [
+"Workspace"
+]
+},
+"Past the cap": {
+"adds": {
+"count": true,
+"findbar": true,
+"hit": true
+},
+"on": [
+"Workspace"
+]
+},
+"Paste a token": {
+"adds": {
+"bk": true,
+"primary": true,
+"quiet": true,
+"sh-body": true,
+"sh-field": true,
+"sh-foot": true,
+"sh-head": true,
+"sh-note": true,
+"sheet2": true,
+"veil": true,
+"where": true
+},
+"on": [
+"Sources"
+]
+},
+"Probing": {
+"adds": {
+"bk": true,
+"prog": true,
+"quiet": true,
+"sh-body": true,
+"sh-foot": true,
+"sh-head": true,
+"sheet2": true,
+"typing": true,
+"veil": true,
+"where": true
+},
+"on": [
+"Sources"
+]
+},
+"Pushed": {
+"adds": {
+"add": true,
+"br": true,
+"btn": true,
+"d": true,
+"del": true,
+"draftline": true,
+"fhead": true,
+"fin": true,
+"fr": true,
+"fta": true,
+"ghost": true,
+"minilink": true,
+"ref": true,
+"refs": true,
+"row1": true,
+"ship": true,
+"shipfiles": true,
+"shipform": true
+},
+"on": [
+"Workspace"
+]
+},
+"Reached it": {
+"adds": {
+"bk": true,
+"primary": true,
+"quiet": true,
+"said": true,
+"sh-body": true,
+"sh-field": true,
+"sh-foot": true,
+"sh-head": true,
+"sh-lab": true,
+"sh-note": true,
+"sh-row": true,
+"sheet2": true,
+"st": true,
+"veil": true,
+"where": true
+},
+"on": [
+"Sources"
+]
+},
+"Refused": {
+"adds": {
+"btn": true,
+"plain": true
+},
+"on": [
+"Sources",
+"Settings"
+]
+},
+"Repositories here": {
+"adds": {
+"aside1": true,
+"bk": true,
+"br": true,
+"btn": true,
+"pickrows": true,
+"pr2": true,
+"primary": true,
+"says": true,
+"sh-body": true,
+"sh-foot": true,
+"sh-head": true,
+"sheet2": true,
+"spin": true,
+"tx": true,
+"veil": true
+},
+"on": [
+"Workspace"
+]
+},
+"Right-click": {
+"adds": {
+"bare": true,
+"c-attr": true,
+"c-comment": true,
+"c-fn": true,
+"c-keyword": true,
+"c-number": true,
+"c-type": true,
+"code": true,
+"count": true,
+"ctx": true,
+"filehead": true,
+"k": true,
+"ln": true,
+"scrim": true,
+"src": true
+},
+"on": [
+"Workspace"
+]
+},
+"Server dark": {
+"adds": {
+"btn": true,
+"chip3": true,
+"filterline": true,
+"fp": true,
+"fsheet": true,
+"g": true,
+"hm": true,
+"hov": true,
+"logged": true,
+"lrows": true,
+"lsec": true,
+"lvl": true,
+"masked": true,
+"mono": true,
+"n": true,
+"note": true,
+"path": true,
+"plain": true,
+"quiet": true,
+"r": true,
+"row": true,
+"said": true,
+"shown": true,
+"st": true,
+"stale2": true,
+"tface": true,
+"tx": true,
+"whereto": true
+},
+"on": [
+"Sources",
+"Settings"
+]
+},
+"Server too old": {
+"adds": {
+"btn": true,
+"dlg": true,
+"dlgfoot": true,
+"primary": true,
+"veil": true,
+"x": true
+},
+"on": [
+"Dashboard",
+"Workspace",
+"Artifacts",
+"Customize",
+"Sources",
+"Settings",
+"Tasks",
+"Account",
+"Updates"
+]
+},
+"Set the key": {
+"adds": {
+"aside1": true,
+"btn": true,
+"dlg": true,
+"dlgfoot": true,
+"fin": true,
+"primary": true,
+"quiet": true,
+"veil": true,
+"x": true
+},
+"on": [
+"Dashboard",
+"Workspace",
+"Artifacts",
+"Customize",
+"Sources",
+"Settings",
+"Tasks",
+"Account",
+"Updates"
+]
+},
+"Sharing sheet": {
+"adds": {
+"bk": true,
+"btn": true,
+"chg": true,
+"inner": true,
+"lvl": true,
+"primary": true,
+"quiet": true,
+"said": true,
+"sh-body": true,
+"sh-foot": true,
+"sh-head": true,
+"sh-lab": true,
+"sh-note": true,
+"sh-row": true,
+"sheet2": true,
+"tface": true,
+"tx": true,
+"veil": true,
+"where": true
+},
+"on": [
+"Settings"
+]
+},
+"Slow": {
+"adds": {
+"lrows": true,
+"r": true,
+"settling": true,
+"tx": true
+},
+"on": [
+"Sources",
+"Settings"
+]
+},
+"Terminal   \u2318J": {
+"adds": {
+"bar": true,
+"caret": true,
+"dim2": true,
+"grip": true,
+"ok2": true,
+"ps": true,
+"scroll": true,
+"term": true,
+"tout": true,
+"where": true
+},
+"on": [
+"Workspace"
+]
+},
+"Threw": {
+"adds": {
+"acts": true,
+"btn": true,
+"in3": true,
+"plain": true,
+"primary": true,
+"quiet": true,
+"threw": true
+},
+"on": [
+"Dashboard",
+"Workspace",
+"Artifacts",
+"Customize",
+"Sources",
+"Settings",
+"Tasks",
+"Account",
+"Updates"
+]
+},
+"Two repositories": {
+"adds": {
+"add": true,
+"bbody": true,
+"berth": true,
+"bhead": true,
+"br": true,
+"bstate": true,
+"btn": true,
+"d": true,
+"del": true,
+"fr": true,
+"minilink": true,
+"p": true,
+"ship": true,
+"shipblocked": true,
+"shipfiles": true
+},
+"on": [
+"Workspace"
+]
+},
+"Uncommitted": {
+"adds": {
+"add": true,
+"br": true,
+"btn": true,
+"d": true,
+"del": true,
+"draftline": true,
+"fhead": true,
+"fin": true,
+"fr": true,
+"fta": true,
+"ghost": true,
+"insp": true,
+"iscroll": true,
+"isec": true,
+"itab": true,
+"itabs": true,
+"minilink": true,
+"p": true,
+"ref": true,
+"refs": true,
+"right": true,
+"row1": true,
+"ship": true,
+"shipfiles": true,
+"shipform": true,
+"ul": true
+},
+"on": [
+"Workspace"
+]
+},
+"Unpushed": {
+"adds": {
+"add": true,
+"br": true,
+"btn": true,
+"d": true,
+"del": true,
+"draftline": true,
+"fhead": true,
+"fin": true,
+"fr": true,
+"fta": true,
+"ghost": true,
+"minilink": true,
+"ref": true,
+"refs": true,
+"row1": true,
+"ship": true,
+"shipfiles": true,
+"shipform": true
+},
+"on": [
+"Workspace"
+]
+},
+"Unreadable": {
+"adds": {
+"br": true,
+"btn": true,
+"ship": true,
+"shipblocked": true
+},
+"on": [
+"Workspace"
+]
+},
+"What it may reach": {
+"adds": {
+"acts": true,
+"aside1": true,
+"back": true,
+"bk": true,
+"box": true,
+"btn": true,
+"find": true,
+"fld": true,
+"form": true,
+"formfoot": true,
+"g": true,
+"hint": true,
+"ic": true,
+"mono": true,
+"msg": true,
+"out": true,
+"pcol": true,
+"pg-head": true,
+"pickrow": true,
+"pickrows": true,
+"pk": true,
+"pr2": true,
+"primary": true,
+"quiet": true,
+"reveal": true,
+"sh-body": true,
+"sh-foot": true,
+"sh-head": true,
+"sheet2": true,
+"sub": true,
+"tick": true,
+"tx": true,
+"veil": true
+},
+"on": [
+"Customize"
+]
+},
+"Where it lives": {
+"adds": {
+"bk": true,
+"btn": true,
+"quiet": true,
+"sh-body": true,
+"sh-foot": true,
+"sh-head": true,
+"sh-lab": true,
+"sh-note": true,
+"sh-row": true,
+"sheet2": true,
+"tx": true,
+"veil": true,
+"where": true
+},
+"on": [
+"Settings"
+]
+},
+"\u2318F in the conversation": {
+"adds": {
+"count": true,
+"findbar": true,
+"hit": true
+},
+"on": [
+"Workspace"
+]
+},
+"\u2318K": {
+"adds": {
+"ent": true,
+"g": true,
+"hint": true,
+"kbox": true,
+"keycap": true,
+"kfield": true,
+"kfoot": true,
+"ki": true,
+"klab": true,
+"klist": true,
+"kveil": true,
+"scope": true,
+"tx": true
+},
+"on": [
+"Dashboard",
+"Workspace",
+"Artifacts",
+"Customize",
+"Sources",
+"Settings",
+"Tasks",
+"Account",
+"Updates"
+]
+},
+"\u2318P": {
+"adds": {
+"ent": true,
+"g": true,
+"hint": true,
+"kbox": true,
+"keycap": true,
+"kfield": true,
+"kfoot": true,
+"ki": true,
+"klab": true,
+"klist": true,
+"kveil": true,
+"mono": true,
+"scope": true,
+"tx": true
+},
+"on": [
+"Dashboard",
+"Workspace",
+"Artifacts",
+"Customize",
+"Sources",
+"Settings",
+"Tasks",
+"Account",
+"Updates"
+]
+}
+},
+"screens": [
+"Dashboard / Two waiting",
+"Dashboard / Nothing waiting",
+"Dashboard / Nothing yet",
+"Workspace / Conversation",
+"Workspace / A file",
+"Workspace / A diff",
+"Workspace / Preview",
+"Workspace / A picture",
+"Workspace / Noting code",
+"Workspace / Notes kept",
+"Artifacts / Library",
+"Artifacts / Reading one",
+"Artifacts / Writing a note",
+"Artifacts / Notes kept",
+"Customize / Skills",
+"Customize / One skill",
+"Customize / A new version",
+"Customize / Create with AI",
+"Customize / Held for review",
+"Customize / Upload a folder",
+"Customize / Profiles",
+"Customize / One profile",
+"Customize / New profile",
+"Customize / Read-only",
+"Customize / Agents",
+"Sources / Repositories",
+"Sources / Git hosts",
+"Sources / Machines",
+"Sources / Trackers",
+"Settings / People",
+"Settings / Teams",
+"Settings / Directories",
+"Settings / Vault",
+"Settings / This Firetower",
+"Tasks / Has work",
+"Tasks / Nothing open",
+"Tasks / Not connected",
+"Account / Signed in",
+"Account / Password held",
+"Updates / What is running",
+"Updates / What it will write",
+"Updates / Upgrading",
+"First run / Address",
+"First run / Looking",
+"First run / No answer",
+"First run / Not a Firetower",
+"First run / Sign in",
+"First run / Replace password",
+"First run / Name it",
+"First run / Set up"
+]
+}
