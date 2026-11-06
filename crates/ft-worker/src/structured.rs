@@ -25,7 +25,7 @@ use crate::Out;
 /// Generous because the first thing it does is start an agent, and an agent's
 /// own startup — reading a repository's configuration, connecting whatever MCP
 /// servers it was given — is not quick and is not ours to hurry.
-const STARTUP: Duration = Duration::from_secs(30);
+pub(crate) const STARTUP: Duration = Duration::from_secs(30);
 
 /// The command that puts a supervised agent under tmux.
 ///

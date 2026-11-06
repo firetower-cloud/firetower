@@ -3582,7 +3582,10 @@ async fn deliver_to_agent(session_id: &SessionId, sending: Sending) {
     let present = Tmux::for_session(session_id.as_str())
         .checked_exists()
         .await;
-    let (code, message) = undelivered_report(what, &format!("{e:#}"), present);
+    if let Err(probe) = &present {
+        tracing::warn!(session = %session_id, "asking tmux whether the agent is still there: {probe:#}");
+    }
+    let (code, message) = undelivered_report(what, present);
 
     let _ = out
         .send(ToServer::Error {
@@ -3608,20 +3611,41 @@ async fn deliver_to_agent(session_id: &SessionId, sending: Sending) {
 /// not a death: the same call [`Worker::watch_agent`] makes when this probe
 /// will not answer. `MessageUndelivered` reports the message and says nothing
 /// about the session — see `fleet::UNDELIVERED`.
-fn undelivered_report(what: &str, failure: &str, present: Result<bool>) -> (&'static str, String) {
+///
+/// Composed here rather than forwarded. Both of these used to carry the
+/// `anyhow` chain the send failed with, and that chain ends in the socket it
+/// could not reach — `/tmp/firetower-<user>/<session>.sock`, which is the name
+/// of the account this worker runs as. `AgentUnavailable` never showed it,
+/// because `note_for` replaces that one with a sentence of its own, but
+/// `MessageUndelivered` is new and ordinary and is written into the session's
+/// timeline as it arrives. A path on somebody's screen is not the widening
+/// that matters; a path in a row that is kept is. So the chains stay in this
+/// worker's log, where a host's own filesystem belongs, and what crosses the
+/// connection is the diagnosis: which frame, how long it was given, and what
+/// tmux said about the agent afterwards. That is the whole of what anybody
+/// acts on.
+fn undelivered_report(what: &str, present: Result<bool>) -> (&'static str, String) {
+    let waited = structured::STARTUP.as_secs();
     match present {
-        Ok(false) => ("AgentUnavailable", format!("sending {what}: {failure}")),
+        Ok(false) => (
+            "AgentUnavailable",
+            format!(
+                "{what} could not be sent: nothing answered for {waited}s, and this host has no \
+                 tmux session for this agent either — it is gone"
+            ),
+        ),
         Ok(true) => (
             "MessageUndelivered",
             format!(
-                "{what} did not reach the agent, which is still running on this host: {failure}"
+                "{what} did not reach the agent within {waited}s. Its tmux session is still \
+                 running on this host, so the agent has not gone — this message did not land"
             ),
         ),
-        Err(probe) => (
+        Err(_) => (
             "MessageUndelivered",
             format!(
-                "{what} did not reach the agent, and whether the agent is still there could \
-                 not be established: {failure} (asking tmux: {probe:#})"
+                "{what} did not reach the agent within {waited}s, and tmux could not say whether \
+                 its session is still there, so the agent is not assumed gone"
             ),
         ),
     }
@@ -5195,10 +5219,10 @@ mod tests {
     /// only a tmux session that is actually absent reports the agent.
     #[test]
     fn a_message_that_would_not_go_only_condemns_a_session_tmux_says_is_gone() {
-        let (gone, _) = undelivered_report("a turn", "no agent is listening", Ok(false));
+        let (gone, _) = undelivered_report("a turn", Ok(false));
         assert_eq!(gone, "AgentUnavailable");
 
-        let (there, said) = undelivered_report("an answer", "no agent is listening", Ok(true));
+        let (there, said) = undelivered_report("an answer", Ok(true));
         assert_eq!(there, "MessageUndelivered");
         assert!(said.contains("an answer"), "{said}");
         assert!(said.contains("still running"), "{said}");
@@ -5207,13 +5231,42 @@ mod tests {
         // `watch_agent` makes when this probe will not answer.
         let (unknown, said) = undelivered_report(
             "a turn",
-            "no agent is listening",
             Err(anyhow::anyhow!(
                 "checking firetower-s_1: connection refused"
             )),
         );
         assert_eq!(unknown, "MessageUndelivered");
-        assert!(said.contains("could not be established"), "{said}");
+        assert!(said.contains("not assumed gone"), "{said}");
+    }
+
+    /// Nothing that crosses the connection carries this host's filesystem.
+    ///
+    /// These sentences are written into a session's timeline and kept. The
+    /// chain a send fails with ends in the socket it could not reach, which
+    /// names the account this worker runs as — so the chain stays in the log
+    /// and the diagnosis is composed instead. Asserted rather than trusted,
+    /// because the natural way to write any of these three is to pass the
+    /// error straight through.
+    #[test]
+    fn what_a_failed_send_reports_upward_carries_no_path() {
+        let probes = [
+            Ok(false),
+            Ok(true),
+            Err(anyhow::anyhow!(
+                "no server running on /tmp/tmux-501/default"
+            )),
+        ];
+        for present in probes {
+            let (_, said) = undelivered_report("a turn", present);
+            assert!(
+                !said.contains('/'),
+                "a path reached the control plane: {said}"
+            );
+            assert!(
+                said.contains("30s"),
+                "how long it was given is the part somebody acts on: {said}"
+            );
+        }
     }
 
     /// A pane that outlived its agent must not block the way back.
