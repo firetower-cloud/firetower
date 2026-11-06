@@ -441,8 +441,14 @@ impl SshKey {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(tag = "type")]
 pub enum Compute {
-    /// A worker as a child process here. Inherits your environment, and its
-    /// workspaces are directories you can open.
+    /// **Retired.** A worker as a child process in the control plane's own
+    /// container: its filesystem, its environment, its database credentials.
+    ///
+    /// Nothing creates one, offers one, schedules onto one or connects to one
+    /// any more. The variant stays because rows still hold it: `host_by_id` is
+    /// what resolves a session's machine, and a `compute` this build cannot
+    /// decode is a historical session that errors instead of rendering — the
+    /// record of what ran there is the reason it was removed.
     Local,
     /// A worker on another machine. What a real deployment looks like.
     ///
@@ -476,6 +482,7 @@ impl Compute {
     /// What to call this kind on screen.
     pub fn label(&self) -> &'static str {
         match self {
+            // Retired, and only ever read off a row written before it was.
             Compute::Local => "local",
             Compute::Server { .. } => "server",
         }
@@ -655,7 +662,7 @@ pub struct Host {
     #[serde(default)]
     pub machine: Option<String>,
     pub id: HostId,
-    /// What the user calls it. `localhost` is a real host, not a special case.
+    /// What the user calls it.
     pub name: String,
     pub state: HostState,
     /// Where this machine is filed, and therefore who may run on it.

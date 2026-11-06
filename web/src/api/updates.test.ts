@@ -47,7 +47,6 @@ const status = (over: Partial<UpdateStatus> = {}): UpdateStatus => ({
     version: "0.30.1",
     upgradable: true,
     reason: null,
-    sessions: ["ledger", "api"],
     updater: { configured: true, reachable: true, version: "0.30.1", apiVersion: 1, problem: null },
   },
   hosts: [
@@ -72,11 +71,10 @@ describe("what starts ticked", () => {
 describe("what a run would end", () => {
   it("names the sessions by where they are", () => {
     const ended = wouldEnd(status(), { controlPlane: true, hostIds: ["h_1", "h_2"] });
-    expect(ended).toEqual([
-      { where: "this machine", sessions: ["ledger", "api"] },
-      { where: "hetzner-2", sessions: ["web"] },
-    ]);
-    expect(countEnded(ended)).toBe(3);
+    // The control plane is not in it: nothing runs in its container, so
+    // recreating it ends nothing.
+    expect(ended).toEqual([{ where: "hetzner-2", sessions: ["web"] }]);
+    expect(countEnded(ended)).toBe(1);
   });
 
   it("counts only what was chosen", () => {

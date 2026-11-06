@@ -938,8 +938,17 @@ impl Access {
     /// `u.<slug>` is what "theirs" means, and asking it is how offboarding
     /// finds out what would go with them. The only difference from a directory
     /// is the first label.
+    ///
+    /// A retired machine is left out. It is filed under whoever was here first
+    /// — the control plane registered its own process at boot and had nobody
+    /// else to file it under — so it would otherwise appear on an offboarding
+    /// confirmation as a machine called `localhost`, with nothing to say that
+    /// agreeing to it destroys every transcript of what ran in that container.
+    /// [`crate::accounts`] spares the same row when it deletes, and these two
+    /// have to agree: a row offered here and spared there is one an
+    /// administrator must confirm destroying and then cannot.
     pub async fn filed_under(&self, under: &str) -> Result<Vec<Filed>> {
-        let rows = sqlx::query(
+        let rows = sqlx::query(&format!(
             "SELECT 'workspace' AS kind, w.id, w.path::text, w.name, w.repo AS detail,
                     u.name AS owner_name
                FROM workspaces w LEFT JOIN principals u ON u.id = w.created_by
@@ -947,7 +956,7 @@ impl Access {
              UNION ALL
              SELECT 'machine', h.id, h.path::text, h.name, NULL, u.name
                FROM hosts h LEFT JOIN principals u ON u.id = h.created_by
-              WHERE h.path <@ $1::ltree
+              WHERE h.path <@ $1::ltree AND {fleet}
              UNION ALL
              SELECT 'agentAccount', a.id, a.path::text, a.name, a.kind, u.name
                FROM agent_accounts a LEFT JOIN principals u ON u.id = a.user_id
@@ -967,7 +976,8 @@ impl Access {
                FROM repos r LEFT JOIN principals u ON u.id = r.added_by
               WHERE r.path <@ $1::ltree
              ORDER BY kind, name",
-        )
+            fleet = crate::db::in_the_fleet("h")
+        ))
         .bind(under)
         .fetch_all(&self.pool)
         .await
@@ -2195,7 +2205,7 @@ mod tests {
         let vault = vault(&db);
 
         let host = db
-            .ensure_host("fire-01", ft_core::Compute::Local, admin.as_str())
+            .ensure_test_host("fire-01", admin.as_str())
             .await
             .unwrap();
         assert_eq!(
@@ -2249,7 +2259,7 @@ mod tests {
         assert_eq!(backend.slug, "backend");
 
         let host = db
-            .ensure_host("fire-01", ft_core::Compute::Local, admin.as_str())
+            .ensure_test_host("fire-01", admin.as_str())
             .await
             .unwrap();
         let to = host.path.moved_to(ft_core::path::DIRECTORY, &backend.slug);
@@ -2429,7 +2439,7 @@ mod tests {
             .unwrap();
 
         let host = db
-            .ensure_host("fire-01", ft_core::Compute::Local, admin.as_str())
+            .ensure_test_host("fire-01", admin.as_str())
             .await
             .unwrap();
         // Deliberately nested: extra labels are a name with separators in it.
@@ -2479,10 +2489,7 @@ mod tests {
         let bob = person(&accounts, &org, "bob").await;
         let lisa = person(&accounts, &org, "lisa").await;
 
-        let host = db
-            .ensure_host("fire-01", ft_core::Compute::Local, bob.as_str())
-            .await
-            .unwrap();
+        let host = db.ensure_test_host("fire-01", bob.as_str()).await.unwrap();
         assert!(
             db.hosts_for(lisa.as_str(), Level::Viewer)
                 .await
@@ -2544,10 +2551,7 @@ mod tests {
             .await
             .unwrap();
 
-        let host = db
-            .ensure_host("fire-01", ft_core::Compute::Local, bob.as_str())
-            .await
-            .unwrap();
+        let host = db.ensure_test_host("fire-01", bob.as_str()).await.unwrap();
         access
             .set_exception(
                 FiledKind::Machine,
@@ -3045,10 +3049,7 @@ mod tests {
 
         // A machine she added and then filed into a directory. It belongs to
         // the directory now, so it is not hers and does not go with her.
-        let host = db
-            .ensure_host("fire-02", ft_core::Compute::Local, ana.as_str())
-            .await
-            .unwrap();
+        let host = db.ensure_test_host("fire-02", ana.as_str()).await.unwrap();
         let there = ft_core::path::ResourcePath::from_stored(format!("d.{}.fire_02", shelf.slug));
         access
             .transfer(&vault, FiledKind::Machine, host.id.as_str(), &there, "ana")
@@ -3071,10 +3072,7 @@ mod tests {
         let (db, access, accounts, org, _admin) = set_up().await;
         let bob = person(&accounts, &org, "bob").await;
         let lisa = person(&accounts, &org, "lisa").await;
-        let host = db
-            .ensure_host("fire-01", ft_core::Compute::Local, bob.as_str())
-            .await
-            .unwrap();
+        let host = db.ensure_test_host("fire-01", bob.as_str()).await.unwrap();
 
         let refused = access
             .set_exception(
@@ -3112,7 +3110,7 @@ mod tests {
             .unwrap();
 
         let host = db
-            .ensure_host("fire-01", ft_core::Compute::Local, admin.as_str())
+            .ensure_test_host("fire-01", admin.as_str())
             .await
             .unwrap();
         access
@@ -3415,7 +3413,7 @@ mod tests {
             .unwrap();
 
         let host = db
-            .ensure_host("fire-01", ft_core::Compute::Local, admin.as_str())
+            .ensure_test_host("fire-01", admin.as_str())
             .await
             .unwrap();
         let to = host.path.moved_to(ft_core::path::DIRECTORY, &shelf.slug);
@@ -3641,7 +3639,7 @@ mod tests {
             .await
             .unwrap();
         let host = db
-            .ensure_host("fire-01", ft_core::Compute::Local, admin.as_str())
+            .ensure_test_host("fire-01", admin.as_str())
             .await
             .unwrap();
         access
@@ -3704,7 +3702,7 @@ mod tests {
         let (db, access, _accounts, _org, admin) = set_up().await;
         let vault = vault(&db);
         let host = db
-            .ensure_host("fire-01", ft_core::Compute::Local, admin.as_str())
+            .ensure_test_host("fire-01", admin.as_str())
             .await
             .unwrap();
 

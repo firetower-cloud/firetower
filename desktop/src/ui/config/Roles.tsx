@@ -183,7 +183,14 @@ export function Roles() {
   );
 }
 
-function toDraft(r: Role): NewRole {
+/**
+ * A profile as the form that edits it.
+ *
+ * Exported because Compute's notice about a removed machine unpins a profile
+ * that pointed at it, and `update_role` takes the whole object: sending a
+ * partial one would quietly blank every field it left out.
+ */
+export function toDraft(r: Role): NewRole {
   return {
     name: r.name,
     does: r.does,
@@ -557,8 +564,13 @@ function Editor({
                 onChange={(v) => set("machine", v)}
               />
             ) : (
+              /* Not the pickers' "No machine to run on" block: a profile with
+                 no machine is a state this screen already produces and handles
+                 — it runs wherever the workspace that uses it runs — so this
+                 is information rather than something in the way. */
               <p className="rounded-md border border-line bg-ground px-3 py-2 text-meta text-mute">
-                No machine is connected. Add one under Machines, or use the same workspace.
+                No machine yet, so this runs wherever the workspace that uses it runs. Add one
+                under Compute to pin it.
               </p>
             )}
           </Group>

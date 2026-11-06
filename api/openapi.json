@@ -1923,6 +1923,31 @@
         }
       }
     },
+    "/api/v1/hosts/retired": {
+      "get": {
+        "tags": [
+          "hosts"
+        ],
+        "summary": "The machines that are gone, for the one line that says so.",
+        "description": "`list_hosts` does not carry them: a retired machine is absent from the\nfleet rather than flagged in it, because \"inert\" has to be enforced at\nevery site that enumerates machines — three pickers, the profile screen,\nthe update targets, the phone — and one of them being missed makes it\nselectable again.\n\nAbsent, though, it would take the record of what ran there with it off the\nscreen. So the way in is sessions rather than machines: this names the\nmachine, and the client counts the sessions it already holds and opens\nthem. Nothing here can be run on, drained, renamed or connected to.",
+        "operationId": "retired_hosts",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RetiredMachine"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/hosts/{id}": {
       "delete": {
         "tags": [
@@ -9809,7 +9834,7 @@
         "oneOf": [
           {
             "type": "object",
-            "description": "A worker as a child process here. Inherits your environment, and its\nworkspaces are directories you can open.",
+            "description": "**Retired.** A worker as a child process in the control plane's own\ncontainer: its filesystem, its environment, its database credentials.\n\nNothing creates one, offers one, schedules onto one or connects to one\nany more. The variant stays because rows still hold it: `host_by_id` is\nwhat resolves a session's machine, and a `compute` this build cannot\ndecode is a historical session that errors instead of rendering — the\nrecord of what ran there is the reason it was removed.",
             "required": [
               "type"
             ],
@@ -9993,7 +10018,6 @@
         "required": [
           "version",
           "upgradable",
-          "sessions",
           "updater"
         ],
         "properties": {
@@ -10006,13 +10030,6 @@
               "string",
               "null"
             ]
-          },
-          "sessions": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "Sessions on this machine, by title. They end when it is recreated."
           },
           "updater": {
             "$ref": "#/components/schemas/UpdaterView"
@@ -11465,7 +11482,7 @@
           },
           "name": {
             "type": "string",
-            "description": "What the user calls it. `localhost` is a real host, not a special case."
+            "description": "What the user calls it."
           },
           "path": {
             "$ref": "#/components/schemas/ResourcePath",
@@ -12864,14 +12881,9 @@
         "description": "What the interface needs to decide what to show.",
         "required": [
           "forwards",
-          "availableHere",
-          "alreadyReachable"
+          "availableHere"
         ],
         "properties": {
-          "alreadyReachable": {
-            "type": "boolean",
-            "description": "Whether a port needs forwarding at all.\n\nA worker that is a child process of this control plane shares this\nmachine's network, so its dev server is already on `localhost`. There\nis nothing to tunnel, and forwarding anyway would bind a second port\nthat loops out and straight back in."
-          },
           "availableHere": {
             "type": "boolean",
             "description": "Whether opening one would reach the person asking.\n\nFalse when the control plane is somewhere other than the machine\nholding the browser: the port would be opened there, and sending\nsomebody to `localhost` would send them to their own machine — where\nthere is either nothing, or something else of theirs. The interface\nsays so rather than offering a link that goes to the wrong place."
@@ -13852,6 +13864,23 @@
       "ResourcePath": {
         "type": "string",
         "description": "A path, as the wire and the interface spell it: `u/kevin/thing`."
+      },
+      "RetiredMachine": {
+        "type": "object",
+        "description": "A machine that was removed, named so that what ran on it can be found.",
+        "required": [
+          "id",
+          "name"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/HostId"
+          },
+          "name": {
+            "type": "string",
+            "description": "What it was called while it existed."
+          }
+        }
       },
       "RevealedSecret": {
         "type": "object",

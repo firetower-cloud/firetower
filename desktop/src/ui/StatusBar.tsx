@@ -7,23 +7,23 @@
  * machine is context. A machine that has gone quiet says so in place.
  */
 import { useRef, useState } from "react";
-import { GitBranch, Monitor } from "lucide-react";
+import { GitBranch, Server } from "lucide-react";
 import { useSessionWork } from "~/api/generated/sessions/sessions";
 import type { Host, Session } from "~/api/generated/model";
-import { isLocal, machines } from "~/api/environments";
-import { useHosts, useSessions } from "~/data";
+import { machines } from "~/api/environments";
+import { useHosts, useMachineGone, useSessions } from "~/data";
 import { navigate } from "~/shims/next-navigation";
 
 const SHARE: Record<string, string> = { yields: "yields", equal: "equal share", takesMore: "takes more" };
 
-/** Where a session runs, as words. The Mac is a client; "Firetower's machine" is the one underneath the control plane. */
+/** Where a session runs, as words. Always another computer, reached over ssh. */
 export function whereItRuns(host: Host | undefined, hosts: Host[]) {
   if (!host) return null;
   const machine = machines(hosts).find((m) => m.hosts.some((h) => h.id === host.id));
   return {
-    name: isLocal(machine) ? "Firetower's machine" : (machine?.label ?? host.name),
+    name: machine?.label ?? host.name,
     how: "on the machine",
-    Mark: Monitor,
+    Mark: Server,
     quiet: host.state === "Unreachable" || !!host.reconnecting,
     draining: host.state === "Draining" || !!host.drained,
   };
@@ -35,7 +35,13 @@ export function StatusBar({ session, branch, onCommit }: { session: Session; bra
   const hosts = useHosts();
   const host = hosts.data.find((h) => h.id === session.hostId);
   const where = whereItRuns(host, hosts.data);
-  const work = useSessionWork(session.id, { query: { refetchInterval: 15_000, retry: false } });
+  /* Asked of the machine, every fifteen seconds, which is a machine that is
+     not in this Firetower any more: the request is refused by
+     `session_context` and the answer would be no answer. Not asked at all, so
+     the clause below is absent because it is unknowable rather than because it
+     came back as zero. */
+  const gone = useMachineGone(session.hostId);
+  const work = useSessionWork(session.id, { query: { refetchInterval: 15_000, retry: false, enabled: !gone } });
   const uncommitted = (work.data ?? []).reduce((n, c) => n + (c.uncommitted ?? 0), 0);
   const unpushed = (work.data ?? []).reduce((n, c) => n + (c.pushed === false ? c.ahead ?? 0 : 0), 0);
   const ended = session.status === "Ended";
@@ -66,7 +72,16 @@ export function StatusBar({ session, branch, onCommit }: { session: Session; bra
         </span>
       )}
 
-      {/* The machine. */}
+      {/* The machine. Or, when it is not one this Firetower has any more, a
+          phrase instead of a button: there is nothing to name and nothing to
+          open, and a segment that silently disappears is how a workspace whose
+          machine was removed would otherwise explain itself. */}
+      {gone && (
+        <span className="stale flex min-w-0 items-center gap-1.5">
+          <Server className="h-3 w-3 shrink-0" strokeWidth={1.75} />
+          <span className="truncate">machine removed</span>
+        </span>
+      )}
       {where && (
         <button
           /* The pane, not the section: `/configuration` alone falls back to

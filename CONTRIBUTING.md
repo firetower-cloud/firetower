@@ -77,8 +77,18 @@ means any page you visit could otherwise read your vault from your own browser.
 
 Locked out? `cargo run -p ft-cli -- passwd admin`.
 
-Workers keep what happened on the host they run on (locally that's
-`~/.firetower`). The control plane's cache is Postgres. Drop the database and
+**Nothing can run until you add a machine.** Firetower runs no agents in its
+own process — not in the image, and not under `just dev` either — so a fresh
+database has an empty fleet, and Compute → **Add a machine** is the first
+thing to do. On a laptop that machine can be the laptop, reached over ssh like
+any other: turn Remote Login on (macOS: System Settings → General → Sharing),
+put the key the Add dialog shows into your own `~/.ssh/authorized_keys`, and
+add `you@localhost`. Run `just build-worker` first and "Install the worker"
+sends the build from this checkout rather than fetching a release.
+
+Workers keep what happened on the machine they run on (for a machine that is
+your own laptop, that is `~/.firetower`). The control plane's cache is
+Postgres. Drop the database and
 it rebuilds from the workers on reconnect; `just reset` wipes both.
 
 ## Day to day

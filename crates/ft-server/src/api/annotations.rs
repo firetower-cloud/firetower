@@ -375,10 +375,7 @@ mod database_tests {
             via: crate::auth::Via::Session,
             user: Some(user),
         };
-        let host = db
-            .ensure_host("localhost", ft_core::Compute::Local, &who)
-            .await
-            .unwrap();
+        let host = db.ensure_test_host("localhost", &who).await.unwrap();
         let id = SessionId::new();
         db.insert_session(
             &id,

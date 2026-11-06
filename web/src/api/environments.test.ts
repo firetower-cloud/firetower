@@ -4,7 +4,6 @@ import {
   machineKey,
   machineLabel,
   environmentLabel,
-  isLocal,
   parseDestination,
 } from "./environments";
 import type { Host } from "./generated/model";
@@ -38,27 +37,24 @@ describe("which machine an environment is on", () => {
   });
 
   /**
-   * An ssh connection to the machine underneath used to be folded into
-   * `local`, which gave "this server" a second mode — and choosing it asked
-   * Firetower to ssh to the machine it is already sitting on.
+   * The machine Firetower ran agents on inside its own container. It is
+   * retired: `listHosts` does not return it, so no picker can draw it — and
+   * if one ever arrives, it is keyed on its own rather than folded in with a
+   * real machine.
    */
-  it("does not fold an ssh connection into the machine hosting Firetower", () => {
-    const local = host("local", { type: "Local" });
-    const underneath = host(
-      "the-vm",
-      { ...ssh(), host: "control-vm" },
-      // Flagged same-machine when it was added, which used to be enough.
-      { machine: "local" },
-    );
-    const groups = machines([local, underneath]);
-    expect(groups.map((m) => m.key)).toEqual(["local", "ssh:control-vm:22"]);
+  it("keeps a retired machine out of every other machine's group", () => {
+    const retired = host("localhost", { type: "Local" });
+    const real = host("the-vm", { ...ssh(), host: "control-vm" });
+    const groups = machines([retired, real]);
+    expect(groups.map((m) => m.key)).toEqual(["retired:localhost", "ssh:control-vm:22"]);
   });
 
-  it("knows the machine hosting Firetower", () => {
-    const groups = machines([host("local", { type: "Local" })]);
-    expect(isLocal(groups[0])).toBe(true);
-    expect(environmentLabel(groups[0].hosts[0])).toBe("This machine");
-    expect(machineKey(groups[0].hosts[0])).toBe("local");
+  it("calls a machine what it is called, whatever kind it is", () => {
+    const retired = host("localhost", { type: "Local" });
+    const groups = machines([retired]);
+    expect(groups[0].label).toBe("localhost");
+    expect(environmentLabel(groups[0].hosts[0])).toBe("localhost");
+    expect(machineKey(retired)).toBe("retired:localhost");
   });
 
   it("calls a machine what you call it, and says where it is beside that", () => {

@@ -5,7 +5,6 @@
 //! is asking the worker that holds the workspace.
 
 use super::agents::{agent_credential, agent_env, agent_home};
-use super::repos::is_local_path;
 use super::{credential_for, ApiError, ApiResult, ErrorCode};
 use crate::auth::Principal;
 use crate::oauth;
@@ -464,6 +463,11 @@ pub(crate) async fn create_session_as(
     // for one by id gets the same list, so naming a machine somebody was not
     // given is `no host is available` rather than a refusal that confirms it
     // exists.
+    //
+    // A retired machine is not in this list and cannot be named into it, by
+    // either route — see `Db::IN_THE_FLEET`. That is the whole of "it will
+    // never be scheduled onto again": not a check here, which is a check
+    // somebody has to remember, but a list it is not in.
     let hosts = state
         .db
         .hosts_for(&owner, crate::access::Level::Writer)
@@ -476,7 +480,17 @@ pub(crate) async fn create_session_as(
             .iter()
             .find(|h| h.state == ft_core::HostState::Online && !h.drained),
     }
-    .ok_or_else(|| ApiError::new(ErrorCode::NoCapacity, "no host is available to take this"))?;
+    .ok_or_else(|| match hosts.is_empty() {
+        // The ordinary state of a fresh install, now that nothing is
+        // registered at boot. It is a different problem from a fleet whose
+        // machines are all busy or down, and it has a different answer.
+        true => ApiError::new(
+            ErrorCode::NoCapacity,
+            "No machine is connected yet, and an agent runs on a machine. \
+             Add one under Compute, then start this again.",
+        ),
+        false => ApiError::new(ErrorCode::NoCapacity, "no host is available to take this"),
+    })?;
 
     if host.drained {
         return Err(ApiError::new(
@@ -514,25 +528,6 @@ pub(crate) async fn create_session_as(
     }
 
     require_ready(&state, &host.id, req.agent).await?;
-
-    // Native workers interpret filesystem repository paths on their own host.
-    // Container users should connect by URL unless using the built-in local environment.
-    if let Some((local, _)) = repos.iter().find(|(r, _)| {
-        is_local_path(&r.remote)
-            && !matches!(
-                host.compute,
-                ft_core::Compute::Local | ft_core::Compute::Server { .. }
-            )
-    }) {
-        return Err(ApiError::new(
-            ErrorCode::InvalidRequest,
-            format!(
-                "{} is a filesystem path. Choose direct host execution where that path exists, \
-                 or connect it by URL to use it in {}.",
-                local.remote, host.name
-            ),
-        ));
-    }
 
     // The trunk, for a repository nobody has read yet.
     //
@@ -1651,13 +1646,39 @@ pub(super) async fn destroy_session(
                 .map(|h| h.name)
                 .unwrap_or_else(|| "its host".to_string());
 
+            // What `force` costs, said accurately. It marks the session
+            // `Ended` here, which is what puts its workspace in front of
+            // `reclaim::sweep` — and the sweep deletes the workspace, the
+            // sessions under it and `agent_lines` with them, within the
+            // minute. For a machine that is only away that is the right trade
+            // and this is the sentence for it. For one that was removed — the
+            // control plane's own container, whose sessions are the record of
+            // what ran there — it is the trade the retirement migration exists
+            // to refuse, so it is not recommended.
+            // Not in the fleet, which for a session that still exists means
+            // retired: an ordinary host removal takes its sessions with it.
+            let gone = !state
+                .db
+                .hosts()
+                .await?
+                .iter()
+                .any(|h| h.id == session.host_id);
+
             return Err(ApiError::new(
                 ErrorCode::HostUnreachable,
-                format!(
-                    "{host} isn't answering, so the workspace can't be torn down. \
-                     Remove it here anyway to stop it filling the inbox — it keeps \
-                     running there until that machine comes back."
-                ),
+                match gone {
+                    true => format!(
+                        "{host} is not in this Firetower any more, so the workspace cannot be \
+                         torn down. Its conversation is the only record of what ran there: \
+                         removing it here would end the session, and what a workspace holds is \
+                         reclaimed once it has ended."
+                    ),
+                    false => format!(
+                        "{host} isn't answering, so the workspace can't be torn down. \
+                         Remove it here anyway to stop it filling the inbox — it keeps \
+                         running there until that machine comes back."
+                    ),
+                },
             ));
         }
 

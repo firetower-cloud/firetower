@@ -214,6 +214,7 @@ export * from './requestKind';
 export * from './requirement';
 export * from './resolve';
 export * from './resourcePath';
+export * from './retiredMachine';
 export * from './revealedSecret';
 export * from './reviewFile';
 export * from './role';

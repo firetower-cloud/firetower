@@ -42,7 +42,7 @@ import { useHostReadiness } from "~/api/generated/hosts/hosts";
 import { useListRoles } from "~/api/generated/roles/roles";
 import { useCreateSession } from "~/api/generated/sessions/sessions";
 import { machineLabel, machines } from "~/api/environments";
-import { canRun, resolve, type Where } from "~/components/WhereItRuns";
+import { canRun, NoMachine, resolve, type Where } from "~/components/WhereItRuns";
 import { usable } from "~/api/accounts";
 import { useAccounts, useAgents, useHosts, useRepos, useSkills } from "~/data";
 import { ConnectAccount } from "~/ui/config/ConnectAccount";
@@ -609,8 +609,16 @@ export function NewPage() {
       {open?.which === "machine" && (
         <Pop anchor={open.at} onClose={close} width={340}>
           <Menu>
+            {/* The shared block, which has somewhere to go: this said "No
+                machine connected." and left whoever read it in a menu with
+                nothing in it. */}
             {all.length === 0 && (
-              <p className="px-3 py-2 text-meta text-mute">No machine connected.</p>
+              <NoMachine
+                onAddMachine={() => {
+                  close();
+                  navigate("/configuration/machines/add");
+                }}
+              />
             )}
             {all.map((m) => (
               <Opt

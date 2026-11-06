@@ -46,7 +46,7 @@ import {
 } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { HostMark, Icon } from "~/components/ui";
-import { useHostOf } from "~/data";
+import { useHostOf, useMachineGone } from "~/data";
 import { Markdown } from "~/components/Markdown";
 import { editFrom } from "~/components/EditCard";
 import { stepLines } from "~/components/Steps";
@@ -213,7 +213,14 @@ export function Chat({
   );
 
   const { items, asked, questions, working, stopped } = conversation;
-  const answerable = session.status !== "Ended";
+  /* The machine this ran on is not in this Firetower any more, so there is
+     nothing at the other end of a message. `api/view.ts` says "only Ended is
+     the end", and for these sessions that is false: nothing ended them —
+     ending them would have taken this conversation with it — so the status
+     says otherwise and the composer would stay live over a worker that does
+     not exist. */
+  const gone = useMachineGone(session.hostId);
+  const answerable = session.status !== "Ended" && !gone;
   /* Repositories being checked in, started from the toolbar's panel. Drawn
      here because this is where what happened to a workspace is written down. */
   const runs = useCheckouts(session.id);
@@ -539,7 +546,10 @@ export function Chat({
 
           {working && <Working heardAt={conversation.heardAt} items={items} delegates={running} inTurn={conversation.inTurn === true} />}
           {stopped && <Stopped why={stopped} />}
-          {session.status === "Failed" && <Relaunch session={session} />}
+          {/* The card that explains the whole state, and offers nothing.
+              Instead of `Relaunch`, not beside it: starting again is the one
+              thing that cannot happen here. */}
+          {gone ? <MachineRemoved /> : session.status === "Failed" && <Relaunch session={session} />}
 
           {questions.map((q) => (
             <Questions key={q.req} sessionId={session.id} asking={q} onAnswered={() => settle(q.req)} />
@@ -620,6 +630,7 @@ export function Chat({
             onRemember={remember}
             onStopping={stopping}
             disabled={!answerable}
+            whyNot={gone ? "No machine to send this to — the machine this workspace ran on has been removed." : undefined}
             asking={asked.length + questions.length > 0}
             hand={hand}
           />
@@ -1392,6 +1403,38 @@ function Working({
     <p className="mt-6 text-ui">
       {quiet ? <span className="text-mute">{doing ?? "Working"} — nothing heard for {ago}s</span> : <span className="text-sheen">{doing}</span>}
     </p>
+  );
+}
+
+/**
+ * A workspace whose machine is not in this Firetower any more.
+ *
+ * Every sentence here is load-bearing, and the one that matters most is the
+ * second: a session on the retired machine still reads as running, because
+ * marking it `Ended` would make `reclaim::sweep` delete the workspace and with
+ * it this conversation — the only record of what that agent did. Without
+ * saying so, a running status on a machine that does not exist reads as
+ * Firetower being broken.
+ *
+ * **No buttons.** The previous draft of this offered "start it again on a
+ * machine": a new workspace on the same branch name, which half the people who
+ * saw it would read as *resume* and the other half would press, quietly
+ * leaving the uncommitted work in a worktree nothing can reach. Starting fresh
+ * on a branch is an ordinary thing to do by the ordinary route.
+ */
+function MachineRemoved() {
+  return (
+    <div className="mt-6 rounded-xl border border-line bg-panel px-4 py-3.5">
+      <p className="text-ui text-text">This workspace ran on a machine that has been removed.</p>
+      <p className="mt-2 text-meta text-dim">
+        Nothing here is running. Its status still says otherwise, and that is deliberate — ending it
+        would have taken this conversation with it.
+      </p>
+      <p className="mt-1.5 text-meta text-dim">
+        Everything above stays readable. The worktree is still on that machine, under the worker&rsquo;s
+        own directory; Firetower has no route to it.
+      </p>
+    </div>
   );
 }
 

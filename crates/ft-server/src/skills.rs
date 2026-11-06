@@ -2590,10 +2590,7 @@ mod tests {
         assert_eq!(s.version, 0, "nothing is current while it is held");
 
         // A session that selects it gets nothing: held content is on no disk.
-        let host = db
-            .ensure_host("fire-01", ft_core::Compute::Local, ana.as_str())
-            .await
-            .unwrap();
+        let host = db.ensure_test_host("fire-01", ana.as_str()).await.unwrap();
         let session = ft_core::SessionId::new();
         db.insert_session(
             &session,
@@ -2741,10 +2738,7 @@ mod tests {
             .create(&org, ana.as_str(), "ana", &bundle("v1"), false)
             .await
             .unwrap();
-        let host = db
-            .ensure_host("fire-01", ft_core::Compute::Local, ana.as_str())
-            .await
-            .unwrap();
+        let host = db.ensure_test_host("fire-01", ana.as_str()).await.unwrap();
         let session = ft_core::SessionId::new();
         db.insert_session(
             &session,

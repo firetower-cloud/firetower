@@ -1,4 +1,4 @@
-//! Where agents run: this machine, or a server you own.
+//! Where agents run: a machine you own, reached over ssh.
 //!
 //! Adding one connects to it there and then, so a wrong address is a message
 //! on the form rather than a host that quietly never works.
@@ -52,12 +52,14 @@ pub(super) async fn create_host(
     // Needed before anything is written: a machine is filed at
     // `u/<whoever added it>/…`, so there has to be somebody adding it.
     let me = whoever(&principal)?;
-    // This machine is registered at start-up and always present. Adding a
-    // second one would be two workers over the same directories.
+    // Retired. Agents used to be able to run in the control plane's own
+    // container, with its filesystem and its database; nothing can start one
+    // there any more, and the kind is only still understood so that the
+    // sessions which ran there keep opening.
     if req.compute == ft_core::Compute::Local {
         return Err(ApiError::new(
             ErrorCode::InvalidRequest,
-            "this machine is always available and doesn't need adding",
+            "Firetower does not run agents on itself. Add the machine over ssh instead.",
         ));
     }
 
@@ -138,6 +140,42 @@ fn settled(compute: ft_core::Compute) -> Result<ft_core::Compute, ApiError> {
                 ));
             }
 
+            // An address is the last argument to `ssh`, and ssh reads anything
+            // beginning with `-` as an option: `-oProxyCommand=…` is a command
+            // it would run *here*, in the control plane's container, as the
+            // control plane. `SshTransport::command` passes `--` before the
+            // destination so this cannot happen whatever is stored; this is the
+            // other half, so that nothing of the shape is ever stored at all.
+            //
+            // **The first character, and only the first.** ssh reads an
+            // argument as an option when it *starts* with `-`; a dash anywhere
+            // else is an ordinary character in an ordinary hostname —
+            // `build-box`, `eu-west-1.example.com` — and searching for one
+            // would refuse addresses that are perfectly good.
+            if typed.host.starts_with('-') {
+                return Err(ApiError::new(
+                    ErrorCode::InvalidRequest,
+                    "an address cannot start with `-` — ssh would read it as an option \
+                     rather than a machine",
+                ));
+            }
+
+            let user = given(user).or(typed.user);
+
+            // The same refusal for the account, because the destination is
+            // assembled from both: `ssh_destination` is `format!("{user}@{host}")`,
+            // so a user of `-oProxyCommand=…` is the same word in the same
+            // place. Not reachable past the `--` above, and that is the point
+            // of saying it twice — the two halves of this fix should not
+            // depend on each other to hold.
+            if user.as_deref().is_some_and(|u| u.starts_with('-')) {
+                return Err(ApiError::new(
+                    ErrorCode::InvalidRequest,
+                    "an ssh account cannot start with `-` — ssh would read the destination \
+                     as an option rather than a machine",
+                ));
+            }
+
             // Read now rather than at the first connection. A host that was
             // accepted should not then fail on something we could have learned
             // from the filesystem before saying yes.
@@ -154,7 +192,7 @@ fn settled(compute: ft_core::Compute) -> Result<ft_core::Compute, ApiError> {
 
             Ok(ft_core::Compute::Server {
                 host: typed.host,
-                user: given(user).or(typed.user),
+                user,
                 port: port.or(typed.port),
                 key,
                 host_key: given(host_key),
@@ -176,8 +214,10 @@ fn called(given: Option<&str>, compute: &ft_core::Compute) -> String {
     match given.map(str::trim).filter(|n| !n.is_empty()) {
         Some(given) => given.to_string(),
         None => match compute {
-            ft_core::Compute::Local => "localhost".to_string(),
             ft_core::Compute::Server { host, .. } => host.clone(),
+            // Refused before this is reached — `create_host` and `probe_host`
+            // both turn one away — and there is no address to fall back on.
+            ft_core::Compute::Local => "localhost".to_string(),
         },
     }
 }
@@ -317,15 +357,6 @@ pub(super) async fn delete_host(
         .find(|h| h.id == id)
         .ok_or_else(|| ApiError::not_found("host"))?;
 
-    // Removing it would leave a fresh install with nowhere to run anything,
-    // and it comes straight back on the next start anyway.
-    if host.compute == ft_core::Compute::Local {
-        return Err(ApiError::new(
-            ErrorCode::InvalidRequest,
-            "this machine is always available and can't be removed",
-        ));
-    }
-
     let live = state.db.live_sessions_on(&id).await?;
     if !live.is_empty() && !req.force {
         return Err(ApiError::new(
@@ -428,6 +459,50 @@ async fn to_look_at(
         .ok_or_else(|| ApiError::not_found("machine"))
 }
 
+/// A machine that was removed, named so that what ran on it can be found.
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RetiredMachine {
+    pub id: ft_core::HostId,
+    /// What it was called while it existed.
+    pub name: String,
+}
+
+/// The machines that are gone, for the one line that says so.
+///
+/// `list_hosts` does not carry them: a retired machine is absent from the
+/// fleet rather than flagged in it, because "inert" has to be enforced at
+/// every site that enumerates machines — three pickers, the profile screen,
+/// the update targets, the phone — and one of them being missed makes it
+/// selectable again.
+///
+/// Absent, though, it would take the record of what ran there with it off the
+/// screen. So the way in is sessions rather than machines: this names the
+/// machine, and the client counts the sessions it already holds and opens
+/// them. Nothing here can be run on, drained, renamed or connected to.
+#[utoipa::path(
+    get, path = "/api/v1/hosts/retired", tag = "hosts",
+    responses((status = 200, body = Vec<RetiredMachine>)),
+)]
+pub(super) async fn retired_hosts(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+) -> ApiResult<Json<Vec<RetiredMachine>>> {
+    let me = whoever(&principal)?;
+    Ok(Json(
+        state
+            .db
+            .retired_hosts(me.id.as_str(), crate::access::Level::Viewer)
+            .await?
+            .into_iter()
+            .map(|host| RetiredMachine {
+                id: host.id,
+                name: host.name,
+            })
+            .collect(),
+    ))
+}
+
 #[utoipa::path(
     get, path = "/api/v1/hosts", tag = "hosts",
     responses((status = 200, body = Vec<Host>)),
@@ -515,7 +590,11 @@ pub(super) async fn install_worker(
         .ok_or_else(|| {
             ApiError::new(
                 ErrorCode::InvalidRequest,
-                "this machine's worker is the control plane's own, and is upgraded with it",
+                // `ssh_transport_for` answers `None` for a machine that is
+                // not reached over ssh, and the only kind left is the retired
+                // one: the control plane's own container, which runs no
+                // worker to install.
+                "that machine was removed from the fleet, so there is no worker to install on it",
             )
         })?;
 
@@ -632,6 +711,51 @@ mod tests {
         assert!(matches!(e.code, ErrorCode::InvalidRequest), "{}", e.message);
     }
 
+    /// An address is the last argument to `ssh`, and ssh reads a leading `-`
+    /// as an option: `-oProxyCommand=…` is a command it runs here, as this
+    /// process, in this container. Refused on the way in, and `--` in
+    /// [`crate::transport::SshTransport::command`] means it would not matter
+    /// if one were already stored.
+    #[test]
+    fn an_address_that_ssh_would_read_as_an_option_is_refused() {
+        for typed in [
+            "-oProxyCommand=touch /tmp/pwned",
+            "-obatchmode=no",
+            "--fire-01",
+        ] {
+            let e = settled(server(typed, None)).unwrap_err();
+            assert!(matches!(e.code, ErrorCode::InvalidRequest), "{typed}");
+            assert!(e.message.contains("cannot start with"), "{}", e.message);
+        }
+
+        // And a machine whose name merely contains one is still a machine:
+        // ssh only reads an argument as an option when it *starts* with `-`.
+        assert!(settled(server("fire-01-a", None)).is_ok());
+        assert!(settled(server("eu-west-1.example.com", Some("build-user"))).is_ok());
+    }
+
+    /// The destination is assembled from both parts — `user@host` — so the
+    /// account is the same bug in the same word. Refused in both the field it
+    /// was typed into and the one parsed out of an address.
+    #[test]
+    fn an_account_that_ssh_would_read_as_an_option_is_refused() {
+        let typed =
+            settled(server("fire-01", Some("-oProxyCommand=touch /tmp/pwned"))).unwrap_err();
+        assert!(matches!(typed.code, ErrorCode::InvalidRequest));
+        assert!(
+            typed.message.contains("cannot start with"),
+            "{}",
+            typed.message
+        );
+
+        let pasted = settled(server("-oProxyCommand=id@fire-01", None)).unwrap_err();
+        assert!(
+            matches!(pasted.code, ErrorCode::InvalidRequest),
+            "{}",
+            pasted.message
+        );
+    }
+
     #[test]
     fn a_key_that_cannot_work_is_refused_before_the_host_exists() {
         // Otherwise it is added, fails to connect, and the message is about
@@ -714,7 +838,7 @@ pub(super) async fn probe_host(
     if req.compute == ft_core::Compute::Local {
         return Err(ApiError::new(
             ErrorCode::InvalidRequest,
-            "this machine is always available and doesn't need adding",
+            "Firetower does not run agents on itself. Add the machine over ssh instead.",
         ));
     }
 

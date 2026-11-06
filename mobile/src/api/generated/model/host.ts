@@ -50,7 +50,7 @@ export interface Host {
      * @nullable
      */
   memoryMb?: number | null;
-  /** What the user calls it. `localhost` is a real host, not a special case. */
+  /** What the user calls it. */
   name: string;
   /**
      * Where this machine is filed, and therefore who may run on it.

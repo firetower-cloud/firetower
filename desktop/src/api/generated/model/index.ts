@@ -214,6 +214,7 @@ export * from './requestKind.ts';
 export * from './requirement.ts';
 export * from './resolve.ts';
 export * from './resourcePath.ts';
+export * from './retiredMachine.ts';
 export * from './revealedSecret.ts';
 export * from './reviewFile.ts';
 export * from './role.ts';

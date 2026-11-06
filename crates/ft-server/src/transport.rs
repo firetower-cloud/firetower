@@ -1,9 +1,13 @@
 //! How the control plane reaches a worker.
 //!
 //! A transport hands back a reader and a writer. That's the whole contract —
-//! the protocol doesn't care whether the bytes travel down a pipe to a child
-//! process, through an SSH tunnel, or over a websocket the worker opened
-//! outbound. Local today, SSH next, hosted later, one daemon throughout.
+//! the protocol doesn't care whether the bytes travel through an SSH tunnel or
+//! over a websocket the worker opened outbound. One daemon throughout.
+//!
+//! Every machine is another computer, reached over ssh. Firetower used to be
+//! able to run a worker as a child of its own process; an agent there had the
+//! control plane's filesystem, environment and database credentials, so that
+//! transport is gone and nothing can start a worker in this container.
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -11,7 +15,7 @@ use std::collections::VecDeque;
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, BufReader};
-use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command};
+use tokio::process::{Child, ChildStderr, Command};
 
 /// How many lines of the far end's stderr to keep.
 ///
@@ -132,59 +136,6 @@ pub trait Transport: Send + Sync {
     async fn connect(&self) -> Result<Connection>;
 }
 
-/// The worker as a child process on this machine.
-///
-/// The command is `firetower-worker --stdio`. Reaching a remote host adds
-/// `ssh <target>` in front of exactly that — which is why the local milestone is
-/// the real system rather than a stand-in for it.
-pub struct LocalTransport {
-    exe: std::path::PathBuf,
-    root: std::path::PathBuf,
-}
-
-impl LocalTransport {
-    pub fn new(root: impl Into<std::path::PathBuf>) -> Result<Self> {
-        Ok(Self {
-            exe: std::env::current_exe().context("locating the firetower binary")?,
-            root: root.into(),
-        })
-    }
-}
-
-#[async_trait]
-impl Transport for LocalTransport {
-    fn describe(&self) -> String {
-        "local child process".to_string()
-    }
-
-    async fn connect(&self) -> Result<Connection> {
-        let mut child = Command::new(&self.exe)
-            .arg("worker")
-            .arg("--stdio")
-            .arg("--root")
-            .arg(&self.root)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            // The worker's logs belong in ours, not in the frame stream. Piped
-            // rather than inherited so they can also be quoted in an error.
-            .stderr(Stdio::piped())
-            .kill_on_drop(true)
-            .spawn()
-            .context("spawning the local worker")?;
-
-        let stdout: ChildStdout = child.stdout.take().context("worker stdout was not piped")?;
-        let stdin: ChildStdin = child.stdin.take().context("worker stdin was not piped")?;
-        let tail = child.stderr.take().map(|e| watch(e, self.describe()));
-
-        Ok(Connection {
-            reader: Box::new(stdout),
-            writer: Box::new(stdin),
-            child: Some(child),
-            tail,
-        })
-    }
-}
-
 /// What a host is asked to run.
 ///
 /// Not `firetower`. That is a person's command — `@firetower/cli` installs its
@@ -192,9 +143,6 @@ impl Transport for LocalTransport {
 /// --stdio` got whichever PATH offered first, and on a host somebody had
 /// installed the CLI on, that was the CLI. It knows nothing about `--stdio` and
 /// said so, naming neither program.
-///
-/// `localhost` does not use this: that worker is spawned from the control
-/// plane's own executable by absolute path.
 pub const WORKER_BINARY: &str = "firetower-worker";
 
 /// Where a worker keeps its state on a machine, and where the installer puts
@@ -375,7 +323,12 @@ impl SshTransport {
             ssh.arg("-o").arg("IdentitiesOnly=yes");
         }
 
-        ssh.arg(&self.destination);
+        // `--` first, always. Without it a destination beginning with `-`
+        // reaches ssh as an *option* rather than a machine, and
+        // `-oProxyCommand=…` is a command this container runs. `settled()`
+        // refuses one on the way in; this is the half that does not depend on
+        // where the value came from.
+        ssh.arg("--").arg(&self.destination);
         Ok(ssh)
     }
 
@@ -635,6 +588,16 @@ pub fn identity_path(raw: &str) -> Result<std::path::PathBuf> {
 mod tests {
     use super::*;
 
+    fn compute(host: &str) -> ft_core::Compute {
+        ft_core::Compute::Server {
+            host: host.into(),
+            user: Some("deploy".into()),
+            port: None,
+            key: ft_core::SshKey::Default,
+            host_key: None,
+        }
+    }
+
     fn ssh(destination: &str) -> SshTransport {
         SshTransport {
             destination: destination.into(),
@@ -706,7 +669,7 @@ mod tests {
             "the reason should have survived: {said:?}"
         );
 
-        let told = crate::diagnose::from_output(&said, Some(status), &ft_core::Compute::Local);
+        let told = crate::diagnose::from_output(&said, Some(status), &compute("fire-01"));
         assert_eq!(told.cause, ft_core::Cause::WorkerMissing);
     }
 
@@ -737,14 +700,6 @@ mod tests {
             Some("line 100"),
             "the end is what explains a failure"
         );
-    }
-
-    #[test]
-    fn local_and_ssh_differ_only_in_how_the_command_is_reached() {
-        // Both run the same worker command. That is the entire difference
-        // between the local milestone and the remote one.
-        let local = LocalTransport::new("/tmp/ft").unwrap();
-        assert_eq!(local.describe(), "local child process");
     }
 
     /// A worker Firetower installed is found without being on anybody's PATH,
@@ -799,6 +754,40 @@ mod tests {
         assert!(said("").contains("no key"));
         assert!(said(".ssh/id_ed25519").contains("relative path"));
         assert!(said("/no/such/directory/id_ed25519").contains("no key at"));
+    }
+
+    /// A destination that starts with `-` is an option to ssh, and
+    /// `-oProxyCommand=…` is a command it runs here. `--` is what makes the
+    /// last argument a machine whatever it says.
+    #[tokio::test]
+    async fn the_destination_is_never_read_as_an_option() {
+        let dir = tempfile::tempdir().unwrap();
+        let transport = SshTransport {
+            home: dir.path().to_path_buf(),
+            ..ssh("-oProxyCommand=touch /tmp/pwned")
+        };
+
+        let command = transport.command().await.unwrap();
+        let argv: Vec<String> = command
+            .as_std()
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+
+        let destination = argv
+            .iter()
+            .position(|a| a == "-oProxyCommand=touch /tmp/pwned")
+            .expect("the destination is still passed");
+        assert_eq!(
+            argv[destination - 1],
+            "--",
+            "`--` has to be the argument before it: {argv:?}"
+        );
+        assert_eq!(
+            destination,
+            argv.len() - 1,
+            "and the destination is last, so nothing can be read as an option after it: {argv:?}"
+        );
     }
 
     #[test]

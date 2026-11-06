@@ -113,6 +113,8 @@ pub fn protocol_mismatch(theirs: u32, ours: u32, compute: &Compute) -> Diagnosis
             "Install the worker again from the Compute screen, or on the machine:\n{}",
             crate::install::one_liner(None)
         )),
+        // Retired: there is no worker in here to reinstall, and a row of this
+        // kind never connects far enough to disagree about a protocol.
         Compute::Local => d,
     }
 }
@@ -131,8 +133,10 @@ fn is_not_found(status: Option<std::process::ExitStatus>) -> bool {
 /// destination.
 fn machine(compute: &Compute) -> String {
     match compute {
-        Compute::Server { host, .. } => host.clone(),
-        Compute::Local => "this machine".to_string(),
+        Compute::Server { host, .. } if !host.is_empty() => host.clone(),
+        // A host that has gone between the failure and the wording of it, or a
+        // retired one. Generic rather than wrong: there is no address to name.
+        _ => "that machine".to_string(),
     }
 }
 
@@ -144,6 +148,18 @@ mod tests {
         Compute::Server {
             host: "fire-01".into(),
             user: Some("deploy".into()),
+            port: None,
+            key: ft_core::SshKey::Default,
+            host_key: None,
+        }
+    }
+
+    /// What [`crate::fleet::Fleet::compute_of`] hands back for a host that is
+    /// no longer there.
+    fn nameless() -> Compute {
+        Compute::Server {
+            host: String::new(),
+            user: None,
             port: None,
             key: ft_core::SshKey::Default,
             host_key: None,
@@ -268,6 +284,10 @@ mod tests {
         assert_eq!(d.cause, Cause::ProtocolMismatch);
         assert!(d.remedy.unwrap().contains("worker.sh"));
         assert!(protocol_mismatch(12, 14, &Compute::Local).remedy.is_none());
+        // A host nothing can name says so without naming the wrong thing.
+        assert!(read(&["connection refused"], &nameless())
+            .summary
+            .contains("that machine"));
     }
 
     #[test]

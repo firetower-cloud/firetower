@@ -577,10 +577,35 @@ impl Accounts {
         // `u/<them>/…` is theirs: an administrator may destroy it along with the
         // account, and may never pass it to anybody else. The machine itself is
         // untouched — this is a row, and whoever wants it back adds it again.
-        sqlx::query(
+        //
+        // **Except a retired machine, which was never theirs.** The control
+        // plane used to register its own process as a host on every boot and
+        // file it under whoever happened to be here first: `ensure_host` files
+        // at `u.<slug of added_by>`, and the boot call passed the oldest
+        // account there was — `Db::first_person`, removed along with it. So the
+        // one row that is the organisation's record of what ran inside the
+        // control plane's container sits at `u/<whoever was first>/localhost`,
+        // and the reasoning above does not reach it: being filed there was not
+        // a personal act an administrator may destroy with the account. It is
+        // where the system put it because there was nobody to ask.
+        //
+        // And destroying it would not stop at the row. `workspaces.host_id`
+        // cascades, `sessions.workspace_id` cascades, and `agent_lines` goes
+        // with the sessions — so offboarding that account would delete every
+        // transcript of what those agents did, in one transaction, for a reason
+        // that has nothing to do with them. It used to be partly self-healing,
+        // because start-up put the row back; nothing puts it back now.
+        //
+        // `crate::access::Access::filed_under` leaves it off the list this
+        // administrator agrees to, and the two have to stay in step:
+        // `offboard_user` refuses unless the list is named in full, so a row
+        // offered there and spared here would be impossible to offboard past.
+        sqlx::query(&format!(
             "DELETE FROM hosts
-              WHERE path <@ ('u.' || (SELECT slug FROM principals WHERE id = $1))::ltree",
-        )
+              WHERE path <@ ('u.' || (SELECT slug FROM principals WHERE id = $1))::ltree
+                AND {fleet}",
+            fleet = crate::db::in_the_fleet("hosts")
+        ))
         .bind(id.as_str())
         .execute(&mut **tx)
         .await
@@ -1098,10 +1123,7 @@ mod tests {
             .id;
 
         // A machine she added, and a credential she authorized.
-        let host = db
-            .ensure_host("fire-01", ft_core::Compute::Local, ana.as_str())
-            .await
-            .unwrap();
+        let host = db.ensure_test_host("fire-01", ana.as_str()).await.unwrap();
         assert_eq!(host.path.as_str(), "u/ana/fire_01");
         let vault =
             crate::vault::Vault::new(db.pool().clone(), crate::vault::crypto::RootKey::generate());
@@ -1148,6 +1170,136 @@ mod tests {
             .iter()
             .all(|h| h.path.as_str() != "u/ana/fire_01"));
         drop(admin);
+    }
+
+    /// Offboarding the founding administrator must not take the machine that
+    /// was the control plane's own container, nor what ran on it.
+    ///
+    /// The row is filed at `u/<them>/localhost` because the control plane used
+    /// to register its own process at boot and had nobody else to file it
+    /// under. The sweep above deletes the machines at somebody's own root, and
+    /// `workspaces.host_id` cascades into `sessions` and `sessions` into
+    /// `agent_lines` — so without the guard, removing that one account deletes
+    /// every transcript from that container, whoever ran them. It used to be
+    /// partly survivable, because start-up put the row back; nothing does now.
+    ///
+    /// **A second path is left open and is not this change's to close.**
+    /// `sessions.user_id` still references `users(id) on delete cascade`, so the
+    /// sessions the departing person ran themselves go when their account does,
+    /// on any machine — the assertion for it is at the bottom of this test.
+    /// Closing that means repointing the key at `principals` the way
+    /// `workspaces.created_by` was, and deciding what a departed person's work
+    /// reads as afterwards. Reported rather than done here.
+    #[tokio::test]
+    async fn offboarding_the_founder_leaves_the_retired_machine_and_its_record() {
+        let (db, founder) = Db::open_for_test_owned().await.unwrap();
+        let accounts = Accounts::new(db.pool().clone());
+        let access = crate::access::Access::new(db.pool().clone());
+        let org = OrgId::from_stored(db.org().await.unwrap());
+
+        // Written the way a version that still had the feature wrote it, under
+        // whoever happened to be here first.
+        let retired = db
+            .ensure_host("localhost", ft_core::Compute::Local, &founder)
+            .await
+            .unwrap();
+        assert_eq!(retired.path.as_str(), "u/admin/localhost");
+
+        // Somebody has to be left to administer the place — and they ran
+        // something in that container too, which is the record at risk.
+        let mel = accounts
+            .create_user(&org, "mel", "mel@example.test", "admin")
+            .await
+            .unwrap()
+            .0
+            .id;
+        let theirs = ran_on(&db, &retired.id, mel.as_str(), "What mel's agent did").await;
+        let founders = ran_on(&db, &retired.id, &founder, "What the founder's agent did").await;
+
+        // And a machine the founder added themselves, which is theirs and goes.
+        let own_machine = db.ensure_test_host("fire-01", &founder).await.unwrap();
+
+        // What the administrator doing this is asked to agree to. The retired
+        // row must not be on it: `offboard_user` refuses unless every item is
+        // named, so a row offered here and spared below could never be
+        // offboarded past.
+        let reach = access.reach(&founder).await.unwrap();
+        assert!(
+            reach.owns.iter().any(|f| f.id == own_machine.id.as_str()),
+            "a machine they added is theirs to lose"
+        );
+        assert!(
+            reach.owns.iter().all(|f| f.id != retired.id.as_str()),
+            "the retired machine is the organisation's record, not their property"
+        );
+
+        accounts
+            .delete_user(&UserId::from_stored(founder.clone()))
+            .await
+            .unwrap();
+
+        assert!(
+            db.host_by_name("fire-01").await.unwrap().is_none(),
+            "what was at their own root went with them"
+        );
+        let still = db
+            .host_by_id(&retired.id)
+            .await
+            .unwrap()
+            .expect("the retired machine stays");
+        assert_eq!(still.compute, ft_core::Compute::Local);
+
+        // The point of the guard: somebody else's session in that container,
+        // and its log, are untouched by a decision about the founder.
+        assert_eq!(
+            db.session(&theirs).await.unwrap().map(|s| s.title),
+            Some("What mel's agent did".to_string()),
+        );
+        assert_eq!(lines_on(&db, &theirs).await, 1, "and what the agent said");
+
+        // The path this change does not close, asserted so that whoever closes
+        // it finds this test rather than a silence: the founder's own session
+        // went with their account, through `sessions.user_id`.
+        assert!(db.session(&founders).await.unwrap().is_none());
+    }
+
+    /// A session on a machine, with one line of the agent's log under it.
+    async fn ran_on(
+        db: &Db,
+        host: &ft_core::HostId,
+        owner: &str,
+        title: &str,
+    ) -> ft_core::SessionId {
+        let id = ft_core::SessionId::new();
+        db.insert_session(
+            &id,
+            host,
+            owner,
+            Some("acme/backend"),
+            title,
+            "do a thing",
+            Some("agent/x"),
+            Some("main"),
+            "ClaudeCode",
+            ft_core::WorkspaceSize::Medium,
+            ft_core::Share::Equal,
+            &ft_core::Step::plan(true, false),
+            None,
+        )
+        .await
+        .unwrap();
+        db.record_agent_line(&id, 1, r#"{"type":"assistant"}"#)
+            .await
+            .unwrap();
+        id
+    }
+
+    async fn lines_on(db: &Db, id: &ft_core::SessionId) -> i64 {
+        sqlx::query_scalar("SELECT count(*) FROM agent_lines WHERE session_id = $1")
+            .bind(id.as_str())
+            .fetch_one(db.pool())
+            .await
+            .unwrap()
     }
 
     #[test]

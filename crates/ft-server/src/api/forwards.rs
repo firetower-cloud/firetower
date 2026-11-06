@@ -149,13 +149,6 @@ pub struct Ports {
     /// there is either nothing, or something else of theirs. The interface
     /// says so rather than offering a link that goes to the wrong place.
     pub available_here: bool,
-    /// Whether a port needs forwarding at all.
-    ///
-    /// A worker that is a child process of this control plane shares this
-    /// machine's network, so its dev server is already on `localhost`. There
-    /// is nothing to tunnel, and forwarding anyway would bind a second port
-    /// that loops out and straight back in.
-    pub already_reachable: bool,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -178,12 +171,12 @@ pub(super) async fn list_forwards(
     Path(id): Path<String>,
 ) -> ApiResult<Json<Ports>> {
     let id = SessionId::from_stored(id);
-    let (_, host) = session_context(&state, &principal, &id).await?;
+    // For the access check it carries, which is the reason it is called here.
+    let _ = session_context(&state, &principal, &id).await?;
 
     Ok(Json(Ports {
         forwards: state.forwards.list(&id).await,
         available_here: available_here(&headers),
-        already_reachable: already_reachable(&state, &host).await,
     }))
 }
 
@@ -218,13 +211,6 @@ pub(super) async fn create_forward(
         return Err(ApiError::new(
             ErrorCode::InvalidRequest,
             "this Firetower is not running on your machine, so it cannot open a port on it",
-        ));
-    }
-
-    if already_reachable(&state, &host).await {
-        return Err(ApiError::new(
-            ErrorCode::InvalidRequest,
-            "this session's worker runs on your machine, so its ports are already reachable",
         ));
     }
 
@@ -287,26 +273,6 @@ fn available_here(headers: &HeaderMap) -> bool {
 
 /// Whether this session's ports are already on this machine's `localhost`.
 ///
-/// True for a worker that is a child process here: it shares this machine's
-/// network namespace, so its dev server is reachable without any of this. A
-/// worker in a container publishes nothing and needs the tunnel, even when the
-/// container is on this very machine.
-async fn already_reachable(state: &AppState, host: &ft_core::HostId) -> bool {
-    // Not when we are in a container. The worker is then a child process
-    // sharing the *container's* network, so its dev server is on a loopback
-    // the browser cannot reach — and telling somebody to open `localhost:3000`
-    // sends them to their own machine, which is the bug this whole check
-    // exists to avoid.
-    if crate::forward::Forwards::in_a_container() {
-        return false;
-    }
-
-    matches!(
-        state.db.host_by_id(host).await,
-        Ok(Some(host)) if host.compute == ft_core::Compute::Local
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

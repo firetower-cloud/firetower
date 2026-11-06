@@ -31,7 +31,7 @@ import { usePrompt } from "~/ui/Confirm";
 import { useEndWorkspace } from "~/ui/end";
 import { HostCard, whereItRuns } from "~/ui/StatusBar";
 import { useHosts } from "~/data";
-import { Monitor, Server, Shapes } from "lucide-react";
+import { Server, Shapes } from "lucide-react";
 import { useRef, useState } from "react";
 import { key } from "~/platform";
 
@@ -377,10 +377,14 @@ function Row({
 }
 
 /**
- * Where the workspace runs, as one icon at the end of the row: a screen for
- * Firetower's own machine, a server for any other computer. Hovering it
+ * Where the workspace runs, as one icon at the end of the row. Hovering it
  * opens the machine's card — the name and the facts live there, not in a
  * row that is already full.
+ *
+ * Nothing is drawn for a machine this Firetower no longer has. That is the
+ * right answer here and the wrong one in the workspace: a row is a list of
+ * places to go, and the sentence about a machine that was removed belongs
+ * where the work is, on its status bar.
  */
 function Where({ place }: { place: Workspace }) {
   const hosts = useHosts();
@@ -389,8 +393,6 @@ function Where({ place }: { place: Workspace }) {
   const [card, setCard] = useState<{ x: number; y: number } | null>(null);
   const hover = useRef<ReturnType<typeof setTimeout>>(undefined);
   if (!host || !where) return null;
-  const local = where.name === "Firetower's machine";
-  const Icon = local ? Monitor : Server;
   return (
     <span
       onMouseEnter={(e) => {
@@ -404,7 +406,7 @@ function Where({ place }: { place: Workspace }) {
       className={`relative ml-0.5 shrink-0 ${where.quiet ? "stale" : ""}`}
       aria-label={`Runs on ${where.name}`}
     >
-      <Icon className={`h-3 w-3 ${where.quiet ? "text-brick" : "text-mute"}`} strokeWidth={1.75} />
+      <Server className={`h-3 w-3 ${where.quiet ? "text-brick" : "text-mute"}`} strokeWidth={1.75} />
       {card && <HostCard host={host} where={where} at={card} />}
     </span>
   );

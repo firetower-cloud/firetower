@@ -250,10 +250,10 @@ export default function NewWorkspace() {
             />
             <Trigger
               value={agentView?.label}
-              placeholder="Choose an agent"
+              placeholder={hostId ? "Choose an agent" : "Choose a machine first"}
               onPress={() => setOpen("agent")}
             />
-            {agent && hostId && !agentOnHost?.installed && <Text className="text-meta text-brick">{agentView?.label} is not installed on this machine.</Text>}
+            {agent && hostId && !agentOnHost?.installed && <Text className="text-meta text-brick">{agentView?.label} is not installed on {host?.name ?? "that machine"}.</Text>}
           </View>
         </Field>
 
@@ -354,7 +354,7 @@ export default function NewWorkspace() {
         open={open === "host"}
         title="Where it runs"
         waiting={findingHosts ? "Reading the machines" : undefined}
-        empty="No machine is connected to this Firetower yet. They are added from the desktop or the web console."
+        empty="No machine yet. Agents run on a machine added over ssh — a VM, a build box, a Mac. Adding one is done from the desktop app or the web console."
         chosen={hostId}
         choices={hosts.map((h) => ({
           id: h.id,
@@ -382,7 +382,7 @@ export default function NewWorkspace() {
             id: a.kind,
             label: a.label,
             detail: onHost?.version ?? undefined,
-            blocked: !a.supported ? "Not supported on this server" : !hostId ? "Choose a machine first" : !onHost?.installed ? "Not installed on this machine" : undefined,
+            blocked: !a.supported ? "Not supported on this server" : !hostId ? "Choose a machine first" : !onHost?.installed ? `Not installed on ${host?.name ?? "that machine"}` : undefined,
           };
         })}
         onPick={(id) => {

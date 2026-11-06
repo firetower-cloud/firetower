@@ -95,23 +95,45 @@ describe("a machine", () => {
     expect(two).toContain("Which one");
   });
 
-  it("is the machine hosting Firetower when that is what was picked", () => {
-    const out = draw([host("local", { type: "Local" })], where({ machine: "local" }), ready);
-    expect(out).toContain("Ready — runs as root on this machine");
+  /**
+   * The sentence already says who it runs as, so the address must not say it
+   * again: this read "runs as root on root@video-vm" the moment the one kind
+   * of machine that printed "on this machine" was retired.
+   */
+  it("says where it runs without saying the account twice", () => {
+    const out = draw([host("native", ssh("video-vm", "root"))], where({ machine: "ssh:video-vm:22" }), ready);
+    expect(out).toContain("Ready — runs as root on video-vm");
+  });
+});
+
+describe("no machine at all", () => {
+  /**
+   * What every fresh install opens on, now that Firetower does not register
+   * its own container as a machine. One block, one thing to do — not a select
+   * whose only entry is "add one".
+   */
+  it("stops being a picker and says the one thing to do", () => {
+    const out = draw([], where());
+    expect(out).toContain("No machine to run on");
+    expect(out).toContain("Add a machine");
+    expect(out).not.toContain("Choose a machine");
+    // The agent line goes with it: with no machine, "not installed there"
+    // names nowhere.
+    expect(out).not.toContain("not installed there");
   });
 });
 
 describe("an environment that goes away", () => {
   it("never falls back to a different worker", () => {
-    const out = draw([host("local", { type: "Local" })], where({ machine: "ssh:video-vm:22" }));
-    expect(out).toContain("Nowhere to run anything yet");
+    const out = draw([host("native", ssh())], where({ machine: "ssh:gone-vm:22" }));
+    expect(out).toContain("That machine is no longer here");
     expect(out).not.toContain("Ready");
   });
 
   it("resolves to nothing rather than to whatever is first", () => {
-    const hosts = [host("local", { type: "Local" })];
-    expect(resolve(hosts, where({ machine: "ssh:video-vm:22" })).host).toBeUndefined();
-    expect(resolve(hosts, where()).host?.id).toBe("local");
+    const hosts = [host("native", ssh())];
+    expect(resolve(hosts, where({ machine: "ssh:gone-vm:22" })).host).toBeUndefined();
+    expect(resolve(hosts, where()).host?.id).toBe("native");
   });
 });
 
@@ -120,8 +142,8 @@ it("Kimi needs a connected account, like every other agent that has a login", ()
   // It used to run on whatever `kimi login` had left on the worker. Its
   // credential is Firetower's to hold now, so an agent without one cannot
   // start — the same rule Claude and Codex have always had.
-  const kimi: AgentView = { ...claude, kind: "KimiCode", needsCredential: true, credentialSet: false, hosts: [{ hostId: "local", hostName: "Local", installed: true, coveredByToken: false, loggedIn: null, behind: false, mayUpdate: true }] };
-  expect(canRun(kimi, "local")).toBe(false);
-  expect(canRun({ ...kimi, credentialSet: true }, "local")).toBe(true);
+  const kimi: AgentView = { ...claude, kind: "KimiCode", needsCredential: true, credentialSet: false, hosts: [{ hostId: "native", hostName: "build-box", installed: true, coveredByToken: false, loggedIn: null, behind: false, mayUpdate: true }] };
+  expect(canRun(kimi, "native")).toBe(false);
+  expect(canRun({ ...kimi, credentialSet: true }, "native")).toBe(true);
   expect(canRun({ ...kimi, credentialSet: true }, "absent")).toBe(false);
 });
