@@ -174,18 +174,22 @@ address nothing answers on.
 
 ## Getting in, and being held at the door
 
+**None of these had been looked at**, because the mock answered `0.13.0`
+against a `MIN_SERVER` of `0.34.1` — `probe.ts` refused it, so every path
+through the flow ended on "not a Firetower".
+
 | Screen | Verdict | What differed |
 |---|---|---|
-| The address | **to compare** | |
-| Looking for it | **to compare** | |
-| No answer | **to compare** | |
-| Not a Firetower | **to compare** | |
-| Who are you here? | **to compare** | |
-| Replace this password | **to compare** | |
-| Name this Firetower | **to compare** | |
-| Set up | **to compare** | |
-| Held — password reset | **to compare** | |
-| Held — mid-setup | **to compare** | |
+| The address | **differs → fixed** | A 26rem column centred on the bare desk, where the drawing puts the whole flow on the sheet with the window's own corners. Heading, mark, field and primary all moved. |
+| Looking for it | **differs → fixed** | A spinner, where the drawing has typing dots and the address being asked. A spinner is the shape for a page that has not arrived; this is a question being put to a machine. |
+| No answer | **differs → fixed** | A bordered checklist box and two equal buttons. Now the drawing's `.bad` panel — a brick **rule**, not a brick box; the three VPN questions stay inside it, where a remedy goes. |
+| Not a Firetower | **differs → fixed** | As above. |
+| Who are you here? | **differs → fixed** | A sage-ringed lock over the organisation's name — a signal colour where nothing has gone right or wrong. Now the `.found` panel naming what was found, fields with glyphs, and a footer that answers the question rather than repeating the way out. |
+| Replace this password | **reported** | **The drawing has the app change the password** — two fields and "Replace it and continue". The build points at the control plane's own interface, with the reason written above `Gate` and `Setup`: this app deliberately does not carry a second copy of the screen that decides whether anybody can get in. The *shape* is the drawing's now; the behaviour is not, and that is a ruling to make rather than a thing to quietly pick. |
+| Name this Firetower | **differs → fixed** | Frame, mark and field. |
+| Set up | **differs → fixed** | Drawn **inside the rail**, so a door offered six ways to go nowhere. The gate replaces the body now. |
+| Held — password reset | **differs → fixed** | As above, plus its own treatment: centred, a quiet mark rather than the flow's dark one, two actions side by side, and the line saying what is still true. |
+| Held — mid-setup | **differs → fixed** | With Set up. |
 
 ## Over any screen
 
@@ -273,6 +277,22 @@ Each of these is a stated deviation rather than an unfinished row.
 4. **The source picker on Tasks.** Drawn as "GitHub ⌄" in the artifact; the
    build hides it below two connected trackers. A picker with one option is
    not a picker.
+
+## A specification conflict, for somebody else to rule on
+
+**The drawing has the app replace a temporary password; the build does not.**
+
+`first:"locked"` in the artifact draws two password fields and a "Replace it
+and continue" inside the app. `Gate.tsx` and `Setup.tsx` both carry the
+opposite position, written down before this sweep: *a password the server will
+not accept any work under is replaced in a browser, on the control plane's own
+interface, and this app deliberately does not carry a second copy of the
+screen that decides whether anybody can get in.*
+
+Criterion 45 says first run must *cover* "replace password". It does not say
+which of the two. The screen now has the drawing's shape — frame, mark, type,
+the single primary — and the build's behaviour. **Changing the behaviour is a
+ruling, not a reinterpretation**, so it is reported here rather than made.
 
 ## Where the endpoint cannot answer what the drawing shows
 
