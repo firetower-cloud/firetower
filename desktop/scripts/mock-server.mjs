@@ -564,6 +564,17 @@ const server = createServer(async (req, res) => {
       other({ id: "s_4", workspaceId: "w_4", number: 6, name: "Backfill the invoice index", status: "Working", agent: "Codex", repo: "acme/jobs", branch: "chore/invoice-index", createdAt: minutesAgo(180) }),
       other({ id: "s_5", workspaceId: "w_5", number: 7, name: "Composer context meter", status: "Ready", repo: "acme/web", branch: "feat/context-meter", createdAt: minutesAgo(1440) }),
     ];
+    /* A workspace with a team under it, which the Overview's team rail is
+       the whole reason to open. Every other scene leaves `s_1` solo, so the
+       panel it draws could not be looked at at all. */
+    if (scene === "team") {
+      return [
+        session(),
+        other({ id: "s_k1", workspaceId: "w_1", parentId: "s_1", number: 2, name: "Quota band thresholds", title: "Quota band thresholds", status: "NeedsYou", createdAt: minutesAgo(4), note: "Should a plan with no soft limit show the band at all?" }),
+        other({ id: "s_k2", workspaceId: "w_1", parentId: "s_1", number: 3, name: "Backfill the invoice index", title: "Backfill the invoice index", status: "Working", agent: "Codex", createdAt: minutesAgo(9) }),
+        other({ id: "s_k3", workspaceId: "w_1", parentId: "s_1", number: 4, name: "Token audit", title: "Token audit", status: "HandedBack", agent: "Cursor", createdAt: minutesAgo(62) }),
+      ];
+    }
     if (scene === "calm") return [session(), ...working];
     const asking = [
       other({

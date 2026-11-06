@@ -11,7 +11,6 @@ import { Globe, MoreHorizontal, PanelRight, Pencil, Share2, SquareTerminal, Tras
 import { WhoCanAccess } from "~/ui/Sharing";
 import { useQueryClient } from "@tanstack/react-query";
 import { getListSessionsQueryKey, useRenameSession } from "~/api/generated/sessions/sessions";
-import { Signal } from "~/components/Signal";
 import { AgentMark, AGENT_LABEL } from "~/components/AgentMark";
 import { childrenOf, group, placeOf } from "~/api/workspaces";
 import type { Backend } from "~/fleet";
@@ -528,8 +527,12 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
                   : "text-mute hover:bg-raise"
               }`}
             >
-              <AgentMark agent={r.agent} size={12} />
-              <Signal status={r.status} size={4} />
+              {/* **The mark, and not the signal.** The rail's Team panel already
+                  says what each agent is doing, and an ember dot here beside
+                  an ember dot there is the same agent shouting twice — which
+                  is exactly what the budget on the Dashboard exists to stop.
+                  This is a switch between runs; the state is read next door. */}
+              <AgentMark agent={r.agent} size={13} />
             </button>
           ))}
         </span>

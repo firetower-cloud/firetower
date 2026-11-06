@@ -15,8 +15,7 @@ import { useMemo } from "react";
 import { Check, ExternalLink, FileText, GitBranch, GitPullRequest, LayoutList, Link2 } from "lucide-react";
 import { navigate } from "~/shims/next-navigation";
 import { AgentMark } from "~/components/AgentMark";
-import { Blocks } from "~/island/Blocks";
-import { beatOf, elapsed, minutesSince } from "~/api/view";
+import { elapsed, minutesSince } from "~/api/view";
 import { useConversation } from "~/api/conversation";
 import { relays } from "~/api/relay";
 import { useHosts } from "~/data";
@@ -38,8 +37,7 @@ import type { Agent, Artifact, PlanStep, Session, SessionStatus } from "~/api/ge
  * back somewhere it belongs, which is not the team rail.
  */
 
-/** The word beside a child's mark. The mark itself — colour and motion — is
- *  the rail's own `Blocks`, so a child reads here exactly as it does there. */
+/** The word beside a child's mark, when it has posted nothing of its own. */
 function labelOf(s: SessionStatus): string {
   switch (s) {
     case "Working":
@@ -100,6 +98,33 @@ function Panel({
 /** How long since it last moved, in the rail's own shorthand. */
 const age = (at: string) => elapsed(minutesSince(at));
 
+/**
+ * One mark, and never a word beside it.
+ *
+ * **Three, and only three**: an ember dot for *asked you a question*, typing
+ * dots for *working*, a tick for *handed back*. The island's four-quadrant
+ * `Blocks` was here, which is a different alphabet — it has to carry every
+ * status at eleven pixels on a surface with no room for words, and this row
+ * has the words right beside it.
+ */
+function TeamMark({ status }: { status: SessionStatus }) {
+  if (status === "NeedsYou") return <span className="dot" title="asked you a question" />;
+  if (status === "Working" || status === "Starting") {
+    return (
+      <span className="typing" title="working">
+        <i />
+        <i />
+        <i />
+      </span>
+    );
+  }
+  if (status === "HandedBack" || status === "Ready") {
+    return <Check className="h-3.5 w-3.5 text-dim" strokeWidth={2} aria-label="handed back" />;
+  }
+  if (status === "Failed") return <span className="st" data-s="bad" title="failed" />;
+  return <span className="st" data-s="off" title="ended" />;
+}
+
 /** The manager at the top of the Team panel — the level above. The active card
  *  when it is this workspace, a link up when it is the parent of a child. */
 function ManagerRow({ manager, active }: { manager: Session; active: boolean }) {
@@ -132,7 +157,11 @@ function ManagerRow({ manager, active }: { manager: Session; active: boolean }) 
 /** One agent on the team. The active one — the session you're reading — is a
  *  plain highlighted row; the rest are links to open them. */
 function MemberRow({ member, active, shared, checkIn }: { member: Session; active: boolean; shared: boolean; checkIn?: string }) {
-  const sub = checkIn ?? member.pullRequest ?? member.branch ?? member.spawnReason ?? "";
+  /* **Not the branch.** Every child of one workspace is on the same branch,
+     so repeating it on four rows says nothing and crowds out the thing worth
+     reading — what this agent is actually doing. Its own check-in first, then
+     why it was started, then the status on its own. */
+  const sub = checkIn ?? member.spawnReason ?? "";
   // A same-workspace child's `name` is the shared workspace's; its own name is
   // its `title`. Everyone else reads off the workspace name.
   const label = agentName(shared ? member.title : member.name);
@@ -148,8 +177,7 @@ function MemberRow({ member, active, shared, checkIn }: { member: Session; activ
         <s>{checkIn ? `“${sub}”` : `${labelOf(member.status)}${sub ? ` · ${sub}` : ""}`}</s>
       </span>
       <span className="rt">
-        {/* One mark, never a word beside it: the dot, the typing or the tick. */}
-        <Blocks beat={beatOf(member)} size={9} />
+        <TeamMark status={member.status} />
         <span className="age">{age(member.createdAt)}</span>
       </span>
     </>

@@ -122,7 +122,9 @@ const SHOTS = [
   },
 
   /* In a workspace */
-  { id: "in-a-workspace__conversation", go: (p) => at(p, "/sessions/s_1", 1800) },
+  /* The `team` scene, because the Overview's team rail is half of what this
+     screen is and every other scene leaves the workspace solo. */
+  { id: "in-a-workspace__conversation", scene: "team", go: (p) => at(p, "/sessions/s_1", 2200) },
   {
     id: "in-a-workspace__a-file",
     go: async (p) => {
