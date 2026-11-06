@@ -246,7 +246,7 @@ function PasteToken({
         <button
           disabled={!value.trim() || busy}
           onClick={onSubmit}
-          className="control border border-line bg-raise text-bone hover:bg-overlay disabled:text-mute"
+          className="btn plain"
         >
           {busy ? "Checking…" : "Connect"}
         </button>

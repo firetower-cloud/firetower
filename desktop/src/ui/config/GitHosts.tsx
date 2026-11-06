@@ -47,7 +47,7 @@ import { getListTrackersQueryKey } from "~/api/generated/trackers/trackers";
 import { useProviders } from "~/data";
 import { why } from "~/data";
 import { openExternal } from "~/open";
-import { bold, Rows, Section } from "~/ui/config/bits";
+import { bold, Group, Rows, Section } from "~/ui/config/bits";
 import { useConnect } from "~/ui/config/connect";
 import { Pop } from "~/ui/Pop";
 import { useConfirm } from "~/ui/Confirm";
@@ -93,12 +93,13 @@ export function GitHosts({ live }: { live: boolean }) {
         note="Signed in as you, because a commit has to be attributable to a person. Everybody here connects their own."
         action={
           live && mayAdd ? (
-            <button onClick={() => setAdding(true)} className="control border border-line bg-raise text-ui text-bone hover:bg-overlay">
-              <Icon of={Plus} size={12} />Add a host
+            <button onClick={() => setAdding(true)} className="btn primary">
+              <Icon of={Plus} size={14} />Add a host
             </button>
           ) : null
         }
       >
+        <Group>
         <Rows feed={providers} empty="Nothing to connect to on this server.">
           {rows.map((p) => (
             <Provider
@@ -110,6 +111,7 @@ export function GitHosts({ live }: { live: boolean }) {
             />
           ))}
         </Rows>
+        </Group>
       </Section>
       {adding && <AddHost onClose={() => setAdding(false)} onAdded={setFresh} />}
     </>
@@ -205,24 +207,25 @@ function Provider({
 
   return (
     <div>
-      <div className="flex items-center gap-2.5 px-3.5 py-2">
+      <div className="r">
         {/* Tinted here, unlike the dense rows elsewhere. This is the list whose
             whole job is telling hosts apart, and at 13px a grey tanuki and a
             grey teacup are the same smudge. */}
-        <HostMark kind={p.kind} size={14} brand />
-
-        <span className="min-w-0 flex-1">
-          <span className="flex items-center gap-2">
-            <span className="truncate text-ui text-bone">{p.label}</span>
-            {p.connected ? (
-              <Chip tone="good">connected</Chip>
-            ) : !p.configured ? (
-              <Chip tone="warn">needs an application</Chip>
-            ) : null}
-            {p.sharedApplication && <Chip>shared app</Chip>}
-          </span>
-          <span className="block truncate font-mono text-micro text-mute">{under}</span>
+        <span className="g">
+          <HostMark kind={p.kind} size={18} brand />
         </span>
+
+        <span className="tx">
+          <b>{p.label}</b>
+          <s>{under}</s>
+        </span>
+        {p.sharedApplication && <Chip>shared app</Chip>}
+        {/* The state as a word, which is what the drawing says. A filled
+            green block for "connected" is a warning shape for good news. */}
+        <span className="said">
+          {p.connected ? "connected" : !p.configured ? "needs an application" : "not connected"}
+        </span>
+        <span className="st" data-s={p.connected ? "ok" : !p.configured ? "warn" : "off"} />
 
         {/* **One action column.** Before, a row was pencil + Connect and the
             next was pencil + Connect + bin, so the controls shifted sideways as
@@ -230,19 +233,19 @@ function Provider({
             ends in the same place. */}
         <div className="flex shrink-0 items-center gap-1.5">
           {primary === "identity" ? (
-            <button onClick={() => setIdentity(!identity)} className="control border border-line bg-raise text-ui text-text hover:bg-overlay">
+            <button onClick={() => setIdentity(!identity)} className="btn plain hov">
               Identity
             </button>
           ) : primary === "connect" ? (
             <button
               disabled={!live || connect.busy}
               onClick={connect.start}
-              className="control border border-line bg-raise text-ui text-text hover:bg-overlay disabled:opacity-50"
+              className="btn plain"
             >
               <Icon of={Link2} size={12} />Connect
             </button>
           ) : primary === "set-up" ? (
-            <button onClick={() => setEditing(true)} className="control border border-line bg-raise text-ui text-text hover:bg-overlay">
+            <button onClick={() => setEditing(true)} className="btn plain">
               Set it up
             </button>
           ) : (
@@ -254,7 +257,7 @@ function Provider({
             <button
               onClick={(e) => setMenu(menu ? null : e.currentTarget)}
               aria-label={`More for ${p.label}`}
-              className="control text-mute hover:bg-raise hover:text-bone"
+              className="gbtn hov"
             >
               <Icon of={MoreHorizontal} size={14} />
             </button>
@@ -850,7 +853,7 @@ function Settings({ p, onSaved, onClose }: { p: ProviderStatus; onSaved: () => v
         <button
           disabled={!changed || save.isPending}
           onClick={() => save.mutate({ id: p.id, data: { label: label.trim(), auth, clientId: clientId.trim() } }, { onSuccess: onSaved })}
-          className="control border border-line bg-raise text-bone hover:bg-overlay disabled:text-mute"
+          className="btn plain"
         >
           {save.isPending ? "Saving…" : changed ? "Save" : "Saved"}
         </button>
@@ -878,7 +881,7 @@ function Identity({ providerId }: { providerId: string }) {
       <div className="mt-2 flex items-center gap-2">
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name" className="min-w-0 flex-1 rounded-md border border-line bg-ground px-2 py-1 text-ui text-bone focus:outline-none" />
         <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email" className="min-w-0 flex-1 rounded-md border border-line bg-ground px-2 py-1 font-mono text-ui text-bone focus:outline-none" />
-        <button disabled={!name.trim() || !email.trim() || save.isPending} onClick={() => save.mutate({ id: providerId, data: { name: name.trim(), email: email.trim() } }, { onSuccess: () => identity.refetch() })} className="control border border-line bg-raise text-bone hover:bg-overlay disabled:text-mute">Save</button>
+        <button disabled={!name.trim() || !email.trim() || save.isPending} onClick={() => save.mutate({ id: providerId, data: { name: name.trim(), email: email.trim() } }, { onSuccess: () => identity.refetch() })} className="btn plain">Save</button>
         {held?.name && <button onClick={() => clear.mutate({ id: providerId }, { onSuccess: () => { setName(""); setEmail(""); identity.refetch(); } })} className="control text-mute hover:text-brick"><X className="h-3.5 w-3.5" strokeWidth={2} /></button>}
       </div>
     </div>

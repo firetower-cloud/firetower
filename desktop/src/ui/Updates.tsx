@@ -108,7 +108,7 @@ export function Updates() {
         </div>
         {/* Both trains: the button is above the whole screen, and a check that
             only moved half of it is one somebody presses twice. */}
-        <button disabled={check.isPending} onClick={() => { void look(); check.mutate(undefined as never, { onSuccess: refresh }); }} className="control border border-line bg-raise text-dim hover:bg-overlay disabled:text-mute"><Icon of={RefreshCw} size={12} />{check.isPending ? "Checking…" : "Check now"}</button>
+        <button disabled={check.isPending} onClick={() => { void look(); check.mutate(undefined as never, { onSuccess: refresh }); }} className="btn plain"><Icon of={RefreshCw} size={12} />{check.isPending ? "Checking…" : "Check now"}</button>
       </div>
 
       <ThisApp />
@@ -158,7 +158,7 @@ export function Updates() {
 
       {mayMoveEverything && (
         <div className="mt-4 flex flex-wrap items-center gap-2">
-          <button disabled={backUp.isPending} onClick={() => backUp.mutate(undefined as never)} className="control border border-line bg-raise text-bone hover:bg-overlay disabled:text-mute"><Icon of={Save} size={12} />{backUp.isPending ? "Backing up…" : backUp.isSuccess ? "Backed up" : "Back up now"}</button>
+          <button disabled={backUp.isPending} onClick={() => backUp.mutate(undefined as never)} className="btn plain"><Icon of={Save} size={12} />{backUp.isPending ? "Backing up…" : backUp.isSuccess ? "Backed up" : "Back up now"}</button>
           {active && <span className="text-meta text-kind-data">A run is in progress.</span>}
         </div>
       )}
@@ -307,7 +307,7 @@ function Machine({ host, to, blocked, onDone }: { host: HostTarget; to: string; 
       </span>
       <span className="font-mono text-meta text-dim">{host.version ?? "—"}</span>
       {host.mayUpgrade ? (
-        <button disabled={blocked || create.isPending} onClick={() => void ask()} className="control border border-line bg-raise text-bone hover:bg-overlay disabled:text-mute">
+        <button disabled={blocked || create.isPending} onClick={() => void ask()} className="btn plain">
           <Icon of={Download} size={12} />{create.isPending ? "Starting…" : `Bring up to ${to}`}
         </button>
       ) : (

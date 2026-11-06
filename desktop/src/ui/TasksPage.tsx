@@ -270,7 +270,7 @@ export function TasksPage({ backend }: { backend: Backend }) {
               <div className="mt-3 flex items-center justify-center gap-2">
                 <button
                   onClick={() => navigate(paneFor(source))}
-                  className="control border border-line bg-raise px-3 text-text hover:bg-overlay hover:text-bone"
+                  className="btn plain"
                 >
                   Connect {source.label}
                   <Icon of={ArrowRight} size={12} />

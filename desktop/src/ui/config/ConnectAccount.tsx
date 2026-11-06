@@ -168,7 +168,7 @@ export function ConnectAccount({
           {ready ? (
             <button disabled={!name.trim() || update.isPending} onClick={finish} className="control bg-bone font-medium text-ground hover:opacity-90 disabled:bg-raise disabled:text-mute">{update.isPending ? "Saving…" : "Done"}</button>
           ) : made && device ? (
-            <button disabled={login.isPending || (!!login.data && !failed)} onClick={again} className="control border border-line bg-raise text-bone hover:bg-overlay disabled:text-mute">{login.isPending ? "Asking for a code…" : "Try again"}</button>
+            <button disabled={login.isPending || (!!login.data && !failed)} onClick={again} className="btn plain">{login.isPending ? "Asking for a code…" : "Try again"}</button>
           ) : (
             <button disabled={!canSave} onClick={save} className="control bg-bone font-medium text-ground hover:opacity-90 disabled:bg-raise disabled:text-mute">
               {create.isPending || update.isPending ? "Connecting…" : device ? "Continue to sign in" : "Connect account"}

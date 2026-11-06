@@ -20,15 +20,20 @@ export function machineKey(host: Host): string {
 /**
  * The word beside a machine's name.
  *
- * Three, not two: a machine ssh got into and found no worker on is not
+ * Four, not two: a machine ssh got into and found no worker on is not
  * unreachable — the key worked, the address is right — and saying it was sent
  * people to check the wrong thing. The diagnosis already knows which; this
  * only says it.
+ *
+ * **Lower case, and about the machine rather than about its record.** The
+ * drawing says `ready`, `needs setup`, `not answering` — what you would say
+ * out loud. `Online` is a field name, and a row that reads "this Mac · Online"
+ * is the wire showing through.
  */
-export function stateLabel(host: Host): "Online" | "Draining" | "No worker" | "Unreachable" {
-  if (host.drained || host.state === "Draining") return "Draining";
-  if (host.state === "Online") return "Online";
-  return reachedTheMachine(host) ? "No worker" : "Unreachable";
+export function stateLabel(host: Host): "ready" | "draining" | "needs setup" | "not answering" {
+  if (host.drained || host.state === "Draining") return "draining";
+  if (host.state === "Online") return "ready";
+  return reachedTheMachine(host) ? "needs setup" : "not answering";
 }
 
 /** Whether the last attempt got onto the machine and failed only after that. */

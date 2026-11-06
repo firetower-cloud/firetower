@@ -36,7 +36,7 @@ import {
   UsersRound,
   type LucideIcon,
 } from "lucide-react";
-import { Rows, Section } from "~/ui/config/bits";
+import { Group as Rowset, Rows, Section, WhereTo } from "~/ui/config/bits";
 import { WhoCanAccess } from "~/ui/Sharing";
 import { Pop } from "~/ui/Pop";
 import { CreateMenu } from "~/ui/config/CreateMenu";
@@ -138,8 +138,10 @@ export function Roles() {
 
   return (
     <Section
-      title="Profiles"
-      note="A saved persona any agent can run — a lead, a developer, a reviewer, a QA. Each carries what it does, where it runs, its instructions, and whether it may hand work off."
+      /* **Agent profiles**, which is what the rail calls it. "Profiles" alone
+         is the account's word on every other product somebody has used. */
+      title="Agent profiles"
+      note="A saved way of working — what it is for, what it may do, and who it may hand work to. A profile with a team leads; one without is a worker."
       action={
         <CreateMenu
           label="New profile"
@@ -174,6 +176,7 @@ export function Roles() {
         ) : undefined
       }
     >
+      <Rowset>
       <Rows
         feed={{ data: shown, loading: rows.loading, error: rows.error }}
         empty={needle ? `No profiles match "${q.trim()}".` : "No profiles yet. Make one, and you can start a workspace as it or a lead can delegate to it."}
@@ -187,6 +190,13 @@ export function Roles() {
           />
         ))}
       </Rows>
+      </Rowset>
+
+      <WhereTo>
+        A profile is filed like a skill or a machine, so sharing one is the same sheet everything
+        else uses. <b>The team is the only thing that makes one a manager</b> — same object either
+        way.
+      </WhereTo>
     </Section>
   );
 }
@@ -227,48 +237,38 @@ function RoleRow({
   const agent = role.agent as Agent | null;
 
   return (
-    <div className="group flex w-full items-start gap-3 border-b border-line-soft px-3.5 py-3 last:border-0 hover:bg-raise/50">
-      <button onClick={onOpen} className="flex min-w-0 flex-1 items-start gap-3 text-left">
-        <UsersRound className="mt-0.5 h-4 w-4 shrink-0 text-mute" strokeWidth={1.75} />
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span className="truncate text-ui text-bone">{role.name}</span>
-            {role.isDefault && (
-              <span className="inline-flex shrink-0 items-center gap-1 rounded bg-slate-tint px-1.5 py-0.5 text-micro text-slate">
-                <Star className="h-3 w-3" strokeWidth={1.75} />
-                default
-              </span>
-            )}
-            {!role.mayWrite && (
-              <span className="shrink-0 text-micro text-mute">shared with you</span>
-            )}
-          </div>
-          <p className="mt-0.5 truncate text-meta text-dim">{role.does}</p>
-          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-            {role.canDelegate && (
-              <span className="inline-flex items-center gap-1 rounded bg-sage-tint px-1.5 py-0.5 text-micro text-sage">
-                <Users className="h-3 w-3" strokeWidth={1.75} />
-                manager
-              </span>
-            )}
-            <Chip>{place}</Chip>
-            {agent && (
-              <Chip>
-                <AgentMark agent={agent} size={11} className="text-dim" />
-                {AGENT_LABEL[agent]}
-              </Chip>
-            )}
-          </div>
-        </div>
+    /* One row, as every other pane draws one: the mark, the name over what it
+       does, then the quiet facts on the right. The chips were three coloured
+       blocks per row on a list that is mostly read. */
+    <div className="r">
+      <button onClick={onOpen} className="flex min-w-0 flex-1 items-center gap-3.5 text-left">
+        <span className="g">
+          {agent ? <AgentMark agent={agent} size={16} /> : <UsersRound className="h-4 w-4" strokeWidth={1.75} />}
+        </span>
+        <span className="tx">
+          <b>{role.name}</b>
+          <s>{role.does}</s>
+        </span>
       </button>
+      {role.canDelegate && <span className="ttag">can delegate</span>}
+      {role.isDefault && (
+        <span className="said flex items-center gap-1">
+          <Star className="h-3 w-3" strokeWidth={1.75} />
+          default
+        </span>
+      )}
+      <span className="said">{place}</span>
+      {/* Where it is filed, which is also who else has it. "Only you" is the
+          same fact said the way a person would say it. */}
+      <span className="path">{role.mayWrite ? role.path : `${role.path} · shared with you`}</span>
       {role.mayWrite && (
         <button
           onClick={onDelete}
           aria-label={`Delete ${role.name}`}
           title="Delete profile"
-          className="shrink-0 rounded p-1.5 text-mute transition hover:bg-brick-tint hover:text-brick"
+          className="gbtn hov hover:text-brick"
         >
-          <Trash2 className="h-4 w-4" strokeWidth={1.75} />
+          <Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} />
         </button>
       )}
     </div>
@@ -303,7 +303,7 @@ function Reading({ role, onClose }: { role: Role; onClose: () => void }) {
       title={role.name}
       note={role.does}
       action={
-        <button onClick={onClose} className="control border border-line bg-raise text-ui text-bone hover:bg-overlay">
+        <button onClick={onClose} className="btn plain">
           All profiles
         </button>
       }
@@ -825,7 +825,7 @@ function Editor({
           </button>
           <button
             onClick={onClose}
-            className="control border border-line bg-raise text-text hover:text-bone"
+            className="btn plain"
           >
             Cancel
           </button>

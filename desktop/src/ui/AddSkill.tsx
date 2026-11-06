@@ -221,7 +221,7 @@ export function AddSkill({
               Limits are 100 files, 2 MB a file and 25 MB a skill
             </span>
             <span className="mt-4 flex gap-2">
-              <button className="control border border-line bg-raise text-ui text-text hover:bg-overlay" onClick={() => picker.current?.click()}>
+              <button className="btn plain" onClick={() => picker.current?.click()}>
                 Choose a folder
               </button>
             </span>

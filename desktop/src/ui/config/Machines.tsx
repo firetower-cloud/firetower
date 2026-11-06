@@ -12,7 +12,7 @@
  */
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronDown, Copy, Cpu, HardDrive, Key, Loader2, Plus, Trash2, X } from "lucide-react";
+import { Check, ChevronDown, Copy, Key, Loader2, Monitor, Plus, Server as ServerIcon, Trash2, X } from "lucide-react";
 import { Icon } from "~/components/ui";
 import type { Compute, Diagnosis, Host } from "~/api/generated/model";
 import {
@@ -31,7 +31,7 @@ import { getListAgentsQueryKey, useInstallAgent } from "~/api/generated/agents/a
 import type { AgentView } from "~/api/generated/model";
 import { parseDestination, reachedTheMachine, stateLabel, waitForOnline } from "~/api/environments";
 import { useAgents, useHosts } from "~/data";
-import { Rows, Section } from "~/ui/config/bits";
+import { Group, Rows, Section, WhereTo } from "~/ui/config/bits";
 import { WhoCanAccess } from "~/ui/Sharing";
 import { useMe } from "~/api/generated/auth/auth";
 import { useConfirm } from "~/ui/Confirm";
@@ -43,19 +43,34 @@ export function Machines({ live }: { live: boolean }) {
   const [open, setOpen] = useState<string | null>(null);
 
   return (
+    /* **Machines**, which is what the rail calls it and what the drawing says.
+       The page said "Compute" — a category word for the one screen that is
+       about a thing you can point at. */
     <Section
-      title="Compute"
-      note="One owner per host until sessions are isolated from each other."
-      action={live && <button onClick={() => setAdding(true)} className="control border border-line bg-raise text-ui text-bone hover:bg-overlay"><Icon of={Plus} size={12} />Add a machine</button>}
+      title="Machines"
+      note="Where agents run. One owner per machine, until sessions are isolated from each other."
+      action={live && <button onClick={() => setAdding(true)} className="btn primary"><Icon of={Plus} size={14} />Add a machine</button>}
     >
+      <Group>
       <Rows feed={hosts} empty="No machine is connected yet.">
         {hosts.data.map((h) => (
           <div key={h.id}>
-            <button onClick={() => setOpen(open === h.id ? null : h.id)} className="flex w-full items-center gap-3 px-3.5 py-3 text-left hover:bg-raise/60">
-              <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${h.state === "Online" ? "bg-sage" : h.state === "Draining" || reachedTheMachine(h) ? "bg-kind-data" : "bg-brick"}`} />
-              <span className="min-w-0 flex-1">
-                <span className="block text-ui text-bone">{h.name}</span>
-                <span className="block font-mono text-micro text-mute">{describe(h.compute)} · worker {h.workerVersion ?? "not installed"}</span>
+            <button onClick={() => setOpen(open === h.id ? null : h.id)} className="r">
+              <span className="st" data-s={h.state === "Online" ? "ok" : h.state === "Draining" || reachedTheMachine(h) ? "warn" : "bad"} />
+              <span className="g">
+                <Icon of={h.compute.type === "Local" ? Monitor : ServerIcon} size={16} />
+              </span>
+              <span className="tx">
+                <b>{h.name}</b>
+                <s>
+                  {[
+                    h.cpus != null ? `${h.cpus} vCPU` : null,
+                    h.memoryMb != null ? `${Math.round(h.memoryMb / 1024)} GB` : null,
+                    h.workerVersion ? `worker ${h.workerVersion}` : "worker not installed",
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </s>
               </span>
               {/* A machine is personal until it is shared, so whoever added it
                   shares it — the same as a workspace. Taking one back out of a
@@ -65,16 +80,25 @@ export function Machines({ live }: { live: boolean }) {
                   decided here, and `startsWith("u/")` read somebody else's own
                   space as this person's. */}
               <WhoCanAccess look="chip" kind="machine" id={h.id} path={h.path} />
-              {h.cpus != null && <span className="flex items-center gap-1.5 text-meta text-mute"><Icon of={Cpu} size={12} />{h.cpus}</span>}
-              {h.memoryMb != null && <span className="flex items-center gap-1.5 text-meta text-mute"><Icon of={HardDrive} size={12} />{Math.round(h.memoryMb / 1024)} GB</span>}
-              <span className="w-[76px] text-right text-meta text-mute">{stateLabel(h)}</span>
-              <ChevronDown className={`h-3.5 w-3.5 text-mute transition-transform ${open === h.id ? "rotate-180" : ""}`} strokeWidth={2} />
+              {/* Where it is, in the voice an address is written in. */}
+              <span className="path">{describe(h.compute)}</span>
+              <span className="said">{stateLabel(h)}</span>
+              <span className="g">
+                <ChevronDown className={`h-3.5 w-3.5 transition-transform ${open === h.id ? "rotate-180" : "-rotate-90"}`} strokeWidth={2} />
+              </span>
             </button>
             {open === h.id && live && <Detail host={h} onGone={() => setOpen(null)} />}
           </div>
         ))}
       </Rows>
+      </Group>
       {adding && <Add onClose={() => setAdding(false)} onAdded={(id) => { setAdding(false); setOpen(id); }} />}
+
+      <WhereTo>
+        A machine that is <b>not answering keeps its workspaces</b> until it comes back — a list
+        that empties itself when the VPN drops reads as work being lost. Draining stops new work
+        without ending what is running.
+      </WhereTo>
     </Section>
   );
 }
@@ -193,16 +217,16 @@ function Detail({ host, onGone }: { host: Host; onGone: () => void }) {
       )}
 
       <div className="flex flex-wrap items-center gap-2">
-        <button disabled={connect.isPending} onClick={() => connect.mutate({ id: host.id }, { onSuccess: refresh })} className="control border border-line bg-raise text-bone hover:bg-overlay disabled:text-mute">{connect.isPending ? "Connecting…" : "Connect"}</button>
-        <button disabled={install.isPending || settling} onClick={() => install.mutate({ id: host.id }, { onSuccess: installed })} className="control border border-line bg-raise text-bone hover:bg-overlay disabled:text-mute">{install.isPending ? "Installing…" : settling ? "Reconnecting…" : host.workerVersion ? "Reinstall the worker" : "Install the worker"}</button>
+        <button disabled={connect.isPending} onClick={() => connect.mutate({ id: host.id }, { onSuccess: refresh })} className="btn plain">{connect.isPending ? "Connecting…" : "Connect"}</button>
+        <button disabled={install.isPending || settling} onClick={() => install.mutate({ id: host.id }, { onSuccess: installed })} className="btn plain">{install.isPending ? "Installing…" : settling ? "Reconnecting…" : host.workerVersion ? "Reinstall the worker" : "Install the worker"}</button>
         {install.isError && <span className="text-meta text-brick">{install.error.message}</span>}
-        <button disabled={drain.isPending} onClick={() => drain.mutate({ id: host.id, data: { drained: !host.drained } }, { onSuccess: refresh })} className="control border border-line bg-raise text-dim hover:bg-overlay disabled:text-mute">{host.drained ? "Take new work" : "Drain"}</button>
+        <button disabled={drain.isPending} onClick={() => drain.mutate({ id: host.id, data: { drained: !host.drained } }, { onSuccess: refresh })} className="btn plain">{host.drained ? "Take new work" : "Drain"}</button>
         <button onClick={() => void confirm({ title: `Remove ${host.name}?`, body: "Nothing on the machine is touched.", action: "Remove", tone: "danger" }).then((ok) => ok && remove.mutate({ id: host.id, params: undefined as never }, { onSuccess: () => { refresh(); onGone(); } }))} className="control ml-auto text-mute hover:text-brick"><Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} />Remove</button>
       </div>
 
       <div className="flex items-center gap-2">
         <input value={name} onChange={(e) => setName(e.target.value)} className="min-w-0 flex-1 rounded-md border border-line bg-ground px-2 py-1 text-ui text-bone focus:outline-none" />
-        <button disabled={!name.trim() || name === host.name || rename.isPending} onClick={() => rename.mutate({ id: host.id, data: { name: name.trim() } }, { onSuccess: refresh })} className="control border border-line bg-raise text-bone hover:bg-overlay disabled:text-mute">Rename</button>
+        <button disabled={!name.trim() || name === host.name || rename.isPending} onClick={() => rename.mutate({ id: host.id, data: { name: name.trim() } }, { onSuccess: refresh })} className="btn plain">Rename</button>
       </div>
     </div>
   );
@@ -311,7 +335,7 @@ function Add({ onClose, onAdded }: { onClose: () => void; onAdded: (id: string) 
             <p className="text-meta text-mute">Which agents should this machine run? Each is fetched onto the machine as the standalone binary its publisher ships; nothing else is needed for it.</p>
             <div className="flex flex-wrap gap-2">
               {agents.data.filter((a) => a.enabled && a.supported).map((a) => (
-                <button key={a.kind} disabled={fetched[a.kind] === "fetching" || fetched[a.kind] === "done"} onClick={() => fetchAgent(a)} className="control border border-line bg-raise text-bone hover:bg-overlay disabled:text-mute">
+                <button key={a.kind} disabled={fetched[a.kind] === "fetching" || fetched[a.kind] === "done"} onClick={() => fetchAgent(a)} className="btn plain">
                   {fetched[a.kind] === "done" ? <Check className="h-3.5 w-3.5 text-sage" strokeWidth={2} /> : <Icon of={Plus} size={12} />}
                   {fetched[a.kind] === "fetching" ? `Fetching ${a.label}…` : fetched[a.kind] === "done" ? a.label : `Install ${a.label}`}
                 </button>
@@ -344,7 +368,7 @@ function Add({ onClose, onAdded }: { onClose: () => void; onAdded: (id: string) 
             {key.isPending ? <p className="mt-1.5 flex items-center gap-2 text-meta text-mute"><Loader2 className="h-3 w-3 animate-spin" />Reading the key…</p> : (
               <div className="mt-2 flex items-start gap-2">
                 <code className="scroll-slim min-w-0 flex-1 overflow-x-auto rounded-md bg-panel px-2.5 py-1.5 font-mono text-micro whitespace-nowrap text-dim">{pub ?? JSON.stringify(key.data)}</code>
-                <button onClick={copy} className="control border border-line bg-raise text-bone hover:bg-overlay">{copied ? <Check className="h-3.5 w-3.5 text-sage" strokeWidth={2} /> : <Copy className="h-3.5 w-3.5" strokeWidth={1.75} />}</button>
+                <button onClick={copy} className="btn plain">{copied ? <Check className="h-3.5 w-3.5 text-sage" strokeWidth={2} /> : <Copy className="h-3.5 w-3.5" strokeWidth={1.75} />}</button>
               </div>
             )}
             <p className="mt-2 text-meta text-mute">Give it to the machine the way that machine takes keys: <code className="font-mono">~/.ssh/authorized_keys</code> of the account above on a machine you own; the provider's console, instance metadata or OS Login on Google Cloud; the CA where there is one. It is public — safe anywhere.</p>

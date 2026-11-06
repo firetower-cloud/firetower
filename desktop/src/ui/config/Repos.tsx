@@ -60,7 +60,7 @@ import {
 } from "~/api/generated/providers/providers";
 import { useHostOf, useProviders, useRepos, why } from "~/data";
 import { navigate } from "~/shims/next-navigation";
-import { Section } from "~/ui/config/bits";
+import { Group, Section } from "~/ui/config/bits";
 import { useConnect } from "~/ui/config/connect";
 import { AddHost } from "~/ui/config/GitHosts";
 import { Pop } from "~/ui/Pop";
@@ -141,11 +141,12 @@ export function Repos({ live }: { live: boolean }) {
   return (
     <Section
       title="Repositories"
+      note="What Firetower cuts worktrees from. Every workspace is a branch of one of these, in a copy of its own."
       action={
         live ? (
           <button
             onClick={() => setAdding(true)}
-            className="control border border-line bg-raise text-ui text-bone hover:bg-overlay"
+            className="btn plain"
           >
             <Plus className="h-3.5 w-3.5 text-mute" strokeWidth={2} />
             Add a host
@@ -161,13 +162,14 @@ export function Repos({ live }: { live: boolean }) {
               pasting={pasting}
               onPick={setFrom}
             />
-            <label className="flex items-center gap-1.5 rounded-md border border-line bg-raise px-2 py-1">
+            <label className="find right">
               <Search className="h-3.5 w-3.5 shrink-0 text-mute" strokeWidth={1.75} />
               <input
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
-                placeholder="Search"
-                className="w-32 bg-transparent text-ui text-bone placeholder:text-mute focus:outline-none"
+                placeholder="Find a repository"
+                aria-label="Find a repository"
+                className="min-w-0 flex-1 bg-transparent placeholder:text-mute focus:outline-none"
               />
             </label>
           </>
@@ -178,13 +180,12 @@ export function Repos({ live }: { live: boolean }) {
       {bare ? (
         <Start hosts={providers.data} loading={providers.loading} onPaste={() => setFrom(PASTE)} />
       ) : (
-        <div className="px-3.5 py-3">
+        <div>
           {pasting ? (
             <Paste onDone={() => setFrom(ALL)} onCancel={() => setFrom(ALL)} />
           ) : (
             <>
-              <Eyebrow label="Imported" count={`${mine.length}`} />
-              <div className="overflow-hidden rounded-lg border border-line">
+              <Group title="Checked out" count={mine.length}>
                 {repos.loading && <Quiet>Reading your repositories…</Quiet>}
                 {!repos.loading && mine.length === 0 && (
                   <Quiet>
@@ -196,24 +197,30 @@ export function Repos({ live }: { live: boolean }) {
                   </Quiet>
                 )}
                 {mine.map((r) => (
-                  <div key={r.id} className="border-b border-line-soft last:border-b-0">
-                    <button
-                      onClick={() => setOpen(open === r.id ? null : r.id)}
-                      className="flex w-full items-center gap-2.5 px-3 py-2 text-left hover:bg-raise/60"
-                    >
-                      <HostMark kind={hostOf(r.slug)?.kind} size={13} className="shrink-0 text-mute" />
-                      <span className="min-w-0 flex-1 truncate font-mono text-ui text-text">{r.slug}</span>
-                      <span className="font-mono text-micro text-mute">{r.defaultBranch ?? "main"}</span>
-                      {r.setup && <span className="text-micro text-mute">setup</span>}
-                      <ChevronDown
-                        className={`h-3.5 w-3.5 shrink-0 text-mute transition-transform ${open === r.id ? "rotate-180" : ""}`}
-                        strokeWidth={2}
-                      />
+                  <div key={r.id}>
+                    <button onClick={() => setOpen(open === r.id ? null : r.id)} className="r">
+                      <span className="g">
+                        <HostMark kind={hostOf(r.slug)?.kind} size={16} />
+                      </span>
+                      {/* The slug reads at reading size, not in monospace. It
+                          is a name, and the mono voice is for what a machine
+                          said — see `STYLE.md`'s rule about a branch at rest. */}
+                      <span className="tx">
+                        <b>{r.slug}</b>
+                        {r.setup ? <s>has a setup command</s> : null}
+                      </span>
+                      <span className="said">{r.defaultBranch ?? "main"}</span>
+                      <span className="g">
+                        <ChevronDown
+                          className={`h-3.5 w-3.5 transition-transform ${open === r.id ? "rotate-180" : "-rotate-90"}`}
+                          strokeWidth={2}
+                        />
+                      </span>
                     </button>
                     {open === r.id && live && <Settings repo={r} onGone={() => setOpen(null)} />}
                   </div>
                 ))}
-              </div>
+              </Group>
 
               {showing.length > 0 && (
                 <Available
@@ -232,17 +239,8 @@ export function Repos({ live }: { live: boolean }) {
   );
 }
 
-function Eyebrow({ label, count }: { label: string; count?: string }) {
-  return (
-    <div className="mt-3 mb-1.5 flex items-center gap-2 first:mt-0">
-      <span className="legend">{label}</span>
-      {count && <span className="ml-auto text-meta text-mute">{count}</span>}
-    </div>
-  );
-}
-
 function Quiet({ children }: { children: React.ReactNode }) {
-  return <p className="px-3 py-3 text-ui text-mute">{children}</p>;
+  return <p className="py-3 text-ui text-mute">{children}</p>;
 }
 
 /* ── What this host can see that you have not taken ────────────────────── */
@@ -342,17 +340,11 @@ function Available({
 
   return (
     <>
-      <Eyebrow
-        label={`Available to import${where}`}
-        count={
-          pending
-            ? undefined
-            : named
-              ? `${all.length} across ${hosts.length} hosts`
-              : `${all.length} not imported`
-        }
-      />
-      <div className="overflow-hidden rounded-lg border border-line">
+      <Group
+        title={`Not imported yet${where}`}
+        count={pending ? undefined : all.length}
+        note="Importing one makes it available to start a workspace on. Nothing is cloned until a workspace needs it."
+      >
         {pending && (
           <p className="flex items-center gap-2 px-3 py-3 text-ui text-mute">
             <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={2} />
@@ -372,23 +364,24 @@ function Available({
           </Quiet>
         )}
         {shown.slice(0, 80).map(({ repo: r, host }) => (
-          <div key={`${host.id}:${r.remote}`} className="border-b border-line-soft last:border-b-0">
-            <div className="flex items-center gap-2.5 px-3 py-2">
-              <HostMark kind={host.kind} size={13} className="shrink-0 text-mute" />
-              <span className="min-w-0 flex-1 truncate font-mono text-ui text-text">{r.slug}</span>
-              {/* **Which host, across several.** Two hosts can both hold an
-                  `acme/web`, and without this the two rows are identical. */}
-              {named && (
-                <span className="hidden shrink-0 truncate font-mono text-micro text-mute sm:block">
-                  {host.gitHost}
-                </span>
-              )}
+          <div key={`${host.id}:${r.remote}`}>
+            <div className="r">
+              <span className="g">
+                <HostMark kind={host.kind} size={16} />
+              </span>
+              <span className="tx">
+                <b>{r.slug}</b>
+                {/* **Which host, across several.** Two hosts can both hold an
+                    `acme/web`, and without this the two rows are identical. */}
+                {/* Joined rather than concatenated: with no push date the old
+                    form left a trailing separator on the row. */}
+                <s>{[named ? host.gitHost : null, r.private ? "private" : null, ago(r.pushedAt) || null].filter(Boolean).join(" · ")}</s>
+              </span>
               {r.private && <Lock className="h-3 w-3 shrink-0 text-mute" strokeWidth={2} />}
-              <span className="font-mono text-micro text-mute">{ago(r.pushedAt)}</span>
               <button
                 disabled={!live || taking !== null}
                 onClick={() => void take(r, host)}
-                className="control shrink-0 border border-line bg-raise text-bone hover:bg-overlay disabled:text-mute"
+                className="btn plain hov"
               >
                 {taking === `${host.id}:${r.slug}` ? "Importing…" : "Import"}
               </button>
@@ -399,11 +392,11 @@ function Available({
           </div>
         ))}
         {shown.length > 80 && (
-          <p className="px-3 py-2 text-meta text-mute">
-            {shown.length - 80} more — narrow it with the search box.
+          <p className="py-2 text-ui text-mute">
+            {shown.length - 80} more — narrow it with the find box.
           </p>
         )}
-      </div>
+      </Group>
     </>
   );
 }
@@ -457,7 +450,7 @@ function HostPicker({
     <div>
       <button
         onClick={(e) => setOpen(open ? null : e.currentTarget)}
-        className="control border border-line bg-raise text-ui text-bone hover:bg-overlay"
+        className="btn plain"
       >
         {pasting ? (
           <>Paste a remote</>
@@ -559,7 +552,7 @@ function Settings({ repo, onGone }: { repo: Repo; onGone: () => void }) {
           <div className="flex items-center gap-2">
             <input value={name} onChange={(e) => setName(e.target.value.toUpperCase())} placeholder="NAME" className="w-40 rounded-md border border-line bg-ground px-2 py-1 font-mono text-ui text-bone focus:outline-none" />
             <input value={value} onChange={(e) => setValue(e.target.value)} placeholder="value" type="password" className="min-w-0 flex-1 rounded-md border border-line bg-ground px-2 py-1 font-mono text-ui text-bone focus:outline-none" />
-            <button disabled={!name || !value || put.isPending} onClick={() => put.mutate({ id: repo.id, data: { variables: [{ name, value }] } }, { onSuccess: () => { setName(""); setValue(""); env.refetch(); } })} className="control border border-line bg-raise text-bone hover:bg-overlay disabled:text-mute">Add</button>
+            <button disabled={!name || !value || put.isPending} onClick={() => put.mutate({ id: repo.id, data: { variables: [{ name, value }] } }, { onSuccess: () => { setName(""); setValue(""); env.refetch(); } })} className="btn plain">Add</button>
           </div>
         </div>
       </div>

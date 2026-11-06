@@ -155,7 +155,7 @@ describe("the empty state", () => {
     expect(html).not.toContain("Connect a git host");
 
     // The import list, for the host that is actually connected.
-    expect(html).toContain("Available to import on GitLab (internal)");
+    expect(html).toContain("Not imported yet on GitLab (internal)");
     expect(html).toContain("platform/infra/deploy");
     // And the empty upper list says so plainly rather than vanishing.
     expect(html).toContain("Nothing imported yet");
@@ -201,11 +201,12 @@ describe("the two lists", () => {
       },
     });
 
-    expect(html).toContain("Imported");
-    expect(html).toContain("Available to import on GitHub");
+    expect(html).toContain("Checked out");
+    expect(html).toContain("Not imported yet on GitHub");
     expect(html).toContain("acme/api");
-    expect(html).toContain("1 not imported");
-    // `acme/web` is drawn once — in Imported — not twice.
+    // The count sits beside the heading rather than in a sentence of its own.
+    expect(html).toContain('Not imported yet on GitHub<span class="n">1</span>');
+    // `acme/web` is drawn once — in Checked out — not twice.
     expect(html.match(/acme\/web/g)?.length).toBe(1);
   });
 
@@ -224,7 +225,7 @@ describe("the two lists", () => {
     });
     // The GitLab one is still on offer despite sharing a slug with a connected
     // GitHub repository.
-    expect(html).toContain("1 not imported");
+    expect(html).toContain('Not imported yet on GitLab (internal)<span class="n">1</span>');
   });
 
   /** Not a big empty card — the screen is not empty, one section of it is. */
@@ -275,14 +276,26 @@ describe("the controls", () => {
    * The screen is a list of repositories; a paragraph explaining what a
    * repository is for sat above it on every visit forever.
    */
-  it("does not explain itself at length above the list", () => {
+  /**
+   * **Reversed by the drawing, deliberately.** This asserted the opposite —
+   * that the populated screen carries no lede — which was a reasonable call
+   * before there was a drawing to check it against. `desktop-redesign.html`
+   * puts one sentence under every page heading, populated or not: it is what
+   * makes eleven configuration panes read as one product rather than eleven
+   * lists. What it still must not do is explain itself *at length*, which is
+   * what this now says.
+   */
+  it("says what the screen is in one sentence, and no more", () => {
     const html = draw({
       hosts: [gitlab({ connected: true })],
       repos: [repo("acme/web", "https://git.acme.internal/acme/web.git")],
       available: { gitlab_01j: [] },
     });
-    expect(html).not.toContain("What Firetower cuts worktrees from");
+    expect(html).toContain("What Firetower cuts worktrees from");
+    // One sentence under the heading, not the old two-paragraph preamble.
     expect(html).not.toContain("a colleague&#x27;s looks different");
+    const sub = /<p class="sub">([^<]*)<\/p>/.exec(html)?.[1] ?? "";
+    expect(sub.length).toBeLessThan(130);
     // The heading stays.
     expect(html).toContain("Repositories");
   });
@@ -336,7 +349,7 @@ describe("across every host", () => {
     expect(html).toContain("acme/api");
     expect(html).toContain("platform/infra/deploy");
     // Counted across the set rather than per host.
-    expect(html).toContain("2 across 2 hosts");
+    expect(html).toContain('Not imported yet<span class="n">2</span>');
   });
 
   /**
@@ -376,6 +389,6 @@ describe("across every host", () => {
     });
     expect(html).toContain("acme/web");
     expect(html).toContain("platform/infra/deploy");
-    expect(html).toContain("Imported");
+    expect(html).toContain("Checked out");
   });
 });
