@@ -683,7 +683,21 @@ const server = createServer(async (req, res) => {
     return res.end(body);
   }
 
-  if (path.endsWith("/readiness")) return json(res, { ready: true, checks: [] });
+  /* The rows the drawing draws under an expanded machine. An empty list was
+     "ready: true, checks: []", which no screen can say anything useful about
+     — and which the composer's machine picker drew as a red band. */
+  if (path.endsWith("/readiness")) {
+    return json(res, {
+      user: "kevin",
+      checks: [
+        { name: "SSH", available: true, required: true, detail: "reached in 180ms", remedy: null },
+        { name: "Worker", available: true, required: true, detail: "0.13.0, answering", remedy: null },
+        { name: "git", available: true, required: true, detail: "2.49.0", remedy: null },
+        { name: "node", available: true, required: true, detail: "22.11.0", remedy: null },
+        { name: "Claude Code", available: scene !== "needs-signin", required: false, detail: scene === "needs-signin" ? "installed, not signed in" : "2.1.273", remedy: null },
+      ],
+    });
+  }
   return json(res, [], 200);
 });
 

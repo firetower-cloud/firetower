@@ -37,6 +37,7 @@ import {
   FileClock,
   Folder,
   Users,
+  UserRound,
   UsersRound,
   type LucideIcon,
 } from "lucide-react";
@@ -99,7 +100,11 @@ function Contents({ at, stale, onCollapse }: { at: DestinationId; stale: boolean
       <Scroll>
         {at === "tasks" && (
           <>
-            <Row label="Everything" icon={Inbox} on={path.startsWith("/tasks")} to="/tasks" />
+            <Row label="Everything" icon={Inbox} on={path === "/tasks"} to="/tasks" />
+            {/* The one narrowing worth a place in the rail. It is the same
+                filter the page carries, reachable from the index rather than
+                only from the row of pills on the screen you are already on. */}
+            <Row label="Assigned to you" icon={UserRound} on={path.startsWith("/tasks/mine")} to="/tasks/mine" />
             <Label>Where work comes from</Label>
             <Row label="Trackers" icon={Ticket} on={path.startsWith("/configuration/trackers")} to="/configuration/trackers" />
           </>

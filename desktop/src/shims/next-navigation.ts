@@ -39,7 +39,17 @@ function ownHistory() {
 
 if (typeof window !== "undefined") ownHistory();
 
+/**
+ * Where we are, and `"/"` when there is no window to ask.
+ *
+ * The guard is not defensive padding: half the component tests render to a
+ * static string under node, with no DOM at all, and the first screen that
+ * read the path inside its own body took eight of them down with a
+ * `ReferenceError`. A router that cannot be rendered without a browser is a
+ * router that cannot be tested.
+ */
 function currentPath(): string {
+  if (typeof window === "undefined") return "/";
   const h = window.location.hash.replace(/^#/, "");
   return h || "/";
 }

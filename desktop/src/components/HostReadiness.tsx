@@ -161,6 +161,23 @@ export function Readout({
     );
   }
 
+  /**
+   * A report with nothing in it.
+   *
+   * `isReady` requires at least one check, so a server that answers with an
+   * empty list — an older one, or a host with nothing to measure — fell
+   * through to the branch below and drew a **brick band reading "0 things are
+   * missing"**. Nothing is missing. Saying so quietly is the whole of what
+   * this screen can honestly say.
+   */
+  if (checks.length === 0) {
+    return (
+      <Verdict tone="good">
+        <span role="status">Ready — nothing to do before you start.</span>
+      </Verdict>
+    );
+  }
+
   return (
     <>
       <Verdict tone="bad">

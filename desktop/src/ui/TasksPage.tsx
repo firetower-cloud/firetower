@@ -26,11 +26,14 @@ import {
   CircleDot,
   ExternalLink,
   GitPullRequest,
+  Play,
   RotateCw,
+  Search,
   Ticket,
   User,
 } from "lucide-react";
 import { GiteaMark, GitLabMark, GithubMark, Icon, Input, LinearMark, Select } from "~/components/ui";
+import { usePathname } from "~/shims/next-navigation";
 import { elapsed, minutesSince } from "~/api/view";
 import type { Backend } from "~/fleet";
 import { useTasks, useTrackers, useTrackerScopes } from "~/data";
@@ -102,7 +105,11 @@ export function TasksPage({ backend }: { backend: Backend }) {
   const [picked, setPicked] = useState<string | null>(null);
   const [kind, setKind] = useState<TaskKind | null>(null);
   const [state, setState] = useState<TaskState>("open");
-  const [mine, setMine] = useState(false);
+  /* `/tasks/mine` is the rail's way in, and the pill is the page's. One piece
+     of state either way, so the two cannot disagree about what is on. */
+  const path = usePathname();
+  const [mine, setMine] = useState(() => path.startsWith("/tasks/mine"));
+  useEffect(() => setMine(path.startsWith("/tasks/mine")), [path]);
   const [typed, setTyped] = useState("");
   const [q, setQ] = useState("");
   const [scopes, setScopes] = useState<Record<string, string>>({});
@@ -158,17 +165,31 @@ export function TasksPage({ backend }: { backend: Backend }) {
 
   const refresh = () => cache.invalidateQueries({ queryKey: getListTasksQueryKey(ask) });
 
+  /* The headline says what the screen is, which changes with what it found.
+     "0 to pick from." over an empty page is a count nobody asked for. */
+  const headline =
+    !connected && source
+      ? "Nothing to pick from yet"
+      : feed.loading
+        ? `Reading ${source?.label ?? "your trackers"}…`
+        : count === 0
+          ? `Nothing ${state} here.`
+          : `${count} to pick from.`;
+
   return (
     <div className="scroll-slim h-full overflow-y-auto">
-      <div className="mx-auto max-w-[1000px] px-6 py-6">
-        <h1 className="text-display text-bone">{count} to pick from.</h1>
-        <p className="mt-1 text-body text-dim">
-          Read from your trackers as you look. Starting one opens a workspace.
-        </p>
-
-        <div className="mt-5 overflow-hidden rounded-lg border border-line bg-panel">
-          {/* Which tracker, and what to narrow it to. */}
-          <div className="flex items-center gap-2 border-b border-line px-2.5 py-2">
+      <div className="pg">
+        <div className="pg-head">
+          <div>
+            <h1>{headline}</h1>
+            <p className="sub">
+              Work the tracker already knows about. Starting one opens a workspace on its
+              repository with the task attached.
+            </p>
+          </div>
+          {/* Which tracker, and the one control here that acts rather than
+              narrows. Beside the heading, where a page's actions live. */}
+          <div className="acts">
             <Sources
               trackers={pickable(trackers)}
               value={source?.id}
@@ -192,23 +213,23 @@ export function TasksPage({ backend }: { backend: Backend }) {
                 className="h-7 max-w-[220px] text-meta"
               />
             )}
-            <span className="flex-1" />
             <button
               onClick={refresh}
               aria-label="Read the tracker again"
               title="Read the tracker again"
-              className="grid h-7 w-7 place-items-center rounded-md border border-line bg-ground text-mute hover:text-bone"
+              className="gbtn"
             >
-              <Icon of={RotateCw} size={12} />
+              <Icon of={RotateCw} size={14} />
             </button>
           </div>
+        </div>
 
           {/* What to ask it for. All of it is hidden until there is something
               to ask: filters over a tracker nobody has connected are controls
               that cannot do anything. */}
           {connected && (
             <>
-          <div className="flex flex-wrap items-center gap-2 border-b border-line px-2.5 py-2">
+          <div className="filterline">
             {kinds.length > 1 && (
               <Seg
                 value={showing as TaskKind}
@@ -224,38 +245,32 @@ export function TasksPage({ backend }: { backend: Backend }) {
                 ["closed", "Closed"],
               ]}
             />
-            <button
-              onClick={() => setMine(!mine)}
-              className={`flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-ui transition-colors ${
-                mine ? "border-line bg-overlay text-bone" : "border-line bg-ground text-mute hover:text-dim"
-              }`}
-            >
+            <button onClick={() => setMine(!mine)} aria-pressed={mine} className="fp">
               <Icon of={User} size={12} />
               Assigned to me
             </button>
-            <Input
+          </div>
+
+          {/* The query on its own line, where it governs the list beneath it
+              rather than competing with the filters beside it. */}
+          <label className="inline-form mt-2.5">
+            <Icon of={Search} size={14} className="shrink-0 text-mute" />
+            <input
               value={typed}
-              onChange={setTyped}
+              onChange={(e) => setTyped(e.target.value)}
+              spellCheck={false}
+              aria-label="Narrow the list"
               placeholder={
                 source?.id === "linear" ? "team:ENG label:bug" : "label:bug sort:updated-desc"
               }
-              mono
-              className="h-7 flex-1"
+              className="min-w-0 flex-1 bg-transparent font-mono text-meta text-bone placeholder:text-mute focus:outline-none"
             />
-          </div>
+          </label>
 
-          {/* What was actually sent, in the tracker's own dialect. */}
-          <div className="border-b border-line-soft px-3 py-1.5">
-            <span className="font-mono text-micro text-mute">{sent(ask)}</span>
-          </div>
-
-          <div className="flex items-center gap-3 border-b border-line-soft px-3 py-1.5">
-            <span className="legend w-[150px] shrink-0">Id</span>
-            <span className="legend flex-1">Title</span>
-            <span className="legend w-[70px] shrink-0">Status</span>
-            <span className="legend w-[56px] shrink-0">Updated</span>
-            <span className="w-[72px] shrink-0" />
-          </div>
+          {/* What was actually sent, in the tracker's own dialect. These are
+              the tracker's filters and not local ones, so the answer below is
+              its answer — which is worth being able to read. */}
+          <p className="mt-2 font-mono text-micro text-mute">sent as {sent(ask)}</p>
             </>
           )}
 
@@ -315,46 +330,35 @@ export function TasksPage({ backend }: { backend: Backend }) {
             // The tail is what identifies it; the org prefix is noise at every row.
             const short = t.key.replace(/^[a-z]+:/, "").replace(/^.*\//, "");
             return (
-              <div
-                key={t.id}
-                className="group flex items-center gap-3 border-b border-line-soft px-3 py-2 last:border-0 hover:bg-raise/60"
-              >
-                <span className="flex w-[150px] shrink-0 items-center gap-1.5">
-                  <Icon of={Glyph} size={12} className="shrink-0 text-mute" />
-                  <span className="truncate font-mono text-micro text-dim" title={t.key}>
-                    {short}
-                  </span>
+              /* One row, as every other list in the app draws one: the kind,
+                 the title at reading size, and *where it is and when it moved*
+                 underneath. There was a four-column table with its own
+                 headers and a sage "open" pill per row — a status column on a
+                 list filtered to one status. */
+              <div key={t.id} className="r">
+                <span className="g">
+                  <Icon of={Glyph} size={16} />
                 </span>
 
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-ui text-bone">{t.title}</span>
-                  <span className="mt-0.5 flex items-center gap-1.5">
-                    {t.labels.map((l) => (
-                      <span
-                        key={l.name}
-                        className="rounded-sm px-1 text-micro"
-                        style={{ color: l.colour ?? undefined, background: `${l.colour}1a` }}
-                      >
-                        {l.name}
-                      </span>
-                    ))}
-                    {t.assignees.map((a) => (
-                      <span key={a.login} className="text-micro text-mute">
-                        @{a.login}
-                      </span>
-                    ))}
-                  </span>
+                <span className="tx">
+                  <b>{t.title}</b>
+                  <s>
+                    {[t.repo, short, elapsed(minutesSince(t.updatedAt)), ...t.assignees.map((a) => a.login)]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </s>
                 </span>
 
-                <span className="w-[70px] shrink-0">
-                  <span className="rounded-sm border border-sage-deep bg-sage-tint px-1.5 py-0.5 text-micro text-sage">
-                    {t.state}
+                {/* The tracker's own labels, in the tracker's own colours —
+                    the one place in the app where a hue comes from outside. */}
+                {/* Neutral. The tracker's own hue is somebody else's palette
+                    arriving on a screen that is allowed one accent, and at
+                    11px a tinted chip reads as a warning whatever it says. */}
+                {t.labels.slice(0, 2).map((l) => (
+                  <span key={l.name} className="ttag">
+                    {l.name}
                   </span>
-                </span>
-
-                <span className="w-[56px] shrink-0 font-mono text-micro text-mute">
-                  {elapsed(minutesSince(t.updatedAt))}
-                </span>
+                ))}
 
                 <button
                   onClick={() =>
@@ -366,17 +370,17 @@ export function TasksPage({ backend }: { backend: Backend }) {
                       taskUrl: t.url,
                     })
                   }
-                  className="control w-[5rem] shrink-0 justify-center border border-line bg-raise text-text transition-colors hover:bg-overlay hover:text-bone"
+                  className="btn quiet"
                 >
+                  <Icon of={Play} size={12} />
                   Start
-                  <Icon of={ArrowRight} size={12} />
                 </button>
               </div>
             );
           })}
 
           {connected && (trail.length > 0 || feed.more) && (
-            <div className="flex items-center justify-between border-t border-line px-3 py-2">
+            <div className="mt-6 flex items-center justify-between">
               <Step
                 of={ArrowLeft}
                 label="Previous"
@@ -393,7 +397,6 @@ export function TasksPage({ backend }: { backend: Backend }) {
               />
             </div>
           )}
-        </div>
       </div>
     </div>
   );
@@ -436,7 +439,7 @@ function Sources({
       <button
         type="button"
         onClick={(e) => setOpen(open ? null : e.currentTarget)}
-        className="flex h-7 items-center gap-1.5 rounded-md border border-line bg-ground px-2.5 text-ui text-bone hover:bg-raise"
+        className="btn plain"
       >
         {Mark && <Mark size={14} />}
         <span className="max-w-[12rem] truncate">{on?.label ?? "Pick a tracker"}</span>
@@ -554,19 +557,19 @@ function Seg<T extends string>({
   onPick: (v: T) => void;
   options: [T, string][];
 }) {
+  /* **Pills on the line, not a recessed track.** These are not two views of
+     one thing — Issues and Open narrow different axes of the same list, and
+     the drawing runs all of them along one row with a hairline between the
+     groups. A track around each pair said they were alternatives to each
+     other and to nothing else. */
   return (
-    <div className="flex gap-0.5 rounded-md bg-ground p-0.5">
+    <>
       {options.map(([v, label]) => (
-        <button
-          key={v}
-          onClick={() => onPick(v)}
-          className={`rounded-sm px-2.5 py-1 text-ui transition-colors ${
-            value === v ? "bg-overlay text-bone" : "text-mute hover:text-dim"
-          }`}
-        >
+        <button key={v} onClick={() => onPick(v)} aria-pressed={value === v} className="fp">
           {label}
         </button>
       ))}
-    </div>
+      <span className="mx-1.5 h-4 w-px bg-line" />
+    </>
   );
 }

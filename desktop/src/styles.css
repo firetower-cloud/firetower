@@ -795,8 +795,12 @@
     flex-wrap: wrap;
   }
   .fp {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
     flex: none;
     height: 32px;
+    white-space: nowrap;
     padding: 0 13px;
     border-radius: 99px;
     font-size: var(--text-ui);
