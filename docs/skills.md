@@ -354,10 +354,11 @@ unless it is in a virtualenv. A repository that needs them should install them
 in its **setup script**, which is the place where "this workspace needs things"
 is already expressed and already reviewed.
 
-Worth knowing but not a blocker: the control plane's own container has no
-Python, and its Dockerfile notes that `firetower serve` runs that machine's
-worker itself. That is the first-run convenience path, not where real work
-happens — a VM or a Mac mini has python3.
+Worth knowing but not a blocker: this is a question about the machine a
+workspace runs on, and never about the control plane. Firetower runs no agents
+in its own container — it has no git, no tmux, no Node and no Python, by
+design — so the only thing that has to be able to read a `.docx` is the VM or
+the Mac mini the work is on.
 
 ## 10. How a skill gets into the library
 

@@ -86,13 +86,16 @@ that handed back to its lead.
 ## Trying it
 
 ```sh
-just db && just dev           # control plane, localhost worker and web
+just build-worker             # the worker from this checkout
+just db && just dev           # control plane and web
 cd desktop && pnpm app        # the Mac app, connected to http://localhost:4400
 ```
 
-The localhost worker is this build's own binary, so the new tools are there
-without installing anything. Start a workspace on a repository with Claude
-Code, and ask it something like:
+Add a machine first — Firetower runs nothing on itself, so a fresh database
+has an empty fleet. Your own laptop over ssh is fine (see CONTRIBUTING), and
+`just dev` installs the worker you just built onto it, so the new tools are
+there without a release. Start a workspace on a repository with Claude Code,
+and ask it something like:
 
 > Add input validation to the API handlers. Then start a child in this
 > workspace to review the diff and tell me what it finds.

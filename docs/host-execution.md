@@ -6,6 +6,14 @@ filesystem and its network. The unit of isolation is the machine — give a
 worker a VM of its own if you want one, and use the machine itself when that is
 the point, as it is for a Mac that has Xcode on it.
 
+**Firetower never runs an agent in its own process.** Every machine is added
+over ssh, including the machine Firetower is installed on. It used to be able
+to: the control plane registered itself as a host called `localhost` and
+spawned a worker as a child, which put the agent in the control plane's own
+container as the same account — with its filesystem, its environment, and the
+database credentials and vault root key in it. That is removed. A fresh
+install has an empty fleet and adding a machine is the first thing to do.
+
 ## Add a machine
 
 Open Compute → **Add a machine**. It shows Firetower's public key. Give it to the
@@ -116,9 +124,23 @@ script, over ssh, pinned to the control plane's version, one machine at a time,
 drained first. By hand, running the one line again does the same; the newest
 release is what it fetches unless `--version` says otherwise.
 
-## The machine running Firetower
+## Which machine to add
 
-**This server — alongside Firetower** is the control plane's own process, and
-needs `git`, `tmux` and a shell on that machine. A control plane running in
-Docker does not run agents in its own container: add the machine underneath it
-over ssh, like any other.
+Not the one holding the control plane's volume.
+
+Firetower's own state — the vault's root key, the updater's token, its event
+log — is a directory on the machine the control plane runs on. A worker on that
+same machine is an agent sitting beside all of it: it cannot be reached through
+the control plane's API, but it does not need to be, because the files are
+simply there to read. Adding that box over ssh is better than running in the
+container, and it is not the arrangement to aim for.
+
+A separate machine, with nothing of Firetower's on it but the worker in one
+account's home, is. A VM, a build box, a Mac with Xcode on it — whatever the
+work actually needs.
+
+A repository connected by filesystem path exists on one machine, and a
+workspace using it has to run on that machine. Firetower has no filesystem of
+its own in the fleet: connecting a path on the box the control plane is
+installed on is not a thing you can do — add that box over ssh and connect the
+path there.
