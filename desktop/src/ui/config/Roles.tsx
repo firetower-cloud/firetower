@@ -125,6 +125,14 @@ export function Roles() {
   };
 
   if (editing) {
+    /* **Read-only says what the screen is, rather than disabling its
+       controls.** A profile somebody shared with you opened the full editor
+       with a Save button that the server would refuse — which is worse than a
+       greyed-out form, because it does not look withheld until after you have
+       written something. It opens as a reading of itself instead, and says
+       where it is changed. */
+    const role = editing.id ? rows.data.find((r) => r.id === editing.id) : undefined;
+    if (role && !role.mayWrite) return <Reading role={role} onClose={() => setEditing(null)} />;
     return <Editor state={editing} all={rows.data} onClose={() => setEditing(null)} />;
   }
 
@@ -273,6 +281,72 @@ function Chip({ children }: { children: ReactNode }) {
     <span className="inline-flex items-center gap-1 rounded bg-raise px-1.5 py-0.5 text-micro text-mute">
       {children}
     </span>
+  );
+}
+
+/**
+ * A profile you may read and not change.
+ *
+ * The same facts the editor holds, as text — no fields, no Save, and nothing
+ * greyed out. The line at the foot is the *where-this-lives note*: a boundary
+ * read as a boundary rather than as a refusal, which is the same move People
+ * and Teams make for the administration site.
+ */
+function Reading({ role, onClose }: { role: Role; onClose: () => void }) {
+  const place =
+    role.placement === "own" ? "its own workspace" : role.placement === "here" ? "the lead's workspace" : "wherever the lead decides";
+  const agent = role.agent as Agent | null;
+  const named = (ids: string[]) => ids.length;
+
+  return (
+    <Section
+      title={role.name}
+      note={role.does}
+      action={
+        <button onClick={onClose} className="control border border-line bg-raise text-ui text-bone hover:bg-overlay">
+          All profiles
+        </button>
+      }
+    >
+      <div className="space-y-5 px-3.5 py-4">
+        <Reads label="Runs in">{place}</Reads>
+        <Reads label="Agent">
+          {agent ? (
+            <span className="inline-flex items-center gap-1.5">
+              <AgentMark agent={agent} size={13} className="text-dim" />
+              {AGENT_LABEL[agent]}
+            </span>
+          ) : (
+            "whichever the lead is running"
+          )}
+        </Reads>
+        <Reads label="Hands work off">
+          {role.canDelegate ? `yes — to ${named(role.delegateScope)} profile${named(role.delegateScope) === 1 ? "" : "s"}` : "no"}
+        </Reads>
+        <Reads label="Skills it may read">
+          {named(role.skillScope) === 0 ? "whatever the workspace has" : `${named(role.skillScope)} named`}
+        </Reads>
+        {role.instructions.trim() && (
+          <Reads label="Instructions">
+            <span className="block whitespace-pre-wrap text-text">{role.instructions.trim()}</span>
+          </Reads>
+        )}
+      </div>
+
+      <p className="border-t border-line-soft px-3.5 py-3 text-meta text-mute">
+        Shared with you. It is changed by whoever owns it, in the directory it is filed in — <span className="font-mono">{role.path}</span>.
+      </p>
+    </Section>
+  );
+}
+
+/** One fact and its name, in the shape the rest of the pane reads in. */
+function Reads({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-baseline gap-3">
+      <span className="w-[9.5rem] shrink-0 text-ui text-dim">{label}</span>
+      <span className="min-w-0 flex-1 text-ui text-bone">{children}</span>
+    </div>
   );
 }
 

@@ -54,25 +54,38 @@ function One({ team }: { team: Team }) {
     query: { enabled: open && !team.everyone },
   });
 
+  /* The everybody team has no list to open — it is everybody, by definition.
+     It was a `disabled` button, and this screen is not allowed one: a greyed
+     control is how an interface says you are being withheld from, and nothing
+     is being withheld here. A row that does not open is simply a row. */
+  const inside = (
+    <>
+      <span className="grid h-[21px] w-[21px] shrink-0 place-items-center rounded-full border border-line bg-overlay text-dim">
+        <Icon of={UsersRound} size={12} />
+      </span>
+      <span className="min-w-0 flex-1 truncate text-ui text-bone">{team.name}</span>
+      <span className="shrink-0 text-micro text-mute">
+        {team.everyone
+          ? "everybody here, always"
+          : `${team.members} ${team.members === 1 ? "person" : "people"}`}
+      </span>
+      {!team.everyone && <Icon of={open ? ChevronDown : ChevronRight} size={12} />}
+    </>
+  );
+
   return (
     <>
-      <button
-        disabled={team.everyone}
-        onClick={() => setOpen((v) => !v)}
-        aria-label={`Who is in ${team.name}`}
-        className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left hover:bg-raise disabled:cursor-default disabled:hover:bg-transparent"
-      >
-        <span className="grid h-[21px] w-[21px] shrink-0 place-items-center rounded-full border border-line bg-overlay text-dim">
-          <Icon of={UsersRound} size={12} />
-        </span>
-        <span className="min-w-0 flex-1 truncate text-ui text-bone">{team.name}</span>
-        <span className="shrink-0 text-micro text-mute">
-          {team.everyone
-            ? "everybody here, always"
-            : `${team.members} ${team.members === 1 ? "person" : "people"}`}
-        </span>
-        {!team.everyone && <Icon of={open ? ChevronDown : ChevronRight} size={12} />}
-      </button>
+      {team.everyone ? (
+        <div className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left">{inside}</div>
+      ) : (
+        <button
+          onClick={() => setOpen((v) => !v)}
+          aria-label={`Who is in ${team.name}`}
+          className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left hover:bg-raise"
+        >
+          {inside}
+        </button>
+      )}
 
       {open &&
         !team.everyone &&
