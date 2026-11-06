@@ -143,6 +143,32 @@ pub struct Worker {
     /// Ports of this machine's sessions, reached over the pipe rather than the
     /// network. Still nothing listening here — see [`tunnel`].
     tunnels: std::sync::Arc<tunnel::Tunnels>,
+    /// One queue per session for everything that goes *down* to its agent.
+    ///
+    /// Reaching an agent can take the full retry window — thirty seconds, see
+    /// [`structured::tell_when_listening`] — and handled on the read loop that
+    /// is thirty seconds in which this worker reads nothing for any session on
+    /// the machine. With one agent per host nobody saw it. With a lead and its
+    /// children sharing one, one wedged agent stalled its neighbours.
+    ///
+    /// A task per frame would get it off the loop and lose the other half:
+    /// frames for one session have to arrive in the order they were sent,
+    /// because that order is somebody typing. So it is a queue per session —
+    /// the loop never waits, and within a session nothing overtakes anything.
+    sending: Mutex<HashMap<String, mpsc::Sender<Sending>>>,
+}
+
+/// One frame on its way to a session's agent.
+///
+/// Carries the lane to complain on rather than borrowing one, so a queue
+/// parked on an empty channel holds nothing: the outbound senders are what
+/// `writing` waits on to know the worker has finished speaking.
+struct Sending {
+    frame: agentd::ToAgent,
+    /// What this is, for the sentence a failure produces — "a turn", "an
+    /// answer". Read by somebody looking at a log, so it reads as English.
+    what: &'static str,
+    out: Out,
 }
 
 /// How many frames may be queued for the control plane at once.
@@ -168,6 +194,16 @@ const CREDENTIALS_EVERY: std::time::Duration = std::time::Duration::from_secs(60
 const LIMITS_EVERY: std::time::Duration = std::time::Duration::from_secs(600);
 
 const OUTBOUND: usize = 1024;
+
+/// How many frames may wait for one session's agent.
+///
+/// Each one is held for as long as its retry window, so a queue this deep is
+/// a session nobody can have been typing at: thirty seconds a frame is two
+/// hours of backlog. Bounded all the same, because the alternative is a
+/// control plane that can grow this worker's memory by sending into a session
+/// whose agent will never answer. Full is backpressure — the read loop waits,
+/// which is the one case where waiting is the honest answer.
+const SENDING: usize = 256;
 
 /// How many control frames may wait. Small on purpose: they are tens of bytes
 /// and a few a second, so a backlog here would mean something else is wrong.
@@ -284,6 +320,7 @@ impl Worker {
             git: GitRoot::new(&root),
             attached: Mutex::new(HashMap::new()),
             watching: Mutex::new(HashMap::new()),
+            sending: Mutex::new(HashMap::new()),
             tunnels: std::sync::Arc::new(tunnel::Tunnels::new()),
             root,
             // Everything already in the log predates this connection. A
@@ -762,6 +799,15 @@ impl Worker {
                     .lock()
                     .await
                     .remove(&terminal_key(&session_id, Pty::Shell));
+                // Nothing is going to this agent again. Dropping the sender
+                // ends the task behind it once it has handed over whatever was
+                // already queued — a session is not told less because it is
+                // being torn down — and without this a worker holding a long
+                // connection keeps one parked task per session it ever carried
+                // a message for. Not removed on `Stop`: a stopped session is
+                // one that may be started again, and the next message would
+                // only build the same queue back.
+                self.sending.lock().await.remove(session_id.as_str());
                 // Whatever was worth keeping should already have been pushed.
                 Tmux::for_session(session_id.as_str()).kill().await?;
                 // And the shell, which would otherwise sit in a directory that
@@ -977,22 +1023,20 @@ impl Worker {
                 }
             }
 
+            // Queued rather than sent, here and for `Answer` below, because
+            // the sending can take thirty seconds and this is the loop every
+            // other session on this machine is read from. See [`Worker::hand_to_agent`].
             ToWorker::SendTurn {
                 session_id,
                 message,
             } => {
-                if let Err(e) =
-                    structured::tell_when_listening(&session_id, &agentd::ToAgent::Send { message })
-                        .await
-                {
-                    tracing::warn!(session = %session_id, "sending a turn: {e:#}");
-                    out.send(ToServer::Error {
-                        session_id: Some(session_id),
-                        code: "AgentUnavailable".into(),
-                        message: format!("{e:#}"),
-                    })
-                    .await?;
-                }
+                self.hand_to_agent(
+                    &session_id,
+                    "a turn",
+                    agentd::ToAgent::Send { message },
+                    out,
+                )
+                .await;
             }
 
             ToWorker::Answer {
@@ -1000,21 +1044,13 @@ impl Worker {
                 req,
                 result,
             } => {
-                if let Err(e) =
-                    structured::tell(&session_id, &agentd::ToAgent::Decide { req, result }).await
-                {
-                    tracing::warn!(session = %session_id, "answering: {e:#}");
-                    // The same report a failed turn makes. Answering a question
-                    // whose agent has gone was the quieter half of the same
-                    // fault: the card stayed, the answer went nowhere, and
-                    // nothing said which had happened.
-                    out.send(ToServer::Error {
-                        session_id: Some(session_id),
-                        code: "AgentUnavailable".into(),
-                        message: format!("{e:#}"),
-                    })
-                    .await?;
-                }
+                self.hand_to_agent(
+                    &session_id,
+                    "an answer",
+                    agentd::ToAgent::Decide { req, result },
+                    out,
+                )
+                .await;
             }
 
             ToWorker::Interrupt { session_id } => {
@@ -2032,6 +2068,14 @@ You are in the directory that holds them, not inside one of them.              P
                         // EOF is ambiguous: a watcher can lose its socket while
                         // the agent keeps writing. Only an explicit negative
                         // tmux probe proves that the supervised agent is gone.
+                        //
+                        // And the probe has to be about this agent. Asked
+                        // loosely it was answered by the session's shell, so a
+                        // dead agent came back `true` and the control plane was
+                        // told the watching had stopped — which it does not act
+                        // on. The session sat in the inbox looking alive, and
+                        // the first message sent to it produced the banner this
+                        // change is about.
                         match tmux::Tmux::for_session(id.as_str()).checked_exists().await {
                             Ok(false) => {
                                 let _ = out.send(ToServer::AgentClosed { session_id: id }).await;
@@ -2056,6 +2100,67 @@ You are in the directory that holds them, not inside one of them.              P
                 }
             }),
         );
+    }
+
+    /// Put a frame on its session's queue, and carry on reading.
+    ///
+    /// The other direction from [`Worker::watch_agent`]: everything the
+    /// control plane says *to* an agent — a turn, an answer to a permission
+    /// question, a delegation tool's result — goes through here.
+    ///
+    /// Nothing is sent on the read loop, because a send can take the whole
+    /// retry window and that window used to be served from this loop: while
+    /// one session's agent was unreachable, no other session on the machine
+    /// was answered either. Nothing is spawned per frame either, because that
+    /// loses the order, and the order is the message — two turns typed in
+    /// quick succession have to arrive as they were typed. One queue per
+    /// session gives both, and the only waiting left here is a queue deep
+    /// enough that waiting is the right answer.
+    ///
+    /// A queue outlives the frame that made it and is reused. Its task parks
+    /// on an empty channel holding nothing of this connection, and ends when
+    /// the worker that owns the map goes.
+    async fn hand_to_agent(
+        &self,
+        session_id: &SessionId,
+        what: &'static str,
+        frame: agentd::ToAgent,
+        out: &Out,
+    ) {
+        let queue = {
+            let mut queues = self.sending.lock().await;
+            // Closed means the task behind it is gone, which a reused `Worker`
+            // in a test can produce. Sending into it would drop the frame
+            // silently, so it is replaced rather than trusted.
+            match queues.get(session_id.as_str()) {
+                Some(queue) if !queue.is_closed() => queue.clone(),
+                _ => {
+                    let (tx, mut rx) = mpsc::channel::<Sending>(SENDING);
+                    let id = session_id.clone();
+                    tokio::spawn(async move {
+                        while let Some(next) = rx.recv().await {
+                            deliver_to_agent(&id, next).await;
+                        }
+                    });
+                    queues.insert(session_id.to_string(), tx.clone());
+                    tx
+                }
+            }
+        };
+
+        // Outside the lock, so a full queue for one session is not a stall for
+        // every other session's sends as well.
+        if queue
+            .send(Sending {
+                frame,
+                what,
+                out: out.clone(),
+            })
+            .await
+            .is_err()
+        {
+            tracing::warn!(session = %session_id, "nothing is left to carry {what}");
+        }
     }
 
     /// Start one agent in a workspace that is already on disk.
@@ -3453,6 +3558,75 @@ enum Standing {
     Abandoned,
 }
 
+/// Hand one frame to a session's agent, and say so upward if it will not go.
+///
+/// Retried for the whole startup window, an answer as much as a turn. An
+/// answer used to get a single connect attempt, which was defensible while it
+/// carried only a person's permission decision — rare, and retypable. The
+/// delegation tools made it the busiest message in the system: `spawn`,
+/// `children`, `update`, `plan` and every profile and skill call come back
+/// this way, and a `spawn` is answered only after a repository has been cloned
+/// and set up. So the one message with no retry became the one message always
+/// in flight, and that is most of why "the agent is not running" started
+/// appearing over agents that were running.
+///
+/// A send that still fails is not proof the agent has gone, and telling those
+/// two apart is what [`undelivered_report`] is for.
+async fn deliver_to_agent(session_id: &SessionId, sending: Sending) {
+    let Sending { frame, what, out } = sending;
+    let Err(e) = structured::tell_when_listening(session_id, &frame).await else {
+        return;
+    };
+    tracing::warn!(session = %session_id, "sending {what}: {e:#}");
+
+    let present = Tmux::for_session(session_id.as_str())
+        .checked_exists()
+        .await;
+    let (code, message) = undelivered_report(what, &format!("{e:#}"), present);
+
+    let _ = out
+        .send(ToServer::Error {
+            session_id: Some(session_id.clone()),
+            code: code.into(),
+            message,
+        })
+        .await;
+}
+
+/// Which fault a frame that would not go is, given what tmux then said about
+/// the agent.
+///
+/// Its own function so that the one decision in it can be read — and tested —
+/// without first waiting out the thirty seconds that have to pass before it is
+/// reached.
+///
+/// `AgentUnavailable` takes the session to `Failed` in the control plane,
+/// which is right for an agent that has exited and wrong — loudly, with a
+/// button offering to restart something that never stopped — for one that
+/// merely did not answer in time. So only tmux saying there is no such session
+/// earns it. A probe that could not be read is an unknown, and an unknown is
+/// not a death: the same call [`Worker::watch_agent`] makes when this probe
+/// will not answer. `MessageUndelivered` reports the message and says nothing
+/// about the session — see `fleet::UNDELIVERED`.
+fn undelivered_report(what: &str, failure: &str, present: Result<bool>) -> (&'static str, String) {
+    match present {
+        Ok(false) => ("AgentUnavailable", format!("sending {what}: {failure}")),
+        Ok(true) => (
+            "MessageUndelivered",
+            format!(
+                "{what} did not reach the agent, which is still running on this host: {failure}"
+            ),
+        ),
+        Err(probe) => (
+            "MessageUndelivered",
+            format!(
+                "{what} did not reach the agent, and whether the agent is still there could \
+                 not be established: {failure} (asking tmux: {probe:#})"
+            ),
+        ),
+    }
+}
+
 /// Tell an agent that is running from the shell that outlived one.
 ///
 /// `tmux has-session` answers neither question: it is true for a healthy agent
@@ -3460,6 +3634,11 @@ enum Standing {
 /// alone meant a relaunch could never replace a dead agent, so the route back
 /// from a failed run was the route that could not be taken. The socket is what
 /// actually distinguishes them, because it is the thing the agent holds open.
+///
+/// It is at least asked about the right session now. The probe is exact — see
+/// [`Tmux::target`] — so a session with a shell open is no longer reported
+/// `Abandoned` on the strength of that shell, and the kill that answer leads
+/// to no longer takes the shell with it.
 async fn standing(tmux: &Tmux, id: &SessionId) -> Standing {
     if !tmux.exists().await {
         return Standing::Fresh;
@@ -3480,6 +3659,12 @@ async fn standing(tmux: &Tmux, id: &SessionId) -> Standing {
 /// The rest are cheap and stay in order deliberately — terminal input has to
 /// arrive in the sequence it was typed, and a replay has to finish before the
 /// events that follow it.
+///
+/// Which is why `SendTurn` and `Answer` are not here, though both can wait out
+/// a thirty-second retry window and so plainly belong off this loop. Spawning
+/// them would lose the order they are here to keep. They are handled by
+/// [`Worker::hand_to_agent`] instead: the arm returns at once, and the waiting
+/// happens on a queue belonging to the one session whose order it is.
 fn takes_a_while(frame: &ToWorker) -> bool {
     matches!(
         frame,
@@ -4818,6 +5003,217 @@ mod tests {
             "it should have overtaken the queue, not waited most of it out — \
              {chunks_first} chunks went first"
         );
+    }
+
+    /// A stand-in for a session's supervisor.
+    ///
+    /// Binds the socket the worker looks for, collects the frames handed to it
+    /// in the order they arrive, and gives them back. One connection per
+    /// frame, because that is what `structured::tell_when_listening` makes.
+    ///
+    /// `after` is how long to wait before binding. The window this change is
+    /// about is the one where a session's socket is briefly not there — a
+    /// supervisor that has just restarted under a session that never stopped,
+    /// or an ACP process that lost its socket after `session/new` — and a test
+    /// that binds first never enters it.
+    fn fake_agent(
+        session_id: &SessionId,
+        expect: usize,
+        after: std::time::Duration,
+    ) -> tokio::task::JoinHandle<Vec<serde_json::Value>> {
+        use tokio::io::AsyncBufReadExt;
+
+        let socket = agentd::socket_path(session_id.as_str());
+        tokio::spawn(async move {
+            tokio::fs::create_dir_all(socket.parent().unwrap())
+                .await
+                .unwrap();
+            // Never a name a live session could hold: these are `SessionId::new`
+            // ids, and the directory is shared with whatever else is running on
+            // this machine.
+            let _ = tokio::fs::remove_file(&socket).await;
+            tokio::time::sleep(after).await;
+
+            let listener = tokio::net::UnixListener::bind(&socket).unwrap();
+            let mut heard = Vec::new();
+            while heard.len() < expect {
+                let Ok((stream, _)) = listener.accept().await else {
+                    break;
+                };
+                let mut line = String::new();
+                let read = tokio::io::BufReader::new(stream).read_line(&mut line).await;
+                if read.is_ok() && !line.trim().is_empty() {
+                    heard.push(serde_json::from_str(line.trim()).expect("a frame"));
+                }
+            }
+            drop(listener);
+            let _ = tokio::fs::remove_file(&socket).await;
+            heard
+        })
+    }
+
+    /// Once this session's socket is there, which is the moment a turn sent
+    /// now could overtake one still waiting for it.
+    async fn wait_for_socket(session_id: &SessionId) {
+        let socket = agentd::socket_path(session_id.as_str());
+        for _ in 0..500 {
+            if socket.exists() {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        panic!("the fake agent never bound {}", socket.display());
+    }
+
+    /// Turns to one session arrive in the order they were sent.
+    ///
+    /// The risk in taking `SendTurn` off the read loop, and the reason it is a
+    /// queue per session rather than a task per frame. Terminal input has to
+    /// arrive in the sequence it was typed.
+    ///
+    /// The fourth turn here is the one that catches a task per frame. The
+    /// first three are sent while the socket is away, so each is sitting in
+    /// its retry loop — a hundred milliseconds between attempts — when the
+    /// agent comes up. A turn typed at that moment connects on its first try
+    /// and arrives in front of all three. Through one queue it cannot: it is
+    /// behind them, and the queue is what holds the order the read loop used
+    /// to hold by doing the waiting itself.
+    #[tokio::test]
+    async fn turns_to_one_session_arrive_in_the_order_they_were_sent() {
+        let home = TempDir::new().unwrap();
+        let worker = std::sync::Arc::new(Worker::open(home.path()).await.unwrap());
+        let served = serve_over_duplex(worker);
+
+        let id = SessionId::new();
+        let agent = fake_agent(&id, 4, std::time::Duration::from_millis(400));
+
+        // In quick succession, at an agent that is not listening yet.
+        for typed in 0..3 {
+            served.send(ToWorker::SendTurn {
+                session_id: id.clone(),
+                message: serde_json::json!({ "method": "session/prompt", "typed": typed }),
+            });
+        }
+
+        // And one more the moment it is, which is the overtaking one.
+        wait_for_socket(&id).await;
+        served.send(ToWorker::SendTurn {
+            session_id: id.clone(),
+            message: serde_json::json!({ "method": "session/prompt", "typed": 3 }),
+        });
+
+        let heard = tokio::time::timeout(std::time::Duration::from_secs(20), agent)
+            .await
+            .expect("the agent should have been reached inside the retry window")
+            .unwrap();
+
+        let order: Vec<u64> = heard
+            .iter()
+            .map(|frame| frame["message"]["typed"].as_u64().expect("the turn"))
+            .collect();
+        assert_eq!(
+            order,
+            vec![0, 1, 2, 3],
+            "turns to one session have to arrive as they were sent"
+        );
+    }
+
+    /// One session waiting out its retry window does not silence the worker.
+    ///
+    /// `SendTurn` ran on the read loop, and reaching an agent can take the
+    /// whole thirty seconds — so while one session's socket was away, this
+    /// worker read nothing for any session on the machine. With one agent per
+    /// host nobody saw it; with a lead and its children sharing one, the stall
+    /// spread.
+    #[tokio::test]
+    async fn a_session_waiting_for_its_agent_does_not_stall_the_others() {
+        let home = TempDir::new().unwrap();
+        let worker = std::sync::Arc::new(Worker::open(home.path()).await.unwrap());
+        let mut served = serve_over_duplex(worker);
+
+        // Nothing is listening for this one and nothing will be, so its send
+        // waits out the full window.
+        served.send(ToWorker::SendTurn {
+            session_id: SessionId::new(),
+            message: serde_json::json!({ "method": "session/prompt" }),
+        });
+        served.send(ToWorker::Ping);
+
+        let answered = served
+            .wait_for(std::time::Duration::from_secs(5), |f| {
+                matches!(f, ToServer::Pong)
+            })
+            .await;
+
+        assert!(
+            answered.is_some(),
+            "the worker should still be answering while one session's send waits"
+        );
+    }
+
+    /// A delegation result reaches an agent whose socket is briefly away.
+    ///
+    /// `Answer` had one connect attempt and no retry, which was defensible
+    /// while it carried only a person's permission decision. Delegation made
+    /// it the vehicle for every tool result a lead produces — `spawn`,
+    /// `children`, `update`, `plan`, and the profile and skill calls — and a
+    /// `spawn` is answered only once a repository has been cloned and set up,
+    /// so it is also the message most often in flight. The one message with no
+    /// retry became the one message always in flight.
+    #[tokio::test]
+    async fn an_answer_waits_for_a_socket_that_is_not_there_yet() {
+        let home = TempDir::new().unwrap();
+        let worker = std::sync::Arc::new(Worker::open(home.path()).await.unwrap());
+        let served = serve_over_duplex(worker);
+
+        let id = SessionId::new();
+        let agent = fake_agent(&id, 1, std::time::Duration::from_millis(300));
+
+        served.send(ToWorker::Answer {
+            session_id: id.clone(),
+            req: "req-1".into(),
+            result: serde_json::json!({ "text": "the child is on its way" }),
+        });
+
+        let heard = tokio::time::timeout(std::time::Duration::from_secs(20), agent)
+            .await
+            .expect("the answer should have waited for the socket")
+            .unwrap();
+
+        assert_eq!(heard.len(), 1);
+        assert_eq!(heard[0]["frame"], "Decide");
+        assert_eq!(heard[0]["req"], "req-1");
+    }
+
+    /// Only an agent tmux says is gone is reported as gone.
+    ///
+    /// `AgentUnavailable` takes the session to `Failed`, and the panel it
+    /// draws says the agent is not running and offers to start it again. Over
+    /// an agent that merely did not answer in time that is wrong twice: the
+    /// session is condemned, and the one thing on offer restarts something
+    /// that never stopped. So a message that would not go reports itself, and
+    /// only a tmux session that is actually absent reports the agent.
+    #[test]
+    fn a_message_that_would_not_go_only_condemns_a_session_tmux_says_is_gone() {
+        let (gone, _) = undelivered_report("a turn", "no agent is listening", Ok(false));
+        assert_eq!(gone, "AgentUnavailable");
+
+        let (there, said) = undelivered_report("an answer", "no agent is listening", Ok(true));
+        assert_eq!(there, "MessageUndelivered");
+        assert!(said.contains("an answer"), "{said}");
+        assert!(said.contains("still running"), "{said}");
+
+        // Unreadable is unknown, and an unknown is not a death — the same call
+        // `watch_agent` makes when this probe will not answer.
+        let (unknown, said) = undelivered_report(
+            "a turn",
+            "no agent is listening",
+            Err(anyhow::anyhow!(
+                "checking firetower-s_1: connection refused"
+            )),
+        );
+        assert_eq!(unknown, "MessageUndelivered");
+        assert!(said.contains("could not be established"), "{said}");
     }
 
     /// A pane that outlived its agent must not block the way back.
