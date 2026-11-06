@@ -81,5 +81,5 @@ export function Mark({ size = 20 }: { size?: number }) {
 
 /** A small filled dot, used to head a line in the mock screens. */
 export const Bullet = () => (
-  <span className="mr-[3px] inline-block h-[6px] w-[6px] rounded-full bg-ember-soft align-[0.15em]" />
+  <span className="mr-[3px] inline-block h-[6px] w-[6px] rounded-full bg-ember-ink align-[0.15em]" />
 );

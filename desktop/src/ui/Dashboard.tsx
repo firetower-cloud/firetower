@@ -230,7 +230,7 @@ function Line({ place }: { place: Workspace }) {
         <span
           className={`rounded-sm border px-1.5 py-0.5 text-micro ${
             state === "waiting"
-              ? "border-ember-deep bg-ember-tint text-ember-soft"
+              ? "border-ember-deep bg-ember-tint text-ember-ink"
               : state === "working"
                 ? "border-slate-deep bg-slate-tint text-slate"
                 : "border-line bg-raise text-mute"

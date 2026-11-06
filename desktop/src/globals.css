@@ -11,6 +11,16 @@
   --color-raise: #17171a;
   --color-overlay: #1e1e22;
   --color-line: #26262b;
+
+  /* A block standing in for a value that has not arrived yet.
+     Its own step rather than one of the surfaces: `--color-raise` was the
+     obvious reuse and measured 1.04:1 over `--color-ground` — fainter than a
+     gridline at 1.16:1, which is the most recessive thing on the page by
+     design, so a loading chart was indistinguishable from a black rectangle.
+     This sits between a gridline and the dimmest text: 1.86:1 at the top of
+     the breath and 1.32:1 at the bottom. Legibly there, without competing with
+     anything that carries meaning. */
+  --color-settling: #3e3e46;
   --color-line-soft: #1a1a1e;
 
   /* ── Text: four tiers, a real gap between each ──────────────
@@ -25,6 +35,9 @@
      Sizes were written at the point of use, so a label and a sentence and a
      caption drifted a half-pixel apart in twenty files. These are the sizes;
      anything not one of them is a mistake, and `just check-style` says so. */
+  --text-figure: 4rem; /* 64px — the one number a page exists to show */
+  --text-figure--line-height: 0.86;
+  --text-figure--letter-spacing: -0.025em;
   --text-display: 1.5rem; /* 24px — the one heading on a page */
   --text-display--line-height: 1.2;
   --text-display--letter-spacing: -0.02em;
@@ -56,6 +69,15 @@
      border, so a badge is never a flat block of colour. */
   --color-ember: #ff6b2c;
   --color-ember-soft: #ff9a6b;
+  /* Ember where it has to be *read*: on its own tint, and anywhere a word or a
+     mark in ember has to carry meaning rather than catch an eye. On a dark
+     tint the readable value is the lighter one, so in dark this is exactly
+     `--color-ember-soft` and no pixel moves. On a pale tint it is the darker
+     one, which is what the light branch gives it. The rule, which also governs
+     `--color-amber-soft` below: **`-soft` is the lighter of the pair in either
+     theme, and a token that is text on its own tint in light needs an `-ink`
+     step.** */
+  --color-ember-ink: #ff9a6b;
   --color-ember-tint: #2a1509;
   --color-ember-deep: #7a3417;
   --color-sage: #6ec08a;
@@ -64,15 +86,34 @@
   --color-brick: #e5645a;
   --color-brick-tint: #2a1414;
   --color-brick-deep: #6e2f2b;
+  /* Approaching, which sage/brick/slate had no step for: "fine", "broken" and
+     "neutral" cannot say "still working, but not for much longer". Only a
+     quota meter uses it, and only while one is filling. */
+  --color-amber: #fab219;
+  /* Amber's split is the mirror of ember's, and it is the reason both exist.
+     `--color-amber` is text on `--color-amber-tint`; on a pale tint that has to
+     clear 8.75:1, which drives it to #653400 — correct, legible and *brown*. A
+     quota meter filling with brown no longer says "still working, but not for
+     much longer", which is the whole reason the colour is here. So a mark on
+     the page — a status pip, a meter fill, a 2px rule — takes this instead, at
+     3.92:1 on white, past the 3:1 floor for a non-text graphic and still
+     recognisably amber. In dark it is `--color-amber` exactly, so nothing
+     moves. */
+  --color-amber-soft: #fab219;
+  --color-amber-tint: #2a2008;
+  --color-amber-deep: #7a5a0d;
   --color-slate: #7d95b0;
   --color-slate-tint: #161d26;
   --color-slate-deep: #35485c;
 
-  /* Series: one hue per member, and the only place data wears colour. A
-     namespace of its own because the signals above are semantic and the file
-     kinds below are deliberately too quiet to carry a chart — reusing
-     sage/brick for a stacked bar makes it read "done"/"broke" when it means
-     neither. Ember is absent on purpose: it means something is waiting on you. */
+  /* Series: one hue per model, and the only place data wears colour.
+     A namespace of its own because the signals above are semantic and the file
+     kinds below are deliberately too quiet to carry a chart — the one that
+     reads "below the ember in saturation" is exactly wrong for a stacked bar.
+     Taken from the same hue families and stepped until each clears its gates
+     against `--color-panel`: worst adjacent CVD dE 12.8, normal-vision 16.2,
+     all at or above 3:1. Ember is absent on purpose. It means something is
+     waiting on you, and a page about money has no business spending it. */
   --color-series-1: #3f86cf;
   --color-series-2: #1f9b74;
   --color-series-3: #8b7ad8;
@@ -93,10 +134,15 @@
 
   /* Git hosts, as the one place a brand colour is allowed in.
      The *mark* is tinted and the control around it is not: on a near-black
-     ground three saturated buttons become the loudest thing in the product,
-     on a screen somebody sees once. A coloured glyph does the work a logo is
-     there to do — being found without being read — and leaves the palette
-     alone. GitHub's is white because its mark has no colour of its own. */
+     ground three saturated buttons become the loudest thing in the product, on
+     a screen somebody sees once. A coloured glyph does the work a logo is there
+     to do — being found without being read — and leaves the palette alone.
+     GitHub's is white because its mark has no colour of its own.
+
+     Here rather than in the desktop's sheet, where they used to live, because
+     that copy had drifted from this one and a brand colour is not the desk's to
+     own. The web client has no GitLab or Gitea mark to draw yet; when it does,
+     the colours are already here. */
   --color-host-github: #f4f4f5;
   --color-host-gitlab: #fc6d26;
   --color-host-gitea: #609926;
@@ -105,7 +151,11 @@
   --font-narrow: var(--font-archivo-narrow), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-jetbrains), ui-monospace, "SF Mono", monospace;
 
-  /* ── Radii: three, plus pill ────────────────────────────────── */
+  /* ── Radii: four, plus pill ─────────────────────────────────── */
+  /* A checkbox, and nothing else. 6px on a 16px box is a circle, and a circle
+     is how every interface ever built says "one of these" — so a multiple
+     choice drawn at `sm` reads as a radio group until somebody ticks two. */
+  --radius-xs: 4px;
   --radius-sm: 6px;
   --radius-md: 8px;
   --radius-lg: 12px;
@@ -117,6 +167,129 @@
 
   /* ── Motion ─────────────────────────────────────────────────── */
   --ease-swift: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ── Light, derived rather than guessed ─────────────────────────────────
+   Light is the design and dark follows from it, but this file was written
+   dark-first and three clients are already drawn on it — so every current
+   value stays where it is, as the default, and light is an override. A client
+   that never sets `data-theme` is pixel-identical to the build before this
+   block existed. That is what lets the desk take light while the web and the
+   phone stay exactly as they are until they opt in.
+
+   **Unlayered on purpose.** `@theme` compiles into `@layer theme`, and a
+   declaration outside every layer beats a layered one whatever its
+   specificity. So this wins without having to out-specify anything, by a rule
+   the cascade guarantees rather than by source order.
+
+   **And no `prefers-color-scheme` default here.** Following the system is the
+   client's job, not the sheet's — the desk resolves it in `theme.ts` and sets
+   the attribute. A media query in this file would move the web client for
+   anybody whose Mac is in light mode, which is precisely what keeping the dark
+   values as the default is for.
+
+   ## How each value was derived
+
+   Each is the dark value with **L* moved while a* and b* are held**, so the
+   hue and its chroma direction survive, until it clears a stated floor. Which
+   floor depends on what the colour is measured *against*, and that is the part
+   worth copying:
+
+   * **File kinds and chart series** are measured against the page. The floor is
+     whatever the dark set's own weakest member clears on `--color-panel`:
+     **5.7:1** for a kind, **4.8:1** for a series. Measured on white: kinds
+     5.70–5.78, series 4.80–4.83.
+   * **Signals** are measured against **the neighbour they actually sit on**. A
+     badge is composed the same way in both themes — the colour on its tint,
+     inside its deep — so `--color-amber` is gated against
+     `--color-amber-tint`, not against the page. Measuring it against white
+     produced a value that was technically fine and visually wrong. Every tint
+     reproduces its dark ratio over the sheet; every colour and every deep
+     reproduces its dark ratio over its own tint.
+   * **The neutrals** are the same six steps mirrored, so the sheet is the one
+     pure white and everything above it steps down. They are faintly cool — two
+     or three points of blue over red — which is what the dark tokens already
+     are, and it is what makes the one warm thing on screen read warmer.
+
+   One honest exception, stated rather than hidden: **ember on its own tint is
+   2.82:1 in light**, where the dark pair holds 6.11. Matching it drives ember
+   to #970100, a dark red that no longer reads as ember. So the light badge uses
+   `--color-ember-ink` on `--color-ember-tint` — 4.69:1 — and the saturated
+   `--color-ember` stays what it is for the one thing it is for: an 8px dot. */
+[data-theme="light"] {
+  /* Ground. `--color-panel` is the one white: the page you are reading.
+     `--color-ground` is the chrome it sits on. */
+  --color-ground: #eceef1;
+  --color-panel: #ffffff;
+  --color-raise: #f5f6f8;
+  --color-overlay: #e6e8ed;
+  --color-line: #e3e5ea;
+  /* 1.09:1 on the sheet, holding the dark pair's 1.09. The rare, fainter
+     hairline — still a line, barely. */
+  --color-line-soft: #f3f5fb;
+  /* 1.78:1 on the sheet, holding dark's 1.78 over `--color-panel`: between a
+     gridline and the dimmest text, legibly there without carrying meaning. */
+  --color-settling: #c2c1cb;
+
+  /* Text. Four tiers, the same real gaps: 18.1, 9.3, 4.2 and 2.4 on white. */
+  --color-bone: #15161a;
+  --color-text: #45474f;
+  --color-dim: #787b85;
+  --color-mute: #a4a7b1;
+
+  /* Signals. Tints against the sheet, colours and deeps against their tint. */
+  --color-ember: #ff5e1a;
+  --color-ember-soft: #ff7a36;
+  --color-ember-ink: #bf4714; /* 5.09 on white, 4.69 on its tint */
+  --color-ember-tint: #fff4e6;
+  --color-ember-deep: #f49e7a;
+  --color-sage: #00582b;
+  --color-sage-tint: #daf3e3;
+  --color-sage-deep: #81b390;
+  --color-brick: #b83a30;
+  --color-brick-tint: #fff3f2;
+  --color-brick-deep: #f7a9a0;
+  --color-amber: #653400; /* 8.76 on its tint, holding dark's 8.75 */
+  --color-amber-soft: #a8780f; /* 3.92 on white, past the 3:1 non-text floor */
+  --color-amber-tint: #fcebce;
+  --color-amber-deep: #b79045;
+  --color-slate: #44607e;
+  --color-slate-tint: #ebf4ff;
+  --color-slate-deep: #a6b9d1;
+
+  /* Series: the dark hue with L* lowered until it clears 4.8:1 on white. */
+  --color-series-1: #2575bd;
+  --color-series-2: #00825d;
+  --color-series-3: #7465c1;
+  --color-series-4: #ba4b76;
+
+  /* File kinds: the same, to 5.7:1. Adjacent ΔE2000 under normal vision is
+     15.4 here against dark's 17.6; under deuteranopia both sets are weak (2.4
+     and 2.0) and the mitigation is the same in both — every kind carries a
+     glyph in the tree and is never keyed by colour alone. */
+  --color-kind-source: #4f688a;
+  --color-kind-native: #8b5b39;
+  --color-kind-data: #776520;
+  --color-kind-style: #6b5f93;
+  --color-kind-media: #37714d;
+  --color-kind-store: #925178;
+  --color-kind-prose: #65666f;
+
+  /* Host marks take their own brand's light-mode mark rather than a derived
+     one — a logo is not ours to reinterpolate. GitHub's #f4f4f5 measures
+     1.10:1 on white and GitLab's orange 2.86:1, both under the floor; Gitea's
+     green already clears it at 3.45:1 and is unchanged. */
+  --color-host-github: #1b1f23;
+  --color-host-gitlab: #e24329;
+  --color-host-gitea: #609926;
+
+  /* Elevation inverts. A top highlight in white says "lit from above" over a
+     dark ground and says nothing at all over a pale one, so light spends a
+     soft drop and a hairline ring instead. */
+  --shadow-raise: 0 2px 6px rgb(21 22 26 / 0.06), 0 0 0 1px rgb(21 22 26 / 0.04);
+  --shadow-float: 0 18px 44px -18px rgb(21 22 26 / 0.26), 0 2px 8px rgb(21 22 26 / 0.05);
+
+  color-scheme: light;
 }
 
 @layer base {
@@ -442,6 +615,34 @@
 .spine-nested {
   --rail: 5px;
   --gap: 13px;
+}
+
+/* ── Waiting, on a first load only ──────────────────────────
+   A block where a value is going to be, breathing just enough to say the page
+   is working rather than broken.
+
+   Not a gradient travelling left to right. That is the shimmer every loading
+   state has, it is louder than anything else on these screens is allowed to
+   be, and it spends attention on the one thing that is not there yet.
+
+   **Only before there is an answer.** A refetch holds the previous one at
+   reduced opacity instead — see `Consumption.tsx`. Replacing a chart somebody
+   is reading with a grey box is a worse answer than a slightly stale one, and
+   it moves the page under them while they are looking at it. */
+@keyframes settling {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+.settling {
+  background: var(--color-settling);
+  border-radius: var(--radius-xs);
+  animation: settling 1.6s ease-in-out infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {

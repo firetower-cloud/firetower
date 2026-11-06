@@ -7,7 +7,7 @@
 const TINTS = [
   "bg-sage-tint text-sage",
   "bg-slate-tint text-slate",
-  "bg-ember-tint text-ember-soft",
+  "bg-ember-tint text-ember-ink",
   "bg-brick-tint text-brick",
   "bg-overlay text-dim",
 ];

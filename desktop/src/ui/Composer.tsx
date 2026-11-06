@@ -671,7 +671,7 @@ export function Composer({
             </>
           )}
           {conversation.limits && conversation.limits.status !== "allowed" && (
-            <span className="ml-auto text-ember-soft">{conversation.limits.window}: {conversation.limits.status}</span>
+            <span className="ml-auto text-ember-ink">{conversation.limits.window}: {conversation.limits.status}</span>
           )}
           <AccountLine />
         </div>

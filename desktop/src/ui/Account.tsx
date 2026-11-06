@@ -61,8 +61,13 @@ export function Account({ backend, onForgot }: { backend: Backend; onForgot: () 
         </p>
         {me.error ? <p className="mt-2 text-meta text-brick">{why(me.error)}</p> : null}
 
+        {/* Amber, not ember. **Ember means an agent is waiting on you and
+            nothing else**, and a password that has to be replaced is not that
+            — it is the other thing amber exists for, "you can carry on, but
+            not for long". This read as ember for as long as there has been an
+            Account screen. */}
         {user?.mustChangePassword && (
-          <p className="mt-4 rounded-xl border border-ember-deep bg-ember-tint px-4 py-3 text-ui text-bone">
+          <p className="mt-4 rounded-xl border border-amber-deep bg-amber-tint px-4 py-3 text-ui text-bone">
             This password has to be replaced before anything else here will work. Open the control plane below and choose your own.
           </p>
         )}
