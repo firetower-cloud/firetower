@@ -1646,23 +1646,26 @@ impl Fleet {
 
     /// The transport a host's kind implies.
     ///
-    /// The worker is identical in both cases and cannot tell which it is
-    /// behind — that indifference is what lets one binary serve a child
-    /// process and a server on the other side of the world.
+    /// One kind, one transport: every machine is another computer reached over
+    /// ssh. A retired host has none — it was the control plane's own process,
+    /// and nothing starts a worker in here any more — so this refuses rather
+    /// than inventing one, and start-up logs it and carries on past the row.
     pub fn transport_for(
         host: &ft_core::Host,
         home: &std::path::Path,
         vault: Option<&Arc<crate::vault::Vault>>,
     ) -> Result<Arc<dyn Transport>> {
-        Ok(match &host.compute {
-            ft_core::Compute::Local => {
-                Arc::new(crate::transport::LocalTransport::new(home.join("worker"))?)
-            }
-            ft_core::Compute::Server { .. } => Arc::new(
+        match &host.compute {
+            ft_core::Compute::Server { .. } => Ok(Arc::new(
                 Self::ssh_transport_for(host, home, vault)?
                     .context("a server host is reached over ssh")?,
+            )),
+            ft_core::Compute::Local => anyhow::bail!(
+                "{} ran agents inside Firetower's own container, which it no longer does. \
+                 Add the machine over ssh instead.",
+                host.name
             ),
-        })
+        }
     }
 
     /// The ssh half of [`Self::transport_for`], for a server host — also what
@@ -1696,11 +1699,18 @@ impl Fleet {
     /// What kind of machine a host is, for wording an error about it.
     ///
     /// A host that has vanished is not worth failing a diagnosis over: the
-    /// wording degrades, the message still arrives.
+    /// wording degrades to "that machine" — see [`crate::diagnose`] — and the
+    /// message still arrives.
     async fn compute_of(&self, host_id: &HostId) -> ft_core::Compute {
         match self.db.host_by_id(host_id).await {
             Ok(Some(host)) => host.compute,
-            _ => ft_core::Compute::Local,
+            _ => ft_core::Compute::Server {
+                host: String::new(),
+                user: None,
+                port: None,
+                key: ft_core::SshKey::Default,
+                host_key: None,
+            },
         }
     }
 
@@ -4746,7 +4756,7 @@ mod tests {
     async fn fleet() -> (Fleet, HostId) {
         let (db, _owner) = Db::open_for_test_owned().await.unwrap();
         let host = db
-            .ensure_host("fire-01", ft_core::Compute::Local, _owner.as_str())
+            .ensure_test_host("fire-01", _owner.as_str())
             .await
             .unwrap();
         (Fleet::new(db), host.id)
@@ -4875,10 +4885,7 @@ mod tests {
     async fn an_acp_permission_survives_a_control_plane_restart() {
         use serde_json::json;
         let (db, owner) = Db::open_for_test_owned().await.unwrap();
-        let host = db
-            .ensure_host("fire-01", ft_core::Compute::Local, &owner)
-            .await
-            .unwrap();
+        let host = db.ensure_test_host("fire-01", &owner).await.unwrap();
         let session = SessionId::new();
         db.insert_session(
             &session,
@@ -4965,7 +4972,7 @@ mod tests {
 
         let (db, owner) = Db::open_for_test_owned().await.unwrap();
         let host = db
-            .ensure_host("fire-01", ft_core::Compute::Local, owner.as_str())
+            .ensure_test_host("fire-01", owner.as_str())
             .await
             .unwrap();
         let session = SessionId::new();
@@ -5185,7 +5192,7 @@ mod supervisor_tests {
     async fn a_tunnel_nobody_waited_for_is_closed_on_the_worker() {
         let (db, _owner) = Db::open_for_test_owned().await.unwrap();
         let host = db
-            .ensure_host("fire-01", ft_core::Compute::Local, _owner.as_str())
+            .ensure_test_host("fire-01", _owner.as_str())
             .await
             .unwrap();
         let fleet = Fleet::new(db);
@@ -5308,7 +5315,7 @@ mod supervisor_tests {
     async fn an_answer_of_the_wrong_kind_does_not_wedge_the_reader() {
         let (db, _owner) = Db::open_for_test_owned().await.unwrap();
         let host = db
-            .ensure_host("fire-01", ft_core::Compute::Local, _owner.as_str())
+            .ensure_test_host("fire-01", _owner.as_str())
             .await
             .unwrap();
         let fleet = Fleet::new(db);
@@ -5352,7 +5359,7 @@ mod supervisor_tests {
     async fn supervising_returns_while_the_host_is_still_connected() {
         let (db, _owner) = Db::open_for_test_owned().await.unwrap();
         let host = db
-            .ensure_host("fire-01", ft_core::Compute::Local, _owner.as_str())
+            .ensure_test_host("fire-01", _owner.as_str())
             .await
             .unwrap();
         let fleet = Fleet::new(db);

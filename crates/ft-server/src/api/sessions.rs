@@ -5,7 +5,6 @@
 //! is asking the worker that holds the workspace.
 
 use super::agents::{agent_credential, agent_env, agent_home};
-use super::repos::is_local_path;
 use super::{credential_for, ApiError, ApiResult, ErrorCode};
 use crate::auth::Principal;
 use crate::oauth;
@@ -464,6 +463,11 @@ pub(crate) async fn create_session_as(
     // for one by id gets the same list, so naming a machine somebody was not
     // given is `no host is available` rather than a refusal that confirms it
     // exists.
+    //
+    // A retired machine is not in this list and cannot be named into it, by
+    // either route — see `Db::IN_THE_FLEET`. That is the whole of "it will
+    // never be scheduled onto again": not a check here, which is a check
+    // somebody has to remember, but a list it is not in.
     let hosts = state
         .db
         .hosts_for(&owner, crate::access::Level::Writer)
@@ -476,7 +480,17 @@ pub(crate) async fn create_session_as(
             .iter()
             .find(|h| h.state == ft_core::HostState::Online && !h.drained),
     }
-    .ok_or_else(|| ApiError::new(ErrorCode::NoCapacity, "no host is available to take this"))?;
+    .ok_or_else(|| match hosts.is_empty() {
+        // The ordinary state of a fresh install, now that nothing is
+        // registered at boot. It is a different problem from a fleet whose
+        // machines are all busy or down, and it has a different answer.
+        true => ApiError::new(
+            ErrorCode::NoCapacity,
+            "No machine is connected yet, and an agent runs on a machine. \
+             Add one under Compute, then start this again.",
+        ),
+        false => ApiError::new(ErrorCode::NoCapacity, "no host is available to take this"),
+    })?;
 
     if host.drained {
         return Err(ApiError::new(
@@ -514,25 +528,6 @@ pub(crate) async fn create_session_as(
     }
 
     require_ready(&state, &host.id, req.agent).await?;
-
-    // Native workers interpret filesystem repository paths on their own host.
-    // Container users should connect by URL unless using the built-in local environment.
-    if let Some((local, _)) = repos.iter().find(|(r, _)| {
-        is_local_path(&r.remote)
-            && !matches!(
-                host.compute,
-                ft_core::Compute::Local | ft_core::Compute::Server { .. }
-            )
-    }) {
-        return Err(ApiError::new(
-            ErrorCode::InvalidRequest,
-            format!(
-                "{} is a filesystem path. Choose direct host execution where that path exists, \
-                 or connect it by URL to use it in {}.",
-                local.remote, host.name
-            ),
-        ));
-    }
 
     // The trunk, for a repository nobody has read yet.
     //

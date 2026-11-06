@@ -250,17 +250,17 @@ pub(super) async fn create_run(
 
     // What would be ended, if it is not going to be waited for.
     let mut running: Vec<String> = Vec::new();
-    if req.control_plane {
-        if !current.control_plane.upgradable {
-            return Err(ApiError::new(
-                ErrorCode::ActionFailed,
-                current
-                    .control_plane
-                    .reason
-                    .unwrap_or_else(|| "the control plane cannot be upgraded from here".into()),
-            ));
-        }
-        running.extend(current.control_plane.sessions.iter().cloned());
+    // Nothing is added to `running` for the control plane: nothing runs in its
+    // container, so recreating it ends nothing. Only the machines below can
+    // have sessions to lose.
+    if req.control_plane && !current.control_plane.upgradable {
+        return Err(ApiError::new(
+            ErrorCode::ActionFailed,
+            current
+                .control_plane
+                .reason
+                .unwrap_or_else(|| "the control plane cannot be upgraded from here".into()),
+        ));
     }
     let mut host_names = Vec::new();
     for id in &req.host_ids {

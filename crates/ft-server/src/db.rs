@@ -24,6 +24,20 @@ use sqlx::{PgPool, Row};
 /// `EXISTS (...)` clause quoted in the message. Substituting a const is not
 /// re-parsed, so the braces can only be braces.
 const HOST_COLUMNS: &str = "h.*, h.path::text AS path";
+/// What counts as being in the fleet: anything but a retired machine.
+///
+/// A `Local` host is the control plane's own process, which no longer runs
+/// anything — see [`ft_core::Compute::Local`]. Its row stays where it is, and
+/// [`Db::host_by_id`] still reads it, so every session, workspace and event
+/// that points at one still opens. It is kept out of the lists instead, which
+/// is the whole of "retired": nothing offers it, nothing schedules onto it,
+/// and nothing tries to connect to it.
+///
+/// One predicate here rather than an exclusion at each of the dozen places
+/// that enumerate machines — three pickers, the profile screen, the update
+/// targets, the phone. Any one of those being missed makes it selectable
+/// again.
+const IN_THE_FLEET: &str = "h.compute->>'type' <> 'Local'";
 /// The same trick for repositories: `ltree` does not decode as a `String`
 /// without being told to be one.
 const REPO_COLUMNS: &str = "r.*, r.path::text AS path";
@@ -83,6 +97,19 @@ impl Db {
             .await
             .context("applying control-plane migrations")?;
         Ok(Self { pool })
+    }
+
+    /// A machine for a test to point at, reached over ssh like every real one.
+    ///
+    /// Nearly every fixture in this crate wants a *row* rather than a machine:
+    /// [`Db::ensure_host`] writes jsonb and dials nothing, and the tests that
+    /// need a host that answers inject a transport of their own —
+    /// [`crate::forward::testing::worker`], or one of the fakes in
+    /// `fleet.rs` — rather than connecting to anything. So one helper, and the
+    /// address is the name, which keeps two fixtures in the same test distinct.
+    #[cfg(test)]
+    pub async fn ensure_test_host(&self, name: &str, added_by: &str) -> Result<Host> {
+        self.ensure_host(name, test_compute(name), added_by).await
     }
 
     /// A test database with an organization and an administrator in it.
@@ -168,8 +195,6 @@ impl Db {
 
     /// Register a host, or leave the existing one alone.
     ///
-    /// `localhost` goes through this like any other host, because it *is* one.
-    ///
     /// **A machine is personal until somebody shares it.** It lands at
     /// `u/<whoever added it>/<its name>`, which is the same default every other
     /// kind gets, and moving it into a directory is a deliberate act with a
@@ -178,9 +203,8 @@ impl Db {
     /// whole organisation before they have decided that, and there is no way to
     /// undo a default nobody chose.
     ///
-    /// `added_by` is a person's id, and at boot that is the installation's
-    /// administrator: `localhost` is registered before anybody else exists, so
-    /// "the only person here" and "whoever added it" are the same answer.
+    /// `added_by` is a person's id. Every machine is added by somebody signed
+    /// in — nothing registers one at boot any more.
     pub async fn ensure_host(&self, name: &str, compute: Compute, added_by: &str) -> Result<Host> {
         if let Some(existing) = self.host_by_name(name).await? {
             return Ok(existing);
@@ -211,21 +235,6 @@ impl Db {
         self.host_by_name(name)
             .await?
             .context("host vanished immediately after insert")
-    }
-
-    /// Whoever has been here longest.
-    ///
-    /// For the one thing that happens before anybody signs in: `localhost` is
-    /// registered at boot and a machine is personal, so it needs an owner and
-    /// there is nobody asking. Ids sort by creation, so this is the account the
-    /// installation was set up with — the same person the migration gave the
-    /// existing machines to on a single-person install.
-    pub async fn first_person(&self) -> Result<String> {
-        sqlx::query_scalar("SELECT id FROM users ORDER BY id LIMIT 1")
-            .fetch_optional(&self.pool)
-            .await
-            .context("looking for the first person here")?
-            .context("this Firetower has nobody in it yet")
     }
 
     /// The label somebody's paths are built from.
@@ -772,7 +781,8 @@ impl Db {
         row.map(host_from_row).transpose()
     }
 
-    /// Every machine this person may run on.
+    /// Every machine this person may run on, retired ones aside — see
+    /// [`IN_THE_FLEET`].
     ///
     /// The fleet's own [`Db::hosts`] is unfiltered and has to be: a supervisor
     /// reconnecting to a machine is not acting for anybody. This is the one an
@@ -780,7 +790,8 @@ impl Db {
     /// exist.
     pub async fn hosts_for(&self, person: &str, at_least: Level) -> Result<Vec<Host>> {
         Ok(sqlx::query(&format!(
-            "SELECT {HOST_COLUMNS} FROM hosts h WHERE {visible} ORDER BY h.created_at",
+            "SELECT {HOST_COLUMNS} FROM hosts h
+              WHERE {visible} AND {IN_THE_FLEET} ORDER BY h.created_at",
             visible = filed_where("h", 1, at_least)
         ))
         .bind(person)
@@ -791,8 +802,9 @@ impl Db {
         .collect())
     }
 
-    /// Every host, whoever may run on it, skipping any row this build cannot
-    /// understand — see [`skip_unreadable_host`].
+    /// Every host in the fleet, whoever may run on it: skipping the retired
+    /// ([`IN_THE_FLEET`]) and any row this build cannot understand
+    /// ([`skip_unreadable_host`]).
     ///
     /// Unfiltered on purpose. What asks is the fleet: a supervisor keeping a
     /// machine connected, a reclaim sweep, a start-up that has to know what to
@@ -800,8 +812,29 @@ impl Db {
     /// check against. [`Db::hosts_for`] is what a request asks.
     pub async fn hosts(&self) -> Result<Vec<Host>> {
         Ok(sqlx::query(&format!(
-            "SELECT {HOST_COLUMNS} FROM hosts h ORDER BY h.created_at"
+            "SELECT {HOST_COLUMNS} FROM hosts h WHERE {IN_THE_FLEET} ORDER BY h.created_at"
         ))
+        .fetch_all(&self.pool)
+        .await?
+        .into_iter()
+        .filter_map(skip_unreadable_host)
+        .collect())
+    }
+
+    /// The machines that were removed, out of the ones this person may see.
+    ///
+    /// The other side of [`IN_THE_FLEET`]. A retired row is in no picker and
+    /// takes no work, and the sessions that ran on it are still the record of
+    /// what happened there — so there has to be one place that says it existed
+    /// and offers the way in. That is a line at the foot of the Compute screen,
+    /// and this is what it reads.
+    pub async fn retired_hosts(&self, person: &str, at_least: Level) -> Result<Vec<Host>> {
+        Ok(sqlx::query(&format!(
+            "SELECT {HOST_COLUMNS} FROM hosts h
+              WHERE {visible} AND NOT {IN_THE_FLEET} ORDER BY h.created_at",
+            visible = filed_where("h", 1, at_least)
+        ))
+        .bind(person)
         .fetch_all(&self.pool)
         .await?
         .into_iter()
@@ -2758,6 +2791,18 @@ async fn sweep_test_schemas(pool: &PgPool) {
 /// which failed start-up, naming neither the host nor the fact that every other
 /// one was fine. Skipping it loudly means the fleet keeps working and the row is
 /// still there to look at.
+/// The ssh machine [`Db::ensure_test_host`] writes.
+#[cfg(test)]
+fn test_compute(host: &str) -> Compute {
+    Compute::Server {
+        host: host.to_string(),
+        user: Some("deploy".to_string()),
+        port: None,
+        key: ft_core::SshKey::Default,
+        host_key: None,
+    }
+}
+
 fn skip_unreadable_host(row: sqlx::postgres::PgRow) -> Option<Host> {
     let id: String = row.get("id");
     let name: String = row.get("name");
@@ -3842,11 +3887,14 @@ mod tests {
         .unwrap();
     }
 
+    /// Every part of a destination has to survive being stored and read back:
+    /// one missing field is a host that connects to a different machine, or to
+    /// none.
     #[tokio::test]
-    async fn localhost_is_stored_like_any_other_host() {
+    async fn a_host_keeps_every_part_of_its_destination() {
         let (db, _owner) = db_with_user().await;
-        let local = db
-            .ensure_host("localhost", Compute::Local, _owner.as_str())
+        let plain = db
+            .ensure_test_host("build-box", _owner.as_str())
             .await
             .unwrap();
         let remote = db
@@ -3866,13 +3914,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(
-            local.compute,
-            Compute::Local,
-            "there is nothing to connect to locally"
-        );
-        // Every part of a destination has to survive the trip: one missing
-        // field is a host that connects to a different machine, or to none.
+        assert!(matches!(plain.compute, Compute::Server { .. }));
         assert_eq!(
             remote.compute,
             Compute::Server {
@@ -3888,11 +3930,111 @@ mod tests {
         assert_eq!(db.hosts().await.unwrap().len(), 2);
     }
 
+    /// The migration that retired the control plane's own container.
+    ///
+    /// It is the one thing in this change that could destroy the record of
+    /// what ran there: `hosts` cascades, so a `delete` here would take the
+    /// sessions, the workspaces and the events with it — the evidence of the
+    /// incident the feature was removed over. So the statement is run against
+    /// rows that point at the retired machine, and nothing may move.
+    #[tokio::test]
+    async fn retiring_the_local_host_deletes_nothing() {
+        let (db, owner) = db_with_user().await;
+        // Written the way a version that still had the feature wrote it.
+        let host = db
+            .ensure_host("localhost", Compute::Local, owner.as_str())
+            .await
+            .unwrap();
+        let session = SessionId::new();
+        db.insert_session(
+            &session,
+            &host.id,
+            &owner,
+            Some("acme/backend"),
+            "What it was doing",
+            "do a thing",
+            Some("agent/x"),
+            Some("main"),
+            "ClaudeCode",
+            WorkspaceSize::Medium,
+            ft_core::Share::Equal,
+            &ft_core::Step::plan(true, false),
+            None,
+        )
+        .await
+        .unwrap();
+        db.record_event(
+            &host.id,
+            1,
+            &session,
+            &EventKind::RepoFetched {
+                detail: "the line somebody will read back".into(),
+            },
+            chrono::Utc::now(),
+        )
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO secret_access (scope, name, owner, action, reason, at, digest)
+             VALUES ('GIT', 'github.com', $1, 'read', 'cloning', now(), '\\x00')",
+        )
+        .bind(&owner)
+        .execute(db.pool())
+        .await
+        .unwrap();
+
+        let counts = || async {
+            let mut counted = Vec::new();
+            for table in ["hosts", "sessions", "workspaces", "events", "secret_access"] {
+                let n: i64 = sqlx::query_scalar(&format!("SELECT count(*) FROM {table}"))
+                    .fetch_one(db.pool())
+                    .await
+                    .unwrap();
+                counted.push((table, n));
+            }
+            counted
+        };
+
+        let before = counts().await;
+        assert!(
+            before.iter().all(|(_, n)| *n > 0),
+            "the test has to have something to lose: {before:?}"
+        );
+
+        sqlx::raw_sql(include_str!(
+            "../../../migrations/server/20261106120000_retire_local_host.sql"
+        ))
+        .execute(db.pool())
+        .await
+        .unwrap();
+
+        assert_eq!(before, counts().await, "the migration deletes nothing");
+
+        // Still readable, which is what makes that session open.
+        let read = db.host_by_id(&host.id).await.unwrap().expect("still there");
+        assert_eq!(read.compute, Compute::Local);
+        assert!(read.drained, "and takes no work");
+        assert!(
+            db.hosts().await.unwrap().is_empty(),
+            "while being in no list"
+        );
+        assert!(db
+            .hosts_for(&owner, Level::Viewer)
+            .await
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            db.session(&session).await.unwrap().map(|s| s.title),
+            Some("What it was doing".to_string()),
+            "and the session still reads"
+        );
+    }
+
     #[tokio::test]
     async fn a_host_with_live_sessions_refuses_to_be_forgotten() {
         let (db, owner) = db_with_user().await;
         let host = db
-            .ensure_host("localhost", Compute::Local, owner.as_str())
+            .ensure_test_host("localhost", owner.as_str())
             .await
             .unwrap();
         let id = SessionId::new();
@@ -3943,7 +4085,7 @@ mod tests {
             .id;
 
         let host = db
-            .ensure_host("localhost", Compute::Local, owner.as_str())
+            .ensure_test_host("localhost", owner.as_str())
             .await
             .unwrap();
         let id = SessionId::new();
@@ -4018,7 +4160,7 @@ mod tests {
         // 500s instead of loading.
         let (db, owner) = db_with_user().await;
         let host = db
-            .ensure_host("localhost", Compute::Local, owner.as_str())
+            .ensure_test_host("localhost", owner.as_str())
             .await
             .unwrap();
         let id = SessionId::new();
@@ -4062,7 +4204,7 @@ mod tests {
         // folding the two together would make its sessions look lost.
         let (db, _owner) = db_with_user().await;
         let host = db
-            .ensure_host("localhost", Compute::Local, _owner.as_str())
+            .ensure_test_host("localhost", _owner.as_str())
             .await
             .unwrap();
 
@@ -4078,11 +4220,11 @@ mod tests {
     async fn registering_a_host_twice_is_harmless() {
         let (db, _owner) = db_with_user().await;
         let first = db
-            .ensure_host("localhost", Compute::Local, _owner.as_str())
+            .ensure_test_host("localhost", _owner.as_str())
             .await
             .unwrap();
         let again = db
-            .ensure_host("localhost", Compute::Local, _owner.as_str())
+            .ensure_test_host("localhost", _owner.as_str())
             .await
             .unwrap();
         assert_eq!(first.id, again.id);
@@ -4093,7 +4235,7 @@ mod tests {
     async fn a_host_starts_unreachable_until_it_says_hello() {
         let (db, _owner) = db_with_user().await;
         let host = db
-            .ensure_host("localhost", Compute::Local, _owner.as_str())
+            .ensure_test_host("localhost", _owner.as_str())
             .await
             .unwrap();
         assert_eq!(host.state, HostState::Unreachable);
@@ -4129,7 +4271,7 @@ mod tests {
     async fn what_a_host_can_run_is_replaced_rather_than_accumulated() {
         let (db, _owner) = db_with_user().await;
         let host = db
-            .ensure_host("localhost", Compute::Local, _owner.as_str())
+            .ensure_test_host("localhost", _owner.as_str())
             .await
             .unwrap();
 
@@ -4151,7 +4293,7 @@ mod tests {
     async fn why_a_host_failed_outlives_the_attempt() {
         let (db, _owner) = db_with_user().await;
         let host = db
-            .ensure_host("fire-01", Compute::Local, _owner.as_str())
+            .ensure_test_host("fire-01", _owner.as_str())
             .await
             .unwrap();
         assert!(host.diagnosis.is_none(), "nothing has failed yet");
@@ -4179,7 +4321,7 @@ mod tests {
     async fn a_host_that_comes_back_stops_explaining_itself() {
         let (db, _owner) = db_with_user().await;
         let host = db
-            .ensure_host("fire-01", Compute::Local, _owner.as_str())
+            .ensure_test_host("fire-01", _owner.as_str())
             .await
             .unwrap();
 
@@ -4203,7 +4345,7 @@ mod tests {
     async fn a_status_event_updates_the_session_projection() {
         let (db, owner) = db_with_user().await;
         let host = db
-            .ensure_host("localhost", Compute::Local, owner.as_str())
+            .ensure_test_host("localhost", owner.as_str())
             .await
             .unwrap();
         let id = SessionId::new();
@@ -4253,7 +4395,7 @@ mod tests {
     async fn the_branch_the_worker_actually_used_wins() {
         let (db, owner) = db_with_user().await;
         let host = db
-            .ensure_host("localhost", Compute::Local, owner.as_str())
+            .ensure_test_host("localhost", owner.as_str())
             .await
             .unwrap();
         let id = SessionId::new();
@@ -4300,7 +4442,7 @@ mod tests {
     async fn a_replayed_event_is_ignored_rather_than_duplicated() {
         let (db, owner) = db_with_user().await;
         let host = db
-            .ensure_host("localhost", Compute::Local, owner.as_str())
+            .ensure_test_host("localhost", owner.as_str())
             .await
             .unwrap();
         let id = SessionId::new();
@@ -4343,7 +4485,7 @@ mod tests {
     async fn a_repository_can_be_added_to_a_running_session() {
         let (db, owner) = db_with_user().await;
         let host = db
-            .ensure_host("localhost", Compute::Local, owner.as_str())
+            .ensure_test_host("localhost", owner.as_str())
             .await
             .unwrap();
         let id = SessionId::new();
@@ -4406,7 +4548,7 @@ mod tests {
     async fn a_worktree_event_that_names_its_repository_is_recorded() {
         let (db, owner) = db_with_user().await;
         let host = db
-            .ensure_host("localhost", Compute::Local, owner.as_str())
+            .ensure_test_host("localhost", owner.as_str())
             .await
             .unwrap();
         let id = SessionId::new();
@@ -4481,7 +4623,7 @@ mod tests {
         // that describe a checkout are absent rather than empty strings.
         let (db, owner) = db_with_user().await;
         let host = db
-            .ensure_host("localhost", Compute::Local, owner.as_str())
+            .ensure_test_host("localhost", owner.as_str())
             .await
             .unwrap();
         let id = SessionId::new();
@@ -4522,7 +4664,7 @@ mod tests {
     async fn adding_a_repository_to_a_bare_agent_names_it() {
         let (db, owner) = db_with_user().await;
         let host = db
-            .ensure_host("localhost", Compute::Local, owner.as_str())
+            .ensure_test_host("localhost", owner.as_str())
             .await
             .unwrap();
         let id = SessionId::new();
@@ -4580,7 +4722,7 @@ mod tests {
     async fn a_second_repository_leaves_the_caption_on_the_first() {
         let (db, owner) = db_with_user().await;
         let host = db
-            .ensure_host("localhost", Compute::Local, owner.as_str())
+            .ensure_test_host("localhost", owner.as_str())
             .await
             .unwrap();
         let id = SessionId::new();
@@ -4632,7 +4774,7 @@ mod tests {
 
         let (db, owner) = db_with_user().await;
         let host = db
-            .ensure_host("localhost", Compute::Local, owner.as_str())
+            .ensure_test_host("localhost", owner.as_str())
             .await
             .unwrap();
         let id = SessionId::new();
@@ -4691,7 +4833,7 @@ mod tests {
     async fn paging_walks_backwards_without_skipping_or_repeating() {
         let (db, owner) = db_with_user().await;
         let host = db
-            .ensure_host("localhost", Compute::Local, owner.as_str())
+            .ensure_test_host("localhost", owner.as_str())
             .await
             .unwrap();
 
@@ -4755,7 +4897,7 @@ mod tests {
     async fn replay_can_be_narrowed_to_one_session() {
         let (db, owner) = db_with_user().await;
         let host = db
-            .ensure_host("localhost", Compute::Local, owner.as_str())
+            .ensure_test_host("localhost", owner.as_str())
             .await
             .unwrap();
 
@@ -4814,7 +4956,7 @@ mod tests {
     async fn the_resume_cursor_only_moves_forward() {
         let (db, owner) = db_with_user().await;
         let host = db
-            .ensure_host("localhost", Compute::Local, owner.as_str())
+            .ensure_test_host("localhost", owner.as_str())
             .await
             .unwrap();
         let id = SessionId::new();
@@ -4986,7 +5128,7 @@ mod tests {
     async fn presence_is_remembered_per_host_and_refreshed_in_place() {
         let (db, _owner) = db_with_user().await;
         let host = db
-            .ensure_host("localhost", Compute::Local, _owner.as_str())
+            .ensure_test_host("localhost", _owner.as_str())
             .await
             .unwrap();
 
@@ -5061,7 +5203,7 @@ mod tests {
     async fn a_forgotten_session_is_not_resurrected_by_its_host() {
         let (db, owner) = db_with_user().await;
         let host = db
-            .ensure_host("fire-01", Compute::Local, owner.as_str())
+            .ensure_test_host("fire-01", owner.as_str())
             .await
             .unwrap();
 
@@ -5127,7 +5269,7 @@ mod tests {
     async fn a_session_state_is_written_unless_the_workspace_is_gone() {
         let (db, owner) = db_with_user().await;
         let host = db
-            .ensure_host("fire-01", Compute::Local, owner.as_str())
+            .ensure_test_host("fire-01", owner.as_str())
             .await
             .unwrap();
 
@@ -5208,7 +5350,7 @@ mod tests {
     async fn a_status_the_control_plane_decides_is_on_the_stream() {
         let (db, owner) = db_with_user().await;
         let host = db
-            .ensure_host("fire-01", Compute::Local, owner.as_str())
+            .ensure_test_host("fire-01", owner.as_str())
             .await
             .unwrap();
 
@@ -5267,7 +5409,7 @@ mod tests {
     async fn nothing_brings_an_ended_session_back() {
         let (db, owner) = db_with_user().await;
         let host = db
-            .ensure_host("fire-01", Compute::Local, owner.as_str())
+            .ensure_test_host("fire-01", owner.as_str())
             .await
             .unwrap();
 
@@ -5354,7 +5496,7 @@ mod tests {
     async fn a_finished_workspace_gives_back_what_it_was_holding() {
         let (db, owner) = db_with_user().await;
         let host = db
-            .ensure_host("fire-01", Compute::Local, owner.as_str())
+            .ensure_test_host("fire-01", owner.as_str())
             .await
             .unwrap();
         let id = a_run(&db, &host.id, &owner).await;
@@ -5384,7 +5526,7 @@ mod tests {
     async fn a_workspace_still_working_is_left_alone() {
         let (db, owner) = db_with_user().await;
         let host = db
-            .ensure_host("fire-01", Compute::Local, owner.as_str())
+            .ensure_test_host("fire-01", owner.as_str())
             .await
             .unwrap();
         let id = a_run(&db, &host.id, &owner).await;
@@ -5412,7 +5554,7 @@ mod tests {
     async fn a_workspace_with_nothing_in_it_yet_is_not_swept_away() {
         let (db, owner) = db_with_user().await;
         let host = db
-            .ensure_host("fire-01", Compute::Local, owner.as_str())
+            .ensure_test_host("fire-01", owner.as_str())
             .await
             .unwrap();
 
@@ -5440,7 +5582,7 @@ mod tests {
     async fn purging_the_same_workspace_twice_is_not_an_error() {
         let (db, owner) = db_with_user().await;
         let host = db
-            .ensure_host("fire-01", Compute::Local, owner.as_str())
+            .ensure_test_host("fire-01", owner.as_str())
             .await
             .unwrap();
         let id = a_run(&db, &host.id, &owner).await;
@@ -5458,7 +5600,7 @@ mod tests {
     async fn no_event_outlives_the_session_it_was_about() {
         let (db, owner) = db_with_user().await;
         let host = db
-            .ensure_host("fire-01", Compute::Local, owner.as_str())
+            .ensure_test_host("fire-01", owner.as_str())
             .await
             .unwrap();
         let id = a_run(&db, &host.id, &owner).await;
@@ -5493,7 +5635,7 @@ mod tests {
     async fn a_switch_pointing_at_a_run_does_not_refuse_to_let_it_go() {
         let (db, owner) = db_with_user().await;
         let host = db
-            .ensure_host("fire-01", Compute::Local, owner.as_str())
+            .ensure_test_host("fire-01", owner.as_str())
             .await
             .unwrap();
         let from = a_run(&db, &host.id, &owner).await;
@@ -5546,7 +5688,7 @@ mod tests {
     async fn a_forgotten_session_is_owed_a_teardown_until_it_is_told() {
         let (db, owner) = db_with_user().await;
         let host = db
-            .ensure_host("fire-01", Compute::Local, owner.as_str())
+            .ensure_test_host("fire-01", owner.as_str())
             .await
             .unwrap();
 
@@ -5597,7 +5739,7 @@ mod tests {
     async fn a_session_runs_inside_a_workspace() {
         let (db, owner) = db_with_user().await;
         let host = db
-            .ensure_host("localhost", Compute::Local, owner.as_str())
+            .ensure_test_host("localhost", owner.as_str())
             .await
             .unwrap();
 
@@ -5652,7 +5794,7 @@ mod tests {
     async fn checkouts_belong_to_the_workspace() {
         let (db, owner) = db_with_user().await;
         let host = db
-            .ensure_host("localhost", Compute::Local, owner.as_str())
+            .ensure_test_host("localhost", owner.as_str())
             .await
             .unwrap();
 
@@ -5720,7 +5862,7 @@ mod tests {
     async fn forgetting_ends_the_session_and_marks_the_workspace() {
         let (db, owner) = db_with_user().await;
         let host = db
-            .ensure_host("localhost", Compute::Local, owner.as_str())
+            .ensure_test_host("localhost", owner.as_str())
             .await
             .unwrap();
 
@@ -5767,7 +5909,7 @@ mod tests {
     async fn a_workspace_is_named_for_its_work() {
         let (db, owner) = db_with_user().await;
         let host = db
-            .ensure_host("localhost", Compute::Local, owner.as_str())
+            .ensure_test_host("localhost", owner.as_str())
             .await
             .unwrap();
 
@@ -5823,7 +5965,7 @@ mod tests {
     async fn renaming_a_session_renames_its_workspace() {
         let (db, owner) = db_with_user().await;
         let host = db
-            .ensure_host("localhost", Compute::Local, owner.as_str())
+            .ensure_test_host("localhost", owner.as_str())
             .await
             .unwrap();
 
@@ -5872,7 +6014,7 @@ mod tests {
     async fn a_workspace_keeps_its_first_sessions_id() {
         let (db, owner) = db_with_user().await;
         let host = db
-            .ensure_host("localhost", Compute::Local, owner.as_str())
+            .ensure_test_host("localhost", owner.as_str())
             .await
             .unwrap();
 
@@ -5907,7 +6049,7 @@ mod tests {
     async fn a_workspace_can_hold_two_agents() {
         let (db, owner) = db_with_user().await;
         let host = db
-            .ensure_host("localhost", Compute::Local, owner.as_str())
+            .ensure_test_host("localhost", owner.as_str())
             .await
             .unwrap();
 
@@ -5985,7 +6127,7 @@ mod tests {
     async fn a_workspace_knows_the_other_agents_it_has_to_take_with_it() {
         let (db, owner) = db_with_user().await;
         let host = db
-            .ensure_host("localhost", Compute::Local, owner.as_str())
+            .ensure_test_host("localhost", owner.as_str())
             .await
             .unwrap();
 
@@ -6059,7 +6201,7 @@ mod tests {
     async fn ending_one_agent_leaves_the_workspace_and_its_neighbour() {
         let (db, owner) = db_with_user().await;
         let host = db
-            .ensure_host("localhost", Compute::Local, owner.as_str())
+            .ensure_test_host("localhost", owner.as_str())
             .await
             .unwrap();
 
@@ -6123,7 +6265,7 @@ mod tests {
     async fn every_session_gets_its_own_number_and_a_name_from_it() {
         let (db, owner) = db_with_user().await;
         let host = db
-            .ensure_host("localhost", Compute::Local, owner.as_str())
+            .ensure_test_host("localhost", owner.as_str())
             .await
             .unwrap();
 
@@ -6247,7 +6389,7 @@ mod tests {
         let (db, mine) = db_with_user().await;
         let theirs = second_user(&db).await;
         let host = db
-            .ensure_host("localhost", Compute::Local, mine.as_str())
+            .ensure_test_host("localhost", mine.as_str())
             .await
             .unwrap();
 
@@ -6284,7 +6426,7 @@ mod tests {
         let (db, mine) = db_with_user().await;
         let theirs = second_user(&db).await;
         let host = db
-            .ensure_host("localhost", Compute::Local, mine.as_str())
+            .ensure_test_host("localhost", mine.as_str())
             .await
             .unwrap();
 
@@ -6319,7 +6461,7 @@ mod tests {
     async fn a_child_remembers_which_session_asked_for_it() {
         let (db, mine) = db_with_user().await;
         let host = db
-            .ensure_host("localhost", Compute::Local, mine.as_str())
+            .ensure_test_host("localhost", mine.as_str())
             .await
             .unwrap();
 
@@ -6391,7 +6533,7 @@ mod tests {
     async fn deliveries_wait_and_are_taken_once_in_order() {
         let (db, mine) = db_with_user().await;
         let host = db
-            .ensure_host("localhost", Compute::Local, mine.as_str())
+            .ensure_test_host("localhost", mine.as_str())
             .await
             .unwrap();
         let lead = SessionId::new();
@@ -6436,7 +6578,7 @@ mod tests {
         let (db, mine) = db_with_user().await;
         let theirs = second_user(&db).await;
         let host = db
-            .ensure_host("localhost", Compute::Local, mine.as_str())
+            .ensure_test_host("localhost", mine.as_str())
             .await
             .unwrap();
 
@@ -6574,10 +6716,7 @@ mod tests {
             .await
             .unwrap();
 
-        let host = db
-            .ensure_host("fire-01", Compute::Local, &admin)
-            .await
-            .unwrap();
+        let host = db.ensure_test_host("fire-01", &admin).await.unwrap();
         let id = a_run(&db, &host.id, &admin).await;
         let workspace = workspace_of(&db, &id).await;
         let at = access
@@ -6630,7 +6769,7 @@ mod tests {
     async fn a_host_this_build_cannot_read_is_skipped_rather_than_fatal() {
         let (db, _owner) = db_with_user().await;
         let keep = db
-            .ensure_host("localhost", Compute::Local, _owner.as_str())
+            .ensure_test_host("localhost", _owner.as_str())
             .await
             .unwrap();
 

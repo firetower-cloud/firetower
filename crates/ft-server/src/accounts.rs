@@ -1098,10 +1098,7 @@ mod tests {
             .id;
 
         // A machine she added, and a credential she authorized.
-        let host = db
-            .ensure_host("fire-01", ft_core::Compute::Local, ana.as_str())
-            .await
-            .unwrap();
+        let host = db.ensure_test_host("fire-01", ana.as_str()).await.unwrap();
         assert_eq!(host.path.as_str(), "u/ana/fire_01");
         let vault =
             crate::vault::Vault::new(db.pool().clone(), crate::vault::crypto::RootKey::generate());

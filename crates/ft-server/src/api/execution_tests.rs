@@ -216,12 +216,189 @@ async fn missing_native_worker_has_native_setup_instructions_and_stays_unready()
     assert!(!worker.required, "not asked until ssh gets in");
 }
 
+/// The machine Firetower used to run everything on is still in `hosts` — the
+/// sessions that ran in that container are the record of it — and it is in no
+/// list, so nothing can put work there by either route.
+#[tokio::test]
+async fn a_retired_machine_is_readable_and_unreachable() {
+    let (state, principal, host, _ready, owner) = fixture().await;
+    let retired = state
+        .db
+        .ensure_host("localhost", Compute::Local, &owner)
+        .await
+        .unwrap();
+
+    // Readable, which is the whole reason the kind still decodes: this is what
+    // resolves the machine of a session that ran there.
+    assert!(
+        state.db.host_by_id(&retired.id).await.unwrap().is_some(),
+        "a session that ran there has to still open"
+    );
+
+    // And in no list: not the fleet's, and not the one every picker is drawn
+    // from.
+    assert!(
+        !state
+            .db
+            .hosts()
+            .await
+            .unwrap()
+            .iter()
+            .any(|h| h.id == retired.id),
+        "nothing supervises or sweeps it"
+    );
+    let Json(listed) = hosts::list_hosts(State(state.clone()), Extension(principal.clone()))
+        .await
+        .unwrap();
+    assert!(
+        !listed.iter().any(|h| h.id == retired.id),
+        "and no picker offers it"
+    );
+    assert!(
+        listed.iter().any(|h| h.id == host.id),
+        "while the machines somebody added are all there"
+    );
+
+    // And one place says it existed, so the sessions that ran there can be
+    // found from the screen the row used to be on.
+    let Json(gone) = hosts::retired_hosts(State(state.clone()), Extension(principal.clone()))
+        .await
+        .unwrap();
+    assert_eq!(gone.len(), 1);
+    assert_eq!(gone[0].name, "localhost");
+    assert_eq!(gone[0].id, retired.id);
+
+    // Naming it is the same answer as naming a machine that does not exist,
+    // which is what it is now.
+    let req = serde_json::from_value(
+        serde_json::json!({ "name": "t", "agent": "ClaudeCode", "hostId": retired.id }),
+    )
+    .unwrap();
+    let error = sessions::create_session(State(state.clone()), Extension(principal), Json(req))
+        .await
+        .unwrap_err();
+    assert!(
+        error.message.contains("no host is available"),
+        "{}",
+        error.message
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// A fresh install, and the one an upgrade leaves behind: nothing in the fleet
+/// but the machine that was removed. The refusal has to send somebody to add
+/// one rather than describe a machine that is not coming back.
+#[tokio::test]
+async fn an_empty_fleet_refuses_the_work_and_says_what_is_missing() {
+    let (state, principal, host, _ready, owner) = fixture().await;
+    state.fleet.stop_supervising(&host.id).await;
+    state.db.delete_host(&host.id).await.unwrap();
+    state
+        .db
+        .ensure_host("localhost", Compute::Local, &owner)
+        .await
+        .unwrap();
+
+    let req =
+        serde_json::from_value(serde_json::json!({ "name": "t", "agent": "ClaudeCode" })).unwrap();
+    let error = sessions::create_session(State(state.clone()), Extension(principal), Json(req))
+        .await
+        .unwrap_err();
+    assert!(
+        error.message.contains("No machine is connected yet"),
+        "{}",
+        error.message
+    );
+
+    let workspaces: i64 = sqlx::query_scalar("SELECT count(*) FROM workspaces")
+        .fetch_one(state.db.pool())
+        .await
+        .unwrap();
+    assert_eq!(workspaces, 0, "and nothing was started anyway");
+}
+
+/// Adding or probing a machine whose address is an ssh option.
+///
+/// `-oProxyCommand=…` reaches ssh as an option rather than a destination, and
+/// ssh runs it through a shell — here, in the control plane's container, as
+/// the control plane. Both doors are shut, and nothing runs on the way past.
+#[tokio::test]
+async fn an_address_that_is_an_ssh_option_is_refused_at_the_api() {
+    let (state, principal, host, _ready, _owner) = fixture().await;
+    let dir = tempfile::tempdir().unwrap();
+    let proof = dir.path().join("pwned");
+    let payload = serde_json::json!({
+        "compute": {
+            "type": "Server",
+            "host": format!("-oProxyCommand=touch {}", proof.display()),
+            "key": { "type": "Default" },
+        },
+    });
+
+    let created = hosts::create_host(
+        State(state.clone()),
+        Extension(principal.clone()),
+        Json(serde_json::from_value(payload.clone()).unwrap()),
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(created.code, ErrorCode::InvalidRequest));
+
+    let probed = hosts::probe_host(
+        State(state.clone()),
+        Json(serde_json::from_value(payload).unwrap()),
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(probed.code, ErrorCode::InvalidRequest));
+
+    assert!(!proof.exists(), "nothing was run");
+    let Json(listed) = hosts::list_hosts(State(state.clone()), Extension(principal))
+        .await
+        .unwrap();
+    assert_eq!(listed.len(), 1, "and nothing was written down");
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// Firetower refuses to be a machine in its own fleet, on both doors.
+#[tokio::test]
+async fn firetower_refuses_to_add_itself() {
+    let (state, principal, host, _ready, _owner) = fixture().await;
+    let payload = serde_json::json!({ "compute": { "type": "Local" } });
+
+    let created = hosts::create_host(
+        State(state.clone()),
+        Extension(principal),
+        Json(serde_json::from_value(payload.clone()).unwrap()),
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(created.code, ErrorCode::InvalidRequest));
+    assert!(
+        created.message.contains("does not run agents on itself"),
+        "{}",
+        created.message
+    );
+
+    let probed = hosts::probe_host(
+        State(state.clone()),
+        Json(serde_json::from_value(payload).unwrap()),
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(probed.code, ErrorCode::InvalidRequest));
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
 #[tokio::test]
 async fn connecting_a_host_path_defers_validation_to_the_execution_machine() {
     let (state, principal, host, ready, owner) = fixture().await;
     let local = state
         .db
-        .ensure_host("localhost", Compute::Local, &owner)
+        .ensure_test_host("localhost", &owner)
         .await
         .unwrap();
     state
@@ -992,16 +1169,15 @@ async fn an_agent_is_only_updated_on_machines_somebody_administers() {
 /// they have just made it, and the agent is what will fill it.
 #[tokio::test]
 async fn an_empty_repository_is_connected_rather_than_refused() {
-    let (state, principal, host, ready, owner) = fixture().await;
-    let local = state
-        .db
-        .ensure_host("localhost", Compute::Local, &owner)
-        .await
-        .unwrap();
+    let (state, principal, host, ready, _owner) = fixture().await;
+    // The fixture's own machine, answering the probe. One host rather than a
+    // second one beside it: a probe is answered by whichever machine is up, so
+    // a test about the answer needs exactly one that is.
+    state.fleet.stop_supervising(&host.id).await;
     state
         .fleet
         .supervise(
-            local.id.clone(),
+            host.id.clone(),
             Arc::new(Worker {
                 ready,
                 // What `ls-remote` answers for a repository nobody has pushed
@@ -1063,7 +1239,6 @@ async fn an_empty_repository_is_connected_rather_than_refused() {
         "a connected repository is in the list"
     );
 
-    state.fleet.stop_supervising(&local.id).await;
     state.fleet.stop_supervising(&host.id).await;
 }
 

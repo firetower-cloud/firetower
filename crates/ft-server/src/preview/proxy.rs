@@ -492,10 +492,7 @@ mod end_to_end {
 
     async fn tunnel_to(port: u16) -> (Fleet, ft_core::HostId, SessionId) {
         let (db, owner) = crate::db::Db::open_for_test_owned().await.unwrap();
-        let host = db
-            .ensure_host("fire-01", ft_core::Compute::Local, &owner)
-            .await
-            .unwrap();
+        let host = db.ensure_test_host("fire-01", &owner).await.unwrap();
         let fleet = Fleet::new(db);
         fleet
             .supervise(host.id.clone(), crate::forward::testing::worker())
