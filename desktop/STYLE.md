@@ -48,18 +48,30 @@ mouse-only and tighter:
 
 | | web | mac |
 |---|---|---|
-| list row | 44px | **34px** (`.row`) |
-| chrome row | 48px | **38px** (`--chrome-title`) |
-| tab / control | 36px | **28px** |
+| chrome row | 44px | **32px** (`--row-tight`, which `.row` uses) |
+| content row | 44px | **40px** (`--row`), 46px for a row you read |
+| title bar | 48px | **40px** (`--chrome-title`) |
+| rail | — | **62px** (`--rail`), 42px targets |
+| panel | — | **252px** (`--panel`) |
+| tab / control | 36px | **30px** (`--control`) |
 | status strip | — | **22px** |
 
-34px is the measurement the whole inbox is built on. Change it and re-check the
-tree, the palette and the tab strip together.
+**This table said 34px three times and no window row has ever been 34.**
+`styles.css` defines `--row: 40px` and `--row-tight: 32px`, `.row` uses
+`min-height: var(--row-tight)`, and the only literal 34 in `desktop/src` is an
+`h-[34px]` in `island/Island.tsx`, which is the menu-bar pill and not a list
+row at all. Anybody measuring against the old number was measuring against one
+that is not in the code.
+
+The pair that matters is **32 for chrome and 40–46 for what you read**: a rail
+row and a panel row are furniture and can be tight, a row carrying a sentence
+cannot. Change either and re-check the tree, the palette and the tab strip
+together.
 
 ## Native chrome
 
 - **Title bar spans the window.** Traffic lights need 78px (`--chrome-lights`) and
-  the server strip is 48px, so reserving the gutter inside the strip pushes the
+  the rail is 62px, so reserving the gutter inside the rail pushes the
   overlap one column right instead of solving it. One full-width bar, everything
   below it starts at a clean edge.
 - **Drag regions.** `.drag` on chrome, `.no-drag` on every control inside it. A
@@ -102,8 +114,8 @@ Patterns and vocabulary, not layout.
 repositories and workspaces, `doing()` for what a place is up to, `Signal`,
 `AgentMark`, `elapsed()`, the `ui/` primitives, every token.
 
-**Not shared:** the screens. A window gets 34px rows, a title bar that is part
-of the app, ⌘-numbered tabs and no drawer.
+**Not shared:** the screens. A window gets 32px chrome rows, a title bar that is
+part of the app, ⌘-numbered destinations and no drawer.
 
 Two rules fall out of the shared half and are worth stating, because both were
 violated on the first pass:

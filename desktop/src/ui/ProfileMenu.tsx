@@ -21,7 +21,6 @@ import {
   CircleFadingArrowUp,
   KeyRound,
   LogOut,
-  Monitor,
   Moon,
   Plus,
   Settings2,
@@ -182,24 +181,30 @@ function Profile({
 
       <Rule />
       {/* Appearance. Three choices rather than the two the artifact draws:
-          "System" is the default and it is the one that cannot be inferred
-          from the other two — a window stuck in light at midnight is the bug
-          a light theme ships with if nobody offers it. */}
-      <div className="flex min-h-[34px] items-center gap-2.5 px-2.5 py-1.5">
-        <span className="shrink-0 text-mute">
-          <Icon of={resolved === "light" ? Sun : Moon} size={16} />
-        </span>
-        <span className="min-w-0 flex-1 truncate">Appearance</span>
-        <span className="track shrink-0">
+          **System is the default**, and it is the one that cannot be inferred
+          from the other two — a window still in light at midnight is the bug
+          a light theme ships with if nobody offers it.
+
+          Two lines rather than one, because all three want a word. "System"
+          as an icon alone is a choice nobody can name, and the whole point of
+          it is that it is the one you do not have to think about. */}
+      <div className="px-2.5 pt-1.5 pb-2">
+        <p className="flex items-center gap-2.5">
+          <span className="shrink-0 text-mute">
+            <Icon of={resolved === "light" ? Sun : Moon} size={16} />
+          </span>
+          <span className="min-w-0 flex-1 truncate">Appearance</span>
+        </p>
+        <span className="track mt-1.5 ml-[26px] flex">
           {(["system", "light", "dark"] as Theme[]).map((t) => (
             <button
               key={t}
               onClick={() => setChoice(t)}
               data-on={choice === t}
-              title={t === "system" ? `Follow the system — ${resolved} right now` : undefined}
-              className="px-1.5 text-micro capitalize"
+              title={t === "system" ? `Follow the Mac — ${resolved} right now` : undefined}
+              className="flex-1 px-2 text-center text-meta capitalize"
             >
-              {t === "system" ? <Icon of={Monitor} size={12} /> : t}
+              {t}
             </button>
           ))}
         </span>
@@ -282,10 +287,10 @@ export function FiretowerSwitcher({
                 {b.id === backend?.id && <span className="text-mute"> — you are here</span>}
               </span>
               <span className="block truncate text-meta text-mute">
-                {dark ? `can’t reach it — ${working} running, last known` : b.user}
+                {dark ? (working > 0 ? `can’t reach it — ${working} running, last known` : "can’t reach it — last known") : b.user}
               </span>
             </span>
-            {!dark && waiting > 0 ? (
+            {dark ? null : waiting > 0 ? (
               <span className="mt-1 flex shrink-0 items-center gap-1.5">
                 <span className="h-2 w-2 rounded-full bg-ember" />
                 <span className="text-meta text-text">{waiting}</span>

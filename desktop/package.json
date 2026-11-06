@@ -11,6 +11,7 @@
     "app": "tauri dev",
     "mock": "node scripts/mock-server.mjs",
     "shoot": "node scripts/shoot.mjs",
+    "shoot:shell": "node scripts/shoot-shell.mjs",
     "orval": "orval",
     "test": "vitest run"
   },

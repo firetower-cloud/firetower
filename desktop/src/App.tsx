@@ -143,7 +143,15 @@ export function App() {
       <Titlebar serverId={which} onSwitch={pick} />
 
       <div className="relative flex min-h-0 flex-1">
-        {connecting || none ? (
+        {/* The style page first, and before the door. It is a dev build's
+            own screen and it needs no Firetower to draw — checked after
+            `none`, as it used to be, it was unreachable on exactly the
+            machine that has not connected to one yet. */}
+        {style ? (
+          <Suspense fallback={null}>
+            <StylePage />
+          </Suspense>
+        ) : connecting || none ? (
           <Connect
             onDone={(serverId) => {
               setWhich(serverId);
@@ -166,10 +174,6 @@ export function App() {
               navigate("/");
             }}
           />
-        ) : style ? (
-          <Suspense fallback={null}>
-            <StylePage />
-          </Suspense>
         ) : !here ? null : (
           <BackendProvider id={here.id} key={here.id}>
             {/* Inside the provider, not around it: the new-workspace form
