@@ -7,12 +7,12 @@
  * diff hid the conversation that explained it. They are two halves of one job.
  */
 import { useEffect, useRef, useState } from "react";
-import { Globe, PanelRight, Pencil, Share2, SquareTerminal, Trash2, X } from "lucide-react";
+import { Globe, MoreHorizontal, PanelRight, Pencil, Share2, SquareTerminal, Trash2, UserPlus, X } from "lucide-react";
 import { WhoCanAccess } from "~/ui/Sharing";
 import { useQueryClient } from "@tanstack/react-query";
 import { getListSessionsQueryKey, useRenameSession } from "~/api/generated/sessions/sessions";
 import { Signal } from "~/components/Signal";
-import { AgentMark } from "~/components/AgentMark";
+import { AgentMark, AGENT_LABEL } from "~/components/AgentMark";
 import { childrenOf, group, placeOf } from "~/api/workspaces";
 import type { Backend } from "~/fleet";
 import { useHostOf, useSession, useSessions } from "~/data";
@@ -450,10 +450,15 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
   if (backend.reach === "unreachable") return <Unreachable org={backend.org} />;
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-ground">
-      {/* A toolbar, not a tab bar: what this workspace is, who is in it, and
-          the two things you toggle. */}
-      <div {...drag} className="flex h-11 shrink-0 items-center gap-3 border-b border-line px-3">
+    /* **The conversation is the sheet; the right rail is the desk.** They were
+       both on the ground, which made the thing being read and the index
+       beside it the same surface — and the composer floating over neither. */
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-panel">
+      {/* **The title row.** What this workspace is, who is in it, and the
+          things you toggle — at 52px with the name at reading weight, so the
+          thing the screen is about is not the same size as the controls
+          around it. The editor strip is its own row underneath. */}
+      <div {...drag} className="whead">
         {renaming !== null ? (
           <input
             autoFocus
@@ -470,11 +475,18 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
             className="w-56 rounded-md border border-line bg-ground px-2 py-1 text-ui text-bone focus:outline-none"
           />
         ) : (
-          <button onDoubleClick={() => mayAct && setRenaming(place.name)} title={mayAct ? "Double-click to rename" : place.name} className="flex min-w-0 items-center gap-1.5 truncate text-ui text-bone">
+          <button onDoubleClick={() => mayAct && setRenaming(place.name)} title={mayAct ? "Double-click to rename" : place.name} className="nm flex items-center gap-1.5">
             {place.name}
             {mayAct && <Pencil className="h-3 w-3 shrink-0 text-mute opacity-0 transition-opacity hover:opacity-100" strokeWidth={1.75} />}
           </button>
         )}
+
+        {/* Who you are reading, named. A row of marks says how many agents are
+            here; it does not say which one is talking. */}
+        <span className="who">
+          <AgentMark agent={run.agent} size={14} />
+          {AGENT_LABEL[run.agent as keyof typeof AGENT_LABEL] ?? run.agent}
+        </span>
 
         {/* What is checked out. The workspace is one directory with a worktree
             per repository, and the second and third of them had nowhere to be
@@ -484,21 +496,25 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
           <button
             onClick={() => setRepos((r) => !r)}
             title="Repositories in this workspace"
-            className={`control max-w-[13rem] ${repos ? "bg-overlay text-bone" : "text-mute hover:bg-raise hover:text-bone"}`}
+            /* Quiet, beside the agent's name: it is a fact about the
+               workspace, not one of the controls on the right. The drawing
+               does not say where this sheet opens from — it reaches it from
+               its own control strip — so this is the build's answer and is
+               recorded as such in the reconciliation. */
+            className={`who max-w-[15rem] rounded-md px-1.5 py-1 transition-colors ${repos ? "bg-raise text-bone" : "hover:text-bone"}`}
           >
-            <HostMark kind={hostOf(checkouts[0]?.slug)?.kind} size={12} className={checkouts.some((c) => c.trouble) ? "text-brick" : ""} />
-            <span className="min-w-0 truncate font-mono text-meta">
-              {checkouts[0]?.slug ?? "No repository"}
-            </span>
-            {checkouts.length > 1 && (
-              <span className="shrink-0 font-mono text-micro opacity-70">+{checkouts.length - 1}</span>
-            )}
+            <HostMark kind={hostOf(checkouts[0]?.slug)?.kind} size={13} className={checkouts.some((c) => c.trouble) ? "text-brick" : ""} />
+            <span className="min-w-0 truncate">{checkouts[0]?.slug ?? "No repository"}</span>
+            {checkouts.length > 1 && <span className="shrink-0 opacity-70">+{checkouts.length - 1}</span>}
           </button>
           {repos && <Repositories session={run} branch={place.branch} onClose={() => setRepos(false)} />}
         </div>
 
-        {/* Which agent you are reading. A count would not do: two of one and
-            one of another is a different place from three of one. */}
+        {/* Which agent you are reading, when there is a choice. A count would
+            not do: two of one and one of another is a different place from
+            three of one — but with one agent the row of marks is a control
+            that never changes anything. */}
+        {place.runs.length > 1 && (
         <span className="flex shrink-0 items-center gap-1">
           {place.runs.map((r) => (
             <button
@@ -516,21 +532,23 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
               <Signal status={r.status} size={4} />
             </button>
           ))}
+        </span>
+        )}
+
+        <div className="right">
           {/* Starting an agent here is working in somebody's workspace, and the
               server refuses it below writer. Drawn for a viewer it was a button
               that opened a form and failed at the end of it. */}
           {mayAct && (
             <button
               onClick={() => setAdding(true)}
-              title="Add an agent to this workspace"
-              className="grid h-7 w-7 place-items-center rounded-md text-mute transition-colors hover:bg-raise hover:text-bone"
+              title="Another agent here"
+              aria-label="Another agent here"
+              className="gbtn"
             >
-              +
+              <UserPlus className="h-4 w-4" strokeWidth={1.75} />
             </button>
           )}
-        </span>
-
-        <div className="ml-auto flex items-center gap-1">
           {/* Who can reach this. First in the group, because it is the only
               one carrying a word rather than a glyph: the icons keep their
               places when a path appears beside this one, and a control that
@@ -547,7 +565,8 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
                 setTerm(!term);
               }}
               title={`Terminal  ${key("J")}`}
-              className={`control ${term ? "bg-overlay text-bone" : "text-mute hover:bg-raise hover:text-bone"}`}
+              aria-label="Terminal"
+              className={`gbtn ${term ? "bg-overlay text-bone" : ""}`}
             >
               <SquareTerminal className="h-4 w-4" strokeWidth={1.75} />
             </button>
@@ -559,7 +578,8 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
             <button
               onClick={() => void endWorkspace(place, childrenOf(place, group(sessions ?? []).groups.flatMap(([, ps]) => ps))).then(({ ended, trouble }) => (ended ? navigate("/") : trouble && void confirm({ title: "It did not end.", body: trouble, action: "OK" })))}
               title="End workspace — every agent in it stops, and every agent it started"
-              className="control text-mute hover:bg-raise hover:text-brick"
+              aria-label="End workspace"
+              className="gbtn hover:text-brick"
             >
               <Trash2 className="h-4 w-4" strokeWidth={1.75} />
             </button>
@@ -568,7 +588,8 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
             <button
               onClick={() => setPicking((p) => !p)}
               title="Preview a port"
-              className={`control ${picking ? "bg-overlay text-bone" : "text-mute hover:bg-raise hover:text-bone"}`}
+              aria-label="Preview a port"
+              className={`gbtn ${picking ? "bg-overlay text-bone" : ""}`}
             >
               <Globe className="h-4 w-4" strokeWidth={1.75} />
             </button>
@@ -577,7 +598,8 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
           <button
             onClick={() => setOpen(!open)}
             title={`Inspector  ${key("\\")}`}
-            className={`control ${open ? "bg-overlay text-bone" : "text-mute hover:bg-raise hover:text-bone"}`}
+            aria-label="Inspector"
+            className={`gbtn ${open ? "bg-overlay text-bone" : ""}`}
           >
             <PanelRight className="h-4 w-4" strokeWidth={1.75} />
           </button>

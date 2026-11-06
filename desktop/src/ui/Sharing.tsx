@@ -35,6 +35,7 @@ import {
   ChevronRight,
   CornerDownRight,
   UserPlus,
+  UsersRound,
   FolderOpen,
   Plus,
   UserRound,
@@ -178,9 +179,13 @@ export function WhoCanAccess({
       <button
         onClick={() => setOpen((v) => !v)}
         title={`Who can access it — ${path ?? "yours"}`}
-        className={`control gap-1.5 ${open ? "bg-overlay text-bone" : "text-mute hover:bg-raise hover:text-bone"}`}
+        aria-label="Who can access it"
+        /* **`Users`, not `UserPlus`.** The toolbar next to it has "another
+           agent here", which is the user-plus glyph — two identical marks
+           side by side, one adding a person and one sharing with people. */
+        className={`gbtn w-auto gap-1.5 px-1.5 ${open ? "bg-overlay text-bone" : ""}`}
       >
-        <UserPlus className="h-4 w-4 shrink-0" strokeWidth={1.75} />
+        <UsersRound className="h-4 w-4 shrink-0" strokeWidth={1.75} />
         {/* The root on the button when it is shared, because "who can see my
             work" is not a question anybody should have to open a dialog to
             answer. Nothing in your own space, which is the quiet default, and

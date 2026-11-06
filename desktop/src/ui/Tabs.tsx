@@ -56,7 +56,7 @@ export function TabStrip({
   onMenu: (e: React.MouseEvent, id: string) => void;
 }) {
   return (
-    <div className="scroll-slim flex h-10 shrink-0 items-stretch overflow-x-auto border-b border-line bg-panel">
+    <div className="tabs">
       {tabs.map((tab) => {
         const on = tab.id === active;
         const chat = tab.id === "chat";
@@ -67,16 +67,15 @@ export function TabStrip({
         return (
           <div
             key={tab.id}
+            role="tab"
+            aria-selected={on}
+            data-preview={preview || undefined}
             onClick={() => onPick(tab.id)}
             onDoubleClick={() => onKeep(tab.id)}
             onAuxClick={(e) => e.button === 1 && !chat && onClose(tab.id)}
             onContextMenu={(e) => onMenu(e, tab.id)}
-            className={`group/tab relative flex max-w-[15rem] min-w-0 shrink-0 cursor-default items-center gap-2 border-r border-line px-3 transition-colors duration-150 select-none ${
-              on ? "bg-ground text-bone" : "text-mute hover:bg-raise/60 hover:text-dim"
-            }`}
+            className={`tab cursor-default select-none ${chat ? "pinned" : ""}`}
           >
-            {/* Marked along the top edge, where an editor marks it. */}
-            {on && <span className="absolute inset-x-0 top-0 h-[2px] bg-bone/70" />}
             {chat ? (
               <MessageSquare className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
             ) : art ? (
@@ -93,8 +92,11 @@ export function TabStrip({
               </span>
             )}
 
+            {/* **Not monospace.** A tab carries a *name*, and the mono voice in
+                this system is for what a machine said. The file's own text is
+                mono; the label above it is not. */}
             <span
-              className={`min-w-0 truncate text-ui ${chat || art ? "" : "font-mono"} ${preview ? "italic" : ""}`}
+              className="nm"
               title={chat ? "Conversation" : art ? art.title : port !== null ? `Port ${port} in this session` : (tab as { path: string }).path}
             >
               {chat ? "Conversation" : art ? art.title : port !== null ? `:${port}` : (tab as { path: string }).path.split("/").pop()}
@@ -106,7 +108,8 @@ export function TabStrip({
                   e.stopPropagation();
                   onClose(tab.id);
                 }}
-                className="grid h-5 w-5 shrink-0 place-items-center rounded text-mute opacity-0 transition-opacity group-hover/tab:opacity-100 hover:bg-overlay hover:text-bone"
+                aria-label="Close this tab"
+                className="x"
               >
                 <X className="h-3 w-3" strokeWidth={2} />
               </button>

@@ -29,7 +29,9 @@ const TABS = [
   { id: "overview", label: "Overview", icon: OverviewIcon },
   { id: "diff", label: "Diff", icon: FileDiff },
   { id: "files", label: "Files", icon: FolderTree },
-  { id: "ship", label: "Commit", icon: ShipIcon },
+  /* **Ship**, which is what the drawing calls it and what the panel does:
+     commit, push, open a pull request. "Commit" names the first of three. */
+  { id: "ship", label: "Ship", icon: ShipIcon },
 ] as const;
 
 export type TabId = (typeof TABS)[number]["id"];
@@ -159,22 +161,22 @@ export function Inspector({
   const scroller = useRef<HTMLDivElement>(null);
 
   return (
-    <aside style={{ width: width ?? 368 }} className="flex shrink-0 flex-col border-l border-line bg-panel">
-      <div className="flex h-11 shrink-0 items-center gap-1 border-b border-line px-2">
-        <div className="track">
-          {tabs.map((t) => (
-            <button key={t.id} data-on={shown === t.id} onClick={() => onTab(t.id)}>
-              <span className="flex items-center gap-1.5">
-                <t.icon className="h-3.5 w-3.5" strokeWidth={1.75} />
-                {t.label}
-                {t.id === "diff" && files.length > 0 && <span className="font-mono text-micro opacity-60">{files.length}</span>}
-              </span>
-            </button>
-          ))}
-        </div>
-        <button onClick={onClose} title="Hide the inspector" className="ml-auto grid h-7 w-7 place-items-center rounded-md text-mute transition-colors hover:bg-raise hover:text-bone">
-          <PanelRightClose className="h-4 w-4" strokeWidth={1.75} />
-        </button>
+    <aside style={{ width: width ?? 344 }} className="flex shrink-0 flex-col bg-ground">
+      {/* **Plain text with an underline**, not four boxed chips with an icon
+          each. The index of a panel should not compete with the panel. */}
+      <div className="itabs" role="tablist">
+        {tabs.map((t) => (
+          <button key={t.id} role="tab" aria-selected={shown === t.id} onClick={() => onTab(t.id)} className="itab">
+            {t.label}
+            {t.id === "diff" && files.length > 0 && <span className="ml-1.5 text-meta text-mute tabular-nums">{files.length}</span>}
+            {shown === t.id && <span className="ul" />}
+          </button>
+        ))}
+        <span className="right">
+          <button onClick={onClose} title="Hide the inspector" aria-label="Hide the inspector" className="gbtn">
+            <PanelRightClose className="h-4 w-4" strokeWidth={1.75} />
+          </button>
+        </span>
       </div>
 
       <div ref={scroller} className="scroll-slim min-h-0 flex-1 overflow-y-auto">

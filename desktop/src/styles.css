@@ -2115,6 +2115,224 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
     color: var(--color-bone);
   }
 
+  /* ── The workspace's own chrome ──────────────────────────────────
+     A title row that says what this workspace is and who is in it, then the
+     editor strip under it. Two rows, not one: the build had the name, the
+     repository, the agents and the toolbar all in a 44px band, so the thing
+     the screen is *about* was the same size as the controls around it. */
+  .whead {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    flex: none;
+    height: 52px;
+    padding: 0 18px 0 24px;
+  }
+  .whead .nm {
+    min-width: 0;
+    font-size: 1rem;
+    font-weight: var(--font-weight-mid);
+    letter-spacing: -0.008em;
+    color: var(--color-bone);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .whead .who {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex: none;
+    font-size: 0.8125rem;
+    color: var(--color-dim);
+  }
+  .whead .right {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex: none;
+    margin-left: auto;
+  }
+
+  /* The editor strip. Marked along the **top** edge, which is where an editor
+     marks it and the one place a marker cannot be confused for the hairline
+     under the row. */
+  .tabs {
+    display: flex;
+    align-items: stretch;
+    gap: 1px;
+    flex: none;
+    height: 40px;
+    padding: 0 8px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .tabs::-webkit-scrollbar {
+    display: none;
+  }
+  .tab {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex: none;
+    height: 100%;
+    max-width: 190px;
+    padding: 0 12px;
+    font-size: var(--text-ui);
+    color: var(--color-dim);
+    transition:
+      background var(--dur-native) var(--ease-swift),
+      color var(--dur-native) var(--ease-swift);
+  }
+  .tab:hover {
+    background: var(--color-raise);
+    color: var(--color-text);
+  }
+  .tab[aria-selected="true"] {
+    background: var(--color-panel);
+    color: var(--color-bone);
+  }
+  .tab[aria-selected="true"]::before {
+    content: "";
+    position: absolute;
+    left: 8px;
+    right: 8px;
+    top: 0;
+    height: 2px;
+    border-radius: 0 0 2px 2px;
+    background: var(--color-bone);
+  }
+  .tab[data-preview="true"] .nm {
+    font-style: italic;
+  }
+  .tab .nm {
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .tab .x {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 18px;
+    height: 18px;
+    border-radius: 5px;
+    color: var(--color-mute);
+    opacity: 0;
+    transition: opacity var(--dur-native) var(--ease-swift);
+  }
+  .tab:hover .x,
+  .tab[aria-selected="true"] .x {
+    opacity: 1;
+  }
+  .tab .x:hover {
+    background: var(--color-overlay);
+    color: var(--color-bone);
+  }
+  .tab.pinned {
+    padding-right: 14px;
+  }
+
+  /* ── The right rail ──────────────────────────────────────────────
+     Plain text tabs with a 2px underline on the current one. They were boxed
+     chips with an icon each, which is four buttons competing with the panel
+     they are the index of. */
+  .itabs {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex: none;
+    height: 52px;
+    padding: 0 18px;
+  }
+  .itab {
+    position: relative;
+    padding: 4px 0;
+    font-size: var(--text-ui);
+    color: var(--color-dim);
+    transition: color var(--dur-native) var(--ease-swift);
+  }
+  .itab:hover {
+    color: var(--color-text);
+  }
+  .itab[aria-selected="true"] {
+    color: var(--color-bone);
+    font-weight: var(--font-weight-mid);
+  }
+  .itab .ul {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -3px;
+    height: 2px;
+    border-radius: 2px;
+    background: var(--color-bone);
+  }
+  .itabs .right {
+    margin-left: auto;
+    display: flex;
+    gap: 2px;
+  }
+  .iscroll {
+    min-height: 0;
+    flex: 1;
+    overflow-y: auto;
+    padding: 0 18px 22px;
+  }
+  .isec {
+    margin-top: 26px;
+  }
+  .isec:first-child {
+    margin-top: 4px;
+  }
+  .isec h3 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.8125rem;
+    letter-spacing: 0.004em;
+    color: var(--color-dim);
+  }
+  .isec h3 .n {
+    margin-left: auto;
+    font-size: 0.75rem;
+    color: var(--color-mute);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* How much of the window is gone, in the composer's bar. */
+  .meter {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    flex: none;
+    height: 30px;
+    padding: 0 4px 0 8px;
+  }
+  .meter .bar {
+    width: 46px;
+    height: 4px;
+    border-radius: 3px;
+    background: var(--color-overlay);
+    overflow: hidden;
+  }
+  .meter .bar i {
+    display: block;
+    height: 100%;
+    border-radius: 3px;
+    background: var(--color-dim);
+  }
+  .meter .bar[data-near="true"] i {
+    background: var(--color-bone);
+  }
+  .meter span {
+    font-size: 0.75rem;
+    color: var(--color-mute);
+    font-variant-numeric: tabular-nums;
+  }
+
   /* ── The team rail, in the workspace's Overview ──────────────────
      The manager as a card, sub-workspaces indented under a hairline, and each
      row saying who, what it is doing in a few words, its state and how long.

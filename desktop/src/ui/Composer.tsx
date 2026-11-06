@@ -30,7 +30,8 @@ import { useAttachFile, useInterruptSession, useListFiles, useSendTurn } from "~
 import { useChooseControl, useSessionControls } from "~/api/generated/conversation/conversation";
 import { takeDraft } from "~/workspace/draft";
 import { delivering, forget as forgetUndelivered, useUndelivered } from "~/workspace/outbox";
-import { AccountLine, AccountNotice } from "~/ui/AccountSwitcher";
+import { AccountNotice } from "~/ui/AccountSwitcher";
+import { FallbackLine } from "~/ui/AccountFallback";
 import { AgentPicker } from "~/ui/AgentPicker";
 import { Mic } from "~/ui/voice/Mic";
 import { VoiceDialog } from "~/ui/voice/Dialogs";
@@ -609,12 +610,20 @@ export function Composer({
               onPick={set}
             />
 
+            {/* What happens when the account runs out, said where the account
+                is chosen rather than in a hint row underneath. */}
+            <FallbackLine sessionId={session.id} agent={session.agent} />
+
             {full !== null && (
-              <span className="control shrink-0 gap-2 text-mute" title={`${Math.round(full * 100)}% of the context window used`}>
-                <span className="h-1 w-14 overflow-hidden rounded-full bg-ground">
-                  <span className={`block h-full rounded-full ${full > 0.75 ? "bg-ember" : "bg-slate"}`} style={{ width: `${Math.min(100, full * 100)}%` }} />
+              /* **Not ember, and not slate.** Ember means an agent is waiting
+                 on you; a context window filling up is not that. Near the end
+                 it goes to the brightest tier, which is the system's own rule:
+                 anything new is shape, weight or position, never a new hue. */
+              <span className="meter" title={`${Math.round(full * 100)}% of the context window used`}>
+                <span className="bar" data-near={full > 0.75 || undefined}>
+                  <i style={{ width: `${Math.min(100, full * 100)}%` }} />
                 </span>
-                <span className="text-micro tabular-nums">{Math.round(full * 100)}%</span>
+                <span>{Math.round(full * 100)}%</span>
               </span>
             )}
 
@@ -649,32 +658,28 @@ export function Composer({
           </div>
         </div>
 
-        <div className="mt-2 flex items-center gap-3 px-1 text-micro text-mute">
-          {/* While it listens the two keys are unchanged and already known, and
-              the one thing worth the space is how to make it stop. */}
-          {listening ? (
-            <span className="text-dim">
-              {voice.state.at === "connecting"
-                ? "Connecting…"
-                : voice.state.at === "settling"
-                  ? "Finishing what you said…"
-                  : "Listening — click to stop"}
-            </span>
-          ) : (
-            <>
-              <span className="flex items-center gap-1">
-                <span className="keycap">⏎</span> send
+        {/* **No key-hint row.** `⏎ send` and `⇧⏎ new line` are learned on the
+            first message and then read on every screen for the rest of the
+            product's life — the drawing has no such row, and what used to sit
+            beside them is in the bar above now. This is only what is actually
+            happening: a microphone that is listening, and a limit that has
+            been hit. */}
+        {(listening || (conversation.limits && conversation.limits.status !== "allowed")) && (
+          <div className="mt-2 flex items-center gap-3 px-1 text-meta text-mute">
+            {listening && (
+              <span className="text-dim">
+                {voice.state.at === "connecting"
+                  ? "Connecting…"
+                  : voice.state.at === "settling"
+                    ? "Finishing what you said…"
+                    : "Listening — click to stop"}
               </span>
-              <span className="flex items-center gap-1">
-                <span className="keycap">⇧⏎</span> new line
-              </span>
-            </>
-          )}
-          {conversation.limits && conversation.limits.status !== "allowed" && (
-            <span className="ml-auto text-ember-ink">{conversation.limits.window}: {conversation.limits.status}</span>
-          )}
-          <AccountLine />
-        </div>
+            )}
+            {conversation.limits && conversation.limits.status !== "allowed" && (
+              <span className="ml-auto text-ember-ink">{conversation.limits.window}: {conversation.limits.status}</span>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
