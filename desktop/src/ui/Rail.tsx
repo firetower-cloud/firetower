@@ -171,6 +171,7 @@ export function Rail({ backend, onSwitch, onForgot }: { backend: Backend; onSwit
         <RailPanel
           at={showing}
           floating={floating}
+          stale={backend.reach === "unreachable"}
           onCollapse={() => {
             setPeek(null);
             setPinned(false);

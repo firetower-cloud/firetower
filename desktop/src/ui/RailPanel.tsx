@@ -28,7 +28,6 @@ import {
   PanelLeftClose,
   Pencil,
   Puzzle,
-  Search,
   Server,
   Settings,
   Shapes,
@@ -57,6 +56,7 @@ import { EVERY, type DestinationId } from "~/ui/destinations";
 export function RailPanel({
   at,
   floating,
+  stale,
   onCollapse,
   onEnter,
   onLeave,
@@ -65,6 +65,9 @@ export function RailPanel({
   /** Over the sheet rather than beside it: the panel is collapsed and this is
    *  a preview, so it floats rather than pushing the page sideways. */
   floating: boolean;
+  /** This Firetower is not answering. The rows stay with what was last known
+   *  on them, dimmed — a list that empties itself reads as work being lost. */
+  stale: boolean;
   onCollapse: () => void;
   onEnter: () => void;
   onLeave: () => void;
@@ -80,14 +83,16 @@ export function RailPanel({
           : "flex w-(--panel) shrink-0 flex-col overflow-hidden"
       }
     >
-      <Contents at={at} onCollapse={onCollapse} />
+      <div className={`flex min-h-0 flex-1 flex-col ${stale ? "stale" : ""}`}>
+        <Contents at={at} stale={stale} onCollapse={onCollapse} />
+      </div>
     </aside>
   );
 }
 
-function Contents({ at, onCollapse }: { at: DestinationId; onCollapse: () => void }) {
+function Contents({ at, stale, onCollapse }: { at: DestinationId; stale: boolean; onCollapse: () => void }) {
   const path = usePathname();
-  if (at === "home") return <Workspaces onCollapse={onCollapse} />;
+  if (at === "home") return <Workspaces stale={stale} onCollapse={onCollapse} />;
   return (
     <>
       <Head name={EVERY.find((d) => d.id === at)?.label ?? ""} onCollapse={onCollapse} />
@@ -140,7 +145,7 @@ const pane = (path: string) => path.split("/").filter(Boolean)[1] ?? "";
  * is this mine or did somebody share it — and even that is only drawn when
  * there is something in it.
  */
-function Workspaces({ onCollapse }: { onCollapse: () => void }) {
+function Workspaces({ stale, onCollapse }: { stale: boolean; onCollapse: () => void }) {
   const path = usePathname();
   const start = useStart();
   const { data: sessions, loading, error } = useSessions();
@@ -162,9 +167,11 @@ function Workspaces({ onCollapse }: { onCollapse: () => void }) {
 
   return (
     <>
-      <Head name="Workspaces" onCollapse={onCollapse}>
-        <Glyph of={Search} label="Find anything" hint={key("P")} onPick={() => navigate("/")} />
-      </Head>
+      {/* No search glyph here yet. The artifact draws one, and ⌘P is the
+          *workspace's* QuickOpen while the palette is not wired up at all —
+          so it would be a control that does nothing, which is worse than no
+          control. It comes back when the palette does. */}
+      <Head name="Workspaces" onCollapse={onCollapse} />
       <Scroll>
         <button onClick={() => start()} className="prow">
           <span className="grid w-[17px] shrink-0 place-items-center text-mute">
@@ -175,7 +182,15 @@ function Workspaces({ onCollapse }: { onCollapse: () => void }) {
         </button>
 
         {loading && <p className="px-2.5 py-1 text-ui text-mute">Loading…</p>}
-        {error && <p className="px-2.5 py-1 text-meta text-brick">{error}</p>}
+        {/* **Never brick.** Brick means something failed, and a Firetower
+            behind a VPN that is off has not failed — it is not there, which
+            the memo expects to be the common case. The rows above and below
+            stay with what was last known on them. */}
+        {stale ? (
+          <p className="px-2.5 py-1 text-meta text-mute">Can’t reach it — showing what was last known.</p>
+        ) : (
+          error && <p className="px-2.5 py-1 text-meta text-brick">{error}</p>
+        )}
 
         {mine.length > 0 ? (
           <>
@@ -185,7 +200,11 @@ function Workspaces({ onCollapse }: { onCollapse: () => void }) {
             ))}
           </>
         ) : (
-          !loading && <p className="px-2.5 py-3 text-ui text-mute">Nothing running yet.</p>
+          !loading && (
+            <p className="px-2.5 py-3 text-ui text-mute">
+              {stale ? "Nothing was running when it was last reached." : "Nothing running yet."}
+            </p>
+          )
         )}
 
         {theirs.length > 0 && (
@@ -334,11 +353,10 @@ function Artifacts() {
 
 /* ── The pieces every panel is made of ───────────────────────────────────── */
 
-function Head({ name, onCollapse, children }: { name: string; onCollapse: () => void; children?: React.ReactNode }) {
+function Head({ name, onCollapse }: { name: string; onCollapse: () => void }) {
   return (
     <div className="flex h-[38px] shrink-0 items-center gap-0.5 pr-2 pl-3.5">
       <span className="min-w-0 flex-1 truncate text-ui font-semibold text-bone">{name}</span>
-      {children}
       <Glyph of={PanelLeftClose} label="Hide this panel" hint={key("\\")} onPick={onCollapse} />
     </div>
   );
