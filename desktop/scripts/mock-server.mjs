@@ -98,7 +98,7 @@ const HOSTS = [
     docker: { status: "Running", detail: "28.1.1" },
     drained: false,
     reconnecting: false,
-    workerVersion: "0.13.0",
+    workerVersion: "0.34.1",
   },
 ];
 
@@ -599,7 +599,7 @@ const server = createServer(async (req, res) => {
   };
 
   const routes = {
-    "/api/v1/bootstrap": { version: "0.13.0", eventsPath: "/api/v1/events", authModes: ["password"], organization: ORG.name, serverId: "o_1" },
+    "/api/v1/bootstrap": { version: "0.34.1", eventsPath: "/api/v1/events", authModes: ["password"], organization: ORG.name, serverId: "o_1" },
     /* `locked` and `needs-setup` are what `Gate.tsx` stands between a
        connected server and the app for, and neither could be reached. */
     "/api/v1/auth/me": { user: { ...USER, mustChangePassword: scene === "locked" }, organization: ORG },
@@ -626,7 +626,14 @@ const server = createServer(async (req, res) => {
     "/api/v1/hosts": scene === "no-machines" ? [] : HOSTS,
     "/api/v1/agents": AGENTS,
     "/api/v1/agent-accounts": ACCOUNTS,
-    "/api/v1/providers": [{ id: "github", label: "GitHub", connected: true, identity: "kevin" }],
+    /* What `GitHosts` actually reads. The stub here was four fields, so the
+       screen drew one row with no state, no address and no "Add a host" —
+       `maySetApplication` is what that button is gated on. */
+    "/api/v1/providers": [
+      { id: "github", kind: "github", label: "GitHub", gitHost: "github.com", connected: true, configured: true, identity: "kevin", builtin: true, maySetApplication: true, sharedApplication: false, authModes: ["deviceCode", "token"], kinds: ["issue", "pullRequest"], changeNoun: "pull request" },
+      { id: "gitlab_01j", kind: "gitlab", label: "GitLab (internal)", gitHost: "git.acme.internal", connected: false, configured: true, identity: null, builtin: false, maySetApplication: true, sharedApplication: true, authModes: ["token"], kinds: ["issue", "pullRequest"], changeNoun: "merge request" },
+      { id: "gitea_01k", kind: "gitea", label: "Gitea", gitHost: "code.acme.dev", connected: false, configured: false, identity: null, builtin: false, maySetApplication: true, sharedApplication: false, authModes: ["token"], kinds: ["issue", "pullRequest"], changeNoun: "pull request" },
+    ],
     "/api/v1/trackers": scene === "no-trackers" ? [] : TRACKERS,
     "/api/v1/tasks": scene === "no-tasks" ? { more: false, next: null, tasks: [] } : TASKS,
     "/api/v1/colleagues": scene === "no-people" ? [] : COLLEAGUES,
@@ -642,19 +649,19 @@ const server = createServer(async (req, res) => {
        something out, so the rail's slate row and the upgrade buttons are
        reachable without waiting for a release. */
     "/api/v1/updates": {
-      current: "0.13.0",
-      latest: { version: "0.14.0", publishedAt: "2026-10-02T09:00:00Z", notesUrl: null, notes: null, cliMinimum: null },
+      current: "0.34.1",
+      latest: { version: "0.35.0", publishedAt: "2026-10-02T09:00:00Z", notesUrl: null, notes: null, cliMinimum: null },
       checkedAt: "2026-10-02T09:12:00Z",
       checkError: null,
       updateAvailable: true,
       activeRun: scene === "upgrading" ? "ur_2" : null,
       controlPlane: {
-        version: "0.13.0",
+        version: "0.34.1",
         upgradable: true,
         mayUpgrade: true,
         reason: null,
         sessions: ["Ledger exports"],
-        updater: { configured: true, reachable: true, version: "0.13.0", apiVersion: 1, problem: null },
+        updater: { configured: true, reachable: true, version: "0.34.1", apiVersion: 1, problem: null },
       },
       hosts: HOSTS.map((h) => ({
         hostId: h.id,
@@ -691,7 +698,7 @@ const server = createServer(async (req, res) => {
       user: "kevin",
       checks: [
         { name: "SSH", available: true, required: true, detail: "reached in 180ms", remedy: null },
-        { name: "Worker", available: true, required: true, detail: "0.13.0, answering", remedy: null },
+        { name: "Worker", available: true, required: true, detail: "0.34.1, answering", remedy: null },
         { name: "git", available: true, required: true, detail: "2.49.0", remedy: null },
         { name: "node", available: true, required: true, detail: "22.11.0", remedy: null },
         { name: "Claude Code", available: scene !== "needs-signin", required: false, detail: scene === "needs-signin" ? "installed, not signed in" : "2.1.273", remedy: null },
@@ -922,11 +929,11 @@ const TRACKERS = [
  * handler's `[]`, so pressing Upgrade drew an empty sheet.
  */
 const PLAN = {
-  version: "0.14.0",
+  version: "0.35.0",
   updaterUpgrade: false,
   envMissing: ["FT_OBJECT_STORE_URL"],
   files: [
-    { name: "docker-compose.yml", verdict: "Update", releaseChange: "ft-server pinned to 0.14.0; a new `objects` service", yourEdits: null },
+    { name: "docker-compose.yml", verdict: "Update", releaseChange: "ft-server pinned to 0.35.0; a new `objects` service", yourEdits: null },
     { name: ".env", verdict: "Edited", releaseChange: "two new keys", yourEdits: "you set FT_LOG=debug" },
     { name: "Caddyfile", verdict: "Unchanged", releaseChange: null, yourEdits: null },
     { name: "objects.yml", verdict: "New", releaseChange: "the object store's own compose file", yourEdits: null },
@@ -943,8 +950,8 @@ const step = (position, title, target, state, over = {}) => ({
 const RUNNING = {
   id: "ur_2",
   state: "running",
-  fromVersion: "0.13.0",
-  toVersion: "0.14.0",
+  fromVersion: "0.34.1",
+  toVersion: "0.35.0",
   whenIdle: false,
   targets: { controlPlane: true, hostIds: ["h_1"] },
   startedBy: "kevin",
@@ -955,7 +962,7 @@ const RUNNING = {
   steps: [
     step(0, "Back up the database", "control plane", "done", { detail: "41 MB to /var/lib/firetower/backups" }),
     step(1, "Write the compose file", "control plane", "done"),
-    step(2, "Pull 0.14.0", "control plane", "running", { detail: "layer 3 of 7" }),
+    step(2, "Pull 0.35.0", "control plane", "running", { detail: "layer 3 of 7" }),
     step(3, "Restart the control plane", "control plane", "pending"),
     step(4, "Upgrade the worker", "this Mac", "pending"),
   ],
@@ -964,8 +971,8 @@ const DONE_RUN = {
   ...RUNNING,
   id: "ur_1",
   state: "succeeded",
-  fromVersion: "0.12.4",
-  toVersion: "0.13.0",
+  fromVersion: "0.33.2",
+  toVersion: "0.34.1",
   createdAt: minutesAgo(21600),
   startedAt: minutesAgo(21600),
   finishedAt: minutesAgo(21580),

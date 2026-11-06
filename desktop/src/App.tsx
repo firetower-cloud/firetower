@@ -180,6 +180,12 @@ export function App() {
                 reads this server's repositories, so it needs the same
                 QueryClient as the screen that opened it. */}
             <StartProvider>
+              {/* **The gate replaces the body**, rail and all. A password that
+                  must be replaced and a server mid-setup are both doors, not
+                  destinations: drawing a rail of six places beside them offers
+                  six ways to go nowhere. The title bar stays — switching
+                  Firetower is the one thing still worth doing from here. */}
+              <Gate backend={here}>
               <Rail
                 backend={here}
                 onSwitch={pick}
@@ -201,20 +207,19 @@ export function App() {
                     corners on the other, because an app does not draw a
                     second set of corners inside the ones it has. */}
                 <div className="ml-2 flex min-w-0 flex-1 flex-col overflow-hidden rounded-l-sheet bg-panel shadow-(--shadow-raise)">
-                  <Gate backend={here}>
-                    <Routes
-                      backend={here}
-                      onSwitch={pick}
-                      onForgot={() => {
-                        const left = servers();
-                        setReal(left);
-                        setWhich(left[0]?.serverId ?? null);
-                        navigate(left.length ? "/" : "/connect");
-                      }}
-                    />
-                  </Gate>
+                  <Routes
+                    backend={here}
+                    onSwitch={pick}
+                    onForgot={() => {
+                      const left = servers();
+                      setReal(left);
+                      setWhich(left[0]?.serverId ?? null);
+                      navigate(left.length ? "/" : "/connect");
+                    }}
+                  />
                 </div>
               </Boundary>
+              </Gate>
             </StartProvider>
           </BackendProvider>
         )}

@@ -2119,6 +2119,142 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
     color: var(--color-bone);
   }
 
+  /* ── Getting in ──────────────────────────────────────────────────
+     The first thing anybody sees. One question at a time, and never two at
+     once — and on the sheet, not on the bare desk: the window has a body and
+     this is it, so it takes the body's own corners. */
+  .first {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    place-items: center;
+    padding: 40px;
+    margin: 0 8px;
+    overflow-y: auto;
+    border-radius: var(--radius-sheet) var(--radius-sheet) 0 0;
+    background: var(--color-panel);
+  }
+  .first .card {
+    width: 420px;
+    max-width: 100%;
+  }
+  .first .mk {
+    display: grid;
+    place-items: center;
+    width: 46px;
+    height: 46px;
+    margin-bottom: 22px;
+    border-radius: 14px;
+    background: var(--color-bone);
+    color: var(--color-panel);
+  }
+  .first h1 {
+    font-size: 1.75rem;
+    line-height: 1.15;
+    letter-spacing: -0.024em;
+    font-weight: var(--font-weight-mid);
+    color: var(--color-bone);
+  }
+  .first p {
+    margin-top: 9px;
+    font-size: 0.96875rem;
+    line-height: 1.6;
+    color: var(--color-dim);
+  }
+  .first .in {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 48px;
+    margin-top: 22px;
+    padding: 0 16px;
+    border-radius: 14px;
+    background: var(--color-raise);
+    transition: box-shadow var(--dur-native) var(--ease-swift);
+  }
+  .first .in:focus-within {
+    box-shadow: inset 0 0 0 1.5px var(--color-bone);
+  }
+  .first .in input {
+    flex: 1;
+    min-width: 0;
+    font-size: 1rem;
+    color: var(--color-bone);
+  }
+  .first .go {
+    width: 100%;
+    justify-content: center;
+    height: 44px;
+    margin-top: 12px;
+  }
+  .first .alt {
+    margin-top: 16px;
+    font-size: 0.84375rem;
+    color: var(--color-dim);
+    text-align: center;
+  }
+  /* What was found, before you say who you are. */
+  .first .found {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 22px;
+    padding: 14px 16px;
+    border-radius: 14px;
+    background: var(--color-raise);
+  }
+  .first .found .tx {
+    min-width: 0;
+    flex: 1;
+  }
+  .first .found .tx b {
+    display: block;
+    font-size: 0.90625rem;
+    font-weight: 520;
+    color: var(--color-bone);
+  }
+  .first .found .tx s {
+    display: block;
+    margin-top: 2px;
+    text-decoration: none;
+    font-size: 0.8125rem;
+    color: var(--color-dim);
+  }
+  /* **A brick rule, not a brick box.** A refusal that fills a panel with
+     colour reads as the app having broken rather than the address being
+     wrong, and the address being wrong is the common case. */
+  .first .bad {
+    margin-top: 16px;
+    padding: 13px 15px;
+    border-radius: 12px;
+    background: var(--color-raise);
+    border-left: 2px solid var(--color-brick);
+    font-size: 0.84375rem;
+    line-height: 1.6;
+    color: var(--color-text);
+  }
+  .first .bad b {
+    display: block;
+    margin-bottom: 2px;
+    font-weight: 520;
+    color: var(--color-bone);
+  }
+  /* How far in you are, as four rules rather than "step 2 of 4". */
+  .first .steps {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 24px;
+  }
+  .first .steps i {
+    flex: 1;
+    height: 3px;
+    border-radius: 2px;
+    background: var(--color-overlay);
+  }
+  .first .steps i[data-on="true"] {
+    background: var(--color-bone);
+  }
+
   /* ── The workspace's own chrome ──────────────────────────────────
      A title row that says what this workspace is and who is in it, then the
      editor strip under it. Two rows, not one: the build had the name, the

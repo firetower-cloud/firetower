@@ -14,7 +14,7 @@
  */
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Check, Loader2 } from "lucide-react";
+import { Building2, Check, Loader2 } from "lucide-react";
 import { getSetupStateQueryKey, useCompleteSetup, useNameOrganization, useSetupState } from "~/api/generated/setup/setup";
 
 import { why } from "~/data";
@@ -34,33 +34,45 @@ export function Setup({ onDone }: { onDone: () => void }) {
   if (s.needsOrganization) {
     return (
       <Frame>
-        <h1 className="text-display text-bone">Name the organisation</h1>
-        <p className="mt-2 text-read text-dim">What the people who run this Firetower call themselves. It is what this Mac will show in the strip.</p>
-        <input autoFocus value={org} onChange={(e) => setOrg(e.target.value)} onKeyDown={(e) => e.key === "Enter" && org.trim() && name.mutate({ data: { name: org.trim() } }, { onSuccess: refresh })} placeholder="Westlabs" className="mt-5 w-full rounded-xl border border-line bg-panel px-4 py-2.5 text-ui text-bone placeholder:text-mute focus:border-slate-deep focus:outline-none" />
-        {name.error && <p className="mt-2 text-meta text-brick">{why(name.error)}</p>}
-        <button disabled={!org.trim() || name.isPending} onClick={() => name.mutate({ data: { name: org.trim() } }, { onSuccess: refresh })} className="control mt-4 w-full justify-center bg-bone font-medium text-ground hover:opacity-90 disabled:bg-raise disabled:text-mute">{name.isPending ? "Naming…" : "Continue"}</button>
+        <span className="mk">
+          <Building2 className="h-6 w-6" strokeWidth={1.75} />
+        </span>
+        <h1>Name this Firetower</h1>
+        <p>What the people who run it call themselves. It is what this Mac shows in the strip.</p>
+        <label className="in">
+          <input autoFocus value={org} onChange={(e) => setOrg(e.target.value)} onKeyDown={(e) => e.key === "Enter" && org.trim() && name.mutate({ data: { name: org.trim() } }, { onSuccess: refresh })} placeholder="Westlabs" aria-label="What to call this Firetower" className="bg-transparent placeholder:text-mute focus:outline-none" />
+        </label>
+        {name.error && <p className="bad">{why(name.error)}</p>}
+        <button disabled={!org.trim() || name.isPending} onClick={() => name.mutate({ data: { name: org.trim() } }, { onSuccess: refresh })} className="btn primary go">{name.isPending ? "Naming…" : "Continue"}</button>
       </Frame>
     );
   }
 
   return (
     <Frame>
-      <Check className="h-6 w-6 text-sage" strokeWidth={2} />
-      <h1 className="mt-3 text-display text-bone">{s.organization?.name ?? "This Firetower"} is set up</h1>
-      <p className="mt-2 text-read text-dim">Connect GitHub and add a machine in Configuration when you are ready. Nothing else is needed to start.</p>
+      <span className="mk">
+        <Check className="h-6 w-6" strokeWidth={2} />
+      </span>
+      <h1>{s.organization?.name ?? "This Firetower"} is set up</h1>
+      <p>Connect a git host and add a machine when you are ready — both are one click away. Nothing else is needed to start.</p>
       {/* Said here because this is the last screen before the app, and an
           opt-out nobody was told about is not one. Short on purpose: the full
           list, and the switch, are one click away where the setting lives. */}
-      <p className="mt-3 border-t border-line pt-3 text-meta text-mute">
+      <p className="alt !text-left">
         Firetower reports daily usage counts so we can see how it is actually used — never your
         code, your prompts or your repository names. An administrator can read exactly what is sent,
         or turn it off, under Organisation → Settings.
       </p>
-      <button disabled={complete.isPending} onClick={() => complete.mutate(undefined as never, { onSuccess: () => { refresh(); onDone(); } })} className="control mt-5 w-full justify-center bg-bone font-medium text-ground hover:opacity-90 disabled:bg-raise disabled:text-mute">{complete.isPending ? "Finishing…" : "Open the dashboard"}</button>
+      <button disabled={complete.isPending} onClick={() => complete.mutate(undefined as never, { onSuccess: () => { refresh(); onDone(); } })} className="btn primary go">{complete.isPending ? "Finishing…" : "Open Firetower"}</button>
     </Frame>
   );
 }
 
+/** The same frame the connect flow uses: on the sheet, one question at a time. */
 function Frame({ children }: { children: React.ReactNode }) {
-  return <div className="grid h-full min-w-0 flex-1 place-items-center bg-ground px-6"><div className="w-full max-w-[26rem]">{children}</div></div>;
+  return (
+    <div className="first">
+      <div className="card">{children}</div>
+    </div>
+  );
 }

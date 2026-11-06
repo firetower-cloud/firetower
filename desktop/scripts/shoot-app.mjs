@@ -55,7 +55,7 @@ const pause = (page, ms = 500) => page.waitForTimeout(ms);
 /** The inspector's tabs are buttons in its header strip. */
 async function inspectorTab(page, label) {
   await at(page, "/sessions/s_1", 1800);
-  await page.getByRole("button", { name: label, exact: true }).first().click();
+  await page.getByRole("tab", { name: new RegExp(`^${label}`) }).first().click();
 }
 
 /** Open a file from the inspector's tree, as a preview or kept. */
@@ -173,7 +173,7 @@ const SHOTS = [
     id: "in-a-workspace__another-agent-here",
     go: async (p) => {
       await at(p, "/sessions/s_1", 1800);
-      await byTitle(p, "Add an agent to this workspace").click();
+      await byTitle(p, "Another agent here").click();
       await pause(p, 700);
     },
   },
@@ -189,7 +189,7 @@ const SHOTS = [
     id: "in-a-workspace__ship-uncommitted",
     go: async (p) => {
       await at(p, "/sessions/s_1", 1800);
-      await inspectorTab(p, "Commit");
+      await inspectorTab(p, "Ship");
       await pause(p, 900);
     },
   },
@@ -239,7 +239,7 @@ const SHOTS = [
     id: "artifacts-and-skills__create-with-ai",
     go: async (p) => {
       await at(p, "/configuration/skills", 1400);
-      await p.getByRole("button", { name: "Add a skill" }).click();
+      await p.getByRole("button", { name: /Add a skill/ }).first().click();
       await pause(p, 400);
       await p.getByText("Create with AI").click();
       await pause(p, 1100);
@@ -281,7 +281,7 @@ const SHOTS = [
     id: "agent-profiles-and-agents__new-profile",
     go: async (p) => {
       await at(p, "/configuration/roles", 1400);
-      await p.getByRole("button", { name: "New profile" }).click();
+      await p.getByRole("button", { name: /New profile/ }).first().click();
       await pause(p, 400);
       await p.getByText("Write it myself").click();
       await pause(p, 900);
@@ -307,7 +307,7 @@ const SHOTS = [
     id: "sources__connect-choose-a-way",
     go: async (p) => {
       await at(p, "/configuration/git-hosts", 1400);
-      await p.getByRole("button", { name: "Add a host" }).click();
+      await p.getByRole("button", { name: /Add a host/ }).first().click();
       await pause(p, 700);
     },
   },
@@ -319,7 +319,7 @@ const SHOTS = [
     id: "sources__add-a-machine",
     go: async (p) => {
       await at(p, "/configuration/machines", 1400);
-      await p.getByRole("button", { name: "Add a machine" }).click();
+      await p.getByRole("button", { name: /Add a machine/ }).first().click();
       await pause(p, 700);
     },
   },
@@ -347,7 +347,7 @@ const SHOTS = [
     id: "settings__new-directory",
     go: async (p) => {
       await at(p, "/configuration/directories", 1400);
-      await p.getByRole("button", { name: /new directory|add a directory/i }).first().click();
+      await p.getByRole("button", { name: /New directory/ }).first().click();
       await pause(p, 700);
     },
   },
