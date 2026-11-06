@@ -843,6 +843,14 @@ pub enum Pty {
 
 impl Pty {
     /// The tmux session it lives in.
+    ///
+    /// The agent's own tmux session is `firetower-<session>`, so **this name
+    /// has that one as a strict prefix** — and tmux matches a `-t` target
+    /// loosely: exact, then fnmatch, then prefix. A shell opened here was
+    /// therefore the answer to every loose question asked about the agent
+    /// beside it: whether it was still running, and which session to kill.
+    /// Anything addressing either of these two names has to ask tmux exactly,
+    /// with the `=` prefix — see `tmux::Tmux::target` in the worker.
     pub fn tmux_name(&self, session: &str) -> String {
         format!("firetower-{session}-shell")
     }
