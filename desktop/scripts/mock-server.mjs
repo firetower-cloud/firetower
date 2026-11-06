@@ -30,6 +30,9 @@ const REPOS = [
 
 const BRANCH = "agent/auth-refactor";
 
+/** An ISO timestamp this many minutes ago, so ages read as ages. */
+const minutesAgo = (n) => new Date(Date.now() - n * 60_000).toISOString();
+
 /** What the workspace came up with. `POST /__reset` puts it back to this. */
 const START = () => [
   { slug: "acme/web", repoId: "r_web", base: "main", branch: BRANCH, path: "web", trouble: null, pullRequest: null, pullState: null },
@@ -496,11 +499,53 @@ const server = createServer(async (req, res) => {
     return json(res, { detail: `./${repo.slug.split("/").pop()} · cut from ${base}` });
   }
 
+  /**
+   * What the Dashboard is drawn from, per scene.
+   *
+   * Three states and nothing in between, because those are the three the
+   * design draws and the three worth photographing: agents asking you
+   * something, agents working and nothing asking, and a Firetower with
+   * nothing in it at all. `note` is the agent's own question — the Dashboard
+   * reads it straight off the row rather than opening a conversation to find
+   * it, which is the whole reason that field exists.
+   */
+  const other = (over) => ({ ...session(), ...over, checkouts: [], steps: undefined });
+  const dashboard = () => {
+    if (scene === "empty") return [];
+    const working = [
+      other({ id: "s_2", workspaceId: "w_2", number: 4, name: "Poke at the deploy script", status: "Working", repo: null, branch: null, createdAt: minutesAgo(8) }),
+      other({ id: "s_3", workspaceId: "w_3", number: 5, name: "Reconcile the webhook retries", status: "Working", agent: "Cursor", repo: "acme/api", branch: "fix/webhook-retry", createdAt: minutesAgo(120) }),
+      other({ id: "s_4", workspaceId: "w_4", number: 6, name: "Backfill the invoice index", status: "Working", agent: "Codex", repo: "acme/jobs", branch: "chore/invoice-index", createdAt: minutesAgo(180) }),
+      other({ id: "s_5", workspaceId: "w_5", number: 7, name: "Composer context meter", status: "Ready", repo: "acme/web", branch: "feat/context-meter", createdAt: minutesAgo(1440) }),
+    ];
+    if (scene === "calm") return [session(), ...working];
+    const asking = [
+      other({
+        id: "s_6", workspaceId: "w_6", number: 8, name: "Quota meter rounding", status: "NeedsYou",
+        repo: "acme/web", branch: "feat/quota-band", createdAt: minutesAgo(12),
+        note: "The amber band starts at 80% of the soft limit. Should a plan with no soft limit show the band at all, or stay neutral until it hits the hard one?",
+      }),
+      other({
+        id: "s_7", workspaceId: "w_7", number: 9, name: "Light mode for the whole app", status: "NeedsYou",
+        repo: "acme/design-system", branch: "feat/light", createdAt: minutesAgo(41),
+        note: "Three of the seven file colours are too pale to read on a white page. Darken all seven, or give light mode its own set?",
+      }),
+      /* A third, past the ember budget: it has to appear in the list below
+         with weight rather than a third dot. */
+      other({
+        id: "s_8", workspaceId: "w_8", number: 10, name: "Tracker webhook signature", status: "HandedBack",
+        repo: "acme/api", branch: "fix/webhook-sig", createdAt: minutesAgo(95),
+        note: "Gitea signs with SHA-256 and GitHub with SHA-1. Verify both, or refuse the older one?",
+      }),
+    ];
+    return [session(), ...asking, ...working];
+  };
+
   const routes = {
     "/api/v1/bootstrap": { version: "0.13.0", eventsPath: "/api/v1/events", authModes: ["password"], organization: ORG.name, serverId: "o_1" },
     "/api/v1/auth/me": { user: USER, organization: ORG },
     "/api/v1/setup": { needsPassword: false, needsOrganization: false, needsGithub: false, completed: true, organization: ORG },
-    "/api/v1/sessions": [session()],
+    "/api/v1/sessions": dashboard(),
     "/api/v1/sessions/s_1": session(),
     "/api/v1/sessions/w_1": session(),
     "/api/v1/sessions/s_1/work": work(),

@@ -1,17 +1,28 @@
 /**
- * Starting work, as a page rather than a sheet.
+ * Starting work, docked at the foot of the Dashboard.
  *
- * The input is the hero: say what you want and start, the way a conversation
- * begins anywhere else. The four decisions a workspace is — who it is, what it
- * touches, what runs it, where — sit beneath it as quiet dropdowns, set only
- * when the default is not what you want.
+ * It was a page of its own at `/new`, with a "Good afternoon" over it and the
+ * workspace list somewhere else entirely — so starting something meant leaving
+ * the screen that told you whether you should. It is one screen now: this
+ * frames the Dashboard and carries the composer, and `/new` lands here.
  *
- * Unlike the old sheet, this one **does** send the prompt: what you type is the
- * first message, delivered once the workspace is set up. Leave it empty and the
- * agent comes up idle, as it always did — you just chat in the composer then.
+ * **The shelf is the two things a workspace *is*** — the repository and the
+ * machine — on their own plane above the input, because on this screen those
+ * choices are *unmade* and making them is the act of starting work. The footer
+ * carries who does it and how. Inside a workspace all of that is settled, so
+ * the composer there has no shelf; that is `Composer.tsx` and it stays as it
+ * is.
  *
- * The data hooks, the fields and the `NewSession` payload are shared with the
- * rest of the client; only the shape on screen is this page's own.
+ * **It takes the whole screen's drops.** The surface is this wrapper rather
+ * than the scroller inside it — the overlay is positioned against it, and an
+ * overlay inside a scroller slides off the top as soon as the page is
+ * scrolled. The Dashboard's own content is `children`, which is what lets one
+ * drop handler cover both.
+ *
+ * What you type **is** the first message, delivered once the workspace is set
+ * up. Leave it empty and the agent comes up idle. The data hooks, the fields
+ * and the `NewSession` payload are shared with the rest of the client; only
+ * the shape on screen is this one's own.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -28,14 +39,12 @@ import {
   X,
 } from "lucide-react";
 import { Icon } from "~/components/ui";
-import { FiretowerMark } from "~/components/ui/Brand";
 import { AgentMark } from "~/components/AgentMark";
 import { RunPicker } from "~/ui/RunPicker";
 import { Mic } from "~/ui/voice/Mic";
 import { VoiceDialog } from "~/ui/voice/Dialogs";
 import { useVoice } from "~/ui/voice/useVoice";
 import { useAgentControls } from "~/api/generated/agents/agents";
-import { useMe } from "~/api/generated/auth/auth";
 import { Pop } from "~/ui/Pop";
 import { Readout, isReady } from "~/components/HostReadiness";
 import { useHostReadiness } from "~/api/generated/hosts/hosts";
@@ -46,7 +55,7 @@ import { canRun, resolve, type Where } from "~/components/WhereItRuns";
 import { usable } from "~/api/accounts";
 import { useAccounts, useAgents, useHosts, useRepos, useSkills } from "~/data";
 import { ConnectAccount } from "~/ui/config/ConnectAccount";
-import { navigate } from "~/shims/next-navigation";
+import { navigate, usePathname } from "~/shims/next-navigation";
 import { leaveDraft } from "~/workspace/draft";
 import { post, whichServer } from "~/workspace/outbox";
 import { base64, chipFor, Chips, Dropping, sift, type Chip } from "~/ui/attach";
@@ -80,16 +89,8 @@ const recall = (key: string) => {
 const slug = (s: string) =>
   s.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48);
 
-/** "Good morning/afternoon/evening", by the clock on this machine. */
-function timeOfDay(): string {
-  const h = new Date().getHours();
-  return h < 12 ? "morning" : h < 18 ? "afternoon" : "evening";
-}
-
-export function NewPage() {
+export function StartComposer({ children }: { children: React.ReactNode }) {
   const seed = useMemo(() => consumeSeed(), []);
-  const me = useMe().data?.user;
-  const who = me?.slug ? me.slug.charAt(0).toUpperCase() + me.slug.slice(1) : me?.username;
 
   const { data: repos } = useRepos();
   const { data: allSkills } = useSkills();
@@ -192,16 +193,23 @@ export function NewPage() {
   /** A picture still being read. The message is not complete without it. */
   const busy = chips.some((c) => c.pending);
 
-  // Arriving from "Create with AI", the composer is already half-written — put
-  // the cursor after it and grow the box, so the person just keeps typing.
+  /* Arriving from "Create with AI", the composer is already half-written — put
+     the cursor after it and grow the box, so the person just keeps typing.
+
+     And arriving by ⌘N or from a task's *Start*, the box takes focus empty:
+     the gesture means "I want to say something", and landing on a screen with
+     the cursor somewhere else makes somebody click before they can type. Not
+     on an ordinary visit to the Dashboard, where the thing to read is the
+     question an agent asked, not the box. */
+  const asked = usePathname().startsWith("/new");
   useEffect(() => {
     const el = box.current;
-    if (!el || !seed?.prompt) return;
+    if (!el || (!seed?.prompt && !asked)) return;
     el.focus();
     el.setSelectionRange(el.value.length, el.value.length);
     el.style.height = "auto";
     el.style.height = Math.min(el.scrollHeight, 240) + "px";
-  }, [seed?.prompt]);
+  }, [seed?.prompt, asked]);
 
   /* A task seeds the repository once the server has mapped its slug to an id. */
   useEffect(() => {
@@ -404,186 +412,186 @@ export function NewPage() {
     /* The surface is this wrapper rather than the scroller inside it: the
        overlay is positioned against it, and an overlay inside a scroller
        slides off the top as soon as the page is scrolled. */
-    <div className="relative flex min-w-0 flex-1 flex-col" {...surface}>
+    <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden" {...surface}>
       {over && <Dropping />}
-      <div className="flex min-h-0 flex-1 flex-col overflow-auto">
-      <div className="m-auto w-full max-w-[680px] px-7 py-10">
-        <h1 className="mb-8 flex items-center justify-center gap-2.5 text-[1.6rem] font-normal leading-snug tracking-[-0.02em] text-bone/90">
-          <FiretowerMark size={28} className="text-bone" />
-          Good {timeOfDay()}{who ? `, ${who}` : ""}
-        </h1>
+      {children}
 
-        {/* What was not taken — too big, too many, a folder — on the line the
-            conversation's composer uses for the same sentences. */}
-        {refused && (
-          <div className="mb-2 flex items-center gap-2 text-meta text-brick">
-            <X className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />
-            {refused}
-          </div>
-        )}
+      <div className="dock">
+        <div className="wrap">
+          {/* What was not taken — too big, too many, a folder — in the words
+              the conversation's composer uses for the same refusals. */}
+          {refused && (
+            <p className="mx-2.5 mb-2 flex items-center gap-2 text-meta text-brick">
+              <X className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />
+              {refused}
+            </p>
+          )}
 
-        {/* composer */}
-        <div className="group rounded-2xl border border-line bg-raise/40 px-5 py-4 transition-colors focus-within:border-slate-deep/80 focus-within:bg-raise/60">
-          {/* The card pads itself here, so the row does not. */}
-          <Chips chips={chips} onDrop={unattach} className="pb-3" />
-          <textarea
-            ref={box}
-            value={prompt}
-            onChange={(e) => {
-              setPrompt(e.target.value);
-              voice.typed(e.target.value);
-              const el = e.target;
-              el.style.height = "auto";
-              el.style.height = Math.min(el.scrollHeight, 240) + "px";
-            }}
-            onKeyDown={(e) => {
-              if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
-              // Enter sends; a modifier makes a newline. Cmd/Ctrl+Enter is the
-              // one asked for; Shift+Enter keeps its native newline so it never
-              // sends by surprise.
-              if (e.shiftKey) return;
-              if (e.metaKey || e.ctrlKey) {
-                e.preventDefault();
-                const el = e.currentTarget;
-                const at = el.selectionStart ?? prompt.length;
-                const end = el.selectionEnd ?? at;
-                const next = prompt.slice(0, at) + "\n" + prompt.slice(end);
-                setPrompt(next);
-                voice.typed(next);
-                requestAnimationFrame(() => {
-                  el.selectionStart = el.selectionEnd = at + 1;
-                  el.style.height = "auto";
-                  el.style.height = Math.min(el.scrollHeight, 240) + "px";
-                });
-                return;
-              }
-              e.preventDefault();
-              go();
-            }}
-            onPaste={(e) => {
-              // A screenshot straight off the clipboard, as the conversation
-              // takes one. Text pastes are left entirely alone.
-              if (e.clipboardData.files.length) void take(e.clipboardData.files);
-            }}
-            placeholder="Describe the task, or start empty and say what you want in the conversation."
-            rows={2}
-            className="scroll-slim w-full resize-none bg-transparent text-read leading-relaxed text-bone placeholder:text-mute/80 focus:outline-none"
-          />
-          <div className="mt-2.5 flex items-center gap-1.5">
-            <label className="control shrink-0 cursor-pointer text-mute hover:bg-raise hover:text-bone" title="Attach a file or an image">
-              <Paperclip className="h-4 w-4" strokeWidth={1.75} />
-              <input type="file" multiple className="hidden" onChange={(e) => void take(e.target.files)} />
-            </label>
-            {voice.possible && <Mic state={voice.state} onStart={voice.start} onStop={voice.stop} />}
-            {allSkills.length > 0 && (
+          {/* Only a blocker that needs *you* surfaces here. Readiness lives in
+              the machine chip's menu, where the machine is. */}
+          {host && kind && mine.length === 0 && (
+            <div className="mx-2.5 mb-2 flex items-center gap-3 rounded-xl border border-amber-deep bg-amber-tint px-3 py-2">
+              <span className="min-w-0 flex-1 text-meta text-bone">
+                No {agents.find((a) => a.kind === kind)?.label ?? kind} account connected.
+              </span>
               <button
-                onClick={(e) => toggle("skills", e.currentTarget)}
-                title="Which skills this agent reads"
-                className="control shrink-0 gap-1.5 text-mute hover:bg-raise hover:text-bone"
+                onClick={() => setConnecting(true)}
+                className="control h-7 border border-line bg-panel text-meta text-bone hover:bg-raise"
               >
-                <Diamond className="h-3.5 w-3.5" strokeWidth={1.75} />
-                <span className="tabular-nums">{selectedSkills.length}</span>
-                <span>{selectedSkills.length === 1 ? "skill" : "skills"}</span>
+                <Icon of={Plus} size={12} />
+                Connect an account
               </button>
-            )}
-            {kind && (
-              <RunPicker
-                agent={kind}
-                agentLabel={agents.find((a) => a.kind === kind)?.label}
-                agents={agents.filter((a) => a.supported).map((a) => ({ kind: a.kind, label: a.label }))}
-                accounts={mine.map((a) => ({ id: a.id, name: a.name, isDefault: a.isDefault }))}
-                accountId={account?.id ?? ""}
-                agentLocked={!!pinned}
-                controls={controls}
-                valueOf={valueOf}
-                onPickAgent={(k) => setWhere({ ...where, agent: k })}
-                onPickAccount={(id) => setAccountId(id)}
-                onPickControl={(k, v) => setChosen((p) => ({ ...p, [k]: v }))}
-              />
-            )}
-            <button
-              onClick={go}
-              disabled={!ready}
-              title={busy ? "Waiting for the images" : "Start the workspace"}
-              className="ml-auto grid h-8 w-8 place-items-center rounded-full bg-bone text-ground transition-opacity duration-150 hover:opacity-90 disabled:bg-overlay disabled:text-mute"
-            >
-              <ArrowUp className="h-4 w-4" strokeWidth={2.5} />
-            </button>
-          </div>
-        </div>
+            </div>
+          )}
+          {create.isError && (
+            <p className="mx-2.5 mb-2 rounded-xl border border-brick-deep bg-brick-tint px-3 py-2 text-meta text-brick">
+              {(create.error as { code?: string })?.code === "NoCapacity"
+                ? "No host is available to take this."
+                : ((create.error as { message?: string })?.message ?? "Couldn't start it.")}
+            </p>
+          )}
 
-        {/* the four decisions */}
-        <div className="mt-3 flex items-center gap-0.5">
-          {/* Profile */}
-          <Pill
-            icon={
-              pinned ? (
-                <AgentMark agent={pinned} size={15} />
-              ) : profile ? (
-                <UserRound className="h-[15px] w-[15px]" strokeWidth={1.8} />
-              ) : (
-                <UserRound className="h-[15px] w-[15px]" strokeWidth={1.8} />
-              )
-            }
-            label={profile ? profile.name : "Just an agent"}
-            set={!!profile}
-            onClick={(e) => toggle("profile", e)}
-          />
-          {/* Repository */}
-          <Pill
-            icon={<FolderGit2 className="h-[15px] w-[15px]" strokeWidth={1.8} />}
-            label={
-              checkouts.length === 0
+          {/* The shelf: what the workspace will be made of. */}
+          <div className="shelf">
+            <button
+              onClick={(e) => toggle("repo", e.currentTarget)}
+              data-set={checkouts.length > 0}
+              className="chip"
+              title="Which repositories this workspace checks out"
+            >
+              <span className="grid place-items-center text-mute">
+                <Icon of={FolderGit2} size={14} />
+              </span>
+              {checkouts.length === 0
                 ? "Add a repository"
                 : checkouts.length === 1
                   ? checkouts[0].slug
-                  : `${checkouts.length} repositories`
-            }
-            set={checkouts.length > 0}
-            onClick={(e) => toggle("repo", e)}
-          />
-          {/* Where it runs — pushed to the far right, apart from the rest */}
-          <span className="flex-1" />
-          <Pill
-            icon={<Server className="h-[15px] w-[15px]" strokeWidth={1.8} />}
-            label={machine ? machineLabel(machine) : "Where it runs"}
-            set={!!where.machine}
-            after={
-              host && kind ? (
+                  : `${checkouts.length} repositories`}
+              <Icon of={ChevronDown} size={12} className="text-mute" />
+            </button>
+            <button
+              onClick={(e) => toggle("machine", e.currentTarget)}
+              data-set={!!where.machine}
+              className="chip"
+              title="Where it runs"
+            >
+              <span className="grid place-items-center text-mute">
+                <Icon of={Server} size={14} />
+              </span>
+              {machine ? machineLabel(machine) : "Where it runs"}
+              {host && kind && (
                 <span
-                  className={`h-1.5 w-1.5 rounded-full ${hostReady ? "bg-sage" : "bg-kind-data"}`}
+                  className={`h-[5px] w-[5px] shrink-0 rounded-full ${hostReady ? "bg-sage" : "bg-amber-soft"}`}
                   title={hostReady ? "Ready" : "Needs setup — open to see"}
                 />
-              ) : undefined
-            }
-            onClick={(e) => toggle("machine", e)}
-          />
-        </div>
-
-        {/* Readiness lives in the machine dropdown now; only a blocker that
-            needs you — no account to run on — surfaces here. */}
-        {host && kind && mine.length === 0 && (
-          <div className="mt-2 flex items-center gap-3 rounded-lg border border-line bg-panel px-3 py-2">
-            <span className="min-w-0 flex-1 text-meta text-kind-data">
-              No {agents.find((a) => a.kind === kind)?.label ?? kind} account connected.
-            </span>
-            <button
-              onClick={() => setConnecting(true)}
-              className="control h-7 border border-line bg-raise text-meta text-bone hover:bg-overlay"
-            >
-              <Icon of={Plus} size={12} />
-              Connect an account
+              )}
+              <Icon of={ChevronDown} size={12} className="text-mute" />
             </button>
           </div>
-        )}
-        {create.isError && (
-          <p className="mt-2 rounded-lg border border-brick-deep bg-brick-tint px-3 py-2 font-mono text-meta text-brick">
-            {(create.error as { code?: string })?.code === "NoCapacity"
-              ? "No host is available to take this."
-              : ((create.error as { message?: string })?.message ?? "Couldn't start it.")}
-          </p>
-        )}
-      </div>
+
+          <div className="composer">
+            <Chips chips={chips} onDrop={unattach} className="pb-3" />
+            <textarea
+              ref={box}
+              value={prompt}
+              onChange={(e) => {
+                setPrompt(e.target.value);
+                voice.typed(e.target.value);
+                const el = e.target;
+                el.style.height = "auto";
+                el.style.height = Math.min(el.scrollHeight, 240) + "px";
+              }}
+              onKeyDown={(e) => {
+                if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
+                // Enter sends; a modifier makes a newline. Cmd/Ctrl+Enter is the
+                // one asked for; Shift+Enter keeps its native newline so it never
+                // sends by surprise.
+                if (e.shiftKey) return;
+                if (e.metaKey || e.ctrlKey) {
+                  e.preventDefault();
+                  const el = e.currentTarget;
+                  const at = el.selectionStart ?? prompt.length;
+                  const end = el.selectionEnd ?? at;
+                  const next = prompt.slice(0, at) + "\n" + prompt.slice(end);
+                  setPrompt(next);
+                  voice.typed(next);
+                  requestAnimationFrame(() => {
+                    el.selectionStart = el.selectionEnd = at + 1;
+                    el.style.height = "auto";
+                    el.style.height = Math.min(el.scrollHeight, 240) + "px";
+                  });
+                  return;
+                }
+                e.preventDefault();
+                go();
+              }}
+              onPaste={(e) => {
+                // A screenshot straight off the clipboard, as the conversation
+                // takes one. Text pastes are left entirely alone.
+                if (e.clipboardData.files.length) void take(e.clipboardData.files);
+              }}
+              placeholder="Start something new…"
+              rows={1}
+              className="scroll-slim w-full resize-none bg-transparent text-lede leading-normal text-bone placeholder:text-mute focus:outline-none"
+            />
+
+            {/* The footer: who does the work, and how. */}
+            <div className="bar">
+              <label className="chip cursor-pointer" title="Attach a file or an image">
+                <Paperclip className="h-4 w-4" strokeWidth={1.75} />
+                <input type="file" multiple className="hidden" onChange={(e) => void take(e.target.files)} />
+              </label>
+              {voice.possible && <Mic state={voice.state} onStart={voice.start} onStop={voice.stop} />}
+              {allSkills.length > 0 && (
+                <button
+                  onClick={(e) => toggle("skills", e.currentTarget)}
+                  title="Which skills this agent reads"
+                  className="chip"
+                >
+                  <Diamond className="h-3.5 w-3.5" strokeWidth={1.75} />
+                  <span className="tabular-nums">{selectedSkills.length}</span>
+                  <span>{selectedSkills.length === 1 ? "skill" : "skills"}</span>
+                </button>
+              )}
+              <button
+                onClick={(e) => toggle("profile", e.currentTarget)}
+                data-set={!!profile}
+                className="chip"
+                title="Which profile the agent wears"
+              >
+                <span className="grid place-items-center text-mute">
+                  {pinned ? <AgentMark agent={pinned} size={15} /> : <UserRound className="h-[15px] w-[15px]" strokeWidth={1.8} />}
+                </span>
+                {profile ? profile.name : "Just an agent"}
+                <Icon of={ChevronDown} size={12} className="text-mute" />
+              </button>
+              {kind && (
+                <RunPicker
+                  agent={kind}
+                  agentLabel={agents.find((a) => a.kind === kind)?.label}
+                  agents={agents.filter((a) => a.supported).map((a) => ({ kind: a.kind, label: a.label }))}
+                  accounts={mine.map((a) => ({ id: a.id, name: a.name, isDefault: a.isDefault }))}
+                  accountId={account?.id ?? ""}
+                  agentLocked={!!pinned}
+                  controls={controls}
+                  valueOf={valueOf}
+                  onPickAgent={(k) => setWhere({ ...where, agent: k })}
+                  onPickAccount={(id) => setAccountId(id)}
+                  onPickControl={(k, v) => setChosen((p) => ({ ...p, [k]: v }))}
+                />
+              )}
+              <button
+                onClick={go}
+                disabled={!ready}
+                title={busy ? "Waiting for the images" : "Start it   ⏎"}
+                aria-label="Start it"
+                className="send"
+              >
+                <ArrowUp className="h-[17px] w-[17px]" strokeWidth={2.5} />
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* ---------- the pill menus ---------- */}

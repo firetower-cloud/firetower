@@ -1,242 +1,266 @@
 /**
- * One server's fleet.
+ * The one screen that answers "do I need to do anything".
  *
- * Same columns as the web dashboard — workspace and branch together, which
- * agents, when it started, what it is doing — and the same filters, because
- * that is the vocabulary. What a window adds is density and a keyboard: rows
- * are 34px, and the whole table is one scroll region rather than a page.
+ * It was a table: a filter bar, a repository select, four ALL-CAPS column
+ * headers, and a row per workspace carrying a branch, three agent marks, an
+ * elapsed time and a state pill. Everything was the same weight, so the
+ * question the screen exists for — *is an agent waiting on me* — had to be
+ * read out of a grid.
+ *
+ * It is a sentence now, and then the questions themselves. **The agent's own
+ * words, at reading size**, from `Session.note`, which is exactly that: "only
+ * ever the agent's own words, and only for the statuses that mean your move".
+ * Nothing new is fetched to get it — it is already on the row.
+ *
+ * ## The ember budget
+ *
+ * An earlier round put six dots on this screen and was rejected for it. The
+ * budget is **three on screen at once**, and the arithmetic is deliberate:
+ * at most **two** questions are drawn in full with a dot, and the rail's
+ * avatar carries at most one more for *waiting somewhere you are not*. In the
+ * calm state that leaves exactly one.
+ *
+ * A third waiting agent does not get a third dot. It joins the list below at
+ * the brightest text tier and in medium weight — which is the system's own
+ * rule, the same one the rail's panel follows: anything new is shape, weight
+ * or position, never a new hue.
  */
-import { useMemo, useState } from "react";
-import { CircleDashed, Plus } from "lucide-react";
-import { Signal } from "~/components/Signal";
+import { useMemo } from "react";
+import { ChevronRight, Monitor, Terminal } from "lucide-react";
 import { AgentMark } from "~/components/AgentMark";
-import { HostMark, Icon } from "~/components/ui";
-import { doing, group, shortRepo, type Workspace } from "~/api/workspaces";
-import { elapsed, minutesSince, needsYou } from "~/api/view";
+import { Icon } from "~/components/ui";
+import { flat, group, isChild, type Workspace } from "~/api/workspaces";
+import { elapsed, inFlight, minutesSince, needsYou } from "~/api/view";
 import { useNow } from "~/ui/clock";
-import type { Backend } from "~/fleet";
-import { useHostOf, useSessions } from "~/data";
+import { useFleet, waitingIn, type Backend } from "~/fleet";
+import { useHosts, useSessions } from "~/data";
+import { whereItRuns } from "~/ui/StatusBar";
 import { navigate } from "~/shims/next-navigation";
-import { useStart } from "~/start";
-import { useQueryClient } from "@tanstack/react-query";
-import { endAllSessions, getListSessionsQueryKey } from "~/api/generated/sessions/sessions";
-import { useConfirm } from "~/ui/Confirm";
-import { why } from "~/data";
+import { StartComposer } from "~/ui/StartComposer";
 
-type Filter = "all" | "waiting" | "working" | "idle";
-const FILTERS: [Filter, string][] = [
-  ["all", "All"],
-  ["waiting", "Waiting"],
-  ["working", "Working"],
-  ["idle", "Idle"],
-];
+/** Small numbers read as words. A sentence does not count in digits. */
+const WORDS = ["no", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine"];
+const say = (n: number) => WORDS[n] ?? String(n);
 
-export function Dashboard({ backend }: { backend: Backend }) {
-  const hostOf = useHostOf();
-  const start = useStart();
+/** How many questions are drawn in full. See the ember budget above. */
+const IN_FULL = 2;
+
+/**
+ * Which questions get a dot, and which get weight instead.
+ *
+ * The cap is the ember budget and not a layout convenience: three dots here
+ * plus the rail's avatar is four of the one colour that is supposed to be
+ * rare. Everything past the cap is still on the screen — it is in the list
+ * below in medium weight at the brightest tier, and it is in the rail's panel
+ * — it just does not get a second way of shouting.
+ */
+export function drawnInFull<T>(asks: T[]): { inFull: T[]; quieter: T[] } {
+  return { inFull: asks.slice(0, IN_FULL), quieter: asks.slice(IN_FULL) };
+}
+
+/**
+ * What to call the list under the questions.
+ *
+ * "Still working" is a lie about a workspace that is waiting on you and did
+ * not fit in the budget above, so the word changes when one of those is in
+ * there. With nothing waiting at all it is not "others" — it is the list.
+ */
+export function also(asking: number, quieter: number, working: number): string {
+  const n = quieter + working;
+  if (asking === 0) return "Working";
+  return `${say(n)} other${n === 1 ? " is" : "s are"} still ${quieter > 0 ? "open" : "working"}`;
+}
+
+export function Dashboard({ backend, onSwitch }: { backend: Backend; onSwitch: (serverId: string) => void }) {
   const { data: sessions, loading, error } = useSessions();
-  // Same reason as the rail's: the card ages come off the clock, and a session
-  // working quietly produces no renders of its own.
+  const fleet = useFleet();
+  /* The ages come off the clock, and a workspace working quietly produces no
+     renders of its own. */
   useNow();
-  const [filter, setFilter] = useState<Filter>("all");
-  const [repo, setRepo] = useState("all");
 
-  const live = sessions.filter((s) => s.status !== "Ended");
-  const repos = useMemo(() => group(live), [live.map((s) => s.status + s.updatedAt).join()]);
+  const { asks, working, agentsWaiting, agentsWorking } = useMemo(() => {
+    const live = sessions.filter((s) => s.status !== "Ended");
+    const places = flat(group(live));
+    /* A child in its own workspace lives under its lead in the Overview tab,
+       not as a row of its own here. */
+    const top = places.filter((p) => !isChild(p, places));
+    return {
+      asks: top.filter((p) => p.runs.some(needsYou)),
+      working: top.filter((p) => !p.runs.some(needsYou)),
+      /* The sentence counts **agents**, which is what it says and what the
+         dock badge counts — three agents can be waiting in two workspaces,
+         and the badge on the dock has always said three. The items below are
+         workspaces, because a workspace is what you open. */
+      agentsWaiting: live.filter(needsYou).length,
+      agentsWorking: live.filter(inFlight).length,
+    };
+  }, [sessions]);
 
-  const shown = repos.groups
-    .filter(([name]) => repo === "all" || name === repo)
-    .map(([name, places]): [string, Workspace[]] => [
-      name,
-      places.filter((p) => filter === "all" || doing(p) === filter),
-    ])
-    .filter(([, places]) => places.length > 0);
+  /* One line, only while it is true. The whole of what the "all servers"
+     scope and the Fleet screen used to do inside the window. */
+  const elsewhere = fleet.find(
+    (f) => f.backend.id !== backend.id && f.backend.reach === "live" && waitingIn(f.sessions) > 0,
+  );
 
-  const waiting = live.filter(needsYou).length;
-  const total = repos.total;
-
-  /* Ending what is on screen: every workspace the filters leave, and every
-     agent in them — the web's rule, with its wording. Their worktrees go;
-     branches already pushed stay on the remote. */
-  const confirm = useConfirm();
-  const cache = useQueryClient();
-  const [ending, setEnding] = useState(false);
-  const listed = shown.flatMap(([, places]) => places);
-  const everything = repo === "all" && filter === "all";
-  const endAll = async () => {
-    const agents = listed.reduce((n, p) => n + p.runs.length, 0);
-    const scope = everything ? "everything on this server" : repo !== "all" ? `in ${shortRepo(repo)}${filter !== "all" ? `, ${filter}` : ""}` : filter;
-    const ok = await confirm({
-      title: listed.length === 1 ? `End "${listed[0].name}"?` : `End all ${listed.length} workspaces?`,
-      body: (
-        <>
-          <p>
-            {listed.length === 1 ? "One workspace" : `${listed.length} workspaces`} — {scope} — and {agents === 1 ? "the agent" : `the ${agents} agents`} in them. Their worktrees go, and anything not pushed goes with them.
-          </p>
-          {listed.length <= 8 && (
-            <ul className="mt-2.5 space-y-0.5">
-              {listed.map((p) => (
-                <li key={p.id} className="flex items-baseline gap-2 text-meta">
-                  <span className="truncate text-text">{p.name}</span>
-                  <span className="truncate font-mono text-mute">{p.branch ?? "—"}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-          <p className="mt-2.5 text-meta text-mute">Branches already pushed stay on the remote. A machine that is not answering keeps its workspaces until it comes back.</p>
-        </>
-      ),
-      action: listed.length === 1 ? "End workspace" : `End all ${listed.length}`,
-      tone: "danger",
-    });
-    if (!ok) return;
-    setEnding(true);
-    try {
-      const result = await endAllSessions({ workspaces: everything ? null : listed.map((p) => p.id) });
-      await cache.invalidateQueries({ queryKey: getListSessionsQueryKey() });
-      if (result.unreachable > 0) {
-        await confirm({ title: `${result.ended} ended.`, body: `${result.unreachable} could not be reached and keep their workspaces until the machine answers.`, action: "OK" });
-      }
-    } catch (e) {
-      await confirm({ title: "That did not work.", body: why(e), action: "OK" });
-    } finally {
-      setEnding(false);
-    }
-  };
+  const nothingYet = !loading && !error && asks.length === 0 && working.length === 0;
+  const { inFull, quieter } = drawnInFull(asks);
 
   return (
-    <div className="scroll-slim h-full overflow-y-auto">
-      <div className="mx-auto max-w-[1000px] px-6 py-6">
-        <div className="flex items-start justify-between">
-          <div>
-            <h1 className="text-display text-bone">
-              {waiting > 0 ? `${waiting} waiting on you.` : `${total} running.`}
-            </h1>
-            <p className="mt-1 max-w-[440px] text-body text-dim">
-              A branch on one of your hosts — a git worktree per repository — with any number of
-              agents in it.
+    <StartComposer>
+      {nothingYet ? (
+        <div className="grid min-h-0 flex-1 place-items-center px-8 pb-[170px]">
+          <div className="max-w-[430px] text-center">
+            <span className="mx-auto grid h-13 w-13 place-items-center rounded-2xl bg-raise text-mute">
+              <Icon of={Terminal} size={20} />
+            </span>
+            <h2 className="mt-5 text-display font-mid text-bone">What should we build?</h2>
+            <p className="mt-2 text-read text-dim">
+              Describe it, and an agent starts on it in its own copy of the code.
             </p>
           </div>
-          <button
-            onClick={() => start()}
-            className="control border border-line bg-raise text-bone transition-colors hover:bg-overlay"
-          >
-            <Icon of={Plus} size={14} />
-            New workspace
-          </button>
         </div>
+      ) : (
+        <div className="scroll-slim min-h-0 flex-1 overflow-y-auto">
+          <div className="mx-auto w-full max-w-[740px] px-[34px] pt-13 pb-[230px]">
+            {loading && <p className="text-read text-mute">Reading what is running…</p>}
+            {error && <p className="text-read text-brick">{error}</p>}
 
-        <div className="mt-5 overflow-hidden rounded-lg border border-line bg-panel">
-          <div className="flex items-center gap-2 border-b border-line px-2.5 py-2">
-            <div className="track">
-              {FILTERS.map(([f, label]) => (
-                <button key={f} data-on={filter === f} onClick={() => setFilter(f)}>
-                  {label}
-                </button>
-              ))}
-            </div>
+            {!loading && !error && (
+              <>
+                <h1 className="text-hero font-mid text-bone">
+                  {agentsWaiting > 0
+                    ? `${say(agentsWaiting)} agent${agentsWaiting === 1 ? " is" : "s are"} waiting on you.`
+                    : `${say(agentsWorking)} agent${agentsWorking === 1 ? " is" : "s are"} working.`}
+                </h1>
+                {agentsWaiting === 0 && (
+                  <p className="mt-3 max-w-[46ch] text-lede text-dim">Nothing needs you right now.</p>
+                )}
+              </>
+            )}
 
-            <select
-              value={repo}
-              onChange={(e) => setRepo(e.target.value)}
-              className="h-7 rounded-md border border-line bg-ground px-2 text-ui text-dim focus:outline-none"
-            >
-              <option value="all">All repositories</option>
-              {repos.groups.map(([name]) => (
-                <option key={name} value={name}>
-                  {shortRepo(name)}
-                </option>
-              ))}
-            </select>
+            {inFull.length > 0 && (
+              <div className="mt-7 flex flex-col">
+                {inFull.map((place) => (
+                  <Ask key={place.id} place={place} />
+                ))}
+              </div>
+            )}
 
-            <span className="ml-auto text-meta text-mute">
-              {total} · {waiting} waiting
-            </span>
-            {listed.length > 0 && (
-              <button disabled={ending} onClick={() => void endAll()} className="rounded-md border border-brick-deep bg-brick-tint px-2.5 py-1 text-ui text-brick transition-colors hover:bg-brick-deep/40 disabled:opacity-50">
-                {ending ? "Ending…" : `End all ${listed.length}`}
+            {elsewhere && (
+              <button
+                onClick={() => onSwitch(elsewhere.backend.id)}
+                title={`Switch to ${elsewhere.backend.org}`}
+                className="elsewhere mt-6 text-ui"
+              >
+                <span>
+                  {say(waitingIn(elsewhere.sessions))} more waiting in <b>{elsewhere.backend.org}</b> — you are not in it
+                </span>
+                <span className="go text-ui">
+                  Switch
+                  <Icon of={ChevronRight} size={12} />
+                </span>
               </button>
             )}
+
+            {(quieter.length > 0 || working.length > 0) && (
+              <section className="mt-13">
+                <h2 className="text-ui font-normal text-dim">{also(asks.length, quieter.length, working.length)}</h2>
+                <div className="mt-1.5">
+                  {/* The waiting ones past the budget. Weight and the brightest
+                      tier, never a third dot. */}
+                  {quieter.map((place) => (
+                    <Row key={place.id} place={place} hot />
+                  ))}
+                  {working.map((place) => (
+                    <Row key={place.id} place={place} />
+                  ))}
+                </div>
+              </section>
+            )}
           </div>
-
-          <div className="flex items-center gap-3 border-b border-line-soft px-3 py-1.5">
-            <span className="w-[15px] shrink-0" />
-            <span className="eyebrow flex-1">Workspace / branch</span>
-            <span className="eyebrow w-[92px] shrink-0">Agents</span>
-            <span className="eyebrow w-[64px] shrink-0">Started</span>
-            <span className="eyebrow w-[84px] shrink-0">State</span>
-          </div>
-
-          {loading && <p className="px-3 py-6 text-center text-ui text-mute">Loading…</p>}
-          {error && <p className="px-3 py-6 text-center text-ui text-brick">{error}</p>}
-          {!loading && !error && shown.length === 0 && (
-            <p className="px-3 py-6 text-center text-ui text-mute">Nothing matches.</p>
-          )}
-
-          {shown.map(([name, places]) => (
-            <div key={name}>
-              <div className="flex items-center gap-1.5 bg-ground/40 px-3 py-1">
-                {name === "no repository" ? (
-                  <Icon of={CircleDashed} size={12} className="text-mute" />
-                ) : (
-                  <HostMark kind={hostOf(name)?.kind} size={11} className="text-mute" />
-                )}
-                <span className="font-mono text-micro text-dim">{name}</span>
-                <span className="ml-auto font-mono text-micro text-mute">{places.length}</span>
-              </div>
-              {places.map((place) => (
-                <Line key={place.id} place={place} />
-              ))}
-            </div>
-          ))}
         </div>
-      </div>
-    </div>
+      )}
+    </StartComposer>
   );
 }
 
-function Line({ place }: { place: Workspace }) {
-  const state = doing(place);
+/**
+ * One agent, and what it asked.
+ *
+ * Not a card and not a filled block — a name, a question and one dot, on the
+ * page itself, where a dot is the loudest thing there is. The question is the
+ * agent's own sentence at reading size, which is the whole reason this screen
+ * is worth opening rather than the rail.
+ */
+function Ask({ place }: { place: Workspace }) {
+  const asking = place.runs.find(needsYou);
+  const question = asking?.note?.trim();
+  return (
+    <button onClick={() => navigate(`/sessions/${place.id}`)} className="ask">
+      <span className="top flex min-w-0 items-center gap-2.5">
+        <span className="dot" />
+        <span className="min-w-0 truncate text-title font-mid text-bone">{place.name}</span>
+        <span className="flex-1" />
+        <span className="shrink-0 text-ui tabular-nums text-dim">
+          {elapsed(minutesSince((asking ?? place.runs[0]).createdAt))}
+        </span>
+      </span>
+      {question ? (
+        <span className="mt-2 block text-lede text-text">{question}</span>
+      ) : (
+        /* No words with it. The status is still the answer — it is your move —
+           and saying so beats an empty space where a sentence should be. */
+        <span className="mt-2 block text-lede text-dim">Waiting on you.</span>
+      )}
+    </button>
+  );
+}
+
+/**
+ * A workspace that is not asking: a name and one timestamp.
+ *
+ * The branch, the agent and the machine are facts *about* the row rather than
+ * things anybody reads, so they arrive on hover — and on focus, or the
+ * keyboard would be told less than the mouse.
+ */
+function Row({ place, hot = false }: { place: Workspace; hot?: boolean }) {
+  const hosts = useHosts();
   const lead = place.runs[0];
+  const host = hosts.data.find((h) => h.id === lead.hostId);
+  const where = whereItRuns(host, hosts.data);
+  const live = place.runs.some(inFlight);
 
   return (
-    <button
-      onClick={() => navigate(`/sessions/${place.id}`)}
-      className="flex h-[var(--row)] w-full items-center gap-3 px-3 text-left transition-colors hover:bg-raise/60"
-    >
-      <span className="w-[15px] shrink-0">
-        <Signal status={lead.status} size={5} />
-      </span>
-
-      <span className="min-w-0 flex-1">
-        <span className="flex items-center gap-2">
-          <span className="truncate text-ui text-bone">{place.name}</span>
-          {place.runs.some(needsYou) && <span className="h-1.5 w-1.5 rounded-full bg-ember" />}
+    <button onClick={() => navigate(`/sessions/${place.id}`)} className="wrow">
+      <span className="top flex min-w-0 items-center gap-2.5">
+        <span className={`min-w-0 truncate text-read ${hot ? "font-mid text-bone" : "text-text"}`}>
+          {place.name}
         </span>
-        <span className="block truncate font-mono text-micro text-mute">{place.branch}</span>
+        {live && (
+          <span className="typing" title="Working now">
+            <i />
+            <i />
+            <i />
+          </span>
+        )}
+        <span className="ml-auto shrink-0 text-ui tabular-nums text-dim">
+          {elapsed(minutesSince(lead.createdAt))}
+        </span>
       </span>
-
-      <span className="flex w-[92px] shrink-0 items-center gap-1">
-        {place.runs.slice(0, 4).map((run) => (
-          <AgentMark key={run.id} agent={run.agent} size={11} className="text-mute" />
-        ))}
-      </span>
-
-      <span className="w-[64px] shrink-0 font-mono text-micro text-mute">
-        {elapsed(minutesSince(lead.createdAt))}
-      </span>
-
-      <span className="w-[84px] shrink-0">
-        <span
-          className={`rounded-sm border px-1.5 py-0.5 text-micro ${
-            state === "waiting"
-              ? "border-ember-deep bg-ember-tint text-ember-ink"
-              : state === "working"
-                ? "border-slate-deep bg-slate-tint text-slate"
-                : "border-line bg-raise text-mute"
-          }`}
-        >
-          {state === "waiting" ? "your move" : state}
+      <span className="more text-meta text-dim">
+        <span>
+          <AgentMark agent={lead.agent} size={13} className="shrink-0 text-mute" />
+          {place.branch ? (
+            <span className="truncate font-mono text-micro tracking-tight">{place.branch}</span>
+          ) : (
+            <span>no branch yet</span>
+          )}
+          {where && (
+            <>
+              <Icon of={Monitor} size={12} className="shrink-0 text-mute" />
+              <span className="truncate">{where.name}</span>
+            </>
+          )}
         </span>
       </span>
     </button>

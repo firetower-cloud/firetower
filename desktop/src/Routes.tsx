@@ -8,7 +8,6 @@
  * same fleet without one of them being a smaller copy of the other.
  */
 import { Dashboard } from "~/ui/Dashboard";
-import { NewPage } from "~/ui/NewPage";
 import { TasksPage } from "~/ui/TasksPage";
 import { ArtifactsPage } from "~/ui/ArtifactsPage";
 import { Workbench } from "~/ui/Workbench";
@@ -20,10 +19,14 @@ import { navigate } from "~/shims/next-navigation";
 import type { Backend } from "~/fleet";
 import { usePathname } from "~/shims/next-navigation";
 
-export function Routes({ backend, onForgot }: { backend: Backend; onForgot: () => void }) {
+export function Routes({ backend, onSwitch, onForgot }: { backend: Backend; onSwitch: (serverId: string) => void; onForgot: () => void }) {
   const path = usePathname();
 
-  if (path.startsWith("/new")) return <NewPage />;
+  /* `/new` was a page of its own; the composer is on the Dashboard now. The
+     address still works, because it is in people's history and in links the
+     app itself has handed out — it just lands on the screen that took the
+     job over. */
+  if (path.startsWith("/new")) return <Dashboard backend={backend} onSwitch={onSwitch} />;
   if (path.startsWith("/tasks")) return <TasksPage backend={backend} />;
   if (path.startsWith("/artifacts")) return <ArtifactsPage />;
   if (path.startsWith("/configuration")) return <Configuration backend={backend} onForgot={onForgot} />;
@@ -36,5 +39,5 @@ export function Routes({ backend, onForgot }: { backend: Backend; onForgot: () =
     return <Workbench backend={backend} workspace={id} />;
   }
 
-  return <Dashboard backend={backend} />;
+  return <Dashboard backend={backend} onSwitch={onSwitch} />;
 }

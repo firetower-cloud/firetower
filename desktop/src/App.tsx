@@ -204,6 +204,7 @@ export function App() {
                   <Gate backend={here}>
                     <Routes
                       backend={here}
+                      onSwitch={pick}
                       onForgot={() => {
                         const left = servers();
                         setReal(left);

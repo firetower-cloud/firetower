@@ -106,10 +106,22 @@
      suits prose, while the chrome around it stays small and quiet. Raising
      everything uniformly would just make a dense screen bigger; this widens
      the gap between what you read and what you operate. */
+  /* The one sentence the Dashboard exists to say. Bigger than `--text-display`
+     because it is not a heading over something — it *is* the content, and it
+     is the only thing on that screen anybody has to read. */
+  --text-hero: 2.5rem;             /* 40px - "Two agents are waiting on you." */
+  --text-hero--line-height: 1.08;
+  --text-hero--letter-spacing: -0.028em;
+
   --text-read: 0.9375rem;          /* 15px - the conversation */
   --text-read--line-height: 1.7;
   --text-lede: 1.0625rem;          /* 17px - a first line worth slowing for */
   --text-lede--line-height: 1.5;
+
+  /* The weight the design is set in, between Tailwind's 500 and 600. Archivo
+     is variable, so 530 is a real weight rather than a synthesised one — and
+     it is what keeps a 40px sentence from reading as a banner. */
+  --font-weight-mid: 530;
 
   /* Desk density. Rows are taller than the web build's 34px because a mouse
      is precise and a window is not short of vertical space; what a tight row
@@ -350,6 +362,297 @@
       opacity: 0;
       transform: translateX(-14px) scale(0.985);
     }
+  }
+
+  /* ── Waiting on you ────────────────────────────────────────────
+     Not a card, not a filled block. A name, a question, and one dot — on the
+     page itself, where a dot is the loudest thing there is. The old row was a
+     table cell with a branch, three agent marks and a state pill in it; what
+     somebody actually needs is the sentence the agent wrote. */
+  .ask {
+    position: relative;
+    display: block;
+    width: calc(100% + 32px);
+    margin-inline: -16px;
+    padding: 16px;
+    border-radius: 14px;
+    text-align: left;
+    transition: background 180ms var(--ease-swift);
+  }
+  .ask:hover {
+    background: var(--color-raise);
+  }
+  .ask + .ask {
+    margin-top: 4px;
+  }
+  .ask > .top > .dot {
+    position: absolute;
+    left: -3px;
+    top: 23px;
+  }
+
+  /* The dot. The only saturated thing on the screen, and it is 8px wide.
+     The halo is the pulse; `ember-pulse` in `globals.css` is the same idea at
+     the other end of the app and keeps its own timing. */
+  .dot {
+    position: relative;
+    width: 8px;
+    height: 8px;
+    flex: none;
+    border-radius: 99px;
+    background: var(--color-ember);
+  }
+  .dot::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 99px;
+    background: var(--color-ember);
+    animation: dot-halo 3.4s ease-in-out infinite;
+  }
+  @keyframes dot-halo {
+    0%,
+    100% {
+      opacity: 0.42;
+      transform: scale(1);
+    }
+    50% {
+      opacity: 0;
+      transform: scale(2.6);
+    }
+  }
+
+  /* ── Somewhere you are not ─────────────────────────────────────
+     The whole of what the "all servers" scope and the Fleet screen used to do,
+     in one line that is only here while it is true. */
+  .elsewhere {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    height: 36px;
+    padding: 0 6px 0 15px;
+    border-radius: 99px;
+    background: var(--color-raise);
+    color: var(--color-dim);
+    transition: background var(--dur-native) var(--ease-swift);
+  }
+  .elsewhere:hover {
+    background: var(--color-overlay);
+  }
+  .elsewhere b {
+    font-weight: 500;
+    color: var(--color-text);
+  }
+  .elsewhere .go {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    gap: 4px;
+    height: 26px;
+    padding: 0 10px;
+    border-radius: 99px;
+    background: var(--color-panel);
+    color: var(--color-bone);
+    box-shadow: var(--shadow-raise);
+  }
+
+  /* ── Also working ──────────────────────────────────────────────
+     A name and one timestamp. The branch, the agent and the machine are facts
+     *about* the row rather than things you read, so they arrive on hover — and
+     on focus, or the keyboard would be told less than the mouse.
+     `grid-template-rows: 0fr → 1fr` animates a height nobody had to measure. */
+  .wrow {
+    display: block;
+    width: calc(100% + 32px);
+    margin-inline: -16px;
+    padding: 11px 16px;
+    border-radius: 12px;
+    text-align: left;
+    transition: background 180ms var(--ease-swift);
+  }
+  .wrow:hover {
+    background: var(--color-raise);
+  }
+  .wrow .more {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows 200ms var(--ease-swift);
+  }
+  .wrow:hover .more,
+  .wrow:focus-visible .more {
+    grid-template-rows: 1fr;
+  }
+  .wrow .more > span {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 0;
+    overflow: hidden;
+    opacity: 0;
+    transition: opacity 160ms var(--ease-swift) 40ms;
+  }
+  .wrow:hover .more > span,
+  .wrow:focus-visible .more > span {
+    opacity: 1;
+    padding-top: 5px;
+  }
+
+  /* Someone is typing. The one thing that moves at rest, and it says what a
+     spinner says without any of a spinner's urgency. */
+  .typing {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    gap: 3px;
+    height: 8px;
+  }
+  .typing i {
+    width: 4px;
+    height: 4px;
+    border-radius: 99px;
+    background: var(--color-mute);
+    animation: typing 1.4s ease-in-out infinite;
+  }
+  .typing i:nth-child(2) {
+    animation-delay: 0.18s;
+  }
+  .typing i:nth-child(3) {
+    animation-delay: 0.36s;
+  }
+  @keyframes typing {
+    0%,
+    70%,
+    100% {
+      opacity: 0.3;
+      transform: translateY(0);
+    }
+    35% {
+      opacity: 1;
+      transform: translateY(-2px);
+    }
+  }
+
+  /* ── The composer ──────────────────────────────────────────────
+     The second-heaviest object on the screen, and the only card on it. It
+     floats over the scroll with the page fading out underneath rather than a
+     rule drawn across it — a rule says "below here is different", and below
+     here is the same page continuing. */
+  .dock {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 10;
+    padding: 0 34px 28px;
+    pointer-events: none;
+  }
+  .dock::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 252px;
+    background: linear-gradient(to top, var(--color-panel) 62%, transparent);
+    pointer-events: none;
+  }
+  /* Only the column takes the pointer. The scrim behind it is 252px of
+     fade over a list somebody still has to be able to click. */
+  .dock .wrap {
+    position: relative;
+    max-width: 704px;
+    margin: 0 auto;
+    pointer-events: auto;
+  }
+  /* The two things a workspace *is*, on their own plane above the input. They
+     are not preferences; they are what the thing will be. A workspace's own
+     composer has no shelf, because there they are already settled. */
+  .shelf {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    margin: 0 10px -12px;
+    padding: 5px 8px 17px;
+    border-radius: 16px 16px 0 0;
+    background: var(--color-overlay);
+  }
+  .composer {
+    position: relative;
+    z-index: 1;
+    padding: 16px 16px 12px;
+    border-radius: 22px;
+    background: var(--color-panel);
+    box-shadow: var(--shadow-float);
+    transition: box-shadow 220ms var(--ease-swift);
+  }
+  /* On a dark ground the one white card has to be the step *above* the page,
+     and the page is already `--color-panel`. */
+  :root[data-theme="dark"] .composer,
+  :root:not([data-theme]) .composer {
+    background: var(--color-raise);
+  }
+  .composer .bar {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    margin-top: 12px;
+  }
+  /* A chip in the composer's footer, and a chip on its shelf: the same object
+     at two jobs. Quiet until it has been set, because an unset default is not
+     news. */
+  .chip {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    gap: 7px;
+    height: 30px;
+    padding: 0 10px;
+    border-radius: 99px;
+    color: var(--color-dim);
+    white-space: nowrap;
+    transition:
+      background var(--dur-native) var(--ease-swift),
+      color var(--dur-native) var(--ease-swift);
+  }
+  .chip:hover {
+    background: var(--color-raise);
+    color: var(--color-text);
+  }
+  .shelf .chip:hover {
+    background: var(--color-panel);
+  }
+  .chip[data-set="true"] {
+    color: var(--color-text);
+  }
+  .chip[disabled] {
+    opacity: 0.5;
+  }
+  /* Bone on ground, never a second saturated colour. White is this system's
+     accent, and a blue send button beside an ember dot costs the dot its
+     meaning. */
+  .send {
+    display: grid;
+    place-items: center;
+    flex: none;
+    margin-left: auto;
+    width: 34px;
+    height: 34px;
+    border-radius: 99px;
+    background: var(--color-bone);
+    color: var(--color-panel);
+    transition:
+      transform 110ms ease-out,
+      opacity var(--dur-native) var(--ease-swift);
+  }
+  .send:hover {
+    opacity: 0.86;
+  }
+  .send:active {
+    transform: scale(0.94);
+  }
+  .send:disabled {
+    background: var(--color-overlay);
+    color: var(--color-mute);
   }
 
   /* ── The island ────────────────────────────────────────────────
@@ -886,6 +1189,21 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
   }
   .island[data-mode="demand"] {
     border-color: var(--color-ember-deep);
+  }
+}
+
+/* Reduced motion keeps the ember *visible*, not still-and-bare.
+   `globals.css` collapses every duration with `!important`, which is right —
+   but it would land the halo on frame zero and leave the dot a flat 8px mark.
+   Held open at full scale instead, which says the same thing without moving.
+   The same call `styles.css` already makes for the island's pulse. */
+@media (prefers-reduced-motion: reduce) {
+  .dot::after {
+    opacity: 0.3;
+    transform: scale(2.2);
+  }
+  .typing i {
+    opacity: 0.55;
   }
 }
 
