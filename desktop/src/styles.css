@@ -668,6 +668,250 @@
     color: var(--color-mute);
   }
 
+  /* ── A pane, and the things every pane is made of ──────────────
+     The shape eleven configuration screens share. `config/bits.tsx` already
+     had two thirds of it in `Section` and `Rows`; this is the rest, and it is
+     here rather than in a component because the markup differs per screen and
+     only the measurements are common. */
+  .pcol {
+    width: 100%;
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: 52px 44px 60px;
+  }
+  .phead2 {
+    display: flex;
+    align-items: flex-start;
+    gap: 20px;
+    flex-wrap: wrap;
+  }
+  .phead2 h1 {
+    font-size: 2.125rem; /* 34px — the one heading on a pane */
+    line-height: 1.12;
+    letter-spacing: -0.026em;
+    font-weight: var(--font-weight-mid);
+    color: var(--color-bone);
+  }
+  .phead2 .sub {
+    max-width: 52ch;
+    margin-top: 7px;
+    font-size: 1rem;
+    line-height: 1.5;
+    color: var(--color-dim);
+  }
+  .phead2 .acts {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: 9px;
+    margin-left: auto;
+    padding-top: 4px;
+  }
+
+  /* A field that is a field without being a box. */
+  .find {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 230px;
+    height: 36px;
+    padding: 0 13px;
+    border-radius: 99px;
+    background: var(--color-raise);
+    color: var(--color-mute);
+    transition: background var(--dur-native) var(--ease-swift);
+  }
+  .find:focus-within {
+    background: var(--color-overlay);
+  }
+  .find input {
+    flex: 1;
+    min-width: 0;
+    font-size: var(--text-ui);
+    color: var(--color-bone);
+  }
+
+  /* ── One primary action, and the quiet ones beside it ──────────
+     The filled button is the thing you came to do. A pane with three of them
+     has made the reader choose which one is real, which is work the design
+     should have done. */
+  .btn {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    gap: 7px;
+    height: 33px;
+    padding: 0 14px;
+    border-radius: 99px;
+    font-size: var(--text-ui);
+    white-space: nowrap;
+    transition:
+      background var(--dur-native) var(--ease-swift),
+      opacity var(--dur-native) var(--ease-swift),
+      transform 110ms ease-out;
+  }
+  .btn:active {
+    transform: scale(0.97);
+  }
+  .btn[disabled] {
+    opacity: 0.5;
+  }
+  .btn.primary {
+    background: var(--color-bone);
+    color: var(--color-panel);
+    font-weight: 480;
+  }
+  .btn.primary:hover {
+    opacity: 0.86;
+  }
+  .btn.plain {
+    background: var(--color-panel);
+    color: var(--color-text);
+    box-shadow: var(--shadow-raise);
+  }
+  :root[data-theme="dark"] .btn.plain,
+  :root:not([data-theme]) .btn.plain {
+    background: var(--color-overlay);
+    box-shadow: none;
+  }
+  .btn.plain:hover {
+    color: var(--color-bone);
+  }
+  .btn.quiet {
+    color: var(--color-dim);
+  }
+  .btn.quiet:hover {
+    background: var(--color-overlay);
+    color: var(--color-text);
+  }
+
+  /* A filter is a pill, not a tab. There is no "current page" here — these
+     narrow a list you are already on. */
+  .filters {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 30px;
+    flex-wrap: wrap;
+  }
+  .fp {
+    flex: none;
+    height: 32px;
+    padding: 0 13px;
+    border-radius: 99px;
+    font-size: var(--text-ui);
+    color: var(--color-dim);
+    transition:
+      background var(--dur-native) var(--ease-swift),
+      color var(--dur-native) var(--ease-swift);
+  }
+  .fp:hover {
+    background: var(--color-raise);
+    color: var(--color-text);
+  }
+  .fp[aria-pressed="true"] {
+    background: var(--color-overlay);
+    color: var(--color-bone);
+  }
+  .filters .right {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: auto;
+  }
+
+  /* ── The library ───────────────────────────────────────────────
+     The poster *is* the card. The name sits on the paper underneath it — a
+     border around the bytes and nothing around the sentence, which is the
+     same call `WorkspaceImage` makes for a picture in a transcript. */
+  .gal {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(228px, 1fr));
+    gap: 30px 24px;
+    margin-top: 26px;
+  }
+  .art {
+    display: block;
+    width: 100%;
+    text-align: left;
+  }
+  .art .shot {
+    position: relative;
+    display: block;
+    width: 100%;
+    aspect-ratio: 16 / 10;
+    overflow: hidden;
+    border-radius: 12px;
+    background: var(--color-overlay);
+    box-shadow: var(--shadow-raise);
+    transition:
+      transform 220ms var(--ease-swift),
+      box-shadow 220ms var(--ease-swift);
+  }
+  .art:hover .shot {
+    transform: translateY(-3px);
+    box-shadow: var(--shadow-float);
+  }
+  .art .nm {
+    display: block;
+    margin-top: 11px;
+    font-size: 0.90625rem; /* 14.5px */
+    line-height: 1.4;
+    letter-spacing: -0.006em;
+    color: var(--color-bone);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .art .mt {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin-top: 3px;
+    font-size: var(--text-meta);
+    color: var(--color-dim);
+  }
+
+  /* The same objects as rows, for finding rather than browsing. The 64px
+     floor is the 84 × 52 poster plus its padding. */
+  .alist {
+    display: flex;
+    flex-direction: column;
+    margin-top: 14px;
+  }
+  .ar {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    width: 100%;
+    min-height: 64px;
+    margin-inline: -14px;
+    padding: 10px 14px;
+    border-radius: 12px;
+    text-align: left;
+    transition: background var(--dur-native) var(--ease-swift);
+  }
+  .ar:hover {
+    background: var(--color-raise);
+  }
+  .ar .ghost {
+    opacity: 0;
+    transition: opacity var(--dur-native) var(--ease-swift);
+  }
+  .ar:hover .ghost,
+  .ar:focus-visible .ghost {
+    opacity: 1;
+  }
+  .colhead {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    margin: 22px -14px 0;
+    padding: 0 14px;
+    font-size: var(--text-meta);
+    color: var(--color-mute);
+  }
+
   /* ── The island ────────────────────────────────────────────────
      The pill above every other window (`src/island/`). These live here rather
      than beside it because the style page draws the same three states inside
