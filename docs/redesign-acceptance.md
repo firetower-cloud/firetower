@@ -91,12 +91,21 @@ of its own — but it is not "dark, plus light later".
 
 33. Customize holds Skills, Agent profiles and Agents, each reachable by clicking
     the thing itself rather than only a menu.
-34. Sources holds Repositories, Git hosts, Machines and Trackers.
+34. Repositories and Machines are each a rail destination of their own. Git
+    hosts sits under Repositories; Trackers sits under Tasks. *(Corrected:
+    this originally said "Sources holds Repositories, Git hosts, Machines and
+    Trackers", which was read off the artifact's document-tab grouping rather
+    than its rail. There is no Sources destination and never was.)*
 35. Settings holds People, Teams, Directories, Vault and This Firetower.
 36. People and Teams draw no invite, role, disable or delete control — and no
     disabled control either. Each says where that work is done.
 37. Connecting a git host supports GitHub, GitLab and Gitea, each with its own
-    token page and scopes. No provider picker; the address decides.
+    token page and scopes. *(Corrected: this originally added "no provider
+    picker; the address decides". The picker was removed once and deliberately
+    restored, with the reasoning recorded above `AddHost` — the kinds are the
+    only place the product says what it can talk to, and an empty box asking
+    "where is it" tells somebody with a Forgejo nothing. The probe still does
+    the work. Keep the picker.)*
 38. Adding a machine shows the key, probes, and creates only once something
     answered. A failure shows the server's own diagnosis.
 39. Opening a profile you may read but not edit draws no disabled controls.
