@@ -14,7 +14,7 @@ import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronDown, Copy, Cpu, HardDrive, History, Key, Loader2, Plus, Trash2, X } from "lucide-react";
 import { Icon } from "~/components/ui";
-import type { Compute, Diagnosis, Host } from "~/api/generated/model";
+import type { Compute, Diagnosis, Host, RetiredMachine, Session } from "~/api/generated/model";
 import {
   getListHostsQueryKey,
   useConnectHost,
@@ -31,7 +31,10 @@ import {
 import { getListAgentsQueryKey, useInstallAgent } from "~/api/generated/agents/agents";
 import type { AgentView } from "~/api/generated/model";
 import { parseDestination, reachedTheMachine, stateLabel, waitForOnline } from "~/api/environments";
-import { useAgents, useHosts, useSessions } from "~/data";
+import { useAgents, useHosts, useRepos, useSessions } from "~/data";
+import { getListRolesQueryKey, useListRoles, useUpdateRole } from "~/api/generated/roles/roles";
+import { STATUS_LABEL } from "~/api/view";
+import { toDraft } from "~/ui/config/Roles";
 import { navigate, usePathname } from "~/shims/next-navigation";
 import { Rows, Section } from "~/ui/config/bits";
 import { WhoCanAccess } from "~/ui/Sharing";
@@ -138,67 +141,266 @@ function Start({ onAdd }: { onAdd: () => void }) {
 }
 
 /**
- * The machines that are gone, under the list of the ones that are not.
+ * The machine that is gone: what is left to do about it, and what happened on
+ * it.
  *
- * A retired machine is absent from `listHosts`, which is what makes every
- * picker correct without an exclusion in it — and would also take the record
- * of what ran there off the screen it used to be on. So the way back in is
- * sessions rather than machines, and it is a line rather than a row: there is
- * nothing here to run on, drain, rename or connect to.
+ * **Two registers, with a rule between them.** Above it, the two things
+ * somebody can actually finish — a repository connected by a path that only
+ * existed on that machine, a profile pinned to it — and only those are
+ * counted. Below it, the record of what ran there: stated, never offered, with
+ * no verb but *read*. They were one count in an earlier draft, and putting the
+ * sessions in it made them read as the third chore on a list, which invites
+ * somebody to go looking for the verb that clears them. There is not one, and
+ * there must not appear to be: ending those sessions is what would delete the
+ * conversation.
  *
- * It does not dismiss and does not fade. Whatever ran in that container is the
- * only account of what it did, and a notice that hides itself takes the way in
- * with it.
+ * Only the chores hold the notice open — it can be dismissed, and goes by
+ * itself when they are done. The record is permanent, so it also sits as a
+ * line under the card that no dismissal touches.
+ *
+ * Every count here is worked out in the client. The machine is absent from
+ * `listHosts` while `useSessions` still returns its sessions, which is the
+ * whole predicate; nothing new is asked of the server, and nothing about those
+ * rows is changed to make the screen easier to draw.
  */
 function Removed() {
-  const gone = useRetiredHosts();
-  const sessions = useSessions();
-  const [showing, setShowing] = useState<string | null>(null);
-  const machines = gone.data ?? [];
+  const machines = useRetiredHosts().data ?? [];
   if (machines.length === 0) return null;
+  return (
+    <>
+      {machines.map((m) => (
+        <WasHere key={m.id} machine={m} />
+      ))}
+    </>
+  );
+}
+
+function WasHere({ machine }: { machine: RetiredMachine }) {
+  const sessions = useSessions();
+  const repos = useRepos();
+  const profiles = useListRoles();
+  const cache = useQueryClient();
+  const unpin = useUpdateRole();
+  const [detail, setDetail] = useState(false);
+  const [listing, setListing] = useState(false);
+  /* Dismissed on this Mac, per machine. The server is not told: this is
+     somebody saying "I have read it", and it is the notice they are hiding
+     rather than anything about the machine. */
+  const key = `firetower.removed.${machine.id}`;
+  const [hidden, setHidden] = useState(() => localStorage.getItem(key) === "1");
+
+  const ran = sessions.data.filter((s) => s.hostId === machine.id);
+  /* A path is read on the machine that does the cloning, and that machine is
+     gone — so these are connected to nowhere until they are given a remote or
+     the machine holding the path is added. Which machine a path was meant for
+     is not recorded anywhere, so this is every path repository rather than
+     only that machine's. */
+  const paths = repos.data.filter((r) => /^[/.~]/.test(r.remote));
+  const pinned = (profiles.data ?? []).filter((p) => p.machine === machine.id);
+  const chores = paths.length + pinned.length;
+
+  const unpinIt = (id: string) => {
+    const profile = (profiles.data ?? []).find((p) => p.id === id);
+    if (!profile) return;
+    unpin.mutate(
+      { id, data: { ...toDraft(profile), machine: null } },
+      { onSuccess: () => cache.invalidateQueries({ queryKey: getListRolesQueryKey() }) },
+    );
+  };
 
   return (
-    <div className="mt-2 space-y-1.5">
-      {machines.map((m) => {
-        const ran = sessions.data.filter((s) => s.hostId === m.id);
-        return (
-          <div key={m.id} className="rounded-lg border border-line bg-ground px-3 py-2">
-            <p className="flex items-start gap-2 text-micro leading-relaxed text-mute">
-              <Icon of={History} size={12} />
-              <span className="min-w-0 flex-1">
-                <span className="text-dim">{m.name}</span> was removed — Firetower no longer runs
-                agents on itself.
-                {ran.length > 0 && ` ${ran.length} session${ran.length === 1 ? "" : "s"} ran on it.`}
-              </span>
-              {ran.length > 0 && (
-                <button
-                  onClick={() => setShowing(showing === m.id ? null : m.id)}
-                  className="shrink-0 text-slate hover:text-bone"
-                >
-                  {showing === m.id ? "Hide them" : "Show them"}
-                </button>
-              )}
-            </p>
-            {showing === m.id && (
-              <ul className="mt-2 space-y-1 border-t border-line-soft pt-2">
-                {ran.map((s) => (
-                  <li key={s.id}>
-                    <button
-                      onClick={() => navigate(`/sessions/${s.workspaceId ?? s.id}`)}
-                      className="flex w-full items-center gap-2 text-left text-meta text-dim hover:text-bone"
-                    >
-                      <span className="min-w-0 flex-1 truncate">{s.title}</span>
-                      <span className="shrink-0 text-micro text-mute">
-                        {new Date(s.createdAt).toLocaleDateString()}
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
+    <>
+      {/* The chores are what keep it on screen. With none left there is
+          nothing to do about this machine and the line below is the whole of
+          what is still true. */}
+      {chores > 0 && !hidden && (
+        <div className="mt-2 rounded-xl border border-kind-data/40 bg-ground px-4 py-3.5">
+          <p className="text-ui text-bone">Firetower no longer runs agents on itself</p>
+          <p className="mt-1 text-meta leading-relaxed text-dim">
+            The machine called <span className="font-mono text-mute">{machine.name}</span> was the
+            control plane&rsquo;s own process. An agent started there ran inside Firetower&rsquo;s
+            container — its filesystem, its environment, its database — so that machine has been
+            removed. Agents now run only on machines you add over ssh.
+          </p>
+          <p className="mt-2 text-meta text-bone">
+            {[
+              paths.length > 0 && `${paths.length} ${paths.length === 1 ? "repository" : "repositories"}`,
+              pinned.length > 0 && `${pinned.length} ${pinned.length === 1 ? "profile" : "profiles"}`,
+            ]
+              .filter(Boolean)
+              .join(" and ")}{" "}
+            still {chores === 1 ? "points" : "point"} at it.
+          </p>
+
+          <div className="mt-2.5 flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => navigate("/configuration/machines/add")}
+              className="control border border-line bg-raise text-ui text-bone hover:bg-overlay"
+            >
+              <Icon of={Plus} size={12} />Add a machine
+            </button>
+            <button onClick={() => setDetail(!detail)} className="control text-dim hover:text-bone">
+              {detail ? "Hide the detail" : "Show what pointed at it"}
+            </button>
+            <button
+              onClick={() => {
+                localStorage.setItem(key, "1");
+                setHidden(true);
+              }}
+              className="control ml-auto text-mute hover:text-bone"
+            >
+              Hide this
+            </button>
           </div>
-        );
-      })}
+
+          {detail && (
+            <div className="mt-3 space-y-3 border-t border-line-soft pt-3">
+              {paths.length > 0 && (
+                <div>
+                  <p className="text-micro uppercase tracking-wide text-mute">
+                    Repositories connected by a path on that machine — {paths.length}
+                  </p>
+                  <div className="mt-1.5 space-y-1">
+                    {paths.map((r) => (
+                      <div key={r.id} className="flex items-center gap-2 rounded-md bg-panel px-2.5 py-1.5">
+                        <span className="min-w-0 flex-1 truncate text-ui text-bone">{r.slug}</span>
+                        <span className="min-w-0 truncate font-mono text-micro text-mute">{r.remote}</span>
+                        <button
+                          onClick={() => navigate("/configuration/repositories")}
+                          className="control shrink-0 text-dim hover:text-bone"
+                        >
+                          Connect by URL instead
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="mt-1.5 text-micro leading-relaxed text-mute">
+                    A path only means something on the machine that does the cloning. Give it a
+                    remote, or add the machine the path is on and connect it there.
+                  </p>
+                </div>
+              )}
+
+              {pinned.length > 0 && (
+                <div>
+                  <p className="text-micro uppercase tracking-wide text-mute">
+                    Profiles pinned to that machine — {pinned.length}
+                  </p>
+                  <div className="mt-1.5 space-y-1">
+                    {pinned.map((p) => (
+                      <div key={p.id} className="flex items-center gap-2 rounded-md bg-panel px-2.5 py-1.5">
+                        <span className="min-w-0 flex-1 truncate text-ui text-bone">{p.name}</span>
+                        <span className="min-w-0 truncate text-micro text-mute">{p.does}</span>
+                        <button
+                          disabled={unpin.isPending}
+                          onClick={() => unpinIt(p.id)}
+                          className="control shrink-0 text-dim hover:text-bone disabled:text-mute"
+                        >
+                          Unpin
+                        </button>
+                        <button
+                          onClick={() => navigate("/configuration/roles")}
+                          className="control shrink-0 text-mute hover:text-bone"
+                        >
+                          Open the profile
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="mt-1.5 text-micro leading-relaxed text-mute">
+                    Unpinned, a profile runs wherever the workspace that uses it runs. Pin it to a
+                    machine again from the profile if it needs a particular one.
+                  </p>
+                  {unpin.isError && <p className="mt-1 text-micro text-brick">{unpin.error.message}</p>}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Below the rule, and on `ground` rather than `panel`, with no verb
+              on any row: the block reads as a different kind of thing before a
+              word of it is read. */}
+          {ran.length > 0 && (
+            <div className="mt-3 border-t border-line pt-3">
+              <p className="text-ui text-bone">The work that was running there</p>
+              <p className="mt-1 text-meta leading-relaxed text-dim">
+                {ran.length === 1 ? "1 session was" : `${ran.length} sessions were`} running on it.
+                They are not running now, and there is no machine to open them on — so they cannot
+                be picked up again.
+              </p>
+              <p className="mt-1.5 text-meta leading-relaxed text-dim">
+                Nothing ended them and nothing was cleaned up, so they still show a running status.
+                Changing it would take the conversation with it, and that conversation is the record
+                of what ran in that container.
+              </p>
+              <p className="mt-1.5 text-meta leading-relaxed text-dim">
+                All of it is readable, and stays readable. Their worktrees are still where the worker
+                left them — <span className="font-mono text-mute">/var/lib/firetower/worker/worktrees</span>{" "}
+                in the Docker deployment — and Firetower has no route to them any more, so anything
+                wanted out of one is fetched there by hand.
+              </p>
+              <button
+                onClick={() => setListing(!listing)}
+                className="control mt-2 text-dim hover:text-bone"
+              >
+                {listing ? "Hide what was running" : "Show what was running"}
+              </button>
+              {listing && <Ran sessions={ran} />}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* The route in, which no dismissal touches. Not a banner: one line in
+          the register the note above the card already uses. It renders for as
+          long as those sessions exist, which is for good — the count going to
+          zero would mean the record had been deleted. */}
+      {ran.length > 0 && (
+        <p className="mt-2 text-meta text-mute">
+          {ran.length === 1 ? "1 session ran" : `${ran.length} sessions ran`} on{" "}
+          {machine.name === "localhost" ? "Firetower's own machine" : machine.name} before it was
+          removed. They can be read; they cannot be picked up again.{" "}
+          <button
+            onClick={() => setListing(!listing)}
+            className="underline decoration-line underline-offset-2 hover:text-dim"
+          >
+            {listing ? "Hide them" : "Show them"}
+          </button>
+        </p>
+      )}
+      {listing && chores === 0 && <Ran sessions={ran} />}
+    </>
+  );
+}
+
+/**
+ * The sessions that ran there, as a list that opens them and does nothing
+ * else.
+ *
+ * **No `Signal` dot.** Its colour comes from `BEAT`, and `Working` is a slate
+ * dot with the breathe animation on it — a dot literally pulsing to say an
+ * agent is mid-task, drawn under a paragraph explaining that nothing is
+ * running. So: a dead dot, and the recorded status quoted beside it. A chip
+ * that looks like a quotation is read as one, and it is worth showing rather
+ * than hiding, because that same string is on the row in the rail.
+ */
+function Ran({ sessions }: { sessions: Session[] }) {
+  return (
+    <div className="mt-2 space-y-1">
+      {sessions.map((s) => (
+        <button
+          key={s.id}
+          onClick={() => navigate(`/sessions/${s.workspaceId ?? s.id}`)}
+          className="flex w-full items-center gap-2 rounded-md bg-panel px-2.5 py-1.5 text-left hover:bg-raise"
+        >
+          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-mute" />
+          <span className="min-w-0 flex-1 truncate text-ui text-bone">{s.title}</span>
+          {s.branch && <span className="min-w-0 truncate font-mono text-micro text-mute">{s.branch}</span>}
+          <span className="stale shrink-0 rounded border border-line px-1.5 font-mono text-micro text-dim">
+            still says {STATUS_LABEL[s.status]}
+          </span>
+        </button>
+      ))}
     </div>
   );
 }

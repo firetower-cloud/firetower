@@ -183,7 +183,14 @@ export function Roles() {
   );
 }
 
-function toDraft(r: Role): NewRole {
+/**
+ * A profile as the form that edits it.
+ *
+ * Exported because Compute's notice about a removed machine unpins a profile
+ * that pointed at it, and `update_role` takes the whole object: sending a
+ * partial one would quietly blank every field it left out.
+ */
+export function toDraft(r: Role): NewRole {
   return {
     name: r.name,
     does: r.does,

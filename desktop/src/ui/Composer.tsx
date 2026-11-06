@@ -77,6 +77,7 @@ export function Composer({
   onRemember,
   onStopping,
   disabled,
+  whyNot,
   asking,
   hand,
 }: {
@@ -87,6 +88,13 @@ export function Composer({
   /** Stop was pressed, or the request to stop came back refused. */
   onStopping: (asked: boolean) => void;
   disabled: boolean;
+  /**
+   * Why it is disabled, when "this session has ended" is not the reason.
+   *
+   * A workspace whose machine was removed is not `Ended` — nothing ended it —
+   * so the placeholder has to say the true thing rather than the usual one.
+   */
+  whyNot?: string;
   asking: boolean;
   /** Filled in with `take`, for the pane's drop surface to call. */
   hand?: RefObject<Hand | null>;
@@ -558,7 +566,7 @@ export function Composer({
               }
             }}
             placeholder={
-              disabled ? "This session has ended." : asking ? "Answer above, or say something else" : "Say something to the agent"
+              disabled ? (whyNot ?? "This session has ended.") : asking ? "Answer above, or say something else" : "Say something to the agent"
             }
             className="scroll-slim block w-full resize-none bg-transparent px-4 py-3.5 text-read text-text placeholder:text-mute focus:outline-none"
           />
