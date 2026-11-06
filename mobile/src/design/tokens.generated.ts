@@ -30,6 +30,7 @@ export const color = {
   "slate": "#7d95b0",
   "slate-tint": "#161d26",
   "slate-deep": "#35485c",
+  "scrim": "rgb(0 0 0 / 0.55)",
   "series-1": "#3f86cf",
   "series-2": "#1f9b74",
   "series-3": "#8b7ad8",

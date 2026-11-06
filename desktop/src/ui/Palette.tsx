@@ -14,6 +14,8 @@ import { CornerDownLeft, Search } from "lucide-react";
 import { useFleet } from "~/fleet";
 import { group, shortRepo } from "~/api/workspaces";
 import { navigate } from "~/shims/next-navigation";
+import { key } from "~/platform";
+import { EVERY } from "~/ui/destinations";
 
 type Item = {
   id: string;
@@ -55,13 +57,23 @@ export function Palette({ open, onClose }: { open: boolean; onClose: () => void 
       ),
     );
 
+    /* Every destination the rail has, so the palette is a second way to the
+       same places rather than a shorter list of its own — and the one way in
+       for somebody who has collapsed the panel and does not know the number
+       keys yet. "Everything, across servers" used to open `/fleet`; that
+       screen went with the "all" scope, and the fleet is a menu under the
+       avatar now. */
     const commands: Item[] = [
+      ...EVERY.map((d) => ({
+        id: `c:${d.id}`,
+        label: d.label,
+        hint: d.key ? key(d.key) : undefined,
+        kind: "command" as const,
+        run: () => navigate(d.href),
+      })),
+      { id: "c:new", label: "New workspace", hint: key("N"), kind: "command", run: () => navigate("/new") },
+      { id: "c:account", label: "Account", kind: "command", run: () => navigate("/account") },
       { id: "c:connect", label: "Connect to a Firetower…", kind: "command", run: () => navigate("/connect") },
-      /* "Everything, across servers" used to open `/fleet`. That screen is
-         gone with the "all" scope — the fleet is a menu under the avatar now,
-         and the dock badge still spans every Firetower. */
-      { id: "c:tasks", label: "Tasks", kind: "command", run: () => navigate("/tasks") },
-      { id: "c:settings", label: "Settings", kind: "command", run: () => navigate("/configuration/people") },
       ...(import.meta.env.DEV ? [{ id: "c:style", label: "Open the style guide", kind: "command" as const, run: () => navigate("/style") }] : []),
     ];
 
@@ -90,14 +102,14 @@ export function Palette({ open, onClose }: { open: boolean; onClose: () => void 
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-ground/60 pt-[14vh] backdrop-blur-[2px]"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-scrim pt-[14vh] backdrop-blur-[2px]"
       onMouseDown={onClose}
     >
       <div
-        className="w-[560px] overflow-hidden rounded-lg border border-line bg-overlay shadow-(--shadow-float)"
+        className="w-[560px] overflow-hidden rounded-2xl bg-panel shadow-(--shadow-float)"
         onMouseDown={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center gap-2 border-b border-line px-3">
+        <div className="flex items-center gap-2 border-b border-line-soft px-3.5">
           <Search className="h-3.5 w-3.5 shrink-0 text-mute" strokeWidth={2} />
           <input
             ref={input}

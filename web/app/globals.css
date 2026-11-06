@@ -118,6 +118,14 @@
   --color-slate-tint: #161d26;
   --color-slate-deep: #35485c;
 
+  /* What a modal is laid over.
+     Not one of the surfaces at an alpha: `--color-ground` at 70% is a *pale*
+     wash on a pale ground, so a sheet over a light page had almost nothing
+     behind it and the card had to do all the separating on its own. A scrim
+     is its own thing — the dark the page recedes into — and in light that is
+     still dark, which is the half a surface token cannot express. */
+  --color-scrim: rgb(0 0 0 / 0.55);
+
   /* Series: one hue per model, and the only place data wears colour.
      A namespace of its own because the signals above are semantic and the file
      kinds below are deliberately too quiet to carry a chart — the one that
@@ -277,6 +285,9 @@
   --color-slate: #44607e;
   --color-slate-tint: #ebf4ff;
   --color-slate-deep: #a6b9d1;
+  /* Lighter than dark's, because less is needed: the card below it is the one
+     pure white and the page it covers is already a step down from that. */
+  --color-scrim: rgb(21 22 26 / 0.22);
 
   /* Series: the dark hue with L* lowered until it clears 4.8:1 on white. */
   --color-series-1: #2575bd;

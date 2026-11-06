@@ -29,6 +29,7 @@ import { isGlobalMod, key } from "~/platform";
 import { useStart } from "~/start";
 import { DESTINATIONS, DOORS, destinationAt, type DestinationId } from "~/ui/destinations";
 import { usePanel } from "~/ui/panel";
+import { Palette } from "~/ui/Palette";
 import { ProfileMenu } from "~/ui/ProfileMenu";
 import { RailPanel } from "~/ui/RailPanel";
 
@@ -48,6 +49,10 @@ export function Rail({ backend, onSwitch, onForgot }: { backend: Backend; onSwit
      in. Null means "the one you are in". */
   const [peek, setPeek] = useState<DestinationId | null>(null);
   const [pinned, setPinned] = usePanel(path);
+  /* ⌘K. It lived in `Palette.tsx` with nothing importing it, no key opening
+     it and nothing rendering it — so the tooltip-shaped promise of a palette
+     has been in the tree for some time without one existing. */
+  const [palette, setPalette] = useState(false);
 
   /* Hysteresis. One timer, because a pointer leaving an icon and arriving at
      the panel fires both edges and whichever lands last has to win. */
@@ -84,6 +89,7 @@ export function Rail({ backend, onSwitch, onForgot }: { backend: Backend; onSwit
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         setPeek(null);
+        setPalette(false);
         return;
       }
       /* The *global* modifier only. ⌃ is the inspector's inside a workspace,
@@ -103,6 +109,15 @@ export function Rail({ backend, onSwitch, onForgot }: { backend: Backend; onSwit
       if (e.key === ",") {
         e.preventDefault();
         go(DOORS[0]);
+        return;
+      }
+      /* **Inside the terminal ⌘K clears the buffer**, which is shipped
+         behaviour and stays — the guard above has already returned by then,
+         and `Shell.tsx` stops the key reaching here at all. Everywhere else
+         it opens the palette. */
+      if (e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPalette((o) => !o);
         return;
       }
       if (e.key.toLowerCase() === "n") {
@@ -168,6 +183,8 @@ export function Rail({ backend, onSwitch, onForgot }: { backend: Backend; onSwit
 
         <ProfileMenu backend={backend} waitingElsewhere={elsewhere} onSwitch={onSwitch} onForgot={onForgot} />
       </nav>
+
+      <Palette open={palette} onClose={() => setPalette(false)} />
 
       {(pinned || floating) && (
         <RailPanel
