@@ -22,7 +22,7 @@ export type Tab =
   /** An artifact. Named rather than pathed: it is not a file in this workspace. */
   | { id: string; artifactId: string; title: string };
 
-/** Files get the kind colours the tree already uses. Nine categories, not ninety. */
+/** Files get the kind colours the tree already uses. Seven categories, not ninety. */
 function tone(path: string): string {
   switch (langOf(path)) {
     case "rust":

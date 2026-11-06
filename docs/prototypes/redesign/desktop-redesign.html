@@ -3953,7 +3953,7 @@ const SPEC_DELTA=[
 const SPEC_IMPLIED=[
   ["Per-session token spend","<code>consumption_events</code> records it; it is not exposed per session. The team rail's share bar is left out until it is."],
   ["Two-letter server monogram","A derivation change in <code>fleet.ts</code>, not an endpoint."],
-  ["Light re-gating","Thirteen hues, derived below. No server involvement."],
+  ["Light re-gating","Eleven hues, derived below. No server involvement."],
 ];
 function specRow(r){ return `<tr>${r.map((c,i)=>`<td class="${i===0?"n":i===1?"k":""}">${c}</td>`).join("")}</tr>`; }
 function spec(){
@@ -4034,7 +4034,7 @@ function spec(){
     <p>Nothing in the layout changes between 1120 and 1680 except how much of the sheet is sheet. Checked: at <b>1120</b> with the panel open the conversation gets 706px and the approval card is 646px, so its three buttons sit on one row with 207px spare — and <code>flex-wrap</code> is the fallback if a label grows, so <i>always</i> is never hidden behind a menu. At <b>1680</b> the Dashboard column stays 740 and centres; the pane column stays 1000. The artifact grid is <code>minmax(228px, 1fr)</code> and gains a column at about 1500.</p>
 
     <h2 style="margin-top:46px">The light palette, re-gated</h2>
-    <p class="prose-lead">Nine file kinds and four chart series, which <code>globals.css</code> gates against the dark panel and which had no light values. Each is the dark hue with <b>L* lowered and a*, b* held</b> — so the hue and its chroma direction survive — until it clears the floor the dark set's own weakest member clears on <code>#111113</code>: <b>5.7:1</b> for a kind, <b>4.8:1</b> for a series.</p>
+    <p class="prose-lead">Seven file kinds and four chart series, which <code>globals.css</code> gates against the dark panel and which had no light values. Each is the dark hue with <b>L* lowered and a*, b* held</b> — so the hue and its chroma direction survive — until it clears the floor the dark set's own weakest member clears on <code>#111113</code>: <b>5.7:1</b> for a kind, <b>4.8:1</b> for a series.</p>
     <h3 style="margin-top:22px">File kinds</h3>
     ${sw(KINDS,"--color-kind-")}
     <h3 style="margin-top:22px">Chart series</h3>

@@ -270,16 +270,22 @@ wrong.
   a kind, **4.8:1** for a series.
 
   **There are seven file kinds, not nine.** `globals.css`'s own comment says
-  "Nine categories, not ninety formats" above a list of seven, and the number
-  travelled from there into `desktop/STYLE.md`'s palette table, the phone's
-  `FileGlyph`, this document's reader, and the Spec tab of
-  `desktop-redesign.html`, which still opens *The light palette, re-gated* with
-  "Nine file kinds and four chart series". Thirteen hues were re-gated, not
-  fifteen. The comment, the table and the phone are corrected; **the artifact
-  is not**, because it is a committed record of the round rather than a live
-  document — whoever next touches it should fix that line. A count quoted from
-  a comment rather than counted from the list is the cheapest error there is to
-  make and the most expensive to notice.
+  "Nine categories, not ninety formats" directly above a list of seven, and the
+  number travelled from there into `desktop/STYLE.md`'s palette table, the
+  phone's `FileGlyph`, both redesign artifacts, and this document's reader.
+  **Eleven hues were re-gated, not thirteen** — and the "thirteen" in the Spec
+  tab's *implied work* table was the same nine, added to four series, which is
+  how an error of this kind pays for itself twice. All of it is corrected,
+  including the artifacts: the Spec tab opened *The light palette, re-gated*
+  with "Nine file kinds" two lines above a grid of seven swatches.
+
+  Left alone deliberately: the invented agent question on the Dashboard mock,
+  which asks about "the nine file colours". It is sample copy under a banner
+  saying every name and question below is invented, and agents are allowed to
+  be wrong.
+
+  A count quoted from a comment rather than counted from the list is the
+  cheapest error there is to make and the most expensive to notice.
 * **Syntax** matches *its own* dark ratio rather than a common floor, because in
   that set the ratios *are* the design — comment is deliberately the faintest
   thing on the page. Chroma is additionally capped at **C\* 34** so no syntax

@@ -29,6 +29,18 @@
   --color-bone: #f4f4f5;
   --color-text: #c8c8ce;
   --color-dim: #8b8b93;
+  /* **Measured, and below 4.5:1 in both themes** — 2.94 on `--color-panel`
+     here, 2.40 on white in the light branch. That is not something light
+     introduced: the faintest tier has always been under the floor for normal
+     text, and it is spent on counts, timestamps, paths and placeholders, of
+     which there are 799 in `desktop/src` alone.
+
+     Written down rather than quietly fixed. Raising it is a visual change to
+     every screen in the product and it trades away the gap between `dim` and
+     `mute` that makes a screen stop reading as grey — so it is a decision
+     about the design, not a defect to patch, and it belongs to whoever owns
+     the contrast sweep. The figures are here so nobody has to re-derive them
+     to have the argument. */
   --color-mute: #5e5e67;
 
   /* ── Type: six sizes, and a name for each ───────────────────
@@ -237,7 +249,13 @@
   /* Text. Four tiers, the same real gaps: 18.1, 9.3, 4.2 and 2.4 on white. */
   --color-bone: #15161a;
   --color-text: #45474f;
+  /* 4.22 on the sheet, and **3.45 on `--color-overlay`** — the one tier that
+     is tighter here than in dark, where it holds 5.58. Secondary text on a
+     recessed surface is the composition to watch. */
   --color-dim: #787b85;
+  /* 2.40 on the sheet, 2.07 on the chrome. See the note in `@theme`: the
+     faintest tier is under the floor in both branches and that is the
+     design's own published value, not a light-mode regression. */
   --color-mute: #a4a7b1;
 
   /* Signals. Tints against the sheet, colours and deeps against their tint. */
