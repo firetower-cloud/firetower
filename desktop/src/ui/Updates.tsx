@@ -287,8 +287,15 @@ function Machine({ host, to, blocked, onDone }: { host: HostTarget; to: string; 
     if (ok) void go(false);
   };
 
+  /* A machine somebody else administers is **listed and dimmed**, with the
+     reason. Not hidden — a list that omits the machines you cannot move is a
+     list that cannot be reconciled against the fleet — and not drawn with a
+     greyed-out button either, which is how an interface says you are being
+     withheld from. It recedes, and says whose it is. */
+  const theirs = !host.mayUpgrade && host.upgradable;
+
   return (
-    <div className="flex items-center gap-3 border-b border-line-soft px-3.5 py-2.5 last:border-0">
+    <div className={`flex items-center gap-3 border-b border-line-soft px-3.5 py-2.5 last:border-0 ${theirs ? "opacity-60" : ""}`}>
       <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${host.online ? "bg-sage" : "bg-line"}`} />
       <span className="min-w-0 flex-1">
         <span className="block truncate text-ui text-bone">{host.name}</span>

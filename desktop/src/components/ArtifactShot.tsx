@@ -150,6 +150,17 @@ function LivePage({ url, ratio }: { url: string; ratio: number }) {
           aria-hidden
           scrolling="no"
           loading="lazy"
+          /* **Opaque origin.** An artifact is untrusted HTML, and the design's
+             rule that a preview is a poster and never a live frame is a
+             security rule before it is a taste one: in an *unsandboxed* frame
+             the page is same-origin with the app, which puts the Tauri bridge
+             within reach of it. This fallback only runs where a poster cannot
+             be captured at all, and it is the one place a live artifact is
+             mounted outside the viewer — so it runs with scripts and without
+             `allow-same-origin`, which is enough for a page to lay itself out
+             and not enough for it to reach anything of ours. The viewer keeps
+             its own frame as it is: that one talks to the app on purpose. */
+          sandbox="allow-scripts"
           style={{
             width: PAGE,
             height: PAGE / ratio,
