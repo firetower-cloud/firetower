@@ -293,9 +293,25 @@ pub async fn apply(workspace: &Path, limits: Limits) {
 /// Silent and unconditional on failure. A pane that cannot join is a pane that
 /// runs unaccounted, and refusing to start the agent over it would trade a
 /// missing measurement for a session nobody can use.
+///
+/// Silent takes the braces. `echo $$ > PATH 2>/dev/null` is not silent: a
+/// shell performs redirections left to right, so the one that fails has
+/// already failed — and been complained about on the real stderr — by the time
+/// `2>/dev/null` is reached. Every host with no cgroup v2 at that path, which
+/// is every macOS host, therefore opened each pane with
+/// `No such file or directory` printed into it, above the agent, where it
+/// reads as the agent having failed to start. Four orphaned sessions on one
+/// machine showed it.
+///
+/// Redirecting the group's stderr instead silences the failure inside it, and
+/// has to be the group rather than a reordered `2>/dev/null > PATH`: zsh
+/// reports a redirection it could not perform on the stderr the shell started
+/// with, whatever the command then does with fd 2. Verified against `sh`,
+/// `bash` and `zsh` — all three stay quiet this way, and all three carry on to
+/// the agent, which is the half that was already right.
 pub fn join_command(workspace: &Path) -> String {
     let procs = agents_dir(workspace).join("cgroup.procs");
-    format!("echo $$ > {} 2>/dev/null;", procs.display())
+    format!("{{ echo $$ > {} ; }} 2>/dev/null;", procs.display())
 }
 
 /// What a workspace is taking, or `None` if it is not being accounted.
@@ -493,5 +509,40 @@ mod tests {
         assert!(joined.contains("2>/dev/null"), "{joined}");
         assert!(!joined.contains("||"), "no branch to fail down: {joined}");
         assert!(joined.trim_end().ends_with(';'), "{joined}");
+    }
+
+    /// And must not say so into the pane.
+    ///
+    /// Run for real, against a path that cannot exist, by each of the shells
+    /// tmux might start a pane with. Asserting on the string would only
+    /// restate the fix; what this is about is whether the shell stays quiet,
+    /// and the shell is the only thing that can answer that.
+    #[test]
+    fn a_pane_that_cannot_join_says_nothing_about_it() {
+        let line = format!(
+            "{} echo the-agent-itself",
+            join_command(Path::new("/ft-no-such-root/work-a1"))
+        );
+
+        for shell in ["/bin/sh", "/bin/bash", "/bin/zsh"] {
+            if !Path::new(shell).exists() {
+                continue;
+            }
+            let run = std::process::Command::new(shell)
+                .args(["-c", &line])
+                .output()
+                .expect("the shell should run");
+
+            assert_eq!(
+                String::from_utf8_lossy(&run.stderr).trim(),
+                "",
+                "{shell} complained into the pane"
+            );
+            assert_eq!(
+                String::from_utf8_lossy(&run.stdout).trim(),
+                "the-agent-itself",
+                "{shell} should have gone on to start the agent"
+            );
+        }
     }
 }
