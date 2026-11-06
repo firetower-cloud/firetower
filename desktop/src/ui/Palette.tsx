@@ -57,9 +57,11 @@ export function Palette({ open, onClose }: { open: boolean; onClose: () => void 
 
     const commands: Item[] = [
       { id: "c:connect", label: "Connect to a Firetower…", kind: "command", run: () => navigate("/connect") },
-      { id: "c:fleet", label: "Everything, across servers", kind: "command", run: () => navigate("/fleet") },
+      /* "Everything, across servers" used to open `/fleet`. That screen is
+         gone with the "all" scope — the fleet is a menu under the avatar now,
+         and the dock badge still spans every Firetower. */
       { id: "c:tasks", label: "Tasks", kind: "command", run: () => navigate("/tasks") },
-      { id: "c:config", label: "Configuration", kind: "command", run: () => navigate("/configuration") },
+      { id: "c:settings", label: "Settings", kind: "command", run: () => navigate("/configuration/people") },
       ...(import.meta.env.DEV ? [{ id: "c:style", label: "Open the style guide", kind: "command" as const, run: () => navigate("/style") }] : []),
     ];
 

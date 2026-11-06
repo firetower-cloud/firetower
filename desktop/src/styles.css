@@ -44,12 +44,22 @@
   --color-strip: rgb(11 11 12 / 0.82);
 
   /* Chrome. The width is fixed by AppKit, not by taste: 78px is how much room
-     the traffic lights need before content may start.
-
-     38px is where the traffic lights sit comfortably. */
-  --chrome-title: 38px;
+     the traffic lights need before content may start. 40px is where the
+     traffic lights sit comfortably with `org / user` beside them. */
+  --chrome-title: 40px;
   --chrome-lights: 78px;
-  --chrome-strip: 48px;
+
+  /* The rail, and the panel beside it. 62px holds a 42px target with 10px of
+     air each side; 252px is a workspace name and a timestamp without either
+     of them truncating at the widths people actually use. Measured on the
+     artifact at 1280 × 824, where they leave the sheet 958px. */
+  --rail: 62px;
+  --panel: 252px;
+
+  /* One radius on one object. The sheet is rounded on the side that faces the
+     chrome and flush to the window's own corners on the other, because an app
+     does not draw a second set of corners inside the ones it has. */
+  --radius-sheet: 14px;
 
   /* Native motion is quicker than web motion. The same curve, less of it. */
   --dur-native: 140ms;
@@ -239,6 +249,108 @@
     box-shadow: none;
   }
 
+
+  /* ── The rail ──────────────────────────────────────────────────
+     Six destinations, a rule, two doors. Selection is a pill in the *sheet's*
+     own colour, because the selected destination is the sheet's handle —
+     nothing else in here fills. Hover and preview are the same gesture at two
+     strengths, drawn in the ink rather than in a hue: a rail that lights up is
+     a rail competing with the one thing on screen that is allowed to. */
+  .rbtn {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: 42px;
+    height: 42px;
+    flex: none;
+    border-radius: 13px;
+    color: var(--color-text);
+    transition:
+      background var(--dur-native) var(--ease-swift),
+      color var(--dur-native) var(--ease-swift),
+      box-shadow var(--dur-native) var(--ease-swift);
+  }
+  .rbtn:hover {
+    background: color-mix(in srgb, var(--color-raise) 70%, transparent);
+    color: var(--color-bone);
+  }
+  .rbtn[data-peek="true"] {
+    background: var(--color-raise);
+    color: var(--color-bone);
+  }
+  .rbtn[aria-current="page"] {
+    background: var(--color-panel);
+    color: var(--color-bone);
+    box-shadow: var(--shadow-raise);
+  }
+  /* Something changed over there. Deliberately not ember: ember means an
+     agent is waiting on *you*, and a newer build is not that. */
+  .rbtn > .news {
+    position: absolute;
+    top: 9px;
+    right: 9px;
+    width: 5.5px;
+    height: 5.5px;
+    border-radius: 99px;
+    background: var(--color-text);
+    box-shadow: 0 0 0 2px var(--color-ground);
+  }
+
+  /* ── A row in the panel, and a row in a menu ───────────────────
+     The same shape at two widths. 34px is the chrome row — the pair `STYLE.md`
+     gets wrong three times is 32 for chrome and 40–46 for what you read, and
+     this is chrome. A name, and at most one thing after it. */
+  .prow,
+  .mrow {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    width: 100%;
+    min-height: 34px;
+    padding: 5px 9px;
+    border-radius: 9px;
+    color: var(--color-text);
+    text-align: left;
+    transition:
+      background var(--dur-native) var(--ease-swift),
+      color var(--dur-native) var(--ease-swift);
+  }
+  .prow:hover,
+  .mrow:hover {
+    background: color-mix(in srgb, var(--color-raise) 70%, transparent);
+  }
+  .prow[aria-current="true"] {
+    background: var(--color-panel);
+    color: var(--color-bone);
+    box-shadow: var(--shadow-raise);
+  }
+  /* A menu sits on `--color-raise` already, so its hover has to be the next
+     step up rather than the same one. */
+  .mrow {
+    gap: 11px;
+    padding-inline: 10px;
+  }
+  .mrow:hover {
+    background: var(--color-overlay);
+  }
+
+  /* The panel floating over the sheet rather than beside it: collapsed, and
+     previewing. It is the one translucent surface in the window that is not
+     the window's own vibrancy, so it is also the one that has to answer
+     `prefers-reduced-transparency` — see the foot of this file. */
+  .panel-float {
+    background: var(--color-panel-vibrant);
+    backdrop-filter: blur(28px) saturate(180%);
+    border-radius: var(--radius-sheet);
+    box-shadow: var(--shadow-float);
+    animation: panel-in 220ms var(--ease-swift);
+  }
+  @keyframes panel-in {
+    from {
+      opacity: 0;
+      transform: translateX(-14px) scale(0.985);
+    }
+  }
 
   /* ── The island ────────────────────────────────────────────────
      The pill above every other window (`src/island/`). These live here rather
@@ -774,6 +886,17 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
   }
   .island[data-mode="demand"] {
     border-color: var(--color-ember-deep);
+  }
+}
+
+/* Asked for less transparency, which is a request and not a preference.
+   The floating panel is the only surface in the window that is translucent of
+   its own accord — everything else is the window's vibrancy, which AppKit
+   turns off for the same setting without being asked. */
+@media (prefers-reduced-transparency: reduce) {
+  .panel-float {
+    background: var(--color-panel);
+    backdrop-filter: none;
   }
 }
 

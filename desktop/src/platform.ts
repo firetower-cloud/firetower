@@ -42,5 +42,23 @@ export const mod = isMac ? "⌘" : "Ctrl";
 /** A shortcut as text: `key("J")` → "⌘J" or "Ctrl+J". */
 export const key = (k: string) => (isMac ? `${mod}${k}` : `${mod}+${k}`);
 
+/**
+ * The *other* modifier: for something local to one pane, where ⌘ is the
+ * window's.
+ *
+ * The rail's six destinations took ⌘1–⌘6, which the workbench's inspector
+ * tabs used to hold. A destination is global so it takes the global modifier;
+ * a panel tab is local to one workspace, so it takes this. On a Mac that is
+ * ⌃, which is free. **Everywhere else Ctrl *is* the global modifier**, so the
+ * local one has to be Alt or the two collide — which is the kind of thing
+ * that is only found on the platform nobody is developing on.
+ */
+export const localMod = isMac ? "⌃" : "Alt";
+/** A local shortcut as text: `localKey("1")` → "⌃1" or "Alt+1". */
+export const localKey = (k: string) => (isMac ? `${localMod}${k}` : `${localMod}+${k}`);
+/** Whether a key event carries it, and nothing else. */
+export const isLocalMod = (e: { ctrlKey: boolean; altKey: boolean; metaKey: boolean }) =>
+  isMac ? e.ctrlKey && !e.metaKey && !e.altKey : e.altKey && !e.ctrlKey && !e.metaKey;
+
 /* Told to the stylesheet, so the chrome tokens can differ by platform. */
 if (typeof document !== "undefined") document.documentElement.dataset.platform = platform;

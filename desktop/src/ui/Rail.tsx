@@ -1,454 +1,231 @@
 /**
- * The rail, at desktop density.
+ * The 62px rail, and the panel it opens.
  *
- * Same pattern as the web build's — nav, then every repository with the
- * workspaces cut from it, then the things you touch once — and the same
- * vocabulary, because `group()`, `doing()` and `Signal` are shared rather than
- * reimplemented. What differs is what a window allows: 34px rows instead of a
- * 44px touch floor, no drawer, and the org at the top instead of the product
- * name, since which server you are on is the question a multi-server client has
- * to answer on every screen.
+ * What used to be here was a 256px column doing three jobs at once —
+ * navigation, the workspace list and the configuration index — and swapping
+ * between them. It is two things now: this, which is **where you can go**, and
+ * `RailPanel`, which is **what is in the place you are pointing at**.
+ *
+ * Six destinations, then a rule, then the two doors that are genuinely
+ * settings. 42px targets, 20px icons, 4px gaps. Selection is a pill in the
+ * sheet's own colour, because the selected destination is the sheet's handle;
+ * nothing else fills.
+ *
+ * ## Hover previews, and so does focus
+ *
+ * Pointing at a destination swaps the panel's contents without navigating.
+ * Pressing it commits. It is a convenience rather than a load-bearing thing —
+ * the rail works without it — but **focus does exactly what hover does**, so
+ * nothing in here is reachable by pointer only. 180ms in and 240ms out, with
+ * the panel itself cancelling both, so a diagonal path from an icon to a row
+ * does not flicker.
  */
-import { BookOpen, ChevronLeft, CircleDashed, CircleFadingArrowUp, LayoutList, ListTodo, Plus, Settings2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import type { LucideIcon } from "lucide-react";
-import { AgentMark } from "~/components/AgentMark";
-import { Blocks } from "~/island/Blocks";
-import { HostMark, Icon } from "~/components/ui";
-import { childrenOf, childrenWorking, doing, group, isChild, rowLabel, shortRepo, type Repositories, type Workspace } from "~/api/workspaces";
-import { beatOf, elapsed, minutesSince } from "~/api/view";
-import type { Backend } from "~/fleet";
-import { useHostOf, useSessions, useUpdatesRow } from "~/data";
-import { isPersonal } from "~/filing";
-import { useMe } from "~/api/generated/auth/auth";
 import { navigate, usePathname } from "~/shims/next-navigation";
-import { useStart } from "~/start";
-import { PANES, paneAt } from "~/ui/config/panes";
-import { useNow } from "~/ui/clock";
-import { useQueryClient } from "@tanstack/react-query";
-import { getListSessionsQueryKey, renameSession } from "~/api/generated/sessions/sessions";
-import { ContextMenu, useMenu } from "~/ui/ContextMenu";
-import { usePrompt } from "~/ui/Confirm";
-import { useEndWorkspace } from "~/ui/end";
-import { HostCard, whereItRuns } from "~/ui/StatusBar";
-import { useHosts } from "~/data";
-import { Monitor, Server, Shapes } from "lucide-react";
-import { useRef, useState } from "react";
+import { useUpdatesRow } from "~/data";
+import { useFleet, waitingIn, type Backend } from "~/fleet";
 import { key } from "~/platform";
+import { useStart } from "~/start";
+import { DESTINATIONS, DOORS, destinationAt, type DestinationId } from "~/ui/destinations";
+import { usePanel } from "~/ui/panel";
+import { ProfileMenu } from "~/ui/ProfileMenu";
+import { RailPanel } from "~/ui/RailPanel";
 
-const NAV: { href: string; label: string; icon: LucideIcon }[] = [
-  { href: "/", label: "Dashboard", icon: LayoutList },
-  { href: "/tasks", label: "Tasks", icon: ListTodo },
-  { href: "/artifacts", label: "Artifacts", icon: Shapes },
-];
-
-export function Rail({ backend }: { backend: Backend }) {
+export function Rail({ backend, onSwitch, onForgot }: { backend: Backend; onSwitch: (serverId: string) => void; onForgot: () => void }) {
   const path = usePathname();
-  const inConfig = path.startsWith("/configuration");
+  const here = destinationAt(path);
   const start = useStart();
-  const { data: sessions, loading, error } = useSessions();
-  const me = useMe();
   const updates = useUpdatesRow();
-  // The ages below are read off the clock, so the rail has to be told the clock
-  // moved — nothing else re-renders a workspace that is quietly working.
-  useNow();
+  const fleet = useFleet();
+  /* One ember dot on the avatar, meaning *waiting somewhere you are not*. It
+     is the whole of what the "all servers" scope and the Fleet screen used to
+     do inside the window; the dock badge and the island still carry the
+     machine-wide count. */
+  const elsewhere = fleet.some((f) => f.backend.id !== backend.id && f.backend.reach === "live" && waitingIn(f.sessions) > 0);
 
-  const running = sessions.filter((s) => s.status !== "Ended");
-  /* Two sections, split on the one question the path answers: is this in your
-     own space, or in a place somebody shared with you. Both are grouped by
-     repository inside, because that is what makes a long list readable — the
-     split is about whose work it is, not about how it is sorted. */
-  const mineRaw = group(running.filter((s) => isPersonal(s.path, me.data?.user)));
-  const theirsRaw = group(running.filter((s) => !isPersonal(s.path, me.data?.user)));
-  /* A child spawned in its own workspace does not get its own row here: it
-     lives under its lead in the Overview tab, as part of that manager's team.
-     So drop children from the rail — the lead's row keeps its delegated-count,
-     so the team is still visible at a glance, and the rail stays a list of
-     top-level workspaces. */
-  const everyPlace = [...mineRaw.groups.flatMap(([, p]) => p), ...theirsRaw.groups.flatMap(([, p]) => p)];
-  const topOnly = (r: Repositories): Repositories => ({
-    total: r.total,
-    groups: r.groups
-      .map(([repo, places]) => [repo, places.filter((p) => !isChild(p, everyPlace))] as [string, Workspace[]])
-      .filter(([, places]) => places.length > 0),
-  });
-  const mine = topOnly(mineRaw);
-  const theirs = topOnly(theirsRaw);
-  const nothing = mine.groups.length === 0 && theirs.groups.length === 0;
-  const dark = backend.reach === "unreachable";
+  /* Which destination the panel is showing, when it is not the one you are
+     in. Null means "the one you are in". */
+  const [peek, setPeek] = useState<DestinationId | null>(null);
+  const [pinned, setPinned] = usePanel(path);
 
-  return (
-    <aside className="flex w-[16rem] shrink-0 flex-col overflow-hidden border-r border-line bg-(--color-panel-vibrant)">
-      {inConfig ? (
-        <Settings path={path} />
-      ) : (
-        <nav className="flex shrink-0 flex-col gap-0.5 px-2 pt-2">
-          <button
-            onClick={() => start()}
-            title={`New workspace  ${key("N")}`}
-            className={`mb-0.5 flex h-8 items-center gap-2.5 rounded-md px-2.5 text-ui transition-colors duration-150 ${
-              path.startsWith("/new")
-                ? "bg-overlay text-bone shadow-(--shadow-raise)"
-                : "text-bone hover:bg-raise/60"
-            }`}
-          >
-            <Icon of={Plus} size={16} />
-            New
-          </button>
-          {NAV.map((n) => (
-            <NavLink
-              key={n.href}
-              {...n}
-              on={n.href === "/" ? path === "/" || path.startsWith("/sessions") : path.startsWith(n.href)}
-            />
-          ))}
-        </nav>
-      )}
+  /* Hysteresis. One timer, because a pointer leaving an icon and arriving at
+     the panel fires both edges and whichever lands last has to win. */
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const hold = () => clearTimeout(timer.current);
+  const startPeek = (to: DestinationId) => {
+    hold();
+    if (to === here) return;
+    timer.current = setTimeout(() => setPeek(to), 180);
+  };
+  const showPeek = (to: DestinationId) => {
+    hold();
+    setPeek(to === here ? null : to);
+  };
+  const endPeek = () => {
+    hold();
+    timer.current = setTimeout(() => setPeek(null), 240);
+  };
+  useEffect(() => hold, []);
 
-      {!inConfig && (
-      <div className="mt-4 flex min-h-0 flex-1 flex-col">
-        {/* **A section with nothing in it is not drawn.** Most people on most
-            days have no shared work, and a standing empty heading is a
-            standing reminder of a feature they are not using — and the same
-            in reverse for somebody who only ever works in a directory.
+  /* Leaving a destination is leaving its preview. Without this, pressing an
+     icon would navigate *and* keep showing the panel of wherever the pointer
+     drifted to on the way back. */
+  useEffect(() => setPeek(null), [path]);
 
-            So the `+` travels: it hangs off whichever heading comes first,
-            because it means "new workspace" rather than "new one of these",
-            and it has to stay reachable whichever section exists. With
-            nothing at all, the personal heading is what is left standing,
-            which is where "nothing running" belongs. */}
-        <div className={`scroll-slim min-h-0 flex-1 overflow-y-auto px-2 pb-3 ${dark ? "stale" : ""}`}>
-          {loading && <p className="px-2.5 py-1 text-ui text-mute">Loading…</p>}
-          {error && <p className="px-2.5 py-1 text-meta text-brick">{error}</p>}
-
-          {(mine.groups.length > 0 || nothing) && (
-            <>
-              <Heading label="Personal workspaces" onNew={() => start()} />
-              {nothing ? (
-                <p className="px-2.5 py-1 text-ui text-mute">Nothing running.</p>
-              ) : (
-                <Repos repos={mine} path={path} />
-              )}
-            </>
-          )}
-
-          {theirs.groups.length > 0 && (
-            <>
-              <Heading
-                label="Shared workspaces"
-                onNew={mine.groups.length === 0 && !nothing ? () => start() : undefined}
-              />
-              <Repos repos={theirs} path={path} />
-            </>
-          )}
-        </div>
-      </div>
-      )}
-
-      {!inConfig && (
-        <div className="shrink-0 border-t border-line px-2 py-1.5">
-          <NavLink href="/configuration" label="Configuration" icon={Settings2} on={false} />
-          <NavLink
-            href="/updates"
-            label={updates.label}
-            icon={CircleFadingArrowUp}
-            on={path.startsWith("/updates")}
-            dot={updates.dot}
-            loud={updates.loud}
-          />
-          {import.meta.env.DEV && <NavLink href="/style" label="Style guide" icon={BookOpen} on={path.startsWith("/style")} />}
-        </div>
-      )}
-
-      {/* Who you are *here*. Two servers means two accounts, so this is not
-          furniture — it answers whose credentials a session would use. */}
-      <button onClick={() => navigate("/account")} className={`shrink-0 border-t border-line px-4 py-2.5 text-left transition-colors hover:bg-raise/60 ${path.startsWith("/account") ? "bg-raise" : ""}`}>
-        <div className="truncate text-ui text-text">{backend.user}</div>
-        <div className="truncate text-meta text-mute">{backend.org}</div>
-      </button>
-    </aside>
-  );
-}
-
-/**
- * The rail, while you are in configuration.
- *
- * It *replaces* the workspaces rather than standing beside them. Two rails at
- * once was a busy screen where one of them was always irrelevant — nobody
- * reading "who is in Ledger work" is also picking a session to open — and the
- * way back is one button at the top rather than a column you have to keep.
- */
-function Settings({ path }: { path: string }) {
-  const at = paneAt(path);
-  return (
-    <div className="scroll-slim flex min-h-0 flex-1 flex-col overflow-y-auto pb-3">
-      {/* Not "Configuration": a button labelled with the place you are already
-          standing is one nobody can guess the effect of, and the pane's own
-          heading says which screen this is. */}
-      <button
-        onClick={() => navigate("/")}
-        className="flex shrink-0 items-center gap-1.5 px-3 py-2.5 text-left text-ui text-dim transition-colors hover:text-bone"
-      >
-        <Icon of={ChevronLeft} size={14} />
-        Back
-      </button>
-
-      {PANES.map((g) => (
-        <div key={g.group} className="mt-3.5 px-2 first:mt-1">
-          <p className="px-2.5 pb-1 text-micro tracking-[0.09em] text-mute uppercase">{g.group}</p>
-          {g.items.map((i) => (
-            <button
-              key={i.at}
-              onClick={() => navigate(`/configuration/${i.at}`)}
-              className={`block w-full rounded-md px-2.5 py-1.5 text-left text-ui transition-colors ${
-                i.at === at ? "bg-raise text-bone" : "text-dim hover:bg-raise/60 hover:text-text"
-              }`}
-            >
-              {i.label}
-            </button>
-          ))}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-/**
- * One row of nav, and the two ways it can ask to be read.
- *
- * `dot` is the quiet one: something changed over there. `loud` is for a row
- * whose *label* has changed to say what it is — slate, which already means
- * exactly this beside this row, and never ember, which answers the one
- * question of whether somebody is waiting on you. The two are never both
- * drawn: a row that says "Update available" in colour and then puts a mark
- * after it is saying one thing twice.
- *
- * Being on the screen wins over both. You are already reading the news.
- */
-function NavLink({ href, label, icon, on, dot, loud }: { href: string; label: string; icon: LucideIcon; on: boolean; dot?: boolean; loud?: boolean }) {
-  return (
-    <button
-      onClick={() => navigate(href)}
-      className={`flex h-8 items-center gap-2.5 rounded-md px-2.5 text-ui transition-colors duration-150 ${
-        on
-          ? "bg-overlay text-bone shadow-(--shadow-raise)"
-          : loud
-            ? "text-slate hover:bg-raise/60"
-            : "text-dim hover:bg-raise/60 hover:text-text"
-      }`}
-    >
-      <Icon of={icon} size={14} />
-      {label}
-      {dot && <span className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-slate" />}
-    </button>
-  );
-}
-
-/**
- * What is inside a repository, in the island's counters.
- *
- * A bare count said how many workspaces there were, which is the least
- * interesting thing about them — three is three whether they are all finished
- * or all stuck. The same glyphs and the same order as the pill, at eight
- * pixels, so a group that is scrolled past still says what is in it.
- */
-function RepoTally({ places }: { places: Workspace[] }) {
-  const tally = { working: 0, blocked: 0, done: 0, broken: 0 };
-  for (const place of places) {
-    const beat = beatOf(place.runs[0]);
-    if (beat === "over") continue;
-    tally[beat] += 1;
-  }
-
-  const order: (keyof typeof tally)[] = ["working", "blocked", "done", "broken"];
-
-  return (
-    <span className="flex shrink-0 items-center gap-1.5">
-      {order
-        .filter((beat) => tally[beat] > 0)
-        .map((beat) => (
-          <span key={beat} className="flex items-center gap-1">
-            <Blocks beat={beat} size={8} />
-            <span className="font-mono text-micro tabular-nums text-mute">{tally[beat]}</span>
-          </span>
-        ))}
-    </span>
-  );
-}
-
-/**
- * One workspace: its branch, and what is happening in it.
- *
- * `child` draws it under the row before it, which is its lead's: indented,
- * with a rule down its left — position and weight, not a colour. `working`
- * is how many of a place's own children are still at it, which is what a
- * lead's row says while its agent sits idle between a dispatch and a result.
- */
-function Row({
-  place,
-  on,
-  label,
-  working = 0,
-  delegated = 0,
-}: {
-  place: Workspace;
-  on: boolean;
-  /** What to call it here: a child's own part, the lead prefix dropped. */
-  label?: string;
-  working?: number;
-  /** Agents it started and has not ended; ending this place ends them too. */
-  delegated?: number;
-}) {
-  const state = doing(place);
-  const menu = useMenu<null>();
-  const prompt = usePrompt();
-  const endWorkspace = useEndWorkspace();
-  const cache = useQueryClient();
-  const rename = async () => {
-    const name = await prompt({ title: "Rename this workspace", initial: place.name, placeholder: "A name", action: "Rename" });
-    if (!name || name === place.name) return;
-    await renameSession(place.id, { name });
-    await cache.invalidateQueries({ queryKey: getListSessionsQueryKey() });
+  const go = (to: { id: DestinationId; href: string }) => {
+    hold();
+    setPeek(null);
+    setPinned(true);
+    navigate(to.href);
   };
 
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setPeek(null);
+        return;
+      }
+      if (!(e.metaKey || e.ctrlKey)) return;
+      /* A focused terminal owns the keyboard, exactly as the workbench's own
+         handler has it. Everything here is a window-level gesture, so none of
+         it is the one exception. */
+      if ((document.activeElement as HTMLElement | null)?.closest(".xterm")) return;
+
+      const numbered = DESTINATIONS.find((d) => d.key === e.key);
+      if (numbered) {
+        e.preventDefault();
+        go(numbered);
+        return;
+      }
+      if (e.key === ",") {
+        e.preventDefault();
+        go(DOORS[0]);
+        return;
+      }
+      if (e.key.toLowerCase() === "n") {
+        e.preventDefault();
+        start();
+        return;
+      }
+      /* The workbench owns the backslash inside a workspace — there it is the
+         inspector rail that collapses, which is the one the width is being
+         argued over. */
+      if (e.key === "\\" && !path.startsWith("/sessions")) {
+        e.preventDefault();
+        setPeek(null);
+        setPinned(!pinned);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+
+  const showing = peek ?? here ?? "home";
+  const floating = !pinned && !!peek;
+
   return (
     <>
-    {menu.open && (
-      <ContextMenu
-        at={menu.open.at}
-        onClose={menu.close}
-        items={[
-          { label: "Open", onPick: () => navigate(`/sessions/${place.id}`) },
-          { label: "Rename…", onPick: () => void rename() },
-          "-",
-          { label: "End workspace", tone: "danger", onPick: () => void endWorkspace(place, delegated).then(({ ended }) => ended && on && navigate("/")) },
-        ]}
-      />
-    )}
-    <button
-      onClick={() => navigate(`/sessions/${place.id}`)}
-      onContextMenu={(e) => menu.show(e, null)}
-      className={`block w-full rounded-md px-2.5 py-1.5 text-left transition-colors duration-150 select-none ${
-        on ? "bg-overlay shadow-(--shadow-raise)" : "hover:bg-raise/60"
-      }`}
-    >
-      <div className="flex items-center gap-2">
-        {/* The island's mark, at nine pixels instead of eleven. One alphabet
-            for both places, so a workspace reads the same in the menu bar as
-            it does here.
+      <nav
+        aria-label="Destinations"
+        onMouseLeave={endPeek}
+        className="relative z-5 flex w-(--rail) shrink-0 flex-col items-center gap-1 pt-0.5 pb-3.5"
+      >
+        {DESTINATIONS.map((d) => (
+          <RailButton
+            key={d.id}
+            icon={d.icon}
+            label={d.label}
+            hint={d.key ? key(d.key) : undefined}
+            on={d.id === here}
+            peeked={peek === d.id && d.id !== here}
+            onPick={() => go(d)}
+            onPoint={() => startPeek(d.id)}
+            onFocus={() => showPeek(d.id)}
+          />
+        ))}
 
-            There used to be a second dot after the name — `runs.some(needsYou)`
-            in ember — saying again what this already says, and contradicting
-            it for the two statuses where `needsYou` and the colour disagree:
-            a finished workspace drew sage and then ember, a failed one brick
-            and then ember. The mark is the only thing that speaks now. */}
-        <Blocks beat={beatOf(place.runs[0])} size={9} />
-        <span className={`min-w-0 flex-1 truncate text-ui ${on ? "text-bone" : "text-dim"}`}>{label ?? place.name}</span>
-        <span className="shrink-0 font-mono text-micro text-mute">
-          {elapsed(minutesSince(place.runs[0].createdAt))}
-        </span>
-      </div>
-      <div className="flex items-center gap-1.5 pl-[12px]">
-        <span className="min-w-0 flex-1 truncate font-mono text-micro text-mute">{place.branch ?? "—"}</span>
-        {/* Slate, which already means "in flight" beside this row: the agent
-            here may be idle, but what it delegated is not. */}
-        {working > 0 && (
-          <span className="shrink-0 font-mono text-micro tabular-nums text-slate" title={`${working} delegated and still working`}>
-            ↳{working}
-          </span>
-        )}
-        {state === "working" &&
-          place.runs.slice(0, 3).map((run) => (
-            <AgentMark key={run.id} agent={run.agent} size={10} className="shrink-0 text-mute" />
-          ))}
-        <Where place={place} />
-      </div>
-    </button>
+        <span className="my-1.5 h-px w-[22px] shrink-0 bg-line" />
+
+        {DOORS.map((d) => (
+          <RailButton
+            key={d.id}
+            icon={d.icon}
+            label={d.id === "updates" ? updates.label : d.label}
+            hint={d.id === "settings" ? key(",") : undefined}
+            on={d.id === here}
+            peeked={peek === d.id && d.id !== here}
+            news={d.id === "updates" && updates.dot}
+            onPick={() => go(d)}
+            onPoint={() => startPeek(d.id)}
+            onFocus={() => showPeek(d.id)}
+          />
+        ))}
+
+        <span className="flex-1" />
+
+        <ProfileMenu backend={backend} waitingElsewhere={elsewhere} onSwitch={onSwitch} onForgot={onForgot} />
+      </nav>
+
+      {(pinned || floating) && (
+        <RailPanel
+          at={showing}
+          floating={floating}
+          onCollapse={() => {
+            setPeek(null);
+            setPinned(false);
+          }}
+          onEnter={hold}
+          onLeave={endPeek}
+        />
+      )}
     </>
   );
 }
 
 /**
- * Where the workspace runs, as one icon at the end of the row: a screen for
- * Firetower's own machine, a server for any other computer. Hovering it
- * opens the machine's card — the name and the facts live there, not in a
- * row that is already full.
+ * One destination.
+ *
+ * The icon is drawn heavier than an icon inside a list — 1.8, and 2 when it is
+ * the one you are on — because a rail icon is read before it is clicked and
+ * there is no label under it to help. That is why these do not go through
+ * `Icon`, which exists to stop exactly this kind of per-site weight: the rule
+ * it enforces is right, and this is the one surface that argues with it.
  */
-function Where({ place }: { place: Workspace }) {
-  const hosts = useHosts();
-  const host = hosts.data.find((h) => h.id === place.runs[0].hostId);
-  const where = whereItRuns(host, hosts.data);
-  const [card, setCard] = useState<{ x: number; y: number } | null>(null);
-  const hover = useRef<ReturnType<typeof setTimeout>>(undefined);
-  if (!host || !where) return null;
-  const local = where.name === "Firetower's machine";
-  const Icon = local ? Monitor : Server;
+function RailButton({
+  icon: Glyph,
+  label,
+  hint,
+  on,
+  peeked,
+  news,
+  onPick,
+  onPoint,
+  onFocus,
+}: {
+  icon: LucideIcon;
+  label: string;
+  hint?: string;
+  on: boolean;
+  peeked: boolean;
+  news?: boolean;
+  onPick: () => void;
+  onPoint: () => void;
+  onFocus: () => void;
+}) {
   return (
-    <span
-      onMouseEnter={(e) => {
-        const r = e.currentTarget.getBoundingClientRect();
-        hover.current = setTimeout(() => setCard({ x: r.left, y: r.bottom }), 350);
-      }}
-      onMouseLeave={() => {
-        clearTimeout(hover.current);
-        setCard(null);
-      }}
-      className={`relative ml-0.5 shrink-0 ${where.quiet ? "stale" : ""}`}
-      aria-label={`Runs on ${where.name}`}
+    <button
+      onClick={onPick}
+      onMouseEnter={onPoint}
+      onFocus={onFocus}
+      aria-current={on ? "page" : undefined}
+      aria-label={label}
+      title={hint ? `${label}  ${hint}` : label}
+      data-peek={peeked}
+      className="rbtn"
     >
-      <Icon className={`h-3 w-3 ${where.quiet ? "text-brick" : "text-mute"}`} strokeWidth={1.75} />
-      {card && <HostCard host={host} where={where} at={card} />}
-    </span>
-  );
-}
-
-/** One section's worth: a heading per repository, with its workspaces under it. */
-function Repos({ repos, path }: { repos: Repositories; path: string }) {
-  const hostOf = useHostOf();
-  return (
-    <>
-      {repos.groups.map(([repo, places]) => (
-        <div key={repo} className="mb-2.5">
-          <div className="flex items-center gap-1.5 px-2.5 py-1">
-            {repo === "no repository" ? (
-              <Icon of={CircleDashed} size={12} className="text-mute" />
-            ) : (
-              <HostMark kind={hostOf(repo)?.kind} size={12} className="text-dim" />
-            )}
-            <span className="min-w-0 flex-1 truncate text-ui font-medium text-bone">
-              {shortRepo(repo)}
-            </span>
-            <RepoTally places={places} />
-          </div>
-          {places.map((place) => (
-            <Row
-              key={place.id}
-              place={place}
-              on={path === `/sessions/${place.id}`}
-              label={rowLabel(place, places)}
-              working={childrenWorking(place, places)}
-              delegated={childrenOf(place, places)}
-            />
-          ))}
-        </div>
-      ))}
-    </>
-  );
-}
-
-/** A section's name, and the one button that belongs to the first of them. */
-function Heading({ label, onNew }: { label: string; onNew?: () => void }) {
-  return (
-    <div className="flex items-center gap-2 px-2.5 pt-1 pb-1">
-      <span className="eyebrow">{label}</span>
-      {onNew && (
-        <button
-          onClick={onNew}
-          title={`New workspace  ${key("N")}`}
-          className="-mr-1 ml-auto grid h-7 w-7 place-items-center rounded-md text-mute transition-colors hover:bg-raise hover:text-bone"
-        >
-          <Icon of={Plus} size={12} />
-        </button>
-      )}
-    </div>
+      <Glyph size={20} strokeWidth={on ? 2 : 1.8} aria-hidden />
+      {news && <span className="news" title="A newer build is out" />}
+    </button>
   );
 }

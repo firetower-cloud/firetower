@@ -45,7 +45,7 @@ import { useDirectories } from "~/data";
 import { useEndAgent, useEndWorkspace } from "~/ui/end";
 import { useConfirm } from "~/ui/Confirm";
 import { drag } from "~/drag";
-import { key } from "~/platform";
+import { isLocalMod, key } from "~/platform";
 
 /** The rail can be dragged between these. */
 const RAIL_MIN = 288;
@@ -338,21 +338,29 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
   }, [immersive]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey)) return;
       /* A focused terminal owns the keyboard. `⌘J` is the one gesture that
          is about the panel rather than what is in it. */
       const inTerminal = !!(document.activeElement as HTMLElement | null)?.closest(".xterm");
+
+      /* The inspector's tabs, on the *local* modifier. They were ⌘1–⌘3 until
+         the rail took the global number row for its six destinations: a
+         destination is global, a panel tab is local to one workspace, and the
+         modifier is what says which. */
+      const to: Record<string, Side> = { "1": "diff", "2": "files", "3": "ship" };
+      if (isLocalMod(e) && to[e.key] && !inTerminal) {
+        // The Commit panel is not a viewer's; neither is the shortcut to it.
+        if (to[e.key] === "ship" && !mayAct) return;
+        e.preventDefault();
+        setSide(to[e.key]);
+        setOpen(true);
+        return;
+      }
+
+      if (!(e.metaKey || e.ctrlKey)) return;
       if (inTerminal && e.key.toLowerCase() !== "j") return;
       if (e.key === "\\") {
         e.preventDefault();
         setOpen((o) => !o);
-      }
-      const to: Record<string, Side> = { "1": "diff", "2": "files", "3": "ship" };
-      // The Commit panel is not a viewer's; neither is the shortcut to it.
-      if (to[e.key] && !(to[e.key] === "ship" && !mayAct)) {
-        e.preventDefault();
-        setSide(to[e.key]);
-        setOpen(true);
       }
       if (e.key.toLowerCase() === "j") {
         e.preventDefault();

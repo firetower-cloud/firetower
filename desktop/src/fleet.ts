@@ -1,8 +1,8 @@
 /**
  * Every server's sessions, for the screens that read across all of them.
  *
- * The fleet view, the palette, the strip's counts and the dock badge are the
- * only things that look at more than one server at once, and they are outside
+ * The switcher under the avatar, the palette and the dock badge are the only
+ * things that look at more than one server at once, and they are outside
  * any one server's provider — so they cannot use that server's cache. This is
  * the deliberate fan-out the design called for: each connected server is asked
  * directly with its own token, and the answers are merged here rather than in
@@ -29,7 +29,7 @@ export type Backend = {
   id: string;
   org: string;
   user: string;
-  /** The monogram in the strip. Identity is a shape here, never a hue. */
+  /** The monogram under the avatar. Identity is a shape here, never a hue. */
   mark: string;
   url: string;
   reach: Reach;
@@ -41,12 +41,72 @@ const known: Map<string, { sessions: Session[]; error: string | null }> = new Ma
 const watchers = new Set<() => void>();
 const changed = () => watchers.forEach((w) => w());
 
-export function asBackend(s: Connected): Backend {
+/**
+ * The monogram, and why it is two letters rather than one.
+ *
+ * Identity here is a shape, never a hue — there are not enough distinguishable
+ * hues, they collide with the signal palette, and a colour-coded server is
+ * unreadable to a dichromat. Which makes the *shape* load-bearing, and one
+ * letter is not enough of it: this used to be `org.slice(0, 1)`, so Acme and
+ * Apex were both "A" and Northwind and Nimbus were both "N". A mark that two
+ * servers share is not a mark.
+ *
+ * So: the first letter, then the first letter after it that nobody else in the
+ * fleet has already claimed. Acme and Apex are "Ac" and "Ap" on their own
+ * second letters; Northwind and Nova both want "No", so the second takes the
+ * first letter of its own that is still free and becomes "Nv". The walk is
+ * over the name's own letters in order, so the mark always reads as an
+ * abbreviation of the thing rather than as a code.
+ *
+ * It holds for two Firetowers of the *same* organisation too — a staging and
+ * a production Ledger come out "Le" and "Ld", both still legibly from the
+ * name. The only pair that can collide is one where both names run out of
+ * letters, which takes two organisations called the same two characters.
+ */
+export function marksOf(orgs: string[]): string[] {
+  /* Letters and digits only. A leading "@" or a space would otherwise become
+     half the monogram. */
+  const letters = orgs.map((o) => [...o].filter((c) => /[\p{L}\p{N}]/u.test(c)));
+  const marks = orgs.map(() => "");
+  /* Grouped by first letter, because that is the only collision a second
+     letter can resolve. Two orgs starting differently never compete. */
+  const byFirst = new Map<string, number[]>();
+  letters.forEach((chars, i) => {
+    const head = (chars[0] ?? "?").toUpperCase();
+    byFirst.set(head, [...(byFirst.get(head) ?? []), i]);
+  });
+
+  for (const [head, group] of byFirst) {
+    const taken = new Set<string>();
+    for (const i of group) {
+      const tail = letters[i].slice(1).map((c) => c.toLowerCase());
+      /* Its own second letter when that is free, else the next of its own
+         letters that is — and its plain second letter if every one is taken,
+         which only happens when two names share every letter in order. */
+      const pick = tail.find((c) => !taken.has(c)) ?? tail[0] ?? "";
+      taken.add(pick);
+      marks[i] = head + pick;
+    }
+  }
+  return marks;
+}
+
+/**
+ * One server as the screens see it.
+ *
+ * `among` is the fleet the mark has to be unique within, which is why it is a
+ * parameter rather than something this reads for itself: the de-duplication is
+ * a fact about the *set*, and a function that answered it from a global would
+ * give a different answer under test than in the app.
+ */
+export function asBackend(s: Connected, among: Connected[] = servers()): Backend {
+  const orgs = among.some((x) => x.serverId === s.serverId) ? among : [...among, s];
+  const mark = marksOf(orgs.map((x) => x.org))[orgs.findIndex((x) => x.serverId === s.serverId)];
   return {
     id: s.serverId,
     org: s.org,
     user: s.user,
-    mark: s.org.slice(0, 1).toUpperCase(),
+    mark,
     url: s.url,
     reach: known.get(s.serverId)?.error ? "unreachable" : "live",
   };
@@ -121,8 +181,9 @@ export function useFleet(): Fleet[] {
     return () => void watchers.delete(w);
   }, []);
 
-  return servers().map((s) => ({
-    backend: asBackend(s),
+  const here = servers();
+  return here.map((s) => ({
+    backend: asBackend(s, here),
     sessions: known.get(s.serverId)?.sessions ?? [],
     error: known.get(s.serverId)?.error ?? null,
   }));
