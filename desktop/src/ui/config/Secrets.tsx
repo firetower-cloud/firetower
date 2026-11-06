@@ -18,11 +18,11 @@
  */
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Eye, EyeOff, Trash2 } from "lucide-react";
+import { Eye, EyeOff, KeyRound, ScrollText, Trash2 } from "lucide-react";
 import { Icon } from "~/components/ui";
 import { getListSecretsQueryKey, useListSecrets, useRemoveSecret, useReplaceSecret, useRevealSecret } from "~/api/generated/secrets/secrets";
 import type { HeldSecret } from "~/api/generated/model";
-import { Section } from "~/ui/config/bits";
+import { Group, Section, WhereTo } from "~/ui/config/bits";
 import { WhoCanAccess } from "~/ui/Sharing";
 
 import { why } from "~/data";
@@ -38,17 +38,28 @@ export function Secrets() {
   const held = (data as { held?: HeldSecret[] } | undefined)?.held ?? [];
 
   return (
+    /* **Vault**, which is what the rail calls it and what the design draws.
+       The page said "Secrets" and the index said "Vault", so the screen
+       disagreed with the way into it. */
     <Section
-      title="Secrets"
-      note="Held encrypted, revealed only by asking, and every read is logged. Each one is made where it is used."
+      title="Vault"
+      note="Held encrypted, revealed only by asking, and every read is logged. Each one is made where it is used, so there is nothing to add here."
     >
-      {isPending && <p className="px-3.5 py-4 text-ui text-mute">Reading the vault…</p>}
-      {error ? <p className="px-3.5 py-4 text-ui text-brick">{why(error)}</p> : null}
-      {!isPending && !error && held.length === 0 && <p className="px-3.5 py-4 text-ui text-mute">Nothing held yet.</p>}
+      <Group>
+        {isPending && <p className="py-4 text-ui text-mute">Reading the vault…</p>}
+        {error ? <p className="py-4 text-ui text-brick">{why(error)}</p> : null}
+        {!isPending && !error && held.length === 0 && <p className="py-4 text-ui text-mute">Nothing held yet.</p>}
 
-      {held.map((s) => (
-        <Row key={s.id} id={s.id} scope={s.scope} name={s.name} mine={s.mine} path={s.path} onGone={refresh} />
-      ))}
+        {held.map((s) => (
+          <Row key={s.id} id={s.id} scope={s.scope} name={s.name} mine={s.mine} path={s.path} onGone={refresh} />
+        ))}
+      </Group>
+
+      <WhereTo>
+        Nothing reads a scope somebody invented here, so there is no control that makes one — you
+        would store the thing, reasonably expect an agent to be given it, and it never would be.
+        What is left is <b>seeing what is held, replacing a value, and taking one away</b>.
+      </WhereTo>
     </Section>
   );
 }
@@ -66,15 +77,27 @@ function Row({ id, scope, name, mine, path, onGone }: { id: string; scope: strin
   const [editing, setEditing] = useState<string | null>(null);
 
   return (
-    <div className="flex items-center gap-2.5 px-3.5 py-2.5">
-      <span className="w-24 shrink-0 truncate font-mono text-micro text-mute">{scope}</span>
+    <>
+    <div className="r">
+      <span className="g">
+        <Icon of={KeyRound} size={16} />
+      </span>
       {/* What it says when it is not simply yours. A secret filed into a
           directory has that directory as its owner — that is what handing it
           over means — so `mine` goes false the moment it is shared, and
           "someone else's" would be a lie about your own credential. The chip
           beside it already says where it is; the only thing left to name is the
           installation's own, which belongs to the deployment and to nobody. */}
-      <span className="min-w-0 flex-1 truncate font-mono text-ui text-text">{name}{!mine && !path && <span className="ml-1.5 text-micro text-mute">· this installation's</span>}</span>
+      <span className="tx">
+        <b>{name}</b>
+        {/* Where it came from, which is the thing a reader is actually asking:
+            a token you authorized, a key a directory holds, the deployment's
+            own. The scope used to be a bare `u/kevin` in a column. */}
+        <s>
+          {scope}
+          {!mine && !path ? " · this installation\u2019s" : ""}
+        </s>
+      </span>
       {/* Filing a secret re-seals it: the owner is in the associated data of
           both crypto layers, so it is opened under the old identity and sealed
           under the new. That is why moving one is a real transfer and not a
@@ -93,12 +116,25 @@ function Row({ id, scope, name, mine, path, onGone }: { id: string; scope: strin
         </>
       ) : (
         <>
-          <code className="font-mono text-micro text-mute">{shown ?? "••••••••"}</code>
-          <button onClick={() => (shown ? setShown(null) : reveal.mutate({ scope, name }, { onSuccess: (r) => setShown(r.value) }))} title={shown ? "Hide" : "Reveal — this is logged"} className="grid h-6 w-6 place-items-center rounded text-mute hover:bg-raise hover:text-bone">{shown ? <EyeOff className="h-3.5 w-3.5" strokeWidth={1.75} /> : <Eye className="h-3.5 w-3.5" strokeWidth={1.75} />}</button>
-          <button onClick={() => setEditing("")} className="text-micro text-mute hover:text-bone">replace</button>
-          <button onClick={() => void confirm({ title: `Remove ${scope}/${name}?`, body: "Sessions that were given it keep what they have.", action: "Remove", tone: "danger" }).then((ok) => ok && remove.mutate({ scope, name }, { onSuccess: onGone }))} className="grid h-6 w-6 place-items-center rounded text-mute hover:text-brick"><Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} /></button>
+          {/* Twelve dots at rest. A value is only ever on screen because
+              somebody asked for it, and the line under it says so. */}
+          {shown ? <code className="shown">{shown}</code> : <span className="masked">••••••••••••</span>}
+          <span className="hov flex items-center gap-1">
+            <button onClick={() => (shown ? setShown(null) : reveal.mutate({ scope, name }, { onSuccess: (r) => setShown(r.value) }))} title={shown ? "Hide" : "Reveal — this is logged"} className="gbtn h-7 w-7">{shown ? <EyeOff className="h-3.5 w-3.5" strokeWidth={1.75} /> : <Eye className="h-3.5 w-3.5" strokeWidth={1.75} />}</button>
+            <button onClick={() => setEditing("")} className="gbtn w-auto px-2 text-meta">replace</button>
+            <button onClick={() => void confirm({ title: `Remove ${scope}/${name}?`, body: "Sessions that were given it keep what they have.", action: "Remove", tone: "danger" }).then((ok) => ok && remove.mutate({ scope, name }, { onSuccess: onGone }))} title="Remove" className="gbtn h-7 w-7 hover:text-brick"><Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} /></button>
+          </span>
         </>
       )}
     </div>
+    {/* Said on the screen that revealed it, not buried in a log somebody has
+        to know exists. The read already happened — this is the receipt. */}
+    {shown && (
+      <p className="logged pl-[52px]">
+        <Icon of={ScrollText} size={12} />
+        Revealed by you, just now. The read is in the access log.
+      </p>
+    )}
+    </>
   );
 }

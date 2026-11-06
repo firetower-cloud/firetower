@@ -444,6 +444,52 @@ const server = createServer(async (req, res) => {
     return json(res, { detail: `back to three, playing ${scene}` });
   }
 
+  /**
+   * The five states every list has, driven on the repositories list.
+   *
+   * Criterion 49 asks for empty, loading, error, refused and server-dark on
+   * every pane, and until now the mock could produce exactly one of them.
+   * Empty is a scene on the route itself; dark is simply an address nothing
+   * answers on; these are the other three.
+   */
+  if (path === "/api/v1/repos") {
+    if (scene === "slow-repos") await new Promise((r) => setTimeout(r, 30_000));
+    if (scene === "repos-error") {
+      return json(res, { code: "ActionFailed", message: "the control plane refused: upstream timed out" }, 500);
+    }
+    if (scene === "repos-denied") {
+      return json(res, { code: "Forbidden", message: "you may not read this organisation's repositories" }, 403);
+    }
+  }
+
+  if (req.method === "POST" && path === "/api/v1/updates/plan") return json(res, PLAN);
+
+  /* Signing in, so the first-run flow can be walked end to end rather than
+     stopping at the password field. `locked` hands back the temporary
+     password case, which is the one `Gate` and `ReplacePassword` exist for. */
+  if (req.method === "POST" && path === "/api/v1/auth/login") {
+    return json(res, { token: "tok", user: { ...USER, mustChangePassword: scene === "locked" } });
+  }
+  if (req.method === "POST" && (path === "/api/v1/setup/organization" || path === "/api/v1/setup/complete")) {
+    if (path.endsWith("organization")) scene = "setup-done";
+    return json(res, { detail: "done" });
+  }
+
+  const members_of = /^\/api\/v1\/teams\/([^/]+)\/members$/.exec(path);
+  if (members_of) return json(res, TEAM_MEMBERS[members_of[1]] ?? []);
+
+  const grants_of = /^\/api\/v1\/directories\/([^/]+)\/grants$/.exec(path);
+  if (grants_of) return json(res, GRANTS[grants_of[1]] ?? []);
+
+  const items_of = /^\/api\/v1\/directories\/([^/]+)\/items$/.exec(path);
+  if (items_of) {
+    return json(res, [
+      { kind: "skill", id: "sk_6", name: "skill-creator" },
+      { kind: "secret", id: "se_3", name: "STAGING_DEPLOY_TOKEN" },
+      { kind: "host", id: "h_1", name: "this Mac" },
+    ]);
+  }
+
   /* A mention, answered the way the control plane answers it: the page lands
      beside the attachments under the slug and the version, a page with assets
      lands as a zip, and what this very session made is named where it is. As
@@ -543,8 +589,15 @@ const server = createServer(async (req, res) => {
 
   const routes = {
     "/api/v1/bootstrap": { version: "0.13.0", eventsPath: "/api/v1/events", authModes: ["password"], organization: ORG.name, serverId: "o_1" },
-    "/api/v1/auth/me": { user: USER, organization: ORG },
-    "/api/v1/setup": { needsPassword: false, needsOrganization: false, needsGithub: false, completed: true, organization: ORG },
+    /* `locked` and `needs-setup` are what `Gate.tsx` stands between a
+       connected server and the app for, and neither could be reached. */
+    "/api/v1/auth/me": { user: { ...USER, mustChangePassword: scene === "locked" }, organization: ORG },
+    "/api/v1/setup":
+      scene === "needs-setup"
+        ? { needsPassword: false, needsOrganization: true, needsGithub: false, completed: false, organization: null }
+        : scene === "setup-done"
+          ? { needsPassword: false, needsOrganization: false, needsGithub: false, completed: false, organization: ORG }
+          : { needsPassword: false, needsOrganization: false, needsGithub: false, completed: true, organization: ORG },
     "/api/v1/sessions": dashboard(),
     "/api/v1/sessions/s_1": session(),
     "/api/v1/sessions/w_1": session(),
@@ -558,12 +611,20 @@ const server = createServer(async (req, res) => {
     "/api/v1/sessions/s_1/account": { account: ACCOUNTS[0], limits: [], switches: [] },
     "/api/v1/sessions/s_1/annotations": [],
     "/api/v1/skills": SKILLS,
-    "/api/v1/repos": REPOS,
-    "/api/v1/hosts": HOSTS,
+    "/api/v1/repos": scene === "no-repos" ? [] : REPOS,
+    "/api/v1/hosts": scene === "no-machines" ? [] : HOSTS,
     "/api/v1/agents": AGENTS,
     "/api/v1/agent-accounts": ACCOUNTS,
     "/api/v1/providers": [{ id: "github", label: "GitHub", connected: true, identity: "kevin" }],
-    "/api/v1/trackers": [],
+    "/api/v1/trackers": scene === "no-trackers" ? [] : TRACKERS,
+    "/api/v1/tasks": scene === "no-tasks" ? { more: false, next: null, tasks: [] } : TASKS,
+    "/api/v1/colleagues": scene === "no-people" ? [] : COLLEAGUES,
+    "/api/v1/teams": scene === "no-people" ? [] : TEAMS,
+    "/api/v1/directories": scene === "no-dirs" ? [] : DIRECTORIES,
+    "/api/v1/secrets": scene === "no-secrets" ? { ...SECRETS, held: [], access: [] } : SECRETS,
+    "/api/v1/roles": scene === "no-roles" ? [] : ROLES,
+    "/api/v1/provider-kinds": PROVIDER_KINDS,
+    "/api/v1/updates/runs": scene === "upgrading" ? [RUNNING, DONE_RUN] : [DONE_RUN],
     /* `UpdateStatus`, as the screen and the rail actually read it. The old
        three-field object here predated both and was the wrong shape, so the
        Updates screen could not be opened against the mock at all. With
@@ -575,7 +636,7 @@ const server = createServer(async (req, res) => {
       checkedAt: "2026-10-02T09:12:00Z",
       checkError: null,
       updateAvailable: true,
-      activeRun: null,
+      activeRun: scene === "upgrading" ? "ur_2" : null,
       controlPlane: {
         version: "0.13.0",
         upgradable: true,
@@ -719,6 +780,183 @@ const SKILLS = [
     description: "Turn an incident channel into the note that goes to the customer. Use when somebody asks for a customer-facing write-up.",
   }),
 ];
+
+/**
+ * What Settings reads, which until the reconciliation was nothing at all.
+ *
+ * Every one of these paths fell through to the handler's `[]`, so People,
+ * Teams, Directories, Vault and Profiles each drew their empty state against
+ * the mock and could not be compared with the drawing at all. An empty list
+ * is a state worth photographing — it is just not the one those five screens
+ * are mostly in.
+ */
+const COLLEAGUES = [
+  { id: "u_1", username: "kevin" },
+  { id: "u_2", username: "ana" },
+  { id: "u_3", username: "lisa" },
+  { id: "u_4", username: "tomas" },
+  { id: "u_5", username: "priya" },
+  { id: "u_6", username: "omar" },
+];
+
+const TEAMS = [
+  { id: "t_0", name: "Everyone", everyone: true, members: 6 },
+  { id: "t_1", name: "Platform", everyone: false, members: 4 },
+  { id: "t_2", name: "Design", everyone: false, members: 2 },
+  { id: "t_3", name: "Support", everyone: false, members: 3 },
+];
+
+const TEAM_MEMBERS = {
+  t_0: COLLEAGUES,
+  t_1: COLLEAGUES.slice(0, 4),
+  t_2: COLLEAGUES.slice(2, 4),
+  t_3: COLLEAGUES.slice(3),
+};
+
+const DIRECTORIES = [
+  { id: "d_1", name: "Platform", slug: "platform", level: "admin", workspaces: 12, skills: 4, secrets: 3, hosts: 1, agentAccounts: 2 },
+  { id: "d_2", name: "Design", slug: "design", level: "writer", workspaces: 5, skills: 2, secrets: 1, hosts: 0, agentAccounts: 1 },
+  { id: "d_3", name: "Firetower", slug: "firetower", level: "viewer", workspaces: 31, skills: 7, secrets: 6, hosts: 1, agentAccounts: 3 },
+];
+
+const GRANTS = {
+  d_1: [
+    { subjectKind: "person", subjectId: "u_1", subjectName: "kevin", level: "admin" },
+    { subjectKind: "team", subjectId: "t_1", subjectName: "Platform", level: "writer" },
+    { subjectKind: "person", subjectId: "u_4", subjectName: "tomas", level: "viewer" },
+  ],
+  d_2: [{ subjectKind: "team", subjectId: "t_2", subjectName: "Design", level: "writer" }],
+  d_3: [{ subjectKind: "team", subjectId: "t_0", subjectName: "Everyone", level: "viewer" }],
+};
+
+/* The vault, with one of each: a key of this person's own, one a directory
+   holds for everybody, and the access log the reveal line points at. */
+const SECRETS = {
+  rootKey: "ft-root-2026-04",
+  intact: true,
+  brokenAt: null,
+  held: [
+    { id: "se_1", scope: "u/kevin", name: "ANTHROPIC_API_KEY", path: "u/kevin", mine: true },
+    { id: "se_2", scope: "u/kevin", name: "LINEAR_API_KEY", path: "u/kevin", mine: true },
+    { id: "se_3", scope: "d/platform", name: "STAGING_DEPLOY_TOKEN", path: "d/platform", mine: false },
+    { id: "se_4", scope: "d/platform", name: "SENTRY_DSN", path: "d/platform", mine: false },
+  ],
+  access: [
+    { id: 3, name: "STAGING_DEPLOY_TOKEN", scope: "d/platform", action: "revealed", at: minutesAgo(40), reason: "read by kevin" },
+    { id: 2, name: "ANTHROPIC_API_KEY", scope: "u/kevin", action: "used", at: minutesAgo(190), reason: "Quota meter rounding" },
+    { id: 1, name: "SENTRY_DSN", scope: "d/platform", action: "stored", at: minutesAgo(5000), reason: "filed by ana" },
+  ],
+};
+
+const role = (over) => ({
+  id: "r_x", name: "A profile", does: "", instructions: "", path: "u/kevin",
+  placement: "Yours", agent: "ClaudeCode", account: null, machine: null,
+  isDefault: false, canDelegate: false, delegateScope: [], skillScope: [],
+  mayShare: true, mayWrite: true, settings: { model: null, effort: null, mode: null, sandbox: null },
+  createdAt: minutesAgo(20000), updatedAt: minutesAgo(400), ...over,
+});
+const ROLES = [
+  role({
+    id: "r_1", name: "Reviewer", isDefault: true,
+    does: "Reads a change and says what is wrong with it. Never writes.",
+    instructions: "Read the diff. Report defects with a file and a line. Do not edit anything.",
+    settings: { model: "claude-opus-5", effort: "high", mode: "read-only", sandbox: null },
+  }),
+  role({
+    id: "r_2", name: "Release captain", canDelegate: true, delegateScope: ["r_1"],
+    does: "Cuts a release, watches the smoke suite, and rolls back when it fails.",
+    instructions: "Follow the deploy runbook. Stop at the first failing check and say so.",
+    settings: { model: "claude-sonnet-5", effort: "medium", mode: null, sandbox: "workspace" },
+  }),
+  role({
+    id: "r_3", name: "Triager", path: "d/platform", placement: "Platform", mayWrite: false, mayShare: false,
+    does: "Reads an inbox of issues and files each one where it belongs.",
+    instructions: "Label, assign and close duplicates. Ask before closing anything with a customer on it.",
+    settings: { model: "claude-haiku-4-5", effort: null, mode: null, sandbox: null },
+  }),
+];
+
+/* Enough to list; the kinds page is what the git-host picker offers. */
+const PROVIDER_KINDS = [
+  { kind: "github", label: "GitHub", defaultHost: "github.com", ways: ["deviceCode", "token"], tokenUrl: "https://github.com/settings/tokens", scopes: ["repo", "read:org"] },
+  { kind: "gitlab", label: "GitLab", defaultHost: "gitlab.com", ways: ["token"], tokenUrl: "https://gitlab.com/-/user_settings/personal_access_tokens", scopes: ["api", "read_repository"] },
+  { kind: "gitea", label: "Gitea", defaultHost: null, ways: ["token"], tokenUrl: null, scopes: ["repo", "read:org"] },
+];
+
+const TRACKERS = [
+  { id: "gh_1", kind: "github", label: "GitHub", host: "github.com", connected: true, auth: "gitProvider", kinds: ["issue", "pullRequest"], changeNoun: "pull request", scopeKind: "repos", keyUrl: null, secret: null, path: null },
+  { id: "tr_linear", kind: "linear", label: "Linear", host: "linear.app", connected: false, auth: "apiKey", kinds: ["ticket"], changeNoun: "change", scopeKind: "teams", keyUrl: "https://linear.app/settings/api", secret: null, path: null },
+];
+
+/**
+ * What an upgrade would write, and one half-run upgrade.
+ *
+ * `Updates` draws three things — what is running, what the next version would
+ * write over, and a run in progress — and only the first could be reached:
+ * `/api/v1/updates/plan` and `/api/v1/updates/runs` both fell through to the
+ * handler's `[]`, so pressing Upgrade drew an empty sheet.
+ */
+const PLAN = {
+  version: "0.14.0",
+  updaterUpgrade: false,
+  envMissing: ["FT_OBJECT_STORE_URL"],
+  files: [
+    { name: "docker-compose.yml", verdict: "Update", releaseChange: "ft-server pinned to 0.14.0; a new `objects` service", yourEdits: null },
+    { name: ".env", verdict: "Edited", releaseChange: "two new keys", yourEdits: "you set FT_LOG=debug" },
+    { name: "Caddyfile", verdict: "Unchanged", releaseChange: null, yourEdits: null },
+    { name: "objects.yml", verdict: "New", releaseChange: "the object store's own compose file", yourEdits: null },
+    { name: "run-local.sh", verdict: "Unshipped", releaseChange: null, yourEdits: "yours; the release does not carry it" },
+  ],
+};
+
+const step = (position, title, target, state, over = {}) => ({
+  position, title, target, state, log: "", detail: null,
+  startedAt: state === "pending" ? null : minutesAgo(6 - position),
+  finishedAt: state === "running" || state === "pending" ? null : minutesAgo(5 - position),
+  ...over,
+});
+const RUNNING = {
+  id: "ur_2",
+  state: "running",
+  fromVersion: "0.13.0",
+  toVersion: "0.14.0",
+  whenIdle: false,
+  targets: { controlPlane: true, hostIds: ["h_1"] },
+  startedBy: "kevin",
+  createdAt: minutesAgo(6),
+  startedAt: minutesAgo(6),
+  finishedAt: null,
+  error: null,
+  steps: [
+    step(0, "Back up the database", "control plane", "done", { detail: "41 MB to /var/lib/firetower/backups" }),
+    step(1, "Write the compose file", "control plane", "done"),
+    step(2, "Pull 0.14.0", "control plane", "running", { detail: "layer 3 of 7" }),
+    step(3, "Restart the control plane", "control plane", "pending"),
+    step(4, "Upgrade the worker", "this Mac", "pending"),
+  ],
+};
+const DONE_RUN = {
+  ...RUNNING,
+  id: "ur_1",
+  state: "succeeded",
+  fromVersion: "0.12.4",
+  toVersion: "0.13.0",
+  createdAt: minutesAgo(21600),
+  startedAt: minutesAgo(21600),
+  finishedAt: minutesAgo(21580),
+  steps: RUNNING.steps.map((t) => ({ ...t, state: "done", detail: null })),
+};
+
+const TASKS = {
+  more: false,
+  next: null,
+  tasks: [
+    { id: "github:acme/web#5138", key: "#5138", kind: "issue", source: "github", state: "open", title: "Quota meter rounds the wrong way at 99.5%", repo: "acme/web", url: "https://example.invalid/5138", updatedAt: minutesAgo(35), body: "The meter reads 100% before the band is reached.", labels: [{ name: "bug", colour: "d73a4a" }], assignees: [{ login: "kevin", avatar: null }] },
+    { id: "github:acme/api#812", key: "#812", kind: "issue", source: "github", state: "open", title: "Webhook signatures from Gitea are refused", repo: "acme/api", url: "https://example.invalid/812", updatedAt: minutesAgo(220), body: "Gitea signs with SHA-256.", labels: [{ name: "tracker", colour: "0e8a16" }], assignees: [] },
+    { id: "github:acme/web#5141", key: "#5141", kind: "pullRequest", source: "github", state: "open", title: "Light mode for the whole app", repo: "acme/web", url: "https://example.invalid/5141", updatedAt: minutesAgo(90), body: null, labels: [], assignees: [{ login: "ana", avatar: null }] },
+    { id: "github:acme/jobs#77", key: "#77", kind: "issue", source: "github", state: "open", title: "Backfill the invoice index out of hours", repo: "acme/jobs", url: "https://example.invalid/77", updatedAt: minutesAgo(1500), body: null, labels: [{ name: "chore", colour: "cfd3d7" }], assignees: [] },
+  ],
+};
 
 /**
  * One real file, so the viewer has something to be.

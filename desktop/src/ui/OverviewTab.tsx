@@ -19,21 +19,24 @@ import { Blocks } from "~/island/Blocks";
 import { beatOf, elapsed, minutesSince } from "~/api/view";
 import { useConversation } from "~/api/conversation";
 import { relays } from "~/api/relay";
-import { useHosts, useTokenUsage } from "~/data";
+import { useHosts } from "~/data";
 import { whereItRuns } from "~/components/WhereItRuns";
 import type { Agent, Artifact, PlanStep, Session, SessionStatus } from "~/api/generated/model";
 
-/** `94100000` → `94.1M`. The context-meter way of saying a big number. */
-function fmtTokens(n: number): string {
-  if (n >= 1e9) return `${(n / 1e9).toFixed(1)}B`;
-  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
-  if (n >= 1e3) return `${(n / 1e3).toFixed(1)}K`;
-  return `${n}`;
-}
-/** Segment colours for the token bar. The design system's `series` palette —
- *  the one meant to carry a chart — not the semantic signals (sage = done,
- *  brick = broke), which made the bar read as a status it does not mean. */
-const SEGMENTS = ["bg-series-1", "bg-series-2", "bg-series-3", "bg-series-4"];
+/**
+ * There is no token bar here, and that is deliberate.
+ *
+ * This panel carried a four-colour stacked bar, `229.8M tokens total`, and a
+ * percentage beside every agent. It is out: four hues in one panel is four
+ * more than a screen is allowed, identity in this system is a *mark* and
+ * never a hue, and the rail got measurably louder for a number nobody opened
+ * the workspace to read.
+ *
+ * **The numbers were real.** `POST /api/v1/sessions/token-usage` answers a
+ * per-session figure and is in the generated client — this was not dropped
+ * because it could only have been invented. It is a feature that may come
+ * back somewhere it belongs, which is not the team rail.
+ */
 
 /** The word beside a child's mark. The mark itself — colour and motion — is
  *  the rail's own `Blocks`, so a child reads here exactly as it does there. */
@@ -94,42 +97,33 @@ function Panel({
   );
 }
 
-/** The shared shell of a team row — compact: one line of name, one of note,
- *  the token share at the end. The active one (the agent you're reading) wears
- *  the slate highlight, so "you are here" needs no words. */
-const ROW = "flex w-full items-center gap-2 rounded-md border px-2 py-1 text-left";
-const tone = (active: boolean, link: boolean) =>
-  active ? "border-slate bg-slate-tint" : `border-line bg-raise${link ? " transition-colors hover:border-dim" : ""}`;
-
-function TokenShare({ tokens, total }: { tokens: number; total: number }) {
-  if (total <= 0) return null;
-  return (
-    <span className="shrink-0 text-right">
-      <span className="block font-mono text-micro text-text">{fmtTokens(tokens)}</span>
-      <span className="block text-micro text-mute">{Math.round((tokens / total) * 100)}%</span>
-    </span>
-  );
-}
+/** How long since it last moved, in the rail's own shorthand. */
+const age = (at: string) => elapsed(minutesSince(at));
 
 /** The manager at the top of the Team panel — the level above. The active card
  *  when it is this workspace, a link up when it is the parent of a child. */
-function ManagerRow({ manager, active, color, tokens, total }: { manager: Session; active: boolean; color: string; tokens: number; total: number }) {
+function ManagerRow({ manager, active }: { manager: Session; active: boolean }) {
   const inner = (
     <>
-      {total > 0 && <span className={`h-5 w-0.5 shrink-0 rounded-full ${color}`} title="its slice of the bar" />}
-      <AgentMark agent={manager.agent as Agent} size={14} className="shrink-0 text-dim" />
-      <span className="flex min-w-0 flex-1 items-center gap-1.5">
-        <Blocks beat={beatOf(manager)} size={9} />
-        <span className="truncate text-meta text-bone">{agentName(manager.name)}</span>
-        <span className="shrink-0 rounded bg-sage-tint px-1 text-micro text-sage">manager</span>
+      <span className="ag">
+        <AgentMark agent={manager.agent as Agent} size={15} />
       </span>
-      <TokenShare tokens={tokens} total={total} />
+      <span className="tx">
+        <b>{agentName(manager.name)}</b>
+        <s>manager</s>
+      </span>
+      <span className="rt">
+        {active && <span className="here-badge">here</span>}
+        <span className="age">{age(manager.createdAt)}</span>
+      </span>
     </>
   );
   return active ? (
-    <div className={`${ROW} ${tone(true, false)}`}>{inner}</div>
+    <div data-here="true" className="tm">
+      {inner}
+    </div>
   ) : (
-    <button onClick={() => navigate(`/sessions/${manager.id}`)} className={`${ROW} ${tone(false, true)}`}>
+    <button onClick={() => navigate(`/sessions/${manager.id}`)} className="tm">
       {inner}
     </button>
   );
@@ -137,31 +131,35 @@ function ManagerRow({ manager, active, color, tokens, total }: { manager: Sessio
 
 /** One agent on the team. The active one — the session you're reading — is a
  *  plain highlighted row; the rest are links to open them. */
-function MemberRow({ member, active, shared, color, checkIn, tokens, total }: { member: Session; active: boolean; shared: boolean; color: string; checkIn?: string; tokens: number; total: number }) {
+function MemberRow({ member, active, shared, checkIn }: { member: Session; active: boolean; shared: boolean; checkIn?: string }) {
   const sub = checkIn ?? member.pullRequest ?? member.branch ?? member.spawnReason ?? "";
   // A same-workspace child's `name` is the shared workspace's; its own name is
   // its `title`. Everyone else reads off the workspace name.
   const label = agentName(shared ? member.title : member.name);
   const inner = (
     <>
-      {total > 0 && <span className={`h-5 w-0.5 shrink-0 rounded-full ${color}`} title="its slice of the bar" />}
-      <AgentMark agent={member.agent as Agent} size={14} className="shrink-0 text-dim" />
-      <span className="min-w-0 flex-1">
-        <span className="flex items-center gap-1.5">
-          <Blocks beat={beatOf(member)} size={9} />
-          <span className="truncate text-meta text-bone">{label}</span>
-        </span>
-        <span className="mt-px block truncate text-micro text-mute">
-          {checkIn ? <span className="text-slate">“{sub}”</span> : (<>{labelOf(member.status)}{sub ? ` · ${sub}` : ""}</>)}
-        </span>
+      <span className="ag">
+        <AgentMark agent={member.agent as Agent} size={15} />
       </span>
-      <TokenShare tokens={tokens} total={total} />
+      <span className="tx">
+        <b>{label}</b>
+        {/* What it is doing, in a few words. Its own check-in when it has
+            posted one, and what the status means when it has not. */}
+        <s>{checkIn ? `“${sub}”` : `${labelOf(member.status)}${sub ? ` · ${sub}` : ""}`}</s>
+      </span>
+      <span className="rt">
+        {/* One mark, never a word beside it: the dot, the typing or the tick. */}
+        <Blocks beat={beatOf(member)} size={9} />
+        <span className="age">{age(member.createdAt)}</span>
+      </span>
     </>
   );
   return active ? (
-    <div className={`${ROW} ${tone(true, false)}`}>{inner}</div>
+    <div data-here="true" className="tm">
+      {inner}
+    </div>
   ) : (
-    <button onClick={() => navigate(`/sessions/${member.id}`)} className={`${ROW} ${tone(false, true)}`}>
+    <button onClick={() => navigate(`/sessions/${member.id}`)} className="tm">
       {inner}
     </button>
   );
@@ -215,19 +213,6 @@ export function OverviewTab({
   const working = kids.filter((k) => k.status === "Working" || k.status === "Starting").length;
   const done = plan.filter((s) => String(s.status) === "Completed").length;
 
-  // Token spend for the manager and each member under it. The manager leads
-  // the panel — the level above — so its spend is the first segment.
-  const ids = useMemo(() => [manager.id, ...roster.map((r) => r.id)], [manager.id, roster]);
-  const usage = useTokenUsage(ids);
-  const managerTokens = usage.get(manager.id) ?? 0;
-  const total = managerTokens + roster.reduce((s, r) => s + (usage.get(r.id) ?? 0), 0);
-  const segments = total > 0 ? [managerTokens, ...roster.map((r) => usage.get(r.id) ?? 0)] : [];
-  // The agents the bar's segments stand for, in order, so each slice can name
-  // itself on hover. A shared child reads off its title, like its row does.
-  const barAgents = [manager, ...roster];
-  const nameOf = (a: Session) =>
-    agentName(a.id !== manager.id && !!manager.workspaceId && a.workspaceId === manager.workspaceId ? a.title : a.name);
-
   const links: { icon: typeof GitBranch; label: string; href?: string }[] = [];
   if (session.branch) links.push({ icon: GitBranch, label: session.branch });
   if (session.pullRequest) links.push({ icon: GitPullRequest, label: session.pullRequest, href: session.pullRequest });
@@ -279,44 +264,22 @@ export function OverviewTab({
           title="Team"
           note={roster.length ? `${roster.length} agent${roster.length > 1 ? "s" : ""}${working ? ` · ${working} working` : ""}` : undefined}
         >
-          {total > 0 && (
-            <div className="mb-2.5">
-              <div className="flex h-1.5 overflow-hidden rounded-full bg-ground">
-                {segments.map((t, i) => (
-                  <div
-                    key={i}
-                    className={SEGMENTS[i % SEGMENTS.length]}
-                    style={{ width: `${(t / total) * 100}%` }}
-                    title={`${nameOf(barAgents[i])} — ${fmtTokens(t)} tokens · ${Math.round((t / total) * 100)}%`}
-                  />
-                ))}
-              </div>
-              <div className="mt-1 flex justify-between font-mono text-micro text-mute">
-                <span>{fmtTokens(total)} tokens total</span>
-                <span>share by agent</span>
-              </div>
-            </div>
-          )}
-          <div className="space-y-1.5">
-            <ManagerRow manager={manager} active={manager.id === session.id} color={SEGMENTS[0]} tokens={managerTokens} total={total} />
-            {/* Under the manager — the whole team. The one you are reading is
-                the active card; the rest are links to open them. */}
-            <div className="ml-2 space-y-1 border-l border-line-soft pl-2">
-              {roster.map((r, i) => (
+          <div>
+            <ManagerRow manager={manager} active={manager.id === session.id} />
+            {/* Under the manager — the whole team, indented under a hairline.
+                The one you are reading is the active card; the rest are links
+                to open them. */}
+            <div className="kids">
+              {roster.map((r) => (
                 <MemberRow
                   key={r.id}
                   member={r}
                   active={r.id === session.id}
-                  // Its slice of the bar — segment 0 is the manager, so a child
-                  // at roster index i is segment i + 1.
-                  color={SEGMENTS[(i + 1) % SEGMENTS.length]}
                   // A child in the manager's own workspace shares its name, so
                   // that name says nothing — use its session title, which the
                   // control plane sets to the child's own name.
                   shared={!!manager.workspaceId && r.workspaceId === manager.workspaceId}
                   checkIn={latestCheckIn.get(r.id)}
-                  tokens={usage.get(r.id) ?? 0}
-                  total={total}
                 />
               ))}
             </div>

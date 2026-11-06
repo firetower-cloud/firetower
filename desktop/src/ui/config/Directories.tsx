@@ -16,7 +16,7 @@
  */
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, ChevronRight, FolderOpen, Plus, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, FolderOpen, Plus, X } from "lucide-react";
 import { Icon } from "~/components/ui";
 import {
   createDirectory,
@@ -33,7 +33,8 @@ import type { Directory, Level } from "~/api/generated/model";
 import { useDirectories, why } from "~/data";
 import { pathSlug } from "~/filing";
 import { Face, PickPeople } from "~/ui/PickPeople";
-import { Rows, Section } from "~/ui/config/bits";
+import { Pop } from "~/ui/Pop";
+import { Group, Rows, Section, WhereTo } from "~/ui/config/bits";
 import { useConfirm } from "~/ui/Confirm";
 
 /** What a level is called on screen. `writer` is the wire's word for Editor. */
@@ -83,15 +84,15 @@ export function Directories() {
             setAdding((v) => !v);
             setTrouble(null);
           }}
-          className="control border border-line bg-raise text-ui text-bone hover:bg-overlay"
+          className="btn primary"
         >
-          <Icon of={Plus} size={12} />
+          <Icon of={Plus} size={14} />
           New directory
         </button>
       }
     >
       {adding && (
-        <div className="px-3.5 py-2.5">
+        <div className="inline-form flex-col items-stretch gap-2">
           <div className="flex items-center gap-2">
             <input
               autoFocus
@@ -107,18 +108,19 @@ export function Directories() {
             <button
               disabled={!name.trim() || busy}
               onClick={() => void make()}
-              className="control ml-auto border border-line bg-raise text-bone hover:bg-overlay disabled:text-mute"
+              className="btn plain ml-auto"
             >
               {busy ? "Making…" : "Make it"}
             </button>
           </div>
-          <p className="mt-1.5 text-micro text-mute">
+          <p className="text-meta text-mute">
             You administer it, so you decide who else gets in.
             {trouble && <span className="text-brick"> {trouble}</span>}
           </p>
         </div>
       )}
 
+      <Group>
       <Rows feed={{ data, loading, error }} empty="No directories yet.">
         {data.map((d) => (
           <One
@@ -130,6 +132,13 @@ export function Directories() {
           />
         ))}
       </Rows>
+      </Group>
+
+      <WhereTo>
+        <b>A grant is not an exception.</b> Letting one person into one workspace is the sharing
+        sheet&rsquo;s job, and the two are kept apart on purpose — they were one flat list once and
+        read as equivalents, which they are not. An exception can never be <i>Admin</i>.
+      </WhereTo>
     </Section>
   );
 }
@@ -170,38 +179,26 @@ function One({
 
   return (
     <>
-      <div className="flex items-center gap-2.5 pr-3.5 pl-3.5 hover:bg-raise">
-        <button
-          onClick={() => setOpen((v) => !v)}
-          aria-label={`Who is in ${directory.name}`}
-          className="flex min-w-0 flex-1 items-center gap-2.5 py-2.5 text-left"
-        >
-          <span className="grid h-[21px] w-[21px] shrink-0 place-items-center rounded-full border border-line bg-overlay text-dim">
-            <Icon of={FolderOpen} size={12} />
-          </span>
-          <span className="min-w-0 flex-1">
-            {renaming === null ? (
-              <span className="block truncate text-ui text-bone">
-                {directory.name}{" "}
-                <span className="font-mono text-micro text-mute">d/{directory.slug}</span>
-              </span>
-            ) : (
-              <span className="block text-ui text-bone">{directory.name}</span>
-            )}
-            {trouble && <span className="block text-micro text-brick">{trouble}</span>}
-          </span>
-          <span className="shrink-0 text-micro text-mute">
-            {holds === 0 ? "empty" : `${holds} ${holds === 1 ? "thing" : "things"}`}
-          </span>
-          {directory.level && (
-            <span className="shrink-0 text-meta text-dim">{said(directory.level)}</span>
-          )}
-          <Icon of={open ? ChevronDown : ChevronRight} size={12} />
-        </button>
-      </div>
+      <button onClick={() => setOpen((v) => !v)} aria-label={`Who is in ${directory.name}`} className="r">
+        <span className="g">
+          <Icon of={open ? ChevronDown : ChevronRight} size={14} />
+        </span>
+        <span className="g -ml-2">
+          <Icon of={FolderOpen} size={16} />
+        </span>
+        <span className="tx">
+          <b>{directory.name}</b>
+          {trouble && <s className="!text-brick">{trouble}</s>}
+        </span>
+        <span className="path">d/{directory.slug}</span>
+        <span className="said">
+          {holds === 0 ? "empty" : `${holds} ${holds === 1 ? "thing" : "things"}`}
+        </span>
+        {directory.level && <span className="said">{said(directory.level)}</span>}
+      </button>
 
       {renaming !== null && (
-        <div className="flex items-center gap-2 py-1.5 pr-3.5 pl-9">
+        <div className="inline-form ml-12">
           <input
             autoFocus
             value={renaming}
@@ -213,7 +210,7 @@ function One({
                 setRenaming(null);
               }
             }}
-            className="w-56 rounded-md border border-line bg-ground px-2 py-1 text-ui text-bone focus:outline-none"
+            className="min-w-0 flex-1 bg-transparent focus:outline-none"
           />
           {/* The slug does not follow the name. Renaming rewrites nothing, so a
               path stays what it was and everything filed under it stays found. */}
@@ -229,35 +226,31 @@ function One({
       {open && (
         <>
           {grants.map((g) => (
-            <div key={g.subjectId} className="flex items-center gap-2.5 py-1.5 pr-3.5 pl-9">
+            <div key={g.subjectId} className="r sub">
               <Face
                 who={{ name: g.subjectName, kind: g.subjectKind === "team" ? "team" : "person" }}
               />
-              <span className="min-w-0 flex-1 truncate text-ui text-text">{g.subjectName}</span>
+              <span className="tx">
+                <b>{g.subjectName}</b>
+                <s>{g.subjectKind === "team" ? `t/${g.subjectName}` : `u/${g.subjectName}`}</s>
+              </span>
               {mayEdit ? (
                 <>
-                  <div className="track shrink-0">
-                    {LEVELS.map((l) => (
-                      <button
-                        key={l.value}
-                        data-on={g.level === l.value}
-                        onClick={() =>
-                          act(
-                            set.mutateAsync({
-                              id: directory.id,
-                              data: {
-                                subjectKind: g.subjectKind,
-                                subjectId: g.subjectId,
-                                level: l.value,
-                              },
-                            }),
-                          )
-                        }
-                      >
-                        {l.label}
-                      </button>
-                    ))}
-                  </div>
+                  {/* A menu, not three buttons. Three pills per row is the
+                      whole choice drawn permanently on every row of a list
+                      that is mostly read — the drawing names the level and
+                      opens the rest on demand. */}
+                  <LevelMenu
+                    level={g.level}
+                    onPick={(level) =>
+                      act(
+                        set.mutateAsync({
+                          id: directory.id,
+                          data: { subjectKind: g.subjectKind, subjectId: g.subjectId, level },
+                        }),
+                      )
+                    }
+                  />
                   <button
                     onClick={() =>
                       act(
@@ -269,19 +262,19 @@ function One({
                       )
                     }
                     aria-label={`Take ${g.subjectName} out of ${directory.name}`}
-                    className="shrink-0 text-mute hover:text-brick"
+                    className="gbtn hov h-7 w-7 hover:text-brick"
                   >
-                    <Icon of={X} size={12} />
+                    <Icon of={X} size={14} />
                   </button>
                 </>
               ) : (
-                <span className="shrink-0 text-meta text-dim">{said(g.level)}</span>
+                <span className="lvl">{said(g.level)}</span>
               )}
             </div>
           ))}
 
           {grants.length === 0 && (
-            <p className="py-1.5 pr-3.5 pl-9 text-micro text-mute">Nobody has been let in yet.</p>
+            <p className="py-1.5 pl-12 text-ui text-mute">Nobody has been let in yet.</p>
           )}
 
           {mayEdit &&
@@ -305,15 +298,15 @@ function One({
                 }}
               />
             ) : (
-              <div className="flex flex-wrap items-center gap-2 py-1.5 pr-3.5 pl-9">
+              <div className="flex flex-wrap items-center gap-2 py-1.5 pl-12">
                 <button
                   onClick={() => setAdding(true)}
-                  className="flex items-center gap-2.5 text-ui text-mute hover:text-dim"
+                  className="flex items-center gap-2.5 text-ui text-dim hover:text-bone"
                 >
-                  <span className="grid h-[21px] w-[21px] shrink-0 place-items-center rounded-full border border-line bg-overlay">
-                    <Icon of={Plus} size={12} />
+                  <span className="g">
+                    <Icon of={Plus} size={14} />
                   </span>
-                  Add people or teams…
+                  Add people or a team
                 </button>
                 <button
                   onClick={() => setRenaming(directory.name)}
@@ -349,6 +342,52 @@ function One({
               </div>
             ))}
         </>
+      )}
+    </>
+  );
+}
+
+/**
+ * Viewer / Editor / Admin, as a menu on the row that holds it.
+ *
+ * `writer` stays on the wire and `Editor` is what it is called here: the word
+ * people use for somebody who may change a thing without administering it.
+ */
+function LevelMenu({ level, onPick }: { level: Level; onPick: (level: Level) => void }) {
+  const [open, setOpen] = useState<HTMLElement | null>(null);
+  return (
+    <>
+      <button
+        type="button"
+        aria-haspopup="menu"
+        onClick={(e) => setOpen(open ? null : e.currentTarget)}
+        className="lvl"
+      >
+        {said(level)}
+        <Icon of={ChevronDown} size={12} />
+      </button>
+      {open && (
+        <Pop anchor={open} onClose={() => setOpen(null)} width={180}>
+          <div role="menu" className="py-1">
+            {LEVELS.map((l) => (
+              <button
+                key={l.value}
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setOpen(null);
+                  onPick(l.value);
+                }}
+                className="mi"
+              >
+                <span className="ic">{l.value === level ? <Icon of={Check} size={14} /> : null}</span>
+                <span className="tx">
+                  <b>{l.label}</b>
+                </span>
+              </button>
+            ))}
+          </div>
+        </Pop>
       )}
     </>
   );

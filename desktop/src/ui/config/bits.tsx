@@ -1,20 +1,51 @@
-/** The three states a list off a server can be in, drawn the same way everywhere. */
-import { ExternalLink, Loader2 } from "lucide-react";
+/**
+ * The shape eleven configuration screens are, written once.
+ *
+ * Each of them had re-implemented it: a title, one sentence, one action, then
+ * rows — and each had reached a slightly different answer, so People's heading
+ * was a different size from Machines' and Directories' primary action was an
+ * outline where Skills' was a pill. `components.html` measures this shape as
+ * the single biggest duplication in the client, and the classes below are the
+ * artifact's own, so the drawing and the build can be read side by side.
+ *
+ * **Rows live on the sheet, not in a card.** A border around a list is a
+ * second frame inside the sheet's own, and what makes a list read as a list is
+ * the repeat — every border added is one more thing competing with it.
+ */
+import { ExternalLink, Info, Loader2 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import { Icon } from "~/components/ui";
 
-export function Rows<T>({ feed, empty, children }: { feed: { data: T[]; loading: boolean; error: string | null }; empty: string; children: React.ReactNode }) {
+/** The three states a list off a server can be in, drawn the same way everywhere. */
+export function Rows<T>({
+  feed,
+  empty,
+  children,
+}: {
+  feed: { data: T[]; loading: boolean; error: string | null };
+  empty: string;
+  children: React.ReactNode;
+}) {
   if (feed.loading) {
     return (
-      <div className="flex items-center gap-2 px-3.5 py-4 text-ui text-mute">
+      <p className="flex items-center gap-2 py-4 text-ui text-mute">
         <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={2} />
         Reading it off the server…
-      </div>
+      </p>
     );
   }
-  if (feed.error) return <p className="px-3.5 py-4 text-ui text-brick">{feed.error}</p>;
-  if (feed.data.length === 0) return <p className="px-3.5 py-4 text-ui text-mute">{empty}</p>;
+  if (feed.error) return <p className="py-4 text-ui text-brick">{feed.error}</p>;
+  if (feed.data.length === 0) return <p className="py-4 text-ui text-mute">{empty}</p>;
   return <>{children}</>;
 }
 
+/**
+ * The page: a title, one sentence, one action, then content.
+ *
+ * `action` is the screen's **one** primary action and belongs top right.
+ * `controls` are what operates on the list — a filter, a find — and sit under
+ * the title, where they plainly govern what is directly beneath them.
+ */
 export function Section({
   title,
   note,
@@ -24,32 +55,153 @@ export function Section({
 }: {
   title: string;
   note?: string;
-  /** Top right, beside the heading. For one button, not for a toolbar. */
   action?: React.ReactNode;
-  /**
-   * A row under the heading and above the card, aligned left.
-   *
-   * Where controls that *operate on the list* belong — a filter, a search, the
-   * picker that chooses what the list is showing. Pushed to the right by
-   * `action` they read as page furniture and sit as far from the rows they
-   * govern as the layout allows; under the title they read as the controls
-   * for what is directly beneath them, which is what they are.
-   */
   controls?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
-    <section className="mt-7 first:mt-0">
-      <div className="flex items-center gap-3">
-        <div className="min-w-0">
-          <h2 className="text-title text-bone">{title}</h2>
-          {note && <p className="mt-0.5 text-meta text-mute">{note}</p>}
+    <div className="pg">
+      <div className="pg-head">
+        <div>
+          <h1>{title}</h1>
+          {note && <p className="sub">{note}</p>}
         </div>
-        {action && <div className="ml-auto shrink-0">{action}</div>}
+        {action && <div className="acts">{action}</div>}
       </div>
-      {controls && <div className="mt-2.5 flex items-center gap-1.5">{controls}</div>}
-      <div className="mt-2.5 divide-y divide-line-soft overflow-hidden rounded-xl border border-line bg-panel">{children}</div>
+      {controls && <div className="filterline">{controls}</div>}
+      {children}
+    </div>
+  );
+}
+
+/**
+ * A run of rows under a heading, with its count and its note.
+ *
+ * The count is beside the heading rather than in a badge: it is part of the
+ * sentence the heading makes, not a state to be flagged.
+ */
+export function Group({
+  title,
+  count,
+  note,
+  children,
+}: {
+  title?: string;
+  count?: number;
+  note?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="lsec">
+      {title && (
+        <h2>
+          {title}
+          {count !== undefined && <span className="n">{count}</span>}
+        </h2>
+      )}
+      {note && <p className="note">{note}</p>}
+      <div className="lrows">{children}</div>
     </section>
+  );
+}
+
+/**
+ * One row, the same shape on every pane.
+ *
+ * `glyph` · name and sub-line · whatever the row says about itself · the
+ * actions, which arrive on hover **and on focus**, or the keyboard is told
+ * less than the mouse.
+ */
+export function Row({
+  glyph,
+  name,
+  sub,
+  onClick,
+  children,
+  className = "",
+}: {
+  glyph?: React.ReactNode;
+  name: React.ReactNode;
+  sub?: React.ReactNode;
+  onClick?: () => void;
+  /** What the row says about itself, and its actions. */
+  children?: React.ReactNode;
+  className?: string;
+}) {
+  const inside = (
+    <>
+      {glyph && <span className="g">{glyph}</span>}
+      <span className="tx">
+        <b>{name}</b>
+        {sub && <s>{sub}</s>}
+      </span>
+      {children}
+    </>
+  );
+  if (!onClick) return <div className={`r ${className}`}>{inside}</div>;
+  return (
+    <button type="button" onClick={onClick} className={`r ${className}`}>
+      {inside}
+    </button>
+  );
+}
+
+/** Nothing here yet, or nothing matched: a glyph, one line, one way forward. */
+export function Blank({
+  icon,
+  title,
+  children,
+  action,
+}: {
+  icon: LucideIcon;
+  title: string;
+  children?: React.ReactNode;
+  action?: React.ReactNode;
+}) {
+  return (
+    <div className="blank">
+      <div className="in">
+        <span className="glyph">
+          <Icon of={icon} size={20} />
+        </span>
+        <h2>{title}</h2>
+        {children && <p>{children}</p>}
+        {action && <div className="acts">{action}</div>}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * A line saying what this screen does not do, and where it is done instead.
+ *
+ * People, Teams, Account and Repositories each end with one. It is how the
+ * read-only surfaces stay generous instead of looking withheld — a reader who
+ * came to invite somebody is told where to go, rather than shown a control
+ * that is greyed out.
+ */
+export function WhereTo({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="whereto">
+      <span className="g">
+        <Icon of={Info} size={16} />
+      </span>
+      <p>{children}</p>
+    </div>
+  );
+}
+
+/** The facts pane: what is read rather than changed. */
+export function Facts({ of }: { of: [string, React.ReactNode, boolean?][] }) {
+  return (
+    <dl className="fsheet">
+      {of.map(([term, value, mono]) => (
+        <div key={term} className="row">
+          <dt>{term}</dt>
+          <dd className={mono ? "mono" : undefined}>{value}</dd>
+        </div>
+      ))}
+    </dl>
   );
 }
 
@@ -121,7 +273,7 @@ export function ManageOnTheWeb({ url, may }: { url: string; may: boolean }) {
       href={origin}
       target="_blank"
       rel="noreferrer"
-      className="control border border-line bg-raise text-ui text-dim hover:bg-overlay hover:text-bone"
+      className="out"
     >
       Manage on the web
       <ExternalLink className="h-3 w-3" strokeWidth={1.75} />

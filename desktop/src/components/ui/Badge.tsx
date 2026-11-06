@@ -1,17 +1,24 @@
 /**
- * A state, said in one word.
+ * A count, a label, a level.
  *
- * Tint behind, matching border, colour on top — never a flat block of colour,
- * which at this size reads as a warning whatever it says.
+ * **Neutral by default, because almost all of them are facts rather than
+ * states.** "administrator", "can delegate", "built in" and a label off a
+ * tracker are all describing the row, not warning about it, and a tinted
+ * block at this size reads as a warning whatever it says. The artifact draws
+ * every one of them as the same quiet pill (`.ttag`).
+ *
+ * `tone` is still here for the few that do mean something — a refusal, a
+ * limit — and it colours **the word**, never the ground behind it.
  */
-type Tone = "sage" | "brick" | "slate" | "ember" | "neutral";
+type Tone = "sage" | "brick" | "slate" | "ember" | "amber" | "neutral";
 
 const TONE: Record<Tone, string> = {
-  sage: "bg-sage-tint border-sage-deep text-sage",
-  brick: "bg-brick-tint border-brick-deep text-brick",
-  slate: "bg-slate-tint border-slate-deep text-slate",
-  ember: "bg-ember-tint border-ember-deep text-ember",
-  neutral: "bg-raise border-line text-dim",
+  sage: "text-sage",
+  brick: "text-brick",
+  slate: "text-slate",
+  ember: "text-ember-ink",
+  amber: "text-amber",
+  neutral: "",
 };
 
 export function Badge({
@@ -30,9 +37,7 @@ export function Badge({
   return (
     <span
       style={style}
-      className={`inline-flex shrink-0 items-center rounded-sm border px-1.5 py-0.5 text-micro font-medium ${
-        mono ? "font-mono" : ""
-      } ${TONE[tone]} ${className}`}
+      className={`ttag ${mono ? "font-mono" : ""} ${TONE[tone]} ${className}`}
     >
       {children}
     </span>

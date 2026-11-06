@@ -1,30 +1,34 @@
 /**
- * Who it belongs to, in the space of a bullet point.
+ * A person or an agent, as a disc.
  *
- * The tint is derived from the name rather than stored, so the same person is
- * the same colour on every screen without anything having to remember it.
+ * **Derived from the name, never stored**, so the same person is the same
+ * mark on every screen without anything having to remember it — and
+ * **neutral**, because the design's one accent is ember and ember means an
+ * agent is waiting on you. Five tinted discs on one list made six colours on
+ * a screen that is allowed one.
+ *
+ * **Initials, not the first two letters.** `fleet.ts`'s `markOf` takes two
+ * letters from a one-word organisation on purpose — two Firetowers whose names
+ * share a first letter must stay apart, and there are only so many of them. A
+ * person is not that: the list says the name in full on the same row, so one
+ * letter is enough and `Ke` beside `kevin` is just noise.
  */
-const TINTS = [
-  "bg-sage-tint text-sage",
-  "bg-slate-tint text-slate",
-  "bg-ember-tint text-ember-ink",
-  "bg-brick-tint text-brick",
-  "bg-overlay text-dim",
-];
 
-export function Avatar({ name, size = 22 }: { name: string; size?: number }) {
-  let hash = 0;
-  for (const ch of name) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+/** `ada lovelace` → `AL`; `kevin` → `K`. */
+export function monogram(name: string): string {
+  const words = name.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  if (words.length === 0) return "?";
+  return (words.length > 1 ? words[0][0] + words[1][0] : words[0][0]).toUpperCase();
+}
 
+export function Avatar({ name, size = 24 }: { name: string; size?: number }) {
   return (
     <span
       title={name}
-      style={{ width: size, height: size }}
-      className={`inline-flex shrink-0 items-center justify-center rounded-full text-micro font-semibold uppercase ${
-        TINTS[hash % TINTS.length]
-      }`}
+      style={{ width: size, height: size, fontSize: Math.max(9, Math.round(size * 0.44)) }}
+      className="face"
     >
-      {name.slice(0, 1)}
+      {monogram(name)}
     </span>
   );
 }

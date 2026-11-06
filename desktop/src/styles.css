@@ -1625,3 +1625,1031 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
     transform: translateY(-3px);
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   THE SHARED SHAPES — the components eleven screens are made of
+   ═══════════════════════════════════════════════════════════════════
+
+   Restyling a screen does nothing if the components it is composed from are
+   untouched: Skills was rebuilt to its drawing and still drew a grey outline
+   where the page's one action should have been a black pill, because that
+   button belongs to `CreateMenu`, not to Skills. These are the shapes
+   `components.html` measured as the ones the design leans on — Button at 50
+   screens of 50, ListRow at 44, Badge, Field, Pop and Segmented at 42 — and
+   they are written once, here, so a fix lands everywhere at once.
+
+   Names are the artifact's own, so the two can be read side by side.
+   ═══════════════════════════════════════════════════════════════════ */
+@layer components {
+  /* ── A page: a title, one sentence, one action, then rows ─────────
+     Eleven configuration screens are this shape and each re-implemented it. */
+  .pg {
+    width: 100%;
+    max-width: 1000px;
+    margin: 0 auto;
+    padding: 52px 44px 64px;
+  }
+  .pg-head {
+    display: flex;
+    align-items: flex-start;
+    gap: 20px;
+    flex-wrap: wrap;
+  }
+  .pg-head > div:first-child {
+    flex: 1 1 400px;
+    min-width: 0;
+  }
+  .pg-head h1 {
+    font-size: 2rem; /* 32px */
+    line-height: 1.14;
+    letter-spacing: -0.026em;
+    font-weight: var(--font-weight-mid);
+    color: var(--color-bone);
+  }
+  .pg-head .sub {
+    margin-top: 8px;
+    max-width: 52ch;
+    font-size: 0.96875rem; /* 15.5px */
+    line-height: 1.55;
+    color: var(--color-dim);
+  }
+  .pg-head .acts {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: none;
+    padding-top: 5px;
+  }
+
+  /* A section of rows: a heading, its count, and a note under it. */
+  .lsec {
+    margin-top: 34px;
+  }
+  .lsec:first-of-type {
+    margin-top: 30px;
+  }
+  .lsec > h2 {
+    display: flex;
+    align-items: baseline;
+    gap: 9px;
+    font-size: 1.0625rem; /* 17px */
+    line-height: 1.3;
+    letter-spacing: -0.012em;
+    font-weight: 540;
+    color: var(--color-bone);
+  }
+  .lsec > h2 .n {
+    font-size: 0.8125rem;
+    font-weight: 400;
+    font-variant-numeric: tabular-nums;
+    color: var(--color-mute);
+  }
+  .lsec > .note {
+    margin-top: 3px;
+    max-width: 72ch;
+    font-size: 0.84375rem; /* 13.5px */
+    line-height: 1.55;
+    color: var(--color-dim);
+  }
+  .lrows {
+    margin-top: 10px;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ── One row shape for every pane ─────────────────────────────────
+     On the page, not in a card: the rows are the content, and a border
+     around them is a second frame inside the sheet's own. */
+  .r {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    width: calc(100% + 28px);
+    margin: 0 -14px;
+    padding: 11px 14px;
+    min-height: 54px;
+    border-radius: 12px;
+    text-align: left;
+    transition: background var(--dur-native) var(--ease-swift);
+  }
+  .r:hover {
+    background: var(--color-raise);
+  }
+  .r:hover .hov {
+    opacity: 1;
+  }
+  .r .hov {
+    opacity: 0;
+    transition: opacity var(--dur-native) var(--ease-swift);
+  }
+  .r .g {
+    display: grid;
+    place-items: center;
+    flex: none;
+    color: var(--color-dim);
+  }
+  .r .tx {
+    min-width: 0;
+    flex: 1;
+  }
+  .r .tx b {
+    display: block;
+    font-size: 0.90625rem; /* 14.5px */
+    font-weight: 480;
+    letter-spacing: -0.005em;
+    color: var(--color-bone);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .r .tx s {
+    display: block;
+    margin-top: 2px;
+    text-decoration: none;
+    font-size: 0.8125rem;
+    line-height: 1.45;
+    color: var(--color-dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .r .path {
+    flex: none;
+    font-family: var(--font-mono);
+    font-size: 0.78125rem; /* 12.5px */
+    letter-spacing: -0.01em;
+    color: var(--color-dim);
+  }
+  .r .said {
+    flex: none;
+    font-size: 0.8125rem;
+    color: var(--color-dim);
+  }
+  .r .chip3 {
+    flex: none;
+    padding: 3px 9px;
+    border-radius: 99px;
+    background: var(--color-raise);
+    font-size: 0.75rem;
+    color: var(--color-dim);
+  }
+  .r:hover .chip3 {
+    background: var(--color-overlay);
+  }
+  /* A child of the row above it: indented, lighter, shorter. */
+  .r.sub {
+    padding-left: 48px;
+    min-height: 40px;
+  }
+  .r.sub .tx b {
+    font-size: 0.84375rem;
+    font-weight: 420;
+    color: var(--color-text);
+  }
+
+  /* A face, for a person. Derived from the name, never stored. */
+  .face {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 24px;
+    height: 24px;
+    border-radius: 99px;
+    background: var(--color-raise);
+    color: var(--color-dim);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+  .r:hover .face {
+    background: var(--color-overlay);
+  }
+
+  /* State, as a dot. Three meanings, and never ember — none of this is an
+     agent waiting on you. */
+  .st {
+    width: 7px;
+    height: 7px;
+    border-radius: 99px;
+    flex: none;
+  }
+  .st[data-s="ok"] {
+    background: var(--color-sage);
+  }
+  .st[data-s="warn"] {
+    background: var(--color-amber-soft);
+  }
+  .st[data-s="off"] {
+    background: var(--color-mute);
+  }
+  .st[data-s="bad"] {
+    background: var(--color-brick);
+  }
+
+  /* A level, as a menu. Viewer / Editor / Admin — the words people use, with
+     `writer` left on the wire. */
+  .lvl {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex: none;
+    height: 28px;
+    padding: 0 10px;
+    border-radius: 99px;
+    background: var(--color-raise);
+    font-size: 0.8125rem;
+    color: var(--color-text);
+  }
+  .r:hover .lvl {
+    background: var(--color-overlay);
+  }
+  .lvl:hover {
+    color: var(--color-bone);
+  }
+
+  /* A tag that is a fact rather than a state: "can delegate", "built in". */
+  .ttag {
+    display: inline-flex;
+    align-items: center;
+    flex: none;
+    height: 21px;
+    padding: 0 8px;
+    border-radius: 99px;
+    background: var(--color-raise);
+    font-size: 0.71875rem;
+    color: var(--color-dim);
+  }
+  .r:hover .ttag {
+    background: var(--color-overlay);
+  }
+
+  /* A secret. The value is never shown at rest. */
+  .masked {
+    flex: none;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    letter-spacing: 0.14em;
+    color: var(--color-mute);
+  }
+  .shown {
+    flex: none;
+    max-width: 230px;
+    padding: 4px 10px;
+    border-radius: 8px;
+    background: var(--color-raise);
+    font-family: var(--font-mono);
+    font-size: 0.78125rem;
+    color: var(--color-bone);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .logged {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+    font-size: 0.78125rem;
+    color: var(--color-dim);
+  }
+
+  /* The facts pane: a deployment, an account, a machine — the things that are
+     read rather than changed. */
+  .fsheet {
+    margin-top: 26px;
+    padding: 4px 18px;
+    border-radius: 16px;
+    background: var(--color-raise);
+  }
+  .fsheet .row {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    padding: 13px 0;
+    border-bottom: 1px solid var(--color-line);
+  }
+  .fsheet .row:last-child {
+    border-bottom: 0;
+  }
+  .fsheet dt {
+    flex: none;
+    width: 180px;
+    font-size: 0.84375rem;
+    color: var(--color-dim);
+  }
+  .fsheet dd {
+    flex: 1;
+    min-width: 0;
+    font-size: 0.875rem;
+    color: var(--color-bone);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .fsheet dd.mono {
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    letter-spacing: -0.01em;
+  }
+
+  /* Two lists on one screen, as Repositories wants. */
+  .filterline {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-top: 26px;
+    flex-wrap: wrap;
+  }
+  .filterline .right {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  /* An inline form, for the one or two places that make something. */
+  .inline-form {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    margin-top: 12px;
+    padding: 11px 14px;
+    border-radius: 12px;
+    background: var(--color-raise);
+  }
+  .inline-form input {
+    flex: 1;
+    min-width: 0;
+    font-size: 0.90625rem;
+    color: var(--color-bone);
+  }
+
+  /* ── A quiet cross-link at the foot of a reader's screen ──────────
+     So it never reads as withholding: it says where the thing you came for
+     actually lives. People, Teams, Account and Repositories each end with one. */
+  .whereto {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 30px;
+    padding: 14px 18px;
+    border-radius: 14px;
+    background: var(--color-raise);
+  }
+  .whereto .g {
+    display: grid;
+    place-items: center;
+    flex: none;
+    color: var(--color-dim);
+  }
+  .whereto p {
+    flex: 1;
+    min-width: 0;
+    font-size: 0.84375rem;
+    line-height: 1.55;
+    color: var(--color-text);
+  }
+  .whereto p b {
+    font-weight: 520;
+    color: var(--color-bone);
+  }
+
+  /* Rows from a server that is not answering. Readable, obviously stale. */
+  .stale2 {
+    opacity: 0.45;
+    filter: saturate(0.4);
+    pointer-events: none;
+  }
+
+  /* ── What a list says when it has nothing to say ──────────────────
+     A fresh install hits empty, loading, error, denied and server-dark at
+     once, so none of them is an edge case. */
+  .blank {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    place-items: center;
+    padding: 56px 34px;
+  }
+  .blank .in {
+    max-width: 430px;
+    text-align: center;
+  }
+  .blank .glyph {
+    display: grid;
+    place-items: center;
+    width: 52px;
+    height: 52px;
+    margin: 0 auto 22px;
+    border-radius: 16px;
+    background: var(--color-raise);
+    color: var(--color-mute);
+  }
+  .blank h2 {
+    font-size: 1.3125rem; /* 21px — a blank inside a page, not a page */
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+    font-weight: var(--font-weight-mid);
+    color: var(--color-bone);
+  }
+  .blank p {
+    margin-top: 9px;
+    font-size: 0.90625rem;
+    line-height: 1.6;
+    color: var(--color-dim);
+  }
+  .blank .acts {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 18px;
+  }
+
+  /* ── The two button shapes the design has, beside .btn ────────────── */
+  /* Destructive, and only ever one on a screen. */
+  .btn.harm {
+    background: var(--color-brick);
+    color: #fff;
+    font-weight: 480;
+  }
+  .btn.harm:hover {
+    filter: brightness(1.08);
+  }
+  /* The full-width commit at the foot of a panel. */
+  .btn.ship {
+    width: 100%;
+    justify-content: center;
+    height: 36px;
+    margin-top: 15px;
+    background: var(--color-bone);
+    color: var(--color-panel);
+    font-weight: 480;
+  }
+  .btn.ship:hover {
+    opacity: 0.88;
+  }
+  .btn.ship:disabled {
+    background: var(--color-overlay);
+    color: var(--color-mute);
+    opacity: 1;
+    cursor: default;
+  }
+  /* A way out of the app, for what this screen does not do. */
+  .out {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    flex: none;
+    height: 36px;
+    padding: 0 14px;
+    border-radius: 99px;
+    background: var(--color-raise);
+    color: var(--color-text);
+    font-size: 0.84375rem;
+    transition: background var(--dur-native) var(--ease-swift);
+  }
+  .out:hover {
+    background: var(--color-overlay);
+    color: var(--color-bone);
+  }
+
+  /* ── The team rail, in the workspace's Overview ──────────────────
+     The manager as a card, sub-workspaces indented under a hairline, and each
+     row saying who, what it is doing in a few words, its state and how long.
+
+     **Three marks and no words**: an ember dot for *asked you a question*,
+     typing dots for *working*, a tick for *handed back*. There was a
+     four-colour stacked bar and a per-agent percentage here; it is out. The
+     numbers behind it are real — `POST /api/v1/sessions/token-usage` answers
+     them — but four hues in one panel is four more than a screen is allowed,
+     and the rail got noticeably louder for a figure nobody came for. */
+  .tm {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    width: 100%;
+    min-height: 40px;
+    padding: 5px 9px;
+    border-radius: 10px;
+    text-align: left;
+    transition: background var(--dur-native) var(--ease-swift);
+  }
+  .tm:hover {
+    background: var(--color-raise);
+  }
+  .tm[data-here="true"] {
+    background: var(--color-raise);
+  }
+  [data-theme="light"] .tm:hover,
+  [data-theme="light"] .tm[data-here="true"] {
+    background: var(--color-panel);
+  }
+  [data-theme="light"] .tm[data-here="true"] {
+    box-shadow: var(--shadow-raise);
+  }
+  .tm .ag {
+    display: grid;
+    place-items: center;
+    flex: none;
+    color: var(--color-dim);
+  }
+  .tm .tx {
+    min-width: 0;
+    flex: 1;
+  }
+  .tm .tx b {
+    display: block;
+    font-size: 0.84375rem;
+    font-weight: 480;
+    letter-spacing: -0.004em;
+    color: var(--color-bone);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .tm .tx s {
+    display: block;
+    text-decoration: none;
+    font-size: 0.78125rem;
+    color: var(--color-dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .tm .rt {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    flex: none;
+  }
+  .tm .age {
+    font-size: 0.75rem;
+    color: var(--color-mute);
+    font-variant-numeric: tabular-nums;
+  }
+  .kids {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    margin-top: 1px;
+    margin-left: 17px;
+    padding-left: 13px;
+    border-left: 1px solid var(--color-line);
+  }
+  .here-badge {
+    flex: none;
+    padding: 1px 7px;
+    border-radius: 99px;
+    background: var(--color-overlay);
+    font-size: 0.71875rem;
+    color: var(--color-dim);
+  }
+
+  /* What the work produced. */
+  .made {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-top: 9px;
+  }
+  .made a,
+  .made button {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 40px;
+    padding: 6px 9px;
+    border-radius: 10px;
+    width: 100%;
+    text-align: left;
+    transition: background var(--dur-native) var(--ease-swift);
+  }
+  .made a:hover,
+  .made button:hover {
+    background: var(--color-raise);
+  }
+  [data-theme="light"] .made a:hover,
+  [data-theme="light"] .made button:hover {
+    background: var(--color-panel);
+  }
+  .made .tx {
+    min-width: 0;
+    flex: 1;
+    font-size: 0.84375rem;
+    color: var(--color-text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .made a:hover .tx,
+  .made button:hover .tx {
+    color: var(--color-bone);
+  }
+  .made .g {
+    display: grid;
+    place-items: center;
+    flex: none;
+    color: var(--color-mute);
+  }
+
+  /* ── A menu, anchored to what opened it ──────────────────────────
+     16px radius, 7px of padding, and rows that are a name over a sub-line —
+     not a list of links. The sheet is what it sits on, not a border. */
+  .pop {
+    padding: 7px;
+    min-width: 244px;
+    border-radius: 16px;
+    background: var(--color-raise);
+    box-shadow: var(--shadow-float), 0 0 0 1px rgb(255 255 255 / 0.06);
+  }
+  [data-theme="light"] .pop {
+    background: var(--color-panel);
+    box-shadow: var(--shadow-float), 0 0 0 1px rgb(21 22 26 / 0.055);
+  }
+  .mi {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    width: 100%;
+    min-height: 34px;
+    padding: 6px 10px;
+    border-radius: 10px;
+    text-align: left;
+    font-size: 0.875rem;
+    color: var(--color-text);
+    transition: background var(--dur-native) var(--ease-swift);
+  }
+  .mi:hover {
+    background: var(--color-overlay);
+  }
+  [data-theme="light"] .mi:hover {
+    background: var(--color-raise);
+  }
+  .mi .ic {
+    display: grid;
+    place-items: center;
+    flex: none;
+    color: var(--color-mute);
+  }
+  .mi .tx {
+    flex: 1;
+    min-width: 0;
+  }
+  .mi .tx b {
+    display: block;
+    font-weight: 460;
+    color: var(--color-bone);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .mi .tx s {
+    display: block;
+    text-decoration: none;
+    font-size: 0.78125rem;
+    color: var(--color-mute);
+  }
+  .mi[data-tone="danger"],
+  .mi[data-tone="danger"] .ic {
+    color: var(--color-brick);
+  }
+  .mline {
+    height: 1px;
+    margin: 6px 10px;
+    background: var(--color-line);
+  }
+  .mhead {
+    padding: 9px 10px 5px;
+  }
+  .mhead b {
+    display: block;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--color-bone);
+  }
+  .mhead s {
+    display: block;
+    text-decoration: none;
+    font-size: 0.78125rem;
+    color: var(--color-mute);
+  }
+
+  /* ── An action with no room for a word ───────────────────────────── */
+  .gbtn {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    color: var(--color-mute);
+    transition:
+      background var(--dur-native) var(--ease-swift),
+      color var(--dur-native) var(--ease-swift);
+  }
+  .gbtn:hover {
+    background: rgb(255 255 255 / 0.06);
+    color: var(--color-text);
+  }
+  .gbtn[disabled] {
+    opacity: 0.4;
+  }
+  [data-theme="light"] .gbtn:hover {
+    background: rgb(21 22 26 / 0.05);
+  }
+
+  /* ── Two or three exclusive choices, inline ──────────────────────── */
+  .seg {
+    display: inline-flex;
+    gap: 2px;
+    padding: 3px;
+    border-radius: 11px;
+    background: var(--color-overlay);
+  }
+  .seg button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 28px;
+    padding: 0 12px;
+    border-radius: 8px;
+    font-size: var(--text-ui);
+    color: var(--color-dim);
+    white-space: nowrap;
+    transition:
+      background var(--dur-native) var(--ease-swift),
+      color var(--dur-native) var(--ease-swift);
+  }
+  .seg button:hover {
+    color: var(--color-text);
+  }
+  .seg button[aria-pressed="true"] {
+    background: var(--color-raise);
+    color: var(--color-bone);
+  }
+  [data-theme="light"] .seg button[aria-pressed="true"] {
+    background: var(--color-panel);
+    box-shadow: var(--shadow-raise);
+  }
+
+  /* ── A labelled input, with its hint and its error ───────────────── */
+  .form {
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+    max-width: 640px;
+    margin-top: 28px;
+  }
+  .fld {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+  }
+  .fld > label {
+    font-size: 0.875rem;
+    font-weight: 500;
+    letter-spacing: -0.005em;
+    color: var(--color-bone);
+  }
+  .fld .hint {
+    max-width: 62ch;
+    font-size: 0.8125rem;
+    line-height: 1.55;
+    color: var(--color-dim);
+  }
+  .fld .box {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 42px;
+    padding: 9px 13px;
+    border-radius: 12px;
+    background: var(--color-raise);
+    transition: box-shadow var(--dur-native) var(--ease-swift);
+  }
+  .fld .box:focus-within {
+    box-shadow: inset 0 0 0 1.5px var(--color-bone);
+  }
+  .fld .box input,
+  .fld .box textarea {
+    flex: 1;
+    min-width: 0;
+    font-size: 0.90625rem;
+    line-height: 1.6;
+    color: var(--color-bone);
+  }
+  .fld .box textarea {
+    min-height: 96px;
+  }
+  .fld .box.mono textarea,
+  .fld .box.mono input {
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    line-height: 1.7;
+  }
+  .fld .box[data-ro="true"] {
+    background: transparent;
+    padding-left: 0;
+    color: var(--color-text);
+  }
+  .fld .bad {
+    font-size: 0.8125rem;
+    color: var(--color-brick);
+  }
+  .formfoot {
+    position: sticky;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    margin-top: 8px;
+    padding: 16px 0 0;
+    background: linear-gradient(to top, var(--color-panel) 70%, transparent);
+  }
+  .formfoot .msg {
+    flex: 1;
+    min-width: 0;
+    font-size: 0.8125rem;
+    color: var(--color-dim);
+  }
+
+  /* Read-only: say what the screen is instead of greying what it is not. */
+  .ro-note {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 22px;
+    padding: 14px 18px;
+    border-radius: 14px;
+    background: var(--color-raise);
+  }
+  .ro-note .g {
+    display: grid;
+    place-items: center;
+    flex: none;
+    color: var(--color-dim);
+  }
+  .ro-note p {
+    flex: 1;
+    min-width: 0;
+    font-size: 0.84375rem;
+    line-height: 1.55;
+    color: var(--color-text);
+  }
+  .ro-note p b {
+    font-weight: 520;
+    color: var(--color-bone);
+  }
+
+  /* ── A centred modal sheet, and the scrim that holds the screen ──── */
+  .veil {
+    position: absolute;
+    inset: 0;
+    z-index: 80;
+    display: grid;
+    place-items: center;
+    padding: 40px;
+    background: var(--color-scrim);
+    animation: veil 160ms ease-out;
+  }
+  .sheet2 {
+    display: flex;
+    flex-direction: column;
+    width: 470px;
+    max-height: 100%;
+    border-radius: 20px;
+    background: var(--color-raise);
+    box-shadow: var(--shadow-float), 0 0 0 1px rgb(255 255 255 / 0.08);
+    overflow: hidden;
+    animation: sheet2 200ms var(--ease-swift);
+  }
+  [data-theme="light"] .sheet2 {
+    background: var(--color-panel);
+    box-shadow: var(--shadow-float), 0 0 0 1px rgb(21 22 26 / 0.07);
+  }
+  .sh-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: none;
+    padding: 16px 16px 10px;
+  }
+  .sh-head h2 {
+    flex: 1;
+    min-width: 0;
+    font-size: 1rem;
+    font-weight: var(--font-weight-mid);
+    letter-spacing: -0.01em;
+    color: var(--color-bone);
+  }
+  .sh-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 0 10px 6px;
+  }
+  .sh-note {
+    padding: 0 16px 10px;
+    font-size: 0.8125rem;
+    line-height: 1.55;
+    color: var(--color-dim);
+  }
+  .sh-lab {
+    padding: 12px 6px 4px;
+    font-size: 0.78125rem;
+    color: var(--color-mute);
+  }
+  .sh-row {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    width: 100%;
+    min-height: 44px;
+    padding: 7px 10px;
+    border-radius: 11px;
+    text-align: left;
+    transition: background var(--dur-native) var(--ease-swift);
+  }
+  .sh-row:hover {
+    background: var(--color-overlay);
+  }
+  [data-theme="light"] .sh-row:hover {
+    background: var(--color-raise);
+  }
+  .sh-row .tx {
+    min-width: 0;
+    flex: 1;
+  }
+  .sh-row .tx b {
+    display: block;
+    font-size: 0.875rem;
+    font-weight: 460;
+    color: var(--color-bone);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .sh-row .tx s {
+    display: block;
+    text-decoration: none;
+    font-size: 0.78125rem;
+    color: var(--color-dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .sh-row.inner {
+    padding-left: 44px;
+    min-height: 36px;
+  }
+  .sh-foot {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    flex: none;
+    padding: 12px 16px 14px;
+    border-top: 1px solid var(--color-line);
+  }
+  .sh-foot .where {
+    flex: 1;
+    min-width: 0;
+    font-size: 0.8125rem;
+    color: var(--color-dim);
+  }
+  .sh-field {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 6px;
+    padding: 11px 13px;
+    border-radius: 12px;
+    background: var(--color-raise);
+  }
+  .sh-field input {
+    flex: 1;
+    min-width: 0;
+    font-size: 0.90625rem;
+    color: var(--color-bone);
+  }
+  @keyframes veil {
+    from {
+      opacity: 0;
+    }
+  }
+  @keyframes sheet2 {
+    from {
+      opacity: 0;
+      transform: translateY(10px) scale(0.985);
+    }
+  }
+}
+
+/* A sheet that arrives without moving, for anybody who asked for that. */
+@media (prefers-reduced-motion: reduce) {
+  .veil,
+  .sheet2 {
+    animation: none;
+  }
+}

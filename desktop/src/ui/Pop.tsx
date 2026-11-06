@@ -187,7 +187,7 @@ export function Pop({
          has been clipped off the bottom of the card is exactly as unreachable
          as one that ran off the window. A menu whose list does scroll never
          reaches this, so its header still does not move. */
-      className={`scroll-slim z-[70] flex flex-col overflow-x-hidden overflow-y-auto rounded-lg border border-line bg-panel shadow-(--shadow-float) ${
+      className={`pop scroll-slim z-[70] flex flex-col overflow-x-hidden overflow-y-auto ${
         width == null ? "w-44" : ""
       } ${spot ? "" : "invisible"}`}
     >
