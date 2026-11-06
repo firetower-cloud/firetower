@@ -1646,13 +1646,39 @@ pub(super) async fn destroy_session(
                 .map(|h| h.name)
                 .unwrap_or_else(|| "its host".to_string());
 
+            // What `force` costs, said accurately. It marks the session
+            // `Ended` here, which is what puts its workspace in front of
+            // `reclaim::sweep` — and the sweep deletes the workspace, the
+            // sessions under it and `agent_lines` with them, within the
+            // minute. For a machine that is only away that is the right trade
+            // and this is the sentence for it. For one that was removed — the
+            // control plane's own container, whose sessions are the record of
+            // what ran there — it is the trade the retirement migration exists
+            // to refuse, so it is not recommended.
+            // Not in the fleet, which for a session that still exists means
+            // retired: an ordinary host removal takes its sessions with it.
+            let gone = !state
+                .db
+                .hosts()
+                .await?
+                .iter()
+                .any(|h| h.id == session.host_id);
+
             return Err(ApiError::new(
                 ErrorCode::HostUnreachable,
-                format!(
-                    "{host} isn't answering, so the workspace can't be torn down. \
-                     Remove it here anyway to stop it filling the inbox — it keeps \
-                     running there until that machine comes back."
-                ),
+                match gone {
+                    true => format!(
+                        "{host} is not in this Firetower any more, so the workspace cannot be \
+                         torn down. Its conversation is the only record of what ran there: \
+                         removing it here would end the session, and what a workspace holds is \
+                         reclaimed once it has ended."
+                    ),
+                    false => format!(
+                        "{host} isn't answering, so the workspace can't be torn down. \
+                         Remove it here anyway to stop it filling the inbox — it keeps \
+                         running there until that machine comes back."
+                    ),
+                },
             ));
         }
 

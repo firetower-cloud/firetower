@@ -938,8 +938,17 @@ impl Access {
     /// `u.<slug>` is what "theirs" means, and asking it is how offboarding
     /// finds out what would go with them. The only difference from a directory
     /// is the first label.
+    ///
+    /// A retired machine is left out. It is filed under whoever was here first
+    /// — the control plane registered its own process at boot and had nobody
+    /// else to file it under — so it would otherwise appear on an offboarding
+    /// confirmation as a machine called `localhost`, with nothing to say that
+    /// agreeing to it destroys every transcript of what ran in that container.
+    /// [`crate::accounts`] spares the same row when it deletes, and these two
+    /// have to agree: a row offered here and spared there is one an
+    /// administrator must confirm destroying and then cannot.
     pub async fn filed_under(&self, under: &str) -> Result<Vec<Filed>> {
-        let rows = sqlx::query(
+        let rows = sqlx::query(&format!(
             "SELECT 'workspace' AS kind, w.id, w.path::text, w.name, w.repo AS detail,
                     u.name AS owner_name
                FROM workspaces w LEFT JOIN principals u ON u.id = w.created_by
@@ -947,7 +956,7 @@ impl Access {
              UNION ALL
              SELECT 'machine', h.id, h.path::text, h.name, NULL, u.name
                FROM hosts h LEFT JOIN principals u ON u.id = h.created_by
-              WHERE h.path <@ $1::ltree
+              WHERE h.path <@ $1::ltree AND {fleet}
              UNION ALL
              SELECT 'agentAccount', a.id, a.path::text, a.name, a.kind, u.name
                FROM agent_accounts a LEFT JOIN principals u ON u.id = a.user_id
@@ -967,7 +976,8 @@ impl Access {
                FROM repos r LEFT JOIN principals u ON u.id = r.added_by
               WHERE r.path <@ $1::ltree
              ORDER BY kind, name",
-        )
+            fleet = crate::db::in_the_fleet("h")
+        ))
         .bind(under)
         .fetch_all(&self.pool)
         .await

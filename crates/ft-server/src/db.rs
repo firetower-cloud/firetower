@@ -37,7 +37,21 @@ const HOST_COLUMNS: &str = "h.*, h.path::text AS path";
 /// that enumerate machines — three pickers, the profile screen, the update
 /// targets, the phone. Any one of those being missed makes it selectable
 /// again.
-const IN_THE_FLEET: &str = "h.compute->>'type' <> 'Local'";
+///
+/// Takes the alias because two queries outside this module need the same
+/// answer and do not spell `hosts` the same way: the sweep that removes the
+/// machines filed under somebody's own root when they are offboarded
+/// ([`crate::accounts`]), and the list that tells an administrator what that
+/// sweep would take ([`crate::access::Access::filed_under`]). Both of those
+/// want the machines that are *in* the fleet, which is this; a retired row is
+/// neither theirs to lose nor anybody's to destroy.
+///
+/// Fails closed. A row whose `compute` has no `type` at all answers `NULL`
+/// rather than true, so it is left out of every list and out of both of those
+/// deletes — which is the safe direction for a row this build cannot read.
+pub(crate) fn in_the_fleet(alias: &str) -> String {
+    format!("{alias}.compute->>'type' <> 'Local'")
+}
 /// The same trick for repositories: `ltree` does not decode as a `String`
 /// without being told to be one.
 const REPO_COLUMNS: &str = "r.*, r.path::text AS path";
@@ -782,7 +796,7 @@ impl Db {
     }
 
     /// Every machine this person may run on, retired ones aside — see
-    /// [`IN_THE_FLEET`].
+    /// [`in_the_fleet`].
     ///
     /// The fleet's own [`Db::hosts`] is unfiltered and has to be: a supervisor
     /// reconnecting to a machine is not acting for anybody. This is the one an
@@ -791,8 +805,9 @@ impl Db {
     pub async fn hosts_for(&self, person: &str, at_least: Level) -> Result<Vec<Host>> {
         Ok(sqlx::query(&format!(
             "SELECT {HOST_COLUMNS} FROM hosts h
-              WHERE {visible} AND {IN_THE_FLEET} ORDER BY h.created_at",
-            visible = filed_where("h", 1, at_least)
+              WHERE {visible} AND {fleet} ORDER BY h.created_at",
+            visible = filed_where("h", 1, at_least),
+            fleet = in_the_fleet("h")
         ))
         .bind(person)
         .fetch_all(&self.pool)
@@ -803,7 +818,7 @@ impl Db {
     }
 
     /// Every host in the fleet, whoever may run on it: skipping the retired
-    /// ([`IN_THE_FLEET`]) and any row this build cannot understand
+    /// ([`in_the_fleet`]) and any row this build cannot understand
     /// ([`skip_unreadable_host`]).
     ///
     /// Unfiltered on purpose. What asks is the fleet: a supervisor keeping a
@@ -812,7 +827,8 @@ impl Db {
     /// check against. [`Db::hosts_for`] is what a request asks.
     pub async fn hosts(&self) -> Result<Vec<Host>> {
         Ok(sqlx::query(&format!(
-            "SELECT {HOST_COLUMNS} FROM hosts h WHERE {IN_THE_FLEET} ORDER BY h.created_at"
+            "SELECT {HOST_COLUMNS} FROM hosts h WHERE {fleet} ORDER BY h.created_at",
+            fleet = in_the_fleet("h")
         ))
         .fetch_all(&self.pool)
         .await?
@@ -823,7 +839,7 @@ impl Db {
 
     /// The machines that were removed, out of the ones this person may see.
     ///
-    /// The other side of [`IN_THE_FLEET`]. A retired row is in no picker and
+    /// The other side of [`in_the_fleet`]. A retired row is in no picker and
     /// takes no work, and the sessions that ran on it are still the record of
     /// what happened there — so there has to be one place that says it existed
     /// and offers the way in. That is a line at the foot of the Compute screen,
@@ -831,8 +847,9 @@ impl Db {
     pub async fn retired_hosts(&self, person: &str, at_least: Level) -> Result<Vec<Host>> {
         Ok(sqlx::query(&format!(
             "SELECT {HOST_COLUMNS} FROM hosts h
-              WHERE {visible} AND NOT {IN_THE_FLEET} ORDER BY h.created_at",
-            visible = filed_where("h", 1, at_least)
+              WHERE {visible} AND NOT ({fleet}) ORDER BY h.created_at",
+            visible = filed_where("h", 1, at_least),
+            fleet = in_the_fleet("h")
         ))
         .bind(person)
         .fetch_all(&self.pool)

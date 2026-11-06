@@ -568,7 +568,11 @@ pub(super) async fn install_worker(
         .ok_or_else(|| {
             ApiError::new(
                 ErrorCode::InvalidRequest,
-                "this machine's worker is the control plane's own, and is upgraded with it",
+                // `ssh_transport_for` answers `None` for a machine that is
+                // not reached over ssh, and the only kind left is the retired
+                // one: the control plane's own container, which runs no
+                // worker to install.
+                "that machine was removed from the fleet, so there is no worker to install on it",
             )
         })?;
 

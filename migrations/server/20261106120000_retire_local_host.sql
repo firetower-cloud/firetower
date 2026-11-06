@@ -14,6 +14,14 @@
 -- stays decodable, and `host_by_id` still answers for it — a session that ran
 -- there opens and renders exactly as it did.
 --
+-- Two code paths would have deleted it afterwards and now refuse to. Both are
+-- about offboarding, and both are documented where they are: the sweep in
+-- `Accounts::delete_user_in` that removes the machines filed under somebody's
+-- own root, and `Access::filed_under`, which is the list an administrator
+-- agrees to before it runs. The row is filed under whoever was first here,
+-- because that is who the control plane had to file it under at boot; it is
+-- not that person's to lose.
+--
 -- What changes is that it is no longer in the fleet: `Db::hosts` and
 -- `Db::hosts_for` both filter `compute->>'type' <> 'Local'`, so no list offers
 -- it, no scheduler reaches it and nothing tries to connect to it. One
