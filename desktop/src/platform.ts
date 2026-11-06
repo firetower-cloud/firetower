@@ -56,7 +56,22 @@ export const key = (k: string) => (isMac ? `${mod}${k}` : `${mod}+${k}`);
 export const localMod = isMac ? "⌃" : "Alt";
 /** A local shortcut as text: `localKey("1")` → "⌃1" or "Alt+1". */
 export const localKey = (k: string) => (isMac ? `${localMod}${k}` : `${localMod}+${k}`);
-/** Whether a key event carries it, and nothing else. */
+/**
+ * Whether a key event carries the global modifier, or the local one.
+ *
+ * **Mutually exclusive, which is the whole point of having both.** The
+ * window's handlers used to test `e.metaKey || e.ctrlKey` — convenient while
+ * nothing on a Mac used Ctrl alone, and wrong the moment the inspector's tabs
+ * moved onto it: ⌃2 reached the rail's handler first and navigated to Tasks
+ * instead of switching a tab. One keystroke, two meanings, and only the app
+ * running said so.
+ *
+ * So each asks for exactly its own modifier and refuses the other. Alt is
+ * excluded from both because on a Mac it composes characters and off one it
+ * *is* the local modifier.
+ */
+export const isGlobalMod = (e: { ctrlKey: boolean; altKey: boolean; metaKey: boolean }) =>
+  isMac ? e.metaKey && !e.ctrlKey && !e.altKey : e.ctrlKey && !e.metaKey && !e.altKey;
 export const isLocalMod = (e: { ctrlKey: boolean; altKey: boolean; metaKey: boolean }) =>
   isMac ? e.ctrlKey && !e.metaKey && !e.altKey : e.altKey && !e.ctrlKey && !e.metaKey;
 

@@ -549,7 +549,7 @@ const server = createServer(async (req, res) => {
     "/api/v1/sessions/s_1": session(),
     "/api/v1/sessions/w_1": session(),
     "/api/v1/sessions/s_1/work": work(),
-    "/api/v1/sessions/s_1/diff": bigDiff(url.searchParams.get("namesOnly") === "true"),
+    "/api/v1/sessions/s_1/diff": BIG ? bigDiff(url.searchParams.get("namesOnly") === "true") : QUOTA_DIFF,
     "/api/v1/sessions/s_1/files": listing(url.searchParams.get("path") ?? ""),
     "/api/v1/sessions/s_1/turn": { sent: true },
     "/api/v1/artifacts": scene === "no-artifacts" ? [] : ARTIFACTS,
@@ -599,6 +599,17 @@ const server = createServer(async (req, res) => {
   };
 
   if (path in routes) return json(res, routes[path]);
+  /* The file itself. `useFileText` reads the body as bytes and decides for
+     itself whether it is text, a picture or too big — so this answers with
+     the text and nothing around it. */
+  if (/^\/api\/v1\/sessions\/[^/]+\/file$/.test(path)) {
+    const wanted = url.searchParams.get("path") ?? "";
+    const body = FILES[wanted];
+    if (body === undefined) return json(res, { message: `No such file: ${wanted}` }, 404);
+    res.writeHead(200, { "content-type": "text/plain; charset=utf-8", "access-control-allow-origin": "*" });
+    return res.end(body);
+  }
+
   if (path.endsWith("/readiness")) return json(res, { ready: true, checks: [] });
   return json(res, [], 200);
 });
@@ -658,6 +669,91 @@ server.on("upgrade", (req, socket) => {
   socket.on("error", () => clearInterval(every));
 });
 
+
+/**
+ * One real file, so the viewer has something to be.
+ *
+ * Every path used to answer `[]` — the fall-through — which meant the code
+ * pane, the gutter, the syntax layer and the note-on-a-selection could not be
+ * driven or photographed at all. This is the file the design's own artifact
+ * uses as its example, with a hunk attributed to this session so the gutter
+ * has lines to mark.
+ */
+const QUOTA_RS = `// The quota band, and where it starts.
+//
+// A plan with no soft limit has no band at all: amber at 80% of a
+// ceiling nobody was told about is a warning you cannot act on.
+
+use std::time::Duration;
+
+#[derive(Debug, Clone)]
+pub struct Band {
+    soft: Option<u64>,
+    hard: u64,
+}
+
+impl Band {
+    // Where amber begins, or None when it never does.
+    pub fn amber_at(&self) -> Option<u64> {
+        let soft = self.soft?;
+        Some(soft * 80 / 100)
+    }
+
+    pub fn ratio(&self, used: u64) -> f64 {
+        used as f64 / self.hard as f64
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn no_soft_limit_has_no_band() {
+        let b = Band { soft: None, hard: 1_000 };
+        assert!(b.amber_at().is_none());
+    }
+}
+`;
+
+/** Text, by path. Anything else is still an empty answer. */
+const FILES = {
+  "src/quota.rs": QUOTA_RS,
+  "package.json": '{\n  "name": "acme-web",\n  "private": true,\n  "version": "0.4.0"\n}\n',
+  "README.md": "# acme/web\n\nThe customer-facing app.\n\n- `src/quota.rs` is the band\n- `app/` is the routes\n",
+};
+
+/**
+ * The hunk this session wrote in `src/quota.rs`.
+ *
+ * Lines 14-19 — `impl Band` and `amber_at` — so the gutter marks them, the
+ * header says `+6`, and the count is clamped to a file of 33 lines rather
+ * than reporting more touched than there are.
+ */
+const QUOTA_DIFF = [
+  {
+    at: "src/quota.rs",
+    path: "src/quota.rs",
+    added: 6,
+    removed: 1,
+    binary: false,
+    patch: [
+      "diff --git a/src/quota.rs b/src/quota.rs",
+      "index 1111111..2222222 100644",
+      "--- a/src/quota.rs",
+      "+++ b/src/quota.rs",
+      "@@ -13,2 +13,7 @@ pub struct Band {",
+      "-impl Band {}",
+      "+impl Band {",
+      "+    // Where amber begins, or None when it never does.",
+      "+    pub fn amber_at(&self) -> Option<u64> {",
+      "+        let soft = self.soft?;",
+      "+        Some(soft * 80 / 100)",
+      "+    }",
+    ].join("\n"),
+  },
+];
+
 /**
  * The workspace tree the generated diff implies, one directory at a time.
  *
@@ -671,7 +767,7 @@ function listing(path) {
       "": [["app", true], ["components", true], ["docs", true], ["src", true], ["package.json", false], ["README.md", false]],
       app: [["checkout", true], ["pricing", true], ["layout.tsx", false], ["page.tsx", false]],
       "app/checkout": [["page.tsx", false], ["form.tsx", false]],
-      src: [["ui", true], ["api", true], ["paths.ts", false]],
+      src: [["ui", true], ["api", true], ["paths.ts", false], ["quota.rs", false]],
       "src/ui": [["Chat.tsx", false], ["Composer.tsx", false]],
       docs: [["artifacts.md", false], ["mentions.md", false]],
     };

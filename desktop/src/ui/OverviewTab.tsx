@@ -16,10 +16,11 @@ import { Check, ExternalLink, FileText, GitBranch, GitPullRequest, LayoutList, L
 import { navigate } from "~/shims/next-navigation";
 import { AgentMark } from "~/components/AgentMark";
 import { Blocks } from "~/island/Blocks";
-import { beatOf } from "~/api/view";
+import { beatOf, elapsed, minutesSince } from "~/api/view";
 import { useConversation } from "~/api/conversation";
 import { relays } from "~/api/relay";
-import { useTokenUsage } from "~/data";
+import { useHosts, useTokenUsage } from "~/data";
+import { whereItRuns } from "~/components/WhereItRuns";
 import type { Agent, Artifact, PlanStep, Session, SessionStatus } from "~/api/generated/model";
 
 /** `94100000` → `94.1M`. The context-meter way of saying a big number. */
@@ -81,9 +82,12 @@ function Panel({
       className="px-3 py-3"
       style={lit ? { background: "linear-gradient(180deg, rgb(63 134 207 / 0.06), transparent 60%)" } : undefined}
     >
+      {/* A section label is a sentence, not a map legend. Tracked-out capitals
+          read as shouting and are harder to scan than the words they replaced;
+          see `STYLE.md`. */}
       <div className="mb-2 flex items-center gap-2">
-        <h4 className={`text-micro font-semibold uppercase tracking-wide ${lit ? "text-slate" : "text-mute"}`}>{title}</h4>
-        {note && <span className="ml-auto font-mono text-micro text-mute">{note}</span>}
+        <h4 className={`text-ui font-mid ${lit ? "text-slate" : "text-dim"}`}>{title}</h4>
+        {note && <span className="ml-auto text-meta tabular-nums text-mute">{note}</span>}
       </div>
       {children}
     </section>
@@ -232,10 +236,40 @@ export function OverviewTab({
   // There is a tree to show whenever this workspace leads a team or hangs off
   // a manager; otherwise it is solo and the panel is skipped.
   const hasTeam = !!lead || kids.length > 0;
-  const nothing = !hasTeam && artifacts.length === 0 && links.length === 0 && plan.length === 0;
+  const hosts = useHosts();
+  const where = whereItRuns(hosts.data.find((h) => h.id === session.hostId), hosts.data);
 
   return (
     <div className="divide-y divide-line-soft">
+      {/* ── Where this is ──
+          The facts that used to run along the bottom edge in one line of mono.
+          A strip of chrome that is always there is a strip nobody reads, and
+          these are not chrome — they are what the workspace *is*. As
+          sentences, at the top of the thing that describes it. */}
+      <section className="px-3 py-3">
+        <p className="text-ui text-text">
+          {session.repo ? (
+            <>
+              In <span className="text-bone">{session.repo}</span>
+              {session.branch && (
+                <>
+                  , on <span className="font-mono text-meta text-slate">{session.branch}</span>
+                </>
+              )}
+            </>
+          ) : (
+            "No repository — a bare agent."
+          )}
+        </p>
+        <p className="mt-1 text-ui text-dim">
+          {where ? where.name : "Waiting for a machine"}
+          {", "}
+          {elapsed(minutesSince(session.createdAt))} in
+          {where?.quiet && <span className="text-mute"> · not answering</span>}
+          {where?.draining && <span className="text-mute"> · draining</span>}
+        </p>
+      </section>
+
       {/* ── Team ── The local tree around this workspace: the manager at the
           top — this workspace when it leads, or the one that started it when
           this is a child — and the agents under it below. A solo workspace has
@@ -372,12 +406,14 @@ export function OverviewTab({
         </Panel>
       )}
 
-      {/* Before the agent has made a plan, cut a branch or delegated anything,
-          there is genuinely nothing — say so rather than draw empty panels. */}
-      {nothing && (
+      {/* Before the agent has made a plan or delegated anything there is
+          nothing *more* to show — say so rather than draw empty panels. The
+          two sentences at the top are always there, which is why this no
+          longer has to carry the branch. */}
+      {!hasTeam && artifacts.length === 0 && links.length === 0 && plan.length === 0 && (
         <p className="px-3 py-6 text-meta text-mute">
-          Nothing to show yet. The plan it's following, the branch it works on, any agents it delegates to and the
-          artifacts it produces all appear here.
+          Nothing else yet. The plan it&rsquo;s following, any agents it delegates to and the artifacts it produces
+          all appear here.
         </p>
       )}
     </div>

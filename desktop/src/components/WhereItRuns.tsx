@@ -1,10 +1,13 @@
 "use client";
 
+import { Monitor } from "lucide-react";
 import type { Agent, AgentView, Host } from "~/api/generated/model";
+import { useSessions } from "~/data";
 import { AgentMark } from "~/components/AgentMark";
 import { Readout } from "~/components/HostReadiness";
 import {
   environmentLabel,
+  isLocal,
   machineLabel,
   machines,
   type Machine,
@@ -163,6 +166,58 @@ function Line({ label, children }: { label: string; children: React.ReactNode })
  * sign-in does not count: a session runs on a named account, so that what it
  * spends is known and can be switched away from.
  */
+/* ── What used to be along the bottom edge ─────────────────────────────
+   `ui/StatusBar.tsx` kept the branch, the machine and the elapsed time in one
+   line of mono across the foot of every workspace. It is gone: a strip of
+   chrome that is always there is a strip nobody reads, and the three facts on
+   it are not the same kind of fact. The branch and the age are now sentences
+   at the top of the right rail's Overview, where the rest of what this
+   workspace *is* already lives. The machine's own detail is below, which is
+   the half that genuinely needed a card rather than a line. */
+
+/** Where a session runs, as words. The Mac is a client; "Firetower's machine" is the one underneath the control plane. */
+export function whereItRuns(host: Host | undefined, hosts: Host[]) {
+  if (!host) return null;
+  const machine = machines(hosts).find((m) => m.hosts.some((h) => h.id === host.id));
+  return {
+    name: isLocal(machine) ? "Firetower's machine" : (machine?.label ?? host.name),
+    how: "on the machine",
+    Mark: Monitor,
+    quiet: host.state === "Unreachable" || !!host.reconnecting,
+    draining: host.state === "Draining" || !!host.drained,
+  };
+}
+
+
+const gb = (mb?: number | null) => (mb ? `${Math.round(mb / 1024)} GB` : null);
+
+/** The facts that do not fit a line. Anchored above the bar, or at a point on screen when told one. */
+export function HostCard({ host, where, at }: { host: Host; where: NonNullable<ReturnType<typeof whereItRuns>>; at?: { x: number; y: number } }) {
+  const sessions = useSessions();
+  const on = sessions.data.filter((s) => s.hostId === host.id && s.status !== "Ended").length;
+  const docker = host.docker?.status === "Running" ? `Docker ${host.docker.detail ?? ""}`.trim() : host.docker?.status === "Absent" ? "no Docker" : host.docker?.status === "Stopped" ? "Docker stopped" : null;
+  return (
+    <div
+      style={at ? { left: Math.min(at.x, window.innerWidth - 22 * 16 - 12), top: at.y + 8 } : undefined}
+      className={`${at ? "fixed" : "absolute bottom-7 left-3"} z-40 w-[22rem] rounded-xl border border-line bg-overlay px-4 py-3 font-sans text-left shadow-(--shadow-float)`}
+    >
+      <div className="flex items-center gap-2">
+        <where.Mark className="h-3.5 w-3.5 text-slate" strokeWidth={1.75} />
+        <span className="text-ui text-bone">{where.name}</span>
+        <span className={`ml-auto text-micro ${host.state === "Online" ? "text-sage" : host.state === "Draining" ? "text-dim" : "text-brick"}`}>{host.state === "Unreachable" ? "Not answering" : host.state}</span>
+      </div>
+      <p className="mt-1.5 text-meta text-dim">
+        {where.how[0].toUpperCase() + where.how.slice(1)}
+        {docker ? ` · ${docker}` : ""}
+      </p>
+      <p className="text-meta text-dim">
+        {[host.cpus ? `${host.cpus} cores` : null, gb(host.memoryMb), `${on} session${on === 1 ? "" : "s"} on it`].filter(Boolean).join(" · ")}
+      </p>
+      <p className="text-meta text-mute">{host.workerVersion ? `worker ${host.workerVersion}` : "worker version unknown"}</p>
+    </div>
+  );
+}
+
 export function canRun(agent: AgentView, hostId: string) {
   const here = agent.hosts.find((h) => h.hostId === hostId);
   if (!here?.installed) return false;

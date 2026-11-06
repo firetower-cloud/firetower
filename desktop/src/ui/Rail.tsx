@@ -25,7 +25,7 @@ import type { LucideIcon } from "lucide-react";
 import { navigate, usePathname } from "~/shims/next-navigation";
 import { useUpdatesRow } from "~/data";
 import { useFleet, waitingIn, type Backend } from "~/fleet";
-import { key } from "~/platform";
+import { isGlobalMod, key } from "~/platform";
 import { useStart } from "~/start";
 import { DESTINATIONS, DOORS, destinationAt, type DestinationId } from "~/ui/destinations";
 import { usePanel } from "~/ui/panel";
@@ -86,7 +86,9 @@ export function Rail({ backend, onSwitch, onForgot }: { backend: Backend; onSwit
         setPeek(null);
         return;
       }
-      if (!(e.metaKey || e.ctrlKey)) return;
+      /* The *global* modifier only. ⌃ is the inspector's inside a workspace,
+         and `e.metaKey || e.ctrlKey` would take it here first. */
+      if (!isGlobalMod(e)) return;
       /* A focused terminal owns the keyboard, exactly as the workbench's own
          handler has it. Everything here is a window-level gesture, so none of
          it is the one exception. */

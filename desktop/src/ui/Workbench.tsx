@@ -36,7 +36,6 @@ import { QuickOpen } from "~/ui/QuickOpen";
 import { TabStrip, type Tab } from "~/ui/Tabs";
 import { Inspector } from "~/ui/Inspector";
 import { Shell } from "~/ui/Shell";
-import { StatusBar } from "~/ui/StatusBar";
 import { Unreachable } from "~/ui/Unreachable";
 import { ContextMenu, useMenu, type MenuItem } from "~/ui/ContextMenu";
 import { mayMove } from "~/filing";
@@ -45,7 +44,7 @@ import { useDirectories } from "~/data";
 import { useEndAgent, useEndWorkspace } from "~/ui/end";
 import { useConfirm } from "~/ui/Confirm";
 import { drag } from "~/drag";
-import { isLocalMod, key } from "~/platform";
+import { isGlobalMod, isLocalMod, key } from "~/platform";
 
 /** The rail can be dragged between these. */
 const RAIL_MIN = 288;
@@ -356,7 +355,7 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
         return;
       }
 
-      if (!(e.metaKey || e.ctrlKey)) return;
+      if (!isGlobalMod(e)) return;
       if (inTerminal && e.key.toLowerCase() !== "j") return;
       if (e.key === "\\") {
         e.preventDefault();
@@ -680,14 +679,6 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
             </div>
           )}
 
-          <StatusBar
-            session={run}
-            branch={place.branch}
-            onCommit={() => {
-              setSide("ship");
-              setOpen(true);
-            }}
-          />
         </div>
 
         {open && (

@@ -34,7 +34,7 @@ import { elapsed, inFlight, minutesSince, needsYou } from "~/api/view";
 import { useNow } from "~/ui/clock";
 import { useFleet, waitingIn, type Backend } from "~/fleet";
 import { useHosts, useSessions } from "~/data";
-import { whereItRuns } from "~/ui/StatusBar";
+import { whereItRuns } from "~/components/WhereItRuns";
 import { navigate } from "~/shims/next-navigation";
 import { StartComposer } from "~/ui/StartComposer";
 
