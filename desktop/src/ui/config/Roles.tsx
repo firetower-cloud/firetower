@@ -692,7 +692,7 @@ function Editor({
                 ];
                 return (
                   <div key={c.kind} className="flex flex-col gap-1.5">
-                    <span className="text-micro font-medium uppercase tracking-wide text-mute">{c.fallback}</span>
+                    <span className="text-micro font-medium text-mute">{c.fallback}</span>
                     <Select
                       ariaLabel={c.fallback}
                       value={draft.settings?.[c.kind] ?? null}

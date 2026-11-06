@@ -335,7 +335,7 @@ export function StylePage() {
 
         <Section
           name="Island"
-          note="The pill above every other window. Three states and one action: it says whether anything is waiting on you, and it takes you there. **It is deliberately outside the theme** — the pill is the black the notch is made of, in any appearance, and it is the one place in the product where ember is decoration rather than a signal."
+          note="The pill above every other window. Three states and one action: it says whether anything is waiting on you, and it takes you there. **It is deliberately outside this design** — the pill is the black the notch is made of in any appearance, it is the one place ember is decoration rather than a signal, and it keeps the two ALL-CAPS labels the rest of the app no longer has. It has its own window, its own rules and a document still to be written; drawn here so it is looked at at all."
         >
           <div className="flex flex-col items-start gap-4 rounded-md border border-line bg-ground p-5">
             {ISLANDS.map(([label, state]) => (

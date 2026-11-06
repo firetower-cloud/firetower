@@ -162,7 +162,7 @@ function Detail({ host, onGone }: { host: Host; onGone: () => void }) {
 
       {host.state === "Online" && offered.length > 0 && (
         <div>
-          <p className="text-micro uppercase tracking-wide text-mute">Agents</p>
+          <p className="legend">Agents</p>
           <div className="mt-1.5 space-y-1">
             {offered.map((a) => {
               const here = onThis(a);

@@ -993,7 +993,7 @@ function Footer({ left, children }: { left: string; children: React.ReactNode })
 
 function Label({ children }: { children: React.ReactNode }) {
   return (
-    <div className="px-3.5 pt-2.5 pb-1 text-micro tracking-[0.08em] text-mute uppercase">
+    <div className="legend px-3.5 pt-2.5 pb-1">
       {children}
     </div>
   );

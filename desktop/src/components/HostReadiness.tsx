@@ -173,7 +173,7 @@ export function Readout({
         </span>
       </Verdict>
       <div className="border-t border-brick-deep bg-brick-tint px-3 py-2.5">
-        <p className="eyebrow mb-1.5 text-brick">Missing</p>
+        <p className="legend mb-1.5 text-brick">Missing</p>
         <ul className="space-y-1.5">
           {missing.map((check) => (
             <li key={check.name} className="flex items-start gap-2.5 text-meta">

@@ -30,7 +30,7 @@ export function List({
 /** The map legend above a list. Nothing else in the app uses this voice. */
 export function Columns({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex items-center gap-3 border-b border-line bg-raise/40 px-4 py-2 font-narrow text-micro font-semibold tracking-[0.14em] text-mute uppercase">
+    <div className="legend flex items-center gap-3 border-b border-line bg-raise/40 px-4 py-2">
       {children}
     </div>
   );

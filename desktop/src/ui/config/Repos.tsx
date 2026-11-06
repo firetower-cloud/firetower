@@ -235,7 +235,7 @@ export function Repos({ live }: { live: boolean }) {
 function Eyebrow({ label, count }: { label: string; count?: string }) {
   return (
     <div className="mt-3 mb-1.5 flex items-center gap-2 first:mt-0">
-      <span className="text-micro tracking-[0.07em] text-mute uppercase">{label}</span>
+      <span className="legend">{label}</span>
       {count && <span className="ml-auto text-meta text-mute">{count}</span>}
     </div>
   );

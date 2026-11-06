@@ -244,7 +244,7 @@ function ThisApp() {
 }
 
 function Label({ children }: { children: React.ReactNode }) {
-  return <h2 className="mt-7 mb-2 text-meta tracking-[0.08em] text-mute uppercase">{children}</h2>;
+  return <h2 className="legend mt-7 mb-2">{children}</h2>;
 }
 
 /**

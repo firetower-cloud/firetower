@@ -250,10 +250,10 @@ export function TasksPage({ backend }: { backend: Backend }) {
           </div>
 
           <div className="flex items-center gap-3 border-b border-line-soft px-3 py-1.5">
-            <span className="eyebrow w-[150px] shrink-0">Id</span>
-            <span className="eyebrow flex-1">Title</span>
-            <span className="eyebrow w-[70px] shrink-0">Status</span>
-            <span className="eyebrow w-[56px] shrink-0">Updated</span>
+            <span className="legend w-[150px] shrink-0">Id</span>
+            <span className="legend flex-1">Title</span>
+            <span className="legend w-[70px] shrink-0">Status</span>
+            <span className="legend w-[56px] shrink-0">Updated</span>
             <span className="w-[72px] shrink-0" />
           </div>
             </>

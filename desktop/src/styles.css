@@ -308,6 +308,19 @@
     box-shadow: 0 0 0 2px var(--color-ground);
   }
 
+  /* ── A section label ───────────────────────────────────────────
+     What `.eyebrow` was for, said in the voice the rest of the design uses.
+     Tracked-out capitals were section labels in eighteen places; they read as
+     shouting and they are *harder* to scan than sentence case, which is the
+     opposite of what a legend is for. The class stays in the shared sheet
+     because the web client still has its own; the desk uses this. */
+  .legend {
+    font-size: var(--text-meta);
+    line-height: var(--text-meta--line-height);
+    letter-spacing: 0.004em;
+    color: var(--color-dim);
+  }
+
   /* ── A row in the panel, and a row in a menu ───────────────────
      The same shape at two widths. 34px is the chrome row — the pair `STYLE.md`
      gets wrong three times is 32 for chrome and 40–46 for what you read, and
