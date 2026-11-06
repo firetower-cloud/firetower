@@ -50,9 +50,11 @@ describe("which machine an environment is on", () => {
   });
 
   it("calls a machine what it is called, whatever kind it is", () => {
-    const groups = machines([host("localhost", { type: "Local" })]);
+    const retired = host("localhost", { type: "Local" });
+    const groups = machines([retired]);
     expect(groups[0].label).toBe("localhost");
     expect(environmentLabel(groups[0].hosts[0])).toBe("localhost");
+    expect(machineKey(retired)).toBe("retired:localhost");
   });
 
   it("calls a machine what you call it, and says where it is beside that", () => {

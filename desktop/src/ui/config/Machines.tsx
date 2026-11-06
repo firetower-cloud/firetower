@@ -12,12 +12,13 @@
  */
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronDown, Copy, Cpu, HardDrive, Key, Loader2, Plus, Trash2, X } from "lucide-react";
+import { Check, ChevronDown, Copy, Cpu, HardDrive, History, Key, Loader2, Plus, Trash2, X } from "lucide-react";
 import { Icon } from "~/components/ui";
 import type { Compute, Diagnosis, Host } from "~/api/generated/model";
 import {
   getListHostsQueryKey,
   useConnectHost,
+  useRetiredHosts,
   useCreateHost,
   useDeleteHost,
   useDrainHost,
@@ -30,7 +31,8 @@ import {
 import { getListAgentsQueryKey, useInstallAgent } from "~/api/generated/agents/agents";
 import type { AgentView } from "~/api/generated/model";
 import { parseDestination, reachedTheMachine, stateLabel, waitForOnline } from "~/api/environments";
-import { useAgents, useHosts } from "~/data";
+import { useAgents, useHosts, useSessions } from "~/data";
+import { navigate, usePathname } from "~/shims/next-navigation";
 import { Rows, Section } from "~/ui/config/bits";
 import { WhoCanAccess } from "~/ui/Sharing";
 import { useMe } from "~/api/generated/auth/auth";
@@ -39,16 +41,21 @@ import { useConfirm } from "~/ui/Confirm";
 export function Machines({ live }: { live: boolean }) {
   const me = useMe();
   const hosts = useHosts();
-  const [adding, setAdding] = useState(false);
+  /* `/configuration/machines/add` opens straight into the dialog. The three
+     machine pickers send people here when the fleet is empty, and landing on a
+     screen that says "add one" with the form still shut is one press of
+     nothing. */
+  const [adding, setAdding] = useState(usePathname().endsWith("/add"));
   const [open, setOpen] = useState<string | null>(null);
 
   return (
+    <>
     <Section
       title="Compute"
       note="One owner per host until sessions are isolated from each other."
       action={live && <button onClick={() => setAdding(true)} className="control border border-line bg-raise text-ui text-bone hover:bg-overlay"><Icon of={Plus} size={12} />Add a machine</button>}
     >
-      <Rows feed={hosts} empty="No machine is connected yet.">
+      <Rows feed={hosts} empty={<Start onAdd={() => setAdding(true)} />}>
         {hosts.data.map((h) => (
           <div key={h.id}>
             <button onClick={() => setOpen(open === h.id ? null : h.id)} className="flex w-full items-center gap-3 px-3.5 py-3 text-left hover:bg-raise/60">
@@ -76,12 +83,124 @@ export function Machines({ live }: { live: boolean }) {
       </Rows>
       {adding && <Add onClose={() => setAdding(false)} onAdded={(id) => { setAdding(false); setOpen(id); }} />}
     </Section>
+    <Removed />
+    </>
   );
 }
 
+/** Where it is, which is all a machine's second line ever was. */
 function describe(c: Compute): string {
-  if (c.type === "Local") return "this server";
+  if (c.type !== "Server") return "";
   return `${c.user ? `${c.user}@` : ""}${c.host}${c.port ? `:${c.port}` : ""}`;
+}
+
+/**
+ * Landing here with nothing added, which is now every fresh install.
+ *
+ * `Repos.tsx`'s own `Start`, beat for beat — the same centred imperative, the
+ * same clamped paragraph, the same 20rem column of actions, the same quiet
+ * routes underneath. That screen already decided that arriving at an empty
+ * list is a beginning rather than a failure, and this screen has exactly the
+ * same problem now that Firetower does not register itself as a machine.
+ */
+function Start({ onAdd }: { onAdd: () => void }) {
+  return (
+    <div className="px-6 py-9 text-center">
+      <p className="text-title text-bone">Add a machine to run agents on</p>
+      <p className="mx-auto mt-1.5 max-w-[46ch] text-ui text-dim">
+        An agent runs on the machine itself — its tools, its filesystem, its network — as the
+        account Firetower connects as. Firetower does not run agents on itself.
+      </p>
+
+      <div className="mx-auto mt-5 flex w-full max-w-[20rem] flex-col gap-2">
+        <button onClick={onAdd} className="control w-full justify-center bg-bone font-medium text-ground hover:opacity-90">
+          <Icon of={Plus} size={12} />Add a machine
+        </button>
+      </div>
+
+      <div className="mx-auto mt-5 flex max-w-[46ch] flex-col items-center gap-1.5 text-meta text-mute">
+        <span>
+          A VM, a build box, a Mac with Xcode on it. It needs ssh, git, tmux and a shell —
+          Firetower puts the worker in that account&rsquo;s home.
+        </span>
+        {/* The key is the step that happens before the form can be filled in,
+            and it is the one thing a machine can only get from a person. A
+            link into the dialog that already shows it, not a second copy. */}
+        <span>
+          You will need Firetower&rsquo;s public key on it.{" "}
+          <button onClick={onAdd} className="underline decoration-line underline-offset-2 hover:text-dim">
+            Show the key
+          </button>
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The machines that are gone, under the list of the ones that are not.
+ *
+ * A retired machine is absent from `listHosts`, which is what makes every
+ * picker correct without an exclusion in it — and would also take the record
+ * of what ran there off the screen it used to be on. So the way back in is
+ * sessions rather than machines, and it is a line rather than a row: there is
+ * nothing here to run on, drain, rename or connect to.
+ *
+ * It does not dismiss and does not fade. Whatever ran in that container is the
+ * only account of what it did, and a notice that hides itself takes the way in
+ * with it.
+ */
+function Removed() {
+  const gone = useRetiredHosts();
+  const sessions = useSessions();
+  const [showing, setShowing] = useState<string | null>(null);
+  const machines = gone.data ?? [];
+  if (machines.length === 0) return null;
+
+  return (
+    <div className="mt-2 space-y-1.5">
+      {machines.map((m) => {
+        const ran = sessions.data.filter((s) => s.hostId === m.id);
+        return (
+          <div key={m.id} className="rounded-lg border border-line bg-ground px-3 py-2">
+            <p className="flex items-start gap-2 text-micro leading-relaxed text-mute">
+              <Icon of={History} size={12} />
+              <span className="min-w-0 flex-1">
+                <span className="text-dim">{m.name}</span> was removed — Firetower no longer runs
+                agents on itself.
+                {ran.length > 0 && ` ${ran.length} session${ran.length === 1 ? "" : "s"} ran on it.`}
+              </span>
+              {ran.length > 0 && (
+                <button
+                  onClick={() => setShowing(showing === m.id ? null : m.id)}
+                  className="shrink-0 text-slate hover:text-bone"
+                >
+                  {showing === m.id ? "Hide them" : "Show them"}
+                </button>
+              )}
+            </p>
+            {showing === m.id && (
+              <ul className="mt-2 space-y-1 border-t border-line-soft pt-2">
+                {ran.map((s) => (
+                  <li key={s.id}>
+                    <button
+                      onClick={() => navigate(`/sessions/${s.workspaceId ?? s.id}`)}
+                      className="flex w-full items-center gap-2 text-left text-meta text-dim hover:text-bone"
+                    >
+                      <span className="min-w-0 flex-1 truncate">{s.title}</span>
+                      <span className="shrink-0 text-micro text-mute">
+                        {new Date(s.createdAt).toLocaleDateString()}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 /* ── One machine ───────────────────────────────────────────────────────── */

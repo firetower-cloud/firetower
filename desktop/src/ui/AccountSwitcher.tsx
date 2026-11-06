@@ -18,7 +18,7 @@ import { AgentMark } from "~/components/AgentMark";
 import { accountsKey, exhausted, quota, sessionAccountKey, switchAccount, usable, useAccounts, useSessionAccount } from "~/api/accounts";
 import type { Account, Agent, AgentView, Limit, Session, Switch } from "~/api/generated/model";
 import { getGetSessionQueryKey, getListSessionsQueryKey } from "~/api/generated/sessions/sessions";
-import { useAgents, why } from "~/data";
+import { useAgents, useHosts, why } from "~/data";
 import { navigate } from "~/shims/next-navigation";
 import { FallbackLine } from "~/ui/AccountFallback";
 import { ConnectAccount } from "~/ui/config/ConnectAccount";
@@ -67,6 +67,10 @@ export function AccountSwitcher({ session, working, children }: { session: Sessi
   const chosen = candidates.find((a) => a.id === selected);
   const changesAgent = !!chosen && chosen.kind !== session.agent;
   const installedHere = (a: Account) => !!agents.data.find((x) => x.kind === a.kind)?.hosts.some((h) => h.hostId === session.hostId && h.installed);
+  /* Named, because "this machine" named the control plane's own container and
+     a session runs on a machine somebody added. Undefined for a machine this
+     Firetower no longer has, which is a thing that can be said generically. */
+  const on = useHosts().data.find((h) => h.id === session.hostId);
   const inFlight = current.data?.switches.some((s) => s.state === "switching") ?? false;
   const last = current.data?.switches.at(-1);
 
@@ -131,7 +135,7 @@ export function AccountSwitcher({ session, working, children }: { session: Sessi
                       <AgentMark agent={a.kind as Agent} size={12} className="mt-1 shrink-0 text-dim" />
                       <span className="min-w-0 flex-1">
                         <span className="block text-ui text-bone">{label(a.kind)} · {a.name}</span>
-                        <span className="block text-meta text-mute">{here ? quota(a) : "Not installed on this machine"}</span>
+                        <span className="block text-meta text-mute">{here ? quota(a) : `Not installed on ${on?.name ?? "that machine"}`}</span>
                       </span>
                       {handoff && here && <span className="shrink-0 text-micro text-mute">hands off</span>}
                     </button>

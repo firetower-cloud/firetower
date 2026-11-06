@@ -16,8 +16,6 @@ export interface ControlPlaneTarget {
   mayUpgrade?: boolean;
   /** @nullable */
   reason?: string | null;
-  /** Sessions on this machine, by title. They end when it is recreated. */
-  sessions: string[];
   updater: UpdaterView;
   upgradable: boolean;
   version: string;

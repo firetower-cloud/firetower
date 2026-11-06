@@ -114,7 +114,13 @@ export function Readout({
   // Said as one sentence rather than a table of two: where it runs, and who it
   // runs as. Both are things people get wrong about a host they set up weeks
   // ago, and neither is worth a row of its own.
-  const where = host.compute.type === "Local" ? "on this machine" : `on ${connectionLabel(host)}`;
+  //
+  // The address without the account, because the sentence has already named
+  // the account: `connectionLabel` carries the user, so this read "runs as
+  // editor on editor@10.0.4.7". It was hidden while a machine could be the
+  // control plane's own container, which printed "on this machine" with no
+  // user in it at all.
+  const where = `on ${host.compute.type === "Server" ? host.compute.host : host.name}`;
 
   if (report.isFetching && !report.data) {
     return (

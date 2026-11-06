@@ -119,7 +119,6 @@ export function Updates() {
           name="Control plane"
           note={s.controlPlane.updater.reachable ? `updater ${s.controlPlane.updater.version ?? ""}` : "no updater"}
           version={s.controlPlane.version}
-          sessions={s.controlPlane.sessions.length}
           said={
             !s.updateAvailable || s.latest?.version === s.current
               ? "up to date"
@@ -310,7 +309,8 @@ function Machine({ host, to, blocked, onDone }: { host: HostTarget; to: string; 
   );
 }
 
-function Row({ name, version, said, sessions, note, action }: { name: string; version: string; said: string | null; sessions: number; note: string; action: React.ReactNode }) {
+/** `sessions` is absent for the control plane: nothing runs in its container. */
+function Row({ name, version, said, sessions, note, action }: { name: string; version: string; said: string | null; sessions?: number; note: string; action: React.ReactNode }) {
   return (
     <div className="flex items-center gap-3 border-b border-line-soft px-3.5 py-2.5 last:border-0">
       <span className="min-w-0 flex-1">

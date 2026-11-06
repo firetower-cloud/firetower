@@ -1,7 +1,16 @@
 /** The three states a list off a server can be in, drawn the same way everywhere. */
 import { ExternalLink, Loader2 } from "lucide-react";
 
-export function Rows<T>({ feed, empty, children }: { feed: { data: T[]; loading: boolean; error: string | null }; empty: string; children: React.ReactNode }) {
+/**
+ * `empty` is usually one sentence, and may be a whole block.
+ *
+ * A grey line inside a bordered card reads as a list that failed to load,
+ * which is right for a list that happens to be empty and wrong for a screen
+ * whose empty state is the first thing to do — Compute, now that nothing is
+ * registered for you. Those pass their own panel; everything else passes a
+ * string and is drawn as it always was.
+ */
+export function Rows<T>({ feed, empty, children }: { feed: { data: T[]; loading: boolean; error: string | null }; empty: React.ReactNode; children: React.ReactNode }) {
   if (feed.loading) {
     return (
       <div className="flex items-center gap-2 px-3.5 py-4 text-ui text-mute">
@@ -11,7 +20,8 @@ export function Rows<T>({ feed, empty, children }: { feed: { data: T[]; loading:
     );
   }
   if (feed.error) return <p className="px-3.5 py-4 text-ui text-brick">{feed.error}</p>;
-  if (feed.data.length === 0) return <p className="px-3.5 py-4 text-ui text-mute">{empty}</p>;
+  if (feed.data.length === 0)
+    return typeof empty === "string" ? <p className="px-3.5 py-4 text-ui text-mute">{empty}</p> : <>{empty}</>;
   return <>{children}</>;
 }
 

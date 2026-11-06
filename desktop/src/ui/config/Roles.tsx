@@ -557,8 +557,13 @@ function Editor({
                 onChange={(v) => set("machine", v)}
               />
             ) : (
+              /* Not the pickers' "No machine to run on" block: a profile with
+                 no machine is a state this screen already produces and handles
+                 — it runs wherever the workspace that uses it runs — so this
+                 is information rather than something in the way. */
               <p className="rounded-md border border-line bg-ground px-3 py-2 text-meta text-mute">
-                No machine is connected. Add one under Machines, or use the same workspace.
+                No machine yet, so this runs wherever the workspace that uses it runs. Add one
+                under Compute to pin it.
               </p>
             )}
           </Group>

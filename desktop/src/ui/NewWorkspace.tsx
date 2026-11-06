@@ -22,7 +22,7 @@ import { Check, ChevronDown, Cpu, GitBranch, Plus, Search, Server, UsersRound, X
 import { HostMark, Icon } from "~/components/ui";
 import { AgentMark, AGENT_LABEL } from "~/components/AgentMark";
 import { useListRoles } from "~/api/generated/roles/roles";
-import { canRun, resolve, type Where } from "~/components/WhereItRuns";
+import { canRun, NoMachine, resolve, type Where } from "~/components/WhereItRuns";
 import { Readout, isReady } from "~/components/HostReadiness";
 import { useHostReadiness } from "~/api/generated/hosts/hosts";
 import { machineLabel, machines } from "~/api/environments";
@@ -396,6 +396,15 @@ export function NewWorkspace({
           {/* Machine, mode and agent are one control because what decides
               whether an agent can start is the three of them together. */}
           <Field label="Where it runs">
+            {all.length === 0 ? (
+              /* The shared block, not an empty select with a non-choice in it:
+                 there is one thing to do and this is where it is said. The
+                 agent chips go with it — with no machine there is nothing for
+                 an agent to be installed on. */
+              <div className="rounded-lg border border-line bg-ground">
+                <NoMachine onAddMachine={() => navigate("/configuration/machines/add")} />
+              </div>
+            ) : (
             <div className="space-y-2 rounded-lg border border-line bg-ground p-2.5">
               <div className="flex items-center gap-2">
                 <Icon of={Server} size={14} className="shrink-0 text-mute" />
@@ -404,7 +413,6 @@ export function NewWorkspace({
                   onChange={(e) => setWhere({ ...where, machine: e.target.value, hostId: "" })}
                   className="min-w-0 flex-1 rounded-md border border-line bg-panel px-2 py-1.5 text-ui text-bone focus:outline-none"
                 >
-                  {all.length === 0 && <option value="">No machine is connected</option>}
                   {all.map((m) => (
                     <option key={m.key} value={m.key}>
                       {machineLabel(m)}
@@ -449,6 +457,7 @@ export function NewWorkspace({
                 </div>
               )}
             </div>
+            )}
           </Field>
 
           <Field label="Account" hint="Whose subscription this runs on">

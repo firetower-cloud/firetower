@@ -23,7 +23,6 @@ export const GetUpdatesResponse = zod.object({
   "controlPlane": zod.object({
   "mayUpgrade": zod.boolean().optional().describe('Whether the person asking may move it. Only an administrator of the\norganisation: the control plane is the whole deployment, not a resource\nanybody holds a grant on.'),
   "reason": zod.string().nullish(),
-  "sessions": zod.array(zod.string()).describe('Sessions on this machine, by title. They end when it is recreated.'),
   "updater": zod.object({
   "apiVersion": zod.int().min(getUpdatesResponseControlPlaneUpdaterApiVersionMin).nullish(),
   "configured": zod.boolean(),
@@ -78,7 +77,6 @@ export const CheckUpdatesResponse = zod.object({
   "controlPlane": zod.object({
   "mayUpgrade": zod.boolean().optional().describe('Whether the person asking may move it. Only an administrator of the\norganisation: the control plane is the whole deployment, not a resource\nanybody holds a grant on.'),
   "reason": zod.string().nullish(),
-  "sessions": zod.array(zod.string()).describe('Sessions on this machine, by title. They end when it is recreated.'),
   "updater": zod.object({
   "apiVersion": zod.int().min(checkUpdatesResponseControlPlaneUpdaterApiVersionMin).nullish(),
   "configured": zod.boolean(),

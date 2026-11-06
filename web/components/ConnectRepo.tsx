@@ -455,8 +455,13 @@ function PasteRemote({ onBack, onClose }: { onBack: () => void; onClose: () => v
       </div>
 
       <Foot>
-        <Go onClick={save} disabled={(!localPath && !found) || create.isPending}>
-          {create.isPending ? "Connecting…" : "Connect"}
+        {/* A probe that failed does not mean the server will refuse this: the
+            row is a URL, and `create_repo` keeps it either way — its name and
+            default branch are read the first time a workspace clones it. With
+            an empty fleet nothing can read a remote at all, and this used to
+            block a save the server would have accepted. */}
+        <Go onClick={save} disabled={!remote.trim() || create.isPending}>
+          {create.isPending ? "Connecting…" : found || localPath || probe.isPending ? "Connect" : "Save it anyway"}
         </Go>
         <Quiet onClick={onBack}>Back</Quiet>
       </Foot>
