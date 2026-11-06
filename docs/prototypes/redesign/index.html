@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>Firetower — the desktop redesign</title>
+<link rel="stylesheet" href="../skills/desk.css">
+<style>
+body{overflow:auto}
+.page{max-width:680px;margin:0 auto;padding:68px 28px 70px;display:flex;flex-direction:column;gap:30px}
+h1{font-size:var(--display);line-height:1.25;letter-spacing:-.02em;color:var(--bone);font-weight:600}
+.sub{font-size:var(--read);line-height:1.65;color:var(--dim);max-width:58ch}
+.links{display:flex;flex-direction:column}
+a.item{display:grid;grid-template-columns:26px 1fr auto;gap:13px;align-items:baseline;
+  padding:15px 10px;border-top:1px solid var(--line-soft);text-decoration:none;color:inherit;border-radius:var(--r-md)}
+a.item:last-child{border-bottom:1px solid var(--line-soft)}
+a.item:hover{background:color-mix(in srgb,var(--raise) 70%,transparent)}
+a.item .t{display:block;font-size:var(--ui);color:var(--bone);font-weight:600}
+a.item .d{display:block;font-size:var(--meta);color:var(--mute);line-height:1.55;margin-top:3px;max-width:54ch}
+a.item .go{color:#3a3a42;font-size:var(--ui)}
+.aside{font-size:var(--meta);line-height:1.6;color:var(--mute);max-width:56ch}
+</style></head><body>
+<div class="page">
+  <div>
+    <h1>The desktop, redesigned</h1>
+    <p class="sub">Two artifacts and the document that explains them. The reasoning, the rejected
+    alternatives and the token derivations are in
+    <span class="mono" style="color:var(--syn-string)">docs/design-handoff.md</span>, which is the
+    thing to read first &mdash; these two are what it points at.</p>
+  </div>
+
+  <div class="links">
+    <a class="item" href="desktop-redesign.html"><span class="mark">01</span>
+      <span><span class="t">Firetower desktop &mdash; redesigned</span><span class="d">Every screen and
+      every state, as a specification you can click through. Fourteen tabs; the ones that are documents
+      rather than mock-ups are <b>Coverage</b> (which feature is drawn and which is not),
+      <b>Spec</b> (measurements, tokens, keyboard, the code delta) and <b>Grouping</b> (why six
+      destinations).</span></span><span class="go">&rsaquo;</span></a>
+    <a class="item" href="components.html"><span class="mark">02</span>
+      <span><span class="t">Firetower desktop &mdash; components</span><span class="d">Forty components
+      and six patterns, rendered live on the real stylesheet rather than described. Usage counts are
+      measured by walking the artifact above, so &ldquo;used on 74 screens&rdquo; is a fact rather than a
+      claim.</span></span><span class="go">&rsaquo;</span></a>
+  </div>
+
+  <p class="aside">Unlike the other prototypes here, these two are <b>self-contained single files</b> &mdash;
+  they carry their own tokens and their own fonts, because they are also the artifacts the design was
+  reviewed from and had to survive being served on their own. They deliberately do not link
+  <span class="mono">desk.css</span>. This landing page does, so it looks like its neighbours.</p>
+  <p class="aside">Every name, question and timestamp inside them is invented.</p>
+</div>
+</body></html>
