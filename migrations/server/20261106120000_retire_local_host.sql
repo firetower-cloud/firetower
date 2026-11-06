@@ -24,6 +24,24 @@
 -- the row directly — an older client, a query written later — sees a machine
 -- that takes no work and is not answering, which is true.
 --
+-- **The sessions that ran there are deliberately left un-ended, and a tidy-up
+-- that looks obviously correct must not be written.** Marking them `Ended`
+-- would delete the thing this migration exists to keep, within the minute:
+--
+--   * `Db::workspaces_to_purge` (db.rs:629) selects every workspace where *no*
+--     session has `status <> 'Ended'` — so a workspace is eligible the moment
+--     its last session ends;
+--   * `reclaim::sweep` hands those to `Db::purge_workspace`, which is
+--     `delete from workspaces`, and the cascades take the sessions and with
+--     them `agent_lines` — the agent's whole raw log, verbatim;
+--   * `reclaim::watch` runs that every sixty seconds, needs no host and no
+--     worker, and reclaim.rs says it outright: there is no grace period.
+--
+-- So the rows stay as they are. Those sessions will read as work that is still
+-- going, on a machine that is not there; that is cosmetic, it is explained on
+-- screen, and it is the correct trade against deleting the record of what the
+-- agents did. Do not end them here, at start-up, or anywhere else.
+--
 -- `roles.host_id` pointing at it is left exactly as it is. Its column is
 -- nullable with `on delete set null`, and null means "the scheduler picks";
 -- nulling them here would silently repin somebody's profile, which is a

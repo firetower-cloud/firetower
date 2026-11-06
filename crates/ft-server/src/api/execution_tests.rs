@@ -286,6 +286,84 @@ async fn a_retired_machine_is_readable_and_unreachable() {
     state.fleet.stop_supervising(&host.id).await;
 }
 
+/// The record of what ran in that container, against the one thing that would
+/// delete it.
+///
+/// The sessions on the retired machine are left as they are, deliberately.
+/// Ending them — in the migration, at start-up, anywhere — would make
+/// `Db::workspaces_to_purge` select their workspaces, and `reclaim::sweep`
+/// purges a workspace by deleting it: the cascade takes the sessions and with
+/// them `agent_lines`, the agent's raw log, which is the evidence of what
+/// happened in that container. The sweep runs every sixty seconds and needs no
+/// host, so that deletion would happen within a minute of deploying and could
+/// not be undone.
+#[tokio::test]
+async fn what_ran_on_the_retired_machine_survives_the_reclaim_sweep() {
+    let (state, _principal, host, _ready, owner) = fixture().await;
+    let retired = state
+        .db
+        .ensure_host("localhost", Compute::Local, &owner)
+        .await
+        .unwrap();
+
+    let session = ft_core::SessionId::new();
+    state
+        .db
+        .insert_session(
+            &session,
+            &retired.id,
+            &owner,
+            Some("acme/backend"),
+            "What it was doing to the database",
+            "do a thing",
+            Some("agent/x"),
+            Some("main"),
+            "ClaudeCode",
+            ft_core::WorkspaceSize::Medium,
+            ft_core::Share::Equal,
+            &ft_core::Step::plan(true, false),
+            None,
+        )
+        .await
+        .unwrap();
+    state
+        .db
+        .record_agent_line(&session, 1, r#"{"type":"assistant"}"#)
+        .await
+        .unwrap();
+
+    // The migration, exactly as it ships.
+    sqlx::raw_sql(include_str!(
+        "../../../../migrations/server/20261106120000_retire_local_host.sql"
+    ))
+    .execute(state.db.pool())
+    .await
+    .unwrap();
+
+    assert!(
+        state.db.workspaces_to_purge(10).await.unwrap().is_empty(),
+        "a session that has not ended is not a workspace to reclaim"
+    );
+    assert_eq!(
+        crate::reclaim::sweep(&state).await.unwrap(),
+        0,
+        "and a pass of the sweep takes nothing"
+    );
+
+    assert!(
+        state.db.session(&session).await.unwrap().is_some(),
+        "the session is still there to open"
+    );
+    let lines: i64 = sqlx::query_scalar("SELECT count(*) FROM agent_lines WHERE session_id = $1")
+        .bind(session.as_str())
+        .fetch_one(state.db.pool())
+        .await
+        .unwrap();
+    assert_eq!(lines, 1, "and so is what the agent actually said");
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
 /// A fresh install, and the one an upgrade leaves behind: nothing in the fleet
 /// but the machine that was removed. The refusal has to send somebody to add
 /// one rather than describe a machine that is not coming back.
