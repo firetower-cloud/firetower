@@ -557,6 +557,7 @@ const server = createServer(async (req, res) => {
     "/api/v1/sessions/s_1/controls": scene.startsWith("codex") ? [] : CLAUDE_CONTROLS,
     "/api/v1/sessions/s_1/account": { account: ACCOUNTS[0], limits: [], switches: [] },
     "/api/v1/sessions/s_1/annotations": [],
+    "/api/v1/skills": SKILLS,
     "/api/v1/repos": REPOS,
     "/api/v1/hosts": HOSTS,
     "/api/v1/agents": AGENTS,
@@ -669,6 +670,55 @@ server.on("upgrade", (req, socket) => {
   socket.on("error", () => clearInterval(every));
 });
 
+
+
+/**
+ * A library with one of each kind in it, so the gallery's four sections and
+ * its risk lines can be driven and photographed. `held` is the one an agent
+ * wrote that is waiting to be read.
+ */
+const skill = (over) => ({
+  id: "sk_x", name: "a-skill", description: "", version: 1, tokens: 900,
+  alwaysOn: false, builtin: false, held: false, mayShare: true, mayWrite: true,
+  author: null, risk: [], defaultIn: [], path: "u/kevin", currentVersionId: "sv_1",
+  createdAt: minutesAgo(9000), updatedAt: minutesAgo(90), ...over,
+});
+const SKILLS = [
+  skill({
+    id: "sk_1", name: "deploy-runbook", version: 0, held: true,
+    description: "Deploy the control plane to staging, run the smoke suite, then promote. Use when somebody asks to ship, cut a release or roll back.",
+    risk: ["Ships executable scripts", "Registers hooks for the whole session"],
+  }),
+  skill({
+    id: "sk_2", name: "firetower-surfaces", version: 4,
+    description: "The surfaces Firetower runs on — web, desktop, iOS and Android, and the iPhone Duo's three postures — and which features belong on each.",
+    alwaysOn: true,
+  }),
+  skill({
+    id: "sk_3", name: "claude-api", version: 2,
+    description: "Reference for the Claude API and the Anthropic SDK: model ids, pricing, params, streaming, tool use, MCP, caching and token counting.",
+  }),
+  skill({
+    id: "sk_4", name: "dataviz", version: 1,
+    description: "Read before writing any chart, graph, plot or dashboard, in any medium. A form heuristic, a colour formula with a runnable validator, and mark specs.",
+    risk: ["Ships executable scripts"],
+  }),
+  skill({
+    id: "sk_5", name: "pr-screenshots", version: 6,
+    description: "Drive the app, take the screenshots a pull request needs, and attach them. Use when a change is visible to somebody.",
+    risk: ["Runs shell commands before the model sees it", "Ships executable scripts"],
+  }),
+  skill({
+    id: "sk_6", name: "skill-creator", version: 3, builtin: true, mayShare: false, mayWrite: false,
+    path: "d/firetower", alwaysOn: true,
+    description: "Write a new skill, or improve an existing one, and save it to the library.",
+  }),
+  skill({
+    id: "sk_7", name: "incident-timeline", version: 2, mayShare: false, mayWrite: false,
+    path: "d/platform",
+    description: "Turn an incident channel into the note that goes to the customer. Use when somebody asks for a customer-facing write-up.",
+  }),
+];
 
 /**
  * One real file, so the viewer has something to be.

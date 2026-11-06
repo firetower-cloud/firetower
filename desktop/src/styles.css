@@ -912,6 +912,147 @@
     color: var(--color-mute);
   }
 
+  /* ── A gallery of things you have ──────────────────────────────
+     Sections rather than one list, because the three groups are the three the
+     path already encodes — what Firetower ships, what is yours, and what
+     somebody filed into a directory you can reach — and a flat list of a
+     hundred makes you read every row to find out which is which. */
+  .sksec {
+    margin-top: 40px;
+  }
+  .sksec:first-of-type {
+    margin-top: 30px;
+  }
+  .sksec .hd {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .sksec h2 {
+    font-size: 1.125rem; /* 18px */
+    line-height: 1.3;
+    letter-spacing: -0.014em;
+    font-weight: 540;
+    color: var(--color-bone);
+  }
+  .sksec .n {
+    font-size: var(--text-ui);
+    color: var(--color-mute);
+    font-variant-numeric: tabular-nums;
+  }
+  .sksec .note {
+    flex: 0 0 100%;
+    max-width: 68ch;
+    margin-top: 2px;
+    font-size: var(--text-ui);
+    line-height: 1.55;
+    color: var(--color-dim);
+  }
+  /* Two columns where there is room for two. A skill is a name and two lines
+     of description; one column of those down a 1000px pane is a column of
+     mostly nothing. */
+  .skgrid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(372px, 1fr));
+    gap: 2px 32px;
+    margin-top: 12px;
+  }
+  .sk {
+    display: flex;
+    align-items: flex-start;
+    gap: 13px;
+    width: auto;
+    margin-inline: -14px;
+    padding: 13px 14px;
+    border-radius: 13px;
+    text-align: left;
+    transition: background var(--dur-native) var(--ease-swift);
+  }
+  .sk:hover {
+    background: var(--color-raise);
+  }
+  .sk .plate {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 38px;
+    height: 38px;
+    margin-top: 1px;
+    border-radius: 11px;
+    background: var(--color-raise);
+    box-shadow: var(--shadow-raise);
+    font-family: var(--font-narrow), ui-sans-serif, system-ui, sans-serif;
+    font-size: var(--text-ui);
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: var(--color-dim);
+  }
+  .sk:hover .plate {
+    background: var(--color-panel);
+  }
+  :root[data-theme="dark"] .sk:hover .plate,
+  :root:not([data-theme]) .sk:hover .plate {
+    background: var(--color-overlay);
+  }
+
+  /* What a skill can do to your machine, as a line of small marks rather than
+     a row of filled badges. A badge per risk made four of them look like four
+     errors; the fact is "worth reading before you approve", not "broken". */
+  .risk {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: var(--text-meta);
+    color: var(--color-dim);
+  }
+  .risk i {
+    flex: none;
+    width: 5px;
+    height: 5px;
+    border-radius: 99px;
+    /* The mark use of amber, not the text-on-tint one. See `globals.css`. */
+    background: var(--color-amber-soft);
+  }
+
+  /* An agent wrote this one and it runs code. A 2px rule, not a filled panel
+     — it encodes "this one is different" and spends two pixels doing it. */
+  .review {
+    margin-top: 14px;
+    padding: 16px 18px;
+    border-radius: 14px;
+    border-left: 2px solid var(--color-amber-soft);
+    background: var(--color-raise);
+  }
+  .review h3 {
+    font-size: 0.9375rem;
+    font-weight: var(--font-weight-mid);
+    letter-spacing: -0.006em;
+    color: var(--color-bone);
+  }
+  .review p {
+    max-width: 72ch;
+    margin-top: 4px;
+    font-size: var(--text-ui);
+    line-height: 1.6;
+    color: var(--color-text);
+  }
+
+  /* Dropping a folder on the page. */
+  .drop {
+    position: absolute;
+    inset: 12px;
+    z-index: 30;
+    display: grid;
+    place-items: center;
+    padding: 30px;
+    text-align: center;
+    border-radius: 18px;
+    border: 1.5px dashed var(--color-dim);
+    background: color-mix(in srgb, var(--color-raise) 88%, transparent);
+    backdrop-filter: blur(6px);
+  }
+
   /* ── The island ────────────────────────────────────────────────
      The pill above every other window (`src/island/`). These live here rather
      than beside it because the style page draws the same three states inside

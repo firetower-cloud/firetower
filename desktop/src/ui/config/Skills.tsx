@@ -151,46 +151,51 @@ export function Skills() {
   const builtIn = shown.filter((s) => s.builtin);
   const sharedWithMe = shown.filter((s) => !s.mayShare && !s.builtin);
 
+  /**
+   * One skill.
+   *
+   * A 38px plate carrying its monogram, the name and what state it is in, two
+   * lines of what it does, and **what it can do to your machine as a line of
+   * small amber marks** rather than a row of filled badges. Four badges read
+   * as four errors; the fact is "worth reading before you approve", which is
+   * what amber means and brick does not.
+   */
   const row = (s: Skill, manage: boolean) => (
-    <div
-      key={s.id}
-      className={`flex w-full items-start gap-3 px-3.5 py-3 transition-colors ${picked.has(s.id) ? "bg-raise/60" : "hover:bg-raise"}`}
-    >
+    <div key={s.id} className={`relative ${picked.has(s.id) ? "rounded-xl bg-raise" : ""}`}>
+      <button onClick={() => setOpen(s.id)} className="sk w-full" title={s.name}>
+        <span className="plate">{monogram(s.name)}</span>
+        <span className="min-w-0 flex-1">
+          <span className="flex min-w-0 flex-wrap items-baseline gap-x-2.5 gap-y-1">
+            <span className="min-w-0 truncate font-mono text-ui font-medium text-bone">{s.name}</span>
+            <span className="shrink-0 text-meta tabular-nums text-mute">
+              {s.held ? "waiting for you" : s.builtin ? "from Firetower" : s.version > 0 ? `v${s.version}` : "pending review"}
+            </span>
+            {s.alwaysOn && <span className="shrink-0 text-meta text-mute">on by default</span>}
+          </span>
+          <span className="mt-1 line-clamp-2 block text-ui leading-snug text-dim">{s.description}</span>
+          {s.risk.length > 0 && (
+            <span className="mt-2 flex flex-wrap gap-x-3.5 gap-y-1">
+              {s.risk.map((r) => (
+                <span key={r} className="risk">
+                  <i />
+                  {r}
+                </span>
+              ))}
+            </span>
+          )}
+        </span>
+        <span className="mt-2 flex shrink-0 items-center gap-2.5">
+          <WhoCanAccess look="chip" kind="skill" id={s.id} path={s.path} />
+        </span>
+      </button>
+      {/* Selecting several to share or delete them together. On the plate's
+          corner and only once you are here, so a hundred rows are a hundred
+          skills rather than a hundred checkboxes. */}
       {manage && (
-        <span className="mt-3">
+        <span className={`absolute top-3.5 left-0 ${picked.has(s.id) ? "" : "opacity-0 focus-within:opacity-100 hover:opacity-100"} transition-opacity`}>
           <Tick on={picked.has(s.id)} label={`Select ${s.name}`} onFlip={() => toggle(s.id)} />
         </span>
       )}
-      <button onClick={() => setOpen(s.id)} className="flex min-w-0 flex-1 items-start gap-3 text-left">
-        <Mark name={s.name} />
-        <span className="min-w-0 flex-1">
-          <span className="flex items-baseline gap-2">
-            <span className="truncate font-mono text-ui text-bone">{s.name}</span>
-            {s.version > 0 && (
-              <span className="shrink-0 text-micro tabular-nums text-mute">v{s.version}</span>
-            )}
-          </span>
-          <span className="mt-0.5 line-clamp-2 block text-meta text-mute">{s.description}</span>
-          <span className="mt-1.5 flex flex-wrap items-center gap-2">
-            {s.held && <Tag tone="amber">needs review</Tag>}
-            {s.author && <Tag>{s.author}</Tag>}
-            <Tag>{s.tokens} tokens</Tag>
-            {s.defaultIn.map((r) => (
-              <Tag key={r}>{r}</Tag>
-            ))}
-            {s.alwaysOn && <Tag>always on</Tag>}
-            {!manage && <Tag>{s.mayWrite ? "editor" : "viewer"}</Tag>}
-            {s.risk.map((r) => (
-              <Tag key={r} tone="brick">
-                {r}
-              </Tag>
-            ))}
-          </span>
-        </span>
-      </button>
-      <span className="shrink-0">
-        <WhoCanAccess look="chip" kind="skill" id={s.id} path={s.path} />
-      </span>
     </div>
   );
 
@@ -220,128 +225,202 @@ export function Skills() {
       </section>
     );
 
+  const held = shown.filter((s) => s.held);
+  const mine = tickable.filter((s) => !s.held);
+
   return (
-    <div {...surface} className={over ? "rounded-xl ring-1 ring-slate" : undefined}>
-    <Section
-      title="Skills you manage"
-      note={
-        orgAdmin
-          ? "Yours, or in any directory, since you're an organisation admin. Select several to share or delete them together."
-          : "Yours, or in a directory you administer. Select several to share or delete them together."
-      }
-      action={
-        <CreateMenu
-          label="Add a skill"
-          choices={[
-            {
-              icon: Sparkles,
-              label: "Create with AI",
-              note: "Describe it; an agent writes it for you.",
-              onPick: () => start({ prompt: "Create a Firetower skill that " }),
-            },
-            {
-              icon: FolderDown,
-              label: "Upload a folder",
-              note: "A skill you already have, dropped in.",
-              onPick: () => add(),
-            },
-          ]}
-        />
-      }
-    >
-      {(feed.data.length > 6 || tickable.length > 0) && (
-        <div className="flex items-center gap-3 px-3.5 py-2">
-          {tickable.length > 0 && (
-            <Tick
-              on={allOn}
-              partly={!allOn && tickable.some((s) => picked.has(s.id))}
-              label="Select all"
-              onFlip={() => setPicked(allOn ? new Set() : new Set(tickable.map((s) => s.id)))}
-            />
-          )}
-          {feed.data.length > 6 ? (
-            <>
-              <Search className="h-3.5 w-3.5 shrink-0 text-mute" strokeWidth={2} />
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search by name, description or author"
-                className="min-w-0 flex-1 bg-transparent text-ui text-bone outline-none placeholder:text-mute"
-              />
-              <span className="shrink-0 text-micro tabular-nums text-mute">
-                {shown.length} of {feed.data.length}
-              </span>
-            </>
-          ) : (
-            <span className="text-meta text-mute">Select all</span>
-          )}
+    /* `data-wide` tells `Configuration.tsx` to drop its 48rem column: this
+       pane brings its own `.pcol`, and two centred columns inside each other
+       is a 770px page inside a 1120px one. */
+    <div {...surface} data-wide className="pcol relative">
+      {over && (
+        <div className="drop">
+          <div>
+            <span className="mx-auto grid h-14 w-14 place-items-center text-dim">
+              <FolderDown className="h-7 w-7" strokeWidth={1.5} />
+            </span>
+            <b className="mt-2 block text-lede font-mid text-bone">Drop the folder</b>
+            <p className="mt-1 max-w-[46ch] text-ui text-dim">
+              One skill, a folder of them, or a .zip of either. Nothing is written until you have looked at
+              what was found.
+            </p>
+          </div>
         </div>
       )}
-      <Rows
-        feed={{ ...feed, data: tickable }}
-        empty={query ? `No skill you manage matches “${query}”.` : "None yet. Add one to get started."}
-      >
-        {tickable.map((s) => row(s, true))}
-      </Rows>
-    </Section>
 
-    {builtIn.length > 0 && (
-      <Section
-        title="From Firetower"
-        note="Shipped with the product and on by default. They cannot be deleted — turn one off for a session in the composer's skill picker."
-      >
-        {builtIn.map((s) => row(s, false))}
-      </Section>
-    )}
-
-    {sharedWithMe.length > 0 && (
-      <Section
-        title="Shared with you"
-        note="You can turn these on in your sessions. Their directory's admins decide who else gets them."
-      >
-        {sharedWithMe.map((s) => row(s, false))}
-      </Section>
-    )}
-
-    {selected.length > 0 && (
-      <div className="pointer-events-none sticky bottom-4 z-20 mt-3 flex justify-center">
-        <div className="pointer-events-auto flex items-center gap-2 rounded-xl border border-line bg-overlay py-1.5 pl-3.5 pr-1.5 shadow-float">
-          <span className="text-ui text-bone tabular-nums">{selected.length} selected</span>
-          {trouble && <span className="max-w-[16rem] truncate text-meta text-brick">{trouble}</span>}
-          <button onClick={clear} className="control text-ui text-mute hover:text-bone">
-            Clear
-          </button>
-          <button
-            disabled={deleting}
-            onClick={() => void removeAll()}
-            className="control border border-brick-deep text-ui text-brick hover:bg-brick-tint disabled:opacity-50"
-          >
-            <Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} />
-            {deleting ? "Deleting…" : "Delete"}
-          </button>
-          <button
-            onClick={() => setSharing(true)}
-            className="control bg-bone text-ui font-medium text-ground hover:opacity-90"
-          >
-            <UserPlus className="h-3.5 w-3.5" strokeWidth={1.75} />
-            {selected.length === 1 ? "Share skill" : `Share ${selected.length} skills`}
-          </button>
+      <div className="phead2">
+        <div className="min-w-0">
+          <h1>Skills</h1>
+          <p className="sub">
+            A folder of instructions an agent reads when it decides it is relevant. Share one, and everybody
+            in that directory gets it.
+          </p>
+        </div>
+        <div className="acts">
+          <label className="find">
+            <Search className="h-[15px] w-[15px] shrink-0" strokeWidth={1.75} />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search by name or description"
+              spellCheck={false}
+              aria-label="Search skills"
+              className="placeholder:text-mute focus:outline-none"
+            />
+          </label>
+          <CreateMenu
+            label="Add a skill"
+            choices={[
+              {
+                icon: Sparkles,
+                label: "Create with AI",
+                note: "Describe it; an agent writes it for you.",
+                onPick: () => start({ prompt: "Create a Firetower skill that " }),
+              },
+              {
+                icon: FolderDown,
+                label: "Upload a folder",
+                note: "A skill you already have, dropped in.",
+                onPick: () => add(),
+              },
+            ]}
+          />
         </div>
       </div>
-    )}
 
-    {sharing && (
-      <ShareMany
-        skills={selected}
-        onClose={() => setSharing(false)}
-        onDone={() => {
-          setSharing(false);
-          clear();
-        }}
-      />
-    )}
+      {/* An agent wrote one and it is waiting. First, because it is the only
+          thing on this screen that wants a decision. */}
+      {held.length > 0 && (
+        <section className="sksec">
+          <div className="hd">
+            <h2>Waiting for you</h2>
+            <span className="n">{held.length}</span>
+          </div>
+          <div className="review">
+            <h3>An agent wrote {held.length === 1 ? "this one" : "these"}, and {held.length === 1 ? "it runs" : "they run"} code</h3>
+            <p>
+              Read every file before you approve {held.length === 1 ? "it" : "them"}. A held skill can ship
+              executable scripts and register hooks for the whole session, so it runs on every turn rather
+              than only when it is invoked.
+            </p>
+          </div>
+          <div className="skgrid mt-1">{held.map((s) => row(s, true))}</div>
+        </section>
+      )}
+
+      <Group
+        title="Yours"
+        count={mine.length}
+        note={
+          orgAdmin
+            ? "Yours, or in any directory, since you're an organisation admin. Select several to share or delete them together."
+            : "Yours, or in a directory you administer. Select several to share or delete them together."
+        }
+        empty={query ? `No skill you manage matches “${query}”.` : "None yet. Add one to get started."}
+      >
+        {mine.map((s) => row(s, true))}
+      </Group>
+
+      {builtIn.length > 0 && (
+        <Group
+          title="From Firetower"
+          count={builtIn.length}
+          note="Shipped with the product and on by default. They cannot be deleted — turn one off for a single session in the composer."
+        >
+          {builtIn.map((s) => row(s, false))}
+        </Group>
+      )}
+
+      {sharedWithMe.length > 0 && (
+        <Group
+          title="Shared with you"
+          count={sharedWithMe.length}
+          note="You can turn these on in your sessions. Their directory's admins decide who else gets them."
+        >
+          {sharedWithMe.map((s) => row(s, false))}
+        </Group>
+      )}
+
+      <p className="mt-9 flex items-center gap-2.5 text-ui text-dim">
+        <FolderDown className="h-[15px] w-[15px]" strokeWidth={1.75} />
+        Or drop a folder anywhere on this page.
+      </p>
+
+      {selected.length > 0 && (
+        <div className="pointer-events-none sticky bottom-4 z-20 mt-3 flex justify-center">
+          <div className="pointer-events-auto flex items-center gap-2 rounded-2xl bg-panel py-1.5 pr-1.5 pl-3.5 shadow-(--shadow-float)">
+            <span className="text-ui tabular-nums text-bone">{selected.length} selected</span>
+            {trouble && <span className="max-w-[16rem] truncate text-meta text-brick">{trouble}</span>}
+            <button onClick={clear} className="btn quiet">
+              Clear
+            </button>
+            <button disabled={deleting} onClick={() => void removeAll()} className="btn plain text-brick">
+              <Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} />
+              {deleting ? "Deleting…" : "Delete"}
+            </button>
+            <button onClick={() => setSharing(true)} className="btn primary">
+              <UserPlus className="h-3.5 w-3.5" strokeWidth={1.75} />
+              {selected.length === 1 ? "Share skill" : `Share ${selected.length} skills`}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {sharing && (
+        <ShareMany
+          skills={selected}
+          onClose={() => setSharing(false)}
+          onDone={() => {
+            setSharing(false);
+            clear();
+          }}
+        />
+      )}
     </div>
   );
+}
+
+/** A section of the gallery: a heading, a count, a sentence, and its rows. */
+function Group({
+  title,
+  count,
+  note,
+  empty,
+  children,
+}: {
+  title: string;
+  count: number;
+  note: string;
+  empty?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="sksec">
+      <div className="hd">
+        <h2>{title}</h2>
+        <span className="n">{count}</span>
+        <p className="note">{note}</p>
+      </div>
+      {count === 0 && empty ? (
+        <p className="mt-3 text-ui text-mute">{empty}</p>
+      ) : (
+        <div className="skgrid">{children}</div>
+      )}
+    </section>
+  );
+}
+
+/**
+ * Two letters from the name: identity by shape, never a hue.
+ *
+ * The initials of the first two words where there are two — `pr-screenshots`
+ * is "ps" — and the first two letters where there is one, so `dataviz` is
+ * "dv" rather than a lonely "d".
+ */
+function monogram(name: string): string {
+  const words = name.split(/[^a-z0-9]+/i).filter(Boolean);
+  const letters = words.length > 1 ? words[0][0] + words[1][0] : (words[0] ?? "?").slice(0, 2);
+  return letters.toLowerCase();
 }
 
 /** A checkbox, drawn the way the import review draws one. */
@@ -366,8 +445,11 @@ function Tick({
       title={label}
       disabled={disabled}
       onClick={onFlip}
-      className={`grid h-4 w-4 shrink-0 place-items-center rounded ${
-        on || partly ? "bg-raise shadow-[inset_0_0_0_1px_#4a4a54]" : "shadow-[inset_0_0_0_1px_#3a3a42]"
+      /* The ring was two hardcoded greys, which is a dark-only decision and
+         invisible on a white page. `--color-line` is the hairline in either
+         theme and `--color-dim` is the step up from it. */
+      className={`grid h-4 w-4 shrink-0 place-items-center rounded bg-panel ring-1 ${
+        on || partly ? "bg-raise ring-dim" : "ring-line"
       } ${disabled ? "cursor-not-allowed opacity-35" : ""}`}
     >
       {on && <span className="block h-1.5 w-2.5 -translate-y-px rotate-[-45deg] border-b-2 border-l-2 border-bone" />}
@@ -376,12 +458,6 @@ function Tick({
   );
 }
 
-/**
- * Nothing here yet.
- *
- * An empty screen is an invitation to act: one button to choose a folder, and
- * the pane itself takes a drop.
- */
 function Empty({
   over,
   onAdd,
@@ -401,21 +477,21 @@ function Empty({
       <span className={`grid h-11 w-11 place-items-center rounded-lg bg-raise shadow-raise ${over ? "text-slate" : "text-mute"}`}>
         <FolderDown className="h-5 w-5" strokeWidth={1.75} />
       </span>
-      <h2 className="mt-3.5 text-lede text-bone">No skills yet</h2>
-      <p className="mt-1.5 max-w-sm text-meta leading-relaxed text-mute">
+      <h2 className="mt-3.5 text-display font-mid text-bone">No skills yet</h2>
+      <p className="mt-2 max-w-sm text-read leading-relaxed text-dim">
         Ask an agent to write one for you, or drop in a skill folder you already have.
       </p>
       <div className="mt-5 flex items-center gap-2">
         <button
           onClick={onCreateWithAI}
-          className="control bg-overlay text-ui font-semibold text-bone shadow-raise hover:opacity-90"
+          className="btn primary"
         >
           <Sparkles className="h-3.5 w-3.5" strokeWidth={1.75} />
           Create with AI
         </button>
         <button
           onClick={() => picker.current?.click()}
-          className="control border border-line bg-raise text-ui text-dim hover:bg-overlay hover:text-bone"
+          className="btn plain"
         >
           Choose a folder
         </button>
@@ -434,6 +510,7 @@ function Empty({
     </div>
   );
 }
+
 
 /** Identity by shape, never a hue — the same reasoning as a server's mark. */
 function Mark({ name }: { name: string }) {
