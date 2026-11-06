@@ -268,6 +268,18 @@ wrong.
 * **File kinds and chart series** are measured against the page. The floor is
   whatever the dark set's own weakest member clears on `#111113`: **5.7:1** for
   a kind, **4.8:1** for a series.
+
+  **There are seven file kinds, not nine.** `globals.css`'s own comment says
+  "Nine categories, not ninety formats" above a list of seven, and the number
+  travelled from there into `desktop/STYLE.md`'s palette table, the phone's
+  `FileGlyph`, this document's reader, and the Spec tab of
+  `desktop-redesign.html`, which still opens *The light palette, re-gated* with
+  "Nine file kinds and four chart series". Thirteen hues were re-gated, not
+  fifteen. The comment, the table and the phone are corrected; **the artifact
+  is not**, because it is a committed record of the round rather than a live
+  document — whoever next touches it should fix that line. A count quoted from
+  a comment rather than counted from the list is the cheapest error there is to
+  make and the most expensive to notice.
 * **Syntax** matches *its own* dark ratio rather than a common floor, because in
   that set the ratios *are* the design — comment is deliberately the faintest
   thing on the page. Chroma is additionally capped at **C\* 34** so no syntax

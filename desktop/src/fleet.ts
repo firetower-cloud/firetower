@@ -42,71 +42,57 @@ const watchers = new Set<() => void>();
 const changed = () => watchers.forEach((w) => w());
 
 /**
- * The monogram, and why it is two letters rather than one.
+ * The monogram: two letters, from the organisation's name and nothing else.
  *
  * Identity here is a shape, never a hue — there are not enough distinguishable
  * hues, they collide with the signal palette, and a colour-coded server is
  * unreadable to a dichromat. Which makes the *shape* load-bearing, and one
  * letter is not enough of it: this used to be `org.slice(0, 1)`, so Acme and
- * Apex were both "A" and Northwind and Nimbus were both "N". A mark that two
- * servers share is not a mark.
+ * Apex were both "A". A mark two servers share is not a mark.
  *
- * So: the first letter, then the first letter after it that nobody else in the
- * fleet has already claimed. Acme and Apex are "Ac" and "Ap" on their own
- * second letters; Northwind and Nova both want "No", so the second takes the
- * first letter of its own that is still free and becomes "Nv". The walk is
- * over the name's own letters in order, so the mark always reads as an
- * abbreviation of the thing rather than as a code.
+ * **And it has to be stable, which is the harder half.** The first fix walked
+ * the fleet and gave the loser of a collision a different second letter. That
+ * is correct at any single moment and wrong over time: connecting a *Nova*
+ * silently re-lettered *Northwind*, and disconnecting one re-lettered the
+ * other. Somebody who has learned "Nw is production" would be wrong about it
+ * one day, and the whole reason this is a mark rather than a colour is that it
+ * can be learned.
  *
- * It holds for two Firetowers of the *same* organisation too — a staging and
- * a production Ledger come out "Le" and "Ld", both still legibly from the
- * name. The only pair that can collide is one where both names run out of
- * letters, which takes two organisations called the same two characters.
+ * So the derivation consults nothing but the name. Two words give their two
+ * initials — *Ledger Ops* is "Lo" — and one word gives its first two letters.
+ * That separates Acme from Apex and Northwind from Nimbus without the fleet
+ * being involved at all.
+ *
+ * **Two names that still land on the same two letters keep the same mark**, and
+ * that is the honest answer rather than a bug. *Northwind* and *Nova* are both
+ * "No"; so are a staging and a production Firetower for one organisation, which
+ * genuinely have the same name. A per-fleet tie-break would make the mark
+ * unstable again whatever it broke the tie *on* — the instability is in being
+ * conditional on the fleet, not in the thing consulted — so the tie is left
+ * standing and the text beside the mark resolves it. Every surface that draws
+ * one draws `org` beside it: the title bar, the switcher, the style page.
  */
-export function marksOf(orgs: string[]): string[] {
-  /* Letters and digits only. A leading "@" or a space would otherwise become
-     half the monogram. */
-  const letters = orgs.map((o) => [...o].filter((c) => /[\p{L}\p{N}]/u.test(c)));
-  const marks = orgs.map(() => "");
-  /* Grouped by first letter, because that is the only collision a second
-     letter can resolve. Two orgs starting differently never compete. */
-  const byFirst = new Map<string, number[]>();
-  letters.forEach((chars, i) => {
-    const head = (chars[0] ?? "?").toUpperCase();
-    byFirst.set(head, [...(byFirst.get(head) ?? []), i]);
-  });
-
-  for (const [head, group] of byFirst) {
-    const taken = new Set<string>();
-    for (const i of group) {
-      const tail = letters[i].slice(1).map((c) => c.toLowerCase());
-      /* Its own second letter when that is free, else the next of its own
-         letters that is — and its plain second letter if every one is taken,
-         which only happens when two names share every letter in order. */
-      const pick = tail.find((c) => !taken.has(c)) ?? tail[0] ?? "";
-      taken.add(pick);
-      marks[i] = head + pick;
-    }
-  }
-  return marks;
+export function markOf(org: string): string {
+  /* Letters and digits only, split into words. A leading "@" or a stray
+     hyphen would otherwise become half the monogram. */
+  const words = org.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  const letters = [...(words.length > 1 ? words[0][0] + words[1][0] : (words[0] ?? ""))];
+  if (letters.length === 0) return "?";
+  return letters[0].toUpperCase() + (letters[1] ?? "").toLowerCase();
 }
 
-/**
- * One server as the screens see it.
- *
- * `among` is the fleet the mark has to be unique within, which is why it is a
- * parameter rather than something this reads for itself: the de-duplication is
- * a fact about the *set*, and a function that answered it from a global would
- * give a different answer under test than in the app.
- */
-export function asBackend(s: Connected, among: Connected[] = servers()): Backend {
-  const orgs = among.some((x) => x.serverId === s.serverId) ? among : [...among, s];
-  const mark = marksOf(orgs.map((x) => x.org))[orgs.findIndex((x) => x.serverId === s.serverId)];
+/** The same, for a list. Each is still derived on its own. */
+export function marksOf(orgs: string[]): string[] {
+  return orgs.map(markOf);
+}
+
+/** One server as the screens see it. */
+export function asBackend(s: Connected): Backend {
   return {
     id: s.serverId,
     org: s.org,
     user: s.user,
-    mark,
+    mark: markOf(s.org),
     url: s.url,
     reach: known.get(s.serverId)?.error ? "unreachable" : "live",
   };
@@ -181,9 +167,8 @@ export function useFleet(): Fleet[] {
     return () => void watchers.delete(w);
   }, []);
 
-  const here = servers();
-  return here.map((s) => ({
-    backend: asBackend(s, here),
+  return servers().map((s) => ({
+    backend: asBackend(s),
     sessions: known.get(s.serverId)?.sessions ?? [],
     error: known.get(s.serverId)?.error ?? null,
   }));

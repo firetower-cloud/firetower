@@ -122,7 +122,7 @@ export function App() {
 
   const asBackend = (id: string | null): Backend | null => {
     const real = id ? real$.find((s) => s.serverId === id) : undefined;
-    return real ? liveBackend(real, real$) : null;
+    return real ? liveBackend(real) : null;
   };
   const here = asBackend(which);
   /* A choice naming a server this Mac no longer has falls back to the next

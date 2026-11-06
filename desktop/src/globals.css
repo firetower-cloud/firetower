@@ -122,8 +122,11 @@
   /* File kinds: what a file *is*, in the tree and nowhere else. A separate
      namespace from the signals above, and deliberately below them in
      saturation: a panel of four hundred rows must not be able to out-shout the
-     one thing on screen that means an agent is waiting on you. Nine
-     categories, not ninety formats. */
+     one thing on screen that means an agent is waiting on you. **Seven**
+     categories, not ninety formats — this comment said nine for a long time
+     and seven is what is below it, which is the number that propagated into
+     `STYLE.md`, the phone's `FileGlyph` and the redesign artifact. Count them
+     before quoting them. */
   --color-kind-source: #7b93b8;
   --color-kind-native: #b8845f;
   --color-kind-data: #c2ab63;

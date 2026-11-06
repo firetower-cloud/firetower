@@ -87,8 +87,8 @@ const SYNTAX: [string, string][] = [
   ["fn", "text-syn-fn"],
   ["attr", "text-syn-attr"],
 ];
-/** Four organisations, two of which share a first letter. See `marksOf`. */
-const ORGS = ["Westlabs", "Northwind", "Nova", "Parallax"];
+/** Four organisations, two of which share a first letter. See `markOf`. */
+const ORGS = ["Westlabs", "Acme", "Apex", "Parallax"];
 
 export function StylePage() {
   const [choice, resolved, setChoice] = useTheme();
@@ -251,7 +251,7 @@ export function StylePage() {
 
         <Section
           name="Firetower marks"
-          note="Identity is a shape, never a hue — a colour-coded server is unreadable to a dichromat and collides with the signal palette. Two letters rather than one, de-duplicated across the fleet: this was `org.slice(0, 1)`, so Nova and Northwind were both “N”."
+          note="Identity is a shape, never a hue — a colour-coded server is unreadable to a dichromat and collides with the signal palette. Two letters rather than one: this was `org.slice(0, 1)`, so Acme and Apex were both “A”. Derived from the organisation's name and nothing else, so connecting a Firetower never re-letters one you already had — a mark you cannot learn is not a mark."
         >
           <div className="flex items-center gap-5 rounded-md border border-line bg-panel p-4">
             {ORGS.map((org, i) => (

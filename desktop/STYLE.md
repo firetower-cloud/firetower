@@ -29,7 +29,7 @@ Three namespaces already exist and there is no room for a fourth:
 | namespace | what it means | where |
 |---|---|---|
 | signals | ember, sage, brick, slate | state, anywhere |
-| file kinds | nine categories, deliberately desaturated | the tree, and nowhere else |
+| file kinds | seven categories, deliberately desaturated | the tree, and nowhere else |
 | ground | six surfaces, neutral by design | everything |
 
 So anything new is identified by **shape, weight, or position** — never by a new hue.
