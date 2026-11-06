@@ -25,7 +25,7 @@ use crate::Out;
 /// Generous because the first thing it does is start an agent, and an agent's
 /// own startup — reading a repository's configuration, connecting whatever MCP
 /// servers it was given — is not quick and is not ours to hurry.
-const STARTUP: Duration = Duration::from_secs(30);
+pub(crate) const STARTUP: Duration = Duration::from_secs(30);
 
 /// The command that puts a supervised agent under tmux.
 ///
@@ -151,8 +151,17 @@ pub async fn wait_for_answer_since(
 
 /// Send one frame to a running agent and hang up.
 ///
-/// A new connection per message on purpose. These are rare — somebody typing —
-/// and a held connection would be one more thing to notice had gone stale.
+/// A new connection per message on purpose: a held one would be one more thing
+/// to notice had gone stale.
+///
+/// One connect attempt, which is now the narrow case rather than the ordinary
+/// one. This used to carry answers as well, on the grounds that they were rare
+/// — somebody typing — and that was true until delegation made an answer the
+/// vehicle for every tool result a lead produces. They go through
+/// [`tell_when_listening`] now. What is left here is interrupting, where there
+/// is nothing to retry: the point of a stop is that it is timely, and a stop
+/// waiting out thirty seconds against an agent that is not listening is a stop
+/// for a turn that is no longer running.
 pub async fn tell(session_id: &SessionId, frame: &ToAgent) -> Result<()> {
     AgentClient::connect(session_id.as_str())
         .await
@@ -161,9 +170,20 @@ pub async fn tell(session_id: &SessionId, frame: &ToAgent) -> Result<()> {
         .await
 }
 
-/// A newly ready ACP process can briefly lose its socket after session/new.
-/// Retry only connection failures: once a socket
-/// accepts the frame, its delivery is ambiguous and must never be replayed.
+/// Send one frame to an agent, waiting for it to be listening if it is not.
+///
+/// A newly ready ACP process can briefly lose its socket after session/new,
+/// and a supervisor restarted under a session that never stopped has not bound
+/// its own yet. Either way the agent is there and the frame is good, so the
+/// window to wait is the same one a launch is given: `STARTUP`, thirty seconds.
+///
+/// Everything the control plane says to an agent comes this way — turns, and
+/// since delegation, every answer — so the sending happens on that session's
+/// own queue rather than on the worker's read loop. See
+/// `Worker::hand_to_agent`.
+///
+/// Retry only connection failures: once a socket accepts the frame, its
+/// delivery is ambiguous and must never be replayed.
 pub async fn tell_when_listening(session_id: &SessionId, frame: &ToAgent) -> Result<()> {
     let deadline = std::time::Instant::now() + STARTUP;
     loop {
