@@ -18,7 +18,8 @@
     "reconcile": "node scripts/reconcile.mjs",
     "orval": "orval",
     "test": "vitest run",
-    "check:states": "node scripts/check-states.mjs"
+    "check:states": "node scripts/check-states.mjs",
+    "assert:design": "node scripts/assert-design.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.101.4",

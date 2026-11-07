@@ -850,6 +850,18 @@ function RepoMenu({
           </div>
         )}
       </Menu>
+      {/* What ticking another one actually does. Outside the scroller, so it
+          stays put while the list moves under the pointer. */}
+      <div className="pkfoot">
+        {checkouts.length === 0 ? (
+          "No repository — a bare workspace with no code in it."
+        ) : (
+          <>
+            <b>{checkouts.length} checked out.</b> Each one gets its own copy of the code, cut from its
+            default branch.
+          </>
+        )}
+      </div>
     </>
   );
 }
@@ -929,7 +941,7 @@ function ProfileMenu({
             }
             title={p.name}
             sub={p.does}
-            chip={p.canDelegate ? "manager" : undefined}
+            chip={p.canDelegate ? "can delegate" : undefined}
           />
         ))}
         {query && shown.length === 0 && (
@@ -938,6 +950,10 @@ function ProfileMenu({
           </div>
         )}
       </Menu>
+      <div className="pkfoot">
+        A profile is a saved way of working — what it is for, what it may do, and who it may hand work
+        to.
+      </div>
     </>
   );
 }
@@ -985,7 +1001,7 @@ function Opt({
         {sub && <span className="block truncate text-micro text-mute">{sub}</span>}
       </span>
       {chip && (
-        <span className="shrink-0 rounded bg-sage-tint px-1.5 py-0.5 text-micro text-sage">{chip}</span>
+        <span className="chip2">{chip}</span>
       )}
       <Check
         className={`h-4 w-4 shrink-0 ${on ? "text-slate" : "text-transparent"}`}

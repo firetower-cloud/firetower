@@ -19,7 +19,9 @@ holds **96 states**. Three scripts drive it:
 |---|---|
 | `pnpm shoot:proto` | Reads `SHEET` out of the artifact and photographs all 96 states at the window's own 1280×824, in light and dark. It reads the prototype and writes nothing into it. |
 | `pnpm shoot:app` | Drives the running app into the same 96 states against `mock-server.mjs`. A state it cannot reach records **why**, in `index.json`, rather than quietly photographing the nearest screen. |
-| `pnpm reconcile` | One sheet per state: the drawing and the build, light along the top and dark underneath. Four panes is the unit that can actually be compared — a contact sheet of ninety-six thumbnails tells you a screen exists and nothing about whether it matches. |
+| `pnpm reconcile` | One sheet per state: the drawing and the build, light along the top and dark underneath. Four panes is the unit that can actually be compared — a contact sheet of ninety-nine thumbnails tells you a screen exists and nothing about whether it matches. |
+| `pnpm assert:design` | The same states, **asserted rather than looked at**. See *Asserting instead of looking* below. |
+| `pnpm check:states` | The states a screenshot cannot see — hover, and anything else behind a pseudo-class. |
 
 ```
 pnpm mock &   pnpm dev &   pnpm shoot:proto && pnpm shoot:app && pnpm reconcile
@@ -53,6 +55,89 @@ and what is present count.
 
 ---
 
+## Asserting instead of looking
+
+Three of the defects the user found — the unpadded `.sk-tabs` strip, the white
+band above the inspector, and the rail's invisible hover — were **photographed
+by this sweep and not seen**. That is not carelessness, it is the method's
+ceiling: nobody reads a hundred and ninety-eight images carefully, and the
+hundredth gets less than the first. A pseudo-class never appears in a
+screenshot at all, which is why the hover survived two passes.
+
+So the comparison is now partly mechanical.
+
+### Layer 1 — the tokens
+
+`assert-design.mjs` loads the app in both themes, reads the **resolved** value
+of every design token out of the running document, and compares it against the
+drawing's own `:root` — parsed out of `desktop-redesign.html` rather than
+copied into the script, so there is no table to keep in step by hand. The
+drawing names the surfaces as furniture (`--desk`, `--sheet`, `--raised`) and
+the build names them by position (`--color-ground`, `--color-panel`,
+`--color-raise`); the mapping between the two lives in one object in that file
+and is the only hand-maintained part.
+
+Then the rule the palette states about itself:
+
+> **Every neutral holds `R = G` exactly.** Ground, panel, raise, overlay, line,
+> line-soft, bone, text, dim, mute — all ten, in both themes. Only blue is
+> lifted.
+
+**It found one on its first run.** `--color-line-soft` was `#f3f5fb` in light:
+green two points above red, which is a different hue rather than a cooler one.
+It had been missed by the drawing's own palette pass because it is the one
+neutral the drawing has no name for, so nothing had ever compared it. Now
+`#f4f4fb` — L\* held to a fraction of a point, the blue lift untouched.
+Overridden in `desktop/src/styles.css` rather than `globals.css`, because that
+sheet is byte-shared with the web client and criterion 6 holds web still until
+it opts in.
+
+### Layer 2 — the rules, against the running app
+
+`design-rules.mjs` walks the DOM at every state the sweep drives — 91 of 99,
+in both themes, so the coverage is free — and checks the invariants the
+handoff states in writing. Each maps to a defect somebody has already found:
+
+| Rule | What it is for |
+|---|---|
+| `no-uppercase` | No `text-transform: uppercase` anywhere. |
+| `ember-budget` | At most three ember marks on a screen. |
+| `mono-only-for-machine-text` | Monospace for paths, branches, versions, hashes and diffs — not for a skill's name. |
+| `min-h-0-above-a-scroller` | Every flex column between the window and a scroll container carries `min-height: 0`. The documented trap that once stopped the file viewer scrolling. |
+| `contrast-floor` | No text below its floor, **measured against the ground it actually sits on** rather than the one its own rule declares. This is the rule that catches the hover bug, and it catches the class rather than the instance. |
+| `page-column-inset` | Every direct child of a page column shares the same inline padding. The `.sk-tabs` bug, as a rule. |
+
+Touch targets are not asserted: a 44pt minimum is a finger rule, and this is a
+pointer-driven desk where the drawing's own controls are 30px. Said here
+rather than silently skipped.
+
+Results land in `.firetower/reconcile/design-assertions.md` and `.json`, one
+row per finding, each carrying **which state, which theme, which element,
+expected versus actual**. A red tick with no locator costs more than it saves.
+
+### What this cannot do
+
+Worth being plain about, because a green run is going to get quoted:
+
+- It **cannot tell anybody the design is good.** It compares the build to a
+  specification; whether the specification is right is a different question
+  and not a machine's.
+- It **cannot catch a missing screen.** Nothing asserts about a state that was
+  never built — absence has no element to measure.
+- It **cannot read copy.** A heading that says the wrong thing in the right
+  type passes every rule here.
+- It **cannot compare node-for-node against the drawing.** Two separately
+  authored DOMs have no correspondence between their nodes, and asserting
+  every computed property across them would drown real findings in false ones
+  from legitimate markup differences. That is layer 3, and it is a much
+  larger job than these two.
+
+It catches **drift**, not **absence**. The sheets and a person reading them
+are still how a screen gets compared; this is what stops a compared screen
+quietly coming apart afterwards.
+
+---
+
 ## Out of scope, and said so rather than counted as a miss
 
 **The island.** `design-handoff.md` §7 puts it outside this design. It is
@@ -71,19 +156,19 @@ untouched, deliberately, and does not appear in the table.
 | Tasks — nothing open | **differs → fixed** | The headline stayed "0 to pick from." and the column headers stayed drawn over a one-line "Nothing open here." The headline says what it found now. |
 | Tasks — not connected | **differs → fixed** | "0 to pick from." and an empty toolbar — no explanation and no way forward. Now the drawing's heading, the sentence about what a tracker is, and the way in. |
 | Agent · model · effort | **not reached** | The harness drove the microphone, not the picker; it did usefully photograph the dictation "no key" state, which is a **modal over a scrim** where the drawing keeps dictation trouble inline by the mic. Both still to do. |
-| Which repository | **differs** | The drawing closes the sheet with a footer — "**1 checked out.** Each one gets its own copy of the code, cut from its default branch." The build has no footer. |
+| Which repository | **differs → fixed** | The drawing closes every picker with a footer, and it is the argument for a picker over a plain dropdown: a list of repositories tells you their names, and the footer tells you that each one you tick is another copy of a checkout. "**N checked out.** Each one gets its own copy of the code, cut from its default branch.", or the bare-workspace line at zero. The machine picker already had its version — the readiness readout. |
 | Which machine | **differs → fixed** | The readiness note was a **brick band reading "0 things are missing"** with bare "Missing" / "Check again" lines. Nothing was missing. An empty check list is not a failure and says so quietly now. The rows' second line (what the machine is) is still absent. |
-| Which profile | **differs** | No search field; no footer explaining what a profile is; the delegation tag is a sage pill reading "manager" where the drawing has a neutral "can delegate". |
+| Which profile | **differs → fixed** | The footer is in, in the drawing's words. The delegation tag was a **sage pill reading "manager"** — green is a verdict colour and being a manager is not a thing having gone well — and is now the drawing's neutral `.chip2` on the recessed surface, reading "can delegate": what the profile *may do* rather than what it is called. **One difference left**: the drawing draws a "Search profiles" field above four profiles; the build shows it only past a handful. |
 
 ## In a workspace
 
 | Screen | Verdict | What differed |
 |---|---|---|
-| Conversation | **differs → fixed** | Name, repository, agents and the whole toolbar in one 44px band; boxed icon tabs in the right rail; "Commit" for Ship; no context meter; a key-hint row the drawing does not have. All moved to the drawing: a 52px title row, `.gbtn` toolbar, plain underlined rail tabs, `.meter`, and the hints gone. |
-| A file | **not reached** | The harness cannot open the inspector's file tree reliably yet. |
-| A diff | **not reached** | As above. |
+| Conversation | **differs → fixed** | Name, repository, agents and the whole toolbar in one 44px band; boxed icon tabs in the right rail; "Commit" for Ship; no context meter; a key-hint row the drawing does not have. All moved to the drawing: a 52px title row, `.gbtn` toolbar, plain underlined rail tabs, `.meter`, and the hints gone. **Then, reported by the user:** the title row **spanned the full width**, so the inspector began 52px down the window and the band above it came out the sheet's white. The drawing has `.insp` as a full-height column and `.whead` *inside* `.conv` — two columns, with the rail's tab row level with the conversation's title. Nested that way now; the tell is that `Overview · Diff · Files · Ship` and the workspace name share a baseline. `min-h-0` on both, for `.wsheet → .conv → .cscroll` and `.insp → .iscroll`. The header's inspector toggle also drew in both states, so there were two — showing the rail is a thing you do to the window and lives in the header, hiding it is a thing you do to the rail and lives in `.itabs .right`. |
+| A file | **differs** | Reached now. The code header differs: the drawing splits the filename from its directory and says "148 lines, 35 touched" with three controls at the right; the build shows one dimmed path, "35 lines +6 −1" and one control. **And the drawing drops `.whead` entirely when a file is open** — its tab strip sits at the top of the window — so the workspace name, the agent and every workspace control vanish while you read a file. Not implemented: it is a behaviour change with a real cost and the drawing's gate (`S.wb==="chat"`) may be a rendering convenience rather than an intent. **For the designer to confirm.** |
+| A diff | **matches** | Reached now. |
 | Preview | **not reached** | Needs a forwarded port; the mock runs none. |
-| A picture | **not reached** | No image in the mock tree. |
+| A picture | **matches** | Reached now; a PNG was added to the mock tree. |
 | Noting code | **not reached** | A text selection needs a real drag; headless Chromium produces none. See `annotate-place.test.ts`. |
 | Notes kept | **not reached** | Follows the selection above. |
 | Terminal | **differs** | The drawing docks it **above the composer** with a header naming the machine and the working directory. The build puts a thin bar **below** the composer reading "Shell · \<branch\> · ⌘J hides". |
@@ -153,9 +238,9 @@ untouched, deliberately, and does not appear in the table.
 | New directory | **to compare** | |
 | Account | **differs** | No avatar; "Forget this Firetower" is dim rather than brick with a trash glyph; the closing note about where account work is done is absent; the rail panel stays open where the drawing collapses it. |
 | Account — password held | **to compare** | Criterion 46 — amber, not ember — is the thing to check. |
-| Updates — what is running | **differs** | The drawing's headline names the **state** ("build-01 and build-02 are behind."); the build names the version ("0.14.0 is out."). No "This app" card for the client's own build. No per-machine checkbox or reason line. No explanatory paragraph above the machine list. |
-| Updates — what it will write | **to compare** | |
-| Updates — upgrading | **to compare** | |
+| Updates — what is running | **differs → fixed** | **None of the drawing's vocabulary existed here**: `.upd-row`, `.upd-sec`, `.mach`, `.run`, `.steps`, `.plan-files` and `.diffrow` were absent, so the screen was bordered cards where the drawing has rows on raised ground. Ported whole. The machines are a list with a **checkbox each** and a reason line, under the explanatory paragraph, with `Back up now` and `Plan the update for N machines` beneath them. Two differences remain and are the build's: it carries an `Upgrade to X` action on the control plane's row, which the drawing's fixture never needs because its control plane is already newest; and `HostTarget` has no `kind`, so every machine takes the server glyph where the drawing gives the local one a monitor. |
+| Updates — what it will write | **differs → fixed** | The plan was a **modal over the page**, carrying the targets, the file list and the per-file decisions at once — so it covered the machine list you had just chosen from. Now a `.run` panel **on** the page: the targets are ticked in the list, and the panel answers only "what does that write". `write`/`new`/`skip`/`keep` in the `k` column, the one amber `your edits are in the way`, `and N more`, and the drawing's three-button footer. **One deliberate departure**: in the drawing the edited file reads `write` and the button offers to keep it, so the default overwrites your edits. A default that destroys work silently is not a default — the shape and the words are the drawing's and the starting position is keep-mine, with the `k` column saying which is in force. For the designer to overrule if the drawing meant it. |
+| Updates — upgrading | **differs → fixed** | A run in progress drew as the line "A run is already in progress." above a machine list you could no longer act on, with the steps folded behind a row in Past runs — the one thing happening was the one thing you had to go and find. Now the run **is** the page: the heading reads "Moving X to Y", and the panel carries the elapsed time, Cancel, and a step per line with the glyphs the rest of the app uses for those three states. **Two crashes found by rendering it**: a run with no steps yet, and a run with no `targets` block; both drew the error boundary. The mock served the run list and not the run, which is why this state had never been photographed. |
 
 ## Every list, in all five states
 

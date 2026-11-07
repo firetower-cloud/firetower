@@ -183,6 +183,19 @@
   --color-panel-vibrant: rgb(255 255 255 / 0.72);
   --color-strip: rgb(236 238 241 / 0.82);
 
+  /* **R = G, like the other nine.** The drawing's palette pass moved every
+     light neutral onto that rule — red and green equal, blue lifted by a
+     controlled amount — because a green a point or two above red is a
+     different hue rather than a cooler one, and it read as a blue-grey cast
+     beside a neutral product. `--color-line-soft` was missed because it is
+     the one neutral the drawing has no name for, so nothing compared it;
+     `assert-design.mjs` found it on its first run. #f3f5fb → #f4f4fb holds
+     L* to a fraction of a point and leaves the blue lift alone.
+
+     Here rather than in `globals.css`: that sheet is byte-shared with the
+     web client and criterion 6 holds web still until it opts in. */
+  --color-line-soft: #f4f4fb;
+
   --color-syn-comment: #878792;
   --color-syn-string: #2d5439;
   --color-syn-keyword: #65598e;
@@ -3833,5 +3846,40 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
      this screen, and it is the only thing on it you have to decide. */
   .diffrow .n.inway {
     color: var(--color-amber-soft);
+  }
+
+  /* ── A picker says what the choice costs ───────────────────────
+     The drawing gives every picker a footer, and it is the argument for a
+     picker over a plain dropdown: a list of repositories tells you their
+     names, and this tells you that each one you tick is another copy of a
+     checkout. The machine picker already had its version — the readiness
+     readout — and the other two had nothing. */
+  .pkfoot {
+    margin: 6px 2px 2px;
+    padding: 11px 12px;
+    border-radius: 11px;
+    background: var(--color-raise);
+    font-size: 0.84375rem; /* 13.5px */
+    line-height: 1.55;
+    color: var(--color-dim);
+  }
+  .pkfoot b {
+    color: var(--color-bone);
+    font-weight: 500;
+  }
+
+  /* A note against an option — what it may do, on the recessed surface. It
+     was green on a green tint, which is a verdict colour: "manager" is not a
+     thing having gone well. */
+  .chip2 {
+    flex: none;
+    font-size: 0.78125rem; /* 12.5px */
+    color: var(--color-dim);
+    background: var(--color-overlay);
+    padding: 1px 8px;
+    border-radius: 99px;
+  }
+  [data-theme="light"] .chip2 {
+    background: var(--color-raise);
   }
 }
