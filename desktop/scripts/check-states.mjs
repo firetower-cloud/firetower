@@ -329,6 +329,65 @@ for (const [scene, want] of [
   await page.close();
 }
 
+/* ── The retired machine is offered nowhere ───────────────────────────
+   `Compute::Local` named the control plane's own container and nothing runs
+   agents there — but the server still creates it, so `listHosts` returns it.
+   The client was written believing it would not, and said so in a comment:
+   "absent by construction, which is what keeps every picker correct without
+   an exclusion in it". There was no exclusion in any of them, so every
+   picker offered `localhost`.
+
+   Driven rather than unit-tested, because the bug was *a filter that was
+   never applied anywhere* — a test of the filter would have passed by not
+   existing. This asks the screens. */
+{
+  const page = await browser.newPage({ viewport: { width: 1280, height: 824 }, deviceScaleFactor: 2 });
+  await page.addInitScript(
+    ([registry]) => {
+      window.localStorage.setItem("firetower.servers", registry);
+      window.localStorage.setItem("firetower.current", "o_1");
+      window.localStorage.setItem("firetower.theme", "dark");
+    },
+    [REGISTRY],
+  );
+  const say = (ok, what, got) => {
+    if (!ok) failed++;
+    console.log(`  ${ok ? "ok    " : "FAILED"} retired: ${what}${ok ? "" : ` — ${got}`}`);
+  };
+
+  /* The fixture really contains one, or this proves nothing. */
+  const hosts = await page.request.get(`${HERE}/api/v1/hosts`).then((r) => r.json());
+  say(
+    hosts.some((h) => h.compute?.type !== "Server"),
+    "the fixture still contains a retired machine",
+    "none in `/hosts` — this check would pass by having nothing to find",
+  );
+
+  for (const [path, what] of [
+    ["/", "the home"],
+    ["/configuration/machines", "the Machines screen"],
+    ["/sessions/s_1", "the workspace"],
+  ]) {
+    await page.goto(`${APP}/#${path}`, { waitUntil: "networkidle" });
+    await page.waitForTimeout(1600);
+    const said = await page.evaluate(() => document.body.innerText);
+    say(!said.includes("localhost"), `${what} does not name it`, "it is on screen");
+  }
+
+  /* And the picker it defaulted to. */
+  await page.goto(`${APP}/#/`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(1600);
+  await page.locator('[title="Where it runs"]').first().click();
+  await page.waitForTimeout(700);
+  const offers = await page.evaluate(() => {
+    const el = [...document.querySelectorAll('[class*="pop"], [role="menu"]')].find((x) => x.getClientRects().length);
+    return el ? el.innerText : "";
+  });
+  say(!offers.includes("localhost"), "the machine picker does not offer it", "it is in the list");
+
+  await page.close();
+}
+
 await browser.close();
 if (failed) {
   console.error(`\n  ${failed} state(s) are not what the design says.`);

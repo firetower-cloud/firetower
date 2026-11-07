@@ -101,11 +101,29 @@ const session = () => ({
 });
 
 const HOSTS = [
+  /* **The control plane's own container.** `accounts.rs` still calls
+     `ensure_host("localhost", ...)`, so `listHosts` really does return this —
+     which is the thing the client assumed it would not. Without it in the
+     fixture the bug cannot be reproduced here at all. */
+  {
+    id: "localhost",
+    name: "localhost",
+    state: "Online",
+    compute: { type: "Local" },
+    cpus: 8,
+    memoryMb: 16384,
+    workerVersion: "0.34.1",
+    agents: [],
+  },
   {
     id: "h_1",
     name: "this Mac",
     state: "Online",
-    compute: { type: "Local" },
+    /* **A machine somebody added, over ssh**, which is the only kind there
+       is now. It was `Local` here, so after the retirement every picker read
+       the fixture's one real machine as a retired one — which would have
+       masked the bug this fixture exists to show. */
+    compute: { type: "Server", host: "10.4.0.21", user: "ubuntu", port: 22 },
     cpus: 10,
     memoryMb: 32768,
     docker: { status: "Running", detail: "28.1.1" },

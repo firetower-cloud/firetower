@@ -235,9 +235,36 @@ function hostnameOf(remote: string): string {
   return (afterUser.split(/[/:]/)[0] ?? "").toLowerCase();
 }
 
+/**
+ * The machines agents run on.
+ *
+ * **The retired one is excluded here, because the server still sends it.**
+ * `Compute::Local` named the control plane's own container and nothing runs
+ * agents there any more — but `accounts.rs` still calls
+ * `ensure_host("localhost", ...)`, so `listHosts` returns it exactly as it
+ * always did.
+ *
+ * The client was written believing otherwise. The note under `machineGone`
+ * said a retired machine is "absent by construction, which is what keeps
+ * every picker correct without an exclusion in it" — and there is no
+ * exclusion in any of them, so every picker offered `localhost` and the
+ * composer's chip defaulted to it. **An invariant nobody enforces is worse
+ * than no invariant**: it is the reason nobody went looking. This is not
+ * something our rewrite dropped; it reproduces on `main`.
+ *
+ * One place, which is what that note wanted and did not have. A session that
+ * ran on the retired machine resolves to no host, which is what
+ * `machineGone` already exists to say.
+ */
 export function useHosts() {
   const q = useListHosts();
-  return { data: q.data ?? [], loading: q.isPending, error: q.error ? why(q.error) : null, trouble: trouble(q.error) };
+  const every = q.data ?? [];
+  return {
+    data: every.filter((h) => h.compute.type === "Server"),
+    loading: q.isPending,
+    error: q.error ? why(q.error) : null,
+    trouble: trouble(q.error),
+  };
 }
 
 /**
