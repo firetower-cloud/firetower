@@ -180,6 +180,21 @@ export const SHOTS = [
     go: (p) => at(p, "/", 1600),
   },
   { id: "starting-work__panel-nothing-running", scene: "ws-none", go: (p) => at(p, "/", 1400) },
+  /* **Who can access it** — the sharing card, and the directory picker inside
+     it. Never driven before, which is half of why a card painted with the
+     recessed fill was reported three times and reported closed twice: the
+     rule that would have caught it only ever ran on screens this sheet drives,
+     and this was not one of them. */
+  {
+    /* The toolbar control's `title` carries the path, so it is matched by its
+       `aria-label` — which is the stable half of what it says. */
+    id: "in-a-workspace__who-can-access-it",
+    go: async (p) => {
+      await at(p, "/sessions/s_1", 1800);
+      await p.getByRole("button", { name: "Who can access it" }).first().click();
+      await pause(p, 800);
+    },
+  },
   { id: "starting-work__tasks-has-work", go: (p) => at(p, "/tasks") },
   /* **The seeded home** — proposition 5. Driven through the task's own Start,
      because what is being checked is that the seed survives the navigation:

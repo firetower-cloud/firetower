@@ -486,7 +486,7 @@ export function Sharing({
         onMouseDown={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal
-        className="flex max-h-[76vh] w-[27rem] flex-col overflow-hidden rounded-xl border border-line bg-overlay shadow-(--shadow-float)"
+        className="flex max-h-[76vh] w-[27rem] flex-col overflow-hidden rounded-xl border border-line lift shadow-(--shadow-float)"
       >
         <div className="flex items-start gap-2 border-b border-line px-3.5 py-2.5">
           <span className="min-w-0 flex-1">
@@ -824,7 +824,7 @@ export function ShareMany({ skills, onClose, onDone }: { skills: Skill[]; onClos
         onMouseDown={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal
-        className="flex max-h-[76vh] w-[27rem] flex-col overflow-hidden rounded-xl border border-line bg-overlay shadow-(--shadow-float)"
+        className="flex max-h-[76vh] w-[27rem] flex-col overflow-hidden rounded-xl border border-line lift shadow-(--shadow-float)"
       >
         <div className="flex items-start gap-2 border-b border-line px-3.5 py-2.5">
           <span className="min-w-0 flex-1">

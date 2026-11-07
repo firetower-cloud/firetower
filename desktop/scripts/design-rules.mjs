@@ -274,16 +274,40 @@ export const RULES = function collect() {
   }
 
   /* ── 6. A surface used outside the role it was defined for ────────
-     **Two bugs, one shape.** The context menu and the annotate popover were
-     painted `--color-overlay`, which the palette reserves for a *recessed*
-     fill — a pressed chip, a recessed track. A card that floats above the
-     page wearing the colour of a dent in it reads grey-lavender, which is
-     what got reported twice.
+     `--color-overlay` is the *recessed* fill — a pressed chip, an inset
+     track, a sunk well. A card that floats above the page wearing the colour
+     of a dent in it reads as a grey slab, and **the user reported it three
+     times**: the context menu, the annotate popover, and the sharing modal.
 
-     Expressible cheaply because it is a fact about the laid-out page rather
-     than about source: a floating card is positioned, has a shadow and a
-     radius, and its own background is its surface. The recessed fill and the
-     rule colour are the two that may never be one. */
+     ## Why the first version of this rule passed the third one
+
+     It asked the element about **its own `position`**:
+
+         position: fixed|absolute  &&  box-shadow  &&  radius > 0
+
+     A modal card does not position itself. `Sharing.tsx` puts a `fixed`
+     scrim and a `fixed` centring wrapper around a card that is a plain flex
+     child — `position: static` — so the predicate was false and the card was
+     never looked at. The same was true of `QuickOpen`, `voice/Dialogs`,
+     `SkillPicker`, `attach`'s drop chip, and the three floating pills in
+     `FileTab`, `Chat` and `ImageTab`. The rule reported only the handful of
+     popovers that happen to position themselves, which is why it was green
+     while the defect was on screen.
+
+     ## What it asks now — two questions, neither about `position`
+
+     **A. A recessed fill may not cast a shadow.** A shadow says *above* and
+     the recessed fill says *below*; an element claiming both is wrong
+     whatever it is and wherever it sits. This is the whole of the reported
+     bug — every one of those cards carries `--shadow-float` — and it also
+     catches a *lifted* control painted with the dent, which is what three
+     segmented thumbs were doing with `--shadow-raise`.
+
+     **B. A card in an overlay may not be the recessed fill**, for the ones
+     with no shadow. "In an overlay" is read from the tree: an ancestor that
+     is `fixed` and covers most of the viewport. Only the **outermost**
+     surface-painting box in there is the card — otherwise every pressed chip
+     inside a popover would be reported, and those are correctly recessed. */
   {
     const d = document.createElement("div");
     document.body.append(d);
@@ -293,12 +317,46 @@ export const RULES = function collect() {
       named[getComputedStyle(d).backgroundColor.replace(/\s/g, "")] = t;
     }
     d.remove();
+    const roleOf = (el) => named[getComputedStyle(el).backgroundColor.replace(/\s/g, "")];
+    const says = (el, role) =>
+      say(
+        "surface-role",
+        el,
+        "a raised surface — `lift`, or `.pop`/`.sheet2`/`.dlg`",
+        `--color-${role}, which is ${role === "overlay" ? "the recessed fill" : "a rule colour"}`,
+      );
+
+    /* A — the contradiction, asked of everything. */
     for (const el of all) {
       const s = getComputedStyle(el);
-      const floats = (s.position === "fixed" || s.position === "absolute") && s.boxShadow !== "none" && parseFloat(s.borderRadius) > 0;
-      if (!floats) continue;
-      const role = named[s.backgroundColor.replace(/\s/g, "")];
-      if (role) say("surface-role", el, "a raised surface — panel or raise", `--color-${role}, which is ${role === "overlay" ? "the recessed fill" : "a rule colour"}`);
+      if (s.boxShadow === "none") continue;
+      /* An inset shadow *is* how you draw a well, so it argues the other way. */
+      if (s.boxShadow.includes("inset")) continue;
+      const role = roleOf(el);
+      if (role) says(el, role);
+    }
+
+    /* B — a shadowless card inside an overlay. */
+    const roomy = (el) => {
+      const b = el.getBoundingClientRect();
+      return b.width > innerWidth * 0.6 && b.height > innerHeight * 0.6;
+    };
+    const inOverlay = (el) => {
+      for (let n = el.parentElement; n && n !== document.body; n = n.parentElement) {
+        const s = getComputedStyle(n);
+        if (s.position === "fixed" && roomy(n)) return true;
+      }
+      return false;
+    };
+    const painted = all.filter((el) => {
+      const s = getComputedStyle(el);
+      const c = rgb(s.backgroundColor);
+      return !!c && c.a > 0.5 && parseFloat(s.borderRadius) > 0 && inOverlay(el);
+    });
+    const cards = painted.filter((el) => !painted.some((other) => other !== el && other.contains(el)));
+    for (const el of cards) {
+      const role = roleOf(el);
+      if (role) says(el, role);
     }
   }
 

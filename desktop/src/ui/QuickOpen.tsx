@@ -44,7 +44,7 @@ export function QuickOpen({ sessionId, open, onClose, onPick }: { sessionId: str
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-scrim pt-[12vh] backdrop-blur-[2px]" onMouseDown={onClose}>
-      <div onMouseDown={(e) => e.stopPropagation()} className="w-[34rem] overflow-hidden rounded-xl border border-line bg-overlay shadow-(--shadow-float)">
+      <div onMouseDown={(e) => e.stopPropagation()} className="w-[34rem] overflow-hidden rounded-xl border border-line lift shadow-(--shadow-float)">
         <input
           autoFocus value={q} onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => {

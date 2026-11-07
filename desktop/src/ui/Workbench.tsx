@@ -562,7 +562,7 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
                 title={`${r.agent === "ClaudeCode" ? "Claude Code" : r.agent} — ${r.title}`}
                 className={`flex items-center gap-1.5 rounded-md px-2 py-1 transition-colors ${
                   r.id === run.id
-                    ? "bg-overlay text-bone shadow-(--shadow-raise)"
+                    ? "lift text-bone shadow-(--shadow-raise)"
                     : "text-mute hover:bg-raise"
                 }`}
               >

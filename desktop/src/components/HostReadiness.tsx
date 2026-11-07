@@ -359,7 +359,7 @@ function Do({ label, onClick, busy }: { label: string; onClick: () => void; busy
       type="button"
       disabled={busy}
       onClick={onClick}
-      className="shrink-0 rounded-sm border border-line bg-overlay px-2.5 py-1 text-micro text-bone transition-colors hover:border-dim disabled:opacity-50"
+      className="shrink-0 rounded-sm border border-line bg-raise px-2.5 py-1 text-micro text-bone transition-colors hover:border-dim disabled:opacity-50"
     >
       {busy ? "Working…" : label}
     </button>

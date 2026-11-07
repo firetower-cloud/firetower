@@ -91,7 +91,7 @@ function Card({ children, onClose }: { children: React.ReactNode; onClose: () =>
         onMouseDown={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal
-        className="w-[26rem] overflow-hidden rounded-xl border border-line bg-overlay shadow-(--shadow-float)"
+        className="w-[26rem] overflow-hidden rounded-xl border border-line lift shadow-(--shadow-float)"
       >
         {children}
       </div>

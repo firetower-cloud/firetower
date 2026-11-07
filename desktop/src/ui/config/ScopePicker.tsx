@@ -76,29 +76,27 @@ export function ScopePicker({
             {selected.length === 0 ? "· all" : `· ${selected.length} of ${items.length}`}
           </span>
         </div>
-        <div className="flex rounded-lg border border-line bg-ground p-0.5">
+        {/* **`.seg`, not a hand-rolled one.** This was a `bg-ground` track
+            with two `rounded-md` buttons whose active one took `bg-overlay`
+            — the recessed fill, on the thumb. `.seg` has it the right way
+            round and has since the components pass: **the track is recessed
+            and the thumb is raised**, which is the whole reason a segmented
+            control reads as one. Two surfaces, one agreed component. */}
+        <span className="seg" role="group" aria-label="Which of these it may reach">
           <button
             type="button"
+            aria-pressed={!expanded}
             onClick={() => {
               setExpanded(false);
               onChange([]);
             }}
-            className={`rounded-md px-3 py-1 text-meta transition-colors ${
-              !expanded ? "bg-overlay text-bone" : "text-dim hover:text-bone"
-            }`}
           >
             All
           </button>
-          <button
-            type="button"
-            onClick={() => setExpanded(true)}
-            className={`rounded-md px-3 py-1 text-meta transition-colors ${
-              expanded ? "bg-overlay text-bone" : "text-dim hover:text-bone"
-            }`}
-          >
+          <button type="button" aria-pressed={expanded} onClick={() => setExpanded(true)}>
             Only these
           </button>
-        </div>
+        </span>
       </div>
       <p className="mt-1 text-micro text-mute">{hint}</p>
 

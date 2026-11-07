@@ -36,7 +36,7 @@ export function PortPicker({ sessionId, open: already, onPick, onClose }: { sess
   };
 
   return (
-    <div ref={box} className="absolute top-full right-0 z-40 mt-1.5 w-[22rem] overflow-hidden rounded-xl border border-line bg-overlay shadow-(--shadow-float)">
+    <div ref={box} className="absolute top-full right-0 z-40 mt-1.5 w-[22rem] overflow-hidden rounded-xl border border-line lift shadow-(--shadow-float)">
       <div className="px-3.5 pt-3 pb-2 text-meta text-dim">Preview a port</div>
       {seen.length > 0 && (
         <ul className="pb-1">

@@ -351,7 +351,7 @@ export function ArtifactTab({
             title={bridge.ready ? "Pick an element and write a note on it" : "The page has not connected its picker yet"}
             className={`control ${
               bridge.annotating
-                ? "bg-overlay font-medium text-bone shadow-(--shadow-raise)"
+                ? "lift font-medium text-bone shadow-(--shadow-raise)"
                 : "border border-line bg-raise text-dim hover:bg-overlay hover:text-bone"
             } disabled:opacity-40`}
           >
@@ -397,7 +397,7 @@ export function ArtifactTab({
                   aria-label="Close"
                   onClick={() => setSharing(false)}
                 />
-                <div className="absolute top-full right-0 z-50 mt-1.5 w-[21rem] overflow-hidden rounded-xl border border-line bg-overlay shadow-(--shadow-float)">
+                <div className="absolute top-full right-0 z-50 mt-1.5 w-[21rem] overflow-hidden rounded-xl border border-line lift shadow-(--shadow-float)">
                   <div className="px-3.5 pt-3 pb-2 text-meta text-dim">Share this artifact</div>
 
                   <button
@@ -576,7 +576,7 @@ export function ArtifactTab({
       </div>
 
       {notice && (
-        <div className="pointer-events-none absolute bottom-4 left-1/2 z-30 -translate-x-1/2 rounded-full border border-line bg-overlay px-3.5 py-1.5 text-meta text-dim shadow-(--shadow-float)">
+        <div className="pointer-events-none absolute bottom-4 left-1/2 z-30 -translate-x-1/2 rounded-full border border-line lift px-3.5 py-1.5 text-meta text-dim shadow-(--shadow-float)">
           {notice}
         </div>
       )}

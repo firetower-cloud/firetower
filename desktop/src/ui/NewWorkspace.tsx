@@ -270,7 +270,7 @@ export function NewWorkspace({
                 {adding && listAt && (
                   <>
                     <button className="catcher z-[60]" onClick={() => setAdding(false)} />
-                    <div style={listAt} className="fixed z-[70] w-[22rem] overflow-hidden rounded-lg border border-line bg-overlay shadow-(--shadow-float)">
+                    <div style={listAt} className="fixed z-[70] w-[22rem] overflow-hidden rounded-lg border border-line lift shadow-(--shadow-float)">
                       <div className="flex items-center gap-2 border-b border-line px-2.5">
                         <Search className="h-3.5 w-3.5 shrink-0 text-mute" strokeWidth={1.75} />
                         <input

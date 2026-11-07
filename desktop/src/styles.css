@@ -2876,6 +2876,34 @@ html:not([data-platform="macos"]) {
   /* ── A menu, anchored to what opened it ──────────────────────────
      16px radius, 7px of padding, and rows that are a name over a sub-line —
      not a list of links. The sheet is what it sits on, not a border. */
+  /* ── The surface a floating object takes ─────────────────────────
+     **One class, because writing it out per component is what caused this.**
+     `--color-overlay` is the *recessed* fill — a pressed chip, an inset
+     track, a sunk well. Painting a floating card with it was reported by the
+     user **three times**, and each pass fixed the one file it was pointed at:
+     the scrim pass corrected thirteen backdrops and left every card, and the
+     card fix landed on `Annotate` alone.
+
+     **Why it survived three passes:** the surface ladder runs ground → panel
+     → raise → overlay, which in dark is monotonically *lighter*
+     (#0b0b0c → #111113 → #17171a → #1e1e22), so an overlay card in dark
+     reads as a plausible step above the page. In light the ladder is not
+     monotonic — #f2f2f3 → #ffffff → #f6f6f9 → #e8e8ec — so the same card is
+     a grey slab on a white page. It looks fine in dark and wrong in light,
+     and it was being reviewed in dark.
+
+     The values are `.pop`'s, which the drawing states as `--sheet` in light
+     and `--raised` in dark. `.pop`, `.sheet2` and `.dlg` say the same thing
+     for their own fixed shapes; this is for everything that is a card of its
+     own size. `design-rules.mjs` asserts the rest: a recessed fill may not
+     cast a shadow. */
+  .lift {
+    background: var(--color-raise);
+  }
+  [data-theme="light"] .lift {
+    background: var(--color-panel);
+  }
+
   .pop {
     padding: 7px;
     min-width: 244px;

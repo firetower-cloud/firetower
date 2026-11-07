@@ -180,7 +180,7 @@ export function PreviewTab({ session, port, path: initialPath = "/", onPath }: {
           /* Heavier when on, never a hue — see the note in ArtifactTab. */
           className={`control ml-1 shrink-0 ${
             bridge.annotating
-              ? "bg-overlay font-medium text-bone shadow-(--shadow-raise)"
+              ? "lift font-medium text-bone shadow-(--shadow-raise)"
               : "border border-line bg-raise text-dim hover:bg-overlay hover:text-bone"
           } disabled:opacity-40`}
         >
@@ -253,7 +253,7 @@ export function PreviewTab({ session, port, path: initialPath = "/", onPath }: {
       )}
 
       {notice && (
-        <div className="pointer-events-none absolute bottom-4 left-1/2 z-30 -translate-x-1/2 rounded-full border border-line bg-overlay px-3.5 py-1.5 text-meta text-dim shadow-(--shadow-float)">{notice}</div>
+        <div className="pointer-events-none absolute bottom-4 left-1/2 z-30 -translate-x-1/2 rounded-full border border-line lift px-3.5 py-1.5 text-meta text-dim shadow-(--shadow-float)">{notice}</div>
       )}
 
       {drafting && (

@@ -146,7 +146,7 @@ export function Repositories({
          picks the window up and moves it. `src/drag.ts` lets controls through
          by looking for one under the pointer, which a paragraph is not. */
       onMouseDown={(e) => e.stopPropagation()}
-      className="absolute top-full left-0 z-40 mt-1.5 w-[24rem] overflow-hidden rounded-xl border border-line bg-overlay shadow-(--shadow-float)"
+      className="absolute top-full left-0 z-40 mt-1.5 w-[24rem] overflow-hidden rounded-xl border border-line lift shadow-(--shadow-float)"
     >
       <div className="flex items-center gap-2 px-3.5 pt-3 pb-2">
         {picking && checkouts.length > 0 && (

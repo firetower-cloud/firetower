@@ -302,7 +302,7 @@ export function AddSkill({
             <button
               disabled={ready.length === 0 || clashes.length > 0 || step === "saving"}
               onClick={confirm}
-              className="control bg-overlay text-ui font-mid text-bone shadow-raise disabled:bg-raise disabled:font-normal disabled:text-mute"
+              className="control lift text-ui font-mid text-bone shadow-raise disabled:bg-raise disabled:font-normal disabled:text-mute"
             >
               {step === "saving"
                 ? "Importing…"

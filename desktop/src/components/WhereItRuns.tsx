@@ -244,7 +244,7 @@ export function HostCard({ host, where, at }: { host: Host; where: NonNullable<R
   return (
     <div
       style={at ? { left: Math.min(at.x, window.innerWidth - 22 * 16 - 12), top: at.y + 8 } : undefined}
-      className={`${at ? "fixed" : "absolute bottom-7 left-3"} z-40 w-[22rem] rounded-xl border border-line bg-overlay px-4 py-3 font-sans text-left shadow-(--shadow-float)`}
+      className={`${at ? "fixed" : "absolute bottom-7 left-3"} z-40 w-[22rem] rounded-xl border border-line lift px-4 py-3 font-sans text-left shadow-(--shadow-float)`}
     >
       <div className="flex items-center gap-2">
         <where.Mark className="h-3.5 w-3.5 text-slate" strokeWidth={1.75} />

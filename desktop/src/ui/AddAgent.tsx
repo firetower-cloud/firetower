@@ -82,7 +82,7 @@ export function AddAgent({
   return (
     <>
       <div className="catcher z-40" onMouseDown={onClose} />
-      <div ref={card} onMouseDown={(e) => e.stopPropagation()} className="fixed top-24 left-1/2 z-50 w-[26rem] -translate-x-1/2 overflow-hidden rounded-xl border border-line bg-overlay shadow-(--shadow-float)">
+      <div ref={card} onMouseDown={(e) => e.stopPropagation()} className="fixed top-24 left-1/2 z-50 w-[26rem] -translate-x-1/2 overflow-hidden rounded-xl border border-line lift shadow-(--shadow-float)">
         <div className="flex items-center gap-2 px-4 pt-3.5 pb-2">
           <Bot className="h-4 w-4 text-slate" strokeWidth={1.75} />
           <span className="text-ui text-bone">Add an agent to this workspace</span>

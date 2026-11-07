@@ -201,7 +201,7 @@ export function SkillPicker({ session, onClose }: { session: Session; onClose: (
         onMouseDown={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal
-        className={`flex max-h-[78vh] flex-col overflow-hidden rounded-xl border border-line bg-overlay shadow-(--shadow-float) ${
+        className={`flex max-h-[78vh] flex-col overflow-hidden rounded-xl border border-line lift shadow-(--shadow-float) ${
           empty ? "w-[min(26rem,93vw)]" : "w-[min(36rem,93vw)]"
         }`}
       >
@@ -269,7 +269,7 @@ export function SkillPicker({ session, onClose }: { session: Session; onClose: (
                 const rows = capped ? g.rows.slice(0, 6) : g.rows;
                 return (
                   <div key={g.at}>
-                    <div className="sticky top-0 z-10 flex items-baseline gap-1.5 bg-overlay px-3.5 pt-2.5 pb-1 text-micro">
+                    <div className="sticky top-0 z-10 flex items-baseline gap-1.5 lift px-3.5 pt-2.5 pb-1 text-micro">
                       <span className="text-dim">{g.title}</span>
                       <span className="tabular-nums text-mute">{g.rows.length}</span>
                     </div>
