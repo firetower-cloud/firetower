@@ -111,8 +111,9 @@ between your turns, never inside one — so dispatch, do what does not depend \
 on it, then end your turn with a one-line status. \
 A child cannot spawn, cannot ask the person, and cannot message or schedule. \
 A question it has comes to you as a message; a command it needs permission \
-for goes to the person. At most 4 children may be live at once and 8 per \
-session; a refusal says which limit and why.";
+for goes to the person. There is no cap on how many you start or how many run \
+at once — dispatch what the work actually needs, and no more, since each one \
+costs tokens and a workspace.";
 
 const CHILDREN_DESCRIPTION: &str = "\
 The children this session started. `list` says what each is doing and \
