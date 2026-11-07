@@ -479,7 +479,7 @@ export function Sharing({
 
   return (
     <div
-      className="fixed inset-0 z-[60] grid place-items-start justify-center bg-ground/40 pt-[12vh] backdrop-blur-[2px]"
+      className="fixed inset-0 z-[60] grid place-items-start justify-center bg-scrim pt-[12vh] backdrop-blur-[2px]"
       onMouseDown={onClose}
     >
       <div
@@ -817,7 +817,7 @@ export function ShareMany({ skills, onClose, onDone }: { skills: Skill[]; onClos
 
   return (
     <div
-      className="fixed inset-0 z-[60] grid place-items-start justify-center bg-ground/40 pt-[12vh] backdrop-blur-[2px]"
+      className="fixed inset-0 z-[60] grid place-items-start justify-center bg-scrim pt-[12vh] backdrop-blur-[2px]"
       onMouseDown={onClose}
     >
       <div

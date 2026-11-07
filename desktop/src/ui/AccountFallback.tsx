@@ -71,7 +71,7 @@ function FallbackEditor({ sessionId, agent, currentId, initial, onClose }: { ses
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-ground/70 pt-[10vh] backdrop-blur-[3px]" onMouseDown={onClose}>
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-scrim pt-[10vh] backdrop-blur-[3px]" onMouseDown={onClose}>
       <div onMouseDown={(e) => e.stopPropagation()} className="w-[32rem] overflow-hidden rounded-2xl border border-line bg-panel shadow-(--shadow-float)">
         <div className="flex items-center gap-3 border-b border-line px-5 py-3.5">
           <h2 className="text-title text-bone">When this account reaches its limit</h2>

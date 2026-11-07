@@ -78,15 +78,18 @@ export function Rail({ backend, onSwitch, onForgot }: { backend: Backend; onSwit
      drifted to on the way back. */
   useEffect(() => setPeek(null), [path]);
 
-  /* **Collapsed means collapsed.** This used to `setPinned(true)` on every
-     destination click, on the theory that going somewhere means wanting to
-     see what is there. It means the panel cannot be dismissed: you shut it,
-     you click an icon, it is back. Navigating is navigating; opening the
-     panel is the title bar's toggle and `⌘\`, and those are the only two
-     things that should open it. */
+  /* **Arriving at a destination opens the panel.** This went back and forth:
+     it opened the panel, then it did not — on the argument that a panel you
+     shut should stay shut — and now it does again, because the panel is how
+     you reach a destination's sub-elements and arriving with it closed hides
+     the thing you came for.
+  
+     So there are three ways in and two ways out: the title bar's toggle and
+     `⌘\` both open and close it; pressing a destination only opens. */
   const go = (to: { id: DestinationId; href: string }) => {
     hold();
     setPeek(null);
+    setPinned(true);
     navigate(to.href);
   };
 

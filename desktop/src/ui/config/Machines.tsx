@@ -327,7 +327,7 @@ function Add({ onClose, onAdded }: { onClose: () => void; onAdded: (id: string) 
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-ground/70 py-[8vh] backdrop-blur-[3px]" onMouseDown={onClose}>
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-scrim py-[8vh] backdrop-blur-[3px]" onMouseDown={onClose}>
       <div onMouseDown={(e) => e.stopPropagation()} className="w-[36rem] overflow-hidden rounded-2xl border border-line bg-panel shadow-(--shadow-float)">
         <div className="flex items-center gap-3 border-b border-line px-5 py-3.5">
           <h2 className="text-title text-bone">Add a machine</h2>

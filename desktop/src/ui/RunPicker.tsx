@@ -90,7 +90,7 @@ export function RunPicker({
 
       {open && (
         <>
-          <button className="fixed inset-0 z-20 cursor-default" onClick={shut} />
+          <button className="catcher z-20" onClick={shut} />
           <div className="scroll-slim absolute bottom-full left-0 z-30 mb-1.5 max-h-[min(26rem,60vh)] w-[18rem] overflow-y-auto overflow-x-hidden rounded-lg border border-line bg-overlay p-1 shadow-(--shadow-float)">
             {pane === null ? (
               <>

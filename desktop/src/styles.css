@@ -2124,7 +2124,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
   /* A child of the row above it: indented, lighter, shorter. */
   .r.sub {
     padding-left: 48px;
-    min-height: 42px;
+    min-height: var(--row);
   }
   .r.sub .tx b {
     font-size: 0.90625rem;
@@ -2911,7 +2911,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
     align-items: center;
     gap: 9px;
     width: 100%;
-    min-height: 42px;
+    min-height: var(--row);
     padding: 5px 9px;
     border-radius: 10px;
     text-align: left;
@@ -3034,7 +3034,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
     display: flex;
     align-items: center;
     gap: 10px;
-    min-height: 42px;
+    min-height: var(--row);
     padding: 6px 9px;
     border-radius: 10px;
     width: 100%;
@@ -3238,7 +3238,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
     display: flex;
     align-items: center;
     gap: 10px;
-    min-height: 42px;
+    min-height: var(--row);
     padding: 9px 13px;
     border-radius: 12px;
     background: var(--color-raise);
@@ -4197,5 +4197,23 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
     font-size: var(--text-ui);
     line-height: 1.55;
     color: var(--color-dim);
+  }
+
+  /* ── The catcher ───────────────────────────────────────────────
+     **A popover is anchored to the thing you are reading**, so it takes no
+     scrim: dimming the page would hide the code you selected, the row you
+     opened the menu on, the chip you are choosing for. What it needs is
+     something to catch the click that dismisses it, and nothing else.
+
+     Named, because it was six copies of `fixed inset-0 z-40` with no name —
+     which is unsearchable, so nothing could tell a popover that forgot its
+     catcher from one that never had a page behind it. The drawing calls it
+     `.catcher`; the stylesheet's `--color-scrim` is the opposite thing, and
+     the two reading alike is most of why a sheet's wash and a popover's
+     catcher kept being confused for one another. */
+  .catcher {
+    position: fixed;
+    inset: 0;
+    cursor: default;
   }
 }

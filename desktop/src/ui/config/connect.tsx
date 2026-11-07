@@ -116,7 +116,7 @@ function CodeModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-ground/80 pt-[14vh] backdrop-blur-[3px]"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-scrim pt-[14vh] backdrop-blur-[3px]"
       onMouseDown={onClose}
     >
       <div

@@ -162,7 +162,7 @@ export function Annotate({
     <>
       {/* Catches the click that dismisses, without dimming the file — you are
           meant to keep reading the code you just selected. */}
-      <div className="fixed inset-0 z-40" onMouseDown={onCancel} />
+      <div className="catcher z-40" onMouseDown={onCancel} />
 
       <div
         ref={card}

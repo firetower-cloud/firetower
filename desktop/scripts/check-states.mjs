@@ -150,23 +150,25 @@ for (const theme of ["light", "dark"]) {
   await page.waitForTimeout(500);
   say(!(await visible()), "the title bar's toggle collapses it");
 
-  /* The bug: clicking a destination icon re-expanded it. */
-  for (const where of ["Tasks", "Artifacts", "Customize"]) {
-    const go = page.getByRole("button", { name: where }).first();
-    if ((await go.count()) === 0) continue;
-    await go.click();
-    await page.waitForTimeout(500);
-    say(!(await visible()), `it stays collapsed after going to ${where}`);
-  }
-
-  /* And it survives a reload, from `firetower.panel`. */
+  /* **And it survives a reload** — the part of the earlier behaviour that
+     stands. `firetower.panel` is read at module load, before React renders,
+     so a collapsed panel does not flash open on launch. */
   await page.reload({ waitUntil: "networkidle" });
   await page.waitForTimeout(1200);
   say(!(await visible()), "it is still collapsed after a reload");
 
-  await page.getByRole("button", { name: /Show the panel/i }).first().click();
+  /* **Arriving at a destination opens it**, which is the reverse of what
+     this file asserted a few hours ago. The panel is how you reach a
+     destination's sub-elements, so arriving with it shut hides what you
+     came for. */
+  const go = page.getByRole("button", { name: "Tasks" }).first();
+  await go.click();
+  await page.waitForTimeout(600);
+  say(await visible(), "pressing a destination opens it");
+
+  await page.getByRole("button", { name: /Hide the panel/i }).first().click();
   await page.waitForTimeout(500);
-  say(await visible(), "and the toggle brings it back");
+  say(!(await visible()), "and the toggle still closes it");
 
   await page.close();
 }

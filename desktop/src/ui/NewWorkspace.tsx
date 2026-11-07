@@ -198,7 +198,7 @@ export function NewWorkspace({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-ground/70 py-[7vh] backdrop-blur-[3px]"
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-scrim py-[7vh] backdrop-blur-[3px]"
       onMouseDown={onClose}
     >
       <div
@@ -269,7 +269,7 @@ export function NewWorkspace({
 
                 {adding && listAt && (
                   <>
-                    <button className="fixed inset-0 z-[60] cursor-default" onClick={() => setAdding(false)} />
+                    <button className="catcher z-[60]" onClick={() => setAdding(false)} />
                     <div style={listAt} className="fixed z-[70] w-[22rem] overflow-hidden rounded-lg border border-line bg-overlay shadow-(--shadow-float)">
                       <div className="flex items-center gap-2 border-b border-line px-2.5">
                         <Search className="h-3.5 w-3.5 shrink-0 text-mute" strokeWidth={1.75} />

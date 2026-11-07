@@ -77,7 +77,7 @@ function Dialog({ q, onSettle }: { q: Pending; onSettle: (answer: string | boole
   }, []);
 
   return (
-    <div className="fixed inset-0 z-[60] grid place-items-start justify-center bg-ground/40 pt-[18vh] backdrop-blur-[2px]" onMouseDown={() => onSettle(q.field ? null : false)}>
+    <div className="fixed inset-0 z-[60] grid place-items-start justify-center bg-scrim pt-[18vh] backdrop-blur-[2px]" onMouseDown={() => onSettle(q.field ? null : false)}>
       <div onMouseDown={(e) => e.stopPropagation()} role="dialog" aria-modal className="dlg">
         <div>
           <h2>{q.title}</h2>

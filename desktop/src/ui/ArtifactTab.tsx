@@ -393,7 +393,7 @@ export function ArtifactTab({
             {sharing && (
               <>
                 <button
-                  className="fixed inset-0 z-40 cursor-default"
+                  className="catcher z-40"
                   aria-label="Close"
                   onClick={() => setSharing(false)}
                 />

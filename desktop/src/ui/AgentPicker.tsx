@@ -165,7 +165,7 @@ export function AgentPicker({
 
       {open && (
         <>
-          <button className="fixed inset-0 z-20 cursor-default" onClick={shut} />
+          <button className="catcher z-20" onClick={shut} />
           {/* Capped and scrolling, because the lists are the agent's and not
               ours: Codex reports a dozen models with a sentence each, which ran
               off the top of the window with the first few unreachable. `vh` as

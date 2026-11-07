@@ -194,7 +194,7 @@ export function SkillPicker({ session, onClose }: { session: Session; onClose: (
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[60] grid place-items-start justify-center bg-ground/40 pt-[10vh] backdrop-blur-[2px]"
+      className="fixed inset-0 z-[60] grid place-items-start justify-center bg-scrim pt-[10vh] backdrop-blur-[2px]"
       onMouseDown={onClose}
     >
       <div

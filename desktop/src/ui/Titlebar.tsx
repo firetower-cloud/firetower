@@ -24,7 +24,7 @@
  */
 import { ChevronDown, Minus, PanelLeft, Square, X } from "lucide-react";
 import { useState } from "react";
-import { Icon } from "~/components/ui";
+import { Icon, IconButton } from "~/components/ui";
 import { bridge } from "~/bridge";
 import { drag } from "~/drag";
 import { useFleet } from "~/fleet";
@@ -69,6 +69,24 @@ export function Titlebar({ serverId, onSwitch }: { serverId: string | null; onSw
         <span className="text-ui text-bone">Firetower</span>
       )}
 
+      {/* **Beside the account control, not at the far end.** The drawing puts
+          this in a `margin-left:auto` group at the right of the title bar,
+          which is a long way from anything and easy to miss — it was there,
+          and the person who asked for it did not know it existed. Next to the
+          name it is where you look for it.
+
+          It is the only way to *close* the panel besides `⌘\`: pressing a
+          destination opens it and never shuts it. */}
+      {here && (
+        <IconButton
+          of={PanelLeft}
+          onClick={() => setPinned(!pinned)}
+          label={pinned ? "Hide the panel" : "Show the panel"}
+          hint={`${pinned ? "Hide the panel" : "Show the panel"}  ${key("\\")}`}
+          className="no-drag -ml-0.5"
+        />
+      )}
+
       {anchor && (
         <Pop anchor={anchor} onClose={() => setAnchor(null)} width={296}>
           <FiretowerSwitcher
@@ -80,18 +98,6 @@ export function Titlebar({ serverId, onSwitch }: { serverId: string | null; onSw
       )}
 
       <span className="flex-1 self-stretch" />
-
-      {/* The way back from a collapsed panel that is not a keystroke. */}
-      {here && (
-        <button
-          onClick={() => setPinned(!pinned)}
-          title={`${pinned ? "Hide the panel" : "Show the panel"}  ${key("\\")}`}
-          aria-label={pinned ? "Hide the panel" : "Show the panel"}
-          className="no-drag grid h-7 w-7 place-items-center rounded-md text-mute transition-colors hover:bg-raise hover:text-text"
-        >
-          <Icon of={PanelLeft} size={14} />
-        </button>
-      )}
 
       {/* macOS draws its own lights at the left; everywhere else the window
           has no frame and these are the buttons, at the right, in the order

@@ -84,7 +84,7 @@ function Card({ children, onClose }: { children: React.ReactNode; onClose: () =>
 
   return (
     <div
-      className="fixed inset-0 z-[60] grid place-items-start justify-center bg-ground/40 pt-[18vh] backdrop-blur-[2px]"
+      className="fixed inset-0 z-[60] grid place-items-start justify-center bg-scrim pt-[18vh] backdrop-blur-[2px]"
       onMouseDown={onClose}
     >
       <div
