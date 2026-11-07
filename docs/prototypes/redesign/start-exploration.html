@@ -322,6 +322,36 @@ a{color:inherit}
 .tag.rec{background:var(--color-sage);color:var(--sheet)}
 .tag.not{background:var(--brick);color:var(--sheet)}
 
+/* ── 5 · the seeded home ─────────────────────────────────────────── */
+.hwrap{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;padding:26px 34px;gap:0}
+.hcol2{width:100%;max-width:680px}
+.hhead{font-size:28px;line-height:1.18;letter-spacing:-.024em;font-weight:530;color:var(--ink)}
+.hsub{margin-top:6px;font-size:14px;color:var(--quiet)}
+.shelf{display:flex;gap:8px;flex-wrap:wrap;margin-top:22px;padding:0 14px 16px;
+  background:var(--raised);border-radius:16px 16px 0 0;padding-top:13px}
+.sc{display:inline-flex;align-items:center;gap:7px;height:32px;padding:0 11px;border-radius:99px;
+  background:var(--sheet);font-size:13.5px;color:var(--body);box-shadow:0 0 0 1px var(--hair)}
+.sc .ic{color:var(--quiet);display:grid}
+.sc[data-unset="true"]{color:var(--quiet);box-shadow:0 0 0 1px var(--hair)}
+/* **Given, not chosen.** The repository and machine are pickers and wear a
+   chevron; the task arrived with you and cannot be changed here, so it has a
+   link-out glyph instead. The absence of the chevron is the whole statement. */
+.sc[data-given="true"]{background:var(--sunk);box-shadow:none}
+.cmp2{margin-top:-10px;border-radius:16px;box-shadow:0 0 0 1px var(--hair);background:var(--sheet);
+  padding:16px 18px 13px;position:relative;z-index:1}
+.cmp2 .in{font-size:16.5px;line-height:1.5;color:var(--ink);min-height:58px;white-space:pre-wrap}
+.cmp2 .in .url{color:var(--color-slate)}
+.cmp2 .ft{display:flex;align-items:center;gap:12px;margin-top:12px}
+.cmp2 .ft .sp{flex:1}
+/* The branch, before you commit to it rather than after. Mono, quiet, and it
+   tracks the first line as you type. */
+.br{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:12.5px;
+  color:var(--quiet);letter-spacing:-.01em}
+.br b{font-weight:400;color:var(--ink)}
+.send{width:34px;height:34px;border-radius:50%;background:var(--ink);color:var(--sheet);
+  display:grid;place-items:center;flex:none}
+
 </style></head><body>
 <div id="bar" class="bar">
   <span class="seg">
@@ -485,13 +515,86 @@ exactly how <code>delegation.md</code> says a child in its own workspace is draw
   snaps back. A menu can say <i>nothing is running on this repository</i>; a drop target cannot.</p></div>
 </div>
 
+<h2>5 &middot; The seeded home, made legible <span class="tag rec">Ship this first</span></h2>
+<p>No new screen and no new gesture. <b>Start goes where it already goes</b> &mdash; the home &mdash; and
+the page acknowledges what you arrived carrying. This is the smallest of the five by a wide margin, it
+needs <b>no server change</b>, and it is the one to ship while the split control&rsquo;s caret stays
+parked behind <code>parentId</code>.</p>
+
+<div class="callout"><b>One premise needed correcting before drawing it.</b> Two of the three parts are
+already built: <code>StartComposer.tsx:234</code> selects the task&rsquo;s repository, and
+<code>:332</code>&ndash;<code>:333</code> name the workspace from the issue title and cut the branch from
+that name &mdash; so <i>Codex authentication issue</i> already becomes
+<code>agent/codex-authentication-issue</code> today. <b>But the composer is not prefilled.</b>
+<code>:120</code> is <code>useState(seed?.prompt ?? "")</code>, and a task&rsquo;s Start sets
+<code>title</code>, <code>repo</code>, <code>issue</code>, <code>taskKey</code> and <code>taskUrl</code>
+&mdash; never <code>prompt</code>. The issue title and URL <i>do</i> reach the agent, at <code>:398</code>,
+as a draft handed over <b>after</b> the session starts. So nobody sees them before pressing send, and the
+page you land on is blank. <b>Prefilling is a real change, not a reveal</b> &mdash; a small one.</div>
+
+<div class="scaled" data-scene="p5"></div>
+
+<p><b>Three decisions, all about acknowledgement rather than plumbing.</b></p>
+<div class="find">
+  <div class="r"><span class="w">The headline</span><span class="v"><i>&ldquo;Good afternoon, what should
+    we work on?&rdquo;</i> is stateless by design, and arriving from a task makes the loudest thing on the
+    page contradict the arrival. It becomes <b>&ldquo;Start NW-4120&rdquo;</b> &mdash; a statement, naming
+    the thing, and <b>deliberately not repeating the title</b>, which is three inches below it in the
+    composer. With no key: <i>Start this task</i>.</span></div>
+  <div class="r"><span class="w">Naming the task</span><span class="v">A chip on the <b>shelf</b>, first
+    position, where the repository and the machine already are &mdash; <code>taskKey</code> and
+    <code>taskUrl</code> are parameters of the workspace exactly as those are, and they travel into
+    <code>NewSession</code> beside them. <b>It wears a link-out glyph and no chevron</b>: the other two
+    are pickers, this one arrived with you and cannot be chosen here. The missing chevron is the whole
+    statement.</span></div>
+  <div class="r"><span class="w">The branch</span><span class="v"><b>Shown in the composer&rsquo;s footer
+    before you commit to it</b>, in mono, tracking the first line as you type. And it becomes
+    <code>agent/&lt;key&gt;-&lt;slug&gt;</code> &mdash; <b><code>agent/nw-4120-quota-meter-goes-amber</code></b>.
+    The key leads because it is stable, short, greppable and survives the title being edited; a few words
+    of the title follow because a branch list of bare keys tells you nothing about what any of them
+    was.</span></div>
+</div>
+
+<p><b>And with no repository on the task</b> &mdash; <code>NW-4099</code>, which names none. The shelf has
+nothing to select, <code>checkouts.length</code> is 0, and <code>:333</code> leaves
+<code>branch</code> <code>undefined</code>. The page says both things rather than leaving two controls
+looking broken:</p>
+<div class="scaled" data-scene="p5b"></div>
+
+<div class="verdict">
+  <div class="g"><h4>Good at</h4><p>It is the one proposition that is <b>mostly already built</b>, needs no
+  server change, and makes Start stop feeling like it points at nothing without adding a gesture, a menu or
+  a screen. Everything it shows is a fact the launch already carries.</p></div>
+  <div class="c"><h4>Costs</h4><p>It does not answer delegation at all &mdash; that still waits on
+  <code>parentId</code>. And it adds a <b>fourth</b> thing to the shelf, which was two chips and is now
+  three; past that it needs a rule about what gets dropped first.</p></div>
+  <div class="m"><h4>When the answer is missing</h4><p>No repository: drawn above &mdash; the shelf chip is
+  unset and says so, and the footer says <i>no branch &mdash; nothing checked out</i> rather than showing a
+  branch that will not exist. No <code>taskKey</code>, only a URL: the headline falls back to <i>Start this
+  task</i> and the branch to today&rsquo;s title slug.</p></div>
+</div>
+
+<div class="callout"><b>One thing the drawing cannot specify, and the Engineer should check.</b>
+<code>consumeSeed()</code> is read once, in a <code>useMemo</code> on mount, and it <i>clears</i> the module
+variable as it reads. If anything remounts the composer between the navigation and the first paint &mdash; a
+key change on the provider, a suspense boundary resolving, a route re-render &mdash; <b>the seed is consumed
+by the mount that is thrown away and the second one gets nothing.</b> The symptom is an empty composer on a
+plain home page, which is indistinguishable from <i>Start did nothing</i>, and is exactly the bug this whole
+exploration is about. <b>This is the Engineer&rsquo;s to verify rather than the drawing&rsquo;s to specify:</b>
+a drawing cannot express a remount. The one-line check is whether <code>consumeSeed</code> runs twice for one
+press.</div>
+
 <h2>What I would do</h2>
 <p><b>Ship 3, which is 1 with a caret.</b> Make the button do the right thing &mdash; create and land you
 in it &mdash; and hang the second intention off a caret that is only drawn when there is a second
 intention. That keeps one click, keeps one <code>start()</code> path, and leaves the six callers with
 nothing to choose entirely unchanged.</p>
-<p><b>Ship 1 first, on its own.</b> It is most of the value, it is a small change, and it is correct
-whatever happens to delegation. The caret can follow when the server can honour it.</p>
+<p><b>Ship 5 first, and it may be all that is wanted.</b> It is the smallest, it needs no server change,
+and it is the only one where most of the mechanism already exists &mdash; the repository, the workspace
+name and the branch derivation are built and invisible. The user asked for scoping and this is the scoped
+answer.</p>
+<p><b>Then 1, then the caret.</b> Landing you <i>in</i> the workspace is the next increment and is correct
+whatever happens to delegation; the caret follows when the server can honour it.</p>
 <p><b>Do not ship 4.</b> It is the most pleasing of the four and the least defensible: undiscoverable,
 mouse-only, and it fails silently in exactly the cases that need an explanation.</p>
 <p><b>Ask for <code>parentId</code> on <code>POST /sessions</code>.</b> Until then, <i>hand to a lead</i>
@@ -634,6 +737,63 @@ function dragGhost() {
   return `<div class="ghost" style="left:300px;top:196px">${ic("grip", 14)} &nbsp;NW-4120 &mdash; Quota meter goes amber too early</div>`;
 }
 
+/* ── 5 · the seeded home ─────────────────────────────────────────
+   **What the build already does, made legible** — plus one real change,
+   because one of the three parts turned out not to exist.
+
+   What is already there: `StartComposer.tsx:234` selects the task's
+   repository, `:332` names the workspace from the issue title, and
+   `:333` derives the branch from that name. What is *not*: the
+   composer is **not** prefilled. `:120` is `useState(seed?.prompt ?? "")`
+   and a task's Start never sets `prompt` — it sets `title`, `repo`,
+   `issue`, `taskKey`, `taskUrl`. The issue title and URL do reach the
+   agent, but at `:398`, as a draft handed over *after* the session
+   starts. Nobody sees them before pressing send. */
+function seededHome(noRepo) {
+  /* The two fixtures are the two tasks the tasks page already draws, so a
+     reader can follow one row from the list into the page it opens. */
+  const key   = noRepo ? "NW-4099" : "NW-4120";
+  const title = noRepo ? "Decide whether we keep the v1 embed"
+                       : "Quota meter goes amber too early on the free plan";
+  const url   = `https://linear.app/northwind/issue/${key}`;
+  /* `agent/<key>-<slug>`: the key first because it is stable, short,
+     greppable and survives the title being edited; a few words of the
+     title after it because a branch list of bare keys tells you nothing
+     about what any of them was. */
+  const branch = noRepo ? null : "agent/nw-4120-quota-meter-goes-amber";
+  const esckey = esc(key);
+  return `<div class="hwrap"><div class="hcol2">
+    <div class="hhead">Start ${esckey}</div>
+    <div class="hsub">${noRepo
+      ? "This task names no repository, so there is nothing to check out yet."
+      : "Edit anything below, then send it."}</div>
+    <div class="shelf">
+      <span class="sc" data-given="true" title="${esckey} — opens the tracker">
+        <span class="ic">${ic("circle-alert", 14)}</span>${esckey}
+        <span class="ic">${ic("external-link", 12)}</span></span>
+      ${noRepo
+        ? `<span class="sc" data-unset="true">${ic("folder-git-2", 14)} Choose a repository ${ic("chevron-down", 13)}</span>`
+        : `<span class="sc">${ic("folder-git-2", 14)} northwind/api ${ic("chevron-down", 13)}</span>`}
+      <span class="sc">${ic("cpu", 14)} Firetower&rsquo;s machine ${ic("chevron-down", 13)}</span>
+    </div>
+    <div class="cmp2">
+      <div class="in">${esc(title)}
+<span class="url">${esc(url)}</span></div>
+      <div class="ft">
+        <span class="ic" style="color:var(--quiet);display:grid">${ic("paperclip", 16)}</span>
+        <span class="sc" style="box-shadow:none;background:transparent;padding-left:0">
+          ${AGENTMARK} Claude Code &middot; Opus 5 ${ic("chevron-down", 13)}</span>
+        <span class="sp"></span>
+        ${branch
+          ? `<span class="br">${ic("git-branch", 13)}<b>${branch}</b></span>`
+          : `<span class="br">${ic("git-branch", 13)}no branch &mdash; nothing checked out</span>`}
+        <span class="send">${ic("arrow-up", 17)}</span>
+      </div>
+    </div>
+  </div></div>`;
+}
+const AGENTMARK = `<span style="color:var(--quiet);display:grid">${ic("box", 14)}</span>`;
+
 /* ── render ─────────────────────────────────────────────────────── */
 const SCENES = {
   today: () => tasks(startBtn, { hot: 0 }),
@@ -658,6 +818,8 @@ const SCENES = {
     { hot: 0, after: sheetPop(TASKS[0]) }),
   p4: () => tasks(startBtn, { hot: 0, drop: "Quota meter rounding", after: dragGhost() }),
   p4b: () => win(`${panel({ newkid: "Quota meter goes amber too early" })}<div class="sheet">${p1()}</div>`, 1),
+  p5: () => win(`${panel()}<div class="sheet">${seededHome(false)}</div>`, 0),
+  p5b: () => win(`${panel()}<div class="sheet">${seededHome(true)}</div>`, 0),
 };
 
 function draw() {
