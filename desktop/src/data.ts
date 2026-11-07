@@ -339,17 +339,18 @@ export function useGate(): { setup: boolean; locked: boolean; ready: boolean } {
 }
 
 /**
- * What the rail's Updates row says, from both of the things that answer to it.
+ * What the profile menu's Updates row says, from both of the things that answer
+ * to it, and whether the avatar is marked.
  *
  * The deployment, asked every ten minutes because the answer changes monthly,
  * and this app's own build, which `src/update.ts` watches on the same beat.
- * Neither one on its own is the question somebody glancing at the rail is
+ * Neither one on its own is the question somebody glancing at the avatar is
  * asking, which is simply whether there is an update to take.
  */
-export function useUpdatesRow(): { label: string; loud: boolean; dot: boolean } {
+export function useUpdatesRow(): { label: string; dot: boolean } {
   const q = useGetUpdates({ query: { refetchInterval: 10 * 60_000, retry: false, staleTime: 60_000 } });
   const build = useBuild();
-  return updatesRow(q.data, !!build.newer);
+  return updatesRow(q.data, build.newer);
 }
 
 /** Named agent connections — whose subscription a session runs on. */

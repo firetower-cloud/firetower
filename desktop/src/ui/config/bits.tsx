@@ -16,6 +16,7 @@ import { CircleSlash2, ExternalLink, Info, Loader2, Lock, RefreshCw, Shapes, Tri
 import type { LucideIcon } from "lucide-react";
 import { Icon } from "~/components/ui";
 import type { Trouble as TroubleKind } from "~/data";
+import { SettingsIndex } from "~/ui/config/SettingsIndex";
 
 /**
  * The five states a list off a server can be in — criterion 49.
@@ -177,6 +178,11 @@ export function Section({
 }) {
   return (
     <div className="pg">
+      {/* **Above the head, and outside everything `trouble` swaps.** Settings
+          has no rail icon to leave a pane by, so the one way between its five
+          panes is in here — and a pane that cannot be read is the pane you
+          most need to leave. It draws nothing outside Settings. */}
+      <SettingsIndex />
       <div className="pg-head">
         <div>
           <h1>{title}</h1>

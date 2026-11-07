@@ -16,7 +16,8 @@ import { Fragment } from "react";
 import { group, shortRepo } from "~/api/workspaces";
 import { navigate } from "~/shims/next-navigation";
 import { key } from "~/platform";
-import { EVERY } from "~/ui/destinations";
+import { SETTINGS_HOME } from "~/ui/config/panes";
+import { DESTINATIONS } from "~/ui/destinations";
 
 type Item = {
   id: string;
@@ -63,16 +64,26 @@ export function Palette({ open, onClose }: { open: boolean; onClose: () => void 
        for somebody who has collapsed the panel and does not know the number
        keys yet. "Everything, across servers" used to open `/fleet`; that
        screen went with the "all" scope, and the fleet is a menu under the
-       avatar now. */
+       avatar now.
+
+       **Settings and Updates are written out rather than mapped.** They were
+       in `EVERY` while they were doors in the rail, and taking them out of the
+       rail would have quietly taken them out of here too — which is the one
+       place that would hurt, because the palette is the second way to
+       everything and these two now have exactly one first way. They are not
+       destinations, so they get no number and no rail icon; they are still
+       addresses, so they stay typeable. */
     const commands: Item[] = [
-      ...EVERY.map((d) => ({
+      ...DESTINATIONS.map((d) => ({
         id: `c:${d.id}`,
         label: d.label,
-        hint: d.key ? key(d.key) : undefined,
+        hint: key(d.key),
         kind: "command" as const,
         run: () => navigate(d.href),
       })),
       { id: "c:new", label: "New workspace", hint: key("N"), kind: "command", run: () => navigate("/new") },
+      { id: "c:settings", label: "Settings", hint: key(","), kind: "command", run: () => navigate(SETTINGS_HOME) },
+      { id: "c:updates", label: "Updates", kind: "command", run: () => navigate("/updates") },
       { id: "c:account", label: "Account", kind: "command", run: () => navigate("/account") },
       { id: "c:connect", label: "Connect to a Firetower…", kind: "command", run: () => navigate("/connect") },
       ...(import.meta.env.DEV ? [{ id: "c:style", label: "Open the style guide", kind: "command" as const, run: () => navigate("/style") }] : []),

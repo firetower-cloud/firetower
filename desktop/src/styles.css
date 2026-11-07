@@ -364,7 +364,9 @@
 
 
   /* ── The rail ──────────────────────────────────────────────────
-     Six destinations, a rule, two doors. Selection is a pill in the *sheet's*
+     Six destinations and the avatar; no rule and no doors under them, since
+     Settings and Updates became rows in the profile menu and nothing else.
+     Selection is a pill in the *sheet's*
      own colour, because the selected destination is the sheet's handle —
      nothing else in here fills. Hover and preview are the same gesture at two
      strengths, drawn in the ink rather than in a hue: a rail that lights up is
@@ -425,12 +427,16 @@
     background: var(--color-bone);
     color: var(--color-panel);
   }
-  /* Something changed over there. Deliberately not ember: ember means an
-     agent is waiting on *you*, and a newer build is not that. */
-  .rbtn > .news {
+  /* **There is an update to take.** Deliberately not ember: ember means an
+     agent is waiting on *you*, and a newer build is not that.
+
+     It was `.rbtn > .news` — the rail's Updates icon was the only thing that
+     drew it. That icon has gone and the mark is the avatar's now, so the
+     position comes off the class and goes to the one site that places it;
+     `ProfileMenu.tsx` carries the rule about what may and may not set it. The
+     ring is still `--color-ground` because both sites sit on the desk. */
+  .news {
     position: absolute;
-    top: 5px;
-    right: 5px;
     width: 5.5px;
     height: 5.5px;
     border-radius: 99px;
@@ -1889,6 +1895,68 @@ html:not([data-platform="macos"]) {
     gap: 8px;
     flex: none;
     padding-top: 5px;
+  }
+
+  /* ── Settings' own index ──────────────────────────────────────────
+     Settings has no rail icon, so the five panes it owns are navigated from
+     inside the page. Plain text with an underline — `.itab`'s rule, for the
+     same job: the index of a page should not compete with the page.
+
+     Two lines, because the grouping is load-bearing. The group name sits over
+     its own cluster rather than beside it, so "Who can reach what" reads as a
+     heading for the three under it; a flat strip of five would have to drop
+     the names, and the names are the part that says why Teams is next to
+     Directories. `SettingsIndex.tsx` has the rest of the argument. */
+  .snav {
+    display: flex;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 12px 30px;
+    margin-bottom: 30px;
+  }
+  .sgroup {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .slabel {
+    font-size: var(--text-meta);
+    line-height: var(--text-meta--line-height);
+    letter-spacing: 0.004em;
+    color: var(--color-mute);
+  }
+  .sitems {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  .sitem {
+    position: relative;
+    flex: none;
+    padding: 1px 0;
+    font-size: var(--text-ui);
+    line-height: 1.4;
+    color: var(--color-dim);
+    transition: color var(--dur-native) var(--ease-swift);
+  }
+  .sitem:hover {
+    color: var(--color-text);
+  }
+  .sitem[aria-current="page"] {
+    color: var(--color-bone);
+    font-weight: var(--font-weight-mid);
+  }
+  /* The same mark the inspector's tabs use, down to the 2px and the offset —
+     one underline in the product, not two that nearly match. */
+  .sitem .ul {
+    position: absolute;
+    right: 0;
+    bottom: -4px;
+    left: 0;
+    height: 2px;
+    border-radius: 2px;
+    background: var(--color-bone);
   }
 
   /* A section of rows: a heading, its count, and a note under it. */

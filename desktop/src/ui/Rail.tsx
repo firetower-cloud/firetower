@@ -6,10 +6,15 @@
  * between them. It is two things now: this, which is **where you can go**, and
  * `RailPanel`, which is **what is in the place you are pointing at**.
  *
- * Six destinations, then a rule, then the two doors that are genuinely
- * settings. 42px targets, 20px icons, 4px gaps. Selection is a pill in the
- * sheet's own colour, because the selected destination is the sheet's handle;
- * nothing else fills.
+ * Six destinations and nothing under them but the avatar. 42px targets, 20px
+ * icons, 4px gaps. Selection is a pill in the sheet's own colour, because the
+ * selected destination is the sheet's handle; nothing else fills.
+ *
+ * **The rule and the two doors below it are gone.** Settings and Updates were
+ * drawn here *and* as rows in the profile menu, and a thing in two places is a
+ * thing with no home; the menu is the home. `destinations.ts` carries that
+ * argument in full. What the rail keeps of Updates is the mark on the avatar,
+ * which is `ProfileMenu`'s.
  *
  * ## Hover previews, and so does focus
  *
@@ -23,11 +28,11 @@
 import { useEffect, useRef, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import { navigate, usePathname } from "~/shims/next-navigation";
-import { useUpdatesRow } from "~/data";
 import { useFleet, waitingIn, type Backend } from "~/fleet";
 import { isGlobalMod, key } from "~/platform";
 import { useStart } from "~/start";
-import { DESTINATIONS, DOORS, destinationAt, type DestinationId } from "~/ui/destinations";
+import { SETTINGS_HOME } from "~/ui/config/panes";
+import { DESTINATIONS, destinationAt, type DestinationId } from "~/ui/destinations";
 import { usePanel } from "~/ui/panel";
 import { Palette } from "~/ui/Palette";
 import { ProfileMenu } from "~/ui/ProfileMenu";
@@ -37,7 +42,6 @@ export function Rail({ backend, onSwitch, onForgot }: { backend: Backend; onSwit
   const path = usePathname();
   const here = destinationAt(path);
   const start = useStart();
-  const updates = useUpdatesRow();
   const fleet = useFleet();
   /* One ember dot on the avatar, meaning *waiting somewhere you are not*. It
      is the whole of what the "all servers" scope and the Fleet screen used to
@@ -98,10 +102,10 @@ export function Rail({ backend, onSwitch, onForgot }: { backend: Backend; onSwit
      a collapsed panel gives up is not the ability to see what is in a
      destination — hovering previews it — only the ability to see it without
      asking. The toggle and `⌘\` are the two things that change the choice. */
-  const go = (to: { id: DestinationId; href: string }) => {
+  const go = (href: string) => {
     hold();
     setPeek(null);
-    navigate(to.href);
+    navigate(href);
   };
 
   /* The panel's find glyph opens the same palette the key does. An event
@@ -131,12 +135,17 @@ export function Rail({ backend, onSwitch, onForgot }: { backend: Backend; onSwit
       const numbered = DESTINATIONS.find((d) => d.key === e.key);
       if (numbered) {
         e.preventDefault();
-        go(numbered);
+        go(numbered.href);
         return;
       }
+      /* **⌘, survives the door going.** It is the one thing the rail still
+         owns about Settings: a window-level gesture belongs to the window
+         rather than to the menu that happens to list it. The menu's row
+         carries the same hint, so the key is still advertised where Settings
+         now lives. */
       if (e.key === ",") {
         e.preventDefault();
-        go(DOORS[0]);
+        go(SETTINGS_HOME);
         return;
       }
       /* **Inside the terminal ⌘K clears the buffer**, which is shipped
@@ -181,27 +190,10 @@ export function Rail({ backend, onSwitch, onForgot }: { backend: Backend; onSwit
             key={d.id}
             icon={d.icon}
             label={d.label}
-            hint={d.key ? key(d.key) : undefined}
+            hint={key(d.key)}
             on={d.id === here}
             peeked={peek === d.id && previews(d.id)}
-            onPick={() => go(d)}
-            onPoint={() => startPeek(d.id)}
-            onFocus={() => showPeek(d.id)}
-          />
-        ))}
-
-        <span className="my-1.5 h-px w-[22px] shrink-0 bg-line" />
-
-        {DOORS.map((d) => (
-          <RailButton
-            key={d.id}
-            icon={d.icon}
-            label={d.id === "updates" ? updates.label : d.label}
-            hint={d.id === "settings" ? key(",") : undefined}
-            on={d.id === here}
-            peeked={peek === d.id && previews(d.id)}
-            news={d.id === "updates" && updates.dot}
-            onPick={() => go(d)}
+            onPick={() => go(d.href)}
             onPoint={() => startPeek(d.id)}
             onFocus={() => showPeek(d.id)}
           />
@@ -246,7 +238,6 @@ function RailButton({
   hint,
   on,
   peeked,
-  news,
   onPick,
   onPoint,
   onFocus,
@@ -256,7 +247,6 @@ function RailButton({
   hint?: string;
   on: boolean;
   peeked: boolean;
-  news?: boolean;
   onPick: () => void;
   onPoint: () => void;
   onFocus: () => void;
@@ -272,8 +262,10 @@ function RailButton({
       data-peek={peeked}
       className="rbtn"
     >
+      {/* No dot can appear on a destination. The one mark the rail carried —
+          *a newer build is out* — is on the avatar now, beside the menu row
+          that says which version. */}
       <Glyph size={20} strokeWidth={on ? 2 : 1.8} aria-hidden />
-      {news && <span className="news" title="A newer build is out" />}
     </button>
   );
 }

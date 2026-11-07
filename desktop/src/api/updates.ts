@@ -173,30 +173,39 @@ export function runSummary(run: UpdateRun): string {
   return parts.join(" · ");
 }
 
-/** Whether the rail shows its dot. */
-export function showsDot(status: UpdateStatus | undefined): boolean {
-  return !!status && (status.updateAvailable || !!status.activeRun);
-}
-
 /**
- * What the rail's Updates row says.
+ * The profile menu's Updates row, and the mark on the avatar above it.
  *
  * Two release trains answer to one row: this app's own build, and the
- * deployment it is pointed at. Either one being behind is something there is
- * to take, and the row says so in words — a dot beside "Updates" was a thing
- * you had to already be curious about, which is how a release sat unread until
- * the next restart.
+ * deployment it is pointed at. Either one being behind is something there is to
+ * take, so either one lights the mark.
  *
- * A run already going keeps the quiet dot instead. It is worth knowing about
- * and there is nothing in it to decide, and one row cannot be loud about two
- * different things.
+ * **`dot` means one thing: there is an update to take.** Nothing else may set
+ * it. It is the only signal on the avatar besides the ember one, it is read
+ * without hover and without opening anything, and a mark that can mean several
+ * things means nothing — so a run already going, a failed check or an unread
+ * release note do not get to borrow it. `ProfileMenu.tsx` says the same thing
+ * at the site that draws it.
+ *
+ * **`label` carries what the mark cannot: which version.** The mark says
+ * something is in here; the row says what, and "Update available" with no
+ * number is a sentence you have to open the screen to act on. The deployment's
+ * release wins when both trains are behind — it is the thing the Updates screen
+ * acts on, and the app's own build moves itself.
+ *
+ * A run in progress says so in words and takes no mark. It is worth knowing
+ * about, there is nothing in it to decide, and you are the one who started it.
  */
 export function updatesRow(
   status: UpdateStatus | undefined,
-  newBuild: boolean,
-): { label: string; loud: boolean; dot: boolean } {
-  const loud = newBuild || !!status?.updateAvailable;
-  return { label: loud ? "Update available" : "Updates", loud, dot: !loud && showsDot(status) };
+  /** The build that is out, if this app's own check found a newer one. */
+  newBuild: string | null,
+): { label: string; dot: boolean } {
+  if (status?.updateAvailable || newBuild) {
+    const ready = (status?.updateAvailable ? status.latest?.version : null) ?? newBuild;
+    return { label: ready ? `Update available — ${ready}` : "Update available", dot: true };
+  }
+  return { label: status?.activeRun ? "Upgrading…" : "Updates", dot: false };
 }
 
 /** A diff, line by line, with what each line is. */

@@ -1,5 +1,5 @@
 /**
- * The six places you can be, and the two doors under them.
+ * The six places you can be.
  *
  * The index used to live in `config/panes.ts` as twelve panes in seven groups
  * behind a Configuration screen, and in `Rail.tsx` as three nav links. Both
@@ -15,20 +15,28 @@
  * Labels do not rest under the icons. They double the rail's width to say what
  * hover, focus and the tooltip already say, and six destinations are few
  * enough to learn.
+ *
+ * ## Settings and Updates are not in here, and there is no rule under the six
+ *
+ * They were two doors below a hairline, on the argument that nobody *goes* to
+ * Settings to do their work and that Updates is somewhere you are sent rather
+ * than somewhere you go. This finishes that argument: a door drawn beside the
+ * destinations, in the same 34px square with the same selected pill, is read
+ * as one — and both were drawn **twice**, once in the rail and once as a row
+ * in the profile menu, which is how a screenshot showed Settings in two
+ * places at once.
+ *
+ * The profile menu is the single home. It already holds the account, the
+ * Firetower switcher and the appearance control, which are the same category
+ * of thing: what is true of *you and this window* rather than where the work
+ * is. So Settings carries its own index now — `config/panes.ts`'s `SETTINGS`,
+ * drawn inside the page by `config/SettingsIndex.tsx` — and the update signal
+ * is a mark on the avatar, which `ProfileMenu.tsx` explains.
  */
-import {
-  type LucideIcon,
-  Download,
-  FolderGit2,
-  House,
-  ListTodo,
-  Puzzle,
-  Server,
-  Settings,
-  Shapes,
-} from "lucide-react";
+import { type LucideIcon, FolderGit2, House, ListTodo, Puzzle, Server, Shapes } from "lucide-react";
+import { paneAt } from "~/ui/config/panes";
 
-export type DestinationId = "home" | "tasks" | "artifacts" | "customize" | "repos" | "machines" | "settings" | "updates";
+export type DestinationId = "home" | "tasks" | "artifacts" | "customize" | "repos" | "machines";
 
 export type Destination = {
   id: DestinationId;
@@ -36,8 +44,9 @@ export type Destination = {
   icon: LucideIcon;
   /** Where pressing it lands. The panel beside it offers the rest. */
   href: string;
-  /** `⌘1`–`⌘6`. The two doors below the rule have their own keys. */
-  key?: string;
+  /** `⌘1`–`⌘6`. Required, now that the two keyless doors have gone: a place
+   *  in the rail with no number was the thing that made them read as doors. */
+  key: string;
 };
 
 /** The six. Order is the keyboard's order, so ⌘3 is always Artifacts. */
@@ -51,27 +60,20 @@ export const DESTINATIONS: Destination[] = [
 ];
 
 /**
- * The two below the rule.
- *
- * They are doors rather than destinations: nobody goes to Settings to do their
- * work, and Updates is somewhere you are sent rather than somewhere you go. The
- * rule is what says so, and it is why they are not ⌘7 and ⌘8.
- */
-export const DOORS: Destination[] = [
-  { id: "settings", label: "Settings", icon: Settings, href: "/configuration/people" },
-  { id: "updates", label: "Updates", icon: Download, href: "/updates" },
-];
-
-export const EVERY = [...DESTINATIONS, ...DOORS];
-
-/**
  * Which configuration pane belongs to which destination.
  *
- * The panes themselves are untouched in this pass — they are still
- * `/configuration/<pane>` and still rendered by `Configuration.tsx`. What has
- * changed is that the index is no longer a screen: each pane now has a
- * destination that owns it, so the rail stays lit on the right icon and the
- * panel beside it offers that destination's other panes.
+ * The panes themselves are untouched — they are still `/configuration/<pane>`
+ * and still rendered by `Configuration.tsx`. What has changed is that the
+ * index is no longer a screen: a pane listed here has a destination that owns
+ * it, so the rail stays lit on the right icon and the panel beside it offers
+ * that destination's other panes.
+ *
+ * **Settings' five panes are deliberately absent.** They had no destination
+ * left to light once the Settings door went, and inventing one would mark a
+ * work surface you are not in. They are listed in `config/panes.ts`'s
+ * `SETTINGS` instead, and that is what the page's own index is built from —
+ * the two are checked against each other in `destinations.test.ts`, because a
+ * pane that falls out of both tables is a pane nothing can reach.
  */
 const PANE_HOME: Record<string, DestinationId> = {
   skills: "customize",
@@ -81,11 +83,6 @@ const PANE_HOME: Record<string, DestinationId> = {
   "git-hosts": "repos",
   machines: "machines",
   trackers: "tasks",
-  people: "settings",
-  teams: "settings",
-  directories: "settings",
-  vault: "settings",
-  server: "settings",
 };
 
 /**
@@ -94,14 +91,22 @@ const PANE_HOME: Record<string, DestinationId> = {
  * A workspace keeps the Dashboard's: you are still in Dashboard when you are
  * reading one, the way you are still in Customize when you are reading one
  * skill. `null` is for the screens that are nobody's — the account, the style
- * page — where the rail shows nothing as current rather than guessing.
+ * page, and now Settings' own panes and Updates — where the rail shows nothing
+ * as current rather than guessing. Nothing as current is the honest answer
+ * there: you are not in a work surface, and the place you *are* in is a row in
+ * the profile menu, which the rail cannot point at.
  */
 export function destinationAt(path: string): DestinationId | null {
   if (path.startsWith("/configuration")) {
-    const pane = path.split("/").filter(Boolean)[1] ?? "";
-    return PANE_HOME[pane] ?? "settings";
+    /* Through `paneAt`, so this agrees with the pane the screen actually
+       draws. An address from an older build, or one somebody typed, falls back
+       to a real pane — and the rail has to light whoever owns *that* one. It
+       used to read the raw segment and answer "settings" for `/configuration`
+       and for any nonsense after it, while `Configuration.tsx` drew
+       Repositories: the mark and the page disagreed. */
+    return PANE_HOME[paneAt(path)] ?? null;
   }
-  const found = EVERY.find((d) => d.id !== "home" && d.href !== "/" && path.startsWith(d.href));
+  const found = DESTINATIONS.find((d) => d.id !== "home" && d.href !== "/" && path.startsWith(d.href));
   if (found) return found.id;
   if (path === "/" || path.startsWith("/sessions") || path.startsWith("/new")) return "home";
   return null;

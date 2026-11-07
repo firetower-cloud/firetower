@@ -12,6 +12,32 @@
  * still goes to the dock and to the island; this is the narrower, cheaper
  * thing that was added back inside the window.
  *
+ * ## Two marks on the avatar, and exactly two things that may set them
+ *
+ * Settings and Updates used to be icons in the rail as well as rows in here,
+ * and the rail's Updates icon is where the *a newer build is out* mark lived.
+ * The icons have gone — `destinations.ts` says why — so the mark comes here,
+ * because the menu it belongs to hangs off this button and a signal has to be
+ * readable without opening the thing it is about.
+ *
+ * | mark | where | means | token |
+ * |---|---|---|---|
+ * | ember dot | top right | an agent is waiting on you somewhere you are not | `--color-ember` |
+ * | `.news` | bottom right | **an available update, and nothing else** | `--color-text` |
+ *
+ * **Each mark means one thing, and that is the whole constraint.** A dot that
+ * can mean several things means nothing: you cannot act on it, so you learn to
+ * ignore it. So nothing else may dot this avatar — not a run already going, not
+ * a failed update check, not an unread release note. If something new deserves
+ * to be seen from here, it gets its own row in the menu and the row says what
+ * it is; the marks stay at two. `updatesRow` holds the Updates half of that
+ * rule, which is why `dot` there is not the same boolean as "worth knowing".
+ *
+ * They are drawn apart and in different colours because they are different
+ * facts. Ember is reserved for *an agent is waiting on you*, and a newer build
+ * is not that — which is the reasoning `.news` was given in the stylesheet when
+ * it was the rail's, kept whole.
+ *
  * `Fleet.tsx`'s headline and its grouping survive here, in the switch list.
  */
 import { useState } from "react";
@@ -31,11 +57,13 @@ import { useMutation } from "@tanstack/react-query";
 import { Icon, Segmented } from "~/components/ui";
 import { useLogout, useMe } from "~/api/generated/auth/auth";
 import { dropCache } from "~/backend";
+import { useUpdatesRow } from "~/data";
 import { useFleet, waitingIn, type Backend } from "~/fleet";
 import { forget } from "~/servers";
 import { key } from "~/platform";
 import { navigate } from "~/shims/next-navigation";
 import { useTheme, type Theme } from "~/theme";
+import { SETTINGS_HOME } from "~/ui/config/panes";
 import { useConfirm } from "~/ui/Confirm";
 import { Pop } from "~/ui/Pop";
 
@@ -58,6 +86,11 @@ export function ProfileMenu({
   const [page, setPage] = useState<Page>("profile");
   const me = useMe();
   const who = me.data?.user?.username ?? backend.user;
+  /* Read here rather than in the rail, which asked for it only while it drew
+     the Updates door. One read for both halves of the signal — the mark on
+     this button and the row inside the menu have to agree, and two calls could
+     straddle a refetch and disagree for a frame. */
+  const updates = useUpdatesRow();
 
   const open = (el: HTMLElement) => {
     setPage("profile");
@@ -70,7 +103,7 @@ export function ProfileMenu({
         onClick={(e) => open(e.currentTarget)}
         aria-haspopup="menu"
         aria-expanded={!!anchor}
-        title={`${who} — ${backend.org}${waitingElsewhere ? " · someone is waiting elsewhere" : ""}`}
+        title={`${who} — ${backend.org}${waitingElsewhere ? " · someone is waiting elsewhere" : ""}${updates.dot ? ` · ${updates.label}` : ""}`}
         aria-label="You, and which Firetower you are in"
         className="group relative grid h-10 w-10 shrink-0 place-items-center rounded-full"
       >
@@ -84,12 +117,15 @@ export function ProfileMenu({
         {waitingElsewhere && (
           <span className="pointer-events-none absolute top-0.5 right-0.5 h-2 w-2 rounded-full bg-ember ring-2 ring-ground" />
         )}
+        {/* Bottom right, and never ember: the two marks have to stay tellable
+            apart at a glance, because they want different things of you. */}
+        {updates.dot && <span className="news pointer-events-none bottom-0.5 right-0.5" title={updates.label} />}
       </button>
 
       {anchor && (
         <Pop anchor={anchor} onClose={() => setAnchor(null)} beside width={page === "switch" ? 296 : 252}>
           {page === "profile" ? (
-            <Profile backend={backend} who={who} elsewhere={waitingElsewhere} onSwitch={() => setPage("switch")} onClose={() => setAnchor(null)} onForgot={onForgot} />
+            <Profile backend={backend} who={who} elsewhere={waitingElsewhere} updates={updates} onSwitch={() => setPage("switch")} onClose={() => setAnchor(null)} onForgot={onForgot} />
           ) : (
             <FiretowerSwitcher backend={backend} onSwitch={onSwitch} onBack={() => setPage("profile")} onClose={() => setAnchor(null)} />
           )}
@@ -118,6 +154,7 @@ function Profile({
   backend,
   who,
   elsewhere,
+  updates,
   onSwitch,
   onClose,
   onForgot,
@@ -125,6 +162,8 @@ function Profile({
   backend: Backend;
   who: string;
   elsewhere: boolean;
+  /** What the avatar's `.news` mark is about, in words. */
+  updates: { label: string; dot: boolean };
   onSwitch: () => void;
   onClose: () => void;
   onForgot: () => void;
@@ -175,8 +214,14 @@ function Profile({
 
       <Rule />
       <Item icon={KeyRound} label="Account" onPick={() => go("/account")} />
-      <Item icon={Settings2} label="Settings" hint={key(",")} onPick={() => go("/configuration/people")} />
-      <Item icon={CircleFadingArrowUp} label="Updates" onPick={() => go("/updates")} />
+      {/* The only Settings there is, and the only place ⌘, is advertised.
+          `SETTINGS_HOME` rather than the path, so this row, the key and the
+          palette's command cannot drift to three different panes. */}
+      <Item icon={Settings2} label="Settings" hint={key(",")} onPick={() => go(SETTINGS_HOME)} />
+      {/* The row says which version; the mark on the avatar only says there is
+          one. Neither is enough alone — a number nobody can see until they
+          open a menu is not a signal, and a dot you cannot act on is noise. */}
+      <Item icon={CircleFadingArrowUp} label={updates.label} onPick={() => go("/updates")} />
       {import.meta.env.DEV && <Item icon={BookOpen} label="Style guide" onPick={() => go("/style")} />}
 
       <Rule />

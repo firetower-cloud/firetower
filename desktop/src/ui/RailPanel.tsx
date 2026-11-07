@@ -20,24 +20,17 @@ import { Fragment, useMemo, useState } from "react";
 import {
   Blocks,
   FolderGit2,
-  GaugeCircle,
   GitBranch,
   Inbox,
-  Key,
   Monitor,
   PanelLeftClose,
   Pencil,
   Puzzle,
   Server,
   Search,
-  Settings,
   Shapes,
   Ticket,
-  Building2,
   CircleAlert,
-  FileClock,
-  Folder,
-  Users,
   UserRound,
   UsersRound,
   type LucideIcon,
@@ -54,7 +47,7 @@ import { key } from "~/platform";
 import { navigate, usePathname } from "~/shims/next-navigation";
 import { useStart } from "~/start";
 import { useNow } from "~/ui/clock";
-import { EVERY, type DestinationId } from "~/ui/destinations";
+import { DESTINATIONS, type DestinationId } from "~/ui/destinations";
 import { ContextMenu, useMenu } from "~/ui/ContextMenu";
 import { usePrompt } from "~/ui/Confirm";
 import { useEndWorkspace } from "~/ui/end";
@@ -106,7 +99,7 @@ function Contents({ at, stale, onCollapse }: { at: DestinationId; stale: boolean
   if (at === "home") return <Workspaces stale={stale} onCollapse={onCollapse} />;
   return (
     <>
-      <Head name={EVERY.find((d) => d.id === at)?.label ?? ""} onCollapse={onCollapse} />
+      <Head name={DESTINATIONS.find((d) => d.id === at)?.label ?? ""} onCollapse={onCollapse} />
       <Scroll>
         {at === "tasks" && (
           <>
@@ -123,24 +116,15 @@ function Contents({ at, stale, onCollapse }: { at: DestinationId; stale: boolean
         {at === "customize" && <Customize />}
         {at === "repos" && <Repositories />}
         {at === "machines" && <Machines />}
-        {at === "settings" && (
-          <>
-            <Label>Who can reach what</Label>
-            <Row label="People" icon={UsersRound} on={pane(path) === "people"} to="/configuration/people" />
-            <Row label="Teams" icon={Users} on={pane(path) === "teams"} to="/configuration/teams" />
-            <Row label="Directories" icon={Folder} on={pane(path) === "directories"} to="/configuration/directories" />
-            <Label>Secrets</Label>
-            <Row label="Vault" icon={Key} on={pane(path) === "vault"} to="/configuration/vault" />
-            <Label>This deployment</Label>
-            <Row label="This Firetower" icon={Building2} on={pane(path) === "server"} to="/configuration/server" />
-          </>
-        )}
-        {at === "updates" && (
-          <>
-            <Row label="What is running" icon={GaugeCircle} on to="/updates" />
-            <Row label="Past runs" icon={FileClock} on={false} to="/updates" />
-          </>
-        )}
+        {/* **Settings' five panes and Updates' two rows used to be here.** They
+            were the panels of the two doors below the rail's rule, and both
+            doors have gone — the profile menu is the only Settings and the only
+            Updates now. Settings' index moved into the page it indexes
+            (`config/panes.ts`'s `SETTINGS`, drawn by `SettingsIndex`), because
+            a panel beside a rail with no icon to open it is unreachable.
+            Updates' two rows were a *What is running* that was always current
+            and a *Past runs* that went to the same address, so there was never
+            an index there to relocate. */}
       </Scroll>
     </>
   );

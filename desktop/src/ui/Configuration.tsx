@@ -2,10 +2,13 @@
  * Everything you set up once, as an index and one pane at a time.
  *
  * **One page became too many things.** It was five sections on one scroll —
- * fine at five, and this is nine now. The index that makes it survivable lives
- * in the rail (`ui/config/panes.ts`), because configuration *replaces* the
- * workspaces rather than standing a second column beside them: two rails side
- * by side was a busy screen where one of them was always irrelevant.
+ * fine at five, and this is nine now. What makes it survivable is that each
+ * pane has an index: seven of them belong to a rail destination and are
+ * indexed by that destination's panel, and Settings' five are indexed inside
+ * the page by `config/SettingsIndex.tsx`, because Settings has no rail icon —
+ * it is a row in the profile menu. Neither index is a second *column*: two
+ * rails side by side was a busy screen where one of them was always
+ * irrelevant, and that is still the thing being avoided.
  *
  * **A pane at a time is also a pane's worth of requests.** The old page asked
  * for machines, repositories, providers, trackers, agents, accounts and secrets
