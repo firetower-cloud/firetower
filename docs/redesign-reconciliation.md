@@ -194,6 +194,29 @@ still failed, because `Rail.go` also called `setPinned(true)` on every
 destination click. Every individual screen in that sequence looks right in a
 screenshot; only the order is wrong.
 
+### Where it stands, after merging main
+
+The run after `157ed6af`, which brought 29 commits of main and 81 changed
+desktop files under the branch:
+
+| | |
+|---|---|
+| The sheets | **95 of 103 shot**, 7 recorded as unreachable with a reason, 1 failing to drive (`connect-paste-a-token`) |
+| Layer 1 — tokens | **clean**, both themes, including the `R = G` rule and the luminance-step rule |
+| Layer 2 — rules | **3 findings**: two are the one state that will not drive, one is the deliberate `--color-mute` deviation |
+| Layer 2b — connectedness | **241 pressed, 212 connected**, 27 answered in place, 3 by design, **1 threw**, 1 false positive |
+
+The one that threw was real and is fixed: `agentName` took a session whose
+`name` was not a string and the whole Overview became the error boundary.
+**That is the third crash from the same shape**, after the skill review's
+`files` and the account sheet's `limits` — three times is a habit, and the
+lesson is that a client should not become a stack trace because an answer
+arrived in a shape it did not expect.
+
+The false positive is the repository chip in the one state whose popover the
+harness has already opened: pressing it closes it, and the screen's shape
+barely changes. Recorded rather than designed around.
+
 ### What this cannot do
 
 Worth being plain about, because a green run is going to get quoted:
