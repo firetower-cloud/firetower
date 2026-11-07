@@ -1540,7 +1540,13 @@ function repoScreen(p, st) {
     '<div class="p-facts" style="padding-bottom:18px"><span><b>4</b> files</span>'+
       '<span style="color:var(--p-sage)">+137</span>'+
       '<span style="color:var(--p-brick)">− 20</span></div>'+
-    textTabs([["diff","Diff"],["files","Files"],["ship","Commit"]], tab, "repo");
+    /* **Ship**, not Commit. The desk settled this and gave the reason:
+       commit is one step of it, and a tab named after one step hides push
+       and open behind a word. The phone has the stronger version of the same
+       argument — `shipping()` exists precisely to reduce four verbs to one
+       honest label, so naming the tab after the first of them contradicts
+       the thing the screen does. The button already says all three. */
+    textTabs([["diff","Diff"],["files","Files"],["ship","Ship"]], tab, "repo");
 
   let body;
   if (tab === "diff") {
@@ -1674,8 +1680,11 @@ function newScreen(p, st) {
   const shelf =
     '<div class="p-shelf">'+
       (bare
+        /* The chip says what the screen it opens is called. With none
+           connected there is nothing to *choose*, and the button on the same
+           page already says Connect — two words for one act on one screen. */
         ? '<button class="p-chip" data-go="goto:repos" data-want="1">'+ic("folder",15)+
-            'Choose a repository'+ic("down",13)+'</button>'
+            'Connect a repository'+ic("down",13)+'</button>'
         : '<button class="p-chip" data-go="noop">'+ic("folder",15)+'northwind/api'+ic("down",13)+'</button>')+
       '<button class="p-chip" data-go="noop">'+ic("machine",15)+'Firetower\u2019s machine'+ic("down",13)+'</button>'+
     '</div>';
@@ -2752,6 +2761,12 @@ function tabRepo() {
       'does. Both halves. A rule that says "scrolls" is not satisfied by one that only says "does not '+
       'wrap" — that was the bug: <code>numberOfLines={1}</code> kept each line whole and nothing '+
       'carried it sideways, so the rest was laid out and then clipped.</div>'+
+      '<h3>It is called Ship, and that is not a synonym for Commit</h3>'+
+      '<p>The desk settled this and the reason travels: <i>commit is one step of it, and a tab '+
+      'named after one step hid push and open behind a word</i>. The phone has the stronger version '+
+      'of the argument \u2014 <code>shipping()</code> exists to reduce four verbs to one honest '+
+      'label, so a tab named after the first of them contradicts the thing the screen does. The '+
+      'button underneath already says all three.</p>'+
       '<h3>One button, and it says what it does</h3>'+
       '<p><code>shipping()</code> reduces every checkout to one stage — uncommitted, unpushed, pushed, '+
       'open — and one honest label. The desk’s three controls in a row do not fit and should not be '+
@@ -2791,7 +2806,7 @@ function tabStart() {
       '<p>A workspace is a checkout on a machine with agents in it, so the form has to ask for all '+
       'three. Six fields do not fit on 390, and a wizard would hide the one thing people change most '+
       '— the repository — behind three taps. So: one form, pickers as panels, the action pinned to '+
-      'the foot. The same decision as the Commit tab, for the same reason.</p>'+
+      'the foot. The same decision as the Ship tab, for the same reason.</p>'+
       '<h3>The one administrative screen, and why it is allowed</h3>'+
       '<p>Mobile writes no access of any kind. Connecting a repository is the exception and it is '+
       'argued rather than assumed: the new-workspace form asks for a repository, and a client that '+
@@ -2922,6 +2937,8 @@ const COV = [
 ]],
 ["The shell", [
   ["Four destinations — Dashboard, Tasks, Artifacts, You", "Y", "the desk's ⌘1–⌘3, then the person"],
+  ["Every screen's headline agrees with what opens it", "Y", "13 pairs, checked in Spec rather than read"],
+  ["The Dashboard has no label headline, only the sentence", "Y", "the desk's shape: a heading plus the same fact is one line too many"],
   ["Dashboard, not Inbox", "Y", "the desk retired <code>Fleet.tsx</code>; the word went with it"],
   ["Artifacts is a destination, not a row under You", "Y", "⌘3 on the desk; the third slot here"],
   ["Config as a tab", "X", "the desk's Configuration screen is gone; its one phone-relevant pane is on You and in the shelf"],
@@ -3029,7 +3046,7 @@ const COV = [
   ["A previewing tab is italic", "Y", "one tap previews, long-press keeps"],
   ["The line count clamped to the file", "Y", ""],
   ["A file that is a picture · too big · binary", "N", "said, rather than drawn badly"],
-  ["Commit — the run's own title and body, as a draft", "Y", ""],
+  ["Ship — the run's own title and body, as a draft", "Y", "named Ship, not Commit: commit is one step of four"],
   ["One full-width action carrying the stage's label", "Y", "<code>shipping()</code>"],
   ["The four stages", "P", "<i>commit, push and open</i> drawn; unpushed, pushed and open are not"],
   ["Two repositories in one workspace", "N", "the contract allows it"],
@@ -3531,6 +3548,59 @@ function auditReach() {
   return REACH.map(([what, go, how]) => ({ what, how, ok: found.has(go) }));
 }
 
+/**
+ * Does a screen agree with the thing that opens it?
+ *
+ * The desktop sweep found four — Secrets under Vault, Compute under
+ * Machines, Profiles under Agent profiles, Commit under Ship — and this
+ * document had one of its own: an inspector tab labelled **Commit** under a
+ * design whose whole argument is that commit is one step of four.
+ *
+ * Reading for it does not scale, so it is a check. Each row declares what
+ * opens a screen and which rule the screen's own headline has to satisfy:
+ *
+ * - `same` — the headline is the opener's words, exactly.
+ * - `answer` — the screen opens with a *sentence*, not a label. The desk's
+ *   Dashboard does this and it is why it has no title: the heading and the
+ *   fact underneath would otherwise say the same thing twice. Enforced as
+ *   "the first headline ends in a full stop or a question mark", which a
+ *   noun cannot do by accident.
+ * - `object` — the headline names the thing you pressed: a workspace, an
+ *   artifact, a path. Nothing to compare it against but itself.
+ */
+const NAMING = [
+  ["Dashboard", "inbox", "answer", {}],
+  ["Dashboard \u2014 unreachable", "inbox", "answer", { mode:"error" }],
+  ["Dashboard \u2014 nothing yet", "inbox", "answer", { mode:"empty" }],
+  ["Tasks", "tasks", "same", {}],
+  ["Artifacts", "artifacts", "same", {}],
+  ["You", "you", "same", {}],
+  ["New workspace", "new", "answer", { newstate:"blank" }],
+  ["Connect a Firetower", "connect", "answer", { connect:"where" }],
+  ["Repositories", "config", "same", {}],
+  ["Connect a repository", "repos", "same", { repos:"list" }],
+  ["Quota meter, four shapes", "artifact", "object", {}],
+  ["Quota meter rounding", "repo", "object", {}],
+  ["Quota meter rounding", "overview", "object", {}],
+];
+function auditNaming() {
+  const keep = JSON.stringify(S);
+  const out = NAMING.map(([opener, screen, rule, patch]) => {
+    Object.assign(S, JSON.parse(keep), patch);
+    let html = ""; try { html = renderScreen(screen, POSES.iphone); } catch (e) {}
+    const box = document.createElement("div"); box.innerHTML = html;
+    const el = box.querySelector(".p-lede, .p-display, .p-title");
+    const head = el ? el.textContent.trim() : "";
+    let ok;
+    if (rule === "same") ok = head === opener;
+    else if (rule === "answer") ok = /[.?]$/.test(head);
+    else ok = head.length > 0;
+    return { opener, screen, rule, head, ok };
+  });
+  Object.assign(S, JSON.parse(keep));
+  return out;
+}
+
 /** Nothing tappable under 44 points. The phone's floor, from `STYLE.md`. */
 const TAPPABLE = ".p-tap,.p-ctl,.p-send,.p-item,.p-quiet,.p-menuitem,.p-popitem,.p-askno,"+
   ".p-askyes,.p-tab,.p-railitem,.p-primary,.p-second,.p-who,.p-difffile,.p-tree,"+
@@ -3556,6 +3626,7 @@ function auditTargets() {
 }
 function tabSpec() {
   const cls = auditClasses(), ctl = auditControls(), reach = auditReach(), tgt = auditTargets();
+  const nam = auditNaming(), namBad = nam.filter(r => !r.ok);
   const missed = reach.filter(r => !r.ok);
   const poseRow = p => {
     const rail = railOn(p) && S.inset ? RAIL : 0, cw = p.w - rail;
@@ -3783,6 +3854,11 @@ function tabSpec() {
     '<td class="d-num '+(missed.length?"d-bad":"d-ok")+'">'+(REACH.length-missed.length)+' of '+
     REACH.length+' states open from inside a phone</td>'+
     '<td>a state you can only reach from a chip in the masthead does not exist to a reader</td></tr>'+
+  '<tr><td>A screen that disagrees with what opens it</td>'+
+    '<td class="d-num '+(namBad.length?"d-bad":"d-ok")+'">'+namBad.length+' of '+nam.length+'</td>'+
+    '<td>the desktop sweep found four of these. A destination called one thing and a page calling '+
+    'itself another is the cheapest kind of incoherence to ship and the hardest to notice from '+
+    'inside one screen</td></tr>'+
   '<tr><td>Touch targets under 44 pt</td>'+
     '<td class="d-num '+(tgt.bad.length?"d-warn":"d-ok")+'">'+tgt.bad.length+' kinds, of '+tgt.n+
     ' on screen</td><td>the phone’s floor; a 36pt control is a control people miss</td></tr>'+
@@ -3797,6 +3873,11 @@ function tabSpec() {
     esc(b.where)+" — "+esc(b.err)).join("; ")+'</p>' : "")+
   (missed.length ? '<p class="d-bad">Not reachable by tapping: '+missed.map(m =>
     esc(m.what)).join(", ")+'</p>' : "")+
+  (namBad.length ? '<p class="d-bad">Disagreeing: '+namBad.map(r =>
+    '<code>'+esc(r.opener)+'</code> opens a screen headed \u201c'+esc(r.head||"nothing")+
+    '\u201d').join("; ")+'</p>' : "")+
+  '<p class="d-num" style="color:var(--d-hush)">Naming detail: '+nam.map(r =>
+    (r.ok?"\u2713 ":"\u2717 ")+r.opener+" \u2192 \u201c"+r.head+"\u201d ("+r.rule+")").join(" \u00b7 ")+'</p>'+
   (tgt.bad.length ? '<p class="d-warn">Under the floor, as this page draws them: '+
     tgt.bad.map(([k,n]) => '<code>'+esc(k)+'</code>×'+n).join(", ")+
     '. Each is a hit area in the artifact rather than in the app; the list is here so the '+
@@ -4213,7 +4294,7 @@ function tabNotes() {
   '</tbody></table>'+
 
   '<h2 style="margin-top:38px">What this page caught in itself</h2>'+
-  '<p>Five, all worth recording because the method is as much of the deliverable as the design is.</p>'+
+  '<p>Six, all worth recording because the method is as much of the deliverable as the design is.</p>'+
   '<h3>The first version of this document looked like the old app</h3>'+
   '<p>It carried <code>northwind/api \u00b7 fix/quota-rounding</code> under every row, a four-colour '+
   'glyph on each one, a chevron at the end, and a segmented filter above the list. Every one of '+
@@ -4231,6 +4312,34 @@ function tabNotes() {
   '<code>CSSStyleRule</code> carries an empty <code>CSSRuleList</code>, so <code>if (r.cssRules)</code> '+
   'is true for every rule on the page and the walk recursed into nothing for all 305 of them. '+
   'Fixed, it examines 171 classes and finds 8 base-plus-variant pairs and no leaks.</p>'+
+  '<h3>A screen that disagrees with what opens it</h3>'+
+  '<p>The desktop sweep found four \u2014 Secrets under Vault, Compute under Machines, Profiles under '+
+  'Agent profiles, Commit under Ship. Renaming a destination here made it worth checking this '+
+  'document for the same thing, and it had <b>one</b>: the repository page\u2019s fourth tab said '+
+  '<b>Commit</b>.</p>'+
+  '<div class="d-keep"><b>It is <i>Ship</i>, and the desk had already given the reason:</b> '+
+  '<i>commit is one step of it, and a tab named after one step hid push and open behind a word</i>. '+
+  'The phone has the stronger version of that argument \u2014 <code>shipping()</code> exists to reduce '+
+  'four verbs to one honest label, so naming the tab after the first of them contradicts the thing '+
+  'the screen does. The button underneath already says all three.</div>'+
+  '<p>One smaller one: with no repository connected, the composer\u2019s shelf chip said <i>Choose a '+
+  'repository</i> and opened a screen called <i>Connect a repository</i> \u2014 two words for one act, '+
+  'on a page whose own button said the second. The chip now says what the screen is called.</p>'+
+
+  '<h4>What the sweep cleared, and one report that was not a defect</h4>'+
+  '<p>The <b>Inbox</b> headline at <code>62-inbox.js:98</code> is inside <code>if (now)</code> \u2014 '+
+  'it is the <b>rebuild of what ships</b>, the left-hand phone on the Dashboard tab, and it is '+
+  'supposed to say Inbox with an ember count under it because that is what '+
+  '<code>app/(tabs)/index.tsx</code> draws today. That device now also wears the shipped '+
+  '<i>Inbox \u00b7 Tasks \u00b7 Config \u00b7 You</i> bar, so the naming change is visible in the '+
+  'picture rather than only in the prose. The proposal\u2019s own Dashboard has <b>no label headline '+
+  'at all</b> and opens with the sentence, which is the desk\u2019s shape.</p>'+
+  '<p>Reading for this does not scale, so it is now a check rather than a habit. Thirteen pairs, '+
+  'each declaring what opens a screen and which rule its headline has to satisfy \u2014 '+
+  '<code>same</code> as the opener\u2019s words, an <code>answer</code> (a sentence, enforced as '+
+  'ending in a full stop or a question mark, which a noun cannot do by accident), or the '+
+  '<code>object</code> you pressed. It is in Spec and it can fail.</p>'+
+
   '<h3>And three screens were drawn and not found</h3>'+
   '<p>Of the four things that came back from the second review, three were not missing work. The '+
   'artifact library was drawn; the connect flow was drawn; the panel at 951 had the right content '+
@@ -4603,7 +4712,7 @@ function subsFor(id) {
         chips("System rail", [["true","Insets"],["false","Overlays"]], "inset", String(S.inset))+
         '<span class="d-spacer"></span>'+t;
     case "repo":
-      return gos("Tab", [["repo:diff","Diff"],["repo:files","Files"],["repo:ship","Commit"]], S.repo)+
+      return gos("Tab", [["repo:diff","Diff"],["repo:files","Files"],["repo:ship","Ship"]], S.repo)+
         chips("Pose", POSE_CHIPS, "pose", S.pose)+'<span class="d-spacer"></span>'+t;
     case "start":
       return gos("Screen", [["goto:new","New workspace"],["goto:tasks","Tasks"]], S.screen)+
