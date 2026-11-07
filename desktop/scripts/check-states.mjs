@@ -157,18 +157,93 @@ for (const theme of ["light", "dark"]) {
   await page.waitForTimeout(1200);
   say(!(await visible()), "it is still collapsed after a reload");
 
-  /* **Arriving at a destination opens it**, which is the reverse of what
-     this file asserted a few hours ago. The panel is how you reach a
-     destination's sub-elements, so arriving with it shut hides what you
-     came for. */
-  const go = page.getByRole("button", { name: "Tasks" }).first();
-  await go.click();
-  await page.waitForTimeout(600);
-  say(await visible(), "pressing a destination opens it");
+  /* **Pressing a destination navigates and nothing else.** This file has
+     asserted both answers on the same day; the user settled it. A collapsed
+     panel gives up seeing a destination's contents *without asking* — not
+     the ability to see them, which hovering gives back. */
+  await page.getByRole("button", { name: "Tasks" }).first().click();
+  await page.waitForTimeout(700);
+  say(!(await visible()), "pressing a destination leaves it collapsed");
 
-  await page.getByRole("button", { name: /Hide the panel/i }).first().click();
+  await page.getByRole("button", { name: /Show the panel/i }).first().click();
   await page.waitForTimeout(500);
-  say(!(await visible()), "and the toggle still closes it");
+  say(await visible(), "and the toggle still opens it");
+
+  await page.close();
+}
+
+/* ── Hovering a destination ───────────────────────────────────────────
+   Three cases, and a preview is wanted unless the thing it would preview is
+   already on screen:
+
+     active + open       → no preview, it is right there
+     active + collapsed  → preview
+     not active          → preview, either way
+
+   It was "anything but the one you are on", which made the active
+   destination the one place a collapsed panel could never be glimpsed —
+   exactly where somebody with the panel shut spends most of their time.
+   Specified three different ways over one day, so it is driven rather than
+   reasoned about. */
+for (const theme of ["light", "dark"]) {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 824 }, deviceScaleFactor: 2 });
+  await page.addInitScript(
+    ([registry, choice]) => {
+      window.localStorage.setItem("firetower.servers", registry);
+      window.localStorage.setItem("firetower.current", "o_1");
+      window.localStorage.setItem("firetower.theme", choice);
+    },
+    [REGISTRY, theme],
+  );
+  await page.goto(`${APP}/#/`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(1200);
+
+  const panel = async () =>
+    page.evaluate(() => {
+      const el = document.querySelector("[data-rail-panel]");
+      if (!el || el.getClientRects().length === 0) return "none";
+      return getComputedStyle(el).position === "absolute" ? "floating" : "pinned";
+    });
+  const point = async (name) => {
+    await page.getByRole("button", { name }).first().hover();
+    await page.waitForTimeout(450);
+  };
+  const away = async () => {
+    await page.mouse.move(900, 700);
+    await page.waitForTimeout(450);
+  };
+  const say = (ok, what, got) => {
+    if (!ok) failed++;
+    console.log(`  ${ok ? "ok    " : "FAILED"} ${theme}: ${what}${ok ? "" : ` — got ${got}`}`);
+  };
+
+  /* Open: the active destination has nothing to preview. */
+  await point("Dashboard");
+  say((await panel()) === "pinned", "open · pointing at the active destination changes nothing", await panel());
+  /* Open: another destination swaps the contents in place rather than floating. */
+  await point("Tasks");
+  say((await panel()) === "pinned", "open · pointing elsewhere swaps it in place", await panel());
+  await away();
+
+  /* Collapsed. */
+  await page.getByRole("button", { name: /Hide the panel/i }).first().click();
+  await page.waitForTimeout(450);
+  say((await panel()) === "none", "collapsed · it is gone", await panel());
+
+  await point("Dashboard");
+  say((await panel()) === "floating", "collapsed · pointing at the **active** destination previews it", await panel());
+  await away();
+  say((await panel()) === "none", "collapsed · and leaving puts it away", await panel());
+
+  await point("Tasks");
+  say((await panel()) === "floating", "collapsed · pointing elsewhere previews it", await panel());
+  await away();
+
+  /* And pressing one navigates without re-opening. */
+  await page.getByRole("button", { name: "Artifacts" }).first().click();
+  await page.waitForTimeout(700);
+  say((await panel()) === "none", "pressing a destination does not re-open it", await panel());
+
 
   await page.close();
 }

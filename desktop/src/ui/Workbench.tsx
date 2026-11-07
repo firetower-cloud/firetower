@@ -7,7 +7,7 @@
  * diff hid the conversation that explained it. They are two halves of one job.
  */
 import { useEffect, useRef, useState } from "react";
-import { Globe, MoreHorizontal, PanelRight, Pencil, Share2, SquareTerminal, Trash2, UserPlus, X } from "lucide-react";
+import { Globe, MoreHorizontal, PanelRight, Share2, SquareTerminal, Trash2, UserPlus, X } from "lucide-react";
 import { WhoCanAccess } from "~/ui/Sharing";
 import { useQueryClient } from "@tanstack/react-query";
 import { getListSessionsQueryKey, useRenameSession } from "~/api/generated/sessions/sessions";
@@ -509,11 +509,13 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
             title="Rename"
             className="nm rn"
           >
+              {/* **No pencil.** It was the designer's answer to "how does a
+                  title say it is a control without a hover doing all the
+                  work", drawn always rather than on hover. The user does not
+                  want it, which is sufficient. The hover treatment is the
+                  whole affordance again — which is what it was before, and
+                  what people are used to. */}
               {place.name}
-              {/* **Always drawn**, 13px. It was `opacity-0` until hover,
-                  which is an affordance you can only find by having already
-                  found it. */}
-              <Pencil className="h-[13px] w-[13px] shrink-0" strokeWidth={1.75} />
             </button>
           )}
 

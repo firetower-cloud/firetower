@@ -603,25 +603,63 @@ case where nothing is checked out and *every file goes with it* because there
 is no branch to promise anybody. The menu item calls it and adds nothing.
 Confirm is a **sheet** in the overlay taxonomy and takes `--color-scrim`.
 
-### A title that says you can rename it
+### A title that renames, and the mark it does not carry
 
-**Decided:** one click renames, and **the pencil is always drawn** — 13px, at
-`--hush`, after the title. Under the pointer it comes to `--quiet` and the
-title takes `--raised`.
+**Decided:** one click renames, double click still renames, and **the title
+carries no mark**. Hover is the affordance.
 
-The old answer was a `title="Double-click to rename"` tooltip, which is a thing
-nobody reads attached to a gesture nobody guesses. Hover alone is not a fix:
-a hover state can *sharpen* an affordance but it cannot be the whole of one,
-because you have to already be pointing at the thing to find out it is a
-control. So the mark is present standing still and quiet enough not to compete
-with the name it sits beside.
+A pencil was drawn here first — 13px, always present, at `--hush` — on an
+argument I still think is correct: **a hover state cannot be the whole
+affordance, because you have to already be pointing at a thing to learn it is
+a control.** The old `title="Double-click to rename"` tooltip was worse: a
+thing nobody reads attached to a gesture nobody guesses.
 
-Double click still works — somebody who learnt the old way should not find it
-gone — and lands in the same place, because a second click on an input that is
-already open is a selection rather than a second rename.
+It was drawn, seen, and removed by the person using it, and the cost is a fair
+one to choose. **A permanent mark beside the one name on the screen is a second
+thing to read every time you look at the title, forever, to solve a problem you
+have once.** Discoverability is paid for continuously and collected rarely, and
+that trade is legitimately the user's to make rather than mine.
 
-**Its absence is the read-only state.** Nothing greyed, nothing disabled: the
-title is simply not a button.
+So **how a title announces itself is still an open question**, not a solved
+one. Two answers have been tried and rejected — a tooltip and a permanent mark.
+If a third occurs to anybody, it is worth raising; what it must not be is a
+quiet reinstatement of either.
+
+Its absence is also the read-only state: the title is a `span` rather than a
+button, nothing greyed, nothing disabled.
+
+### The rail's hover preview, stated once
+
+Hovering a destination shows its panel without going there. **The rule has been
+specified three different ways in one day, so it is written here and this is
+where it stops moving.**
+
+| destination | panel | preview? |
+|---|---|---|
+| the one you are on | open | **no** — it is already on screen |
+| the one you are on | collapsed | **yes** |
+| any other | either | **yes** |
+
+One sentence: **preview unless you are pointing at the thing the open panel is
+already showing.**
+
+Two of those rows were unreachable in the drawing and in the build.
+`startPeek` refused `home` outright, which made *the one you are on, panel
+collapsed* impossible; and the panel only floated when it was collapsed, so
+hovering a **different** destination with the panel open did nothing at all.
+Both are drawn now, and all four combinations are asserted in a render by
+`ember.py`'s neighbour, `peek.py` — because **a state nobody has drawn is a
+state nobody has checked**, which is the same lesson the rail menu taught a
+few hours earlier.
+
+**Clicking a destination does not pin the panel.** It navigates and nothing
+else. `peekgo` used to set `panel = "pinned"` on every navigation; pinned or
+collapsed is the person's last choice, it persists across destinations, and a
+navigation is not a vote about chrome.
+
+The peek itself is unchanged in standing: **a new feature, argued on its own
+merits, owed to nothing, and the first thing to cut if the build has to be
+smaller.** What is new is only that the rule no longer moves.
 
 ### Six destinations, not twelve panes
 
@@ -981,7 +1019,7 @@ component list.
 **`desktop-redesign.html`** — fifteen tabs. Ten are mock-ups of a 1280×824
 window; five are documents:
 
-* **Every screen** — the contact sheet, and **read this one first**. All 106
+* **Every screen** — the contact sheet, and **read this one first**. All 108
   states at a third scale, grouped as Coverage is, each tile a control that
   opens it full size. It exists because a reader looking for the connect screen
   could not find it and reported it missing: it is the eleventh of fifteen tabs

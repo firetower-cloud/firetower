@@ -1926,17 +1926,20 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
 .tm .tx.one{display:block;align-self:center}
 </style>
 <style>
-/* The title is the rename control, so it has to say so standing still —
-   a hover state cannot be the whole affordance and the tooltip it replaced
-   was a thing nobody read. The pencil is always drawn, at `--hush`, and
-   comes up to `--quiet` under the pointer with the title on `--raised`.
-   **Its absence is the read-only state**: no disabled control, nothing
-   greyed, the affordance simply is not there. */
-.whead .nm.rn{display:inline-flex;align-items:center;gap:7px;border-radius:7px;
+/* The title is the rename control. **It carries no mark.** A pencil was
+   drawn here always-on, at `--hush`, on the argument that a hover state
+   cannot be the whole affordance — you have to already be pointing at a
+   thing to learn it is a control. That argument still stands and the cost
+   was chosen anyway: a permanent mark beside the one name on the screen is
+   a second thing to read every time you look at the title, forever, to
+   solve a problem you have once.
+
+   So hover is the affordance again, and **how a title announces itself is
+   an open question** rather than a solved one. A tooltip nobody reads and
+   a mark nobody wants are both answers that have been tried. */
+.whead .nm.rn{display:inline-flex;align-items:center;border-radius:7px;
   margin-left:-7px;padding:2px 7px;color:var(--ink)}
-.whead .nm.rn svg{color:var(--hush)}
 .whead .nm.rn:hover{background:var(--raised)}
-.whead .nm.rn:hover svg{color:var(--quiet)}
 </style>
 
 </head>
@@ -2168,6 +2171,7 @@ const S={theme:"light",panel:"pinned",peek:null,menu:null,tower:"nw",
      `mayWrite === false`. It is what the *absence* of the rename affordance
      and of the rail menu is for, so it has to be drawable. */
   ro:false,
+  peekrule:"off",           // which row of the hover-preview rule is on show
   home:"both",               // both | nowait | noart | neither
   when:null,                 // force a greeting: morning | afternoon | evening
   pvw:"desktop", pvpick:true, port:false};
@@ -2199,6 +2203,10 @@ function railIcon(name){
     stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
 }
 
+/* Which destination the rail should read as current. One definition, used by
+   both the rail and the preview rule, because they disagreed about it. */
+function activeDest(){ return S.rt==="work" ? "home" : S.rt; }
+
 /* ── The rail ────────────────────────────────────────────────── */
 function rail(){
   const el=elsewhere();
@@ -2207,7 +2215,7 @@ function rail(){
     title="${d.label}${d.key?`   ⌘${d.key}`:""}" aria-label="${d.label}">
     ${railIcon(d.icon)}${d.news?`<span class="news" title="A newer build is out"></span>`:""}</button>`;
   return `<nav class="rail" data-railzone aria-label="Destinations">
-    ${DEST.map(d=>btn(d,d.id===(S.rt==="work"?"home":S.rt))).join("")}
+    ${DEST.map(d=>btn(d,d.id===activeDest())).join("")}
     <span class="sep"></span>
     ${FOOT.map(d=>btn(d,false)).join("")}
     <span class="rgrow"></span>
@@ -2541,7 +2549,24 @@ function popSwitch(){
 const W=1280,H=824;
 function renderWin(){
   const t=tower();
-  const floating=S.panel==="collapsed"&&!!S.peek;
+  /* **The hover preview, stated once.** It has been specified three different
+     ways, so the rule is written here rather than inferred from the code:
+
+       active destination, panel open      → no preview; it is already on screen
+       active destination, panel collapsed → preview
+       any other destination, either state → preview
+
+     Which is one sentence: **preview unless you are pointing at the thing the
+     open panel is already showing.** The third row is the one the build never
+     had — with the panel open, hovering a *different* destination previews it
+     in place rather than doing nothing.
+
+     The peek itself is still what this document said it was: a new feature
+     argued on its own merits, owed to nothing, and the first thing to cut if
+     the build has to be smaller. That framing is unchanged; what is new is
+     that the rule no longer moves. */
+  const peeking=!!S.peek && !(S.peek===activeDest() && S.panel==="pinned");
+  const floating=peeking && S.panel==="collapsed";
   const show=S.panel==="pinned"||floating;
   if(S.first) return `<div class="win" style="width:${W}px;height:${H}px">
     <div class="titlebar"><span class="lights"><i></i><i></i><i></i></span>
@@ -2562,7 +2587,7 @@ function renderWin(){
     </div>
     <div class="body">
       ${rail2()}
-      ${show?`<div class="panel" data-float="${floating}" data-navzone>${panelFor2(S.peek||S.rt)}</div>`:""}
+      ${show?`<div class="panel" data-float="${floating}" data-navzone>${panelFor2(peeking?S.peek:S.rt)}</div>`:""}
       <main class="sheet">${
         S.threw           ? threw()
       : S.rt==="work"      ? workspace()
@@ -2744,7 +2769,7 @@ function workspace(){
     <div class="conv">
       ${S.wb==="chat"?`<div class="whead">
         ${S.ro?`<span class="nm" title="${esc(WS.name)}">${esc(WS.name)}</span>`
-          :`<button class="nm rn" data-act="noop" title="Rename">${esc(WS.name)}${ic("pencil",13)}</button>`}
+          :`<button class="nm rn" data-act="noop" title="Rename">${esc(WS.name)}</button>`}
         <span class="who">${AGENT[WS.agent](14)}Claude Code</span>
         <span class="right">
           <button class="gbtn" data-act="noop" title="Terminal   ⌘J">${ic("terminal",15)}</button>
@@ -4422,6 +4447,9 @@ const SPEC_DELTA=[
   ["A row you may not act on gets no menu","added","<b>Not a menu with two dead items.</b> The only one that would survive is <i>Open</i>, which is exactly what left-clicking the row already does — a menu whose single entry duplicates the gesture that summoned it is noise. <b>No disabled control, and the screen says it instead:</b> opening the workspace shows a title that is a <code>span</code> rather than a button, with no pencil. The absence <i>is</i> the statement, and it is the same absence <code>Workbench.tsx:491</code> already produces."],
   ["End workspace does not get a second question","noted","<code>ui/end.ts</code>&rsquo;s <code>useEndWorkspace</code> <b>already confirms</b>, with a body it builds from <code>sessionWork</code> — uncommitted files, unpushed commits, how many agents stop, and the separate wording for a workspace with nothing checked out, where <i>every file goes with it</i> and there is no branch to promise anybody. The menu item calls it and adds nothing. Confirm is a <b>sheet</b> in the overlay taxonomy and takes <code>--color-scrim</code>."],
   ["desktop/src/ui/Workbench.tsx:491 — the title renames","modified","<b>One click, and an affordance that does not need a hover.</b> It answered a double click and a <code>title</code> tooltip, which made the one way to rename from this screen a thing you had to already know. The pencil is now <b>always drawn, at <code>--hush</code></b>, 13px after the title; under the pointer it comes to <code>--quiet</code> and the title takes <code>--raised</code>. Hover sharpens it and is not what announces it. <b>Double click still works</b>, and lands in the same place. Already bound in the product; this draws the affordance it needs."],
+  ["The rename pencil comes out","reverted","<b>Drawn, then removed by the person using it.</b> A pencil sat beside the workspace title always-on at <code>--hush</code>, on the argument that <i>a hover state cannot be the whole affordance — you have to already be pointing at a thing to learn it is a control</i>. That argument still stands; the cost was chosen anyway, and it is a fair one: <b>a permanent mark beside the one name on the screen is a second thing to read every time you look at it, forever, to solve a problem you have once.</b> Hover is the affordance again. <b>Rename is unchanged</b> — single click and double click both open the field. <i>How a title announces itself is still open</i>: a tooltip nobody reads and a mark nobody wants are both answers that have been tried."],
+  ["The rail&rsquo;s hover preview — the rule","clarified","<b>Specified three different ways in one day, so it is written down rather than inferred.</b> Active destination + panel open: <b>no preview</b>, it is already on screen. Active + panel collapsed: <b>preview</b>. Any other destination, either state: <b>preview</b>. One sentence: <i>preview unless you are pointing at the thing the open panel is already showing.</i> Two rows were unreachable in the drawing — <code>startPeek</code> refused <code>home</code> outright, and the panel only floated when collapsed, so hovering a <i>different</i> destination with the panel open did nothing. Both are drawn now, and all four rows are asserted in a render by <code>peek.py</code>."],
+  ["Clicking a destination does not pin the panel","corrected","<code>peekgo</code> set <code>panel = \"pinned\"</code> on every navigation. <b>It navigates and nothing else.</b> Pinned or collapsed is the person&rsquo;s last choice and persists across destinations; a navigation is not a vote about chrome."],
   ["desktop/src/styles.css — the composer","modified","<b>18px → 16.5px, and it is the same number as <i>Your message</i> deliberately.</b> These are the same words before and after you press send, and typing at 18 to read it back at 16.5 shrank the text the moment it was committed. 18 also set what you type at the size of an <b>agent's question</b> — the loudest reading tier there is — and above the <b>17px prose</b> you read at length. The type pass stepped everything under 28px up a pixel, which was right; this is the one place the uniform step landed where the scale did not intend. <b>Both composers move together</b>: the home rule restated 18 rather than changing it, so the workspace composer was already the same size and they do not now disagree."],
   ["web/app/globals.css — light signals","added","Light values for <code>--color-sage</code> and <code>--color-slate</code>, derived the way §4 derives everything: measured against what the mark sits on. <b>4.49:1</b> and <b>5.83:1</b> on the chrome, past the 3:1 floor for a non-text mark. The dark values are globals.css verbatim."],
   ["Overlays — the cross-cutting pass","corrected","<b>The pass this document promised when the palette was wired and never ran.</b> Four kinds are now named with a test — <i>does the thing it is about stay on screen?</i> — and every overlay is assigned. <b>Sheets</b> take <code>--color-scrim</code>; <b>popovers</b> take none; the find <b>bar</b> takes nothing; the Gate and Boundary are <b>screens</b>. See the handoff."],
@@ -4806,7 +4834,10 @@ const COV=[
     ["Seven · forty · all finished · none","Y","The states C was chosen against"],
     ["A <i>Done</i> or <i>Broken</i> band the data can fill","N","<code>doing()</code> returns <code>idle</code> for finished, never-started and failed alike. Needs a <code>BEAT</code> rollup — see Spec"],
   ]],
-  ["Rail — hover preview of a destination’s panel","Y",""],
+  ["Rail — hover preview of a destination’s panel","Y","<b>The rule, exhaustively.</b> Active + panel open: <i>no preview</i>, it is already on screen. Active + panel collapsed: preview. Any other destination, either state: preview. One sentence — <b>preview unless you are pointing at what the open panel already shows</b>"],
+  ["&mdash; hovering the destination you are on, panel hidden","Y","The row the build never had, and a state nobody had drawn"],
+  ["&mdash; hovering another destination, panel open","Y","Previews in place rather than doing nothing"],
+  ["Clicking a destination leaves the panel as it was","Y","<b>It navigates and nothing else.</b> Pinned or collapsed is the person&rsquo;s last choice and persists; a navigation does not overrule it"],
   ["Rail — focus previews exactly as hover does","Y",""],
   ["Titlebar — the Firetower named as text","Y",""],
   ["Firetower switcher",null,"",[
@@ -6111,6 +6142,10 @@ const SHEET = [
   ["Home — good morning",          {tab:"home", rt:"home", home:"both", when:"morning"}],
   ["Home — good evening",          {tab:"home", rt:"home", home:"both", when:"evening"}],
   ["Panel — by status, forty",     {tab:"home", rt:"home", home:"both", ws:"many"}],
+  // The row of the preview rule the build never had: you are on this
+  // destination, the panel is hidden, and you hover the one you are already on.
+  ["Hovering the one you are on",  {tab:"home", rt:"home", home:"both", panel:"collapsed", peek:"home"}],
+  ["Hovering another, panel open", {tab:"home", rt:"home", home:"both", panel:"pinned", peek:"artifacts"}],
   ["Panel — by repository, forty",{tab:"home", rt:"home", home:"both", ws:"many", wsby:"repo"}],
   ["Panel — nothing running",      {tab:"home", rt:"home", home:"neither", ws:"none"}],
   ["Tasks — has work",             {tab:"tasks", rt:"tasks", tasks:"full"}],
@@ -6296,7 +6331,11 @@ function chrome(){
     `<button data-act="${act}" data-${key}="${id}" aria-pressed="${S[key]===id}">${l}</button>`).join("")}</span>`;
   document.getElementById("ctl").innerHTML=`
     <span class="seg">${TABS.map(([id,l])=>`<button data-act="tab" data-tab="${id}" aria-pressed="${S.tab===id}">${l}</button>`).join("")}</span>
-    ${S.tab==="home"?seg("home","home",HOMES)+seg("when","when",WHENS):""}
+    ${S.tab==="home"?seg("home","home",HOMES)+seg("when","when",WHENS)
+      +`<span class="seg">${[["off","No hover"],["on-open","On it · panel open"],
+          ["on-shut","On it · panel hidden"],["other-open","Another · panel open"],
+          ["other-shut","Another · panel hidden"]]
+        .map(([id,l])=>`<button data-act="peekrule" data-peekrule="${id}" aria-pressed="${(S.peekrule||"off")===id}">${l}</button>`).join("")}</span>`:""}
     ${S.tab==="work"?`<span class="seg">${
       [["chat","Conversation"],["file","A file"],["diff","A diff"],["pv","Preview"],["image","A picture"],["noting","Noting code"],["kept","Notes kept"]]
       .map(([id,l])=>`<button data-act="wb" data-wb="${id}" aria-pressed="${S.wb===id}">${l}</button>`).join("")}</span>
@@ -6528,7 +6567,14 @@ document.addEventListener("click",e=>{
     S.pick = S.pick===b.dataset.pick ? null : b.dataset.pick;
     S.pane=null; S.menu=null;
   }
-  else if(a==="peekgo"){ const to=b.dataset.to; S.peek=null; shut(); S.panel="pinned";
+  /* The four rows of the preview rule, as four states you can step through.
+     The third and fourth were unreachable before: `startPeek` refused `home`
+     outright and the panel only floated when it was collapsed. */
+  else if(a==="peekrule"){ const v=b.dataset.peekrule; S.peekrule=v;
+    S.tab="home"; S.rt="home";
+    S.panel = (v==="on-shut"||v==="other-shut") ? "collapsed" : "pinned";
+    S.peek  = v==="off" ? null : (v==="on-open"||v==="on-shut") ? "home" : "artifacts"; }
+  else if(a==="peekgo"){ const to=b.dataset.to; S.peek=null; shut();
     const T={home:"home",artifacts:"artifacts",skills:"customize",updates:"updates",
              repos:"sources",machines:"sources",tasks:"sources",settings:"settings"};
     S.rt = to==="settings" ? "people" : to;
@@ -6539,7 +6585,7 @@ document.addEventListener("click",e=>{
 });
 function startPeek(to){
   clearTimeout(pOut);
-  if(to==="home"||S.peek===to) return;
+  if(S.peek===to) return;
   clearTimeout(pIn);
   pIn=setTimeout(()=>{S.peek=to;render();},180);
 }

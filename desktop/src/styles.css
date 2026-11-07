@@ -3984,12 +3984,12 @@ html:not([data-platform="macos"]) {
      So it has to say so standing still. A hover state cannot be the whole
      affordance — you must already be pointing at a thing to learn it is a
      control — and the tooltip it replaced was a thing nobody read. The
-     pencil is always drawn, at `--mute`, and comes up to `--dim` under the
-     pointer with the title on `--raise`.
+     title takes `--raise` under the pointer. There was an always-drawn
+     pencil here, which is the stronger answer and the one the user did not
+     want; the hover is the whole affordance again.
 
-     **Its absence is the read-only state.** No disabled control, nothing
-     greyed: a `span` rather than a button, no pencil, and the screen has
-     said what it is. */
+     **Read-only is the absence.** No disabled control, nothing greyed: a
+     `span` rather than a button, and the screen has said what it is. */
   .whead .nm.rn {
     display: inline-flex;
     align-items: center;
@@ -3999,15 +3999,8 @@ html:not([data-platform="macos"]) {
     padding: 2px 7px;
     color: var(--color-bone);
   }
-  .whead .nm.rn svg {
-    color: var(--color-mute);
-    transition: color var(--dur-native) var(--ease-swift);
-  }
   .whead .nm.rn:hover {
     background: var(--color-raise);
-  }
-  .whead .nm.rn:hover svg {
-    color: var(--color-dim);
   }
 
   /* ── A context menu ────────────────────────────────────────────

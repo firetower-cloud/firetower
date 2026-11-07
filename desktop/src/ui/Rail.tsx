@@ -58,14 +58,29 @@ export function Rail({ backend, onSwitch, onForgot }: { backend: Backend; onSwit
      the panel fires both edges and whichever lands last has to win. */
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const hold = () => clearTimeout(timer.current);
+  /**
+   * Whether pointing at a destination should preview it.
+   *
+   * | destination | panel | preview |
+   * |---|---|---|
+   * | active | open | **no** — it is already on screen |
+   * | active | collapsed | **yes** |
+   * | not active | either | **yes** |
+   *
+   * It used to be "anything but the one you are on", which made the active
+   * destination the one place a collapsed panel could never be glimpsed —
+   * exactly the case somebody with the panel shut is in most of the time.
+   */
+  const previews = (to: DestinationId) => to !== here || !pinned;
+
   const startPeek = (to: DestinationId) => {
     hold();
-    if (to === here) return;
+    if (!previews(to)) return;
     timer.current = setTimeout(() => setPeek(to), 180);
   };
   const showPeek = (to: DestinationId) => {
     hold();
-    setPeek(to === here ? null : to);
+    setPeek(previews(to) ? to : null);
   };
   const endPeek = () => {
     hold();
@@ -78,18 +93,14 @@ export function Rail({ backend, onSwitch, onForgot }: { backend: Backend; onSwit
      drifted to on the way back. */
   useEffect(() => setPeek(null), [path]);
 
-  /* **Arriving at a destination opens the panel.** This went back and forth:
-     it opened the panel, then it did not — on the argument that a panel you
-     shut should stay shut — and now it does again, because the panel is how
-     you reach a destination's sub-elements and arriving with it closed hides
-     the thing you came for.
-  
-     So there are three ways in and two ways out: the title bar's toggle and
-     `⌘\` both open and close it; pressing a destination only opens. */
+  /* **Pressing a destination navigates and nothing else.** The panel is
+     open or shut because somebody chose it, and that choice persists. What
+     a collapsed panel gives up is not the ability to see what is in a
+     destination — hovering previews it — only the ability to see it without
+     asking. The toggle and `⌘\` are the two things that change the choice. */
   const go = (to: { id: DestinationId; href: string }) => {
     hold();
     setPeek(null);
-    setPinned(true);
     navigate(to.href);
   };
 
@@ -172,7 +183,7 @@ export function Rail({ backend, onSwitch, onForgot }: { backend: Backend; onSwit
             label={d.label}
             hint={d.key ? key(d.key) : undefined}
             on={d.id === here}
-            peeked={peek === d.id && d.id !== here}
+            peeked={peek === d.id && previews(d.id)}
             onPick={() => go(d)}
             onPoint={() => startPeek(d.id)}
             onFocus={() => showPeek(d.id)}
@@ -188,7 +199,7 @@ export function Rail({ backend, onSwitch, onForgot }: { backend: Backend; onSwit
             label={d.id === "updates" ? updates.label : d.label}
             hint={d.id === "settings" ? key(",") : undefined}
             on={d.id === here}
-            peeked={peek === d.id && d.id !== here}
+            peeked={peek === d.id && previews(d.id)}
             news={d.id === "updates" && updates.dot}
             onPick={() => go(d)}
             onPoint={() => startPeek(d.id)}
