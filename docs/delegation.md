@@ -64,9 +64,10 @@ Every check a person starting a session meets, a lead meets.
 
 ## Limits
 
-Flat: a child cannot spawn. At most 4 children in flight per lead and 8 over
-its life. A refusal is a sentence the agent reads — which limit, and what is
-holding it.
+Flat: a child cannot spawn — the only limit left. There is no cap on how many
+children a lead starts, nor on how many of them run at once; the spawn tool
+says so, and asks the agent to dispatch what the work needs rather than what it
+is allowed. A refusal is a sentence the agent reads: which rule, and why.
 
 Money and wall-clock caps are not here. Firetower shows a quota at 100% and
 does not interrupt a running agent; a cap that interrupts is a new behaviour
