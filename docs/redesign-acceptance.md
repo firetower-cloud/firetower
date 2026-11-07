@@ -118,7 +118,11 @@ of its own — but it is not "dark, plus light later".
     nothing binds it.
 42. Artifacts render as poster images in every list and grid. No live frame is
     mounted outside the artifact viewer. The "no poster yet" state is drawn.
-43. A skill opens with its Details, Bundle, Versions and Defaults tabs, and both
+43. A skill opens with the tabs **the prototype draws** — `Instructions`,
+    `Files`, `Versions` (`desktop-redesign.html:2893`). *(Corrected: this said
+    "Details, Bundle, Versions and Defaults", which is the **old** app's four
+    tabs. It was written by reading the codebase instead of the drawing, so it
+    instructed the build to keep what the redesign replaced.)* And both
     create flows land in the held-for-review state rather than a second concept.
 44. Updates reads by default; controls appear only for whoever may act, and a
     machine someone does not administer is listed and dimmed with the reason.
@@ -175,3 +179,21 @@ is reported, not reinterpreted.
 62. **The theme control is reachable from Settings as well as the profile menu.**
     System, Light and Dark. It was built in one place and a reader looked for it
     in the other.
+
+---
+
+## The rule that outranks every criterion above
+
+**Where a criterion and the prototype disagree, the prototype wins and the
+criterion is the bug.**
+
+Three criteria have now been found describing the old app rather than the
+drawing — 34 (a "Sources" destination that never existed), 37 (a provider
+picker the code argues for), and 43 (a skill's four old tabs). Each was written
+by reading the codebase, and each instructed the build to preserve the thing the
+redesign replaced. An engineer meeting them exactly produced the old screen and
+reported it as passing, which was accurate and useless.
+
+So: this document is a convenience, not the authority.
+`docs/prototypes/redesign/desktop-redesign.html` is the authority. If a screen
+matches the drawing and fails a criterion here, the criterion gets fixed.
