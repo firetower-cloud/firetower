@@ -29,6 +29,7 @@ import {
   Pencil,
   Puzzle,
   Server,
+  Search,
   Settings,
   Shapes,
   Ticket,
@@ -172,10 +173,6 @@ function Workspaces({ stale, onCollapse }: { stale: boolean; onCollapse: () => v
 
   return (
     <>
-      {/* No search glyph here yet. The artifact draws one, and ⌘P is the
-          *workspace's* QuickOpen while the palette is not wired up at all —
-          so it would be a control that does nothing, which is worse than no
-          control. It comes back when the palette does. */}
       <Head name="Workspaces" onCollapse={onCollapse} />
       <Scroll>
         <button onClick={() => start()} className="prow">
@@ -362,6 +359,16 @@ function Head({ name, onCollapse }: { name: string; onCollapse: () => void }) {
   return (
     <div className="flex h-[38px] shrink-0 items-center gap-0.5 pr-2 pl-3.5">
       <span className="min-w-0 flex-1 truncate text-ui font-semibold text-bone">{name}</span>
+      {/* **Find anything, from the panel.** The drawing puts it here beside
+          the collapse, in every destination's panel — the palette was
+          reachable only by the key, which is the one way an affordance can be
+          present and invisible at the same time. */}
+      <Glyph
+        of={Search}
+        label="Find anything"
+        hint={key("K")}
+        onPick={() => window.dispatchEvent(new CustomEvent("firetower:palette"))}
+      />
       <Glyph of={PanelLeftClose} label="Hide this panel" hint={key("\\")} onPick={onCollapse} />
     </div>
   );

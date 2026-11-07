@@ -85,6 +85,15 @@ export function Rail({ backend, onSwitch, onForgot }: { backend: Backend; onSwit
     navigate(to.href);
   };
 
+  /* The panel's find glyph opens the same palette the key does. An event
+     rather than a prop: the panel is three components down and nothing else
+     between here and there has any business knowing about ⌘K. */
+  useEffect(() => {
+    const open = () => setPalette(true);
+    window.addEventListener("firetower:palette", open);
+    return () => window.removeEventListener("firetower:palette", open);
+  }, []);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {

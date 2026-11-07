@@ -18,13 +18,14 @@
  * control beside a fact invites somebody to change what they have no say over.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronLeft, FolderDown, Plus, Search, ShieldAlert, Sparkles, Trash2, UserPlus } from "lucide-react";
-import { Rows, Section } from "~/ui/config/bits";
+import { Check, ChevronLeft, FolderDown, Loader2, Plus, Search, ShieldAlert, Sparkles, Trash2, TriangleAlert, UserPlus } from "lucide-react";
+import { Blank, Rows, Section } from "~/ui/config/bits";
 import { ShareMany, WhoCanAccess } from "~/ui/Sharing";
 import { AddSkill } from "~/ui/AddSkill";
 import { CreateMenu } from "~/ui/config/CreateMenu";
 import { useStart } from "~/start";
 import { useSkills, useSkillDetail, useSkillVersions, why } from "~/data";
+import { elapsed, minutesSince } from "~/api/view";
 import { useRepos } from "~/data";
 import {
   deleteSkill,
@@ -130,7 +131,7 @@ export function Skills() {
 
   const chosen = feed.data.find((s) => s.id === open);
   if (chosen)
-    return <Detail skill={chosen} onBack={() => setOpen(null)} onChanged={refresh} />;
+    return <Detail skill={chosen} onBack={() => setOpen(null)} onChanged={refresh} onNewVersion={() => add()} />;
 
   const q = query.trim().toLowerCase();
   const shown = q
@@ -172,7 +173,13 @@ export function Skills() {
             </span>
             {s.alwaysOn && <span className="shrink-0 text-meta text-mute">on by default</span>}
           </span>
-          <span className="mt-1 line-clamp-2 block text-ui leading-snug text-dim">{s.description}</span>
+          {/* **No `block` here.** `line-clamp-2` sets `display: -webkit-box`
+              and `block` sets `display: block`; both are display utilities, so
+              whichever Tailwind emitted last won — and it was `block`. The
+              clamp was in the class list and doing nothing, so a one-line
+              description and a five-line one made two different row heights
+              and the list read as ragged. */}
+          <span className="ds mt-1 text-ui leading-snug text-dim">{s.description}</span>
           {s.risk.length > 0 && (
             <span className="mt-2 flex flex-wrap gap-x-3.5 gap-y-1">
               {s.risk.map((r) => (
@@ -538,11 +545,20 @@ function Tag({ children, tone }: { children: React.ReactNode; tone?: "brick" | "
   );
 }
 
+/**
+ * Three, which is what `desktop-redesign.html:2893` draws.
+ *
+ * It was four — Details, Bundle, Versions, **Defaults** — because criterion 43
+ * named the old app's four and the criterion was written by reading the
+ * codebase rather than the drawing. The drawing wins; the criterion was the
+ * bug. `Defaults` was not dropped with its tab: the drawing keeps "On by
+ * default" as a card in the aside, which is where the fact belongs, so the
+ * control lives there now instead of behind a tab of its own.
+ */
 const TABS = [
-  { at: "details", label: "Details" },
-  { at: "bundle", label: "Bundle" },
+  { at: "details", label: "Instructions" },
+  { at: "bundle", label: "Files" },
   { at: "versions", label: "Versions" },
-  { at: "defaults", label: "Defaults" },
 ] as const;
 
 /**
@@ -554,10 +570,13 @@ function Detail({
   skill,
   onBack,
   onChanged,
+  onNewVersion,
 }: {
   skill: Skill;
   onBack: () => void;
   onChanged: () => void;
+  /** The gallery's upload sheet, reached from the one skill it would replace. */
+  onNewVersion?: () => void;
 }) {
   const [tab, setTab] = useState<(typeof TABS)[number]["at"]>("details");
   const [saving, setSaving] = useState<string | null>(null);
@@ -592,24 +611,34 @@ function Detail({
       </button>
 
       {/* Who it is and what can be done to it, all at the top. */}
-      <header className="mt-4 flex items-start gap-5">
-        <span className="grid h-16 w-16 shrink-0 place-items-center rounded-xl border border-line bg-raise font-narrow text-display font-bold uppercase text-bone shadow-raise">
-          {skill.name.split("-").slice(0, 2).map((w) => w[0] ?? "").join("")}
-        </span>
-        <div className="min-w-0 flex-1">
-          <h1 className="truncate font-mono text-display text-bone">{skill.name}</h1>
-          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-meta text-dim">
-            <span>{skill.builtin ? "Firetower" : (skill.author ?? "somebody who has left")}</span>
-            <span className="h-3 w-px bg-line" />
+      <header className="sk-head">
+        {/* The gallery's plate at the detail's size, so the thing you clicked
+            and the thing you are reading are plainly the same object. */}
+        <span className="plate">{monogram(skill.name)}</span>
+        <div className="tx">
+          <h1>{skill.name}</h1>
+          <div className="facts">
+            <span>by {skill.builtin ? "Firetower" : (skill.author ?? "somebody who has left")}</span>
             <span className="tabular-nums">{skill.version > 0 ? `v${skill.version}` : "pending review"}</span>
-            <span className="h-3 w-px bg-line" />
-            <span className="font-mono">{where}</span>
+            <span>updated {elapsed(minutesSince(skill.updatedAt))} ago</span>
+            <span>
+              {where === "Only you" ? "only you" : <>shared in <b>{where}</b></>}
+            </span>
           </div>
-          <p className="mt-2 line-clamp-2 max-w-[80ch] text-ui leading-relaxed text-text">{skill.description}</p>
-          <div className="mt-3.5 flex flex-wrap items-center gap-2">
+          {/* The whole description. It is one sentence and the reason somebody
+              opened this; clamping it here was the gallery's rule applied to
+              the page the gallery leads to. */}
+          <p className="ds">{skill.description}</p>
+          <div className="acts">
+            {skill.mayWrite && onNewVersion && (
+              <button onClick={onNewVersion} className="btn plain">
+                <FolderDown className="h-3.5 w-3.5" strokeWidth={1.75} />
+                Drop a new version
+              </button>
+            )}
             <WhoCanAccess look="toolbar" kind="skill" id={skill.id} path={skill.path} />
             {skill.mayShare && (
-              <button className="control border border-brick-deep text-ui text-brick hover:bg-brick-tint" onClick={remove}>
+              <button className="btn quiet" onClick={remove}>
                 <Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} />
                 Delete
               </button>
@@ -625,14 +654,12 @@ function Detail({
       )}
 
       {!skill.held && (<>
-      <div className="mt-6 border-b border-line-soft px-8 pb-2">
-        <div className="track w-fit">
-          {TABS.map((t) => (
-            <button key={t.at} data-on={tab === t.at} onClick={() => setTab(t.at)}>
-              {t.label}
-            </button>
-          ))}
-        </div>
+      <div className="sk-tabs">
+        {TABS.map((t) => (
+          <button key={t.at} aria-selected={tab === t.at} onClick={() => setTab(t.at)}>
+            {t.label}
+          </button>
+        ))}
       </div>
 
       {saving && <p className="px-8 pt-3 text-meta text-brick">{saving}</p>}
@@ -679,17 +706,12 @@ function Detail({
                 )}
               </div>
             </div>
-            {(skill.alwaysOn || skill.defaultIn.length > 0) && (
-              <div>
-                <h3 className="text-ui text-bone">On by default</h3>
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  {skill.alwaysOn && <Tag>everywhere</Tag>}
-                  {skill.defaultIn.map((r) => (
-                    <Tag key={r}>{r}</Tag>
-                  ))}
-                </div>
-              </div>
-            )}
+            {/* Where the drawing puts this fact — and, since it is a fact
+                somebody may change, where the control for it goes too. */}
+            <div>
+              <h3 className="text-ui text-bone">On by default</h3>
+              <Defaults skill={skill} onChanged={onChanged} />
+            </div>
           </aside>
         </div>
       )}
@@ -697,7 +719,6 @@ function Detail({
       <div className="max-w-[56rem] px-8 pb-16">
         {tab === "bundle" && <Bundle id={skill.id} />}
         {tab === "versions" && <Versions id={skill.id} />}
-        {tab === "defaults" && <Defaults skill={skill} onChanged={onChanged} />}
       </div>
       </>)}
     </section>
@@ -756,6 +777,39 @@ function Review({
     }
   };
 
+  /**
+   * **Guarded.** This read `q.data` straight into `review.files.map(...)`, so
+   * a review that had not arrived — or a request that failed — took the whole
+   * screen down with `Cannot read properties of undefined`. A held skill is
+   * exactly the row somebody clicks first, and `Boundary` catching it is not
+   * the same as the screen working.
+   */
+  if (q.isPending) {
+    return (
+      <div className="max-w-[56rem] px-8 py-6">
+        <p className="flex items-center gap-2 text-ui text-mute">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={2} />
+          Reading what the agent wrote…
+        </p>
+      </div>
+    );
+  }
+  /* **Shape, not presence.** The thing that actually crashed was a server
+     answering `[]` — truthy, so a `!q.data` guard passes it straight through
+     to `review.files.map` and the screen goes down. The generated client does
+     not validate at runtime, so the one field this screen cannot do without
+     is checked here. */
+  if (q.error || !Array.isArray((q.data as { files?: unknown } | undefined)?.files)) {
+    return (
+      <div className="max-w-[56rem] px-8 py-6">
+        <Blank icon={TriangleAlert} title="That did not load">
+          {q.error ? `${why(q.error)} ` : ""}The skill is still held — nothing has been approved and
+          nothing has been discarded.
+        </Blank>
+      </div>
+    );
+  }
+
   const review = q.data;
   return (
     <div className="max-w-[56rem] px-8 py-6">
@@ -773,10 +827,9 @@ function Review({
         </div>
       </div>
 
-      {q.isPending && <p className="mt-5 text-meta text-mute">Reading what's pending…</p>}
-      {q.error && <p className="mt-5 text-meta text-brick">{why(q.error)}</p>}
-
-      {review && (
+      {/* The three states are handled above, so this is the one that has
+          something to draw. */}
+      {(
         <div className="mt-5 space-y-4">
           <Facts
             title="What it says it is"

@@ -34,13 +34,23 @@ const BRANCH = "agent/auth-refactor";
 const minutesAgo = (n) => new Date(Date.now() - n * 60_000).toISOString();
 
 /** What the workspace came up with. `POST /__reset` puts it back to this. */
-const START = () => [
-  { slug: "acme/web", repoId: "r_web", base: "main", branch: BRANCH, path: "web", trouble: null, pullRequest: null, pullState: null },
-  { slug: "acme/api", repoId: "r_api", base: "main", branch: BRANCH, path: "api", trouble: null, pullRequest: null, pullState: null },
-  { slug: "acme/infra", repoId: "r_infra", base: "main", branch: BRANCH, path: "infra", trouble: "github.com did not answer — nothing was cloned", pullRequest: null, pullState: null },
-];
+const START = () => {
+  const web = { slug: "acme/web", repoId: "r_web", base: "main", branch: BRANCH, path: "web", trouble: null, pullRequest: null, pullState: null };
+  /* **One checkout, or three.** Ship draws a section per repository the moment
+     there is more than one, and the drawing has both — so the scene decides
+     which of the two is on screen rather than the fixture always being three. */
+  if (scene === "one-repo") return [web];
+  if (scene === "merged") return [{ ...web, pullRequest: "https://example.invalid/acme/web/pull/482", pullState: "merged" }];
+  return [
+    web,
+    { slug: "acme/api", repoId: "r_api", base: "main", branch: BRANCH, path: "api", trouble: null, pullRequest: null, pullState: null },
+    { slug: "acme/infra", repoId: "r_infra", base: "main", branch: BRANCH, path: "infra", trouble: "github.com did not answer — nothing was cloned", pullRequest: null, pullState: null },
+  ];
+};
 
-let checkouts = START();
+/* `scene` is assigned below, so the first call reads `undefined` and gets the
+   default three — which is what a fresh process should have. */
+let checkouts = [];
 
 const work = () =>
   checkouts.map((c) => ({
@@ -439,8 +449,8 @@ const server = createServer(async (req, res) => {
   // Back to a workspace that has just come up, so a second scene can be
   // photographed without restarting the process.
   if (path === "/__reset") {
-    checkouts = START();
     scene = url.searchParams.get("scene") ?? "default";
+    checkouts = START();
     return json(res, { detail: `back to three, playing ${scene}` });
   }
 
@@ -619,9 +629,19 @@ const server = createServer(async (req, res) => {
     "/api/v1/artifacts": scene === "no-artifacts" ? [] : ARTIFACTS,
     "/api/v1/sessions/s_1/conversation": conversation(),
     "/api/v1/sessions/s_1/controls": scene.startsWith("codex") ? [] : CLAUDE_CONTROLS,
-    "/api/v1/sessions/s_1/account": { account: ACCOUNTS[0], limits: [], switches: [] },
+    "/api/v1/sessions/s_1/account":
+      scene === "limit-hit"
+        ? {
+            account: { ...ACCOUNTS[0], limits: [{ scope: "weekly", status: "exhausted", usedPercent: 100, resetsAt: Math.floor(Date.now() / 1000) + 3 * 3600 }] },
+            limits: [{ scope: "weekly", status: "exhausted", usedPercent: 100, resetsAt: Math.floor(Date.now() / 1000) + 3 * 3600, window: "this week" }],
+            switches: [ACCOUNTS[1] ?? ACCOUNTS[0]],
+          }
+        : { account: ACCOUNTS[0], limits: [], switches: [] },
     "/api/v1/sessions/s_1/annotations": [],
-    "/api/v1/skills": SKILLS,
+    /* `throws` answers the right path with the wrong shape, which is what a
+       real client meets when a server drifts — and is the one way to get
+       `Boundary`'s own screen on camera without planting a bug in the app. */
+    "/api/v1/skills": scene === "throws" ? { nope: true } : SKILLS,
     "/api/v1/repos": scene === "no-repos" ? [] : REPOS,
     "/api/v1/hosts": scene === "no-machines" ? [] : HOSTS,
     "/api/v1/agents": AGENTS,
@@ -684,6 +704,17 @@ const server = createServer(async (req, res) => {
      the text and nothing around it. */
   if (/^\/api\/v1\/sessions\/[^/]+\/file$/.test(path)) {
     const wanted = url.searchParams.get("path") ?? "";
+    /* A real picture, because `useFileText` reads the bytes and decides for
+       itself what it is holding — a text stand-in renders as a code pane. */
+    if (wanted.endsWith(".png")) {
+      res.writeHead(200, { "content-type": "image/png", "access-control-allow-origin": "*" });
+      return res.end(
+        Buffer.from(
+          "iVBORw0KGgoAAAANSUhEUgAAAGQAAABGCAYAAAAZpBqjAAAAXklEQVR4nO3QMQEAAAjAoNm/9Eq4AZIjcKtzdGBqAzsBOwE7ATsBOwE7ATsBOwE7ATsBOwE7ATsBOwE7ATsBOwE7ATsBOwE7ATsBOwE7ATsBOwE7ATsBOwE7AbsPUZEAgXCYVwkAAAAASUVORK5CYII=",
+          "base64",
+        ),
+      );
+    }
     const body = FILES[wanted];
     if (body === undefined) return json(res, { message: `No such file: ${wanted}` }, 404);
     res.writeHead(200, { "content-type": "text/plain; charset=utf-8", "access-control-allow-origin": "*" });
@@ -693,6 +724,84 @@ const server = createServer(async (req, res) => {
   /* The rows the drawing draws under an expanded machine. An empty list was
      "ready: true, checks: []", which no screen can say anything useful about
      — and which the composer's machine picker drew as a red band. */
+  /* What an agent wrote and is waiting on. Without this the held skill — the
+     first row of the gallery — opened onto a screen that threw. */
+  const review_of = /^\/api\/v1\/skills\/([^/]+)\/review$/.exec(path);
+  if (review_of) {
+    const held = SKILLS.find((k) => k.id === review_of[1]);
+    if (!held) return json(res, { code: "NotFound", message: "no such skill" }, 404);
+    return json(res, {
+      name: held.name,
+      description: held.description,
+      body: "# Deploy runbook\n\nUse when somebody asks to ship, cut a release or roll back.\n\n## Steps\n\n1. Run `scripts/preflight.sh` and stop at the first failure.\n2. Promote staging to production.\n3. Watch the smoke suite for ten minutes.\n",
+      files: [
+        { path: "SKILL.md", size: 1840, executable: false, text: "# Deploy runbook\n\nUse when somebody asks to ship." },
+        { path: "scripts/preflight.sh", size: 612, executable: true, text: "#!/usr/bin/env bash\nset -euo pipefail\ncargo test --workspace\n" },
+        { path: "scripts/promote.sh", size: 934, executable: true, text: "#!/usr/bin/env bash\nset -euo pipefail\nfiretower deploy --promote staging\n" },
+      ],
+    });
+  }
+
+  /* ── The scenes the reconciliation could not reach ────────────────
+     Every one of these fell through to the handler's `[]`, so the state the
+     prototype draws for it could not be photographed at all. */
+
+  /* A forwarded port, so the Preview tab has something to be. */
+  if (/^\/api\/v1\/sessions\/[^/]+\/forwards$/.test(path)) {
+    return json(res, {
+      alreadyReachable: false,
+      availableHere: true,
+      forwards: [{ port: 3000, local: 53000, url: "http://localhost:53000" }],
+    });
+  }
+
+  /* An ssh probe, with its three answers. */
+  if (req.method === "POST" && path === "/api/v1/hosts/probe") {
+    if (scene === "probe-fails") {
+      return json(res, {
+        reached: false,
+        diagnosis: {
+          at: new Date().toISOString(),
+          cause: "AuthRefused",
+          summary: "build-02 refused the key",
+          detail: "Permission denied (publickey). The key is in the agent but the machine has not been told about it.",
+          remedy: "Add Firetower's public key to ~/.ssh/authorized_keys on build-02.",
+        },
+      });
+    }
+    await new Promise((r) => setTimeout(r, scene === "probe-slow" ? 30_000 : 400));
+    return json(res, { reached: true, diagnosis: null });
+  }
+
+  /* Dictation. Five states, and the client could reach none of them. */
+  if (path === "/api/v1/voice") {
+    return json(res, {
+      configured: scene !== "voice-unset",
+      mayConfigure: true,
+    });
+  }
+  if (req.method === "POST" && path === "/api/v1/voice/ticket") {
+    if (scene === "voice-rejected") {
+      return json(res, { code: "Forbidden", message: "OpenAI refused the key: incorrect API key provided" }, 403);
+    }
+    return json(res, { url: "wss://example.invalid/realtime", token: "tok" });
+  }
+  if (req.method === "POST" && path === "/api/v1/voice/key") return json(res, { detail: "stored" });
+
+  /* Connecting a git host: the device code, the token, and what came back. */
+  if (req.method === "POST" && /^\/api\/v1\/providers\/[^/]+\/authorize$/.test(path)) {
+    return json(res, { userCode: "FTWR-8213", verificationUri: "https://github.com/login/device" });
+  }
+  if (req.method === "POST" && /^\/api\/v1\/providers\/[^/]+\/token$/.test(path)) {
+    return json(res, { account: "kevin" });
+  }
+  if (/^\/api\/v1\/providers\/[^/]+\/connection$/.test(path)) {
+    return json(res, { connected: scene === "host-connected", identity: scene === "host-connected" ? "kevin" : null });
+  }
+  if (/^\/api\/v1\/providers\/[^/]+\/identity$/.test(path)) {
+    return json(res, { identity: "kevin", scopes: ["repo", "read:org"] });
+  }
+
   if (path.endsWith("/readiness")) {
     return json(res, {
       user: "kevin",
@@ -1089,7 +1198,7 @@ function listing(path) {
       "app/checkout": [["page.tsx", false], ["form.tsx", false]],
       src: [["ui", true], ["api", true], ["paths.ts", false], ["quota.rs", false]],
       "src/ui": [["Chat.tsx", false], ["Composer.tsx", false]],
-      docs: [["artifacts.md", false], ["mentions.md", false]],
+      docs: [["artifacts.md", false], ["mentions.md", false], ["shot.png", false]],
     };
     return (tree[path] ?? []).map(([name, directory]) => ({ name, directory, link: false, bytes: directory ? 0 : 2048 }));
   }

@@ -1000,6 +1000,109 @@
     background: var(--color-overlay);
   }
 
+  /* A skill, opened. The plate is the gallery's at 62px, the name is the
+     folder's name so it is set in the mono voice, and the facts under it are
+     separated by space rather than by hairline rules — four vertical lines in
+     a row of five words is a fence around a sentence. */
+  .sk-head {
+    display: flex;
+    align-items: flex-start;
+    gap: 18px;
+    margin-top: 22px;
+  }
+  .sk-head .plate {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 62px;
+    height: 62px;
+    border-radius: 18px;
+    background: var(--color-raise);
+    box-shadow: var(--shadow-raise);
+    font-family: var(--font-narrow), ui-sans-serif, system-ui, sans-serif;
+    font-size: 1.375rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: var(--color-text);
+  }
+  .sk-head .tx {
+    min-width: 0;
+    flex: 1;
+  }
+  .sk-head h1 {
+    font-family: var(--font-mono);
+    font-size: 1.75rem;
+    line-height: 1.15;
+    letter-spacing: -0.03em;
+    font-weight: var(--font-weight-mid);
+    color: var(--color-bone);
+  }
+  .sk-head .facts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 16px;
+    margin-top: 7px;
+    font-size: 0.84375rem;
+    color: var(--color-dim);
+  }
+  .sk-head .facts b {
+    font-weight: 500;
+    color: var(--color-text);
+  }
+  .sk-head .ds {
+    max-width: 66ch;
+    margin-top: 11px;
+    font-size: 0.96875rem;
+    line-height: 1.6;
+    color: var(--color-text);
+  }
+  .sk-head .acts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+    margin-top: 16px;
+  }
+
+  .sk .ds {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  /* A skill, opened: text tabs with a rule under the strip and a 2px mark on
+     the current one. It was a recessed track, which is the shape for two or
+     three exclusive filters, not for the index of a document. */
+  .sk-tabs {
+    display: flex;
+    gap: 18px;
+    margin-top: 30px;
+    border-bottom: 1px solid var(--color-line);
+  }
+  .sk-tabs button {
+    position: relative;
+    padding: 0 0 11px;
+    font-size: 0.875rem;
+    color: var(--color-dim);
+    transition: color var(--dur-native) var(--ease-swift);
+  }
+  .sk-tabs button:hover {
+    color: var(--color-text);
+  }
+  .sk-tabs button[aria-selected="true"] {
+    color: var(--color-bone);
+    font-weight: 520;
+  }
+  .sk-tabs button[aria-selected="true"]::after {
+    content: "";
+    position: absolute;
+    inset-inline: 0;
+    bottom: -1px;
+    height: 2px;
+    border-radius: 2px;
+    background: var(--color-bone);
+  }
+
   /* What a skill can do to your machine, as a line of small marks rather than
      a row of filled badges. A badge per risk made four of them look like four
      errors; the fact is "worth reading before you approve", not "broken". */

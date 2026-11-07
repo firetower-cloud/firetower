@@ -59,12 +59,35 @@ async function inspectorTab(page, label) {
 }
 
 /** Open a file from the inspector's tree, as a preview or kept. */
-async function openFile(page, { keep } = {}) {
+async function openFile(page, { keep, named = "quota.rs", under = "src" } = {}) {
   await inspectorTab(page, "Files");
+  await pause(page, 900);
+  /* The tree is lazy: a folder has to be opened before its files exist. */
+  await page.locator("aside button", { hasText: under }).first().click();
   await pause(page, 700);
-  const row = page.locator("button", { hasText: "quota.rs" }).first();
+  const row = page.locator("aside button", { hasText: named }).first();
   if (keep) await row.dblclick();
   else await row.click();
+  await pause(page, 1200);
+}
+
+/** Add a machine, type an address, and probe it. */
+async function probeMachine(page, settle) {
+  await at(page, "/configuration/machines", 1400);
+  await page.getByRole("button", { name: /Add a machine/ }).first().click();
+  await pause(page, 500);
+  await page.getByPlaceholder(/ubuntu@|host|address/i).first().fill("ubuntu@10.4.0.22");
+  await page.getByRole("button", { name: /probe|check|continue|add/i }).first().click();
+  await pause(page, settle);
+}
+
+/** Press the microphone in a workspace. */
+async function dictate(page) {
+  await at(page, "/sessions/s_1", 1800);
+  await byTitle(page, "Dictate").click().catch(async () => {
+    await page.locator(".composer .control, .bar button").nth(1).click();
+  });
+  await pause(page, 900);
 }
 
 /** The first-run flow: type an address and press Connect. */
@@ -125,13 +148,7 @@ const SHOTS = [
   /* The `team` scene, because the Overview's team rail is half of what this
      screen is and every other scene leaves the workspace solo. */
   { id: "in-a-workspace__conversation", scene: "team", go: (p) => at(p, "/sessions/s_1", 2200) },
-  {
-    id: "in-a-workspace__a-file",
-    go: async (p) => {
-      await openFile(p, { keep: true });
-      await pause(p, 1200);
-    },
-  },
+  { id: "in-a-workspace__a-file", go: (p) => openFile(p, { keep: true }) },
   {
     id: "in-a-workspace__a-diff",
     go: async (p) => {
@@ -140,10 +157,39 @@ const SHOTS = [
       await pause(p, 1200);
     },
   },
-  { id: "in-a-workspace__preview", skip: "the preview tab needs a forwarded port, which the mock does not run" },
-  { id: "in-a-workspace__a-picture", skip: "no image in the mock tree" },
-  { id: "in-a-workspace__noting-code", skip: "a text selection needs a real drag; see annotate-place.test.ts" },
-  { id: "in-a-workspace__notes-kept", skip: "a kept note needs the selection above" },
+  {
+    id: "in-a-workspace__preview",
+    go: async (p) => {
+      await at(p, "/sessions/s_1", 1800);
+      await byTitle(p, "Preview a port").click();
+      await pause(p, 600);
+      await p.getByText("3000", { exact: false }).first().click();
+      await pause(p, 1400);
+    },
+  },
+  { id: "in-a-workspace__a-picture", go: (p) => openFile(p, { keep: true, named: "shot.png", under: "docs" }) },
+  {
+    id: "in-a-workspace__noting-code",
+    go: async (p) => {
+      await openFile(p, { keep: true });
+      /* Headless Chromium produces no selection from a synthetic drag, so the
+         range is made programmatically and the `mouseup` React's delegated
+         listener hears is dispatched by hand. */
+      await p.evaluate(() => {
+        const lines = document.querySelectorAll(".code span, .code div");
+        const line = lines[Math.min(14, lines.length - 1)];
+        if (!line) return;
+        const r = document.createRange();
+        r.selectNodeContents(line);
+        const sel = window.getSelection();
+        sel?.removeAllRanges();
+        sel?.addRange(r);
+      });
+      await p.locator(".code").first().dispatchEvent("mouseup");
+      await pause(p, 900);
+    },
+  },
+  { id: "in-a-workspace__notes-kept", skip: "a kept note follows sending the note above, which posts a turn to the agent" },
   {
     id: "in-a-workspace__terminal",
     go: async (p) => {
@@ -164,8 +210,8 @@ const SHOTS = [
     id: "in-a-workspace__right-click-a-file",
     go: async (p) => {
       await at(p, "/sessions/s_1", 1800);
-      await inspectorTab(p, "Files");
-      await p.locator('[data-file], .scroll-slim button', { hasText: "quota.rs" }).first().click({ button: "right" });
+      await openFile(p, { keep: true });
+      await p.locator("aside button", { hasText: "quota.rs" }).first().click({ button: "right" });
       await pause(p, 600);
     },
   },
@@ -187,14 +233,28 @@ const SHOTS = [
   },
   {
     id: "in-a-workspace__ship-uncommitted",
+    /* One checkout, which is what the drawing's single-repository Ship is. */
+    scene: "one-repo",
     go: async (p) => {
-      await at(p, "/sessions/s_1", 1800);
       await inspectorTab(p, "Ship");
       await pause(p, 900);
     },
   },
-  { id: "in-a-workspace__ship-two-repositories", skip: "needs a second checkout; the mock workspace has one" },
-  { id: "in-a-workspace__ship-merged", skip: "needs a merged pull request on the mock checkout" },
+  {
+    id: "in-a-workspace__ship-two-repositories",
+    go: async (p) => {
+      await inspectorTab(p, "Ship");
+      await pause(p, 900);
+    },
+  },
+  {
+    id: "in-a-workspace__ship-merged",
+    scene: "merged",
+    go: async (p) => {
+      await inspectorTab(p, "Ship");
+      await pause(p, 900);
+    },
+  },
   {
     id: "in-a-workspace__which-skills",
     go: async (p) => {
@@ -229,9 +289,9 @@ const SHOTS = [
     id: "artifacts-and-skills__a-new-version",
     go: async (p) => {
       await at(p, "/configuration/skills", 1400);
-      await p.locator(".sk").first().click();
+      await p.locator(".sk", { hasText: "pr-screenshots" }).first().click();
       await pause(p, 900);
-      await p.getByText("Versions", { exact: true }).first().click();
+      await p.locator(".sk-tabs button", { hasText: "Versions" }).click();
       await pause(p, 900);
     },
   },
@@ -251,9 +311,10 @@ const SHOTS = [
       /* The build lands a held skill on the gallery rather than at the end of
          a create flow — criterion 43's "both create flows land in the
          held-for-review state". This is that card. */
+      /* The held skill, opened — what an agent wrote and is waiting on. */
       await at(p, "/configuration/skills", 1400);
-      await p.locator(".review").first().scrollIntoViewIfNeeded().catch(() => {});
-      await pause(p, 400);
+      await p.locator(".sk", { hasText: "deploy-runbook" }).first().click();
+      await pause(p, 1100);
     },
   },
   {
@@ -311,9 +372,25 @@ const SHOTS = [
       await pause(p, 700);
     },
   },
-  { id: "sources__connect-device-code", skip: "the device-code page needs a real GitHub app; the mock cannot hand back a user code" },
-  { id: "sources__connect-paste-a-token", skip: "reached after probing a real address; see the finding on AddHost" },
-  { id: "sources__connect-connected", skip: "the connected confirmation follows a token the mock cannot verify" },
+  {
+    id: "sources__connect-device-code",
+    go: async (p) => {
+      await at(p, "/configuration/git-hosts", 1400);
+      await p.getByRole("button", { name: /^Connect$/ }).first().click();
+      await pause(p, 1200);
+    },
+  },
+  {
+    id: "sources__connect-paste-a-token",
+    go: async (p) => {
+      await at(p, "/configuration/git-hosts", 1400);
+      await p.getByRole("button", { name: /^Connect$/ }).first().click();
+      await pause(p, 900);
+      await p.getByRole("button", { name: /token/i }).first().click();
+      await pause(p, 800);
+    },
+  },
+  { id: "sources__connect-connected", scene: "host-connected", go: (p) => at(p, "/configuration/git-hosts", 1600) },
   { id: "sources__machines", go: (p) => at(p, "/configuration/machines", 1400) },
   {
     id: "sources__add-a-machine",
@@ -323,9 +400,9 @@ const SHOTS = [
       await pause(p, 700);
     },
   },
-  { id: "sources__add-a-machine-probing", skip: "the probe is a POST the mock answers instantly; the in-flight frame cannot be held" },
-  { id: "sources__add-a-machine-no-answer", skip: "needs an ssh probe that fails; the mock does not run one" },
-  { id: "sources__add-a-machine-reached-it", skip: "needs a successful ssh probe; the mock does not run one" },
+  { id: "sources__add-a-machine-probing", scene: "probe-slow", go: (p) => probeMachine(p, 1200) },
+  { id: "sources__add-a-machine-no-answer", scene: "probe-fails", go: (p) => probeMachine(p, 2500) },
+  { id: "sources__add-a-machine-reached-it", go: (p) => probeMachine(p, 2500) },
   { id: "sources__trackers", go: (p) => at(p, "/configuration/trackers", 1400) },
 
   /* Settings */
@@ -442,7 +519,7 @@ const SHOTS = [
       await pause(p, 700);
     },
   },
-  { id: "over-any-screen__a-usage-limit-is-reached", skip: "the limit banner needs a session whose account reports a limit; the mock reports none" },
+  { id: "over-any-screen__a-usage-limit-is-reached", scene: "limit-hit", go: (p) => at(p, "/sessions/s_1", 2000) },
   {
     id: "over-any-screen__what-happens-on-a-limit",
     go: async (p) => {
@@ -451,7 +528,7 @@ const SHOTS = [
       await pause(p, 700);
     },
   },
-  { id: "over-any-screen__a-screen-that-threw", skip: "Boundary is driven by boundary.test; nothing in the mock throws on purpose" },
+  { id: "over-any-screen__a-screen-that-threw", scene: "throws", go: (p) => at(p, "/configuration/skills", 1600) },
   {
     id: "over-any-screen__switch-firetower",
     go: async (p) => {
@@ -470,11 +547,19 @@ const SHOTS = [
       await pause(p, 500);
     },
   },
-  { id: "over-any-screen__dictation-blocked", skip: "dictation state needs a microphone permission answer Chrome will not fake" },
-  { id: "over-any-screen__dictation-key-refused", skip: "needs a voice key the mock cannot refuse" },
-  { id: "over-any-screen__dictation-no-key", skip: "needs the voice endpoints; the mock answers neither" },
-  { id: "over-any-screen__dictation-server-too-old", skip: "needs a server under the voice minimum" },
-  { id: "over-any-screen__dictation-set-the-key", skip: "needs the voice endpoints; the mock answers neither" },
+  { id: "over-any-screen__dictation-blocked", skip: "a microphone permission answer Chrome will not fake in a headless context" },
+  { id: "over-any-screen__dictation-key-refused", scene: "voice-rejected", go: (p) => dictate(p) },
+  { id: "over-any-screen__dictation-no-key", scene: "voice-unset", go: (p) => dictate(p) },
+  { id: "over-any-screen__dictation-server-too-old", skip: "needs a server under the voice minimum; the mock is at MIN_SERVER by design" },
+  {
+    id: "over-any-screen__dictation-set-the-key",
+    scene: "voice-unset",
+    go: async (p) => {
+      await dictate(p);
+      await p.getByRole("button", { name: /add|set|key/i }).first().click().catch(() => {});
+      await pause(p, 700);
+    },
+  },
 ];
 
 /* Every prototype state is in the table, exactly once. */
