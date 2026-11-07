@@ -37,6 +37,19 @@ setTimeout(function(){{
       var r=e.getBoundingClientRect(); if(!r.width||!r.height) return;
       var cs=getComputedStyle(e);
       if(cs.visibility==="hidden"||cs.display==="none"||+cs.opacity===0) return;
+      /* **A clipped mark is not a mark anybody can see.** `overflow:hidden`
+         does not zero a child's bounding rect, so counting rects alone
+         counted every chip in a one-line row that had been clipped away —
+         five ember on a home showing two. Walk the ancestors and drop
+         anything that falls outside a clipping one. */
+      var clipped=false;
+      for(var p=e.parentElement; p && p!==document.body; p=p.parentElement){{
+        var ps=getComputedStyle(p);
+        if(ps.overflow==="visible" && ps.overflowX==="visible" && ps.overflowY==="visible") continue;
+        var pr=p.getBoundingClientRect();
+        if(r.bottom<=pr.top+0.5||r.top>=pr.bottom-0.5||r.right<=pr.left+0.5||r.left>=pr.right-0.5){{clipped=true;break;}}
+      }}
+      if(clipped) return;
       var where=[];
       if(EM.includes(cs.color) && e.textContent.trim() && ![...e.children].some(function(k){{
           return getComputedStyle(k).color===cs.color && k.textContent.trim()===e.textContent.trim();}})) where.push("text");

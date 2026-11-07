@@ -636,6 +636,21 @@ code{font-family:var(--mono);font-size:12.5px;background:var(--raised);border-ra
         <p class="meta2"><b>Section</b> Primitives &nbsp;·&nbsp; <code>web/components/ui/Checkbox.tsx</code>
            &nbsp;·&nbsp; .tick .draftline</p>
       </footer>
+    </article><article class="ent2" id="c-chatturn">
+      <header>
+        <h3>ChatTurn</h3>
+        <span class="use"><b>16</b> of 51</span>
+        <span class="sprd">Dashboard, First run, Sources, Updates, Workspace</span>
+        <span class="tags"><span class="tag" data-v="changed">survives, changed</span><span class="tag" data-r="desktop">desktop only</span></span>
+      </header>
+      <div class="stage" data-spec="ChatTurn"></div>
+      <footer>
+        <p class="for">One turn: yours, the agent’s, what it did, what it is asking.</p>
+        
+        <p class="meta2"><b>Variants</b> mine · theirs · tool run · approval · thinking · working &nbsp;·&nbsp; <b>States</b> streaming · settled · folded</p>
+        <p class="meta2"><b>Section</b> Domain &nbsp;·&nbsp; <code>desktop/src/ui/Chat.tsx</code>
+           &nbsp;·&nbsp; .turn .mine .did .tool .approval .atwork .thought .typing</p>
+      </footer>
     </article><article class="ent2" id="c-stateblock">
       <header>
         <h3>StateBlock</h3>
@@ -665,21 +680,6 @@ code{font-family:var(--mono);font-size:12.5px;background:var(--raised);border-ra
         <p class="meta2"><b>Variants</b> flat · raised &nbsp;·&nbsp; <b>States</b> —</p>
         <p class="meta2"><b>Section</b> Primitives &nbsp;·&nbsp; <code>components/ui/Card.tsx</code>
            &nbsp;·&nbsp; .card .card1 .plate</p>
-      </footer>
-    </article><article class="ent2" id="c-chatturn">
-      <header>
-        <h3>ChatTurn</h3>
-        <span class="use"><b>13</b> of 51</span>
-        <span class="sprd">First run, Sources, Updates, Workspace</span>
-        <span class="tags"><span class="tag" data-v="changed">survives, changed</span><span class="tag" data-r="desktop">desktop only</span></span>
-      </header>
-      <div class="stage" data-spec="ChatTurn"></div>
-      <footer>
-        <p class="for">One turn: yours, the agent’s, what it did, what it is asking.</p>
-        
-        <p class="meta2"><b>Variants</b> mine · theirs · tool run · approval · thinking · working &nbsp;·&nbsp; <b>States</b> streaming · settled · folded</p>
-        <p class="meta2"><b>Section</b> Domain &nbsp;·&nbsp; <code>desktop/src/ui/Chat.tsx</code>
-           &nbsp;·&nbsp; .turn .mine .did .tool .approval .atwork .thought .typing</p>
       </footer>
     </article><article class="ent2" id="c-diffview">
       <header>
@@ -888,7 +888,7 @@ code{font-family:var(--mono);font-size:12.5px;background:var(--raised);border-ra
     <footer><p class="for">A title, one sentence, one action, then rows. <b>Eleven configuration screens are this shape</b> and each currently re-implements it.</p><p class="note2"><code>bits.tsx</code> has <code>Section</code> and <code>Rows</code>, which is two thirds of it. The missing third is the page head and the single action.</p></footer>
   </article><article class="ent2">
     <header><h3>Create menu</h3>
-      <span class="use"><b>11</b> of 51</span>
+      <span class="use"><b>10</b> of 51</span>
       <span class="sprd">instantiated on</span></header>
     <div class="stage" data-pat="Create menu"></div>
     <footer><p class="for">“Make one” that offers <i>how</i> — by hand, or by asking an agent.</p><p class="note2"><code>config/CreateMenu.tsx</code> already exists and is used twice (Skills, Profiles). Every other <i>Add</i> on every other screen is a plain button. <b>Audit each one: it either belongs to this pattern or has a reason not to.</b></p></footer>

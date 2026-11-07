@@ -398,6 +398,83 @@ then replaced. It is drawn beside the home in `home-alternative.html`, which is
 where the comparison belongs. A design that was right and then outgrown deserves
 the same record as one that was rejected.
 
+### The home's three status sections
+
+**Decided:** three one-line sections above *Recent artifacts* — **Waiting for
+you**, **Handed back**, **Working** — each with *View more* at its top right in
+the treatment *Recent artifacts* already uses for *View all*. They key off
+`BEAT`: `blocked`, `done`, `working`. Each chip carries its own mark from the
+same `beatMark` the team rail uses, so three sections read apart at a glance
+rather than as three identical grey rows.
+
+**How many chips is one line: two to three, and the same at 1280 and 1680.**
+`.hcol` caps at 748px, so the column is 748 and its content 680 at both widths
+— the window's width does not enter into it, which is why the second
+measurement was worth taking rather than assuming. A chip caps at
+`max-width: 306px` and truncates, so **a name can never fill the line alone**
+and two always fit: 2×306 + 8 ≤ 680. Three fit at ordinary lengths.
+
+**The cut is never through a chip.** A wrapped flex row moves a whole item to
+the next line, so clipping to one row's height hides chips entirely. And both
+the clip and the control are **measured after layout, not guessed** — a chip is
+as wide as a workspace name, so any fixed count is wrong the moment a name is
+long. If nothing is on a second row, *View more* is not drawn.
+
+**The *N more* chip is gone.** It existed for exactly one reason — to cap ember
+in that row — and the one-line clip now does that. Two overflow affordances in
+one row is one too many, and the header is the better place because that is
+where *Recent artifacts* already puts one.
+
+**An empty section is not drawn.** *Nothing waiting* is the Waiting section not
+existing, with the other two carrying on; three headings with nothing under two
+of them is worse than one heading. **All three empty is first run**, and first
+run gets no headings at all.
+
+### *View more*: expand, or open the panel — open
+
+**The measurement favours opening the panel, and the drawing defaults to
+expanding because that is what was asked for.**
+
+Counted in a render at 36 workspaces:
+
+| state | ember |
+|---|---|
+| home at rest | **3** |
+| home, 36 workspaces, sections collapsed | **3** |
+| home, 36 workspaces, **a section expanded** | **5** |
+| home, 36 workspaces, *View more* opens the panel | **3** |
+
+The budget is three and **the home has no exemption** — that belongs to the
+workspaces panel alone. So expanding in place is the one shape here that breaks
+it, and it breaks it precisely when the page is busiest, which is when the
+signal matters most.
+
+Two further arguments point the same way. The panel is already flat,
+status-ordered and banded by exactly these three words, so there is nothing to
+build at the far end of a navigation. And when the panel is pinned, the home's
+sections and the panel are showing the same list on the same screen — a cost
+worth naming whichever way this goes.
+
+Against all that: the user asked for expansion in those words, and the
+duplication exists whether or not *View more* navigates. **It is a decision
+about where a long list lives, and it is not mine to settle** — both are drawn,
+the masthead switches them, and the ember numbers are the argument.
+
+### The fourth beat has no section, and nobody has ruled on it
+
+`BEAT` has four states. Three are named above; **`broken` has no section.** A
+failed workspace stays inside *Waiting for you*, which is what `NEEDS_YOU`
+already does — it spans `NeedsYou`, `HandedBack` and `Failed`.
+
+**This is the status quo rather than a decision.** It is written down here so
+that the next person does not read the absence as intent: whether a failed run
+deserves its own section was raised, deferred, and not argued either way.
+
+One thing about it *is* decided: it wears a **brick triangle, not a brick dot**.
+A brick circle beside an ember circle in the same row is one shape told apart by
+hue alone, which is the one thing the guide forbids, and it is the same fix the
+team rail made for the same reason.
+
 ### The workspaces panel is status-ordered, not status-grouped
 
 **Decided:** flat, sorted needs-you → working → done → broken, newest within
@@ -1019,7 +1096,7 @@ component list.
 **`desktop-redesign.html`** — fifteen tabs. Ten are mock-ups of a 1280×824
 window; five are documents:
 
-* **Every screen** — the contact sheet, and **read this one first**. All 108
+* **Every screen** — the contact sheet, and **read this one first**. All 111
   states at a third scale, grouped as Coverage is, each tile a control that
   opens it full size. It exists because a reader looking for the connect screen
   could not find it and reported it missing: it is the eleventh of fifteen tabs

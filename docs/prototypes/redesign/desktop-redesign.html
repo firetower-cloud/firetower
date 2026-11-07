@@ -1941,6 +1941,18 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
   margin-left:-7px;padding:2px 7px;color:var(--ink)}
 .whead .nm.rn:hover{background:var(--raised)}
 </style>
+<style>
+/* **One line, and the cut is never through a chip.** A flex row that wraps
+   moves a whole item to the next line, so clipping to one row's height hides
+   chips entirely rather than slicing one in half. The column is capped at
+   748px, so how many fit is a constant of the design and not of the window —
+   it is the same number at 1280 and at 1680. */
+.chips{display:flex;flex-wrap:wrap;gap:7px}
+.chips[data-one="true"]{overflow:hidden}   /* the height is measured, not guessed */
+.sect .all[hidden]{display:none}
+.sw .typing{transform:scale(.86)}
+.sw .bm{display:grid;place-items:center}
+</style>
 
 </head>
 <body>
@@ -2172,6 +2184,12 @@ const S={theme:"light",panel:"pinned",peek:null,menu:null,tower:"nw",
      and of the rail menu is for, so it has to be drawable. */
   ro:false,
   peekrule:"off",           // which row of the hover-preview rule is on show
+  band:null,                // which home section is expanded, if any
+  /* What *View more* does. "expand" is what was asked for — the section opens
+     in place. "panel" opens the Workspaces panel at that band instead, which
+     is the alternative the ember count argues for. */
+  bandgo:"expand",
+  longname:false,           // one workspace name long enough to fill a line alone
   home:"both",               // both | nowait | noart | neither
   when:null,                 // force a greeting: morning | afternoon | evening
   pvw:"desktop", pvpick:true, port:false};
@@ -2279,10 +2297,19 @@ const WS_MANY=(()=>{
       beat:i===0?"blocked":i<3?"working":"done",age:`${i+1}d`}));
   return out;
 })();
-const WORKSPACES=()=> S.ws==="many" ? WS_MANY
-  : S.ws==="done" ? WS_SMALL.map(w=>({...w,beat:"done"}))
-  : S.ws==="none" ? []
-  : WS_SMALL;
+/* One list, so the home and the panel cannot disagree on the same screen.
+   *Nothing waiting* has to mean nothing is waiting anywhere, and the panel
+   sitting beside the home saying "Needs you 2" while the home says there is
+   nothing is the drawing contradicting itself in one screenshot. */
+const WORKSPACES=()=>{
+  const base = S.ws==="many" ? WS_MANY
+    : S.ws==="done" ? WS_SMALL.map(w=>({...w,beat:"done"}))
+    : S.ws==="none" ? []
+    : WS_SMALL;
+  if(S.home==="neither") return [];
+  if(S.home==="nowait") return base.filter(w=>w.beat!=="blocked"&&w.beat!=="broken");
+  return base;
+};
 
 const BEAT_ORDER = { blocked:0, working:1, done:2, broken:3 };
 const BEAT_BAND  = { blocked:"Needs you", working:"Working", done:"Done", broken:"Broken" };
@@ -2412,10 +2439,6 @@ function laterPass(){
    page. The dock badge and the island are untouched and still sum
    across every Firetower, which is what carries the thesis. */
 
-/* Two chips carry a dot; everything past that is a count without one.
-   The budget is three ember marks on screen and the rail's avatar can
-   take the third. (The constant is DOTTED, not IN_FULL.) */
-const DOTTED=2;
 const GREETINGS={morning:"Good morning",afternoon:"Good afternoon",evening:"Good evening"};
 function partOfDay(){
   if(S.when) return S.when;
@@ -2425,19 +2448,67 @@ function partOfDay(){
 const homeAsks=asks;
 const homeArts=()=> (S.home==="both"||S.home==="nowait") ? ARTS.filter(a=>a.p).slice(0,3) : [];
 
+/* ── The home's status sections ────────────────────────────────────
+   Three one-line sections — waiting, handed back, working — each with
+   *View more* at its top right, in the treatment *Recent artifacts*
+   already uses for *View all*.
+
+   **The fourth beat has no section, and that is deferred rather than
+   decided.** `BEAT` has four states; `broken` is not one of the three
+   named here. It stays where it already is — inside *Waiting for you*,
+   wearing its brick mark — because `NEEDS_YOU` spans `NeedsYou`,
+   `HandedBack` *and* `Failed`. **Nobody has ruled on whether it should
+   have a section of its own**, and its absence here is the status quo
+   rather than an argument. Recorded so the next person does not read
+   it as intent.
+
+   It still takes a **triangle, not a dot**: a brick circle beside an
+   ember circle in the same row is one shape told apart by hue alone,
+   which is the one thing the guide forbids. Same alphabet as the team
+   rail, from the same `beatMark`. */
+const BANDS=[
+  {beat:"blocked", title:"Waiting for you", mark:"needs"},
+  {beat:"done",    title:"Handed back",    mark:"ready"},
+  {beat:"working", title:"Working",        mark:"working"},
+];
+/* One long name is the state that breaks a row of chips, and a real
+   workspace name gets this long. Drawn rather than imagined. */
+const LONGNAME="Reconcile the webhook retries against the ledger-sync mirror";
+/* **An empty section is not drawn.** Three headings with nothing under two of
+   them is worse than one heading, and a section that is sometimes there is
+   easier to read than a section that is sometimes empty — the panel's bands
+   already work this way.
+
+   So *Nothing waiting* is not a state of this page; it is the Waiting section
+   not existing, with Handed back and Working carrying on. **All three empty is
+   first run**, and first run gets no headings at all: the composer is the only
+   thing to do and the page says so by having nothing else on it. */
+function homeBands(){
+  const ws=WORKSPACES().map(w=>S.longname&&w.id==="w1"?{...w,name:LONGNAME}:w);
+  return BANDS.map(b=>{
+    /* `broken` rides with `blocked`, which is what the product already
+       does and what nobody has yet decided to change. */
+    const list=ws.filter(w=>w.beat===b.beat||(b.beat==="blocked"&&w.beat==="broken"));
+    return list.length?{...b,list}:null;
+  }).filter(Boolean);   /* an empty section is not drawn at all */
+}
+
 function waitingSection(){
-  const a=homeAsks();
-  if(!a.length) return "";
-  const over=a.length-DOTTED;
-  return `<section class="sect">
-    <div class="hd"><h2>Agents waiting for you</h2></div>
-    <div class="chips">
-      ${a.slice(0,DOTTED).map(x=>`<button class="sw" data-act="open" title="${esc(x.name)} — ${esc(x.q)}">
-        <span class="dot"></span><b>${esc(x.name)}</b><span class="age">${x.age}</span></button>`).join("")}
-      ${over>0?`<button class="sw" data-over="true" data-act="noop" title="${over} more waiting">
-        <b>${over} more</b></button>`:""}
-    </div>
-  </section>`;
+  return homeBands().map(b=>{
+    const open=(S.band||"")===b.beat;
+    return `<section class="sect">
+      <div class="hd"><h2>${b.title}</h2>
+        ${S.bandgo==="panel"
+          ? `<button class="all" data-act="bandpanel" data-band="${b.beat}">View more${ic("chevron-right",14)}</button>`
+          : `<button class="all" data-act="band" data-band="${open?"":b.beat}">
+              ${open?"View less":"View more"}${ic(open?"chevron-up":"chevron-right",14)}</button>`}</div>
+      <div class="chips" data-one="${!open}">
+        ${b.list.map(w=>`<button class="sw" data-act="open" title="${esc(w.name)}">
+          ${beatMark(w.beat==="broken"?"failed":b.mark)}
+          <b>${esc(w.name)}</b><span class="age">${w.age}</span></button>`).join("")}
+      </div>
+    </section>`;
+  }).join("");
 }
 
 function artifactsSection(){
@@ -2461,7 +2532,7 @@ function artifactsSection(){
 
 function dashboard(){
   const el=elsewhere();
-  const bare = !homeAsks().length && !homeArts().length;
+  const bare = !homeBands().length && !homeArts().length;
   const pct=Math.round(WS.context.used/WS.context.of*100);
   return `<div class="home"><div class="hcol" data-bare="${bare}">
     <div class="air"><h1>${GREETINGS[partOfDay()]}, what should we work on?</h1></div>
@@ -4450,6 +4521,11 @@ const SPEC_DELTA=[
   ["The rename pencil comes out","reverted","<b>Drawn, then removed by the person using it.</b> A pencil sat beside the workspace title always-on at <code>--hush</code>, on the argument that <i>a hover state cannot be the whole affordance — you have to already be pointing at a thing to learn it is a control</i>. That argument still stands; the cost was chosen anyway, and it is a fair one: <b>a permanent mark beside the one name on the screen is a second thing to read every time you look at it, forever, to solve a problem you have once.</b> Hover is the affordance again. <b>Rename is unchanged</b> — single click and double click both open the field. <i>How a title announces itself is still open</i>: a tooltip nobody reads and a mark nobody wants are both answers that have been tried."],
   ["The rail&rsquo;s hover preview — the rule","clarified","<b>Specified three different ways in one day, so it is written down rather than inferred.</b> Active destination + panel open: <b>no preview</b>, it is already on screen. Active + panel collapsed: <b>preview</b>. Any other destination, either state: <b>preview</b>. One sentence: <i>preview unless you are pointing at the thing the open panel is already showing.</i> Two rows were unreachable in the drawing — <code>startPeek</code> refused <code>home</code> outright, and the panel only floated when collapsed, so hovering a <i>different</i> destination with the panel open did nothing. Both are drawn now, and all four rows are asserted in a render by <code>peek.py</code>."],
   ["Clicking a destination does not pin the panel","corrected","<code>peekgo</code> set <code>panel = \"pinned\"</code> on every navigation. <b>It navigates and nothing else.</b> Pinned or collapsed is the person&rsquo;s last choice and persists across destinations; a navigation is not a vote about chrome."],
+  ["desktop/src/ui/Dashboard — three status sections","added","<b>Waiting for you &middot; Handed back &middot; Working</b>, each one line of chips with <i>View more</i> at its top right in the treatment <i>Recent artifacts</i> already uses. They key off <code>BEAT</code> via <code>beatOfPlace</code>: <code>blocked</code>, <code>done</code>, <code>working</code>. Each chip carries its own mark from the same <code>beatMark</code> the team rail uses — <b>ember dot, sage check, slate typing</b> — so three sections read apart at a glance instead of as three grey rows."],
+  ["How many chips is one line","measured","<b>Two to three, and the same at 1280 and at 1680.</b> <code>.hcol</code> caps at <b>748px</b>, so the column is 748 and the content 680 at both widths — the window&rsquo;s width does not enter into it. A chip caps at <code>max-width:306px</code> and truncates, so <b>a name can never fill the line alone</b> and two always fit: 2&times;306 + 8 = 614 &le; 680. Three fit at ordinary name lengths (widest measured 266px). <b>The cut is never through a chip</b> — a wrapped flex row moves a whole item down, so clipping to one row&rsquo;s height hides chips entirely."],
+  ["The N more chip","removed","It existed for one reason: to cap ember in that row. <b>The one-line clip now does that</b>, and <i>View more</i> is the overflow affordance. Two overflow affordances in one row was one too many, and the header is the better place for it because it is where <i>Recent artifacts</i> already puts one."],
+  ["<i>View more</i> — expand, or open the panel","open","<b>Drawn both ways, and the measurement favours the panel.</b> Counted in a render at 36 workspaces: at rest <b>3</b> ember; collapsed <b>3</b>; <b>expanded in place, 5</b> — over a budget of three, and <b>the home has no exemption</b>. Opening the Workspaces panel at that band stays at <b>3</b>, puts the long list where the exemption already lives, and does not rebuild a list the panel does flat and status-ordered already. Against that: the user asked for expansion in those words, and with the panel pinned the home&rsquo;s sections and the panel show the same thing anyway. <b>The drawing defaults to expanding, because that is what was asked;</b> the switch is in the masthead."],
+  ["Empty sections","added","<b>An empty section is not drawn.</b> <i>Nothing waiting</i> is the Waiting section not existing, with Handed back and Working carrying on — three headings with nothing under two of them is worse than one heading. <b>All three empty is first run</b> and gets no headings at all. The panel and the home now read one list, so a screenshot cannot show the home saying nothing is waiting beside a panel counting two."],
   ["desktop/src/styles.css — the composer","modified","<b>18px → 16.5px, and it is the same number as <i>Your message</i> deliberately.</b> These are the same words before and after you press send, and typing at 18 to read it back at 16.5 shrank the text the moment it was committed. 18 also set what you type at the size of an <b>agent's question</b> — the loudest reading tier there is — and above the <b>17px prose</b> you read at length. The type pass stepped everything under 28px up a pixel, which was right; this is the one place the uniform step landed where the scale did not intend. <b>Both composers move together</b>: the home rule restated 18 rather than changing it, so the workspace composer was already the same size and they do not now disagree."],
   ["web/app/globals.css — light signals","added","Light values for <code>--color-sage</code> and <code>--color-slate</code>, derived the way §4 derives everything: measured against what the mark sits on. <b>4.49:1</b> and <b>5.83:1</b> on the chrome, past the 3:1 floor for a non-text mark. The dark values are globals.css verbatim."],
   ["Overlays — the cross-cutting pass","corrected","<b>The pass this document promised when the palette was wired and never ran.</b> Four kinds are now named with a test — <i>does the thing it is about stay on screen?</i> — and every overlay is assigned. <b>Sheets</b> take <code>--color-scrim</code>; <b>popovers</b> take none; the find <b>bar</b> takes nothing; the Gate and Boundary are <b>screens</b>. See the handoff."],
@@ -4827,6 +4903,14 @@ const COV=[
  ["Shell, session and the way in",[
   ["Rail — six destinations, two settings doors","Y",""],
   ["Right-click a workspace &mdash; rename, end","Y","<b>A regression this document did not catch.</b> It was in <code>Rail.tsx</code> and is not in <code>RailPanel.tsx</code>; nothing here asked whether it was still there. See <i>What this column does not check</i> below"],
+  ["Home — Waiting for you &middot; Handed back &middot; Working",null,"Three one-line sections, each with <i>View more</i> in the <i>Recent artifacts</i> treatment",[
+    ["One line of chips, cut between chips and never through one","Y","A wrapped flex row moves a whole item to the next line, so clipping to one row&rsquo;s height hides chips entirely. <b>Two to three fit</b> — measured, not assumed"],
+    ["<i>View more</i> appears only when something is hidden","Y","Measured after layout from the chips&rsquo; own rows; a chip is as wide as a workspace name, so no fixed count is right"],
+    ["An empty section is not drawn","Y","<i>Nothing waiting</i> is the Waiting section not existing, with the other two carrying on"],
+    ["All three empty — first run","Y","No headings at all. The composer is the only thing to do and the page says so by having nothing else on it"],
+    ["The <i>N more</i> chip","&mdash;","<b>Removed.</b> It existed to cap ember in that row; the one-line clip now does that and <i>View more</i> is the overflow affordance. Two in one row was one too many"],
+    ["A fourth section for <code>broken</code>","&mdash;","<b>Deferred, not decided.</b> <code>BEAT</code> has four states and three are named here. A failed workspace stays inside <i>Waiting for you</i> — which is what <code>NEEDS_YOU</code> already does — wearing a brick <b>triangle</b>, because a brick circle beside an ember circle is one shape told apart by hue alone. <b>Nobody has ruled on whether it should have a section of its own</b>; its absence here is the status quo rather than intent"],
+  ]],
   ["The workspaces panel",null,"Proposition C, chosen from <code>workspaces-exploration.html</code>",[
     ["Flat, status-ordered, banded","Y","One hairline and a word where the band turns"],
     ["Status / Repository switch","Y","Its own row — the header cannot hold a fourth thing at 252px"],
@@ -6141,6 +6225,9 @@ const SHEET = [
   ["Home — neither",               {tab:"home", rt:"home", home:"neither"}],
   ["Home — good morning",          {tab:"home", rt:"home", home:"both", when:"morning"}],
   ["Home — good evening",          {tab:"home", rt:"home", home:"both", when:"evening"}],
+  ["Home — three sections, busy",  {tab:"home", rt:"home", home:"both", ws:"many"}],
+  ["Home — a section expanded",    {tab:"home", rt:"home", home:"both", ws:"many", band:"blocked"}],
+  ["Home — one name fills the line",{tab:"home", rt:"home", home:"both", longname:true}],
   ["Panel — by status, forty",     {tab:"home", rt:"home", home:"both", ws:"many"}],
   // The row of the preview rule the build never had: you are on this
   // destination, the panel is hidden, and you hover the one you are already on.
@@ -6326,12 +6413,36 @@ function paneOf(){
   if(S.rt==="mkskill") return "mk"+S.mk;
   return S.rt;
 }
+/* **Both the clip and the control are decided by measurement.**
+
+   A chip is as wide as a workspace name, so how many fit is not a number
+   anybody can write down — and a guessed `max-height` is wrong the moment a
+   name is long enough to make a chip taller or shorter than the guess. So the
+   rows are found from the chips themselves: anything whose top is below the
+   first chip's is on a second line. If there is no second line there is
+   nothing to view, and the control is not drawn. */
+function trimChips(){
+  document.querySelectorAll("#win .chips").forEach(row=>{
+    const all=row.parentElement.querySelector(".hd .all");
+    const chips=[...row.children];
+    row.style.maxHeight="";
+    if(!chips.length) return;
+    const top=chips[0].offsetTop;
+    const spill=chips.some(c=>c.offsetTop>top+2);
+    if(all) all.hidden=!spill;
+    if(spill && row.dataset.one==="true")
+      row.style.maxHeight=chips[0].offsetHeight+"px";
+  });
+}
+
 function chrome(){
   const seg=(act,key,opts)=>`<span class="seg">${opts.map(([id,l])=>
     `<button data-act="${act}" data-${key}="${id}" aria-pressed="${S[key]===id}">${l}</button>`).join("")}</span>`;
   document.getElementById("ctl").innerHTML=`
     <span class="seg">${TABS.map(([id,l])=>`<button data-act="tab" data-tab="${id}" aria-pressed="${S.tab===id}">${l}</button>`).join("")}</span>
     ${S.tab==="home"?seg("home","home",HOMES)+seg("when","when",WHENS)
+      +seg("bandgo","bandgo",[["expand","View more expands"],["panel","View more opens the panel"]])
+      +`<span class="seg"><button data-act="longname" data-longname="${S.longname?"":"1"}" aria-pressed="${S.longname}">One long name</button></span>`
       +`<span class="seg">${[["off","No hover"],["on-open","On it · panel open"],
           ["on-shut","On it · panel hidden"],["other-open","Another · panel open"],
           ["other-shut","Another · panel hidden"]]
@@ -6441,7 +6552,7 @@ function render(){
   document.documentElement.dataset.theme=S.theme;
   const doc = S.tab==="grouping"||S.tab==="spec"||S.tab==="coverage"||S.tab==="sheet";  /* a document, not a mock */
   document.getElementById("stage-wrap").style.display = doc ? "none" : "";
-  if(!doc){ winbox.innerHTML=renderWin(); fit(); }
+  if(!doc){ winbox.innerHTML=renderWin(); fit(); trimChips(); }
   document.getElementById("contact").innerHTML = S.tab==="sheet" ? contact() : "";
   chrome(); renderGrouping(); notes();
 }
@@ -6570,6 +6681,12 @@ document.addEventListener("click",e=>{
   /* The four rows of the preview rule, as four states you can step through.
      The third and fourth were unreachable before: `startPeek` refused `home`
      outright and the panel only floated when it was collapsed. */
+  else if(a==="bandgo"){ S.bandgo=b.dataset.bandgo; S.band=null; S.tab="home"; S.rt="home"; }
+  /* The panel is already flat, status-ordered and banded by exactly these
+     three words, so there is nothing to build at the far end of this. */
+  else if(a==="bandpanel"){ S.panel="pinned"; S.wsby="status"; S.band=null; S.tab="home"; S.rt="home"; }
+  else if(a==="band"){ S.band=b.dataset.band||null; S.tab="home"; S.rt="home"; }
+  else if(a==="longname"){ S.longname=b.dataset.longname==="1"; S.band=null; S.tab="home"; S.rt="home"; }
   else if(a==="peekrule"){ const v=b.dataset.peekrule; S.peekrule=v;
     S.tab="home"; S.rt="home";
     S.panel = (v==="on-shut"||v==="other-shut") ? "collapsed" : "pinned";

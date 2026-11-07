@@ -30,7 +30,7 @@ a.item .go{color:#3a3a42;font-size:var(--ui)}
     <a class="item" href="desktop-redesign.html"><span class="mark">01</span>
       <span><span class="t">Firetower desktop &mdash; redesigned</span><span class="d">Every screen and
       every state, as a specification you can click through. Fifteen tabs, and the one to open first is
-      <b>Every screen</b> &mdash; a contact sheet of all 108 states at a third scale, which is what makes
+      <b>Every screen</b> &mdash; a contact sheet of all 111 states at a third scale, which is what makes
       the other fourteen findable. The rest that are documents rather than mock-ups: <b>Coverage</b>
       (which feature is drawn and which is not), <b>Spec</b> (measurements, tokens, keyboard, the code
       delta) and <b>Grouping</b> (why six destinations).</span></span><span class="go">&rsaquo;</span></a>
@@ -58,7 +58,7 @@ a.item .go{color:#3a3a42;font-size:var(--ui)}
   they carry their own tokens and their own fonts, because they are also the artifacts the design was
   reviewed from and had to survive being served on their own. They deliberately do not link
   <span class="mono">desk.css</span>. This landing page does, so it looks like its neighbours.</p>
-  <p class="aside"><b>Three harnesses ship beside these pages</b> and both measure a render rather than the
+  <p class="aside"><b>Four harnesses ship beside these pages</b> and both measure a render rather than the
   source. <span class="mono">measure.py</span> derives the component usage counts by walking the desktop
   artifact. <span class="mono">ember.py</span> counts ember marks on a screen and asserts the budget of
   three &mdash; with <b>one scoped exemption</b>, the workspaces panel, which carries a status dot on every
@@ -68,6 +68,12 @@ a.item .go{color:#3a3a42;font-size:var(--ui)}
   hover-preview rule and reports, for each, whether a panel shows, whether it floats and whose panel it is
   &mdash; two of those four were unreachable until they were drawn, and a state nobody has drawn is a state
   nobody has checked.</p>
+  <p class="aside"><span class="mono">chips.py</span> answers one question the home kept raising &mdash;
+  <b>how many chips is one line?</b> It measures the laid-out rows at a real 1280 and a real 1680 and
+  reports how many fall on the first line, which chip is widest, and whether <i>View more</i> is drawn.
+  The artifact renders a fixed 1280 window and <i>scales</i> it, so a wider browser measures the same
+  layout; the harness overrides the window&rsquo;s own width rather than the browser&rsquo;s, which is the
+  difference between asking the question and appearing to.</p>
   <p class="aside">Every name, question and timestamp inside them is invented.</p>
 </div>
 </body></html>
