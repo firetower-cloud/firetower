@@ -185,6 +185,47 @@ is a slider somebody kept nudging. Three is enough: body, label, heading. If a
 thing needs emphasis beyond 530, it needs a different size or more space around
 it, not another 20 units of weight.
 
+### Signals are the first namespace, not a fourth
+
+`STYLE.md` says colour is fully spent and that anything new is identified by
+shape, weight or position — never by a new hue. That rule is right and it has
+been misread, including by this document, as *the product is monochrome except
+for ember*. It is not. **The signals are semantic and they already exist**, and
+`api/view.ts` carries the one table that assigns them:
+
+| status | tone |
+|---|---|
+| `working` | slate |
+| `blocked` | **ember** |
+| `done` | sage |
+| `broken` | brick |
+| `over` | mute |
+
+The workspace's team rail drew **all five in neutral ink**, which left *asked
+you a question*, *working* and *handed back* looking like one grey thing told
+apart by an 11px shape. Two inches below it the Plan drew a finished step in
+sage — the same word, in the same panel, in two different colours.
+
+> **Reaching for the table that already exists is not spending colour. It is
+> stopping a screen from throwing away colour it had already been given.**
+
+So: a handed-back tick is sage, a working agent's dots are slate, a question is
+ember, a broken child is brick. No new hue, no fourth namespace.
+
+**Two rules survive that, and they are what keep it safe.**
+
+**Never hue alone.** The product draws a failed child as a round pip. Two rows
+above it, a question is a round ember dot — one circle told from another by
+colour, which is exactly what the guide forbids and what a dichromat cannot do.
+It is a **warning glyph** here instead: a tick and a triangle read apart with
+the colour off.
+
+**Ember stays rare, and it is counted.** Sage, slate and brick are quiet by
+design — that is why they are the safe moves. Ember is not. After this pass the
+busiest screen in the whole document carries **three** ember marks, and the
+team rail contributes exactly one. If a change pushes that past three, the
+change is wrong.
+
 ### A server is a mark, never a colour
 
 Firetowers are told apart by a monogram, not a hue. There are not enough

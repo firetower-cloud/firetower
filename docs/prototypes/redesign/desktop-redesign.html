@@ -72,6 +72,14 @@
   --color-host-gitea:#609926;   /* unchanged; it already clears 3.45:1 */
   --slate-ink:#44607E;   /* a pending change, and the control that made one */
 
+  /* The signal marks, under their own names. `api/view.ts`'s BEAT_TONE is the
+     one table that says what a status means — working: slate, blocked: ember,
+     done: sage, broken: brick, over: mute — and it is already shipped. These
+     are its light values; the dark ones are globals.css verbatim. Not a new
+     namespace: the first one, applied where it had been left grey. */
+  --color-sage:#2F7D52;  /* done            4.49:1 as a mark on the chrome */
+  --color-slate:#44607E; /* working         5.83:1 */
+
   /* File kinds and chart series, re-gated for a white ground. Each is the
      dark hue with L* lowered, a* and b* held, until it clears the floor the
      dark set’s own weakest member clears on #111113 — 5.7:1 for a kind,
@@ -116,6 +124,7 @@
   --color-amber-deep:#7a5a0d; --color-brick-tint:#2a1414; --color-brick-deep:#6e2f2b;
   --color-host-github:#f4f4f5; --color-host-gitlab:#fc6d26; --color-host-gitea:#609926;
   --slate-ink:#7D95B0;
+  --color-sage:#6ec08a; --color-slate:#7d95b0;
   --color-kind-source:#7b93b8; --color-kind-native:#b8845f; --color-kind-data:#c2ab63;
   --color-kind-style:#9a8cc4; --color-kind-media:#79b58d; --color-kind-store:#bd79a1;
   --color-kind-prose:#9a9aa4;
@@ -1813,6 +1822,23 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
 .hcol .elsewhere .go{display:inline-flex;align-items:center;gap:2px;height:26px;padding:0 10px;
   border-radius:99px;background:var(--sheet);color:var(--ink);font-size:13.5px}
 </style>
+<style>
+/* ═══ THE TEAM RAIL'S STATE MARKS ══════════════════════════════════
+   One mark per state, each in the colour `api/view.ts` already assigns
+   it. The shapes stay what they were — a dot, three dots, a tick, a
+   pip — so nothing is identified by hue alone. */
+.bm{display:grid;place-items:center;flex:none}
+.bm[data-tone="sage"]{color:var(--color-sage)}
+.bm[data-tone="brick"]{color:var(--brick)}
+.bm[data-tone="over"]{color:var(--hush)}
+.typing[data-tone="slate"] i{background:var(--color-slate)}
+/* Done, in the plan, is the same sage as done in the team — the two sat
+   two inches apart saying the same word in two different colours. */
+.step[data-s="done"] .box{background:var(--color-sage);border-color:var(--color-sage)}
+.planbar{margin-top:10px;height:3px;border-radius:99px;background:var(--hair);overflow:hidden}
+.planbar i{display:block;height:100%;border-radius:99px;background:var(--color-sage);
+  transition:width 500ms var(--swift)}
+</style>
 
 </head>
 <body>
@@ -2024,6 +2050,7 @@ const S={theme:"light",panel:"pinned",peek:null,menu:null,tower:"nw",
   scopesheet:false,          // what a profile may reach
   repos:null,                // what is checked out here: 1 | pick
   gate:null,                 // held at the door mid-session: locked | setup
+  teamfail:false,           // a child that failed, in the team rail
   home:"both",               // both | nowait | noart | neither
   when:null,                 // force a greeting: morning | afternoon | evening
   pvw:"desktop", pvpick:true, port:false};
@@ -2361,10 +2388,22 @@ function renderWin(){
 /* ═══════════════════════════════════════════════════════════════════
    THE WORKSPACE
    ═══════════════════════════════════════════════════════════════════ */
+/* `api/view.ts`'s BEAT_TONE, applied. It is the one table that says what a
+   status means and it was already shipped — working: slate, blocked: ember,
+   done: sage, broken: brick, over: mute. These marks had all been drawn in
+   neutral ink, which left three different facts looking like one grey thing
+   told apart only by an 11px shape. No new hue: the signals are the first
+   namespace, not a fourth. */
 function beatMark(state){
-  if(state==="needs") return `<span class="dot"></span>`;
-  if(state==="working") return `<span class="typing" title="Working now"><i></i><i></i><i></i></span>`;
-  if(state==="ready") return `<span class="g" style="color:var(--quiet);display:grid">${ic("check",14)}</span>`;
+  if(state==="needs")   return `<span class="dot" title="Asked you a question"></span>`;
+  if(state==="working") return `<span class="typing" data-tone="slate" title="Working now"><i></i><i></i><i></i></span>`;
+  if(state==="ready")   return `<span class="bm" data-tone="sage" title="Handed back">${ic("check",14)}</span>`;
+  /* A glyph, not a pip. The product draws this as a round pip, which beside
+     the ember dot two rows up is one circle distinguished from another by
+     hue alone — the one thing the guide forbids. A tick and a warning read
+     apart with the colour off. */
+  if(state==="failed")  return `<span class="bm" data-tone="brick" title="Failed">${ic("triangle-alert",14)}</span>`;
+  if(state==="over")    return `<span class="bm" data-tone="over" title="Ended">${ic("check",14)}</span>`;
   return "";
 }
 function team(){
@@ -2378,7 +2417,7 @@ function team(){
       </span></button>`;
   return `<div class="team">
     ${row(m,true)}
-    <div class="kids">${TEAM.kids.map(k=>row(k)).join("")}</div>
+    <div class="kids">${(S.teamfail?TEAM.kids.map(k=>k.name==="Backfill the invoice index"?{...k,state:"failed",note:"the migration would not apply"}:k):TEAM.kids).map(k=>row(k)).join("")}</div>
   </div>`;
 }
 function inspector(){
@@ -2403,6 +2442,9 @@ function inspector(){
       </section>
       <section class="isec">
         <h3>Plan<span class="n">${PLAN.filter(p=>p.s==="done").length} of ${PLAN.length}</span></h3>
+        ${/* The bar OverviewTab.tsx:325 already draws, in the sage it already
+             uses. A count tells you where you are; a bar shows it. */""}
+        <div class="planbar"><i style="width:${Math.round(PLAN.filter(p=>p.s==="done").length/PLAN.length*100)}%"></i></div>
         <div class="plan">${PLAN.map(p=>`<div class="step" data-s="${p.s}">
           <span class="box">${p.s==="done"?ic("check",10):""}</span><span>${esc(p.t)}</span></div>`).join("")}</div>
       </section>`;
@@ -4090,6 +4132,11 @@ const SPEC_DELTA=[
   ["Translucent blacks","corrected","The 31 uses of <code>rgb(21 22 26 / …)</code> — hovers, shadows, scrims — carried the same cast and concentrated it. Now <code>rgb(22 22 23 / …)</code>. <b>This is what made the rail hover look wrong</b>; it was never the hover rule."],
   ["--color-ground, lightness","modified","<b>#eceef1 → #F2F2F3.</b> Lighter and exactly neutral. Deliberately <i>not</i> Codex's <code>#f6f6f6</code>: the chrome-to-sheet step would fall to <b>ΔE 3.1</b>, and this window is a rounded card floating on that chrome rather than a flat page. At <code>#F2F2F3</code> the step is <b>ΔE 4.5</b> — down from 6.2, in the same family as the rest of the ladder (3.4, 4.9). <b>#f6f6f6 is available if the softer edge is wanted; say so.</b>"],
   ["desktop/src/styles.css — the rail box","modified","<b>42px → 34px, radius 13 → 11.</b> 7px of padding around a 20px glyph rather than 11, so the current destination reads as a tight square rather than a button-sized tile. Hover and current share the one box, so the rail does not change size under the pointer. The news pip moves with it: <code>top/right 9px → 5px</code>."],
+  ["desktop/src/ui/OverviewTab.tsx — the team rail","corrected","<b>No new hue. The table already existed and was not being used.</b> <code>api/view.ts</code>'s <code>BEAT_TONE</code> says working: slate, blocked: ember, done: sage, broken: brick, over: mute — and the rail drew all of them in neutral ink, so three different facts looked like one grey thing told apart by an 11px shape. Each mark now takes the tone its own status already carries."],
+  ["The same word, two colours","corrected","The Plan drew a finished step in <b>sage</b> (<code>OverviewTab.tsx:325</code>, <code>:338</code>) while the Team rail two inches above drew <i>handed back</i> in grey. One meaning, one panel, two renderings. Both are sage."],
+  ["A child that failed","added","<code>OverviewTab.tsx:53</code> returns <code>failed</code> and <code>:124</code> draws it; this document could not draw it at all. Added, in brick — and as a <b>warning glyph rather than the product's round pip</b>, because a brick circle two rows under an ember circle is one shape told apart by hue alone, which is the one thing <code>STYLE.md</code> forbids."],
+  ["The plan's progress bar","added","<code>OverviewTab.tsx:325</code> draws one in sage. This document had the count and not the bar."],
+  ["web/app/globals.css — light signals","added","Light values for <code>--color-sage</code> and <code>--color-slate</code>, derived the way §4 derives everything: measured against what the mark sits on. <b>4.49:1</b> and <b>5.83:1</b> on the chrome, past the 3:1 floor for a non-text mark. The dark values are globals.css verbatim."],
   ["Type scale","modified","<b>Every size below 28px rises by 1px.</b> One uniform step, applied to the tier rather than to screens — it raises the operating tiers the complaint named and is the only change that cannot disturb the gaps between them. Row minimums grow 2px to match (34→36, 40→42, 44→46, 54→58). Costs one row in a configuration list at 1280 × 824; the panel loses none."],
   ["Type weights","modified","<b>Fourteen weights become three — 400, 500, 530.</b> Mechanical: 420/450→400, 460/480/500/520→500, 540/560/600/650/700→530."],
   ["Mono","corrected","Skill names, profile names and dropped-folder names move to the text face. Paths, branches, codes, keys and diffs keep the mono face. The test: <i>would you ever read it character by character?</i>"],
@@ -4642,7 +4689,14 @@ const COV=[
   ["Notes on code — writing, kept","Y",""],
   ["⌘F in the conversation · none · past the cap","Y",""],
   ["⌘P QuickOpen · ⌘K palette","Y",""],
-  ["Right rail — Overview · Diff · Files · Ship","Y",""],
+  ["Right rail — Overview · Diff · Files · Ship",null,"",[
+    ["The team, manager and children","Y",""],
+    ["Asked you a question · working · handed back","Y","Ember, slate, sage — <code>BEAT_TONE</code>'s own tones, not new hues"],
+    ["A child that failed","Y","Brick, and a warning glyph rather than a second circle"],
+    ["Made","Y",""],
+    ["Plan, with its sage progress bar","Y","Matching <code>OverviewTab.tsx:325</code>"],
+    ["Diff · Files · Ship","Y",""],
+  ]],
   ["Ship",null,"",[
     ["Nine stages, each with its honest label","Y",""],
     ["Title and body, from the run’s own proposal","Y",""],
@@ -5731,7 +5785,9 @@ const SHEET = [
   ["Repositories here",            {tab:"work", rt:"work", wb:"chat", repos:"1", panel:"collapsed"}],
   ["Ship — uncommitted",           {tab:"work", rt:"work", wb:"chat", itab:"ship", ship:"uncommitted", panel:"collapsed"}],
   ["Ship — two repositories",      {tab:"work", rt:"work", wb:"chat", itab:"ship", ship:"many", panel:"collapsed"}],
+  ["The team — a child failed",    {tab:"work", rt:"work", wb:"chat", itab:"overview", teamfail:true, panel:"collapsed"}],
   ["Ship — merged",                {tab:"work", rt:"work", wb:"chat", itab:"ship", ship:"merged", panel:"collapsed"}],
+  ["The team — a child failed",    {tab:"work", rt:"work", wb:"chat", itab:"overview", teamfail:true, panel:"collapsed"}],
   ["Which skills",                 {tab:"work", rt:"work", wb:"chat", pick:"skills", panel:"collapsed"}],
  ]],
  ["Artifacts and skills", [
@@ -5906,7 +5962,10 @@ function chrome(){
         <button data-act="addagent" data-addagent="1" aria-pressed="${S.addagent}">Another agent</button>
         <button data-act="ctx" data-ctx="1" aria-pressed="${S.ctx}">Right-click</button>
         <button data-act="repos" data-repos="1" aria-pressed="${S.repos==="1"}">Repositories here</button>
-        <button data-act="repos" data-repos="pick" aria-pressed="${S.repos==="pick"}">Check one in</button></span>`:""}
+        <button data-act="repos" data-repos="pick" aria-pressed="${S.repos==="pick"}">Check one in</button></span>
+      <span class="seg">
+        <button data-act="teamfail" data-teamfail="0" aria-pressed="${!S.teamfail}">Team as usual</button>
+        <button data-act="teamfail" data-teamfail="1" aria-pressed="${S.teamfail}">A child failed</button></span>`:""}
     ${S.tab==="artifacts"?seg("art","art",[["grid","Library"],["read","Reading one"],["noting","Writing a note"],["kept","Notes kept"]]):""}
     ${(SUB2[S.tab]||SUB[S.tab])?`<span class="seg">${(SUB2[S.tab]||SUB[S.tab]).map(([id,l])=>
       `<button data-act="pane" data-pane2="${id}" aria-pressed="${paneOf()===id}">${l}</button>`).join("")}</span>`:""}
@@ -6059,6 +6118,7 @@ document.addEventListener("click",e=>{
   else if(a==="ship"){ S.ship=b.dataset.ship; S.itab="ship"; S.insp=true; S.rt="work"; S.tab="work"; }
   else if(a==="find"){ S.find=b.dataset.find||null; if(S.find){S.rt="work";S.tab="work";} }
   else if(a==="addagent"){ S.addagent=b.dataset.addagent==="1"; if(S.addagent){S.rt="work";S.tab="work";} }
+  else if(a==="teamfail"){ S.teamfail=b.dataset.teamfail==="1"; S.rt="work"; S.tab="work"; S.itab="overview"; S.insp=true; }
   else if(a==="ctx"){ S.ctx=b.dataset.ctx==="1"; if(S.ctx){S.rt="work";S.tab="work";S.wb="file";} }
   else if(a==="voice") S.voice=b.dataset.voice||null;
   else if(a==="repos"){ S.repos=b.dataset.repos||null; if(S.repos){S.rt="work";S.tab="work";} }
