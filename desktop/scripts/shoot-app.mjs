@@ -45,7 +45,7 @@ for (const s of SHOTS) {
     continue;
   }
   for (const theme of ["light", "dark"]) {
-    const page = await fresh(theme, { servers: s.servers ?? REGISTRY, scene: s.scene ?? "default", at: s.at ?? null });
+    const page = await fresh(theme, { servers: s.servers ?? REGISTRY, scene: s.scene ?? "default", at: s.at ?? null, seed: s.seed ?? null });
     try {
       await s.go(page);
       await page.screenshot({ path: `${OUT}/${s.id}-${theme}.png` });

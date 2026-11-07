@@ -141,7 +141,7 @@ for (const s of SHOTS) {
   if (s.skip) continue;
   if (ONLY && !s.id.includes(ONLY)) continue;
   for (const theme of ["light", "dark"]) {
-    const page = await fresh(theme, { servers: s.servers ?? REGISTRY, scene: s.scene ?? "default", at: s.at ?? null });
+    const page = await fresh(theme, { servers: s.servers ?? REGISTRY, scene: s.scene ?? "default", at: s.at ?? null, seed: s.seed ?? null });
     try {
       await s.go(page);
       const found = await page.evaluate(`(${RULES.toString()})()`);

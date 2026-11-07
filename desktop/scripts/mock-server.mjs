@@ -605,6 +605,38 @@ const server = createServer(async (req, res) => {
         other({ id: "s_k3", workspaceId: "w_1", parentId: "s_1", number: 4, name: "Token audit", title: "Token audit", status: "Ended", agent: "Cursor", createdAt: minutesAgo(62) }),
       ];
     }
+    /* **The four states proposition C was chosen against.** Seven, forty
+       with thirty in one repository, everything finished, and none. The
+       panel's whole argument is what it does at forty rows, and nothing
+       here could produce forty. */
+    if (scene === "ws-many") {
+      const verb = ["Backfill", "Reconcile", "Rewrite", "Audit", "Trim", "Split", "Port", "Cache", "Retry", "Measure"];
+      const noun = ["the invoice index", "the webhook retries", "the quota band", "the token store", "the migration",
+        "the session log", "the poster queue", "the vault read", "the host probe", "the diff view"];
+      const status = (i) => (i < 3 ? "NeedsYou" : i < 9 ? "Working" : i === 29 ? "Failed" : "HandedBack");
+      const out = [];
+      for (let i = 0; i < 30; i++) {
+        out.push(other({
+          id: `m_${i}`, workspaceId: `wm_${i}`, number: 100 + i,
+          name: `${verb[i % 10]} ${noun[(i * 3) % 10]}`, title: `${verb[i % 10]} ${noun[(i * 3) % 10]}`,
+          status: status(i), repo: "acme/api", createdAt: minutesAgo(i < 9 ? i + 4 : (i - 6) * 60),
+        }));
+      }
+      ["acme/web", "acme/infra", "acme/ledger-sync", "acme/docs", "acme/pricing", "acme/billing-worker"]
+        .forEach((repo, i) => out.push(other({
+          id: `o_${i}`, workspaceId: `wo_${i}`, number: 200 + i,
+          name: `Work on ${repo.split("/")[1]}`, title: `Work on ${repo.split("/")[1]}`,
+          status: i === 0 ? "NeedsYou" : i < 3 ? "Working" : "HandedBack",
+          repo, createdAt: minutesAgo((i + 1) * 60 * 24),
+        })));
+      return out;
+    }
+    /* Everything finished: the same set, all handed back. The question C
+       answers here is what a panel with no *Working* band looks like. */
+    if (scene === "ws-done") {
+      return [session(), ...working].map((x) => ({ ...x, status: "HandedBack" }));
+    }
+    if (scene === "ws-none") return [];
     if (scene === "calm") return [session(), ...working];
     const asking = [
       other({
@@ -789,6 +821,29 @@ const server = createServer(async (req, res) => {
      child from the team rail took the screen down to the error boundary.
      Found by `assert-connected.mjs` on its first run with the fifth
      outcome. */
+  /* **⌘P had nothing to find.** The sheet opens, you type, and the worker's
+     `find_files` fell through to the handler's `[]` — so the state the
+     drawing draws, five of a hundred and forty-eight files with their
+     directories beside them, could not be photographed. A checkout's worth
+     of paths, filtered the way the worker filters them. */
+  const search_in = /^\/api\/v1\/sessions\/([^/]+)\/files\/search$/.exec(path);
+  if (search_in) {
+    const q = (url.searchParams.get("q") ?? "").toLowerCase();
+    const every = [
+      "crates/ft-server/src/quota.rs",
+      "crates/ft-server/tests/quota_band.rs",
+      "web/app/components/QuotaMeter.tsx",
+      "web/app/globals.css",
+      "Cargo.toml",
+      "crates/ft-server/src/main.rs",
+      "crates/ft-worker/src/lib.rs",
+      "desktop/src/ui/Home.tsx",
+      "docs/STYLE.md",
+      "package.json",
+    ];
+    return json(res, q ? every.filter((f) => f.toLowerCase().includes(q)) : every);
+  }
+
   const account_of = /^\/api\/v1\/sessions\/([^/]+)\/account$/.exec(path);
   if (account_of && account_of[1] !== "s_1") {
     return json(res, { account: ACCOUNTS[0], limits: [], switches: [] });

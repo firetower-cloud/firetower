@@ -16,7 +16,7 @@
  * matters enough to be in a row has to earn the space against the name, and
  * otherwise belongs in the thing the row opens.
  */
-import { useMemo } from "react";
+import { Fragment, useMemo, useState } from "react";
 import {
   Blocks,
   FolderGit2,
@@ -46,7 +46,7 @@ import { Icon } from "~/components/ui";
 import { useListArtifacts } from "~/api/generated/artifacts/artifacts";
 import { useMe } from "~/api/generated/auth/auth";
 import { elapsed, minutesSince, needsYou } from "~/api/view";
-import { flat, group, isChild, rowLabel, type Workspace } from "~/api/workspaces";
+import { doing, flat, group, isChild, rowLabel, type Repositories, type Workspace } from "~/api/workspaces";
 import { useHosts, useRepos, useSessions, useSkills } from "~/data";
 import { isPersonal } from "~/filing";
 import { key } from "~/platform";
@@ -154,29 +154,117 @@ const pane = (path: string) => path.split("/").filter(Boolean)[1] ?? "";
  * is this mine or did somebody share it — and even that is only drawn when
  * there is something in it.
  */
+/**
+ * How a workspace is grouped in the panel. One answer, kept, because it is a
+ * preference and asking again every launch is the same complaint that got the
+ * rail's collapsed state persisted.
+ */
+const BY_KEY = "firetower.workspaces-by";
+type By = "status" | "repo";
+const heldBy = (): By => {
+  try {
+    return window.localStorage.getItem(BY_KEY) === "repo" ? "repo" : "status";
+  } catch {
+    return "status";
+  }
+};
+
+/**
+ * What a workspace is doing, as a band.
+ *
+ * **Three, not the drawing's four.** The drawing bands on a `BEAT` rollup —
+ * *Needs you*, *Working*, *Done*, *Broken* — and says in its own Spec that
+ * the rollup does not exist yet. It does not: `doing()` is what there is, and
+ * its `waiting` spans `NeedsYou`, `HandedBack` *and* `Failed`, because
+ * `NEEDS_YOU` is all three. So a finished workspace and a failed one both
+ * report *waiting*, not *idle*.
+ *
+ * That is why these are named for what `doing()` can honestly say. All three
+ * of those statuses really are waiting on you — one stopped to ask, one gave
+ * it back, one died and will not go on — so **"Waiting on you"** is true of
+ * the band. Splitting it into the drawing's three needs `beatOfPlace()`, and
+ * that is a product decision rather than a wiring one.
+ */
+const BANDS: { of: ReturnType<typeof doing>; says: string }[] = [
+  { of: "waiting", says: "Waiting on you" },
+  { of: "working", says: "Working" },
+  { of: "idle", says: "Idle" },
+];
+const BAND_ORDER = { waiting: 0, working: 1, idle: 2 } as const;
+
+/**
+ * In Repository mode the band is a repository, so status has nowhere else to
+ * live and the dot returns — **capped at one**.
+ *
+ * The drawing says two. Counted in a render rather than assumed, two puts
+ * **four** ember marks on the Dashboard at forty workspaces, against a budget
+ * of three: the home's waiting chips already carry two before this panel
+ * draws anything. The budget is for the screen, not for the panel, and the
+ * panel is the last thing to arrive on it — so it gets what is left.
+ */
+const EMBER_CAP = 1;
+
 function Workspaces({ stale, onCollapse }: { stale: boolean; onCollapse: () => void }) {
   const path = usePathname();
   const start = useStart();
   const { data: sessions, loading, error } = useSessions();
   const me = useMe();
+  const [by, setBy] = useState<By>(heldBy);
   /* The ages are read off the clock, so this has to be told the clock moved —
      nothing else re-renders a workspace that is quietly working. */
   useNow();
 
+  const pick = (next: By) => {
+    setBy(next);
+    try {
+      window.localStorage.setItem(BY_KEY, next);
+    } catch {
+      /* it applies now; it just does not survive a restart */
+    }
+  };
+
   const { mine, theirs } = useMemo(() => {
     const running = sessions.filter((s) => s.status !== "Ended");
-    const own = flat(group(running.filter((s) => isPersonal(s.path, me.data?.user))));
-    const shared = flat(group(running.filter((s) => !isPersonal(s.path, me.data?.user))));
+    const ownBy = group(running.filter((s) => isPersonal(s.path, me.data?.user)));
+    const sharedBy = group(running.filter((s) => !isPersonal(s.path, me.data?.user)));
     /* A child spawned in its own workspace lives under its lead in the
        Overview tab, not as a row of its own here. */
-    const everyPlace = [...own, ...shared];
-    const topOnly = (places: Workspace[]) => places.filter((p) => !isChild(p, everyPlace));
-    return { mine: topOnly(own), theirs: topOnly(shared) };
+    const everyPlace = [...flat(ownBy), ...flat(sharedBy)];
+    const topOnly = (p: Workspace) => !isChild(p, everyPlace);
+    /* **Both shapes, from one grouping.** Status mode wants them flat;
+       Repository mode wants the repository `group()` already knows, which
+       `Workspace` itself does not carry. */
+    const both = (by: Repositories) => ({
+      flat: flat(by).filter(topOnly),
+      byRepo: by.groups
+        .map(([repo, places]) => [repo, places.filter(topOnly)] as [string, Workspace[]])
+        .filter(([, places]) => places.length > 0),
+    });
+    return { mine: both(ownBy), theirs: both(sharedBy) };
   }, [sessions, me.data?.user]);
+
+  const nothing = mine.flat.length === 0 && theirs.flat.length === 0;
 
   return (
     <>
       <Head name="Workspaces" onCollapse={onCollapse} />
+      {/* **Its own row.** The header already carries a name, a search and a
+          collapse at 252px, and `Repository` is the longest realistic label —
+          a fourth thing on that line is what overlapped the title. This
+          switch is on the Workspaces panel and nowhere else: it is the one
+          panel whose set is big and heterogeneous enough for a second
+          grouping to pay for itself. */}
+      {!nothing && (
+        <div className="pswitch">
+          <span className="seg2" role="group" aria-label="Group workspaces by">
+            {([["status", "Status"], ["repo", "Repository"]] as const).map(([id, says]) => (
+              <button key={id} onClick={() => pick(id)} aria-pressed={by === id}>
+                {says}
+              </button>
+            ))}
+          </span>
+        </div>
+      )}
       <Scroll>
         <button onClick={() => start()} className="prow">
           <span className="grid w-[17px] shrink-0 place-items-center text-mute">
@@ -197,34 +285,100 @@ function Workspaces({ stale, onCollapse }: { stale: boolean; onCollapse: () => v
           error && <p className="px-2.5 py-1 text-meta text-brick">{error}</p>
         )}
 
-        {mine.length > 0 ? (
-          <>
-            <Label>Recent</Label>
-            {mine.map((place) => (
-              <Place key={place.id} place={place} places={mine} on={path === `/sessions/${place.id}`} />
-            ))}
-          </>
-        ) : (
-          /* **Only when there is nothing at all.** This was keyed on `mine`
-             alone, so a fleet of eight workspaces shared with you printed
-             "Nothing running yet." immediately above all eight of them. */
-          !loading &&
-          theirs.length === 0 && (
-            <p className="px-2.5 py-3 text-ui text-mute">
-              {stale ? "Nothing was running when it was last reached." : "Nothing running yet."}
-            </p>
-          )
+        {nothing && !loading && !error && (
+          <p className="pnone">Nothing running yet. Start something on the home and it appears here.</p>
         )}
 
-        {theirs.length > 0 && (
+        {mine.flat.length > 0 && <Listing places={mine} by={by} path={path} />}
+
+        {theirs.flat.length > 0 && (
           <>
             <Label>Shared with you</Label>
-            {theirs.map((place) => (
-              <Place key={place.id} place={place} places={theirs} on={path === `/sessions/${place.id}`} />
-            ))}
+            <Listing places={theirs} by={by} path={path} />
           </>
         )}
       </Scroll>
+    </>
+  );
+}
+
+/**
+ * The rows, banded.
+ *
+ * **Flat and ordered, not grouped into sections.** One hairline and a word
+ * where the band turns. A grouped list reorders under the pointer — the row
+ * you reached for jumps to another section the moment its state changes.
+ */
+function Listing({
+  places,
+  by,
+  path,
+}: {
+  places: { flat: Workspace[]; byRepo: [string, Workspace[]][] };
+  by: By;
+  path: string;
+}) {
+  if (by === "repo") {
+    let embers = 0;
+    return (
+      <>
+        {places.byRepo.map(([repo, held]) => (
+          <Fragment key={repo}>
+            <div className="prepo">
+              <Icon of={FolderGit2} size={14} />
+              <span>{repo}</span>
+              <span className="n">{held.length}</span>
+            </div>
+            {[...held]
+              .sort((a, b) => BAND_ORDER[doing(a)] - BAND_ORDER[doing(b)])
+              .map((place) => {
+                /* Past the cap a waiting row keeps its place and loses its
+                   dot; the repository's count still says how many. */
+                const hot = doing(place) === "waiting";
+                const show = hot ? ++embers <= EMBER_CAP : true;
+                return (
+                  <Place
+                    key={place.id}
+                    place={place}
+                    places={held}
+                    mark={show}
+                    on={path === `/sessions/${place.id}`}
+                  />
+                );
+              })}
+          </Fragment>
+        ))}
+      </>
+    );
+  }
+
+  const sorted = [...places.flat].sort((a, b) => BAND_ORDER[doing(a)] - BAND_ORDER[doing(b)]);
+  let last: string | null = null;
+  return (
+    <>
+      {sorted.map((place) => {
+        const band = doing(place);
+        const turn = band !== last;
+        last = band;
+        const n = sorted.filter((p) => doing(p) === band).length;
+        return (
+          <Fragment key={place.id}>
+            {turn && (
+              <div className="pband">
+                <span>{BANDS.find((b) => b.of === band)?.says}</span>
+                <i />
+                <span className="n">{n}</span>
+              </div>
+            )}
+            {/* **No mark in Status mode.** The band above already says the
+                state and counts it, so a dot on every row repeats the
+                heading — and measuring it found worse: the Dashboard's
+                chips, the rail's avatar and a dotted panel put five ember
+                marks on one screen against a budget of three. */}
+            <Place place={place} places={sorted} mark={false} on={path === `/sessions/${place.id}`} />
+          </Fragment>
+        );
+      })}
     </>
   );
 }
@@ -237,7 +391,7 @@ function Workspaces({ stale, onCollapse }: { stale: boolean; onCollapse: () => v
  * the dot, and the rule the whole design turns on is that ember is rare — six
  * of a thing that means "the one loud thing" is none of them.
  */
-function Place({ place, places, on }: { place: Workspace; places: Workspace[]; on: boolean }) {
+function Place({ place, places, on, mark }: { place: Workspace; places: Workspace[]; on: boolean; mark: boolean }) {
   const hot = place.runs.some(needsYou);
   return (
     <button
@@ -246,6 +400,9 @@ function Place({ place, places, on }: { place: Workspace; places: Workspace[]; o
       title={hot ? `${place.name} — waiting on you` : place.name}
       className="prow"
     >
+      {/* The column is held whether or not there is a mark in it, so a capped
+          row does not shift its name left of the rows above. */}
+      <span className="mk">{mark && hot && <i className="wdot" />}</span>
       <span className={`min-w-0 flex-1 truncate ${hot ? "font-medium text-bone" : ""}`}>
         {rowLabel(place, places)}
       </span>

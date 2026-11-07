@@ -31,7 +31,7 @@ export function attach(b) {
 }
 
 /** A page per state: `theme.ts` writes the attribute at import, so a theme is a reload. */
-export async function fresh(theme, { servers = REGISTRY, scene = "default", at = null } = {}) {
+export async function fresh(theme, { servers = REGISTRY, scene = "default", at = null, seed = null } = {}) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 824 }, deviceScaleFactor: 2 });
   page.on("pageerror", (e) => console.log("    pageerror:", String(e).slice(0, 160)));
   await page.request.post(`${HERE}/__reset?scene=${scene}`);
@@ -54,14 +54,17 @@ export async function fresh(theme, { servers = REGISTRY, scene = "default", at =
     }, at);
   }
   await page.addInitScript(
-    ([registry, choice]) => {
+    ([registry, choice, held]) => {
       if (registry) window.localStorage.setItem("firetower.servers", registry);
       else window.localStorage.removeItem("firetower.servers");
       window.localStorage.setItem("firetower.current", "o_1");
       window.localStorage.setItem("firetower.theme", choice);
       window.localStorage.removeItem("firetower.panel");
+      /* A state that *is* a preference — the panel grouped by repository —
+         has to be able to say so before the first render. */
+      for (const [k, v] of Object.entries(held ?? {})) window.localStorage.setItem(k, v);
     },
-    [servers, theme],
+    [servers, theme, seed],
   );
   return page;
 }
@@ -133,6 +136,16 @@ export const SHOTS = [
   { id: "starting-work__home-neither", scene: "bare", go: (p) => at(p, "/") },
   { id: "starting-work__home-good-morning", scene: "waiting", at: "2026-11-07T09:30:00", go: (p) => at(p, "/") },
   { id: "starting-work__home-good-evening", scene: "waiting", at: "2026-11-07T21:30:00", go: (p) => at(p, "/") },
+  /* The four states proposition C was chosen against. The panel's argument
+     is entirely about what it does at forty rows. */
+  { id: "starting-work__panel-forty-workspaces", scene: "ws-many", go: (p) => at(p, "/", 1600) },
+  {
+    id: "starting-work__panel-grouped-by-repository",
+    scene: "ws-many",
+    seed: { "firetower.workspaces-by": "repo" },
+    go: (p) => at(p, "/", 1600),
+  },
+  { id: "starting-work__panel-nothing-running", scene: "ws-none", go: (p) => at(p, "/", 1400) },
   { id: "starting-work__tasks-has-work", go: (p) => at(p, "/tasks") },
   { id: "starting-work__tasks-nothing-open", scene: "no-tasks", go: (p) => at(p, "/tasks") },
   { id: "starting-work__tasks-not-connected", scene: "no-trackers", go: (p) => at(p, "/tasks") },
@@ -173,6 +186,9 @@ export const SHOTS = [
   /* The `team` scene, because the Overview's team rail is half of what this
      screen is and every other scene leaves the workspace solo. */
   { id: "in-a-workspace__conversation", scene: "team", go: (p) => at(p, "/sessions/s_1", 2200) },
+  /* A child that failed. `OverviewTab` has always drawn it and nothing here
+     could reach the state, so the mark was never photographed. */
+  { id: "in-a-workspace__the-team-a-child-failed", scene: "team-failed", go: (p) => at(p, "/sessions/s_1", 2200) },
   { id: "in-a-workspace__a-file", go: (p) => openFile(p, { keep: true }) },
   {
     id: "in-a-workspace__a-diff",

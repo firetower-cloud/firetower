@@ -3961,4 +3961,127 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
     line-height: 1.5;
     color: var(--color-dim);
   }
+
+  /* ── The workspaces panel — proposition C ──────────────────────
+     Flat and status-ordered rather than status-grouped: one hairline and a
+     word where the band turns, not a section. A grouped list reorders under
+     the pointer — the row you reached for jumps elsewhere the moment its
+     state changes — which is why the grouped proposition was not shipped.
+
+     **The switch gets a row of its own.** At 252px the header already
+     carries a name, a search and a collapse, and "Repository" is the longest
+     realistic label; a fourth thing on that line is what overlapped the
+     title. Measure at that label, not at "Status". */
+  .pswitch {
+    padding: 2px 8px 8px;
+    flex: none;
+  }
+  .seg2 {
+    display: inline-flex;
+    gap: 2px;
+    padding: 2px;
+    border-radius: 99px;
+    background: var(--color-raise);
+  }
+  .seg2 button {
+    padding: 4px 11px;
+    border-radius: 99px;
+    font-size: 0.8125rem; /* 13px */
+    color: var(--color-dim);
+    white-space: nowrap;
+    transition:
+      background var(--dur-native) var(--ease-swift),
+      color var(--dur-native) var(--ease-swift);
+  }
+  .seg2 button:hover {
+    color: var(--color-text);
+  }
+  .seg2 button[aria-pressed="true"] {
+    background: var(--color-panel);
+    color: var(--color-bone);
+    box-shadow: var(--shadow-raise);
+  }
+  [data-theme="dark"] .seg2 button[aria-pressed="true"] {
+    background: var(--color-overlay);
+  }
+
+  /* A section's job for a line's cost. At forty rows that is the difference
+     between seeing the working band and scrolling to it. */
+  .pband {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 13px 9px 4px;
+  }
+  .pband span {
+    font-size: 0.8125rem; /* 13px */
+    color: var(--color-mute);
+    flex: none;
+  }
+  .pband .n {
+    font-variant-numeric: tabular-nums;
+  }
+  .pband i {
+    flex: 1;
+    height: 1px;
+    background: var(--color-line);
+  }
+
+  .prepo {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 14px 9px 4px;
+    font-size: 0.84375rem; /* 13.5px */
+    color: var(--color-dim);
+  }
+  .prepo > span:first-of-type {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .prepo .n {
+    margin-left: auto;
+    flex: none;
+    font-size: 0.78125rem; /* 12.5px */
+    color: var(--color-mute);
+    font-variant-numeric: tabular-nums;
+  }
+  .prepo svg {
+    flex: none;
+    color: var(--color-mute);
+  }
+
+  /* The mark's column is held whether or not there is a mark in it, so a
+     capped row does not shift its name left of the rows above. */
+  .prow .mk {
+    width: 9px;
+    flex: none;
+    display: grid;
+    place-items: center;
+  }
+  .wdot {
+    width: 8px;
+    height: 8px;
+    border-radius: 99px;
+    flex: none;
+    background: var(--color-ember);
+  }
+  .wdot[data-t="working"] {
+    background: var(--color-slate);
+  }
+  .wdot[data-t="done"] {
+    background: var(--color-sage);
+  }
+  .wdot[data-t="broken"] {
+    background: var(--color-brick);
+  }
+
+  .pnone {
+    padding: 14px 9px;
+    font-size: var(--text-ui);
+    line-height: 1.55;
+    color: var(--color-dim);
+  }
 }

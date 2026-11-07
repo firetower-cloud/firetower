@@ -82,7 +82,7 @@ for (const s of SHOTS) {
      that navigates destroys the list the next candidate was found in. */
   let candidates = [];
   {
-    const page = await fresh("dark", { servers: s.servers ?? REGISTRY, scene: s.scene ?? "default", at: s.at ?? null });
+    const page = await fresh("dark", { servers: s.servers ?? REGISTRY, scene: s.scene ?? "default", at: s.at ?? null, seed: s.seed ?? null });
     try {
       await s.go(page);
       const CATALOGUE = await catalogue(page, s.scene ?? "default");
@@ -141,7 +141,7 @@ for (const s of SHOTS) {
       findings.push({ state: s.id, label: c.label, names: `${c.entity.kind} ${c.entity.ids.join(" / ")}`, outcome: "by-design", landed: "—" });
       continue;
     }
-    const page = await fresh("dark", { servers: s.servers ?? REGISTRY, scene: s.scene ?? "default", at: s.at ?? null });
+    const page = await fresh("dark", { servers: s.servers ?? REGISTRY, scene: s.scene ?? "default", at: s.at ?? null, seed: s.seed ?? null });
     try {
       await s.go(page);
       const before = await page.evaluate(() => ({
