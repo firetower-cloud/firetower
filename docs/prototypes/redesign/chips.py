@@ -23,12 +23,17 @@ setTimeout(function(){{
       document.querySelectorAll("#win .sect").forEach(function(sec){{
         var h2=sec.querySelector("h2"), row=sec.querySelector(".chips");
         if(!h2||!row||!row.children.length) return;
-        var chips=[...row.children], top=chips[0].offsetTop;
-        var on=chips.filter(function(c){{return c.offsetTop<=top+2}});
+        var chips=[...row.children];
+        var tops=[...new Set(chips.map(function(c){{return c.offsetTop}}))].sort(function(a,b){{return a-b}});
+        /* Visible = not clipped away by the row's own max-height. */
+        var h=row.clientHeight;
+        var vis=chips.filter(function(c){{return c.offsetTop-chips[0].offsetTop < h-2}});
+        var visRows=[...new Set(vis.map(function(c){{return c.offsetTop}}))].length;
         var all=sec.querySelector(".hd .all");
-        out.push(h2.textContent.trim()+": "+on.length+"/"+chips.length
-          +" viewmore="+(all?(all.hidden?"hidden":"shown"):"none")
-          +" widest="+Math.round(Math.max.apply(null,chips.map(function(c){{return c.offsetWidth}}))));
+        out.push(h2.textContent.trim()+": "+vis.length+" of "+chips.length+" chips"
+          +" in "+visRows+" row(s) of "+tops.length
+          +" | viewall="+(all?(all.hidden?"hidden":"shown"):"none")
+          +" | widest="+Math.round(Math.max.apply(null,chips.map(function(c){{return c.offsetWidth}}))));
       }});
       document.title="CHIPS "+out.join(" || ");
     }},250);

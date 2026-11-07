@@ -398,82 +398,98 @@ then replaced. It is drawn beside the home in `home-alternative.html`, which is
 where the comparison belongs. A design that was right and then outgrown deserves
 the same record as one that was rejected.
 
-### The home's three status sections
+### The home's *Recent agents*
 
-**Decided:** three one-line sections above *Recent artifacts* — **Waiting for
-you**, **Handed back**, **Working** — each with *View more* at its top right in
-the treatment *Recent artifacts* already uses for *View all*. They key off
-`BEAT`: `blocked`, `done`, `working`. Each chip carries its own mark from the
-same `beatMark` the team rail uses, so three sections read apart at a glance
-rather than as three identical grey rows.
+**Decided:** one section above *Recent artifacts*, headed **Recent agents**,
+with *View all* at its top right in the treatment *Recent artifacts* already
+uses. Ordered **`broken → blocked → done → working`** — severity first, then
+what has finished, then what is still going.
 
-**How many chips is one line: two to three, and the same at 1280 and 1680.**
-`.hcol` caps at 748px, so the column is 748 and its content 680 at both widths
-— the window's width does not enter into it, which is why the second
-measurement was worth taking rather than assuming. A chip caps at
-`max-width: 306px` and truncates, so **a name can never fill the line alone**
-and two always fit: 2×306 + 8 ≤ 680. Three fit at ordinary lengths.
+**Three sections were built first, and reversed.** *Waiting for you*, *Handed
+back* and *Working*, each one line of chips. Seen in the hand, each heading had
+one chip under it: three words of chrome to label three words of content. **A
+heading per category costs more than it returns when each category holds one
+item** — which is obvious in a screenshot and was not obvious in a brief.
 
-**The cut is never through a chip.** A wrapped flex row moves a whole item to
-the next line, so clipping to one row's height hides chips entirely. And both
-the clip and the control are **measured after layout, not guessed** — a chip is
-as wide as a workspace name, so any fixed count is wrong the moment a name is
-long. If nothing is on a second row, *View more* is not drawn.
+**What makes one section work is that the marks are shapes, not colours** —
+ember dot, sage tick, slate typing, brick triangle, each readable with the
+colour off. That has only been true since the team-rail pass. Before it, a
+single undivided row would have been four greys and the headings would have
+been load-bearing; the earlier design could not have had this one.
 
-**The *N more* chip is gone.** It existed for exactly one reason — to cap ember
-in that row — and the one-line clip now does that. Two overflow affordances in
-one row is one too many, and the header is the better place because that is
-where *Recent artifacts* already puts one.
+**No visible break where the order turns.** The workspaces panel rules its
+bands because it is a tall list you scan down. This is two to five chips, and
+at two rows a rule would land somewhere different every time a name changed
+length — **a break that moves is worse than no break**. The marks are the
+ordering, and a row this short does not need a legend.
 
-**An empty section is not drawn.** *Nothing waiting* is the Waiting section not
-existing, with the other two carrying on; three headings with nothing under two
-of them is worse than one heading. **All three empty is first run**, and first
-run gets no headings at all.
+**No agents at all is first run**, and first run has no heading rather than an
+empty one.
 
-### *View more*: expand, or open the panel — open
+### One line or two, and the ember count that decides it
 
-**The measurement favours opening the panel, and the drawing defaults to
-expanding because that is what was asked for.**
+**Both are drawn and the masthead switches them; two is the default.** It was
+asked for as two, then one, then two again inside a few minutes, which says it
+is a thing to look at rather than to specify — so the next revision is a
+control press rather than a rebuild.
 
-Counted in a render at 36 workspaces:
+Measured at the 748px column, identical at 1280 and 1680:
 
-| state | ember |
-|---|---|
-| home at rest | **3** |
-| home, 36 workspaces, sections collapsed | **3** |
-| home, 36 workspaces, **a section expanded** | **5** |
-| home, 36 workspaces, *View more* opens the panel | **3** |
+| | chips shown | *View all* reveals | ember |
+|---|---|---|---|
+| one line, 7 workspaces | 3 of 7 | 4 | **3** |
+| one line, 40 workspaces | 2 of 36 | 34 | **2** |
+| two lines, 7 workspaces | 5 of 7 | 2 | **3** |
+| two lines, 40 workspaces | 5 of 36 | 31 | **5** |
 
-The budget is three and **the home has no exemption** — that belongs to the
-workspaces panel alone. So expanding in place is the one shape here that breaks
-it, and it breaks it precisely when the page is busiest, which is when the
-signal matters most.
+Two lines is not double one: the second row only exists once the first
+overflows, and a chip caps at 306px so a name can never fill a line alone.
 
-Two further arguments point the same way. The panel is already flat,
-status-ordered and banded by exactly these three words, so there is nothing to
-build at the far end of a navigation. And when the panel is pinned, the home's
-sections and the panel are showing the same list on the same screen — a cost
-worth naming whichever way this goes.
+**The ember number is the finding, and it is structural rather than
+incidental.** Severity-first ordering puts every blocked workspace at the front
+of the row, so **each extra row revealed is *more* likely to be ember, not
+less** — the second row is the worst row to add under this order. One line
+holds the budget of three at any list length. Two lines holds it at seven
+workspaces and breaks it at forty, which is exactly when the signal matters.
+The home has no exemption; that belongs to the panel alone.
 
-Against all that: the user asked for expansion in those words, and the
-duplication exists whether or not *View more* navigates. **It is a decision
-about where a long list lives, and it is not mine to settle** — both are drawn,
-the masthead switches them, and the ember numbers are the argument.
+**So the measurement recommends one line.** Two is drawn and defaulted because
+it is where the request landed twice, and the numbers are here rather than an
+argument.
 
-### The fourth beat has no section, and nobody has ruled on it
+### *View all*: expand, or open the panel — open, and now less close
 
-`BEAT` has four states. Three are named above; **`broken` has no section.** A
-failed workspace stays inside *Waiting for you*, which is what `NEEDS_YOU`
-already does — it spans `NeedsYou`, `HandedBack` and `Failed`.
+The same question as before, sharpened by there being one section rather than
+three.
 
-**This is the status quo rather than a decision.** It is written down here so
-that the next person does not read the absence as intent: whether a failed run
-deserves its own section was raised, deferred, and not argued either way.
+**At two lines it reveals almost nothing.** Seven workspaces, two rows: five of
+seven are already on screen, so *View all* is worth two chips — a control that
+earns its place only on a long list. And on a long list, expanding 36 chips in
+place on the home rebuilds, badly, a panel that is flat, status-ordered, banded
+by these same words and most likely open beside it.
 
-One thing about it *is* decided: it wears a **brick triangle, not a brick dot**.
-A brick circle beside an ember circle in the same row is one shape told apart by
-hue alone, which is the one thing the guide forbids, and it is the same fix the
-team rail made for the same reason.
+**Recommended: *View all* opens the Workspaces panel.** It keeps the home at
+rest, puts the long list where the ember exemption already lives, and builds
+nothing at the far end of the navigation. Both are drawn; the user has not
+ruled on it.
+
+### All four beats, and `broken` leads
+
+`BEAT` has four states and **one section now carries all four**, which is the
+other thing collapsing the three bought. An earlier draft had three sections
+and no home for `broken`; it rode inside *Waiting for you*, which was the
+status quo rather than a decision, and was recorded as deferred.
+
+The ordering settles it without needing a ruling. **`broken` goes first** —
+a failed run is the one thing in the list you cannot resolve by waiting — then
+`blocked`, then `done`, then `working`. That is `BEAT_ORDER` with `broken`
+lifted to the front.
+
+It keeps its **brick triangle, not a brick dot**. A brick circle beside an
+ember circle in the same row is one shape told apart by hue alone, which is the
+one thing the guide forbids, and it is the same fix the team rail made for the
+same reason. In a single undivided row it matters more than it did in a banded
+list: here the mark is the only thing saying which state a chip is in.
 
 ### The workspaces panel is status-ordered, not status-grouped
 
@@ -609,9 +625,19 @@ the exemption is what keeps it protecting everything else.
 
 ### What measurement does not settle
 
-Three decisions in this document were derived from measurement, defensible on
-the numbers, and overruled by the person using the app: the ember budget on the
-workspaces panel, no-dots-in-Status-mode, and keeping the check-in line.
+Five decisions in this document were derived from measurement or from argument,
+defensible on their own terms, and overturned by the person using the app: the
+ember budget on the workspaces panel, no-dots-in-Status-mode, keeping the
+check-in line, the always-drawn rename pencil, and three status sections on the
+home.
+
+The last two are a different kind from the first three, and worth separating.
+Those three were overruled from a brief. **The pencil and the three sections
+were overturned by being built and looked at** — and in both cases the person
+looking was right in a way the argument could not have reached. Three headings
+carrying one chip each is obvious in a screenshot and invisible in a
+specification; so is a permanent mark beside a title you read a hundred times a
+day.
 
 Stated once rather than apologised for three times: **a rule derived from
 measurement describes what is legible, not what somebody wants to live with.**
@@ -1096,7 +1122,7 @@ component list.
 **`desktop-redesign.html`** — fifteen tabs. Ten are mock-ups of a 1280×824
 window; five are documents:
 
-* **Every screen** — the contact sheet, and **read this one first**. All 111
+* **Every screen** — the contact sheet, and **read this one first**. All 112
   states at a third scale, grouped as Coverage is, each tile a control that
   opens it full size. It exists because a reader looking for the connect screen
   could not find it and reported it missing: it is the eleventh of fifteen tabs
