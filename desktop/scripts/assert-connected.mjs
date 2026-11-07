@@ -67,11 +67,19 @@ attach(browser);
 const findings = [];
 let pressed = 0;
 
-/** Controls that are not meant to navigate, recognised rather than guessed. */
+/**
+ * Controls that are not meant to navigate, recognised rather than guessed.
+ *
+ * `.nm` is the workspace title, which renames rather than goes anywhere.
+ * It used to carry `data-gesture="dblclick"` because a single press did
+ * nothing — that is no longer true, and a marker describing behaviour the
+ * code has stopped having is worse than no marker.
+ */
 const BY_DESIGN = `
   [role="tab"], [role="switch"], [role="checkbox"], [role="menuitemcheckbox"],
   [aria-pressed], [aria-expanded], [aria-haspopup],
-  input, label, summary, [data-filter], [data-gesture], .seg button, .itab, .tab, .sk-tabs button
+  input, label, summary, [data-filter], [data-gesture], .seg button, .itab, .tab, .sk-tabs button,
+  .nm
 `;
 
 for (const s of SHOTS) {

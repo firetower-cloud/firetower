@@ -60,7 +60,7 @@ export function Skills({ open: asked = null }: { open?: string | null }) {
   const me = useMe();
   // An organisation admin may move anything filed in a directory, so the
   // first section holds more for them, and its note says why.
-  const orgAdmin = me.data?.user.role === "admin";
+  const orgAdmin = me.data?.user?.role === "admin";
   const refresh = () => cache.invalidateQueries({ queryKey: getListSkillsQueryKey() });
 
   /* Several at once. Only what this person may move can be ticked, so the

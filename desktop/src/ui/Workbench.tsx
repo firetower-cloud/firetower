@@ -488,13 +488,20 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
             />
           ) : (
             <button
+            /* **One click renames.** It answered a double click and nothing
+               else, which made the one way to rename a workspace from this
+               screen a thing you had to already know. Nothing competes for
+               the single click — the connectedness check classified this as
+               deliberately inert, which is the same evidence read the other
+               way — so there is no gesture to give up.
+
+               Double click still works: somebody who learnt the old way
+               should not find it gone. It lands in the same place, because a
+               second click on an input that is already open is a selection
+               and not a second rename. */
+            onClick={() => mayAct && setRenaming(place.name)}
             onDoubleClick={() => mayAct && setRenaming(place.name)}
-            /* It answers a double click and nothing else, which the title
-               says to a person and nothing said to anything else. A single
-               press doing nothing is correct here and indistinguishable from
-               broken without this. */
-            data-gesture="dblclick"
-            title={mayAct ? "Double-click to rename" : place.name}
+            title={mayAct ? "Rename" : place.name}
             className="nm flex items-center gap-1.5"
           >
               {place.name}

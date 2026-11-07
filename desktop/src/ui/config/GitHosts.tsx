@@ -576,7 +576,7 @@ function Where({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const canBrowser = found?.authModes.includes("device") ?? false;
+  const canBrowser = found?.authModes?.includes("device") ?? false;
   /* Browser sign-in without an application is a host nobody can connect — the
      same half-added state the server's `default_auth` exists to avoid, so the
      button does not offer it either. */

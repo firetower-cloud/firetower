@@ -694,6 +694,33 @@ const server = createServer(async (req, res) => {
        real client meets when a server drifts — and is the one way to get
        `Boundary`'s own screen on camera without planting a bug in the app. */
     "/api/v1/skills": scene === "throws" ? { nope: true } : SKILLS,
+    /* ── The seven the 404 found ──────────────────────────────────────
+       Every one of these answered `[]` through the fall-through, so the
+       screens that read them drew their empty state and nobody could tell
+       that from the real thing. They are served explicitly now — some with
+       content, some genuinely empty, and the difference is the point. */
+    /* Which skills this session reads. The composer's chip counts them. */
+    "/api/v1/sessions/s_1/skills": SKILLS.filter((k) => !k.held).slice(0, 2).map((k) => k.id),
+    /* The run controls, per agent rather than per session. */
+    "/api/v1/agents/ClaudeCode/controls": CLAUDE_CONTROLS,
+    "/api/v1/agents/Codex/controls": [],
+    /* What this session made. The Overview's "Artifacts & links" reads it. */
+    "/api/v1/sessions/s_1/artifacts": ARTIFACTS.slice(0, 1),
+    /* No fallback configured, said explicitly. */
+    "/api/v1/sessions/s_1/fallback": { enabled: false, order: [] },
+    /* What a tracker is scoped to. */
+    "/api/v1/trackers/gh_1/scopes": [
+      { id: "acme/web", label: "acme/web" },
+      { id: "acme/api", label: "acme/api" },
+    ],
+    /* **Main's endpoint**, added with the machine retirement — the line
+       under Compute saying what was removed and where its sessions went.
+       It has never been drawn here, because this answered `[]`. */
+    "/api/v1/hosts/retired": scene === "no-retired" ? [] : [{ id: "h_gone", name: "build-02" }],
+    /* The repositories a connected host offers to import. */
+    "/api/v1/providers/github/repos": REPOS.map((r) => ({
+      id: r.id, slug: r.slug, remote: r.remote, defaultBranch: r.defaultBranch, private: false,
+    })),
     "/api/v1/repos": scene === "no-repos" ? [] : REPOS,
     "/api/v1/hosts": scene === "no-machines" ? [] : HOSTS,
     "/api/v1/agents": AGENTS,
@@ -947,7 +974,19 @@ const server = createServer(async (req, res) => {
       ],
     });
   }
-  return json(res, [], 200);
+  /* **An unmatched route is a 404, not an empty list.**
+   *
+   * This answered `[]` with a 200, and `[]` is truthy — so `data?.files`,
+   * `data?.limits` and `data.name` all sailed past their guards and threw
+   * one level in. That is three white screens from one line: the skill
+   * review, the account sheet, and opening a child from the team rail. Each
+   * was found on a different day by a different check, and all three would
+   * have shown up at the first render if the mock had said "I do not serve
+   * this" instead of "here is nothing".
+   *
+   * A real server 404s a path it does not have. So does this, now, and the
+   * body says which path so the gap names itself in the console. */
+  return json(res, { code: "NotFound", message: `the mock does not serve ${req.method} ${path}` }, 404);
 });
 
 /**

@@ -57,7 +57,7 @@ export function ProfileMenu({
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const [page, setPage] = useState<Page>("profile");
   const me = useMe();
-  const who = me.data?.user.username ?? backend.user;
+  const who = me.data?.user?.username ?? backend.user;
 
   const open = (el: HTMLElement) => {
     setPage("profile");
@@ -153,7 +153,7 @@ function Profile({
     <>
       <div className="px-2.5 pt-2 pb-1.5">
         <p className="truncate text-ui text-bone">{who}</p>
-        <p className="truncate text-meta text-mute">{me.data?.user.email ?? backend.url.replace(/^https?:\/\//, "")}</p>
+        <p className="truncate text-meta text-mute">{me.data?.user?.email ?? backend.url.replace(/^https?:\/\//, "")}</p>
       </div>
       <Rule />
 

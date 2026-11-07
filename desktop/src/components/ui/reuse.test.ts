@@ -158,3 +158,30 @@ describe("every token is used by something", () => {
     expect(tokens.filter((t) => !used(t))).toEqual([]);
   });
 });
+
+/**
+ * An optional chain that stops one link short of the thing it is reading.
+ *
+ * **Three white screens came from this, on three different days.** The skill
+ * review read `q.data?.files` and called `.map` on it; the account sheet read
+ * `current.data?.limits` and called `.find`; the team rail read a session's
+ * `name` and called `.lastIndexOf`. Each time `?.` guarded the *response* and
+ * not the field, so an answer that arrived but was not the expected shape —
+ * the mock's catch-all `[]`, a server one version out, a proxy — sailed past
+ * the guard and threw one level in.
+ *
+ * Scoped to `.data?.`, which is where a value crosses from the server into
+ * this code. Inside the client a shape is ours to guarantee: `place.runs` is
+ * set by `group()` in the same module, so chaining it would be noise. The
+ * whole-tree version of this rule was measured first — fifteen hits, eleven
+ * of them this one boundary — because a check with a bad signal-to-noise
+ * ratio gets switched off, which is worse than no check.
+ */
+describe("a response is guarded at the field, not just at the response", () => {
+  test("no `.data?.x.y` — the second link is unguarded", () => {
+    const risky = FILES.flatMap((f) =>
+      [...f.text.matchAll(/\.data\?\.(\w+)\.\w+/g)].map((m) => `${f.path}: .data?.${m[1]}.…`),
+    );
+    expect(risky).toEqual([]);
+  });
+});

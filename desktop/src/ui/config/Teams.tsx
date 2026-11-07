@@ -35,7 +35,7 @@ export function Teams({ backend }: { backend: Backend }) {
       settling={q.isPending}
       trouble={trouble(q.error)}
       error={q.error ? why(q.error) : null}
-      action={<ManageOnTheWeb url={backend.url} may={me.data?.user.role === "admin"} />}
+      action={<ManageOnTheWeb url={backend.url} may={me.data?.user?.role === "admin"} />}
     >
       <Group>
         <Rows

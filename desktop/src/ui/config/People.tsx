@@ -37,7 +37,7 @@ export function People({ backend }: { backend: Backend }) {
       action={
         <>
           <Find value={find} onChange={setFind} />
-          <ManageOnTheWeb url={backend.url} may={me.data?.user.role === "admin"} />
+          <ManageOnTheWeb url={backend.url} may={me.data?.user?.role === "admin"} />
         </>
       }
     >
@@ -54,7 +54,7 @@ export function People({ backend }: { backend: Backend }) {
                 <b>{p.username}</b>
               </span>
               <span className="path">u/{p.username}</span>
-              {p.id === me.data?.user.id && <span className="said">you</span>}
+              {p.id === me.data?.user?.id && <span className="said">you</span>}
             </div>
           ))}
         </Rows>

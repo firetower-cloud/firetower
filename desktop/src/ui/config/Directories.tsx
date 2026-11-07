@@ -131,7 +131,7 @@ export function Directories() {
           <One
             key={d.id}
             directory={d as Directory}
-            mayEdit={(d as Directory).level === "admin" || me.data?.user.role === "admin"}
+            mayEdit={(d as Directory).level === "admin" || me.data?.user?.role === "admin"}
             onChange={refresh}
             confirm={confirm}
           />

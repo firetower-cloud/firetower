@@ -434,7 +434,7 @@ export function Sharing({
     if (place.kind === "mine")
       return {
         name: "Only you",
-        note: `u/${me.data?.user.slug ?? ""}`,
+        note: `u/${me.data?.user?.slug ?? ""}`,
         count: "just you",
         personal: true,
         who: null,
@@ -555,7 +555,7 @@ export function Sharing({
               people={newWith}
               onPeople={setNewWith}
               one={one}
-              meId={me.data?.user.id}
+              meId={me.data?.user?.id}
             />
           )}
 
@@ -709,7 +709,7 @@ export function ShareMany({ skills, onClose, onDone }: { skills: Skill[]; onClos
   const destination = (): Landing | null => {
     if (!moving || !place) return null;
     if (place.kind === "mine")
-      return { name: "Only you", note: `u/${me.data?.user.slug ?? ""}`, count: "just you", personal: true, who: null };
+      return { name: "Only you", note: `u/${me.data?.user?.slug ?? ""}`, count: "just you", personal: true, who: null };
     if (place.kind === "new") {
       const inside = [
         { subjectId: "you", subjectKind: "person", name: "You", level: "admin" as Level },
@@ -887,7 +887,7 @@ export function ShareMany({ skills, onClose, onDone }: { skills: Skill[]; onClos
               people={newWith}
               onPeople={setNewWith}
               one={n === 1 ? "skill" : "skills"}
-              meId={me.data?.user.id}
+              meId={me.data?.user?.id}
             />
           )}
 

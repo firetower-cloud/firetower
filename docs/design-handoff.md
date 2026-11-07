@@ -568,6 +568,61 @@ Both composers move together. `.mid .composer .in` **restated** 18px rather
 than changing it, so the home and workspace composers were already the same
 size and do not now disagree; the base rule is the only one that carries a size.
 
+### Right-click a workspace: the set that was there before
+
+**Decided:** **Open · Rename… · ─ · End workspace**, on a workspace row in the
+rail panel. The old set verbatim.
+
+This is a **restoration, not a design**. `Rail.tsx` imported `ContextMenu`,
+`useMenu`, `renameSession` and `useEndWorkspace`; `RailPanel.tsx` imports none
+of them, so right-clicking a workspace does nothing. The item set was read off
+`Rail.tsx` at `f3cbc425` rather than invented, and it is deliberately not
+grown: a restoration that quietly gains items is a second thing to argue about,
+and the argument delays the thing that already worked.
+
+**`mayWrite` gates it, not `maySpeak`.** `Chat.tsx:168` separates them —
+`mayWrite` is *the place*, may I work in this workspace at all; `maySpeak` is
+*this conversation*, true only for whoever started it, because the agent runs
+on their subscription and pushes with their git token. Renaming and ending are
+facts about the place. And `!== false` rather than `=== true`: a control plane
+older than this app sends neither, and reading their absence as *you may only
+watch* would take every control away from the person whose work it is.
+
+**A row you may not act on gets no menu at all** — not a menu with two dead
+entries. The only item that would survive is *Open*, which is exactly what
+left-clicking the row already does, and a menu whose single entry duplicates
+the gesture that summoned it is noise. The rule here is the one this document
+applies everywhere: no disabled control, say what the screen is instead. The
+screen already says it — open the workspace and the title is a `span` rather
+than a button, with no pencil beside it.
+
+**End workspace gets no second question.** `ui/end.ts` already confirms, and
+its body is built from `sessionWork`: uncommitted files, unpushed commits, how
+many agents stop, how many they started elsewhere, and the separately worded
+case where nothing is checked out and *every file goes with it* because there
+is no branch to promise anybody. The menu item calls it and adds nothing.
+Confirm is a **sheet** in the overlay taxonomy and takes `--color-scrim`.
+
+### A title that says you can rename it
+
+**Decided:** one click renames, and **the pencil is always drawn** — 13px, at
+`--hush`, after the title. Under the pointer it comes to `--quiet` and the
+title takes `--raised`.
+
+The old answer was a `title="Double-click to rename"` tooltip, which is a thing
+nobody reads attached to a gesture nobody guesses. Hover alone is not a fix:
+a hover state can *sharpen* an affordance but it cannot be the whole of one,
+because you have to already be pointing at the thing to find out it is a
+control. So the mark is present standing still and quiet enough not to compete
+with the name it sits beside.
+
+Double click still works — somebody who learnt the old way should not find it
+gone — and lands in the same place, because a second click on an input that is
+already open is a selection rather than a second rename.
+
+**Its absence is the read-only state.** Nothing greyed, nothing disabled: the
+title is simply not a button.
+
 ### Six destinations, not twelve panes
 
 **Decided:** a 62px icon rail with six destinations — Dashboard, Tasks,
@@ -1092,6 +1147,35 @@ row. It is four things, and two of them are optional.
 
 So: **read this document, then look at the artifacts.** The habit at the top of
 this section applies to reading a handoff as much as to checking your own work.
+
+### What none of the checks could have caught
+
+The rebuild produced one **functional** regression — right-click to rename or
+end a workspace — and it got past every check here for the same structural
+reason.
+
+- `audit.py` asks whether the CSS collides.
+- `sweep.py` asks whether every control throws.
+- **Coverage** asks whether what is drawn is built.
+
+**Not one of them asks whether the new build still does what the old one did.**
+A drawing says what a screen looks like, and Coverage says what is drawn —
+neither has any representation of the previous build, so neither can miss
+something that is absent from both the drawing and the new code. It is
+invisible to a comparison between them by construction.
+
+This is worth stating plainly because the instinct is to add a row to Coverage
+and move on. A row would have caught *this* one and not the next, since the
+next will also be something nobody thought to write down. **The check has to
+compare two builds, and only the code has two** — which is why the fix belongs
+on the Engineer's side as a hook-delta assertion over the imports a file used
+to carry, and why these documents' honest contribution is to admit the gap
+rather than paper over it with one more row.
+
+The general form, which is the third time this document has had to say
+something like it: **a check that cannot fail is worse than no check**, and a
+check that can only fail on things somebody already remembered is a check with
+a blind spot shaped exactly like the mistake.
 
 ### One practical note
 
