@@ -16,7 +16,10 @@ import { readFileSync } from "node:fs";
 const PORT = Number(process.argv[2] ?? 4401);
 
 const ORG = { id: "o_1", name: "Acme" };
-const USER = { id: "u_1", orgId: "o_1", username: "kevin", role: "admin", mustChangePassword: false };
+/* `slug` is what every path is keyed on — `u/kevin/…` — and it was missing,
+   so `isPersonal` answered false for every session this person owns and the
+   panel filed a whole fleet under "Shared with you". */
+const USER = { id: "u_1", orgId: "o_1", username: "kevin", slug: "kevin", email: "kevin@acme.co", role: "admin", mustChangePassword: false };
 
 const REPOS = [
   { id: "r_web", slug: "acme/web", remote: "git@github.com:acme/web.git", defaultBranch: "main", env: [] },
@@ -565,14 +568,18 @@ const server = createServer(async (req, res) => {
    * reads it straight off the row rather than opening a conversation to find
    * it, which is the whole reason that field exists.
    */
-  const other = (over) => ({ ...session(), ...over, checkouts: [], steps: undefined });
+  /* **Whose it is.** Every session carried the same path, so `isPersonal`
+     answered false for all of them and the panel filed a whole fleet under
+     "Shared with you" — with "Nothing running yet." printed above it. Most
+     of them are this person's; two are not, which is what the drawing has. */
+  const other = (over) => ({ ...session(), path: "u/kevin", ...over, checkouts: [], steps: undefined });
   const dashboard = () => {
     if (scene === "empty") return [];
     const working = [
       other({ id: "s_2", workspaceId: "w_2", number: 4, name: "Poke at the deploy script", status: "Working", repo: null, branch: null, createdAt: minutesAgo(8) }),
-      other({ id: "s_3", workspaceId: "w_3", number: 5, name: "Reconcile the webhook retries", status: "Working", agent: "Cursor", repo: "acme/api", branch: "fix/webhook-retry", createdAt: minutesAgo(120) }),
+      other({ id: "s_3", workspaceId: "w_3", number: 5, name: "Reconcile the webhook retries", status: "Working", agent: "Cursor", repo: "acme/api", branch: "fix/webhook-retry", createdAt: minutesAgo(120), path: "u/ana" }),
       other({ id: "s_4", workspaceId: "w_4", number: 6, name: "Backfill the invoice index", status: "Working", agent: "Codex", repo: "acme/jobs", branch: "chore/invoice-index", createdAt: minutesAgo(180) }),
-      other({ id: "s_5", workspaceId: "w_5", number: 7, name: "Composer context meter", status: "Ready", repo: "acme/web", branch: "feat/context-meter", createdAt: minutesAgo(1440) }),
+      other({ id: "s_5", workspaceId: "w_5", number: 7, name: "Composer context meter", status: "Ready", repo: "acme/web", branch: "feat/context-meter", createdAt: minutesAgo(1440), path: "u/ana" }),
     ];
     /* A workspace with a team under it, which the Overview's team rail is
        the whole reason to open. Every other scene leaves `s_1` solo, so the
@@ -932,7 +939,7 @@ const SKILLS = [
  * are mostly in.
  */
 const COLLEAGUES = [
-  { id: "u_1", username: "kevin" },
+  { id: "u_1", username: "kevin", slug: "kevin" },
   { id: "u_2", username: "ana" },
   { id: "u_3", username: "lisa" },
   { id: "u_4", username: "tomas" },

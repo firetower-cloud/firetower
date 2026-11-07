@@ -202,7 +202,11 @@ function Workspaces({ stale, onCollapse }: { stale: boolean; onCollapse: () => v
             ))}
           </>
         ) : (
-          !loading && (
+          /* **Only when there is nothing at all.** This was keyed on `mine`
+             alone, so a fleet of eight workspaces shared with you printed
+             "Nothing running yet." immediately above all eight of them. */
+          !loading &&
+          theirs.length === 0 && (
             <p className="px-2.5 py-3 text-ui text-mute">
               {stale ? "Nothing was running when it was last reached." : "Nothing running yet."}
             </p>

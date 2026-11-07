@@ -20,6 +20,22 @@ const OUT = process.env.OUT ?? new URL("../../.firetower/reconcile/proto", impor
 const PROTO = new URL("../../docs/prototypes/redesign/desktop-redesign.html", import.meta.url).href;
 mkdirSync(OUT, { recursive: true });
 
+/**
+ * The Dashboard's reference moved.
+ *
+ * `home-alternative.html` supersedes `desktop-redesign.html` for that screen
+ * and nothing else, so those three states are shot from the other file. When
+ * the designer folds it into the main artifact this map empties and the
+ * sweep has one authority again — which is the point of recording it here
+ * rather than remembering it.
+ */
+const HOME = new URL("../../docs/prototypes/redesign/home-alternative.html", import.meta.url).href;
+const MOVED = {
+  "starting-work__dashboard-two-waiting": { at: HOME, state: { state: "waiting" } },
+  "starting-work__dashboard-nothing-waiting": { at: HOME, state: { state: "calm" } },
+  "starting-work__dashboard-nothing-yet": { at: HOME, state: { state: "empty" } },
+};
+
 const browser = await chromium.launch({ channel: "chrome" });
 /* Wide enough that `fit()` leaves SCALE at 1 — a scaled element screenshot is
    a scaled photograph, and the whole point here is full size. */
@@ -44,6 +60,32 @@ let n = 0;
 for (const [group, rows] of sheet) {
   for (const [label, patch] of rows) {
     const id = `${slug(group)}__${slug(label)}`;
+    const moved = MOVED[id];
+    if (moved) {
+      /* A second page: the two files are different documents with different
+         globals, and navigating back and forth per theme is slower than
+         keeping one open. */
+      const alt = await browser.newPage({ viewport: { width: 1700, height: 1100 }, deviceScaleFactor: 2 });
+      await alt.goto(moved.at, { waitUntil: "load" });
+      await alt.waitForTimeout(500);
+      for (const theme of ["light", "dark"]) {
+        await alt.evaluate(
+          ([patch, theme]) => {
+            Object.assign(S, patch, { theme, tab: "home" });
+            render();
+          },
+          [moved.state, theme],
+        );
+        await alt.waitForTimeout(160);
+        await alt.locator(".win").first().screenshot({ path: `${OUT}/${id}-${theme}.png` });
+      }
+      await alt.close();
+      index.push({ group, label, id, patch, from: "home-alternative.html" });
+      n++;
+      process.stdout.write(`\r  ${n}/96  ${label}`.padEnd(70));
+      continue;
+    }
+
     for (const theme of ["light", "dark"]) {
       await page.evaluate(
         ([patch, theme]) => {

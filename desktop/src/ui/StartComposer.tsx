@@ -89,7 +89,24 @@ const recall = (key: string) => {
 const slug = (s: string) =>
   s.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48);
 
-export function StartComposer({ children }: { children: React.ReactNode }) {
+export function StartComposer({
+  mid,
+  above,
+  bare,
+  children,
+}: {
+  /**
+   * The composer sits **in the middle of the page** rather than docked to its
+   * foot — the home's arrangement, where a greeting is above it and what is
+   * waiting is below. Same composer either way; only the frame moves.
+   */
+  mid?: boolean;
+  /** What goes above it. On the home, the greeting. */
+  above?: React.ReactNode;
+  /** Nothing waiting and nothing published: first run, centred. */
+  bare?: boolean;
+  children: React.ReactNode;
+}) {
   const seed = useMemo(() => consumeSeed(), []);
 
   const { data: repos } = useRepos();
@@ -414,10 +431,12 @@ export function StartComposer({ children }: { children: React.ReactNode }) {
        slides off the top as soon as the page is scrolled. */
     <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden" {...surface}>
       {over && <Dropping />}
-      {children}
+      {!mid && children}
 
-      <div className="dock">
-        <div className="wrap">
+      <div className={mid ? "home" : "dock"}>
+        <div className={mid ? "hcol" : "wrap"} data-bare={mid && bare ? "true" : undefined}>
+          {mid && <div className="air">{above}</div>}
+          <div className={mid ? "mid" : "contents"}>
           {/* What was not taken — too big, too many, a folder — in the words
               the conversation's composer uses for the same refusals. */}
           {refused && (
@@ -541,18 +560,12 @@ export function StartComposer({ children }: { children: React.ReactNode }) {
                 <Paperclip className="h-4 w-4" strokeWidth={1.75} />
                 <input type="file" multiple className="hidden" onChange={(e) => void take(e.target.files)} />
               </label>
-              {voice.possible && <Mic state={voice.state} onStart={voice.start} onStop={voice.stop} />}
-              {allSkills.length > 0 && (
-                <button
-                  onClick={(e) => toggle("skills", e.currentTarget)}
-                  title="Which skills this agent reads"
-                  className="chip"
-                >
-                  <Diamond className="h-3.5 w-3.5" strokeWidth={1.75} />
-                  <span className="tabular-nums">{selectedSkills.length}</span>
-                  <span>{selectedSkills.length === 1 ? "skill" : "skills"}</span>
-                </button>
-              )}
+
+              {/* **No skills chip here.** The drawing has one in a workspace
+                  and not on the Dashboard, and the reason holds: starting
+                  something, the profile decides what it reads, and a count of
+                  skills is a number about a decision you have not made yet.
+                  Replying, you can see what it read and change it. */}
               <button
                 onClick={(e) => toggle("profile", e.currentTarget)}
                 data-set={!!profile}
@@ -580,6 +593,15 @@ export function StartComposer({ children }: { children: React.ReactNode }) {
                   onPickControl={(k, v) => setChosen((p) => ({ ...p, [k]: v }))}
                 />
               )}
+              {/* **At the right-hand end**, where the drawing puts it: the
+                  chips on the left are what this run will be, and dictation
+                  is a way of typing — it belongs beside the thing it types
+                  into, not in the middle of the settings. */}
+              {voice.possible && (
+                <span className="ml-auto">
+                  <Mic state={voice.state} onStart={voice.start} onStop={voice.stop} />
+                </span>
+              )}
               <button
                 onClick={go}
                 disabled={!ready}
@@ -591,6 +613,9 @@ export function StartComposer({ children }: { children: React.ReactNode }) {
               </button>
             </div>
           </div>
+          </div>
+          {/* The sections the home puts under the composer. */}
+          {mid && children}
         </div>
       </div>
 

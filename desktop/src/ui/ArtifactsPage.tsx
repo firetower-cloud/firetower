@@ -345,7 +345,7 @@ function Pane({ children }: { children: React.ReactNode }) {
 }
 
 /** Where the artifact came from: the workspace, or the directory it is in. */
-const cameFrom = (a: Artifact) =>
+export const cameFrom = (a: Artifact) =>
   a.mine ? (a.fromWorkspaceName ?? "no workspace") : (a.path?.split("/")[1] ?? "shared");
 
 /**

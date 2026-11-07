@@ -113,10 +113,32 @@
   --text-hero--line-height: 1.08;
   --text-hero--letter-spacing: -0.028em;
 
-  --text-read: 0.9375rem;          /* 15px - the conversation */
+  --text-read: 1rem;               /* 16px - the conversation */
   --text-read--line-height: 1.7;
-  --text-lede: 1.0625rem;          /* 17px - a first line worth slowing for */
+  --text-lede: 1.125rem;           /* 18px - a first line worth slowing for */
   --text-lede--line-height: 1.5;
+
+  /* ── One pixel on everything under 28 ──────────────────────────
+     The drawing's type pass, applied to the scale rather than to screens:
+     uniform, because it is the only step that cannot disturb the gaps
+     between tiers — and the gap between what you read and what you operate
+     is what makes a dense screen readable.
+
+     **Overridden here, not in `globals.css`.** That sheet is byte-shared
+     with the web client and criterion 6 holds web still until it opts in;
+     the desk's own layer is exactly where a desk-only scale belongs. Every
+     line-height is unitless and scales with the size, so none is touched.
+     32, 34 and 40 are unchanged: the rule is *below* 28. */
+  --text-display: 1.5625rem;       /* 24 → 25 */
+  --text-title: 1.0625rem;         /* 16 → 17 */
+  --text-body: 0.9375rem;          /* 14 → 15 */
+  /* 13 → 14.5, not 14: the floor for a control label. `--text-ui` was built
+     for a mouse-only dense desk, and that is the second deliberate departure
+     from `STYLE.md` on density. */
+  --text-ui: 0.90625rem;           /* 13 → 14.5 */
+  --text-meta: 0.78125rem;         /* 11.5 → 12.5 */
+  --text-micro: 0.71875rem;        /* 10.5 → 11.5 */
+  --text-code: 0.875rem;           /* 13 → 14 */
 
   /* The weight the design is set in, between Tailwind's 500 and 600. Archivo
      is variable, so 530 is a real weight rather than a synthesised one — and
@@ -126,9 +148,9 @@
   /* Desk density. Rows are taller than the web build's 34px because a mouse
      is precise and a window is not short of vertical space; what a tight row
      buys on a phone is nothing here. */
-  --row: 40px;
-  --row-tight: 32px;
-  --control: 30px;
+  --row: 42px;         /* 40 → 42: a name and a sub-line each gained a pixel */
+  --row-tight: 36px;   /* 34 → 36, which is what the panel row is drawn at */
+  --control: 30px;     /* unchanged — the drawing grew the label, not the box */
 }
 
 /* ── The native layer, in light ─────────────────────────────────────────
@@ -344,7 +366,7 @@
     align-items: center;
     gap: 9px;
     width: 100%;
-    min-height: 34px;
+    min-height: 36px;
     padding: 5px 9px;
     border-radius: 9px;
     color: var(--color-text);
@@ -709,7 +731,7 @@
   .phead2 .sub {
     max-width: 52ch;
     margin-top: 7px;
-    font-size: 1rem;
+    font-size: 1.0625rem;
     line-height: 1.5;
     color: var(--color-dim);
   }
@@ -873,7 +895,7 @@
   .art .nm {
     display: block;
     margin-top: 11px;
-    font-size: 0.90625rem; /* 14.5px */
+    font-size: 0.96875rem; /* 14.5px */
     line-height: 1.4;
     letter-spacing: -0.006em;
     color: var(--color-bone);
@@ -948,7 +970,7 @@
     flex-wrap: wrap;
   }
   .sksec h2 {
-    font-size: 1.125rem; /* 18px */
+    font-size: 1.1875rem; /* 18px */
     line-height: 1.3;
     letter-spacing: -0.014em;
     font-weight: 530;
@@ -1034,7 +1056,7 @@
     background: var(--color-raise);
     box-shadow: var(--shadow-raise);
     font-family: var(--font-narrow), ui-sans-serif, system-ui, sans-serif;
-    font-size: 1.375rem;
+    font-size: 1.4375rem;
     font-weight: 530;
     letter-spacing: 0.02em;
     color: var(--color-text);
@@ -1056,7 +1078,7 @@
     flex-wrap: wrap;
     gap: 4px 16px;
     margin-top: 7px;
-    font-size: 0.84375rem;
+    font-size: 0.90625rem;
     color: var(--color-dim);
   }
   .sk-head .facts b {
@@ -1066,7 +1088,7 @@
   .sk-head .ds {
     max-width: 66ch;
     margin-top: 11px;
-    font-size: 0.96875rem;
+    font-size: 1.03125rem;
     line-height: 1.6;
     color: var(--color-text);
   }
@@ -1096,7 +1118,7 @@
   .sk-tabs button {
     position: relative;
     padding: 0 0 11px;
-    font-size: 0.875rem;
+    font-size: 0.9375rem;
     color: var(--color-dim);
     transition: color var(--dur-native) var(--ease-swift);
   }
@@ -1146,7 +1168,7 @@
     background: var(--color-raise);
   }
   .review h3 {
-    font-size: 0.9375rem;
+    font-size: 1.0rem;
     font-weight: var(--font-weight-mid);
     letter-spacing: -0.006em;
     color: var(--color-bone);
@@ -1790,7 +1812,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
   .pg-head .sub {
     margin-top: 8px;
     max-width: 52ch;
-    font-size: 0.96875rem; /* 15.5px */
+    font-size: 1.03125rem; /* 15.5px */
     line-height: 1.55;
     color: var(--color-dim);
   }
@@ -1814,14 +1836,14 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
     display: flex;
     align-items: baseline;
     gap: 9px;
-    font-size: 1.0625rem; /* 17px */
+    font-size: 1.125rem; /* 17px */
     line-height: 1.3;
     letter-spacing: -0.012em;
     font-weight: 530;
     color: var(--color-bone);
   }
   .lsec > h2 .n {
-    font-size: 0.8125rem;
+    font-size: 0.875rem;
     font-weight: 400;
     font-variant-numeric: tabular-nums;
     color: var(--color-mute);
@@ -1829,7 +1851,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
   .lsec > .note {
     margin-top: 3px;
     max-width: 72ch;
-    font-size: 0.84375rem; /* 13.5px */
+    font-size: 0.90625rem; /* 13.5px */
     line-height: 1.55;
     color: var(--color-dim);
   }
@@ -1849,7 +1871,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
     width: calc(100% + 28px);
     margin: 0 -14px;
     padding: 11px 14px;
-    min-height: 54px;
+    min-height: 58px;
     border-radius: 12px;
     text-align: left;
     transition: background var(--dur-native) var(--ease-swift);
@@ -1876,7 +1898,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
   }
   .r .tx b {
     display: block;
-    font-size: 0.90625rem; /* 14.5px */
+    font-size: 0.96875rem; /* 14.5px */
     font-weight: 500;
     letter-spacing: -0.005em;
     color: var(--color-bone);
@@ -1888,7 +1910,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
     display: block;
     margin-top: 2px;
     text-decoration: none;
-    font-size: 0.8125rem;
+    font-size: 0.875rem;
     line-height: 1.45;
     color: var(--color-dim);
     white-space: nowrap;
@@ -1898,13 +1920,13 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
   .r .path {
     flex: none;
     font-family: var(--font-mono);
-    font-size: 0.78125rem; /* 12.5px */
+    font-size: 0.84375rem; /* 12.5px */
     letter-spacing: -0.01em;
     color: var(--color-dim);
   }
   .r .said {
     flex: none;
-    font-size: 0.8125rem;
+    font-size: 0.875rem;
     color: var(--color-dim);
   }
   .r .chip3 {
@@ -1912,7 +1934,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
     padding: 3px 9px;
     border-radius: 99px;
     background: var(--color-raise);
-    font-size: 0.75rem;
+    font-size: 0.8125rem;
     color: var(--color-dim);
   }
   .r:hover .chip3 {
@@ -1921,10 +1943,10 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
   /* A child of the row above it: indented, lighter, shorter. */
   .r.sub {
     padding-left: 48px;
-    min-height: 40px;
+    min-height: 42px;
   }
   .r.sub .tx b {
-    font-size: 0.84375rem;
+    font-size: 0.90625rem;
     font-weight: 400;
     color: var(--color-text);
   }
@@ -1939,7 +1961,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
     border-radius: 99px;
     background: var(--color-raise);
     color: var(--color-dim);
-    font-size: 0.6875rem;
+    font-size: 0.75rem;
     font-weight: 530;
     letter-spacing: 0.02em;
   }
@@ -1979,7 +2001,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
     padding: 0 10px;
     border-radius: 99px;
     background: var(--color-raise);
-    font-size: 0.8125rem;
+    font-size: 0.875rem;
     color: var(--color-text);
   }
   .r:hover .lvl {
@@ -1998,7 +2020,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
     padding: 0 8px;
     border-radius: 99px;
     background: var(--color-raise);
-    font-size: 0.71875rem;
+    font-size: 0.78125rem;
     color: var(--color-dim);
   }
   .r:hover .ttag {
@@ -2009,7 +2031,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
   .masked {
     flex: none;
     font-family: var(--font-mono);
-    font-size: 0.8125rem;
+    font-size: 0.875rem;
     letter-spacing: 0.14em;
     color: var(--color-mute);
   }
@@ -2020,7 +2042,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
     border-radius: 8px;
     background: var(--color-raise);
     font-family: var(--font-mono);
-    font-size: 0.78125rem;
+    font-size: 0.84375rem;
     color: var(--color-bone);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -2031,7 +2053,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
     align-items: center;
     gap: 8px;
     margin-top: 10px;
-    font-size: 0.78125rem;
+    font-size: 0.84375rem;
     color: var(--color-dim);
   }
 
@@ -2056,13 +2078,13 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
   .fsheet dt {
     flex: none;
     width: 180px;
-    font-size: 0.84375rem;
+    font-size: 0.90625rem;
     color: var(--color-dim);
   }
   .fsheet dd {
     flex: 1;
     min-width: 0;
-    font-size: 0.875rem;
+    font-size: 0.9375rem;
     color: var(--color-bone);
     white-space: nowrap;
     overflow: hidden;
@@ -2070,7 +2092,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
   }
   .fsheet dd.mono {
     font-family: var(--font-mono);
-    font-size: 0.8125rem;
+    font-size: 0.875rem;
     letter-spacing: -0.01em;
   }
 
@@ -2102,7 +2124,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
   .inline-form input {
     flex: 1;
     min-width: 0;
-    font-size: 0.90625rem;
+    font-size: 0.96875rem;
     color: var(--color-bone);
   }
 
@@ -2127,7 +2149,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
   .whereto p {
     flex: 1;
     min-width: 0;
-    font-size: 0.84375rem;
+    font-size: 0.90625rem;
     line-height: 1.55;
     color: var(--color-text);
   }
@@ -2186,7 +2208,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
     color: var(--color-mute);
   }
   .blank h2 {
-    font-size: 1.3125rem; /* 21px — a blank inside a page, not a page */
+    font-size: 1.375rem; /* 21px — a blank inside a page, not a page */
     line-height: 1.2;
     letter-spacing: -0.02em;
     font-weight: var(--font-weight-mid);
@@ -2194,7 +2216,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
   }
   .blank p {
     margin-top: 9px;
-    font-size: 0.90625rem;
+    font-size: 0.96875rem;
     line-height: 1.6;
     color: var(--color-dim);
   }
@@ -2246,7 +2268,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
     border-radius: 99px;
     background: var(--color-raise);
     color: var(--color-text);
-    font-size: 0.84375rem;
+    font-size: 0.90625rem;
     transition: background var(--dur-native) var(--ease-swift);
   }
   .out:hover {
@@ -2271,7 +2293,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
     box-shadow: var(--shadow-float), 0 0 0 1px rgb(21 22 26 / 0.07);
   }
   .dlg h2 {
-    font-size: 1.125rem;
+    font-size: 1.1875rem;
     line-height: 1.3;
     letter-spacing: -0.014em;
     font-weight: var(--font-weight-mid);
@@ -2279,7 +2301,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
   }
   .dlg .say {
     margin-top: 10px;
-    font-size: 0.90625rem;
+    font-size: 0.96875rem;
     line-height: 1.6;
     color: var(--color-dim);
   }
@@ -2315,7 +2337,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
      are the other thing a palette has to teach once. */
   .klab {
     padding: 10px 10px 4px;
-    font-size: 0.71875rem;
+    font-size: 0.78125rem;
     color: var(--color-mute);
   }
   .kfoot {
@@ -2324,7 +2346,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
     gap: 14px;
     padding: 9px 14px;
     border-top: 1px solid var(--color-line);
-    font-size: 0.71875rem;
+    font-size: 0.78125rem;
     color: var(--color-mute);
   }
 
@@ -2366,7 +2388,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
   }
   .first p {
     margin-top: 9px;
-    font-size: 0.96875rem;
+    font-size: 1.03125rem;
     line-height: 1.6;
     color: var(--color-dim);
   }
@@ -2387,7 +2409,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
   .first .in input {
     flex: 1;
     min-width: 0;
-    font-size: 1rem;
+    font-size: 1.0625rem;
     color: var(--color-bone);
   }
   .first .go {
@@ -2398,7 +2420,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
   }
   .first .alt {
     margin-top: 16px;
-    font-size: 0.84375rem;
+    font-size: 0.90625rem;
     color: var(--color-dim);
     text-align: center;
   }
@@ -2418,7 +2440,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
   }
   .first .found .tx b {
     display: block;
-    font-size: 0.90625rem;
+    font-size: 0.96875rem;
     font-weight: 500;
     color: var(--color-bone);
   }
@@ -2426,7 +2448,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
     display: block;
     margin-top: 2px;
     text-decoration: none;
-    font-size: 0.8125rem;
+    font-size: 0.875rem;
     color: var(--color-dim);
   }
   /* **A brick rule, not a brick box.** A refusal that fills a panel with
@@ -2438,7 +2460,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
     border-radius: 12px;
     background: var(--color-raise);
     border-left: 2px solid var(--color-brick);
-    font-size: 0.84375rem;
+    font-size: 0.90625rem;
     line-height: 1.6;
     color: var(--color-text);
   }
@@ -2479,7 +2501,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
   }
   .whead .nm {
     min-width: 0;
-    font-size: 1rem;
+    font-size: 1.0625rem;
     font-weight: var(--font-weight-mid);
     letter-spacing: -0.008em;
     color: var(--color-bone);
@@ -2492,7 +2514,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
     align-items: center;
     gap: 6px;
     flex: none;
-    font-size: 0.8125rem;
+    font-size: 0.875rem;
     color: var(--color-dim);
   }
   .whead .right {
@@ -2640,13 +2662,13 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 0.8125rem;
+    font-size: 0.875rem;
     letter-spacing: 0.004em;
     color: var(--color-dim);
   }
   .isec h3 .n {
     margin-left: auto;
-    font-size: 0.75rem;
+    font-size: 0.8125rem;
     color: var(--color-mute);
     font-variant-numeric: tabular-nums;
   }
@@ -2677,7 +2699,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
     background: var(--color-bone);
   }
   .meter span {
-    font-size: 0.75rem;
+    font-size: 0.8125rem;
     color: var(--color-mute);
     font-variant-numeric: tabular-nums;
   }
@@ -2697,7 +2719,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
     align-items: center;
     gap: 9px;
     width: 100%;
-    min-height: 40px;
+    min-height: 42px;
     padding: 5px 9px;
     border-radius: 10px;
     text-align: left;
@@ -2728,7 +2750,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
   }
   .tm .tx b {
     display: block;
-    font-size: 0.84375rem;
+    font-size: 0.90625rem;
     font-weight: 500;
     letter-spacing: -0.004em;
     color: var(--color-bone);
@@ -2739,7 +2761,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
   .tm .tx s {
     display: block;
     text-decoration: none;
-    font-size: 0.78125rem;
+    font-size: 0.84375rem;
     color: var(--color-dim);
     white-space: nowrap;
     overflow: hidden;
@@ -2752,7 +2774,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
     flex: none;
   }
   .tm .age {
-    font-size: 0.75rem;
+    font-size: 0.8125rem;
     color: var(--color-mute);
     font-variant-numeric: tabular-nums;
   }
@@ -2770,7 +2792,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
     padding: 1px 7px;
     border-radius: 99px;
     background: var(--color-overlay);
-    font-size: 0.71875rem;
+    font-size: 0.78125rem;
     color: var(--color-dim);
   }
 
@@ -2786,7 +2808,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
     display: flex;
     align-items: center;
     gap: 10px;
-    min-height: 40px;
+    min-height: 42px;
     padding: 6px 9px;
     border-radius: 10px;
     width: 100%;
@@ -2804,7 +2826,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
   .made .tx {
     min-width: 0;
     flex: 1;
-    font-size: 0.84375rem;
+    font-size: 0.90625rem;
     color: var(--color-text);
     white-space: nowrap;
     overflow: hidden;
@@ -2840,11 +2862,11 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
     align-items: center;
     gap: 11px;
     width: 100%;
-    min-height: 34px;
+    min-height: 36px;
     padding: 6px 10px;
     border-radius: 10px;
     text-align: left;
-    font-size: 0.875rem;
+    font-size: 0.9375rem;
     color: var(--color-text);
     transition: background var(--dur-native) var(--ease-swift);
   }
@@ -2875,7 +2897,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
   .mi .tx s {
     display: block;
     text-decoration: none;
-    font-size: 0.78125rem;
+    font-size: 0.84375rem;
     color: var(--color-mute);
   }
   .mi[data-tone="danger"],
@@ -2892,14 +2914,14 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
   }
   .mhead b {
     display: block;
-    font-size: 0.875rem;
+    font-size: 0.9375rem;
     font-weight: 500;
     color: var(--color-bone);
   }
   .mhead s {
     display: block;
     text-decoration: none;
-    font-size: 0.78125rem;
+    font-size: 0.84375rem;
     color: var(--color-mute);
   }
 
@@ -2975,14 +2997,14 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
     gap: 7px;
   }
   .fld > label {
-    font-size: 0.875rem;
+    font-size: 0.9375rem;
     font-weight: 500;
     letter-spacing: -0.005em;
     color: var(--color-bone);
   }
   .fld .hint {
     max-width: 62ch;
-    font-size: 0.8125rem;
+    font-size: 0.875rem;
     line-height: 1.55;
     color: var(--color-dim);
   }
@@ -3003,7 +3025,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
   .fld .box textarea {
     flex: 1;
     min-width: 0;
-    font-size: 0.90625rem;
+    font-size: 0.96875rem;
     line-height: 1.6;
     color: var(--color-bone);
   }
@@ -3013,7 +3035,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
   .fld .box.mono textarea,
   .fld .box.mono input {
     font-family: var(--font-mono);
-    font-size: 0.8125rem;
+    font-size: 0.875rem;
     line-height: 1.7;
   }
   .fld .box[data-ro="true"] {
@@ -3022,7 +3044,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
     color: var(--color-text);
   }
   .fld .bad {
-    font-size: 0.8125rem;
+    font-size: 0.875rem;
     color: var(--color-brick);
   }
   .formfoot {
@@ -3038,7 +3060,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
   .formfoot .msg {
     flex: 1;
     min-width: 0;
-    font-size: 0.8125rem;
+    font-size: 0.875rem;
     color: var(--color-dim);
   }
 
@@ -3059,7 +3081,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
     padding: 0 13px;
     border-radius: 11px;
     background: var(--color-raise);
-    font-size: 0.875rem;
+    font-size: 0.9375rem;
     color: var(--color-text);
     transition:
       background var(--dur-native) var(--ease-swift),
@@ -3082,7 +3104,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
     color: var(--color-panel);
   }
   .pk .sub {
-    font-size: 0.78125rem;
+    font-size: 0.84375rem;
     color: var(--color-mute);
   }
   .pk[aria-pressed="true"] .sub {
@@ -3108,7 +3130,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
   .ro-note p {
     flex: 1;
     min-width: 0;
-    font-size: 0.84375rem;
+    font-size: 0.90625rem;
     line-height: 1.55;
     color: var(--color-text);
   }
@@ -3153,7 +3175,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
   .sh-head h2 {
     flex: 1;
     min-width: 0;
-    font-size: 1rem;
+    font-size: 1.0625rem;
     font-weight: var(--font-weight-mid);
     letter-spacing: -0.01em;
     color: var(--color-bone);
@@ -3166,13 +3188,13 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
   }
   .sh-note {
     padding: 0 16px 10px;
-    font-size: 0.8125rem;
+    font-size: 0.875rem;
     line-height: 1.55;
     color: var(--color-dim);
   }
   .sh-lab {
     padding: 12px 6px 4px;
-    font-size: 0.78125rem;
+    font-size: 0.84375rem;
     color: var(--color-mute);
   }
   .sh-row {
@@ -3180,7 +3202,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
     align-items: center;
     gap: 11px;
     width: 100%;
-    min-height: 44px;
+    min-height: 46px;
     padding: 7px 10px;
     border-radius: 11px;
     text-align: left;
@@ -3198,7 +3220,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
   }
   .sh-row .tx b {
     display: block;
-    font-size: 0.875rem;
+    font-size: 0.9375rem;
     font-weight: 500;
     color: var(--color-bone);
     white-space: nowrap;
@@ -3208,7 +3230,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
   .sh-row .tx s {
     display: block;
     text-decoration: none;
-    font-size: 0.78125rem;
+    font-size: 0.84375rem;
     color: var(--color-dim);
     white-space: nowrap;
     overflow: hidden;
@@ -3229,7 +3251,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
   .sh-foot .where {
     flex: 1;
     min-width: 0;
-    font-size: 0.8125rem;
+    font-size: 0.875rem;
     color: var(--color-dim);
   }
   .sh-field {
@@ -3244,7 +3266,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
   .sh-field input {
     flex: 1;
     min-width: 0;
-    font-size: 0.90625rem;
+    font-size: 0.96875rem;
     color: var(--color-bone);
   }
   @keyframes veil {
@@ -3265,5 +3287,191 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
   .veil,
   .sheet2 {
     animation: none;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   THE HOME — a greeting, a composer, and two sections
+   ═══════════════════════════════════════════════════════════════════
+
+   Drawn in `docs/prototypes/redesign/home-alternative.html`, which
+   supersedes the Dashboard in `desktop-redesign.html` for this screen only.
+
+   **The headline is always a greeting, never a status.** The same sentence
+   whether four agents are waiting or none are. What is waiting goes into a
+   section beneath the composer, as chips — which is also where the ember
+   budget is enforced: two chips carry a dot and everything past them
+   collapses into a count with none. Five dots in a row is the failure the
+   whole redesign's first round was rejected for.
+   ═══════════════════════════════════════════════════════════════════ */
+@layer components {
+  .home {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+  }
+  .hcol {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    max-width: 748px;
+    min-height: 100%;
+    margin: 0 auto;
+    padding: 18px 34px 12px;
+  }
+  /* The air above the greeting. A taller window buys white above the
+     sentence rather than a taller gap between the sections below it. */
+  .air {
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    min-height: var(--air, 192px);
+    padding-bottom: 28px;
+  }
+  .air h1 {
+    font-size: 2.125rem;
+    line-height: 1.14;
+    letter-spacing: -0.026em;
+    font-weight: var(--font-weight-mid);
+    color: var(--color-bone);
+  }
+  /* Nothing waiting and nothing published: first run. It has to look
+     deliberate rather than broken, so the column centres and the air
+     collapses — one sentence and one composer, and no empty headings. */
+  .hcol[data-bare="true"] {
+    justify-content: center;
+    padding-bottom: 70px;
+  }
+  .hcol[data-bare="true"] .air {
+    min-height: 0;
+    padding-bottom: 26px;
+  }
+
+  /* The composer, in the middle of the page rather than docked to the foot. */
+  .mid {
+    position: relative;
+    z-index: 1;
+    flex: none;
+  }
+  .mid .shelf {
+    margin: 0 14px -14px;
+  }
+  .mid .composer {
+    box-shadow:
+      0 14px 36px -16px rgb(21 22 26 / 0.22),
+      0 2px 6px rgb(21 22 26 / 0.05);
+  }
+  [data-theme="dark"] .mid .composer,
+  :root:not([data-theme]) .mid .composer {
+    box-shadow: var(--shadow-float);
+  }
+  .mid .composer textarea {
+    min-height: 64px;
+    font-size: 1.0625rem;
+  }
+  .mid .composer .bar {
+    margin-top: 14px;
+  }
+
+  /* ── A section under the composer ────────────────────────────────
+     The heading is quiet on purpose: it labels a shelf, it is not a
+     heading over a page. */
+  .sect {
+    flex: none;
+    margin-top: 20px;
+  }
+  .sect:first-of-type {
+    margin-top: 22px;
+  }
+  .sect .hd {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+  }
+  .sect h2 {
+    font-size: 0.9375rem;
+    font-weight: 400;
+    letter-spacing: 0.004em;
+    color: var(--color-dim);
+  }
+  .sect .all {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    flex: none;
+    margin-left: auto;
+    font-size: 0.90625rem;
+    color: var(--color-dim);
+    transition: color var(--dur-native) var(--ease-swift);
+  }
+  .sect .all:hover {
+    color: var(--color-bone);
+  }
+  .sect .none {
+    max-width: 56ch;
+    margin-top: 10px;
+    font-size: 0.90625rem;
+    line-height: 1.6;
+    color: var(--color-dim);
+  }
+
+  /* **Two dots, then a count.** `DOTTED` is the Dashboard's own `IN_FULL`
+     rule said again: the budget is three ember marks on screen and the
+     rail's avatar can take the third. */
+  .chips {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    flex: none;
+    gap: 8px;
+    margin-top: 12px;
+  }
+  .chips .sw {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    flex: none;
+    height: 32px;
+    max-width: 306px;
+    padding: 0 14px;
+    border-radius: 99px;
+    background: var(--color-raise);
+    font-size: 0.90625rem;
+    color: var(--color-text);
+    transition:
+      background var(--dur-native) var(--ease-swift),
+      color var(--dur-native) var(--ease-swift);
+  }
+  .chips .sw:hover {
+    background: var(--color-overlay);
+    color: var(--color-bone);
+  }
+  .chips .sw b {
+    min-width: 0;
+    font-weight: 400;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .chips .sw .age {
+    flex: none;
+    color: var(--color-mute);
+    font-variant-numeric: tabular-nums;
+  }
+  .chips .sw[data-over="true"] {
+    color: var(--color-dim);
+  }
+
+  /* Three posters across. */
+  .three {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 22px;
+    margin-top: 14px;
+  }
+  .hcol .elsewhere {
+    align-self: flex-start;
+    margin-top: 10px;
   }
 }

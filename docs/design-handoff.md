@@ -219,6 +219,41 @@ menu's.
 vertical chrome to answer a question that is asked a few times a day, and it
 made every screen slightly about fleet management.
 
+### The home replaces the Dashboard
+
+**Decided:** the first screen is a greeting — *Good morning, what should we work
+on?* — with the composer in the middle of the page, and two sections under it:
+**Agents waiting for you**, then **Recent artifacts**. Drawn by a second
+designer, approved by the user, and folded into `desktop-redesign.html` so there
+is one drawing of it. `docs/prototypes/redesign/home-alternative.html` is now a
+record of the exploration, not a specification.
+
+**Why:** starting work is what you open the app to do, so the page opens with
+somewhere to type rather than with a report. The two things under it are *work
+that wants you* and *work you made*, in that order when both exist. Two chips
+carry an ember dot and anything past that is a count without one — the constant
+is **`DOTTED = 2`**, and the budget is three ember marks on screen with the
+rail's avatar taking the third.
+
+**What it costs, recorded honestly by the designer who drew it.** The answer to
+*is anything waiting on me* moves from a **34px headline about 12% down the
+window** to a **14.5px chip about 63% down**. The agent's own question — the
+thing you would actually answer — leaves the page entirely. And both sections
+now wear the same heading at the same size and colour, so the only thing
+separating work that wants you from work you made is **an 8px dot**.
+
+**What still carries the thesis is untouched.** `App.tsx:85` and `:97` — the
+dock badge and the menu-bar island — sum across every Firetower and do not
+change. The machine-wide answer to *is anything waiting* was never carried by
+this screen, which is the same reasoning that made retiring `Fleet.tsx`
+affordable.
+
+**Superseded, not deleted.** The Dashboard this replaces — a headline counting
+the waiting agents, with their questions on the page — was accepted, built, and
+then replaced. It is drawn beside the home in `home-alternative.html`, which is
+where the comparison belongs. A design that was right and then outgrown deserves
+the same record as one that was rejected.
+
 ### Six destinations, not twelve panes
 
 **Decided:** a 62px icon rail with six destinations — Dashboard, Tasks,
