@@ -1060,6 +1060,10 @@
     width: 100%;
     text-align: left;
   }
+  /* **No fill here.** This had `background: var(--color-overlay)` and it has
+     never rendered: `ArtifactShot` always sets its own `bg-white` or
+     `bg-line`, and a utility beats a component-layer rule. A declaration that
+     cannot be seen is a declaration that will be trusted and is not true. */
   .art .shot {
     position: relative;
     display: block;
@@ -1067,7 +1071,6 @@
     aspect-ratio: 16 / 10;
     overflow: hidden;
     border-radius: 12px;
-    background: var(--color-overlay);
     box-shadow: var(--shadow-raise);
     transition:
       transform 220ms var(--ease-swift),
@@ -1549,9 +1552,14 @@
   .row:hover {
     background: color-mix(in srgb, var(--color-raise) 70%, transparent);
   }
+  /* **The recessed fill and no shadow**, which is what the drawing says:
+     `.ki[aria-selected="true"]{background:var(--sunk)}`. The shadow here was
+     ours — and a drop shadow on a row that is *dented into* its list is the
+     same contradiction a card wearing the recessed fill is, said the other
+     way round. Inside a white palette the fill has to be darker than the card
+     to be seen at all, so the fill was never the part that was wrong. */
   .row[data-on="true"] {
     background: var(--color-overlay);
-    box-shadow: var(--shadow-raise);
   }
 
   /* ── Controls ──────────────────────────────────────────────────

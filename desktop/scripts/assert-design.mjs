@@ -188,8 +188,9 @@ for (const s of SHOTS) {
       for (const f of found) {
         /* The exemption tallies are not findings; they are how the sweep
            answers *does each exemption still apply to anything*. */
-        if (f.rule === "ember-exemption-tally") {
-          exemptions.set(f.at, (exemptions.get(f.at) ?? 0) + Number(f.actual));
+        if (f.rule === "ember-exemption-tally" || f.rule === "surface-exemption-tally") {
+          const key = `${f.rule === "ember-exemption-tally" ? "ember" : "surface"} · ${f.at}`;
+          exemptions.set(key, (exemptions.get(key) ?? 0) + Number(f.actual));
           continue;
         }
         add(s.id, theme, f.rule, f.at, f.expected, f.actual);
@@ -211,18 +212,19 @@ console.log("");
    which is the check being wrong rather than the build. */
 if (!ONLY) {
   for (const [key, n] of exemptions) {
-    const [intent, name] = key.split("|");
+    const [which, rest] = key.split(" · ");
+    const [intent, name] = rest.split("|");
     /* **Both directions.** A load-bearing exemption that stops suppressing
        has lost its anchor, and the budget will fail as a violation. A
        defensive one that *starts* suppressing means the false positive it
        guards against has come back, and somebody should look at that too. */
     if (intent === "load-bearing" && n === 0) {
-      add("every state", "both", "ember-exemption-expired", name,
+      add("every state", "both", `${which}-exemption-expired`, name,
         "a load-bearing exemption still applies to something",
         "it suppressed nothing in the whole sweep — the anchor has moved, and the budget will now fail as a violation");
     }
     if (intent === "defensive" && n > 0) {
-      add("every state", "both", "ember-exemption-woke-up", name,
+      add("every state", "both", `${which}-exemption-woke-up`, name,
         "a defensive exemption suppresses nothing",
         `it suppressed ${n} — the false positive it guards against is back, which is worth looking at rather than hiding`);
     }

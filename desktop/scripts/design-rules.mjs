@@ -328,6 +328,32 @@ export const RULES = function collect() {
     }
     d.remove();
     const roleOf = (el) => named[getComputedStyle(el).backgroundColor.replace(/\s/g, "")];
+
+    /**
+     * **The one deliberate exception, declared rather than tolerated.**
+     *
+     * An artifact that has not been photographed draws a plate, and
+     * `ArtifactShot` says in writing why it is `--color-line`: not `bg-white`,
+     * because a white rectangle is what a page looks like before it paints, so
+     * it read as *broken* rather than as *not photographed yet*; and not
+     * `bg-panel`, because the tile around it is already panel and the two met
+     * with nothing between them. **A plate is the one place a rule colour is
+     * a fill rather than an edge** — reached by looking at it rendered, and
+     * written down before this rule existed.
+     *
+     * Tallied like the ember exemptions, and for the same reason: an
+     * exemption keyed on something that can move expires in the worst
+     * direction. If this stops matching, the sweep says which anchor moved
+     * instead of reporting the design as broken.
+     */
+    const SPARED = [["the artifact plate", ".shot, .art .shot", "load-bearing"]];
+    const spared = new Map(SPARED.map(([name]) => [name, 0]));
+    const excuse = (el) => {
+      const hit = SPARED.find(([, sel]) => el.closest(sel));
+      if (!hit) return false;
+      spared.set(hit[0], spared.get(hit[0]) + 1);
+      return true;
+    };
     const says = (el, role) =>
       say(
         "surface-role",
@@ -343,7 +369,7 @@ export const RULES = function collect() {
       /* An inset shadow *is* how you draw a well, so it argues the other way. */
       if (s.boxShadow.includes("inset")) continue;
       const role = roleOf(el);
-      if (role) says(el, role);
+      if (role && !excuse(el)) says(el, role);
     }
 
     /* B — a shadowless card inside an overlay. */
@@ -366,7 +392,12 @@ export const RULES = function collect() {
     const cards = painted.filter((el) => !painted.some((other) => other !== el && other.contains(el)));
     for (const el of cards) {
       const role = roleOf(el);
-      if (role) says(el, role);
+      if (role && !excuse(el)) says(el, role);
+    }
+
+    for (const [name, n] of spared) {
+      const intent = SPARED.find(([who]) => who === name)[2];
+      out.push({ rule: "surface-exemption-tally", at: `${intent}|${name}`, expected: "applies somewhere", actual: String(n) });
     }
   }
 
