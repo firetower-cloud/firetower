@@ -115,6 +115,62 @@ for (const theme of ["light", "dark"]) {
   await page.close();
 }
 
+/* ── Collapsed means collapsed ────────────────────────────────────────
+   The panel's state was one answer per destination, so collapsing it and
+   clicking another icon read a different slot — and every slot defaulted to
+   open. A screenshot of either screen looks right; only the sequence is
+   wrong, which is why it took somebody using the app to find it. */
+{
+  const page = await browser.newPage({ viewport: { width: 1280, height: 824 }, deviceScaleFactor: 2 });
+  await page.addInitScript(
+    ([registry]) => {
+      window.localStorage.setItem("firetower.servers", registry);
+      window.localStorage.setItem("firetower.current", "o_1");
+      window.localStorage.setItem("firetower.theme", "dark");
+    },
+    [REGISTRY],
+  );
+  await page.goto(`${APP}/#/`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(1200);
+
+  const visible = async () =>
+    page.evaluate(() => {
+      const el = document.querySelector("[data-rail-panel]");
+      return !!el && el.getClientRects().length > 0 && el.getBoundingClientRect().width > 80;
+    });
+
+  const say = (ok, what) => {
+    if (!ok) failed++;
+    console.log(`  ${ok ? "ok    " : "FAILED"} rail: ${what}`);
+  };
+
+  say(await visible(), "the panel is open to begin with");
+
+  await page.getByRole("button", { name: /Hide the panel/i }).first().click();
+  await page.waitForTimeout(500);
+  say(!(await visible()), "the title bar's toggle collapses it");
+
+  /* The bug: clicking a destination icon re-expanded it. */
+  for (const where of ["Tasks", "Artifacts", "Customize"]) {
+    const go = page.getByRole("button", { name: where }).first();
+    if ((await go.count()) === 0) continue;
+    await go.click();
+    await page.waitForTimeout(500);
+    say(!(await visible()), `it stays collapsed after going to ${where}`);
+  }
+
+  /* And it survives a reload, from `firetower.panel`. */
+  await page.reload({ waitUntil: "networkidle" });
+  await page.waitForTimeout(1200);
+  say(!(await visible()), "it is still collapsed after a reload");
+
+  await page.getByRole("button", { name: /Show the panel/i }).first().click();
+  await page.waitForTimeout(500);
+  say(await visible(), "and the toggle brings it back");
+
+  await page.close();
+}
+
 await browser.close();
 if (failed) {
   console.error(`\n  ${failed} state(s) are not what the design says.`);

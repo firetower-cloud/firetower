@@ -76,6 +76,9 @@ export function RailPanel({
 }) {
   return (
     <aside
+      /* Named, because "the aside" is ambiguous — Configuration panes have
+         their own, and a check looking for *this* one was finding those. */
+      data-rail-panel=""
       onMouseEnter={onEnter}
       onMouseLeave={onLeave}
       onFocusCapture={onEnter}
