@@ -433,5 +433,35 @@ export const RULES = function collect() {
     }
   }
 
+  /**
+   * **A row of chips is only as wide as the band under it.**
+   *
+   * The composer's shelf is a fixed band and its chips were `flex: none`
+   * with `white-space: nowrap`, so a chip could neither wrap nor shrink nor
+   * truncate — it simply grew. Nothing caught it, because every machine in
+   * the fixture was called something short: `machineLabel` turned the
+   * longest of them into `this Mac · ubuntu@10.4.0.21`, which fits with room
+   * to spare. The shelf was photographed in two themes at every state in the
+   * table and the overflow was not in a single one of them. It took a person
+   * with a machine called "Mac mini office" to see it.
+   *
+   * So this does not ask whether a label is long. It asks whether a row's
+   * last child ends past the inside of its parent, which is true of the bug
+   * whatever the name happens to be. A pixel of slack, because sub-pixel
+   * layout is not a defect.
+   */
+  for (const band of document.querySelectorAll(".shelf, .bar")) {
+    const r = band.getBoundingClientRect();
+    const cs = getComputedStyle(band);
+    if (cs.overflowX !== "visible") continue; /* it clips on purpose */
+    const inside = r.right - parseFloat(cs.paddingRight || "0");
+    for (const kid of band.children) {
+      const k = kid.getBoundingClientRect();
+      if (k.width === 0 && k.height === 0) continue;
+      if (k.right <= inside + 1) continue;
+      say("row-escapes-its-band", kid, `inside ${Math.round(inside)}px`, `${Math.round(k.right)}px`);
+    }
+  }
+
   return out;
 };

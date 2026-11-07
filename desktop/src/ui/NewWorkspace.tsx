@@ -509,9 +509,16 @@ export function NewWorkspace({
         </div>
 
         <div className="flex items-center gap-3 border-t border-line bg-ground/40 px-5 py-3">
-          <span className="flex items-center gap-1.5 text-meta text-mute">
+          <span className="flex min-w-0 items-center gap-1.5 text-meta text-mute">
             <Icon of={Cpu} size={12} />
-            {host ? machineLabel(all.find((m) => m.hosts.some((h) => h.id === host.id)) ?? all[0]) : backend.org}
+            {/* Truncating, for the same reason the composer's chip does: the
+                machine's name is its owner's and `machineLabel` adds
+                ` · user@host` to it. Here the row ends in Cancel and Create,
+                so an untruncated name pushes the buttons rather than
+                overflowing — the name is what gives way. */}
+            <span className="truncate">
+              {host ? machineLabel(all.find((m) => m.hosts.some((h) => h.id === host.id)) ?? all[0]) : backend.org}
+            </span>
           </span>
           <button onClick={onClose} className="control ml-auto text-mute hover:bg-raise hover:text-bone">
             Cancel

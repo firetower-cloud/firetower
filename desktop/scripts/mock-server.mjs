@@ -133,6 +133,32 @@ const HOSTS = [
   },
 ];
 
+/* **A machine named the way people actually name machines.** Every host in
+   the fixture above is called something short — `localhost`, `this Mac` —
+   and `machineLabel` turned the longest of them into `this Mac ·
+   ubuntu@10.4.0.21`, which fits the composer's shelf with room to spare. So
+   the shelf was photographed ninety-odd times and never once with a label
+   that did not fit, and the chip overflowing its band was invisible to the
+   whole harness. This is the reported one: a name with spaces in it, a real
+   account and a tailnet address. It is first in the list because the
+   composer falls back to `all[0]`, so the state needs no interaction to
+   reach. */
+const LONG_HOSTS = [
+  {
+    id: "h_long",
+    name: "Mac mini office",
+    state: "Online",
+    compute: { type: "Server", host: "100.113.135.95", user: "kevinpiacentini", port: 22 },
+    cpus: 10,
+    memoryMb: 32768,
+    docker: { status: "Running", detail: "28.1.1" },
+    drained: false,
+    reconnecting: false,
+    workerVersion: "0.34.1",
+  },
+  ...HOSTS,
+];
+
 /* `latestVersion` and `behind` are the published-against-installed pair the
    control plane now works out for itself — see `updates::agents`. The numbers
    here are the ones a real check produced: Claude Code 2.1.273 installed
@@ -757,7 +783,7 @@ const server = createServer(async (req, res) => {
       id: r.id, slug: r.slug, remote: r.remote, defaultBranch: r.defaultBranch, private: false,
     })),
     "/api/v1/repos": scene === "no-repos" ? [] : REPOS,
-    "/api/v1/hosts": scene === "no-machines" ? [] : HOSTS,
+    "/api/v1/hosts": scene === "no-machines" ? [] : scene === "long-machine" ? LONG_HOSTS : HOSTS,
     "/api/v1/agents": AGENTS,
     "/api/v1/agent-accounts": ACCOUNTS,
     /* What `GitHosts` actually reads. The stub here was four fields, so the

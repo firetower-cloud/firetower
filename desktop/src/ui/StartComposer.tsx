@@ -627,36 +627,46 @@ export function StartComposer({
                 <span className="grid place-items-center text-mute">
                   <Icon of={CircleAlert} size={14} />
                 </span>
-                {seed?.taskKey ?? seed?.issue ?? "The task"}
+                <span className="lbl">{seed?.taskKey ?? seed?.issue ?? "The task"}</span>
                 {seed?.taskUrl && <Icon of={ExternalLink} size={12} className="text-mute" />}
               </button>
             )}
             <button
               onClick={(e) => toggle("repo", e.currentTarget)}
               data-set={checkouts.length > 0}
+              data-which="repo"
               className="chip"
               title="Which repositories this workspace checks out"
             >
               <span className="grid place-items-center text-mute">
                 <Icon of={FolderGit2} size={14} />
               </span>
-              {checkouts.length === 0
-                ? "Add a repository"
-                : checkouts.length === 1
-                  ? checkouts[0].slug
-                  : `${checkouts.length} repositories`}
+              <span className="lbl">
+                {checkouts.length === 0
+                  ? "Add a repository"
+                  : checkouts.length === 1
+                    ? checkouts[0].slug
+                    : `${checkouts.length} repositories`}
+              </span>
               <Icon of={ChevronDown} size={12} className="text-mute" />
             </button>
             <button
               onClick={(e) => toggle("machine", e.currentTarget)}
               data-set={!!where.machine}
+              data-which="machine"
               className="chip"
               title="Where it runs"
             >
               <span className="grid place-items-center text-mute">
                 <Icon of={Server} size={14} />
               </span>
-              {machine ? machineLabel(machine) : "Where it runs"}
+              {/* The whole name on the label, because the label is the part
+                  that gets cut — the button keeps saying what it *does*, so
+                  hovering the chevron still explains the control and hovering
+                  the name reads it back in full. */}
+              <span className="lbl" title={machine ? machineLabel(machine) : undefined}>
+                {machine ? machineLabel(machine) : "Where it runs"}
+              </span>
               {host && kind && (
                 <span
                   className={`h-[5px] w-[5px] shrink-0 rounded-full ${hostReady ? "bg-sage" : "bg-amber-soft"}`}
@@ -734,7 +744,7 @@ export function StartComposer({
                 <span className="grid place-items-center text-mute">
                   {pinned ? <AgentMark agent={pinned} size={15} /> : <UserRound className="h-[15px] w-[15px]" strokeWidth={1.8} />}
                 </span>
-                {profile ? profile.name : "Just an agent"}
+                <span className="lbl">{profile ? profile.name : "Just an agent"}</span>
                 <Icon of={ChevronDown} size={12} className="text-mute" />
               </button>
               {kind && (
