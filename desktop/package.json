@@ -17,7 +17,8 @@
     "shoot:app": "node scripts/shoot-app.mjs",
     "reconcile": "node scripts/reconcile.mjs",
     "orval": "orval",
-    "test": "vitest run"
+    "test": "vitest run",
+    "check:states": "node scripts/check-states.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.101.4",

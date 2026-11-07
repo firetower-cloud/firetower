@@ -311,18 +311,31 @@
       background var(--dur-native) var(--ease-swift),
       color var(--dur-native) var(--ease-swift);
   }
-  .rbtn:hover {
+  /* **Hover does not apply to the destination you are already on.**
+     `[data-theme="light"] .rbtn:hover` has three compound parts against
+     `.rbtn[aria-current="page"]`'s two, so in light it won the *background*
+     and lost the *colour* — the active rule kept setting `--color-panel`, and
+     a near-white glyph landed on a 5% grey box. Nobody designed that state;
+     it is two rules each winning half an argument.
+
+     Scoped out rather than out-specified, because the current destination has
+     nothing to indicate on hover — it is already the loudest thing in the
+     rail. Dark hid it: the unscoped hover ties the active rule on specificity
+     and loses on source order, which is why checking dark said nothing. */
+  .rbtn:not([aria-current="page"]):hover {
     background: rgb(255 255 255 / 0.06);
     color: var(--color-text);
   }
-  [data-theme="light"] .rbtn:hover {
+  [data-theme="light"] .rbtn:not([aria-current="page"]):hover {
     background: rgb(22 22 23 / 0.05);
   }
-  .rbtn[data-peek="true"] {
+  /* The same shape, and it would have bitten the moment somebody put the
+     keyboard on the destination they are already in. */
+  .rbtn:not([aria-current="page"])[data-peek="true"] {
     background: rgb(255 255 255 / 0.07);
     color: var(--color-text);
   }
-  [data-theme="light"] .rbtn[data-peek="true"] {
+  [data-theme="light"] .rbtn:not([aria-current="page"])[data-peek="true"] {
     background: rgb(22 22 23 / 0.07);
   }
   /* **Inverted, and the only thing in the chrome that is.** It was a white
@@ -3547,5 +3560,278 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
   .hcol .elsewhere {
     align-self: flex-start;
     margin-top: 10px;
+  }
+
+  /* ── Updates: reading is not upgrading ─────────────────────────
+     The whole screen was built before the drawing had one, so none of this
+     vocabulary existed here and the screen was a stack of bordered cards
+     against a page of rows on raised ground. Ported whole rather than
+     approximated, because the shape is the argument: what you *read* is a
+     sentence and two rows, and what you *operate* is a list of machines with
+     a checkbox each — and a bordered card around the first makes it look
+     like the second. */
+  .upd-hero {
+    margin-top: 6px;
+  }
+  .upd-hero h1 {
+    font-size: 2.125rem; /* 34px */
+    line-height: 1.12;
+    letter-spacing: -0.026em;
+    font-weight: var(--font-weight-mid);
+    color: var(--color-bone);
+  }
+  .upd-hero p {
+    margin-top: 9px;
+    font-size: var(--text-title);
+    line-height: 1.55;
+    color: var(--color-dim);
+    max-width: 56ch;
+  }
+
+  .upd-row {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 16px 18px;
+    border-radius: 14px;
+    background: var(--color-raise);
+    margin-top: 12px;
+  }
+  .upd-row .tx {
+    min-width: 0;
+    flex: 1;
+  }
+  .upd-row .tx b {
+    display: block;
+    font-size: var(--text-read);
+    font-weight: 500;
+    color: var(--color-bone);
+    letter-spacing: -0.006em;
+  }
+  /* `s` for the second line, as the drawing has it — struck through is not
+     meant and is turned off here rather than at every use. */
+  .upd-row .tx s {
+    display: block;
+    text-decoration: none;
+    margin-top: 2px;
+    font-size: var(--text-ui);
+    color: var(--color-dim);
+  }
+  .upd-row .ver {
+    font-family: var(--font-mono);
+    font-size: var(--text-body);
+    color: var(--color-bone);
+    flex: none;
+    background: var(--color-panel);
+    padding: 4px 10px;
+    border-radius: 8px;
+  }
+  [data-theme="dark"] .upd-row .ver {
+    background: var(--color-overlay);
+  }
+  .upd-row .acts {
+    display: flex;
+    gap: 7px;
+    flex: none;
+  }
+
+  .upd-sec {
+    margin-top: 36px;
+  }
+  .upd-sec h2 {
+    font-size: 1.1875rem; /* 19px */
+    line-height: 1.3;
+    letter-spacing: -0.014em;
+    font-weight: var(--font-weight-mid);
+    color: var(--color-bone);
+  }
+  .upd-sec .note {
+    margin-top: 3px;
+    font-size: var(--text-ui);
+    line-height: 1.55;
+    color: var(--color-dim);
+    max-width: 70ch;
+  }
+
+  .mach {
+    display: flex;
+    align-items: center;
+    gap: 13px;
+    padding: 13px 16px;
+    border-radius: 13px;
+    margin-top: 2px;
+    width: 100%;
+    text-align: left;
+    transition: background var(--dur-native) var(--ease-swift);
+  }
+  .mach:hover {
+    background: var(--color-raise);
+  }
+  .mach .g {
+    color: var(--color-dim);
+    display: grid;
+    place-items: center;
+    flex: none;
+  }
+  .mach .tx {
+    min-width: 0;
+    flex: 1;
+  }
+  .mach .tx b {
+    display: block;
+    font-size: 0.96875rem; /* 15.5px */
+    font-weight: 500;
+    color: var(--color-bone);
+  }
+  .mach .tx s {
+    display: block;
+    text-decoration: none;
+    margin-top: 1px;
+    font-size: var(--text-body);
+    color: var(--color-dim);
+  }
+  .mach .ver {
+    font-family: var(--font-mono);
+    font-size: 0.84375rem; /* 13.5px */
+    color: var(--color-dim);
+    flex: none;
+  }
+  .mach .box {
+    width: 17px;
+    height: 17px;
+    border-radius: 6px;
+    flex: none;
+    display: grid;
+    place-items: center;
+    border: 1.5px solid var(--color-line);
+    color: var(--color-panel);
+  }
+  .mach .box[data-on="true"] {
+    background: var(--color-bone);
+    border-color: var(--color-bone);
+  }
+  /* A machine somebody else administers: shown, because not being able to
+     move it is not a reason to hide that it is behind — but visibly not
+     yours to tick. */
+  .mach .box[data-off="true"] {
+    opacity: 0.35;
+  }
+
+  /* A run, as it goes — and the plan, before it does. */
+  .run {
+    margin-top: 14px;
+    border-radius: 16px;
+    background: var(--color-raise);
+    padding: 18px 20px;
+  }
+  .run .top {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+  }
+  .run .top b {
+    font-size: var(--text-read);
+    font-weight: 500;
+    color: var(--color-bone);
+    flex: 1;
+  }
+  .run .why {
+    margin-top: 6px;
+    font-size: var(--text-ui);
+    line-height: 1.6;
+    color: var(--color-dim);
+    max-width: 68ch;
+  }
+  .run .foot {
+    display: flex;
+    gap: 7px;
+    margin-top: 16px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .steps {
+    margin-top: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .stepr {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    font-size: var(--text-ui);
+    color: var(--color-dim);
+    padding: 4px 0;
+  }
+  .stepr .g {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 17px;
+  }
+  .stepr[data-s="now"] {
+    color: var(--color-bone);
+  }
+  .stepr .t {
+    flex: 1;
+    min-width: 0;
+  }
+  .stepr .el {
+    font-size: 0.84375rem; /* 13.5px */
+    color: var(--color-mute);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .plan-files {
+    margin-top: 12px;
+    border-radius: 12px;
+    background: var(--color-panel);
+    padding: 6px;
+  }
+  [data-theme="dark"] .plan-files {
+    background: var(--color-overlay);
+  }
+  .diffrow {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 7px 11px;
+    border-radius: 9px;
+    min-height: 36px;
+    transition: background var(--dur-native) var(--ease-swift);
+  }
+  .diffrow:hover {
+    background: var(--color-panel);
+  }
+  [data-theme="dark"] .diffrow:hover {
+    background: var(--color-raise);
+  }
+  .diffrow .k {
+    width: 52px;
+    flex: none;
+    font-size: 0.8125rem; /* 13px */
+    color: var(--color-dim);
+  }
+  .diffrow .p {
+    flex: 1;
+    min-width: 0;
+    font-family: var(--font-mono);
+    font-size: 0.84375rem; /* 13.5px */
+    letter-spacing: -0.01em;
+    color: var(--color-text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .diffrow .n {
+    flex: none;
+    font-size: 0.8125rem; /* 13px */
+    color: var(--color-mute);
+    font-variant-numeric: tabular-nums;
+  }
+  /* The one amber line among twenty-three neutral ones — the only colour on
+     this screen, and it is the only thing on it you have to decide. */
+  .diffrow .n.inway {
+    color: var(--color-amber-soft);
   }
 }

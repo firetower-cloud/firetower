@@ -161,7 +161,9 @@ export function Inspector({
   const scroller = useRef<HTMLDivElement>(null);
 
   return (
-    <aside style={{ width: width ?? 344 }} className="flex shrink-0 flex-col bg-ground">
+    /* A full-height column of its own, on the desk's colour — `min-h-0`
+       because `.insp → .iscroll` is one of the chains that needs it. */
+    <aside style={{ width: width ?? 344 }} className="flex min-h-0 shrink-0 flex-col bg-ground">
       {/* **Plain text with an underline**, not four boxed chips with an icon
           each. The index of a panel should not compete with the panel. */}
       <div className="itabs" role="tablist">

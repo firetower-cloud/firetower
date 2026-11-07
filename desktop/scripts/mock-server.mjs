@@ -670,6 +670,11 @@ const server = createServer(async (req, res) => {
     "/api/v1/roles": scene === "no-roles" ? [] : ROLES,
     "/api/v1/provider-kinds": PROVIDER_KINDS,
     "/api/v1/updates/runs": scene === "upgrading" ? [RUNNING, DONE_RUN] : [DONE_RUN],
+    /* One run, by id. The list was served and the detail was not, so the
+       screen that draws the steps had nothing to draw them from and the
+       upgrading state could never be photographed. */
+    "/api/v1/updates/runs/ur_2": RUNNING,
+    "/api/v1/updates/runs/ur_1": DONE_RUN,
     /* `UpdateStatus`, as the screen and the rail actually read it. The old
        three-field object here predated both and was the wrong shape, so the
        Updates screen could not be opened against the mock at all. With

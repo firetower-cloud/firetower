@@ -452,282 +452,296 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
     /* **The conversation is the sheet; the right rail is the desk.** They were
        both on the ground, which made the thing being read and the index
        beside it the same surface — and the composer floating over neither. */
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-panel">
-      {/* **The title row.** What this workspace is, who is in it, and the
-          things you toggle — at 52px with the name at reading weight, so the
-          thing the screen is about is not the same size as the controls
-          around it. The editor strip is its own row underneath. */}
-      <div {...drag} className="whead">
-        {renaming !== null ? (
-          <input
-            autoFocus
-            value={renaming}
-            onChange={(e) => setRenaming(e.target.value)}
-            onBlur={() => setRenaming(null)}
-            onKeyDown={(e) => {
-              if (e.key === "Escape") setRenaming(null);
-              if (e.key === "Enter" && renaming.trim()) {
-                rename.mutate({ id: run.id, data: { name: renaming.trim() } }, { onSuccess: () => cache.invalidateQueries({ queryKey: getListSessionsQueryKey() }) });
-                setRenaming(null);
-              }
-            }}
-            className="w-56 rounded-md border border-line bg-ground px-2 py-1 text-ui text-bone focus:outline-none"
-          />
-        ) : (
-          <button onDoubleClick={() => mayAct && setRenaming(place.name)} title={mayAct ? "Double-click to rename" : place.name} className="nm flex items-center gap-1.5">
-            {place.name}
-            {mayAct && <Pencil className="h-3 w-3 shrink-0 text-mute opacity-0 transition-opacity hover:opacity-100" strokeWidth={1.75} />}
-          </button>
-        )}
+    <div className="flex min-h-0 min-w-0 flex-1 bg-panel">
+      {/* **The conversation column.** Full height, and the title row belongs
+          to it rather than to the window — so it stops at the rail's left
+          edge instead of spanning both. It spanned, and the band above the
+          rail came out the sheet's white: a 52px gap at the top of a column
+          that is meant to start at the top.
 
-        {/* Who you are reading, named. A row of marks says how many agents are
-            here; it does not say which one is talking. */}
-        <span className="who">
-          <AgentMark agent={run.agent} size={14} />
-          {AGENT_LABEL[run.agent as keyof typeof AGENT_LABEL] ?? run.agent}
-        </span>
-
-        {/* What is checked out. The workspace is one directory with a worktree
-            per repository, and the second and third of them had nowhere to be
-            said — so this names the first, counts the rest, and goes brick
-            when one of them is not there. */}
-        <div className="relative shrink-0">
-          <button
-            onClick={() => setRepos((r) => !r)}
-            title="Repositories in this workspace"
-            /* Quiet, beside the agent's name: it is a fact about the
-               workspace, not one of the controls on the right. The drawing
-               does not say where this sheet opens from — it reaches it from
-               its own control strip — so this is the build's answer and is
-               recorded as such in the reconciliation. */
-            className={`who max-w-[15rem] rounded-md px-1.5 py-1 transition-colors ${repos ? "bg-raise text-bone" : "hover:text-bone"}`}
-          >
-            <HostMark kind={hostOf(checkouts[0]?.slug)?.kind} size={13} className={checkouts.some((c) => c.trouble) ? "text-brick" : ""} />
-            <span className="min-w-0 truncate">{checkouts[0]?.slug ?? "No repository"}</span>
-            {checkouts.length > 1 && <span className="shrink-0 opacity-70">+{checkouts.length - 1}</span>}
-          </button>
-          {repos && <Repositories session={run} branch={place.branch} onClose={() => setRepos(false)} />}
-        </div>
-
-        {/* Which agent you are reading, when there is a choice. A count would
-            not do: two of one and one of another is a different place from
-            three of one — but with one agent the row of marks is a control
-            that never changes anything. */}
-        {place.runs.length > 1 && (
-        <span className="flex shrink-0 items-center gap-1">
-          {place.runs.map((r) => (
-            <button
-              key={r.id}
-              onClick={() => setReading(r.id)}
-              onContextMenu={(e) => chipMenu.show(e, r.id)}
-              title={`${r.agent === "ClaudeCode" ? "Claude Code" : r.agent} — ${r.title}`}
-              className={`flex items-center gap-1.5 rounded-md px-2 py-1 transition-colors ${
-                r.id === run.id
-                  ? "bg-overlay text-bone shadow-(--shadow-raise)"
-                  : "text-mute hover:bg-raise"
-              }`}
-            >
-              {/* **The mark, and not the signal.** The rail's Team panel already
-                  says what each agent is doing, and an ember dot here beside
-                  an ember dot there is the same agent shouting twice — which
-                  is exactly what the budget on the Dashboard exists to stop.
-                  This is a switch between runs; the state is read next door. */}
-              <AgentMark agent={r.agent} size={13} />
-            </button>
-          ))}
-        </span>
-        )}
-
-        <div className="right">
-          {/* Starting an agent here is working in somebody's workspace, and the
-              server refuses it below writer. Drawn for a viewer it was a button
-              that opened a form and failed at the end of it. */}
-          {mayAct && (
-            <button
-              onClick={() => setAdding(true)}
-              title="Another agent here"
-              aria-label="Another agent here"
-              className="gbtn"
-            >
-              <UserPlus className="h-4 w-4" strokeWidth={1.75} />
-            </button>
-          )}
-          {/* Who can reach this. First in the group, because it is the only
-              one carrying a word rather than a glyph: the icons keep their
-              places when a path appears beside this one, and a control that
-              shifts its neighbours when a workspace is shared is a control that
-              moves under the pointer. */}
-          <WhoCanAccess look="toolbar" kind="workspace" id={place.id} path={place.runs[0]?.path} />
-          {/* A shell on the machine this runs on — which is somebody's own
-              machine. `session_pty` has always required writer; this is the
-              control finally agreeing with it. */}
-          {mayAct && (
-            <button
-              onClick={() => {
-                setShell(true);
-                setTerm(!term);
+          `min-h-0` the whole way down, on every flex column between the
+          window and a scroll container — here `.wsheet → .conv → .cscroll`,
+          and the rail carries it for the same reason. A flex child defaults
+          to `min-height: auto` and refuses to shrink below its content, so
+          without it this grows past the window and the pane below never
+          scrolls. */}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        {/* **The title row.** What this workspace is, who is in it, and the
+            things you toggle — at 52px with the name at reading weight, so the
+            thing the screen is about is not the same size as the controls
+            around it. The editor strip is its own row underneath. */}
+        <div {...drag} className="whead">
+          {renaming !== null ? (
+            <input
+              autoFocus
+              value={renaming}
+              onChange={(e) => setRenaming(e.target.value)}
+              onBlur={() => setRenaming(null)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") setRenaming(null);
+                if (e.key === "Enter" && renaming.trim()) {
+                  rename.mutate({ id: run.id, data: { name: renaming.trim() } }, { onSuccess: () => cache.invalidateQueries({ queryKey: getListSessionsQueryKey() }) });
+                  setRenaming(null);
+                }
               }}
-              title={`Terminal  ${key("J")}`}
-              aria-label="Terminal"
-              className={`gbtn ${term ? "bg-overlay text-bone" : ""}`}
-            >
-              <SquareTerminal className="h-4 w-4" strokeWidth={1.75} />
-            </button>
-          )}
-          {/* Ending the workspace stops every agent in it, including other
-              people's, so it is asked of the path rather than of the grant —
-              and drawn only to somebody the server will take it from. */}
-          {mayEndPlace && (
-            <button
-              onClick={() => void endWorkspace(place, childrenOf(place, group(sessions ?? []).groups.flatMap(([, ps]) => ps))).then(({ ended, trouble }) => (ended ? navigate("/") : trouble && void confirm({ title: "It did not end.", body: trouble, action: "OK" })))}
-              title="End workspace — every agent in it stops, and every agent it started"
-              aria-label="End workspace"
-              className="gbtn hover:text-brick"
-            >
-              <Trash2 className="h-4 w-4" strokeWidth={1.75} />
-            </button>
-          )}
-          <div className="relative">
-            <button
-              onClick={() => setPicking((p) => !p)}
-              title="Preview a port"
-              aria-label="Preview a port"
-              className={`gbtn ${picking ? "bg-overlay text-bone" : ""}`}
-            >
-              <Globe className="h-4 w-4" strokeWidth={1.75} />
-            </button>
-            {picking && <PortPicker sessionId={run.id} open={tabs.flatMap((t) => ("port" in t ? [t.port] : []))} onPick={openPreview} onClose={() => setPicking(false)} />}
-          </div>
-          <button
-            onClick={() => setOpen(!open)}
-            title={`Inspector  ${key("\\")}`}
-            aria-label="Inspector"
-            className={`gbtn ${open ? "bg-overlay text-bone" : ""}`}
-          >
-            <PanelRight className="h-4 w-4" strokeWidth={1.75} />
-          </button>
-        </div>
-      </div>
-
-      <div className="flex min-h-0 flex-1">
-        {/* `min-h-0` on both columns: a flex child defaults to
-            `min-height: auto` and refuses to shrink below its content, so without
-            it this grows past the window and the pane below never scrolls. */}
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          {tabs.length > 1 && (
-            <TabStrip
-              tabs={tabs}
-              active={active}
-              onPick={setActive}
-              onClose={closeTab}
-              onMenu={tabMenu.show}
-              onKeep={(id) =>
-                setTabs((held) => held.map((t) => (t.id === id ? { ...t, preview: false } : t)))
-              }
+              className="w-56 rounded-md border border-line bg-ground px-2 py-1 text-ui text-bone focus:outline-none"
             />
+          ) : (
+            <button onDoubleClick={() => mayAct && setRenaming(place.name)} title={mayAct ? "Double-click to rename" : place.name} className="nm flex items-center gap-1.5">
+              {place.name}
+              {mayAct && <Pencil className="h-3 w-3 shrink-0 text-mute opacity-0 transition-opacity hover:opacity-100" strokeWidth={1.75} />}
+            </button>
           )}
 
-          <div className="min-h-0 flex-1">
-            {active === "chat" ? (
-              <Chat
-                session={run}
-                lead={run.parentId ? (sessions?.find((s) => s.id === run.parentId) ?? null) : null}
-                branch={place.branch}
-                onOpenFile={openFile}
-                artifacts={artifacts.data ?? []}
-                onOpenArtifact={openArtifact}
-                onOpenDiff={() => {
-                  setSide("diff");
-                  setOpen(true);
-                }}
-              />
-            ) : "port" in (tabs.find((t) => t.id === active) ?? {}) ||
-              "artifactId" in (tabs.find((t) => t.id === active) ?? {}) ? null : isImage((tabs.find((t) => t.id === active) as { path: string }).path) ? (
-              <ImageTab session={run} path={(tabs.find((t) => t.id === active) as { path: string }).path} />
-            ) : (
-              <FileTab session={run} path={(tabs.find((t) => t.id === active) as { path: string }).path} line={(tabs.find((t) => t.id === active) as { line?: number }).line} />
-            )}
-            {/* Previews stay mounted while another tab is up: a frame that is
-                unmounted is a page reloaded, and the scroll and state you left
-                it with are gone. Hidden, it keeps everything. */}
-            {tabs.map((t) =>
-              "artifactId" in t ? (
-                <div key={t.id} hidden={active !== t.id} className="h-full">
-                  {(() => {
-                    const found = (artifacts.data ?? []).find((a) => a.id === t.artifactId);
-                    return found ? (
-                      <ArtifactTab
-                        artifact={found}
-                        sendTo={run.id}
-                        expanded={expanded === t.id}
-                        onExpanded={(v) => setExpanded(v ? t.id : null)}
-                      />
-                    ) : null;
-                  })()}
-                </div>
-              ) : "port" in t ? (
-                <div key={t.id} hidden={active !== t.id} className="h-full">
-                  <PreviewTab
-                    session={run}
-                    port={t.port}
-                    path={t.path}
-                    onPath={(path) => setTabs((held) => held.map((x) => (x.id === t.id ? { ...x, path } : x)))}
-                  />
-                </div>
-              ) : null,
-            )}
+          {/* Who you are reading, named. A row of marks says how many agents are
+              here; it does not say which one is talking. */}
+          <span className="who">
+            <AgentMark agent={run.agent} size={14} />
+            {AGENT_LABEL[run.agent as keyof typeof AGENT_LABEL] ?? run.agent}
+          </span>
+
+          {/* What is checked out. The workspace is one directory with a worktree
+              per repository, and the second and third of them had nowhere to be
+              said — so this names the first, counts the rest, and goes brick
+              when one of them is not there. */}
+          <div className="relative shrink-0">
+            <button
+              onClick={() => setRepos((r) => !r)}
+              title="Repositories in this workspace"
+              /* Quiet, beside the agent's name: it is a fact about the
+                 workspace, not one of the controls on the right. The drawing
+                 does not say where this sheet opens from — it reaches it from
+                 its own control strip — so this is the build's answer and is
+                 recorded as such in the reconciliation. */
+              className={`who max-w-[15rem] rounded-md px-1.5 py-1 transition-colors ${repos ? "bg-raise text-bone" : "hover:text-bone"}`}
+            >
+              <HostMark kind={hostOf(checkouts[0]?.slug)?.kind} size={13} className={checkouts.some((c) => c.trouble) ? "text-brick" : ""} />
+              <span className="min-w-0 truncate">{checkouts[0]?.slug ?? "No repository"}</span>
+              {checkouts.length > 1 && <span className="shrink-0 opacity-70">+{checkouts.length - 1}</span>}
+            </button>
+            {repos && <Repositories session={run} branch={place.branch} onClose={() => setRepos(false)} />}
           </div>
 
-          {shell && (
-            <div hidden={!term} style={{ height: termHeight }} className="relative flex shrink-0 flex-col border-t border-line">
-              <div onPointerDown={startTermResize} title="Drag to resize" className="group/vhandle absolute inset-x-0 -top-1 z-10 h-2 cursor-row-resize">
-                <div className="absolute inset-x-0 top-1 h-px bg-transparent transition-colors duration-150 group-hover/vhandle:bg-slate group-active/vhandle:bg-slate" />
-              </div>
-              <div className="flex h-8 shrink-0 items-center gap-2 border-b border-line bg-panel px-3">
-                <span className="text-meta text-dim">Shell</span>
-                <span className="font-mono text-micro text-mute">{place.branch}</span>
-                <span className="ml-auto text-micro text-mute">{key("J")} hides</span>
-                <button
-                  onClick={() => {
-                    setShell(false);
-                    setTerm(false);
-                  }}
-                  title="Close — this ends the shell and whatever it is running"
-                  className="grid h-6 w-6 place-items-center rounded text-mute hover:bg-raise hover:text-bone"
-                >
-                  <X className="h-3.5 w-3.5" strokeWidth={2} />
-                </button>
-              </div>
-              <div className="min-h-0 flex-1">
-                <Shell sessionId={run.id} ended={run.status === "Ended"} showing={term} onOpenPath={(p, line) => openFile(p, true, line)} />
-              </div>
-            </div>
+          {/* Which agent you are reading, when there is a choice. A count would
+              not do: two of one and one of another is a different place from
+              three of one — but with one agent the row of marks is a control
+              that never changes anything. */}
+          {place.runs.length > 1 && (
+          <span className="flex shrink-0 items-center gap-1">
+            {place.runs.map((r) => (
+              <button
+                key={r.id}
+                onClick={() => setReading(r.id)}
+                onContextMenu={(e) => chipMenu.show(e, r.id)}
+                title={`${r.agent === "ClaudeCode" ? "Claude Code" : r.agent} — ${r.title}`}
+                className={`flex items-center gap-1.5 rounded-md px-2 py-1 transition-colors ${
+                  r.id === run.id
+                    ? "bg-overlay text-bone shadow-(--shadow-raise)"
+                    : "text-mute hover:bg-raise"
+                }`}
+              >
+                {/* **The mark, and not the signal.** The rail's Team panel already
+                    says what each agent is doing, and an ember dot here beside
+                    an ember dot there is the same agent shouting twice — which
+                    is exactly what the budget on the Dashboard exists to stop.
+                    This is a switch between runs; the state is read next door. */}
+                <AgentMark agent={r.agent} size={13} />
+              </button>
+            ))}
+          </span>
           )}
 
+          <div className="right">
+            {/* Starting an agent here is working in somebody's workspace, and the
+                server refuses it below writer. Drawn for a viewer it was a button
+                that opened a form and failed at the end of it. */}
+            {mayAct && (
+              <button
+                onClick={() => setAdding(true)}
+                title="Another agent here"
+                aria-label="Another agent here"
+                className="gbtn"
+              >
+                <UserPlus className="h-4 w-4" strokeWidth={1.75} />
+              </button>
+            )}
+            {/* Who can reach this. First in the group, because it is the only
+                one carrying a word rather than a glyph: the icons keep their
+                places when a path appears beside this one, and a control that
+                shifts its neighbours when a workspace is shared is a control that
+                moves under the pointer. */}
+            <WhoCanAccess look="toolbar" kind="workspace" id={place.id} path={place.runs[0]?.path} />
+            {/* A shell on the machine this runs on — which is somebody's own
+                machine. `session_pty` has always required writer; this is the
+                control finally agreeing with it. */}
+            {mayAct && (
+              <button
+                onClick={() => {
+                  setShell(true);
+                  setTerm(!term);
+                }}
+                title={`Terminal  ${key("J")}`}
+                aria-label="Terminal"
+                className={`gbtn ${term ? "bg-overlay text-bone" : ""}`}
+              >
+                <SquareTerminal className="h-4 w-4" strokeWidth={1.75} />
+              </button>
+            )}
+            {/* Ending the workspace stops every agent in it, including other
+                people's, so it is asked of the path rather than of the grant —
+                and drawn only to somebody the server will take it from. */}
+            {mayEndPlace && (
+              <button
+                onClick={() => void endWorkspace(place, childrenOf(place, group(sessions ?? []).groups.flatMap(([, ps]) => ps))).then(({ ended, trouble }) => (ended ? navigate("/") : trouble && void confirm({ title: "It did not end.", body: trouble, action: "OK" })))}
+                title="End workspace — every agent in it stops, and every agent it started"
+                aria-label="End workspace"
+                className="gbtn hover:text-brick"
+              >
+                <Trash2 className="h-4 w-4" strokeWidth={1.75} />
+              </button>
+            )}
+            <div className="relative">
+              <button
+                onClick={() => setPicking((p) => !p)}
+                title="Preview a port"
+                aria-label="Preview a port"
+                className={`gbtn ${picking ? "bg-overlay text-bone" : ""}`}
+              >
+                <Globe className="h-4 w-4" strokeWidth={1.75} />
+              </button>
+              {picking && <PortPicker sessionId={run.id} open={tabs.flatMap((t) => ("port" in t ? [t.port] : []))} onPick={openPreview} onClose={() => setPicking(false)} />}
+            </div>
+            {/* Showing the rail is a thing you do to the window, so it lives
+                here; *hiding* it is a thing you do to the rail, so it lives in
+                the rail's own tab row. One control each, where the drawing has
+                them — rather than one toggle that is in the wrong place half
+                the time. */}
+            {!open && (
+              <button
+                onClick={() => setOpen(true)}
+                title={`Show the rail  ${key("\\")}`}
+                aria-label="Show the rail"
+                className="gbtn"
+              >
+                <PanelRight className="h-4 w-4" strokeWidth={1.75} />
+              </button>
+            )}
+          </div>
         </div>
 
-        {open && (
-          <div onPointerDown={startResize} title="Drag to resize" className="group/handle relative z-10 -mr-px w-1 shrink-0 cursor-col-resize">
-            <div className="absolute inset-y-0 left-0 w-px bg-transparent transition-colors duration-150 group-hover/handle:bg-slate group-active/handle:bg-slate" />
-          </div>
-        )}
-        {open && (
-          <Inspector
-            width={width}
-            session={run}
-            workspace={place.id}
-            branch={place.branch}
-            tab={side}
-            onTab={setSide}
-            onOpenFile={openFile}
-            onClose={() => setOpen(false)}
-            lead={lead}
-            team={team}
-            artifacts={myArtifacts}
-            onOpenArtifact={openArtifact}
+        {tabs.length > 1 && (
+          <TabStrip
+            tabs={tabs}
+            active={active}
+            onPick={setActive}
+            onClose={closeTab}
+            onMenu={tabMenu.show}
+            onKeep={(id) =>
+              setTabs((held) => held.map((t) => (t.id === id ? { ...t, preview: false } : t)))
+            }
           />
         )}
+
+        <div className="min-h-0 flex-1">
+          {active === "chat" ? (
+            <Chat
+              session={run}
+              lead={run.parentId ? (sessions?.find((s) => s.id === run.parentId) ?? null) : null}
+              branch={place.branch}
+              onOpenFile={openFile}
+              artifacts={artifacts.data ?? []}
+              onOpenArtifact={openArtifact}
+              onOpenDiff={() => {
+                setSide("diff");
+                setOpen(true);
+              }}
+            />
+          ) : "port" in (tabs.find((t) => t.id === active) ?? {}) ||
+            "artifactId" in (tabs.find((t) => t.id === active) ?? {}) ? null : isImage((tabs.find((t) => t.id === active) as { path: string }).path) ? (
+            <ImageTab session={run} path={(tabs.find((t) => t.id === active) as { path: string }).path} />
+          ) : (
+            <FileTab session={run} path={(tabs.find((t) => t.id === active) as { path: string }).path} line={(tabs.find((t) => t.id === active) as { line?: number }).line} />
+          )}
+          {/* Previews stay mounted while another tab is up: a frame that is
+              unmounted is a page reloaded, and the scroll and state you left
+              it with are gone. Hidden, it keeps everything. */}
+          {tabs.map((t) =>
+            "artifactId" in t ? (
+              <div key={t.id} hidden={active !== t.id} className="h-full">
+                {(() => {
+                  const found = (artifacts.data ?? []).find((a) => a.id === t.artifactId);
+                  return found ? (
+                    <ArtifactTab
+                      artifact={found}
+                      sendTo={run.id}
+                      expanded={expanded === t.id}
+                      onExpanded={(v) => setExpanded(v ? t.id : null)}
+                    />
+                  ) : null;
+                })()}
+              </div>
+            ) : "port" in t ? (
+              <div key={t.id} hidden={active !== t.id} className="h-full">
+                <PreviewTab
+                  session={run}
+                  port={t.port}
+                  path={t.path}
+                  onPath={(path) => setTabs((held) => held.map((x) => (x.id === t.id ? { ...x, path } : x)))}
+                />
+              </div>
+            ) : null,
+          )}
+        </div>
+
+        {shell && (
+          <div hidden={!term} style={{ height: termHeight }} className="relative flex shrink-0 flex-col border-t border-line">
+            <div onPointerDown={startTermResize} title="Drag to resize" className="group/vhandle absolute inset-x-0 -top-1 z-10 h-2 cursor-row-resize">
+              <div className="absolute inset-x-0 top-1 h-px bg-transparent transition-colors duration-150 group-hover/vhandle:bg-slate group-active/vhandle:bg-slate" />
+            </div>
+            <div className="flex h-8 shrink-0 items-center gap-2 border-b border-line bg-panel px-3">
+              <span className="text-meta text-dim">Shell</span>
+              <span className="font-mono text-micro text-mute">{place.branch}</span>
+              <span className="ml-auto text-micro text-mute">{key("J")} hides</span>
+              <button
+                onClick={() => {
+                  setShell(false);
+                  setTerm(false);
+                }}
+                title="Close — this ends the shell and whatever it is running"
+                className="grid h-6 w-6 place-items-center rounded text-mute hover:bg-raise hover:text-bone"
+              >
+                <X className="h-3.5 w-3.5" strokeWidth={2} />
+              </button>
+            </div>
+            <div className="min-h-0 flex-1">
+              <Shell sessionId={run.id} ended={run.status === "Ended"} showing={term} onOpenPath={(p, line) => openFile(p, true, line)} />
+            </div>
+          </div>
+        )}
+
       </div>
+
+      {open && (
+        <div onPointerDown={startResize} title="Drag to resize" className="group/handle relative z-10 -mr-px w-1 shrink-0 cursor-col-resize">
+          <div className="absolute inset-y-0 left-0 w-px bg-transparent transition-colors duration-150 group-hover/handle:bg-slate group-active/handle:bg-slate" />
+        </div>
+      )}
+      {open && (
+        <Inspector
+          width={width}
+          session={run}
+          workspace={place.id}
+          branch={place.branch}
+          tab={side}
+          onTab={setSide}
+          onOpenFile={openFile}
+          onClose={() => setOpen(false)}
+          lead={lead}
+          team={team}
+          artifacts={myArtifacts}
+          onOpenArtifact={openArtifact}
+        />
+      )}
 
       {tabMenu.open && <ContextMenu at={tabMenu.open.at} items={tabItems(tabMenu.open.on)} onClose={tabMenu.close} />}
       {chipMenu.open && (

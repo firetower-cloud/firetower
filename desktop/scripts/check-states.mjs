@@ -1,0 +1,123 @@
+/**
+ * The states a screenshot cannot see.
+ *
+ * `shoot-app.mjs` photographs what a page looks like at rest. A pseudo-class
+ * is invisible to it — nothing in a static shot tells you what `:hover` does,
+ * and the rail's active destination shipped for two passes with a near-white
+ * glyph on a pale grey box because of that. The cause was a specificity
+ * split: `[data-theme="light"] .rbtn:hover` has three compound parts against
+ * `.rbtn[aria-current="page"]`'s two, so in light the hover won the
+ * *background* and the active rule kept the *colour*. Two rules each winning
+ * half an argument is a state nobody designed.
+ *
+ * So this drives the states rather than drawing them, and asserts the
+ * computed pair — which is the only form of this check that can fail.
+ *
+ *   pnpm mock &  pnpm dev &  pnpm check:states
+ */
+import { chromium } from "playwright-core";
+import { mkdirSync } from "node:fs";
+
+const APP = process.env.APP ?? "http://localhost:5273";
+const HERE = process.env.HERE ?? "http://localhost:4401";
+
+const REGISTRY = JSON.stringify([
+  { url: HERE, serverId: "o_1", org: "Acme", user: "kevin", token: "tok", addedAt: "2026-09-21T09:00:00Z" },
+]);
+
+const SHOTS = process.env.SHOTS ?? new URL("../../.firetower/reconcile/states", import.meta.url).pathname;
+mkdirSync(SHOTS, { recursive: true });
+
+const browser = await chromium.launch({ channel: "chrome" });
+let failed = 0;
+
+const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+
+/** Two colours are the same if their computed strings are. */
+const sameish = (a, b) => a.replace(/\s/g, "") === b.replace(/\s/g, "");
+
+for (const theme of ["light", "dark"]) {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 824 }, deviceScaleFactor: 2 });
+  await page.addInitScript(
+    ([registry, choice]) => {
+      window.localStorage.setItem("firetower.servers", registry);
+      window.localStorage.setItem("firetower.current", "o_1");
+      window.localStorage.setItem("firetower.theme", choice);
+    },
+    [REGISTRY, theme],
+  );
+  await page.goto(`${APP}/#/`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(1200);
+
+  /* What the rail is supposed to be, read off the tokens rather than
+     hardcoded — the values move and the relationship does not. */
+  const tok = await page.evaluate(() => {
+    const s = getComputedStyle(document.documentElement);
+    const of = (n) => s.getPropertyValue(n).trim();
+    return { bone: of("--color-bone"), panel: of("--color-panel"), dim: of("--color-dim"), text: of("--color-text") };
+  });
+  const asRgb = async (hex) =>
+    page.evaluate((h) => {
+      const d = document.createElement("div");
+      d.style.color = h;
+      document.body.append(d);
+      const v = getComputedStyle(d).color;
+      d.remove();
+      return v;
+    }, hex);
+
+  const read = async (name) => {
+    const el = page.getByRole("button", { name }).first();
+    const at = async () =>
+      el.evaluate((n) => {
+        const s = getComputedStyle(n);
+        return { color: s.color, background: s.backgroundColor };
+      });
+    const rest = await at();
+    await el.hover();
+    await page.waitForTimeout(220);
+    const hovered = await at();
+    /* And the crop, so the pair can be looked at as well as asserted — a
+       passing assertion about two colours still says nothing about whether
+       the result is any good. */
+    await page.locator("nav").first().screenshot({ path: `${SHOTS}/rail-${slug(name)}-hover-${theme}.png` });
+    /* Park the pointer somewhere harmless so the next read is clean. */
+    await page.mouse.move(640, 760);
+    await page.waitForTimeout(160);
+    return { rest, hovered };
+  };
+
+  const say = (ok, what, got) => {
+    if (!ok) failed++;
+    console.log(`  ${ok ? "ok    " : "FAILED"} ${theme}: ${what}${ok ? "" : ` — got ${JSON.stringify(got)}`}`);
+  };
+
+  /* **The destination you are already on.** Hover must change nothing: it is
+     already the loudest thing in the rail and has nothing to indicate. */
+  const current = await read("Dashboard");
+  const onBone = await asRgb(tok.bone);
+  const onPanel = await asRgb(tok.panel);
+  say(sameish(current.rest.background, onBone) && sameish(current.rest.color, onPanel),
+      "the current destination rests inverted", current.rest);
+  say(sameish(current.hovered.background, current.rest.background) &&
+      sameish(current.hovered.color, current.rest.color),
+      "hovering the current destination changes nothing", current.hovered);
+
+  /* And a destination you are not on: the container takes the state, and the
+     glyph goes from `--dim` to `--text`. Never the other way round. */
+  const other = await read("Machines");
+  const onDim = await asRgb(tok.dim);
+  const onText = await asRgb(tok.text);
+  say(sameish(other.rest.color, onDim), "another destination rests at --dim", other.rest);
+  say(sameish(other.hovered.color, onText) && other.hovered.background !== other.rest.background,
+      "hovering it lifts the glyph and brings a ground", other.hovered);
+
+  await page.close();
+}
+
+await browser.close();
+if (failed) {
+  console.error(`\n  ${failed} state(s) are not what the design says.`);
+  process.exit(1);
+}
+console.log("\n  Every driven state is what the design says.");
