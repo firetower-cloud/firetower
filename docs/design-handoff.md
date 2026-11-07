@@ -143,6 +143,12 @@ else marks the current thing with a raised surface. It inverts because the rail
 is the only place with no label to help — the glyph alone has to carry it, and
 a white pill was the same *direction* as hover, so on and hovered read alike.
 
+The box is **34px with an 11px radius** — 7px of padding around a 20px glyph,
+so it reads as a tight square rather than a button-sized tile. **Hover and
+current share that one box**, so the rail never changes size under the pointer;
+two different geometries there reads as cheap without anybody being able to say
+why.
+
 A list row keeps the raised treatment, because the name is already readable and
 the row only needs marking. It lost its shadow: white on the desk grey is
 already a ΔE 6.2 step, and a shadow on top of that is the same second signal.
@@ -463,6 +469,62 @@ needed — ember text on a pale ember tint — matching the dark pair's 8.34:1
 drives it to `#970100`, a dark red that no longer reads as ember. That is the
 same trade amber made at `#653400`. Whoever needs it should decide knowingly
 rather than discover it.
+
+### Every neutral holds R = G
+
+> **The shipped dark scale raises blue and never green.** `--color-ground`
+> through `--color-line`, and `--color-bone` through `--color-mute`: **`R = G`
+> on all ten, without exception.** Light must do the same.
+
+This is the rule behind `globals.css`'s own note that the hue is neutral on
+purpose — *"the warmth in this app belongs to the ember, not to the walls."*
+A controlled blue lift reads as a cool grey. Raising **green as well** reads as
+a different hue, and that is what the first light derivation did: every light
+neutral had green 1–3 points above red. Beside a neutral product it looked like
+a blue-grey cast, and it was correctly reported as one.
+
+Fixed across all nine, each holding its old L\* to within 0.15 so no contrast
+ratio moved by more than 0.03:
+
+| | before | after | |
+|---|---|---|---|
+| `--desk` | `#ECEEF1` | `#F2F2F3` | and lighter — see below |
+| `--raised` | `#F5F6F8` | `#F6F6F9` | |
+| `--sunk` | `#E6E8ED` | `#E8E8EC` | |
+| `--hair` | `#E3E5EA` | `#E5E5EA` | |
+| `--ink` | `#15161A` | `#161617` | 18.08:1 unchanged |
+| `--body` | `#45474F` | `#47474D` | 9.26 → 9.23:1 |
+| `--quiet` | `#787B85` | `#7B7B83` | 4.22 → 4.20:1 |
+| `--hush` | `#A4A7B1` | `#A6A6AF` | 2.40 → 2.42:1 |
+
+**The artifact's own dark branch had drifted too**, found while checking this.
+Its dark neutrals were not `globals.css`'s — `--desk` was `#060608` against the
+real `#0b0b0c` — and five of the nine carried the same green contamination.
+§4 says the dark branch *is* the current values; the drawing disagreed with the
+document. All nine are now `globals.css` byte for byte, so **both themes hold
+`R = G` on every neutral** and the light ladder mirrors dark's blue lift by
+role: surfaces +1 / +3 / +4 / +5, text +1 / +6 / +8 / +9.
+
+**The translucent blacks carried it too.** Thirty-one uses of
+`rgb(21 22 26 / …)` — every hover, shadow and scrim — are now
+`rgb(22 22 23 / …)`. **That is what made the rail hover look wrong**: a 5%
+black with a blue bias over a blue-cast ground concentrates the cast exactly
+where the eye is. The hover rule itself was never the problem, which is worth
+remembering — *a tint that looks wrong is usually the thing underneath it.*
+
+### The ground's lightness is a separate decision
+
+`--desk` went `#ECEEF1` → **`#F2F2F3`**: neutral, and ten points lighter.
+Deliberately **not** Codex's `#f6f6f6`, which was the comparison that prompted
+this. At `#f6f6f6` the chrome-to-sheet step falls to **ΔE 3.1**; at `#F2F2F3`
+it is **ΔE 4.5**, down from 6.2 and in the same family as the rest of the
+ladder (sheet → raised 3.4, raised → sunk 4.9).
+
+The step is doing structural work here that it may not be doing in the thing
+being compared to: **this window is a rounded card floating on that chrome**,
+not a flat page. Halving the only figure-ground boundary in the design to match
+a hex value is the wrong trade. `#f6f6f6` remains available and costs exactly
+the ΔE 3.1 above — it is a judgement, not a constraint.
 
 ### The greys were measured and left alone
 

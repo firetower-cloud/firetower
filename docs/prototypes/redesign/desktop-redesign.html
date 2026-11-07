@@ -23,22 +23,28 @@
    read warmer. That is the whole colour budget.
    ═══════════════════════════════════════════════════════════════════ */
 :root{
-  --desk:#ECEEF1;        /* the chrome the sheet sits on */
+  /* R = G on every neutral, B raised by a controlled amount — the rule the
+     shipped dark scale holds without exception (--color-ground through
+     --color-line are all R=G). The first light derivation raised green
+     1–3 points above red as well, which is a different hue rather than a
+     cooler one, and it is what read as a blue-grey cast beside a neutral
+     product. Each value below holds its old L* to within 0.15. */
+  --desk:#F2F2F3;        /* the chrome the sheet sits on */
   --sheet:#FFFFFF;       /* the one white: the page you are reading */
-  --raised:#F5F6F8;      /* a control, a chip, a hovered row */
+  --raised:#F6F6F9;      /* a control, a chip, a hovered row */
   /* These two measure ΔE 1.1 apart in light, where dark holds a clean 3.7.
      **Left overlapping on purpose.** Separating them means a darker hairline,
      and this design is trying to draw fewer and fainter lines, not stronger
      ones. They are never adjacent — a fill and a rule in the same 2px of
      screen does not occur — so the overlap costs nothing and closing it would
      cost the thing the pass is for. Recorded rather than silently "fixed". */
-  --sunk:#E6E8ED;        /* a pressed chip, a recessed track */
-  --hair:#E3E5EA;        /* the rare hairline */
+  --sunk:#E8E8EC;        /* a pressed chip, a recessed track */
+  --hair:#E5E5EA;        /* the rare hairline */
 
-  --ink:#15161A;         /* a title, the one sentence     18.1:1 */
-  --body:#45474F;        /* what somebody reads            9.3:1 */
-  --quiet:#787B85;       /* secondary                      4.2:1 */
-  --hush:#A4A7B1;        /* a timestamp. The faintest.     2.4:1 */
+  --ink:#161617;         /* a title, the one sentence     18.1:1 */
+  --body:#47474D;        /* what somebody reads            9.3:1 */
+  --quiet:#7B7B83;       /* secondary                      4.2:1 */
+  --hush:#A6A6AF;        /* a timestamp. The faintest.     2.4:1 */
 
   --ember:#FF5E1A;       /* the only saturated thing on the screen */
   --ember-ink:#BF4714;   /* ember where it has to be read  5.1:1 */
@@ -84,10 +90,10 @@
   --touched:#EAF6EE;          /* a line this session wrote */
   --touched-ink:#2F7D52;
 
-  --lift-1:0 1px 2px rgb(21 22 26 / .05);
-  --lift-2:0 2px 6px rgb(21 22 26 / .06), 0 0 0 1px rgb(21 22 26 / .04);
-  --lift-3:0 18px 44px -18px rgb(21 22 26 / .26), 0 2px 8px rgb(21 22 26 / .05);
-  --window-lift:0 1px 1px rgb(21 22 26 / .10), 0 32px 70px -26px rgb(21 22 26 / .34);
+  --lift-1:0 1px 2px rgb(22 22 23 / .05);
+  --lift-2:0 2px 6px rgb(22 22 23 / .06), 0 0 0 1px rgb(22 22 23 / .04);
+  --lift-3:0 18px 44px -18px rgb(22 22 23 / .26), 0 2px 8px rgb(22 22 23 / .05);
+  --window-lift:0 1px 1px rgb(22 22 23 / .10), 0 32px 70px -26px rgb(22 22 23 / .34);
   --scrim:linear-gradient(to top, var(--sheet) 62%, rgb(255 255 255 / 0));
 
   --swift:cubic-bezier(.16,1,.3,1);
@@ -99,8 +105,10 @@
   color-scheme:light;
 }
 :root[data-theme="dark"]{
-  --desk:#060608; --sheet:#131317; --raised:#1B1C20; --sunk:#232429; --hair:#2A2C31;
-  --ink:#F5F5F7; --body:#C6C8CF; --quiet:#8B8E98; --hush:#60636D;
+  /* globals.css verbatim — the handoff says the dark branch *is* the
+     current values, and this artifact had drifted from them. */
+  --desk:#0B0B0C; --sheet:#111113; --raised:#17171A; --sunk:#1E1E22; --hair:#26262B;
+  --ink:#F4F4F5; --body:#C8C8CE; --quiet:#8B8B93; --hush:#5E5E67;
   --ember:#FF6B2C; --ember-ink:#FF9A6B; --brick:#E5645A;
   /* globals.css verbatim. --color-amber-soft is the one proposed addition and
      equals --color-amber here, so dark does not move at all. */
@@ -195,7 +203,7 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
    first letter of the org, so Acme and Apex are both "A". */
 .ftid{display:inline-flex;align-items:center;gap:8px;height:28px;padding:0 9px 0 6px;border-radius:9px;
   transition:background var(--quick) var(--swift)}
-.ftid:hover{background:rgb(21 22 26 / .05)}
+.ftid:hover{background:rgb(22 22 23 / .05)}
 :root[data-theme="dark"] .ftid:hover{background:rgb(255 255 255 / .06)}
 .mark{display:grid;place-items:center;flex:none;border-radius:7px;background:var(--raised);
   color:var(--quiet);font-family:"Archivo Narrow",var(--font);font-weight:530;letter-spacing:.02em;
@@ -208,7 +216,7 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
 .tb-right{margin-left:auto;display:flex;align-items:center;gap:2px}
 .gbtn{width:28px;height:28px;border-radius:8px;display:grid;place-items:center;color:var(--hush);flex:none;
   transition:background var(--quick) var(--swift),color var(--quick) var(--swift)}
-.gbtn:hover{background:rgb(21 22 26 / .05);color:var(--body)}
+.gbtn:hover{background:rgb(22 22 23 / .05);color:var(--body)}
 :root[data-theme="dark"] .gbtn:hover{background:rgb(255 255 255 / .06)}
 
 .body{display:flex;min-height:0;flex:1;position:relative}
@@ -218,19 +226,22 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
    selected destination is the sheet's own handle. Nothing else fills. */
 .rail{width:62px;flex:none;display:flex;flex-direction:column;align-items:center;gap:4px;
   padding:2px 0 14px;position:relative;z-index:5}
-.rbtn{width:42px;height:42px;border-radius:13px;display:grid;place-items:center;color:var(--quiet);
+/* 34px around a 20px glyph — 7px of padding, so it reads as a tight square
+   rather than a button-sized tile. Hover and current share this box, so the
+   rail never changes size under the pointer. */
+.rbtn{width:34px;height:34px;border-radius:11px;display:grid;place-items:center;color:var(--quiet);
   position:relative;flex:none;transition:background var(--quick) var(--swift),color var(--quick) var(--swift),
   box-shadow var(--quick) var(--swift)}
-.rbtn:hover{background:rgb(21 22 26 / .05);color:var(--body)}
+.rbtn:hover{background:rgb(22 22 23 / .05);color:var(--body)}
 :root[data-theme="dark"] .rbtn:hover{background:rgb(255 255 255 / .06)}
 /* The one place in the chrome that inverts. Everywhere else marks the
    current thing with a raised surface; the rail has no label to help, so
    the glyph alone has to carry it and a fill is the only unambiguous
    answer. A white pill was the same direction as hover and read as one. */
 .rbtn[aria-current="page"]{background:var(--ink);color:var(--sheet)}
-.rbtn[data-peek="true"]{background:rgb(21 22 26 / .07);color:var(--body)}
+.rbtn[data-peek="true"]{background:rgb(22 22 23 / .07);color:var(--body)}
 :root[data-theme="dark"] .rbtn[data-peek="true"]{background:rgb(255 255 255 / .07)}
-.rbtn .news{position:absolute;top:9px;right:9px;width:5.5px;height:5.5px;border-radius:99px;
+.rbtn .news{position:absolute;top:5px;right:5px;width:5.5px;height:5.5px;border-radius:99px;
   background:var(--body);box-shadow:0 0 0 2px var(--desk)}
 .rgrow{flex:1}
 .rail .sep{width:22px;height:1px;background:var(--sunk);margin:7px 0;flex:none}
@@ -257,7 +268,7 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
 .plabel:first-child{padding-top:4px}
 .prow{display:flex;align-items:center;gap:9px;width:100%;min-height:36px;padding:5px 9px;border-radius:9px;
   color:var(--body);transition:background var(--quick) var(--swift),color var(--quick) var(--swift)}
-.prow:hover{background:rgb(21 22 26 / .045)}
+.prow:hover{background:rgb(22 22 23 / .045)}
 :root[data-theme="dark"] .prow:hover{background:rgb(255 255 255 / .05)}
 .prow[aria-current="true"]{background:var(--sheet);color:var(--ink)}
 .prow .lbl{flex:1;min-width:0;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
@@ -376,7 +387,7 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
   border-radius:22px;box-shadow:var(--lift-3);padding:16px 16px 12px;
   transition:box-shadow 220ms var(--swift)}
 :root[data-theme="dark"] .composer{background:var(--raised)}
-.composer:focus-within{box-shadow:0 22px 52px -18px rgb(21 22 26 / .3), 0 2px 10px rgb(21 22 26 / .07)}
+.composer:focus-within{box-shadow:0 22px 52px -18px rgb(22 22 23 / .3), 0 2px 10px rgb(22 22 23 / .07)}
 .composer .in{width:100%;font-size:18px;line-height:1.5;color:var(--ink);letter-spacing:-.004em;min-height:26px}
 .composer .bar{display:flex;align-items:center;gap:3px;margin-top:12px}
 .chip{display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 10px;border-radius:99px;
@@ -406,7 +417,7 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
 /* ── A menu ──────────────────────────────────────────────────────── */
 .scrim{position:absolute;inset:0;z-index:50}
 .pop{position:absolute;z-index:60;background:var(--sheet);border-radius:16px;
-  box-shadow:var(--lift-3),0 0 0 1px rgb(21 22 26 / .055);
+  box-shadow:var(--lift-3),0 0 0 1px rgb(22 22 23 / .055);
   padding:7px;min-width:244px;animation:pop 170ms var(--swift);transform-origin:bottom left}
 :root[data-theme="dark"] .pop{background:var(--raised);box-shadow:var(--lift-3),0 0 0 1px rgb(255 255 255 / .06)}
 @keyframes pop{from{opacity:0;transform:translateY(6px) scale(.97)}}
@@ -834,7 +845,7 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
 
 /* The note card, where you pointed. */
 .notecard{position:absolute;z-index:70;width:360px;background:var(--sheet);border-radius:16px;
-  box-shadow:var(--lift-3),0 0 0 1px rgb(21 22 26 / .055);padding:6px;animation:pop-top 170ms var(--swift)}
+  box-shadow:var(--lift-3),0 0 0 1px rgb(22 22 23 / .055);padding:6px;animation:pop-top 170ms var(--swift)}
 :root[data-theme="dark"] .notecard{background:var(--raised);box-shadow:var(--lift-3),0 0 0 1px rgb(255 255 255 / .07)}
 .notecard .quote,.spotnote .quote{margin:4px 6px 0;padding:9px 11px;border-radius:10px;background:var(--raised);
   font-size:14px;line-height:1.5;color:var(--body);max-height:66px;overflow:hidden;position:relative}
@@ -844,7 +855,7 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
 .notecard .qhead,.spotnote .qhead .gbtn:hover{color:var(--ink)}
 .notecard .qhead,.spotnote .qhead .lbl{flex:1;min-width:0;font-size:13.5px;color:var(--hush);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.notecard:focus-within{box-shadow:var(--lift-3),0 0 0 1px rgb(21 22 26 / .14)}
+.notecard:focus-within{box-shadow:var(--lift-3),0 0 0 1px rgb(22 22 23 / .14)}
 .notecard textarea:focus-visible{outline:none}
 .notecard textarea{display:block;width:calc(100% - 12px);margin:8px 6px 0;min-height:64px;
   font-size:15.5px;line-height:1.55;color:var(--ink);padding:2px}
@@ -865,7 +876,7 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
   background:rgb(255 255 255 / .16);color:var(--sheet);flex:none}
 .notepill .go:hover{background:rgb(255 255 255 / .26)}
 :root[data-theme="dark"] .notepill{background:var(--sheet);color:var(--ink)}
-:root[data-theme="dark"] .notepill .go{background:rgb(21 22 26 / .1);color:var(--ink)}
+:root[data-theme="dark"] .notepill .go{background:rgb(22 22 23 / .1);color:var(--ink)}
 </style>
 
 <style>
@@ -1139,12 +1150,12 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
    question. Three steps that replace each other, and nothing commits
    until Save.
    ═══════════════════════════════════════════════════════════════════ */
-.veil{position:absolute;inset:0;z-index:80;background:rgb(21 22 26 / .34);
+.veil{position:absolute;inset:0;z-index:80;background:rgb(22 22 23 / .34);
   display:grid;place-items:center;padding:40px;animation:veil 160ms ease-out}
 :root[data-theme="dark"] .veil{background:rgb(0 0 0 / .52)}
 @keyframes veil{from{opacity:0}}
 .sheet2{width:470px;max-height:100%;display:flex;flex-direction:column;background:var(--sheet);
-  border-radius:20px;box-shadow:var(--lift-3),0 0 0 1px rgb(21 22 26 / .07);overflow:hidden;
+  border-radius:20px;box-shadow:var(--lift-3),0 0 0 1px rgb(22 22 23 / .07);overflow:hidden;
   animation:sheet2 200ms var(--swift)}
 :root[data-theme="dark"] .sheet2{background:var(--raised);box-shadow:var(--lift-3),0 0 0 1px rgb(255 255 255 / .08)}
 @keyframes sheet2{from{opacity:0;transform:translateY(10px) scale(.985)}}
@@ -1374,11 +1385,11 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
    so every result carries its server as a mark; ⌘P is this workspace
    and shows no marks, because everything in it is from here.
    ═══════════════════════════════════════════════════════════════════ */
-.kveil{position:absolute;inset:0;z-index:90;background:rgb(21 22 26 / .30);
+.kveil{position:absolute;inset:0;z-index:90;background:rgb(22 22 23 / .30);
   display:grid;place-items:start center;padding:88px 40px 40px;animation:veil 140ms ease-out}
 :root[data-theme="dark"] .kveil{background:rgb(0 0 0 / .5)}
 .kbox{width:580px;max-width:100%;max-height:100%;display:flex;flex-direction:column;background:var(--sheet);
-  border-radius:18px;box-shadow:var(--lift-3),0 0 0 1px rgb(21 22 26 / .07);overflow:hidden;
+  border-radius:18px;box-shadow:var(--lift-3),0 0 0 1px rgb(22 22 23 / .07);overflow:hidden;
   animation:sheet2 180ms var(--swift)}
 :root[data-theme="dark"] .kbox{background:var(--raised);box-shadow:var(--lift-3),0 0 0 1px rgb(255 255 255 / .08)}
 .kfield{height:54px;flex:none;display:flex;align-items:center;gap:12px;padding:0 18px}
@@ -1449,7 +1460,7 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
    CONFIRM, AND A SCREEN THAT THREW
    ═══════════════════════════════════════════════════════════════════ */
 .cbox{width:430px;background:var(--sheet);border-radius:18px;overflow:hidden;
-  box-shadow:var(--lift-3),0 0 0 1px rgb(21 22 26 / .07);animation:sheet2 180ms var(--swift)}
+  box-shadow:var(--lift-3),0 0 0 1px rgb(22 22 23 / .07);animation:sheet2 180ms var(--swift)}
 :root[data-theme="dark"] .cbox{background:var(--raised);box-shadow:var(--lift-3),0 0 0 1px rgb(255 255 255 / .08)}
 .cbox .in2{padding:22px 24px 18px}
 .cbox h2{font-size:19px;line-height:1.3;letter-spacing:-.014em;font-weight:530;color:var(--ink)}
@@ -1583,7 +1594,7 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
 .imgstage{flex:1;min-height:0;position:relative;margin:0 16px;border-radius:14px;background:var(--sunk);
   display:grid;place-items:center;overflow:hidden}
 .imgfake{width:62%;aspect-ratio:16/10;border-radius:8px;background:var(--sheet);overflow:hidden;
-  box-shadow:0 10px 30px -14px rgb(21 22 26 / .3)}
+  box-shadow:0 10px 30px -14px rgb(22 22 23 / .3)}
 :root[data-theme="dark"] .imgfake{background:#17181c}
 .if-bar{height:17px;display:flex;align-items:center;gap:4px;padding:0 7px;background:var(--raised)}
 .if-bar i{width:5px;height:5px;border-radius:99px;background:var(--sunk)}
@@ -1598,14 +1609,14 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
   background:var(--ink);color:var(--sheet);font-size:12px;font-weight:530;display:grid;place-items:center;
   box-shadow:0 0 0 3px var(--sheet)}
 .spotnote{position:absolute;transform:translate(14px,-6px);width:264px;background:var(--sheet);
-  border-radius:13px;padding:11px 12px 10px;box-shadow:0 20px 48px -16px rgb(21 22 26 / .34), 0 0 0 1px var(--hair)}
+  border-radius:13px;padding:11px 12px 10px;box-shadow:0 20px 48px -16px rgb(22 22 23 / .34), 0 0 0 1px var(--hair)}
 :root[data-theme="dark"] .spotnote{background:var(--raised)}
 .imgfoot{margin:12px 16px 0;font-size:13.5px;line-height:1.55;color:var(--quiet);max-width:70ch}
 
 /* ═══ ⌘F ═══════════════════════════════════════════════════════════ */
 .findbar{position:absolute;top:10px;right:18px;z-index:9;display:flex;align-items:center;gap:5px;
   height:38px;padding:0 6px 0 11px;border-radius:11px;background:var(--sheet);
-  box-shadow:0 16px 40px -14px rgb(21 22 26 / .3), 0 0 0 1px var(--hair)}
+  box-shadow:0 16px 40px -14px rgb(22 22 23 / .3), 0 0 0 1px var(--hair)}
 :root[data-theme="dark"] .findbar{background:var(--raised)}
 .findbar .g{color:var(--hush);display:grid;place-items:center}
 .findbar input{width:168px;font-size:14.5px;color:var(--ink);background:transparent}
@@ -1635,7 +1646,7 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
 /* ═══ A MENU AT THE POINTER ════════════════════════════════════════ */
 .scrim.bare{background:transparent}
 .ctx{position:absolute;z-index:40;width:224px;padding:5px;border-radius:12px;background:var(--sheet);
-  box-shadow:0 24px 60px -18px rgb(21 22 26 / .38), 0 0 0 1px var(--hair)}
+  box-shadow:0 24px 60px -18px rgb(22 22 23 / .38), 0 0 0 1px var(--hair)}
 :root[data-theme="dark"] .ctx{background:var(--raised)}
 .ctx button{display:flex;align-items:center;gap:10px;width:100%;height:30px;padding:0 9px;border-radius:8px;
   font-size:14.5px;color:var(--ink);text-align:left}
@@ -1648,7 +1659,7 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
 
 /* ═══ A DIALOG THAT REFUSES ════════════════════════════════════════ */
 .dlg{position:relative;width:428px;max-height:100%;overflow:auto;padding:22px 22px 0;border-radius:17px;
-  background:var(--sheet);box-shadow:var(--lift-3),0 0 0 1px rgb(21 22 26 / .07);
+  background:var(--sheet);box-shadow:var(--lift-3),0 0 0 1px rgb(22 22 23 / .07);
   animation:sheet2 200ms var(--swift)}
 :root[data-theme="dark"] .dlg{background:var(--raised);box-shadow:var(--lift-3),0 0 0 1px rgb(255 255 255 / .08)}
 .dlg .x{position:absolute;top:12px;right:12px}
@@ -1734,7 +1745,7 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
 .cs-tile{display:flex;flex-direction:column;gap:8px;text-align:left;cursor:pointer;border-radius:12px}
 .cs-frame{display:block;position:relative;overflow:hidden;border-radius:9px;background:var(--desk);
   box-shadow:0 0 0 1px var(--hair);transition:box-shadow var(--quick) var(--swift)}
-.cs-tile:hover .cs-frame{box-shadow:0 0 0 1.5px var(--quiet),0 10px 26px -12px rgb(21 22 26 / .3)}
+.cs-tile:hover .cs-frame{box-shadow:0 0 0 1.5px var(--quiet),0 10px 26px -12px rgb(22 22 23 / .3)}
 .cs-tile:focus-visible .cs-frame{box-shadow:0 0 0 2px var(--ink)}
 /* The tile is a picture of a screen, not a screen: nothing inside it is
    clickable, so a press always means "open this one full size". */
@@ -1765,7 +1776,7 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
 /* Softer than the docked card's drop. That one floats over scrolling text
    and has to separate itself from it; this sits in still white with
    content above and below, where a 44px shadow reads as a dialog. */
-.mid .composer{box-shadow:0 14px 36px -16px rgb(21 22 26 / .22), 0 2px 6px rgb(21 22 26 / .05)}
+.mid .composer{box-shadow:0 14px 36px -16px rgb(22 22 23 / .22), 0 2px 6px rgb(22 22 23 / .05)}
 .mid .composer .in{min-height:64px;font-size:18px}
 
 /* One shape, two contents. *Agents waiting for you* is work asking for
@@ -4074,6 +4085,11 @@ const SPEC_DELTA=[
   ["Surface tokens — usage","tidied","No value changes. <code>--sunk</code> now carries every recessed <i>fill</i> and <code>--hair</code> every <i>rule</i>; the two had drifted across each other's jobs. Invisible on screen, but it is what lets either be retuned later without hunting."],
   ["desktop/src/ui/Dashboard.tsx","replaced","<b>The home replaces it.</b> A greeting with three times of day, the composer in the middle of the page, then <i>Agents waiting for you</i> and <i>Recent artifacts</i>. Approved from <code>docs/prototypes/redesign/home-alternative.html</code> and folded in here so there is one drawing of it; that file is now a record of the exploration. Two chips carry an ember dot and the rest is a count — the constant is <code>DOTTED = 2</code>."],
   ["What the home costs","noted","The answer to <i>is anything waiting on me</i> moves from a 34px headline near the top to a <b>14.5px chip about two thirds down</b>, and the agent's own question leaves the page. <b>What still carries the thesis is untouched:</b> <code>App.tsx:85</code> and <code>:97</code> — the dock badge and the island — sum across every Firetower and do not change."],
+  ["web/app/globals.css — light neutrals","corrected","<b>A hue bug, not a taste.</b> Every shipped dark neutral holds <code>R = G</code> exactly — <code>--color-ground</code> through <code>--color-line</code>, and <code>--color-bone</code> through <code>--color-mute</code>. The first light derivation raised green 1–3 points above red as well, which is a different hue rather than a cooler one, and it is what read as a blue-grey cast. Every light neutral now holds <code>R = G</code> with B raised by the amount its dark counterpart uses. <b>Each value keeps its old L* to within 0.15</b>, so no contrast ratio moves by more than 0.03."],
+  ["The artifact's dark branch","corrected","<b>Found while checking the light cast.</b> This document's dark neutrals were <i>not</i> <code>globals.css</code>'s — <code>--desk</code> was <code>#060608</code> against the real <code>#0b0b0c</code>, and five of the nine carried the same green contamination. The handoff says the dark branch <i>is</i> the current values; the drawing disagreed with it. All nine are now <code>globals.css</code> byte for byte, and <b>both themes hold <code>R = G</code> on every neutral</b>."],
+  ["Translucent blacks","corrected","The 31 uses of <code>rgb(21 22 26 / …)</code> — hovers, shadows, scrims — carried the same cast and concentrated it. Now <code>rgb(22 22 23 / …)</code>. <b>This is what made the rail hover look wrong</b>; it was never the hover rule."],
+  ["--color-ground, lightness","modified","<b>#eceef1 → #F2F2F3.</b> Lighter and exactly neutral. Deliberately <i>not</i> Codex's <code>#f6f6f6</code>: the chrome-to-sheet step would fall to <b>ΔE 3.1</b>, and this window is a rounded card floating on that chrome rather than a flat page. At <code>#F2F2F3</code> the step is <b>ΔE 4.5</b> — down from 6.2, in the same family as the rest of the ladder (3.4, 4.9). <b>#f6f6f6 is available if the softer edge is wanted; say so.</b>"],
+  ["desktop/src/styles.css — the rail box","modified","<b>42px → 34px, radius 13 → 11.</b> 7px of padding around a 20px glyph rather than 11, so the current destination reads as a tight square rather than a button-sized tile. Hover and current share the one box, so the rail does not change size under the pointer. The news pip moves with it: <code>top/right 9px → 5px</code>."],
   ["Type scale","modified","<b>Every size below 28px rises by 1px.</b> One uniform step, applied to the tier rather than to screens — it raises the operating tiers the complaint named and is the only change that cannot disturb the gaps between them. Row minimums grow 2px to match (34→36, 40→42, 44→46, 54→58). Costs one row in a configuration list at 1280 × 824; the panel loses none."],
   ["Type weights","modified","<b>Fourteen weights become three — 400, 500, 530.</b> Mechanical: 420/450→400, 460/480/500/520→500, 540/560/600/650/700→530."],
   ["Mono","corrected","Skill names, profile names and dropped-folder names move to the text face. Paths, branches, codes, keys and diffs keep the mono face. The test: <i>would you ever read it character by character?</i>"],
