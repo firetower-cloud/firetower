@@ -2145,11 +2145,11 @@ const S={theme:"light",panel:"pinned",peek:null,menu:null,tower:"nw",
   ws:"small",                // small | many | done | none
   wsby:"status",             // status | repo
   teamfail:false,           // a child that failed, in the team rail
-  /* The team row, second pass. "b" ships: status mark leading, the status
-     *word* gone from the second line, the agent mark moved to the right.
-     "now" is the shipped row, kept so the comparison is the argument;
-     "a" drops the second line altogether. */
-  teamv:"b",
+  /* The team row, second pass. **"a" ships**: one line — status mark, name,
+     agent mark, age — for every row including the manager. "b" keeps the
+     check-in and is the rejected alternative, kept switchable because the
+     comparison is the argument. "now" is the row as it stands in the product. */
+  teamv:"a",
   teamup:false,             // the manager as a link up to its parent
   home:"both",               // both | nowait | noart | neither
   when:null,                 // force a greeting: morning | afternoon | evening
@@ -2261,17 +2261,27 @@ const WORKSPACES=()=> S.ws==="many" ? WS_MANY
 
 const BEAT_ORDER = { blocked:0, working:1, done:2, broken:3 };
 const BEAT_BAND  = { blocked:"Needs you", working:"Working", done:"Done", broken:"Broken" };
-/* **In Status mode the rows carry no mark at all.** The band above them
-   already says "Needs you" and counts them, so a dot on every row repeats
-   the heading — and measuring it found worse: the Dashboard's chips, the
-   rail avatar and a dotted panel put *five* ember marks on one screen
-   against a budget of three. Dropping the dot is the better drawing and it
-   takes the panel to zero.
+/* **Every row carries its status dot, in both modes, with no cap.**
+   `BEAT_TONE`'s own tones: ember blocked, slate working, sage done, brick
+   broken.
 
-   In Repository mode the band is a repository, so status has nowhere else
-   to live and the dot comes back — capped, because the same arithmetic
-   applies. */
-const EMBER_CAP = 2;
+   This overrules two things this document previously argued and measured.
+   It drew *no* dot in Status mode — the band already says "Needs you" and
+   counts them — and it capped ember in Repository mode, because a dot per
+   blocked row put five ember marks on one screen against a budget of three.
+   The arithmetic was real. **The user has seen it rendered both ways and
+   chosen this one**, and it is a decision rather than an oversight.
+
+   What the measurement missed is what the switch feels like in the hand.
+   A dot that exists in one mode and vanishes in the other makes the same
+   panel read as alive and then dead, with nothing on screen explaining the
+   difference — and a capped row is a blocked workspace drawn exactly like a
+   calm one, which is worse than a loud panel. **The dot is not mode
+   dependent, and the cap is gone.**
+
+   The ember budget still holds everywhere else — the Dashboard, the team
+   rail, the chips. This panel is an exemption with a reason, not a repeal;
+   see the handoff, section 4. */
 
 function panel(){
   const ws = WORKSPACES();
@@ -2285,11 +2295,11 @@ function panel(){
   if(nothing){
     body = `<p class="pnone">Nothing running yet. Start something on the home and it appears here.</p>`;
   } else if(grouped){
-    const by={}; let embers=0; ws.forEach(w=>(by[w.repo]=by[w.repo]||[]).push(w));
+    const by={}; ws.forEach(w=>(by[w.repo]=by[w.repo]||[]).push(w));
     body = Object.keys(by).map(r=>
       `<div class="prepo">${ic("folder-git-2",14)}<span>${esc(r)}</span><span class="n">${by[r].length}</span></div>`
       + by[r].sort((x,y)=>BEAT_ORDER[x.beat]-BEAT_ORDER[y.beat])
-          .map(w=>wrow(w, w.beat==="blocked" && ++embers > EMBER_CAP)).join("")).join("");
+          .map(w=>wrow(w)).join("")).join("");
   } else {
     const sorted=[...ws].sort((x,y)=>BEAT_ORDER[x.beat]-BEAT_ORDER[y.beat]);
     let last=null;
@@ -2297,7 +2307,7 @@ function panel(){
       const turn = w.beat!==last; last=w.beat;
       const n = sorted.filter(x=>x.beat===w.beat).length;
       return (turn?`<div class="pband"><span>${BEAT_BAND[w.beat]}</span><i></i><span class="n">${n}</span></div>`:"")
-        + wrow(w, true);   /* the band says the state; the row does not repeat it */
+        + wrow(w);   /* the band groups; the dot is the row's own and stays */
     }).join("");
   }
   return `<div class="phead">
@@ -2311,13 +2321,13 @@ function panel(){
       ${body}
     </div>`;
 }
-/* Past the cap a blocked row keeps its place and loses its dot; the band's
-   count still says how many there are. */
-function wrow(w, capped){
+/* One row shape for both modes. The dot is never conditional: a workspace
+   that needs you looks the same wherever the panel has put it. */
+function wrow(w){
   const on = S.rt==="work" && w.id===WS.id;
   return `<button class="prow" data-act="open" aria-current="${!!on}"
     title="${esc(w.name)} — ${BEAT_BAND[w.beat].toLowerCase()}">
-    <span class="mk">${capped?"":`<i class="wdot" data-t="${w.beat}"></i>`}</span>
+    <span class="mk"><i class="wdot" data-t="${w.beat}"></i></span>
     <span class="lbl">${esc(w.name)}</span><span class="age">${w.age}</span></button>`;
 }
 
@@ -2622,16 +2632,24 @@ function team(){
       <span class="rt">${here?`<span class="here-badge">here</span>`:beatMark(x.state)}
         <span class="age">${x.age}</span></span></button>`;
 
-  /* A · the whole second line goes. */
+  /* A · **what ships.** The whole second line goes, and every row carries a
+     status mark — the manager included, in both of its states. The `here`
+     chip stays beside the name: it says *where you are*, which is placement,
+     not status, and the two facts both belong on the one line. */
   const rowA=(x,here)=>`<button class="tm" data-act="noop" data-here="${!!here}">
-      <span class="lead">${here?"":beatMark(x.state)}</span>
+      <span class="lead">${beatMark(x.state)}</span>
       <span class="tx one"><b>${esc(x.name)}</b>${here?`<span class="here-badge">here</span>`:""}</span>
       <span class="rt"><span class="ag">${AGENT[x.agent](15)}</span>
         <span class="age">${x.age}</span></span></button>`;
 
-  /* B · the status *word* goes; what it is doing stays. */
+  /* B · **the rejected alternative, kept.** Only the status *word* goes and
+     the line keeps the check-in. It is genuinely the more informative row —
+     “Two readings of the band — which do you want?” says what the ember is
+     *about*, where a bare name says only that something is there. It was
+     drawn, rendered switchable against A, and **not chosen**: the panel is
+     quieter as one line, and both of those things are true at once. */
   const rowB=(x,here)=>`<button class="tm" data-act="noop" data-here="${!!here}">
-      <span class="lead">${here?"":beatMark(x.state)}</span>
+      <span class="lead">${beatMark(x.state)}</span>
       <span class="tx"><b>${esc(x.name)}</b>${here?`<span class="here-badge">here</span>`:""}
         <s>${esc(x.sub||x.note||"")}</s></span>
       <span class="rt"><span class="ag">${AGENT[x.agent](15)}</span>
@@ -4375,10 +4393,12 @@ const SPEC_DELTA=[
   ["A child that failed","added","<code>OverviewTab.tsx:53</code> returns <code>failed</code> and <code>:124</code> draws it; this document could not draw it at all. Added, in brick — and as a <b>warning glyph rather than the product's round pip</b>, because a brick circle two rows under an ember circle is one shape told apart by hue alone, which is the one thing <code>STYLE.md</code> forbids."],
   ["The plan's progress bar","added","<code>OverviewTab.tsx:325</code> draws one in sage. This document had the count and not the bar."],
   ["The team row — which mark leads","modified","<b>The status mark moves to the left edge; the agent mark takes its place on the right.</b> <code>OverviewTab.tsx:203</code> puts <code>AgentMark</code> first and <code>TeamMark</code> last, so <i>which model is running</i> was the first thing in the row and <i>whether it needs you</i> was the last — past the name, past a second line, at the far edge beside the age. The one you scan for was in the least prominent position. Both are already marks, so the swap costs the system nothing and adds no token."],
-  ["The status word leaves the second line","modified","<b>The status was said twice.</b> <code>:208</code> builds the line as <code>checkIn ?? spawnReason</code> and prefixes <code>labelOf(status)</code> <i>only when there is no check-in</i> — so the word was already absent half the time, and present as a prefix the other half, while the glyph said the same thing six inches to the right. Dropping the prefix makes the line one thing always: <b>what the agent is doing, or why it exists.</b> The status is the mark, and only the mark."],
-  ["Two row shapes were drawn, not one","noted","<b>(a)</b> dropped the second line entirely — name, mark, time. <b>(b)</b> dropped only the status word. Rendered side by side, (a) deletes the check-in, which is the most useful string in the rail: <i>&ldquo;Two readings of the band — which do you want?&rdquo;</i> tells you what the ember is <i>about</i>, and a bare <i>Quota band thresholds</i> does not. <b>(b) ships</b>; (a) stays in the document, switchable, as the argument. See <b>Workspace → Team row</b>."],
-  ["desktop/src/ui/OverviewTab.tsx — ManagerRow does two jobs","corrected","<b>One component, two meanings, and only one of them was drawn.</b> <code>:168</code> is a <code>div</code> when <code>active</code> and a <code>button</code> that navigates when it is not. <b>Active it correctly has no status</b> — you are standing in it, and its state is the title bar and the composer. <b>As a link up to the parent it is another workspace you are not looking at</b>, and its status is worth exactly what a sibling's is; it now carries one. The <code>here</code> chip moves onto the name line: it is not a status, and at ~40px it does not fit a mark slot."],
-  ["Ember on a waiting parent","noted","<b>The parent link draws <i>working</i>, not ember.</b> A manager blocked on its own child is <code>Working</code> in <code>api/view.ts</code>'s terms — <code>NeedsYou</code> means waiting on <i>you</i>. Drawing the parent ember would have put a fourth one in this rail for a state no human is being asked about, and is exactly how ember stops meaning one thing. Counted in a render: <b>three</b>, unchanged by the move, in every variant including the busiest."],
+  ["The second line goes entirely","modified","<b>The team row is one line: status mark, name, agent mark, age.</b> No check-in, no <code>spawnReason</code>, no status word. <code>:208</code> built that line as <code>checkIn ?? spawnReason</code> prefixed with <code>labelOf(status)</code> <i>only when there was no check-in</i> — so the status was said twice half the time and the line changed shape depending on whether an agent had spoken. One line, always the same shape."],
+  ["Keeping the check-in — <b>rejected</b>","noted","<b>Two shapes were drawn and rendered switchable, and the quieter one won.</b> (b) kept the check-in and dropped only the status word; it is genuinely the more informative row — <i>&ldquo;Two readings of the band — which do you want?&rdquo;</i> says what the ember is <i>about</i>, where a bare <i>Quota band thresholds</i> says only that something is there. <b>It was not chosen.</b> Both are true at once: the check-in tells you more, and the panel is calmer as one line. It stays in the document under <b>Workspace → Team row · B</b> so the comparison survives the decision."],
+  ["desktop/src/ui/OverviewTab.tsx — ManagerRow","corrected","<b>The manager carries a status mark, in both of its states, like every other row.</b> <code>:168</code> is a <code>div</code> when <code>active</code> and a navigating <code>button</code> when it is not, and <i>neither</i> drew one — <code>ManagerRow</code> renders the literal word <code>manager</code> where a status would be. An earlier draft here argued the active one needs no mark, since you are standing in it and its state is the title bar; <b>overruled</b>. A rail where one row is shaped differently from the rest is a rail you have to think about. The word <code>manager</code> goes with every other second line."],
+  ["The <i>here</i> chip","modified","Moves onto the name line beside the mark, and <b>is not a substitute for one</b>. It says <i>where you are</i> — placement — and the mark says <i>what state the thing is in</i>. Two different facts, both on the one line. It was in the status slot, where at ~40px it overflowed a 16px mark and printed <code>hereAda</code>."],
+  ["Ember on a waiting parent","noted","<b>The parent link draws <i>working</i>, not ember.</b> A manager blocked on its own child is <code>Working</code> in <code>api/view.ts</code>'s terms — <code>NeedsYou</code> means waiting on <i>you</i>. Drawing it ember would have put one more in that rail for a state nobody is being asked about, which is how a signal that means one thing stops meaning it."],
+  ["desktop/src/ui/WorkspacesPanel — a dot on every row","corrected","<b>Every workspace row carries its status dot, in both modes, uncapped</b>, taking its own <code>BEAT_TONE</code>. This overturns two things this document argued and measured: <i>no dot in Status mode</i>, on the grounds that the band already says <i>Needs you</i> and counts them, and an <b>ember cap</b> in Repository mode, because a dot per blocked row puts <b>five</b> ember marks on the Dashboard and <b>seven</b> with a full list, against a budget of three. <b>The numbers are real and the decision stands against them.</b> A dot that exists in one mode and vanishes in the other makes the same panel read as alive and then dead with nothing explaining why; and a capped row draws a blocked workspace exactly like a calm one, which is the worse failure. See the handoff, <i>What measurement does not settle</i>."],
   ["desktop/src/styles.css — the composer","modified","<b>18px → 16.5px, and it is the same number as <i>Your message</i> deliberately.</b> These are the same words before and after you press send, and typing at 18 to read it back at 16.5 shrank the text the moment it was committed. 18 also set what you type at the size of an <b>agent's question</b> — the loudest reading tier there is — and above the <b>17px prose</b> you read at length. The type pass stepped everything under 28px up a pixel, which was right; this is the one place the uniform step landed where the scale did not intend. <b>Both composers move together</b>: the home rule restated 18 rather than changing it, so the workspace composer was already the same size and they do not now disagree."],
   ["web/app/globals.css — light signals","added","Light values for <code>--color-sage</code> and <code>--color-slate</code>, derived the way §4 derives everything: measured against what the mark sits on. <b>4.49:1</b> and <b>5.83:1</b> on the chrome, past the 3:1 floor for a non-text mark. The dark values are globals.css verbatim."],
   ["Overlays — the cross-cutting pass","corrected","<b>The pass this document promised when the palette was wired and never ran.</b> Four kinds are now named with a test — <i>does the thing it is about stay on screen?</i> — and every overlay is assigned. <b>Sheets</b> take <code>--color-scrim</code>; <b>popovers</b> take none; the find <b>bar</b> takes nothing; the Gate and Boundary are <b>screens</b>. See the handoff."],
@@ -4758,6 +4778,7 @@ const COV=[
   ["The workspaces panel",null,"Proposition C, chosen from <code>workspaces-exploration.html</code>",[
     ["Flat, status-ordered, banded","Y","One hairline and a word where the band turns"],
     ["Status / Repository switch","Y","Its own row — the header cannot hold a fourth thing at 252px"],
+    ["A status dot on every row, in both modes","Y","<b>Uncapped, and not mode dependent.</b> <code>BEAT_TONE</code>'s own tones. Earlier drafts drew none in Status mode and capped ember in Repository mode; both overruled — see Spec"],
     ["Seven · forty · all finished · none","Y","The states C was chosen against"],
     ["A <i>Done</i> or <i>Broken</i> band the data can fill","N","<code>doing()</code> returns <code>idle</code> for finished, never-started and failed alike. Needs a <code>BEAT</code> rollup — see Spec"],
   ]],
@@ -4957,7 +4978,8 @@ const COV=[
   ["⌘P QuickOpen · ⌘K palette","Y",""],
   ["Right rail — Overview · Diff · Files · Ship",null,"",[
     ["The team, manager and children","Y",""],
-    ["The manager — <i>here</i>, and as a link up to the parent","Y","<b>Both states.</b> <code>ManagerRow</code> is a <code>div</code> when active and a navigating <code>button</code> when it is not; only the first was drawn. Active it carries no status by design, the parent link carries one"],
+    ["The manager — <i>here</i>, and as a link up to the parent","Y","<b>Both states.</b> <code>ManagerRow</code> is a <code>div</code> when active and a navigating <code>button</code> when it is not; only the first was drawn. Both now carry a status mark, like every other row"],
+    ["Every row one line — mark, name, agent, age","Y","No second line anywhere in the panel. The check-in version was drawn, compared and rejected; it is kept switchable under <b>Team row · B</b>"],
     ["The status mark leading the row","Y","Left edge, ahead of the name; the agent mark moves to the right beside the age"],
     ["Asked you a question · working · handed back","Y","Ember, slate, sage — <code>BEAT_TONE</code>'s own tones, not new hues"],
     ["A child that failed","Y","Brick, and a warning glyph rather than a second circle"],
@@ -6031,8 +6053,8 @@ const SHEET = [
   ["Home — neither",               {tab:"home", rt:"home", home:"neither"}],
   ["Home — good morning",          {tab:"home", rt:"home", home:"both", when:"morning"}],
   ["Home — good evening",          {tab:"home", rt:"home", home:"both", when:"evening"}],
-  ["Panel — forty workspaces",     {tab:"home", rt:"home", home:"both", ws:"many"}],
-  ["Panel — grouped by repository",{tab:"home", rt:"home", home:"both", ws:"many", wsby:"repo"}],
+  ["Panel — by status, forty",     {tab:"home", rt:"home", home:"both", ws:"many"}],
+  ["Panel — by repository, forty",{tab:"home", rt:"home", home:"both", ws:"many", wsby:"repo"}],
   ["Panel — nothing running",      {tab:"home", rt:"home", home:"neither", ws:"none"}],
   ["Tasks — has work",             {tab:"tasks", rt:"tasks", tasks:"full"}],
   ["Tasks — nothing open",         {tab:"tasks", rt:"tasks", tasks:"empty"}],
@@ -6241,7 +6263,7 @@ function chrome(){
         <button data-act="teamfail" data-teamfail="0" aria-pressed="${!S.teamfail}">Team as usual</button>
         <button data-act="teamfail" data-teamfail="1" aria-pressed="${S.teamfail}">A child failed</button></span>
       ${S.insp&&S.itab==="overview"?`<span class="seg">${
-        [["b","Team row · B"],["a","Team row · A"],["now","Team row · now"]]
+        [["a","Team row · A"],["b","Team row · B"],["now","Team row · now"]]
         .map(([id,l])=>`<button data-act="teamv" data-teamv="${id}" aria-pressed="${S.teamv===id}">${l}</button>`).join("")}</span>
       <span class="seg">
         <button data-act="teamup" data-teamup="0" aria-pressed="${!S.teamup}">Manager here</button>

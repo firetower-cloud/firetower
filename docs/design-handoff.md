@@ -441,67 +441,114 @@ tracker, Artifacts has grid-or-list, and the configuration panels are fixed
 lists of panes. A control that appears on one panel needs a reason; that is the
 reason.
 
-### The team rail: the status leads the row
+### The team rail: one line, and the status leads it
 
-**Decided:** the status mark moves to the **left edge of the row**, ahead of
-the name, and the agent mark takes its old place on the right beside the age.
-The **status word leaves the second line**, which keeps only what the agent is
-doing or why it exists.
+**Decided:** every row in the team rail — manager and child, every state — is
+**one line: status mark, name, agent mark, age.** The status mark is at the
+left edge; the agent mark moved to the right beside the age. There is no
+second line anywhere in the panel.
 
 **What was wrong is structural, not chromatic.** A colour pass had already
-given each state its own tone and it still read as a wall of grey. The reason
-is that `OverviewTab.tsx:203` orders the row `AgentMark`, name, second line,
+given each state its own tone and it still read as a wall of grey, because
+`OverviewTab.tsx:203` orders the row `AgentMark`, name, second line,
 `TeamMark` — so *which model is running* was the first thing in the row and
-*whether it needs you* was the last, at the far edge past a two-line block. The
-fact you scan a team rail for was in the least prominent position in it.
-
-Both are already marks of the same size, so the swap costs nothing: no token,
-no new shape, no extra row height.
+*whether it needs you* was the last, at the far edge past a two-line block.
+The fact you scan a team rail for was in the least prominent position in it.
+Both are already marks of the same size, so the swap costs no token, no shape
+and no row height.
 
 **The status was also said twice.** Line `:208` builds the second line as
 `checkIn ?? spawnReason` and prefixes `labelOf(status)` **only when there is no
-check-in**. So the word was already absent half the time, and the other half it
-duplicated a glyph six inches to its right. Dropping the prefix makes that line
-one thing always — *what the agent is doing* — and leaves the status to the
-mark alone.
+check-in** — so the word was absent half the time, duplicated a glyph the other
+half, and the line changed shape depending on whether an agent had spoken.
 
-**Rejected: dropping the whole second line.** The brief said "remove the second
-line", and two shapes were drawn and rendered side by side before choosing. (a)
-leaves a name, a mark and a time; (b) leaves the description. (a) is tighter and
-it deletes the single most useful string in the rail: *"Two readings of the
-band — which do you want?"* tells you what the ember is **about**, where a bare
-*Quota band thresholds* tells you only that something is there. The rail's job
-is to let you decide which child to open without opening one, and (a) removes
-the only text that helps you decide. Both stay in the artifact, switchable,
-under **Workspace → Team row** — the comparison is the argument.
+**Rejected: keeping the check-in.** Two shapes were drawn and rendered
+switchable. (a) drops the whole second line; (b) drops only the status word and
+keeps what the agent is doing. **(b) is the more informative row** — *"Two
+readings of the band — which do you want?"* tells you what the ember is
+*about*, where a bare *Quota band thresholds* tells you only that something is
+there — and **(a) was chosen**, twice, by the person using it. Both things are
+true: the check-in says more, and the panel is calmer as one line. (b) stays in
+the artifact under **Workspace → Team row · B** so the comparison survives the
+decision.
 
-### ManagerRow is one component doing two jobs
+### ManagerRow is one component doing two jobs, and both carry a status
 
-**Decided:** the active manager carries **no** status mark; the parent link
-carries one.
+**Decided:** the manager carries a status mark in **both** states, like every
+other row, and loses the literal word `manager`.
 
 `ManagerRow` is a `div` when `active` and a navigating `button` when it is not
-(`OverviewTab.tsx:168`), and only the first was ever drawn. The question "why
-has the manager no status?" has two different answers:
+(`OverviewTab.tsx:168`), and **neither drew a status** — the slot held the word
+`manager` instead. An earlier draft here argued the active one needs none,
+since you are standing in it and its state is the title bar, the conversation
+and the composer. That was overruled, and the reason is better than the
+argument it replaced: **a rail where one row is shaped differently from the
+rest is a rail you have to think about.** Consistency of shape is worth more
+than the one redundant mark it costs.
 
-- **Active** — you are standing in it. Its state is the title bar, the
-  conversation and the composer, all of which are on screen and larger than any
-  mark. A mark would be the fourth thing saying it.
-- **As a link up** — it is another workspace you are *not* looking at, reached
-  by pressing it, and its status is worth exactly what a sibling's is. It now
-  carries one.
-
-The `here` chip moves onto the name line. It was in the status slot, where it
-does not belong — it says which row you are standing in, not what state
-anything is in — and at ~40px it overflowed a 16px mark slot and printed
-`hereAda`.
+The `here` chip sits on the name line beside the mark and **is not a substitute
+for it**. It says *where you are* — placement — and the mark says *what state
+the thing is in*. Two different facts, both on the one line. It had been in the
+status slot, where at ~40px it overflowed a 16px mark and printed `hereAda`.
 
 **The parent link draws *working*, not ember.** A manager blocked on its own
 child is `Working` in `api/view.ts`'s terms; `NeedsYou` means waiting on *you*.
-Drawing it ember would have added a fourth one to that rail for a state nobody
-is being asked about — which is precisely how a signal that means one thing
-stops meaning it. Counted in a render rather than in the source: **three**,
-unchanged by the move, in every variant including the busiest.
+Drawing it ember would have added one more to that rail for a state nobody is
+being asked about — which is how a signal that means one thing stops meaning
+it.
+
+### Every workspace row carries a dot, in both modes, uncapped
+
+**Decided:** a status dot on every row of the workspaces panel, in Status mode
+and Repository mode alike, taking its own `BEAT_TONE` — ember blocked, slate
+working, sage done, brick broken. **No cap.**
+
+This overturns two things this document argued and measured:
+
+- **No dot in Status mode**, on the grounds that the band above already says
+  *Needs you* and counts them, so a dot per row repeats the heading.
+- **An ember cap in Repository mode**, because the band is a repository there
+  and status has nowhere else to live.
+
+**The arithmetic was real.** Counted in a render: a dot per blocked row puts
+**five** ember marks on the Dashboard at rest and **seven** with a full list,
+against a budget of three. The decision stands against that number, taken by
+the person who has to live with it, having seen it rendered both ways.
+
+What the measurement missed is what the *switch* feels like in the hand. A dot
+that exists in one mode and vanishes in the other makes the same panel read as
+alive and then dead, with nothing on screen explaining the difference. And a
+capped row draws a blocked workspace **exactly like a calm one**, which is a
+worse failure than a loud panel: the budget was spent protecting the signal and
+paid for it by lying about a row.
+
+**The ember budget is not repealed.** It still governs the Dashboard, the team
+rail and the chips. `ember.py` (beside `measure.py`) counts ember in a render
+rather than in the source and still asserts the limit of three; the workspaces
+panel is one **scoped exemption**, `.pscroll i.wdot`, with the date and the
+reason written beside it. That shape matters: an assertion that fails on
+intended behaviour is an assertion the next person switches off wholesale, and
+the exemption is what keeps it protecting everything else.
+
+### What measurement does not settle
+
+Three decisions in this document were derived from measurement, defensible on
+the numbers, and overruled by the person using the app: the ember budget on the
+workspaces panel, no-dots-in-Status-mode, and keeping the check-in line.
+
+Stated once rather than apologised for three times: **a rule derived from
+measurement describes what is legible, not what somebody wants to live with.**
+Both halves of each of these are true at the same time. The check-in is
+genuinely more informative *and* the rail is genuinely calmer without it. Five
+ember marks genuinely dilute the signal *and* a dot that disappears when you
+flip a switch genuinely reads as a bug.
+
+The measurement is still worth doing — it is what made the trade visible and
+specific enough to decide, and it is why these are decisions with numbers
+attached rather than preferences. What it does not do is settle the question on
+its own. Where the two disagree, draw both, render both, and let the person who
+will live with it choose; then write down what it cost, which is what the
+rejected alternatives in this document are for.
 
 ### What you type is the size of what you sent
 
