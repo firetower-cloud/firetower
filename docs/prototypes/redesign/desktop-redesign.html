@@ -77,7 +77,13 @@
      done: sage, broken: brick, over: mute — and it is already shipped. These
      are its light values; the dark ones are globals.css verbatim. Not a new
      namespace: the first one, applied where it had been left grey. */
-  --color-sage:#2F7D52;  /* done            4.49:1 as a mark on the chrome */
+  /* globals.css:275 verbatim. The drawing had #2F7D52 at 5.03:1 on white;
+     the shipped value is 8.64:1, which is what §4's own method produces —
+     match the dark pair's ratio against the same neighbour, and dark sage
+     holds 8.60:1 on the panel. The drawing was wrong by its own rule. */
+  --color-sage:#00582b;      /* done     8.64:1 on the sheet */
+  --color-sage-tint:#daf3e3; /* globals.css:276 */
+  --color-sage-deep:#81b390; /* globals.css:277 */
   --color-slate:#44607E; /* working         5.83:1 */
 
   /* File kinds and chart series, re-gated for a white ground. Each is the
@@ -129,7 +135,8 @@
   --color-amber-deep:#7a5a0d; --color-brick-tint:#2a1414; --color-brick-deep:#6e2f2b;
   --color-host-github:#f4f4f5; --color-host-gitlab:#fc6d26; --color-host-gitea:#609926;
   --slate-ink:#7D95B0;
-  --color-sage:#6ec08a; --color-slate:#7d95b0;
+  --color-sage:#6ec08a; --color-sage-tint:#12251a; --color-sage-deep:#2c5b3d;
+  --color-slate:#7d95b0;
   --color-kind-source:#7b93b8; --color-kind-native:#b8845f; --color-kind-data:#c2ab63;
   --color-kind-style:#9a8cc4; --color-kind-media:#79b58d; --color-kind-store:#bd79a1;
   --color-kind-prose:#9a9aa4;
@@ -1850,6 +1857,38 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
 .planbar i{display:block;height:100%;border-radius:99px;background:var(--color-sage);
   transition:width 500ms var(--swift)}
 </style>
+<style>
+/* ═══ THE WORKSPACES PANEL — proposition C ═════════════════════════
+   The switch gets a row of its own. It was in the header beside the
+   title in the exploration and overlapped it: 252px already carries a
+   name, a search and a collapse, and "Repository" is the longest
+   realistic label. A fourth thing does not fit on that line. */
+.pswitch{padding:2px 8px 8px;flex:none}
+.seg2{display:inline-flex;gap:2px;padding:2px;border-radius:99px;background:var(--raised)}
+.seg2 button{padding:4px 11px;border-radius:99px;font-size:13px;color:var(--quiet);
+  white-space:nowrap;transition:background var(--quick) var(--swift),color var(--quick) var(--swift)}
+.seg2 button:hover{color:var(--body)}
+.seg2 button[aria-pressed="true"]{background:var(--sheet);color:var(--ink);box-shadow:var(--lift-1)}
+:root[data-theme="dark"] .seg2 button[aria-pressed="true"]{background:var(--sunk)}
+
+/* One hairline and a word where the band turns — a section's job for a
+   line's cost. At forty rows that is the difference between seeing the
+   working band and scrolling to it. */
+.pband{display:flex;align-items:center;gap:8px;padding:13px 9px 4px}
+.pband span{font-size:13px;color:var(--hush);flex:none}
+.pband .n{margin-left:0;font-variant-numeric:tabular-nums}
+.pband i{flex:1;height:1px;background:var(--hair)}
+.prepo{display:flex;align-items:center;gap:7px;padding:14px 9px 4px;font-size:13.5px;color:var(--quiet)}
+.prepo span:first-of-type{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.prepo .n{margin-left:auto;flex:none;font-size:12.5px;color:var(--hush);font-variant-numeric:tabular-nums}
+.prepo svg{flex:none;color:var(--hush)}
+.prow .mk{width:9px;flex:none;display:grid;place-items:center}
+.wdot{width:8px;height:8px;border-radius:99px;flex:none;background:var(--ember)}
+.wdot[data-t="working"]{background:var(--color-slate)}
+.wdot[data-t="done"]{background:var(--color-sage)}
+.wdot[data-t="broken"]{background:var(--brick)}
+.pnone{padding:14px 9px;font-size:14.5px;line-height:1.55;color:var(--quiet)}
+</style>
 
 </head>
 <body>
@@ -2061,6 +2100,8 @@ const S={theme:"light",panel:"pinned",peek:null,menu:null,tower:"nw",
   scopesheet:false,          // what a profile may reach
   repos:null,                // what is checked out here: 1 | pick
   gate:null,                 // held at the door mid-session: locked | setup
+  ws:"small",                // small | many | done | none
+  wsby:"status",             // status | repo
   teamfail:false,           // a child that failed, in the team rail
   home:"both",               // both | nowait | noart | neither
   when:null,                 // force a greeting: morning | afternoon | evening
@@ -2128,23 +2169,108 @@ function panelFor(r){
         Not in this pass. Every destination gets this panel and this behaviour — the shape is settled here, the contents are not.</p>
     </div>`;
 }
+/* ── The workspaces panel ─────────────────────────────────────────
+   Proposition C from docs/prototypes/redesign/workspaces-exploration.html,
+   chosen by the user. Flat and status-ordered rather than status-grouped:
+   one hairline and a word where the band turns, not a section. A grouped
+   list reorders under the pointer — the row you reached for jumps to
+   another section the moment its state changes — which is why A was not
+   shipped and why that record is kept.
+
+   **Roll up BEAT, not doing().** `doing()` is nearer to hand and it is the
+   wrong function: it returns waiting | working | idle, where "waiting"
+   spans NeedsYou, HandedBack *and* Failed. view.ts argues it in its own
+   words — "finished, blocked and broken are three different things to
+   feel, and a product that paints them the same has told you to go and
+   look without telling you what at." Worst first: broken › blocked ›
+   working › done. */
+/* The states C was chosen against, kept because they are why it won. */
+const WS_SMALL=[
+  {id:"w1",name:"Quota meter rounding",        repo:"northwind/api",  beat:"blocked", age:"12m"},
+  {id:"w2",name:"Light mode for the whole app",repo:"northwind/web",  beat:"blocked", age:"41m"},
+  {id:"w3",name:"Poke at the deploy script",   repo:"northwind/infra",beat:"working", age:"8m"},
+  {id:"w4",name:"Backfill the invoice index",  repo:"northwind/api",  beat:"working", age:"3h"},
+  {id:"w5",name:"Composer context meter",      repo:"northwind/web",  beat:"done",    age:"1d"},
+  {id:"w6",name:"Reconcile the webhook retries",repo:"acme/ledger-sync",beat:"done",  age:"2h"},
+  {id:"w7",name:"Token audit",                 repo:"northwind/api",  beat:"broken",  age:"5h"},
+];
+const WS_MANY=(()=>{
+  const v=["Backfill","Reconcile","Rewrite","Audit","Trim","Split","Port","Cache","Retry","Measure"];
+  const n=["the invoice index","the webhook retries","the quota band","the token store","the migration",
+           "the session log","the poster queue","the vault read","the host probe","the diff view"];
+  const out=[];
+  for(let i=0;i<30;i++) out.push({id:"m"+i,name:`${v[i%10]} ${n[(i*3)%10]}`,repo:"northwind/api",
+    beat:i<3?"blocked":i<9?"working":i===29?"broken":"done",age:i<9?`${i+4}m`:`${i-6}h`});
+  ["northwind/web","northwind/infra","acme/ledger-sync","northwind/docs","acme/pricing","northwind/billing-worker"]
+    .forEach((r,i)=>out.push({id:"o"+i,name:`Work on ${r.split("/")[1]}`,repo:r,
+      beat:i===0?"blocked":i<3?"working":"done",age:`${i+1}d`}));
+  return out;
+})();
+const WORKSPACES=()=> S.ws==="many" ? WS_MANY
+  : S.ws==="done" ? WS_SMALL.map(w=>({...w,beat:"done"}))
+  : S.ws==="none" ? []
+  : WS_SMALL;
+
+const BEAT_ORDER = { blocked:0, working:1, done:2, broken:3 };
+const BEAT_BAND  = { blocked:"Needs you", working:"Working", done:"Done", broken:"Broken" };
+/* **In Status mode the rows carry no mark at all.** The band above them
+   already says "Needs you" and counts them, so a dot on every row repeats
+   the heading — and measuring it found worse: the Dashboard's chips, the
+   rail avatar and a dotted panel put *five* ember marks on one screen
+   against a budget of three. Dropping the dot is the better drawing and it
+   takes the panel to zero.
+
+   In Repository mode the band is a repository, so status has nowhere else
+   to live and the dot comes back — capped, because the same arithmetic
+   applies. */
+const EMBER_CAP = 2;
+
 function panel(){
-  const mine=[...asks().map(a=>({...a,hot:true})),...working().filter(w=>!w.repo||!w.repo.startsWith("acme"))];
-  const shared=working().filter(w=>w.repo&&w.repo.startsWith("acme"));
-  const row=(w,on)=>`<button class="prow ${w.hot?"hot":""}" data-act="open" aria-current="${!!on}"
-    title="${esc(w.name)}${w.hot?" — waiting on you":""}">
-    <span class="lbl">${esc(w.name)}</span><span class="age">${w.age}</span></button>`;
+  const ws = WORKSPACES();
+  const grouped = S.wsby === "repo";
+  const nothing = !ws.length;
+  const sw = `<div class="pswitch">
+    <span class="seg2">${[["status","Status"],["repo","Repository"]].map(([id,t])=>
+      `<button data-act="wsby" data-wsby="${id}" aria-pressed="${(S.wsby||"status")===id}">${t}</button>`).join("")}</span>
+  </div>`;
+  let body;
+  if(nothing){
+    body = `<p class="pnone">Nothing running yet. Start something on the home and it appears here.</p>`;
+  } else if(grouped){
+    const by={}; let embers=0; ws.forEach(w=>(by[w.repo]=by[w.repo]||[]).push(w));
+    body = Object.keys(by).map(r=>
+      `<div class="prepo">${ic("folder-git-2",14)}<span>${esc(r)}</span><span class="n">${by[r].length}</span></div>`
+      + by[r].sort((x,y)=>BEAT_ORDER[x.beat]-BEAT_ORDER[y.beat])
+          .map(w=>wrow(w, w.beat==="blocked" && ++embers > EMBER_CAP)).join("")).join("");
+  } else {
+    const sorted=[...ws].sort((x,y)=>BEAT_ORDER[x.beat]-BEAT_ORDER[y.beat]);
+    let last=null;
+    body = sorted.map(w=>{
+      const turn = w.beat!==last; last=w.beat;
+      const n = sorted.filter(x=>x.beat===w.beat).length;
+      return (turn?`<div class="pband"><span>${BEAT_BAND[w.beat]}</span><i></i><span class="n">${n}</span></div>`:"")
+        + wrow(w, true);   /* the band says the state; the row does not repeat it */
+    }).join("");
+  }
   return `<div class="phead">
       <span class="nm">Workspaces</span>
       <button class="gbtn" data-act="noop" title="Find anything   ⌘P" aria-label="Find anything">${ic("search",15)}</button>
       <button class="gbtn" data-act="panel" title="Hide this panel   ⌘\\" aria-label="Hide this panel">${ic("panel-left-close",15)}</button>
     </div>
+    ${nothing?"":sw}
     <div class="pscroll" data-navzone>
       <button class="prow strong" data-act="noop"><span style="width:8px;flex:none;display:grid;place-items:center;color:var(--quiet)">${ic("pencil",14)}</span><span class="lbl">New workspace</span><span class="kbd">⌘N</span></button>
-      ${mine.length?`<div class="plabel"><span>Recent</span></div>${mine.map(w=>row(w,S.rt==="work"&&w.id===WS.id)).join("")}`
-        :`<p style="padding:14px 9px;font-size:14.5px;color:var(--quiet)">Nothing running yet.</p>`}
-      ${shared.length?`<div class="plabel"><span>Shared with you</span></div>${shared.map(w=>row(w)).join("")}`:""}
+      ${body}
     </div>`;
+}
+/* Past the cap a blocked row keeps its place and loses its dot; the band's
+   count still says how many there are. */
+function wrow(w, capped){
+  const on = S.rt==="work" && w.id===WS.id;
+  return `<button class="prow" data-act="open" aria-current="${!!on}"
+    title="${esc(w.name)} — ${BEAT_BAND[w.beat].toLowerCase()}">
+    <span class="mk">${capped?"":`<i class="wdot" data-t="${w.beat}"></i>`}</span>
+    <span class="lbl">${esc(w.name)}</span><span class="age">${w.age}</span></button>`;
 }
 
 /* ── The Dashboard ───────────────────────────────────────────── */
@@ -4048,6 +4174,7 @@ const SPEC_MEASURE=[
   ["Sheet, panel hidden","1210px","1280 − 62 − 8"],
   ["Sheet radius","14px, left corners only","the window's own radius does the right"],
   ["Home column","748px box, 680px content","34px padding each side"],
+  ["The panel","252px","Header 40px · switch row 30px · rows 36px minimum"],
   ["Conversation column","716px box, 648px content","max-w-46rem in today's build is 736"],
   ["Inspector rail","344px","inside the sheet, on the desk colour"],
   ["Pane column","1000px box, 912px content","44px padding each side"],
@@ -4155,6 +4282,11 @@ const SPEC_DELTA=[
   ["desktop/src/ui/Annotate.tsx — 165","<b>no change</b>","<b>Correct as it is, and now by rule rather than by accident.</b> No scrim: the note is attached to a specific piece of text and dimming the page would hide the thing the note is about. The full-screen <code>fixed inset-0</code> is the catcher and should stay."],
   ["desktop/src/ui/Annotate.tsx — 194","corrected","The quoted excerpt is <code>font-mono text-micro</code> for <i>every</i> quote. A quote of a <b>code selection</b> keeps mono — the characters matter. A quote of something an <b>agent said</b> is prose and takes the text face. This document already drew it that way; the product does not."],
   ["--color-scrim vs a gradient fade","renamed","This document had <code>--scrim</code> as the composer's bottom <b>fade</b> while the product has <code>--color-scrim</code> as the modal <b>dim</b>. One name, two unrelated jobs, and a mapping that would have put a dim where a fade belongs. The fade is <code>--fade</code>. The transparent click-catcher class is <code>.catcher</code> for the same reason."],
+  ["desktop/src/ui/Rail.tsx — the panel","replaced","<b>Proposition C, chosen by the user.</b> Flat and status-ordered, not status-grouped: one hairline and a word where the band turns. A <b>Status / Repository</b> switch on <i>its own row</i> under the header — 252px already carries a name, a search and a collapse, and <code>Repository</code> is the longest realistic label; a fourth thing on that line is what overlapped the title in the exploration."],
+  ["Roll up BEAT, not doing()","<b>important</b>","<code>doing()</code> is nearer to hand and is the wrong function. It returns <code>waiting | working | idle</code>, and its <i>waiting</i> spans <code>NeedsYou</code>, <code>HandedBack</code> <b>and</b> <code>Failed</code>. <code>view.ts</code> argues it in its own words: <i>“finished, blocked and broken are three different things to feel, and a product that paints them the same has told you to go and look without telling you what at.”</i> Worst first: broken › blocked › working › done."],
+  ["What C cannot show today","<b>implied work</b>","<b>There is no “done” and no “broken” at workspace level.</b> A finished place, a never-started one and one whose run <i>failed</i> all return <code>idle</code> from <code>doing()</code>. The <i>Done</i> and <i>Broken</i> bands are drawn here from a <code>BEAT</code> rollup that does not exist yet — <b>do not build a band the data cannot fill.</b> It needs a <code>beatOfPlace()</code> beside <code>doing()</code> in <code>api/workspaces.ts</code>; no server change, the statuses are already on the wire."],
+  ["The panel draws no ember in Status mode","measured","Rows carry <b>no mark</b> — the band above already says <i>Needs you</i> and counts them. Measured before and after: a dot per blocked row put <b>five</b> ember marks on the Dashboard against a budget of three. Without them it is <b>3</b> on the Dashboard and <b>1</b> elsewhere. In Repository mode the band is a repository, so the dot returns, capped at two."],
+  ["web/app/globals.css — --color-sage","<b>drawing corrected</b>","The drawing had <code>#2F7D52</code>; the build ships <code>#00582b</code>. <b>The shipped value is right and the drawing was wrong by its own rule</b> — §4 says match the dark pair's ratio against the same neighbour, dark sage holds <b>8.60:1</b> on the panel, and <code>#00582b</code> holds <b>8.64:1</b> on the sheet where <code>#2F7D52</code> holds 5.03. Taken into the drawing along with <code>--color-sage-tint</code> and <code>-deep</code>."],
   ["Type scale","modified","<b>Every size below 28px rises by 1px.</b> One uniform step, applied to the tier rather than to screens — it raises the operating tiers the complaint named and is the only change that cannot disturb the gaps between them. Row minimums grow 2px to match (34→36, 40→42, 44→46, 54→58). Costs one row in a configuration list at 1280 × 824; the panel loses none."],
   ["Type weights","modified","<b>Fourteen weights become three — 400, 500, 530.</b> Mechanical: 420/450→400, 460/480/500/520→500, 540/560/600/650/700→530."],
   ["Mono","corrected","Skill names, profile names and dropped-folder names move to the text face. Paths, branches, codes, keys and diffs keep the mono face. The test: <i>would you ever read it character by character?</i>"],
@@ -4514,6 +4646,12 @@ test ratio_uses_the_hard_limit ... <span class="ok2">ok</span>
 const COV=[
  ["Shell, session and the way in",[
   ["Rail — six destinations, two settings doors","Y",""],
+  ["The workspaces panel",null,"Proposition C, chosen from <code>workspaces-exploration.html</code>",[
+    ["Flat, status-ordered, banded","Y","One hairline and a word where the band turns"],
+    ["Status / Repository switch","Y","Its own row — the header cannot hold a fourth thing at 252px"],
+    ["Seven · forty · all finished · none","Y","The states C was chosen against"],
+    ["A <i>Done</i> or <i>Broken</i> band the data can fill","N","<code>doing()</code> returns <code>idle</code> for finished, never-started and failed alike. Needs a <code>BEAT</code> rollup — see Spec"],
+  ]],
   ["Rail — hover preview of a destination’s panel","Y",""],
   ["Rail — focus previews exactly as hover does","Y",""],
   ["Titlebar — the Firetower named as text","Y",""],
@@ -5782,6 +5920,9 @@ const SHEET = [
   ["Home — neither",               {tab:"home", rt:"home", home:"neither"}],
   ["Home — good morning",          {tab:"home", rt:"home", home:"both", when:"morning"}],
   ["Home — good evening",          {tab:"home", rt:"home", home:"both", when:"evening"}],
+  ["Panel — forty workspaces",     {tab:"home", rt:"home", home:"both", ws:"many"}],
+  ["Panel — grouped by repository",{tab:"home", rt:"home", home:"both", ws:"many", wsby:"repo"}],
+  ["Panel — nothing running",      {tab:"home", rt:"home", home:"neither", ws:"none"}],
   ["Tasks — has work",             {tab:"tasks", rt:"tasks", tasks:"full"}],
   ["Tasks — nothing open",         {tab:"tasks", rt:"tasks", tasks:"empty"}],
   ["Tasks — not connected",        {tab:"tasks", rt:"tasks", tasks:"off"}],
@@ -6017,6 +6158,9 @@ function chrome(){
       [["","No sheet"],["1","What it may reach"]]
       .map(([id,l])=>`<button data-act="scopesheet" data-scopesheet="${id}" aria-pressed="${(S.scopesheet?"1":"")===id}">${l}</button>`).join("")}</span>`:""}
     ${S.tab==="updates"?seg("up","up",[["read","What is running"],["plan","What it will write"],["run","Upgrading"]]):""}
+    <span class="seg">${
+      [["small","7 workspaces"],["many","40, 30 in one repo"],["done","All finished"],["none","None"]]
+      .map(([id,l])=>`<button data-act="ws" data-ws="${id}" aria-pressed="${S.ws===id}">${l}</button>`).join("")}</span>
     <span class="seg">
       <button data-act="pal" data-pal="k" aria-pressed="${S.pal==="k"}">⌘K</button>
       <button data-act="pal" data-pal="p" aria-pressed="${S.pal==="p"}">⌘P</button>
@@ -6138,6 +6282,8 @@ document.addEventListener("click",e=>{
   else if(a==="ship"){ S.ship=b.dataset.ship; S.itab="ship"; S.insp=true; S.rt="work"; S.tab="work"; }
   else if(a==="find"){ S.find=b.dataset.find||null; if(S.find){S.rt="work";S.tab="work";} }
   else if(a==="addagent"){ S.addagent=b.dataset.addagent==="1"; if(S.addagent){S.rt="work";S.tab="work";} }
+  else if(a==="wsby"){ S.wsby=b.dataset.wsby; }
+  else if(a==="ws"){ S.ws=b.dataset.ws; }
   else if(a==="teamfail"){ S.teamfail=b.dataset.teamfail==="1"; S.rt="work"; S.tab="work"; S.itab="overview"; S.insp=true; }
   else if(a==="ctx"){ S.ctx=b.dataset.ctx==="1"; if(S.ctx){S.rt="work";S.tab="work";S.wb="file";} }
   else if(a==="voice") S.voice=b.dataset.voice||null;

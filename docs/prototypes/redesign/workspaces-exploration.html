@@ -77,7 +77,13 @@
      done: sage, broken: brick, over: mute — and it is already shipped. These
      are its light values; the dark ones are globals.css verbatim. Not a new
      namespace: the first one, applied where it had been left grey. */
-  --color-sage:#2F7D52;  /* done            4.49:1 as a mark on the chrome */
+  /* globals.css:275 verbatim. The drawing had #2F7D52 at 5.03:1 on white;
+     the shipped value is 8.64:1, which is what §4's own method produces —
+     match the dark pair's ratio against the same neighbour, and dark sage
+     holds 8.60:1 on the panel. The drawing was wrong by its own rule. */
+  --color-sage:#00582b;      /* done     8.64:1 on the sheet */
+  --color-sage-tint:#daf3e3; /* globals.css:276 */
+  --color-sage-deep:#81b390; /* globals.css:277 */
   --color-slate:#44607E; /* working         5.83:1 */
 
   /* File kinds and chart series, re-gated for a white ground. Each is the
@@ -129,7 +135,8 @@
   --color-amber-deep:#7a5a0d; --color-brick-tint:#2a1414; --color-brick-deep:#6e2f2b;
   --color-host-github:#f4f4f5; --color-host-gitlab:#fc6d26; --color-host-gitea:#609926;
   --slate-ink:#7D95B0;
-  --color-sage:#6ec08a; --color-slate:#7d95b0;
+  --color-sage:#6ec08a; --color-sage-tint:#12251a; --color-sage-deep:#2c5b3d;
+  --color-slate:#7d95b0;
   --color-kind-source:#7b93b8; --color-kind-native:#b8845f; --color-kind-data:#c2ab63;
   --color-kind-style:#9a8cc4; --color-kind-media:#79b58d; --color-kind-store:#bd79a1;
   --color-kind-prose:#9a9aa4;
@@ -229,8 +236,9 @@ code{font-family:var(--mono);font-size:12.5px;background:var(--raised);border-ra
 .tbl td:first-child{color:var(--ink);font-weight:500;width:150px}
 </style></head><body><div class="doc">
 <div class="themer"><button data-t="light" aria-pressed="true">Light</button><button data-t="dark" aria-pressed="false">Dark</button></div>
-<h1>The workspaces panel</h1>
-<p class="lead">Four propositions for what the rail's panel is <b>for</b>, drawn at its real <b>252px</b>. Recency, status and repository are three questions and one list can only lead with one of them — so these are not feature variants, they are different answers to <i>what is this panel for</i>.</p>
+<h1>The workspaces panel — the exploration</h1>
+<p class="lead"><b>C was chosen and is now the panel in <code>desktop-redesign.html</code>.</b> This page is the record: A, B and D are the rejected alternatives, kept with their reasons so nobody re-makes the argument. Drawn at the real <b>252px</b>.</p>
+<p class="lead" style="margin-top:9px"><b>Two things the chosen drawing fixed after this page was made.</b> The switch sat in the header beside the title and overlapped it — 252px already carries a name, a search and a collapse, so it has a row of its own now. And in Status mode the rows lost their dots: the band already says <i>Needs you</i> and counts them, and a dot per blocked row put <b>five</b> ember marks on the Dashboard against a budget of three.</p>
 <div id="app"></div>
 </div>
 <script>

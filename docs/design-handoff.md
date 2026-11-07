@@ -350,6 +350,49 @@ then replaced. It is drawn beside the home in `home-alternative.html`, which is
 where the comparison belongs. A design that was right and then outgrown deserves
 the same record as one that was rejected.
 
+### The workspaces panel is status-ordered, not status-grouped
+
+**Decided:** flat, sorted needs-you → working → done → broken, newest within
+each, with **one hairline and a word** where the band turns. A **Status /
+Repository** switch on its own row under the header.
+
+**Rejected, and worth keeping rejected:** *status-grouped*, with a real section
+per state. It is the clearest of the alternatives at seven rows and it is the
+one not to ship, because **a workspace changes state while you are looking at
+it and the row you reached for jumps to another section** — the fuller the
+panel, the further it jumps. A list whose order is the thing that is changing
+is a list you cannot aim at. Also rejected: repository-first, which at forty
+workspaces with thirty in one repository is a wall under one heading with
+needs-you scattered across six groups.
+
+**Roll up `BEAT`, not `doing()`.** `doing()` is nearer to hand and is the wrong
+function: it returns `waiting | working | idle`, and its *waiting* spans
+`NeedsYou`, `HandedBack` **and** `Failed`. `view.ts` argues it in its own words
+— *"finished, blocked and broken are three different things to feel, and a
+product that paints them the same has told you to go and look without telling
+you what at."*
+
+**What the drawing shows that the data cannot yet fill.** There is **no "done"
+and no "broken" at workspace level**: a finished place, a never-started one and
+one whose run failed all return `idle`. The *Done* and *Broken* bands need a
+`beatOfPlace()` beside `doing()` in `api/workspaces.ts`. **Implied work, named
+rather than designed around** — no server change, the statuses are already on
+the wire.
+
+**The panel draws no ember in Status mode, and that is a measurement.** Rows
+carry no mark: the band above already says *Needs you* and counts them. A dot
+per blocked row put **five** ember marks on the Dashboard against a budget of
+three — the chips, the rail avatar and the panel all answering one question.
+Without them it is **3** on the Dashboard and **1** everywhere else. In
+Repository mode the band is a repository, so status has nowhere else to live
+and the dot returns, capped at two.
+
+**The switch is on this panel only.** It is the one panel holding a set big and
+heterogeneous enough for a second grouping to pay. Tasks already picks its
+tracker, Artifacts has grid-or-list, and the configuration panels are fixed
+lists of panes. A control that appears on one panel needs a reason; that is the
+reason.
+
 ### Six destinations, not twelve panes
 
 **Decided:** a 62px icon rail with six destinations — Dashboard, Tasks,
@@ -634,6 +677,18 @@ not occur — so the overlap costs nothing. **No surface token moved.**
 The general lesson is still worth having: **derive a light scale as a ladder**,
 each rung measured against its neighbour rather than against the page, or the
 bottom rungs collapse into each other without anybody noticing.
+
+### When the drawing and the build disagree, measure
+
+`--color-sage` light: the drawing had `#2F7D52`, the build shipped `#00582b`.
+**The build was right and the drawing was wrong by its own rule.** §4 says match
+the dark pair's ratio against the same neighbour; dark sage holds **8.60:1** on
+the panel, `#00582b` holds **8.64:1** on the sheet, and `#2F7D52` holds 5.03.
+
+The general point is worth more than the value: **a shared token is not moved to
+match a drawing.** `globals.css` reaches three clients, so the burden is on the
+drawing to justify a change, not on the build to absorb one. Reconcile toward
+the shipped value unless the drawing can show the shipped one is wrong.
 
 ### Host marks
 
