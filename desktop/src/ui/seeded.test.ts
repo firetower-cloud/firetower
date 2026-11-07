@@ -63,10 +63,11 @@ describe("the branch, shown before it is cut", () => {
 
   test("no key is the behaviour it has always had — the first line, slugged", () => {
     expect(branchFor("auth refactor")).toBe("agent/auth-refactor");
-    /* The whole line, capped at `slug`'s 48 characters — not a few words.
-       Shortening every branch in the build was not what was asked for. */
+    /* The whole line, capped at 48 characters — not a few words. Shortening
+       every branch in the build was not what was asked for. What did change
+       is the cap's own cut: it was a bare `slice` and ended `…-free-pla`. */
     expect(branchFor("Quota meter goes amber too early on the free plan")).toBe(
-      "agent/quota-meter-goes-amber-too-early-on-the-free-plan",
+      "agent/quota-meter-goes-amber-too-early-on-the-free",
     );
   });
 

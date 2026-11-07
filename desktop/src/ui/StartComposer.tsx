@@ -90,8 +90,11 @@ const recall = (key: string) => {
   }
 };
 
-const slug = (s: string) =>
-  s.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48);
+/* The whole of it, uncapped. The length cap belongs to `fewWords`, which is
+   the only thing that knows where a word ends — it used to be a `.slice(0, 48)`
+   here, and the two of them in sequence left the mid-word cut this was written
+   to remove. */
+const slug = (s: string) => s.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
 /**
  * A few words of a title, cut on a word boundary.
@@ -132,7 +135,12 @@ const fewWords = (s: string, within = 24) => {
  */
 export function branchFor(first: string, taskKey?: string | null): string {
   const key = taskKey ? slug(taskKey) : "";
-  const stem = key ? [key, fewWords(first)].filter(Boolean).join("-") : slug(first);
+  /* **The no-key branch keeps its length and gains the word boundary.**
+     `slug` caps at 48 with a bare `slice`, so a long title has always cut
+     mid-word — `…-on-the-free-pla`. That is the defect `fewWords` exists to
+     prevent, and it was live on every branch this build cuts. Same rule, one
+     function, and nothing gets shorter than it was. */
+  const stem = key ? [key, fewWords(first)].filter(Boolean).join("-") : fewWords(first, 48);
   return `agent/${stem || "work"}`;
 }
 
