@@ -532,10 +532,17 @@ export const SHOTS = [
   },
   {
     id: "over-any-screen__p-go-to-a-file",
+    /* **With something typed.** It opened the sheet and photographed it
+       empty, which is a state the drawing does not draw — the drawing has
+       `quota` in it and five of a hundred and forty-eight files listed. An
+       empty sheet cannot be compared against a full one, so the shot settled
+       nothing either way. */
     go: async (p) => {
       await at(p, "/sessions/s_1", 1800);
       await p.keyboard.press("Meta+p");
-      await pause(p, 800);
+      await pause(p, 700);
+      await p.keyboard.type("quota", { delay: 40 });
+      await pause(p, 900);
     },
   },
   {
