@@ -1925,6 +1925,19 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
 .tm .tx b{display:inline}
 .tm .tx.one{display:block;align-self:center}
 </style>
+<style>
+/* The title is the rename control, so it has to say so standing still —
+   a hover state cannot be the whole affordance and the tooltip it replaced
+   was a thing nobody read. The pencil is always drawn, at `--hush`, and
+   comes up to `--quiet` under the pointer with the title on `--raised`.
+   **Its absence is the read-only state**: no disabled control, nothing
+   greyed, the affordance simply is not there. */
+.whead .nm.rn{display:inline-flex;align-items:center;gap:7px;border-radius:7px;
+  margin-left:-7px;padding:2px 7px;color:var(--ink)}
+.whead .nm.rn svg{color:var(--hush)}
+.whead .nm.rn:hover{background:var(--raised)}
+.whead .nm.rn:hover svg{color:var(--quiet)}
+</style>
 
 </head>
 <body>
@@ -2151,6 +2164,10 @@ const S={theme:"light",panel:"pinned",peek:null,menu:null,tower:"nw",
      comparison is the argument. "now" is the row as it stands in the product. */
   teamv:"a",
   teamup:false,             // the manager as a link up to its parent
+  /* Read only: a workspace shared with you that you may open and not act on.
+     `mayWrite === false`. It is what the *absence* of the rename affordance
+     and of the rail menu is for, so it has to be drawable. */
+  ro:false,
   home:"both",               // both | nowait | noart | neither
   when:null,                 // force a greeting: morning | afternoon | evening
   pvw:"desktop", pvpick:true, port:false};
@@ -2726,7 +2743,8 @@ function workspace(){
   return `<div class="wsheet">
     <div class="conv">
       ${S.wb==="chat"?`<div class="whead">
-        <span class="nm">${esc(WS.name)}</span>
+        ${S.ro?`<span class="nm" title="${esc(WS.name)}">${esc(WS.name)}</span>`
+          :`<button class="nm rn" data-act="noop" title="Rename">${esc(WS.name)}${ic("pencil",13)}</button>`}
         <span class="who">${AGENT[WS.agent](14)}Claude Code</span>
         <span class="right">
           <button class="gbtn" data-act="noop" title="Terminal   ⌘J">${ic("terminal",15)}</button>
@@ -4399,6 +4417,11 @@ const SPEC_DELTA=[
   ["The <i>here</i> chip","modified","Moves onto the name line beside the mark, and <b>is not a substitute for one</b>. It says <i>where you are</i> — placement — and the mark says <i>what state the thing is in</i>. Two different facts, both on the one line. It was in the status slot, where at ~40px it overflowed a 16px mark and printed <code>hereAda</code>."],
   ["Ember on a waiting parent","noted","<b>The parent link draws <i>working</i>, not ember.</b> A manager blocked on its own child is <code>Working</code> in <code>api/view.ts</code>'s terms — <code>NeedsYou</code> means waiting on <i>you</i>. Drawing it ember would have put one more in that rail for a state nobody is being asked about, which is how a signal that means one thing stops meaning it."],
   ["desktop/src/ui/WorkspacesPanel — a dot on every row","corrected","<b>Every workspace row carries its status dot, in both modes, uncapped</b>, taking its own <code>BEAT_TONE</code>. This overturns two things this document argued and measured: <i>no dot in Status mode</i>, on the grounds that the band already says <i>Needs you</i> and counts them, and an <b>ember cap</b> in Repository mode, because a dot per blocked row puts <b>five</b> ember marks on the Dashboard and <b>seven</b> with a full list, against a budget of three. <b>The numbers are real and the decision stands against them.</b> A dot that exists in one mode and vanishes in the other makes the same panel read as alive and then dead with nothing explaining why; and a capped row draws a blocked workspace exactly like a calm one, which is the worse failure. See the handoff, <i>What measurement does not settle</i>."],
+  ["desktop/src/ui/RailPanel.tsx — the right-click menu","restored","<b>A regression the rebuild caused, not a gap in the old design.</b> <code>Rail.tsx</code> imported <code>ContextMenu</code>, <code>useMenu</code>, <code>renameSession</code> and <code>useEndWorkspace</code>; <code>RailPanel.tsx</code> imports none of them, so right-clicking a workspace does nothing. The item set is the old one <b>verbatim</b>, read off <code>Rail.tsx</code> at <code>f3cbc425</code>: <b>Open</b> &middot; <b>Rename&hellip;</b> &middot; a rule &middot; <b>End workspace</b> in brick. Deliberately not grown &mdash; a restoration that quietly gains items is a second thing to argue about."],
+  ["mayWrite gates it, not maySpeak","corrected","<code>Chat.tsx:168</code> separates them: <code>mayWrite</code> is <i>the place</i> — may I work in this workspace at all — and <code>maySpeak</code> is <i>this conversation</i>, true only for whoever started it. <b>Renaming and ending are facts about the place</b>, so the gate is <code>place.mayWrite !== false</code>. <code>!== false</code> and not <code>=== true</code>: a control plane older than this app sends neither, and reading their absence as <i>you may only watch</i> takes every control away from the person whose work it is."],
+  ["A row you may not act on gets no menu","added","<b>Not a menu with two dead items.</b> The only one that would survive is <i>Open</i>, which is exactly what left-clicking the row already does — a menu whose single entry duplicates the gesture that summoned it is noise. <b>No disabled control, and the screen says it instead:</b> opening the workspace shows a title that is a <code>span</code> rather than a button, with no pencil. The absence <i>is</i> the statement, and it is the same absence <code>Workbench.tsx:491</code> already produces."],
+  ["End workspace does not get a second question","noted","<code>ui/end.ts</code>&rsquo;s <code>useEndWorkspace</code> <b>already confirms</b>, with a body it builds from <code>sessionWork</code> — uncommitted files, unpushed commits, how many agents stop, and the separate wording for a workspace with nothing checked out, where <i>every file goes with it</i> and there is no branch to promise anybody. The menu item calls it and adds nothing. Confirm is a <b>sheet</b> in the overlay taxonomy and takes <code>--color-scrim</code>."],
+  ["desktop/src/ui/Workbench.tsx:491 — the title renames","modified","<b>One click, and an affordance that does not need a hover.</b> It answered a double click and a <code>title</code> tooltip, which made the one way to rename from this screen a thing you had to already know. The pencil is now <b>always drawn, at <code>--hush</code></b>, 13px after the title; under the pointer it comes to <code>--quiet</code> and the title takes <code>--raised</code>. Hover sharpens it and is not what announces it. <b>Double click still works</b>, and lands in the same place. Already bound in the product; this draws the affordance it needs."],
   ["desktop/src/styles.css — the composer","modified","<b>18px → 16.5px, and it is the same number as <i>Your message</i> deliberately.</b> These are the same words before and after you press send, and typing at 18 to read it back at 16.5 shrank the text the moment it was committed. 18 also set what you type at the size of an <b>agent's question</b> — the loudest reading tier there is — and above the <b>17px prose</b> you read at length. The type pass stepped everything under 28px up a pixel, which was right; this is the one place the uniform step landed where the scale did not intend. <b>Both composers move together</b>: the home rule restated 18 rather than changing it, so the workspace composer was already the same size and they do not now disagree."],
   ["web/app/globals.css — light signals","added","Light values for <code>--color-sage</code> and <code>--color-slate</code>, derived the way §4 derives everything: measured against what the mark sits on. <b>4.49:1</b> and <b>5.83:1</b> on the chrome, past the 3:1 floor for a non-text mark. The dark values are globals.css verbatim."],
   ["Overlays — the cross-cutting pass","corrected","<b>The pass this document promised when the palette was wired and never ran.</b> Four kinds are now named with a test — <i>does the thing it is about stay on screen?</i> — and every overlay is assigned. <b>Sheets</b> take <code>--color-scrim</code>; <b>popovers</b> take none; the find <b>bar</b> takes nothing; the Gate and Boundary are <b>screens</b>. See the handoff."],
@@ -4775,6 +4798,7 @@ test ratio_uses_the_hard_limit ... <span class="ok2">ok</span>
 const COV=[
  ["Shell, session and the way in",[
   ["Rail — six destinations, two settings doors","Y",""],
+  ["Right-click a workspace &mdash; rename, end","Y","<b>A regression this document did not catch.</b> It was in <code>Rail.tsx</code> and is not in <code>RailPanel.tsx</code>; nothing here asked whether it was still there. See <i>What this column does not check</i> below"],
   ["The workspaces panel",null,"Proposition C, chosen from <code>workspaces-exploration.html</code>",[
     ["Flat, status-ordered, banded","Y","One hairline and a word where the band turns"],
     ["Status / Repository switch","Y","Its own row — the header cannot hold a fourth thing at 252px"],
@@ -4810,6 +4834,8 @@ const COV=[
   ]],
   ["Unreachable · Boundary · Confirm","Y","Each a global control"],
   ["ContextMenu at the pointer","Y","Keyboard, clamping, one destructive item"],
+  ["&mdash; on a file in the workspace","Y","Eight items; <i>Discard the changes here</i> is the destructive one"],
+  ["&mdash; on a workspace in the rail panel","Y","<b>Restored.</b> Open &middot; Rename&hellip; &middot; End workspace, the set <code>Rail.tsx</code> carried before the rebuild. <code>mayWrite !== false</code> gates it, and when it is false there is <b>no menu</b>"],
   ["Pop — a menu that escapes its clipper","Y",""],
   ["Overlays — four kinds, one rule","Y","Sheet · popover · bar · screen, each with its own backdrop. See Spec"],
   ["Mark (the product glyph)","—","<b>Not a surface.</b> An asset beside the fonts"],
@@ -5069,6 +5095,20 @@ function coverage(){
       </div>`).join("")}
 
     <h3 class="covgroup">What “deliberately not drawn” means</h3>
+    <h3 style="margin-top:26px">What this column does not check</h3>
+    <p><b>The first functional regression of the rebuild got past all three checks, and it got past them for the same reason.</b>
+    <code>Rail.tsx</code> imported <code>ContextMenu</code>, <code>useMenu</code>, <code>renameSession</code> and
+    <code>useEndWorkspace</code>; <code>RailPanel.tsx</code> imports none of them, so right-clicking a workspace
+    stopped doing anything. The audit asks whether the CSS collides. The sweep asks whether every control throws.
+    This column asks whether what is drawn is built. <b>Not one of them asks whether the new build still does what
+    the old one did</b> &mdash; and a feature that is in neither the drawing nor the new code is invisible to a
+    comparison between them.</p>
+    <p>That is a gap in the method rather than an oversight in the work. A drawing says what a screen looks like and
+    Coverage says what is drawn; <b>neither has any representation of the previous build</b>, so neither can miss it.
+    The evidence for a restoration is git history, not this document &mdash; the item set above was read off
+    <code>Rail.tsx</code> at <code>f3cbc425</code> rather than invented, and it is the old set verbatim because a
+    restoration that quietly grows is a second thing to argue about. The Engineer is adding a hook-delta assertion,
+    which is the right side to fix it on: <b>the check has to compare two builds, and only the code has two.</b></p>
     <p>Three rows above are marked <i>n/a</i> rather than <i>no</i>, and the difference is the point of the column. <b>Mark</b> and <b>FileGlyph</b> are assets, not screens. <b>A Files tab on a profile</b> is the interesting one: it was reported missing, and it does not exist — <code>config/Roles.tsx</code> has no file handling of any kind. A profile is fields and a team. The thing that <i>does</i> have a files view is a skill, where it is called <b>Bundle</b>, and that one is a real gap listed as such.</p>
     <p><b>The menu-bar island is the one remaining “no”.</b> It has its own HTML entry point, its own window, no chrome, and rules that contradict this document’s on purpose — the pill is the black the notch is made of, and ember on it is the one place in the product where the colour is decoration rather than a signal. Putting it here would mean two design systems in one file. It wants an artifact of its own.</p>
   </div>`;
@@ -5859,6 +5899,23 @@ function addAgentSheet(){
    menu that follows nothing should not outlive what it opened on.    */
 function ctxMenu(){
   if(!S.ctx) return "";
+  /* **The one the rebuild dropped.** `Rail.tsx` carried `ContextMenu`,
+     `useMenu`, `renameSession` and `useEndWorkspace`; `RailPanel.tsx` imports
+     none of them, so right-clicking a workspace does nothing. The item set is
+     the old one verbatim — Open, Rename…, a rule, End workspace — because a
+     restoration that quietly grows is a second thing to argue about.
+
+     `mayWrite` gates it, not `maySpeak`: `Chat.tsx:168` separates them, and
+     renaming and ending are facts about the **place**, not about whose
+     conversation it is. `!== false`, so an older control plane that sends
+     neither does not take the menu away from the person whose work it is. */
+  if(S.ctx==="ws") return `<div class="catcher" data-act="ctx" data-ctx=""></div>
+  <div class="ctx" style="left:152px;top:292px" role="menu">
+    <button role="menuitem"><span>Open</span></button>
+    <button role="menuitem" data-on="true"><span>Rename&hellip;</span></button>
+    <span class="sep"></span>
+    <button role="menuitem" data-harm="true"><span>End workspace</span></button>
+  </div>`;
   const items=[["Open",""],["Open in a new tab","⌘↵"],"-",
                ["Copy path","⌥⌘C"],["Copy the file","⌘C"],"-",
                ["Reveal in Finder",""],["Compare with main",""],"-",
@@ -6074,7 +6131,9 @@ const SHEET = [
   ["Notes kept",                   {tab:"work", rt:"work", wb:"kept", panel:"collapsed"}],
   ["Terminal",                     {tab:"work", rt:"work", wb:"chat", term:true, panel:"collapsed"}],
   ["Find in the conversation",     {tab:"work", rt:"work", wb:"chat", find:"chat", panel:"collapsed"}],
-  ["Right-click a file",           {tab:"work", rt:"work", wb:"file", ctx:true, panel:"collapsed"}],
+  ["Right-click a file",           {tab:"work", rt:"work", wb:"file", ctx:"file", panel:"collapsed"}],
+  ["Right-click a workspace",      {tab:"work", rt:"work", wb:"chat", ctx:"ws", panel:"pinned", insp:false}],
+  ["A workspace you may not act on",{tab:"work", rt:"work", wb:"chat", ro:true, panel:"collapsed"}],
   ["Another agent here",           {tab:"work", rt:"work", wb:"chat", addagent:true, panel:"collapsed"}],
   ["Repositories here",            {tab:"work", rt:"work", wb:"chat", repos:"1", panel:"collapsed"}],
   ["Ship — uncommitted",           {tab:"work", rt:"work", wb:"chat", itab:"ship", ship:"uncommitted", panel:"collapsed"}],
@@ -6256,7 +6315,9 @@ function chrome(){
         .map(([id,l])=>`<button data-act="ship" data-ship="${id}" aria-pressed="${S.ship===id}">${l}</button>`).join("")}</span>
       <span class="seg">
         <button data-act="addagent" data-addagent="1" aria-pressed="${S.addagent}">Another agent</button>
-        <button data-act="ctx" data-ctx="1" aria-pressed="${S.ctx}">Right-click</button>
+        <button data-act="ctx" data-ctx="1" aria-pressed="${S.ctx==="file"}">Right-click a file</button>
+        <button data-act="ctx" data-ctx="ws" aria-pressed="${S.ctx==="ws"}">Right-click a workspace</button>
+        <button data-act="ro" data-ro="1" aria-pressed="${S.ro}">Read only</button>
         <button data-act="repos" data-repos="1" aria-pressed="${S.repos==="1"}">Repositories here</button>
         <button data-act="repos" data-repos="pick" aria-pressed="${S.repos==="pick"}">Check one in</button></span>
       <span class="seg">
@@ -6367,7 +6428,7 @@ document.addEventListener("click",e=>{
              tasks:"tasks",account:"account"};
     /* Leaving a screen takes its overlays with it: a dialog that outlives what
        it was opened over is the bug this prevents. */
-    if(S.tab!=="work"){ S.find=null; S.addagent=false; S.ctx=false; S.repos=null; }
+    if(S.tab!=="work"){ S.find=null; S.addagent=false; S.ctx=false; S.repos=null; S.ro=false; }
     if(S.tab!=="first") S.gate=null;
     if(S.tab!=="customize") S.scopesheet=false;
     if(R[S.tab]) S.rt=R[S.tab];
@@ -6428,7 +6489,10 @@ document.addEventListener("click",e=>{
   else if(a==="teamv"){ S.teamv=b.dataset.teamv; S.rt="work"; S.tab="work"; S.itab="overview"; S.insp=true; }
   else if(a==="teamup"){ S.teamup=b.dataset.teamup==="1"; S.rt="work"; S.tab="work"; S.itab="overview"; S.insp=true; }
   else if(a==="teamfail"){ S.teamfail=b.dataset.teamfail==="1"; S.rt="work"; S.tab="work"; S.itab="overview"; S.insp=true; }
-  else if(a==="ctx"){ S.ctx=b.dataset.ctx==="1"; if(S.ctx){S.rt="work";S.tab="work";S.wb="file";} }
+  else if(a==="ctx"){ const v=b.dataset.ctx; S.ctx=v==="1"?"file":v||false;
+    if(S.ctx==="ws"){ S.rt="work"; S.tab="work"; S.wb="chat"; S.panel="pinned"; S.insp=false; }
+    else if(S.ctx){ S.rt="work"; S.tab="work"; S.wb="file"; } }
+  else if(a==="ro"){ S.ro=b.dataset.ro==="1"; S.rt="work"; S.tab="work"; S.wb="chat"; }
   else if(a==="voice") S.voice=b.dataset.voice||null;
   else if(a==="repos"){ S.repos=b.dataset.repos||null; if(S.repos){S.rt="work";S.tab="work";} }
   else if(a==="gate"){ S.gate=b.dataset.gate||null; if(S.gate) S.first=null; }
