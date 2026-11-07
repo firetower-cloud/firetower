@@ -29,7 +29,7 @@ import { ArtifactShot } from "~/components/ArtifactShot";
 import { useListArtifacts } from "~/api/generated/artifacts/artifacts";
 import type { Artifact } from "~/api/generated/model";
 import { elapsed, minutesSince, needsYou } from "~/api/view";
-import { flat, group, isChild } from "~/api/workspaces";
+import { flat, group, isChild, placeBeat } from "~/api/workspaces";
 import { useSessions } from "~/data";
 import { useFleet, waitingIn, type Backend } from "~/fleet";
 import { navigate } from "~/shims/next-navigation";
@@ -79,12 +79,21 @@ export function Home({ backend, onSwitch }: { backend: Backend; onSwitch: (serve
      renders of its own. */
   useNow();
 
-  const asks = useMemo(() => {
+  const { asks, every } = useMemo(() => {
     const live = sessions.filter((s) => s.status !== "Ended");
     const places = flat(group(live));
     /* A child in its own workspace lives under its lead in the Overview tab,
-       not as a chip of its own here. */
-    return places.filter((p) => !isChild(p, places)).filter((p) => p.runs.some(needsYou));
+       not as a chip of its own here.
+
+       **The section still lists all three.** `needsYou` is right that handed
+       back and failed both want you — what changes is that each chip wears
+       its own tone. The section says *these need you*; the dot says what
+       kind of needing. */
+    return {
+      asks: places.filter((p) => !isChild(p, places)).filter((p) => p.runs.some(needsYou)),
+      /* `placeBeat` reads one hop past what is drawn, so it needs them all. */
+      every: places,
+    };
   }, [sessions]);
 
   const recent = (artifacts.data ?? []).slice(0, 3) as Artifact[];
@@ -120,7 +129,12 @@ export function Home({ backend, onSwitch }: { backend: Backend; onSwitch: (serve
                   title={note ? `${place.name} — ${note}` : place.name}
                   className="sw"
                 >
-                  <span className="dot" />
+                  {/* **The same function the rail uses.** This was a bare
+                      ember dot on every chip, so a workspace that had handed
+                      back drew sage in the panel and ember here, and a
+                      failed one drew brick there and ember here. Two
+                      surfaces, one fact, two functions. */}
+                  <span className="dot" data-t={placeBeat(place, every)} />
                   <b>{place.name}</b>
                   <span className="age">
                     {elapsed(minutesSince((asking ?? place.runs[0]).createdAt))}

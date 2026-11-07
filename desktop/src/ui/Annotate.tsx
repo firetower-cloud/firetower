@@ -168,7 +168,10 @@ export function Annotate({
         ref={card}
         onMouseDown={(e) => e.stopPropagation()}
         style={{ left: box.left, top: box.top, width: W }}
-        className="fixed z-50 overflow-hidden rounded-xl border border-line bg-overlay shadow-(--shadow-float)"
+        /* A popover, so it takes a raised surface — `bg-overlay` is
+           `--sunk`, which the palette keeps for a pressed chip and a
+           recessed track. */
+        className="pop fixed z-50 min-w-0 overflow-hidden rounded-xl p-0"
       >
         <div className="flex items-center gap-2 px-3.5 pt-3">
           <MessageSquarePlus className="h-3.5 w-3.5 shrink-0 text-slate" strokeWidth={1.75} />

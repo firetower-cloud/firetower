@@ -63,10 +63,10 @@ export function ContextMenu({ at, items, onClose }: { at: MenuAt; items: MenuIte
   }, [onClose, cursor, items, picks]);
 
   return (
-    <div ref={card} role="menu" style={{ left: box.left, top: box.top, width: W }} onContextMenu={(e) => e.preventDefault()} className="fixed z-[55] overflow-hidden rounded-lg border border-line bg-overlay py-1 shadow-(--shadow-float)">
+    <div ref={card} role="menu" style={{ left: box.left, top: box.top, width: W }} onContextMenu={(e) => e.preventDefault()} className="ctx">
       {items.map((item, n) =>
         item === "-" ? (
-          <div key={n} className="my-1 h-px bg-line-soft" />
+          <span key={n} className="sep" />
         ) : (
           <button
             key={n}
@@ -77,9 +77,11 @@ export function ContextMenu({ at, items, onClose }: { at: MenuAt; items: MenuIte
               item.onPick();
               onClose();
             }}
-            className={`flex w-full items-center gap-3 px-3 py-1.5 text-left text-ui transition-colors disabled:opacity-40 ${cursor === n ? "bg-raise" : ""} ${item.tone === "danger" ? "text-brick" : "text-text"}`}
+            data-on={cursor === n}
+            data-harm={item.tone === "danger"}
+            className="transition-colors disabled:opacity-40"
           >
-            <span className="min-w-0 flex-1 truncate">{item.label}</span>
+            <span>{item.label}</span>
             {item.shortcut && <span className="shrink-0 font-mono text-micro text-mute">{item.shortcut}</span>}
           </button>
         ),

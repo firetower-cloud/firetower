@@ -217,7 +217,36 @@ export const RULES = function collect() {
     if (r < floor) say("contrast-floor", el, `≥ ${floor}:1`, `${r.toFixed(2)}:1`);
   }
 
-  /* ── 6. One inset for every child of a page column ────────────────── */
+  /* ── 6. A surface used outside the role it was defined for ────────
+     **Two bugs, one shape.** The context menu and the annotate popover were
+     painted `--color-overlay`, which the palette reserves for a *recessed*
+     fill — a pressed chip, a recessed track. A card that floats above the
+     page wearing the colour of a dent in it reads grey-lavender, which is
+     what got reported twice.
+
+     Expressible cheaply because it is a fact about the laid-out page rather
+     than about source: a floating card is positioned, has a shadow and a
+     radius, and its own background is its surface. The recessed fill and the
+     rule colour are the two that may never be one. */
+  {
+    const d = document.createElement("div");
+    document.body.append(d);
+    const named = {};
+    for (const t of ["overlay", "line", "line-soft"]) {
+      d.style.background = `var(--color-${t})`;
+      named[getComputedStyle(d).backgroundColor.replace(/\s/g, "")] = t;
+    }
+    d.remove();
+    for (const el of all) {
+      const s = getComputedStyle(el);
+      const floats = (s.position === "fixed" || s.position === "absolute") && s.boxShadow !== "none" && parseFloat(s.borderRadius) > 0;
+      if (!floats) continue;
+      const role = named[s.backgroundColor.replace(/\s/g, "")];
+      if (role) say("surface-role", el, "a raised surface — panel or raise", `--color-${role}, which is ${role === "overlay" ? "the recessed fill" : "a rule colour"}`);
+    }
+  }
+
+  /* ── 7. One inset for every child of a page column ────────────────── */
   for (const col of document.querySelectorAll(".pcol, .pg, .hcol")) {
     const kids = [...col.children].filter((k) => {
       const s = getComputedStyle(k);

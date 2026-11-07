@@ -538,6 +538,11 @@
   /* The dot. The only saturated thing on the screen, and it is 8px wide.
      The halo is the pulse; `ember-pulse` in `globals.css` is the same idea at
      the other end of the app and keeps its own timing. */
+  /* **One mark, one table.** The dot wears the beat its workspace is in —
+     the same `data-t` the panel's `.wdot` takes — because two surfaces
+     drawing one fact with two functions is how the home came to say *stuck*
+     where the rail said *finished*. Ember without one, which is the chip
+     that has always been here: a question. */
   .dot {
     position: relative;
     width: 8px;
@@ -546,7 +551,23 @@
     border-radius: 99px;
     background: var(--color-ember);
   }
-  .dot::after {
+  .dot[data-t="working"] {
+    background: var(--color-slate);
+  }
+  .dot[data-t="done"] {
+    background: var(--color-sage);
+  }
+  .dot[data-t="broken"] {
+    background: var(--color-brick);
+  }
+  .dot[data-t="over"] {
+    background: var(--color-mute);
+  }
+  /* **The halo is the question's, not every state's.** It is the one thing
+     on the home that moves, and a finished workspace pulsing for attention
+     is the opposite of what it has to say. */
+  .dot:not([data-t]):after,
+  .dot[data-t="blocked"]::after {
     content: "";
     position: absolute;
     inset: 0;
@@ -3987,5 +4008,69 @@ html:not([data-platform="macos"]) {
   }
   .whead .nm.rn:hover svg {
     color: var(--color-dim);
+  }
+
+  /* ── A context menu ────────────────────────────────────────────
+     **A floating card takes a raised surface, not a recessed one.** Both of
+     these were `bg-overlay`, which is `--sunk` — the token the palette
+     reserves for a pressed chip and a recessed track. A card that hovers
+     above the page wearing the colour of a dent in it is the grey-lavender
+     cast that got reported twice: the scrim pass fixed what sits *behind*
+     these cards and nobody checked what the cards are *made of*.
+
+     `--sheet` in light and `--raised` in dark, which is what `.pop` already
+     says and what the drawing says for both. */
+  .ctx {
+    position: fixed;
+    z-index: 55;
+    width: 224px;
+    padding: 5px;
+    border-radius: 12px;
+    background: var(--color-panel);
+    box-shadow:
+      0 24px 60px -18px rgb(22 22 23 / 0.38),
+      0 0 0 1px var(--color-line);
+  }
+  [data-theme="dark"] .ctx {
+    background: var(--color-raise);
+  }
+  .ctx button {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    height: 30px;
+    padding: 0 9px;
+    border-radius: 8px;
+    font-size: var(--text-ui);
+    color: var(--color-bone);
+    text-align: left;
+  }
+  .ctx button > span:first-child {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .ctx button:hover,
+  .ctx button[data-on="true"] {
+    background: var(--color-overlay);
+  }
+  [data-theme="light"] .ctx button:hover,
+  [data-theme="light"] .ctx button[data-on="true"] {
+    background: var(--color-raise);
+  }
+  .ctx button[data-harm="true"] {
+    color: var(--color-brick);
+  }
+  .ctx button[data-harm="true"]:hover {
+    background: var(--color-brick-tint);
+  }
+  .ctx .sep {
+    display: block;
+    height: 1px;
+    margin: 4px 9px;
+    background: var(--color-line);
   }
 }
