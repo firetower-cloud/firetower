@@ -12,6 +12,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CornerDownLeft, Search } from "lucide-react";
 import { useFleet } from "~/fleet";
+import { Fragment } from "react";
 import { group, shortRepo } from "~/api/workspaces";
 import { navigate } from "~/shims/next-navigation";
 import { key } from "~/platform";
@@ -132,27 +133,48 @@ export function Palette({ open, onClose }: { open: boolean; onClose: () => void 
           />
         </div>
 
-        <div className="p-1.5">
+        <div className="scroll-slim max-h-[52vh] overflow-y-auto p-1.5">
           {items.length === 0 && <div className="px-2 py-3 text-ui text-mute">Nothing matches.</div>}
           {items.map((i, n) => (
-            <button
-              key={i.id}
-              onMouseEnter={() => setAt(n)}
-              onClick={() => choose(i)}
-              data-on={n === at}
-              className="row w-full text-left"
-              style={{ gridTemplateColumns: "18px 1fr auto", height: "32px" }}
-            >
-              <span className="text-micro font-bold text-mute" style={{ fontFamily: "var(--font-narrow)" }}>
-                {i.mark ?? "›"}
-              </span>
-              <span className="flex min-w-0 items-baseline gap-2">
-                <span className={`truncate text-ui ${n === at ? "text-bone" : "text-text"}`}>{i.label}</span>
-                {i.hint && <span className="truncate text-meta text-mute">{i.hint}</span>}
-              </span>
-              {n === at && <CornerDownLeft className="h-3 w-3 text-dim" strokeWidth={2} />}
-            </button>
+            <Fragment key={i.id}>
+              {/* **Grouped, not one flat list.** A workspace and a place to go
+                  are different kinds of answer, and a reader scanning for one
+                  should not have to read the other. The heading appears at the
+                  first item of its kind and nowhere else. */}
+              {i.kind !== items[n - 1]?.kind && <p className="klab">{i.kind === "session" ? "Workspaces" : "Go to"}</p>}
+              <button
+                onMouseEnter={() => setAt(n)}
+                onClick={() => choose(i)}
+                data-on={n === at}
+                className="row w-full text-left"
+                style={{ gridTemplateColumns: "18px 1fr auto", height: "32px" }}
+              >
+                <span className="text-micro font-bold text-mute" style={{ fontFamily: "var(--font-narrow)" }}>
+                  {i.mark ?? "›"}
+                </span>
+                <span className="flex min-w-0 items-baseline gap-2">
+                  <span className={`truncate text-ui ${n === at ? "text-bone" : "text-text"}`}>{i.label}</span>
+                  {i.hint && <span className="truncate text-meta text-mute">{i.hint}</span>}
+                </span>
+                {n === at && <CornerDownLeft className="h-3 w-3 text-dim" strokeWidth={2} />}
+              </button>
+            </Fragment>
           ))}
+        </div>
+
+        {/* The keys, and the one fact about this list that is not obvious:
+            it spans every connected Firetower, and the mark says whose. */}
+        <div className="kfoot">
+          <span className="flex items-center gap-1.5">
+            <span className="keycap">↑↓</span> move
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="keycap">⏎</span> open
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="keycap">Esc</span> close
+          </span>
+          <span className="ml-auto">Results from every Firetower. The mark says whose.</span>
         </div>
       </div>
     </div>

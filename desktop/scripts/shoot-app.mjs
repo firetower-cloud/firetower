@@ -433,10 +433,12 @@ const SHOTS = [
   {
     id: "over-any-screen__before-something-is-undone",
     go: async (p) => {
-      await at(p, "/configuration/skills", 1400);
-      await p.locator(".sk").first().click();
-      await pause(p, 900);
-      await p.getByRole("button", { name: /discard|delete|remove/i }).first().click();
+      /* Any confirmation draws the same dialog; the vault's remove is the
+         one this mock can reach without a workspace somebody may end. */
+      await at(p, "/configuration/vault", 1400);
+      await p.locator(".r").first().hover();
+      await pause(p, 200);
+      await p.getByRole("button", { name: "Remove" }).first().click();
       await pause(p, 700);
     },
   },
