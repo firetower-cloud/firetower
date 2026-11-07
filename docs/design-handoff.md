@@ -147,6 +147,30 @@ A list row keeps the raised treatment, because the name is already readable and
 the row only needs marking. It lost its shadow: white on the desk grey is
 already a ΔE 6.2 step, and a shadow on top of that is the same second signal.
 
+### The scale is raised once, not per screen
+
+**Every type size below 28px is 1px larger than the first draft.** Conversation
+prose is 17, an agent's question 18, a row name 15.5, a control label 14.5, a
+timestamp 13.5. The floor for anything a person reads is **13.5px**.
+
+It was done as a uniform step for a reason worth keeping. A scale earns its name
+by making a row the same size wherever it sits, so the unit of change is the
+*tier*, never the screen. And adding the same number to everything is the only
+move that **cannot** disturb the gaps between tiers — which is the thing that
+makes a dense screen readable, and the thing a well-meaning per-screen pass
+destroys. Prose sits 1.5px above a row name before and after; a question sits
+1px above prose.
+
+**It costs rows, and that is the right trade here.** Measured at the reference
+1280 × 824 window: the destination panel still holds 7 of 7, and a configuration
+list drops from 6 visible to 5. One row, and the list scrolls. Conversation
+prose improves at the same time — the column stays 648px, so the measure goes
+from about 81 characters a line to 76, which is further *into* the comfortable
+range rather than out of it.
+
+Row minimums grew 2px with it (34 → 36, 40 → 42, 44 → 46, 54 → 58), because a
+name and a sub-line each grew a pixel.
+
 ### Three weights, and no more
 
 **400 · 500 · 530.** The first draft of this design used fourteen — 420, 450,
