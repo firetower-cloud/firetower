@@ -516,6 +516,81 @@ for (const [scene, want] of [
   }
 }
 
+/* ── The seeded home ──────────────────────────────────────────────────
+   **The seed is read twice for one press**, counted: `["a seed",
+   "nothing"]`. React double-invokes a `useMemo` factory under `StrictMode`,
+   and the old `consumeSeed()` cleared the module variable as it read — so it
+   worked only because React keeps the result of the *first* invocation.
+   Nothing said so, and a real remount between the navigation and the first
+   paint has the same shape with a worse ending: the seed goes to the instance
+   that is discarded.
+
+   **The symptom is a blank composer on a plain home**, which is
+   indistinguishable from *Start did nothing* — so it is invisible to a
+   screenshot of the home and only exists after a press. Driven through the
+   task's own Start for that reason; a state that set the seed directly would
+   not have found it. The caret is the other thing no picture holds. */
+for (const [title, key, repo] of [
+  ["Quota meter rounds the wrong way at 99.5%", "#5138", "acme/web"],
+  ["Decide whether we keep the v1 embed", "#91", null],
+]) {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 824 }, deviceScaleFactor: 2 });
+  await page.request.post(`${HERE}/__reset`);
+  await page.addInitScript(
+    ([registry]) => {
+      window.localStorage.setItem("firetower.servers", registry);
+      window.localStorage.setItem("firetower.current", "o_1");
+      window.localStorage.setItem("firetower.theme", "light");
+    },
+    [REGISTRY],
+  );
+  const say = (ok, what, got) => {
+    if (!ok) failed++;
+    console.log(`  ${ok ? "ok    " : "FAILED"} seeded ${key}: ${what}${ok ? "" : ` — ${got}`}`);
+  };
+
+  await page.goto(`${APP}/#/tasks`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(1500);
+  await page.locator("div.r").filter({ hasText: title }).first().getByRole("button", { name: "Start" }).click();
+  await page.waitForTimeout(1600);
+
+  const seen = await page.evaluate(() => {
+    const box = document.querySelector(".composer textarea");
+    const chips = [...document.querySelectorAll(".shelf .chip")];
+    return {
+      headline: document.querySelector(".air h1")?.textContent ?? null,
+      sub: document.querySelector(".hsub")?.textContent ?? null,
+      prompt: box?.value ?? null,
+      caret: box ? box.selectionStart : null,
+      focused: document.activeElement === box,
+      first: chips[0] ? { says: chips[0].textContent.trim(), given: chips[0].dataset.given === "true", chevron: !!chips[0].querySelector("svg.lucide-chevron-down") } : null,
+      pickers: chips.slice(1).every((c) => !!c.querySelector("svg.lucide-chevron-down")),
+      branch: document.querySelector(".composer .bar .br")?.textContent?.trim() ?? null,
+    };
+  });
+
+  say(seen.prompt?.includes(title), "the composer holds the task, so the seed survived the press", `it reads ${JSON.stringify(seen.prompt)}`);
+  say((seen.prompt ?? "").split("\n").length === 2, "with the URL on a line of its own", JSON.stringify(seen.prompt));
+  say(seen.focused && seen.caret === title.length, "and the caret is at the end of the title, not of the URL", `at ${seen.caret} of ${title.length}, focused ${seen.focused}`);
+  say(seen.headline === `Start ${key}`, "the headline names the task and does not greet", `it reads ${seen.headline}`);
+  say(!seen.headline.includes(title), "and does not repeat the title that is three inches below it", seen.headline);
+  say(
+    seen.sub === (repo ? "Edit anything below, then send it." : "This task names no repository, so there is nothing to check out yet."),
+    `the line under it is the ${repo ? "ordinary" : "no-repository"} one`,
+    seen.sub,
+  );
+  say(seen.first?.says === key && seen.first.given, "the task chip is first on the shelf", `the first chip is ${seen.first?.says}`);
+  say(seen.first && !seen.first.chevron && seen.pickers, "it wears no chevron and the pickers do — the whole statement", `given chevron ${seen.first?.chevron}, pickers all chevroned ${seen.pickers}`);
+  say(
+    repo ? seen.branch?.startsWith("agent/") : seen.branch === "no branch — nothing checked out",
+    `the footer shows ${repo ? "the branch before it is cut" : "that there is no branch to cut"}`,
+    `it reads ${seen.branch}`,
+  );
+  if (repo) say(seen.branch?.includes(key.replace(/\W/g, "")), "and the key leads it, because the key is what survives an edit", seen.branch);
+
+  await page.close();
+}
+
 await browser.close();
 if (failed) {
   console.error(`\n  ${failed} state(s) are not what the design says.`);

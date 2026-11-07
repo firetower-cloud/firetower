@@ -820,6 +820,44 @@
   .chip[disabled] {
     opacity: 0.5;
   }
+  /* **A chip that arrived with you, not one you pick.** The task's key, first
+     on the shelf, with a link-out glyph and no chevron. It stays at full
+     strength while disabled — there is no tracker URL to open, which is a
+     fact about the task and not a control being withheld. */
+  .chip[data-given="true"][disabled] {
+    opacity: 1;
+  }
+  .chip[data-given="true"][disabled]:hover {
+    background: transparent;
+    color: var(--color-text);
+  }
+  /* The branch this will be cut on, in the composer's footer before it is
+     cut. Mono because it is a machine name you will type into `git`, and
+     pushed to the right-hand end whether or not dictation exists here. */
+  .composer .bar .br {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex: none;
+    margin-left: auto;
+    min-width: 0;
+    padding-left: 8px;
+    font-family: var(--font-mono);
+    font-size: 0.78125rem; /* 12.5px */
+    letter-spacing: -0.01em;
+    color: var(--color-dim);
+  }
+  /* The name itself reads at full strength and the words around it do not —
+     the drawing's own split, and the reason is that the branch is the part
+     you will paste into `git`. */
+  .composer .bar .br b {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 400;
+    color: var(--color-bone);
+  }
   /* Bone on ground, never a second saturated colour. White is this system's
      accent, and a blue send button beside an ember dot costs the dot its
      meaning. */
@@ -3325,6 +3363,17 @@ html:not([data-platform="macos"]) {
     font-weight: var(--font-weight-mid);
     color: var(--color-bone);
   }
+  /* The line under the headline, which only a task's arrival draws. It says
+     the one thing the rest of the page cannot: *edit anything below, then
+     send it* — or that there is no repository to check out. The greeting
+     never has one, because a greeting that needed explaining would be the
+     wrong greeting. */
+  .hsub {
+    margin-top: 7px;
+    font-size: 0.90625rem;
+    color: var(--color-dim);
+  }
+
   /* Nothing waiting and nothing published: first run. It has to look
      deliberate rather than broken, so the column centres and the air
      collapses — one sentence and one composer, and no empty headings. */

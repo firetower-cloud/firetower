@@ -29,8 +29,11 @@ import {
   ArrowUp,
   Check,
   ChevronDown,
+  CircleAlert,
   Diamond,
+  ExternalLink,
   FolderGit2,
+  GitBranch,
   Paperclip,
   Plus,
   Search,
@@ -60,8 +63,9 @@ import { leaveDraft } from "~/workspace/draft";
 import { post, whichServer } from "~/workspace/outbox";
 import { base64, chipFor, Chips, Dropping, sift, type Chip } from "~/ui/attach";
 import { folderRefusals, useFileDrop } from "~/ui/drop";
+import { openExternal } from "~/open";
 import { isMac } from "~/platform";
-import { consumeSeed } from "~/start";
+import { dropSeed, seedWaiting, type Seed } from "~/start";
 import type { Agent, Control, ControlKind, Role } from "~/api/generated/model";
 
 type Checkout = { id: string; slug: string };
@@ -89,6 +93,70 @@ const recall = (key: string) => {
 const slug = (s: string) =>
   s.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48);
 
+/**
+ * A few words of a title, cut on a word boundary.
+ *
+ * *Quota meter goes amber too early on the free plan* becomes
+ * `quota-meter-goes-amber` — enough to recognise in `git branch` and not a
+ * sentence. Cut between words, never mid-word, because a branch ending in
+ * `…-ea` reads as a typo.
+ *
+ * And never left ending on an article or a preposition. *Quota meter rounds
+ * the wrong way* cut at twenty-four is `quota-meter-rounds-the`, which reads
+ * as a sentence that was interrupted; dropping a trailing word of three
+ * letters or fewer gives `quota-meter-rounds`, which reads as a name.
+ */
+const fewWords = (s: string, within = 24) => {
+  const full = slug(s);
+  if (full.length <= within) return full;
+  const cut = full.slice(0, within + 1);
+  const at = cut.lastIndexOf("-");
+  const kept = at > 0 ? cut.slice(0, at) : full.slice(0, within);
+  const parts = kept.split("-");
+  return parts.length > 1 && parts[parts.length - 1].length <= 3
+    ? parts.slice(0, -1).join("-")
+    : kept;
+};
+
+/**
+ * The branch a workspace will be cut on — shown in the composer's footer
+ * before you commit to it, rather than discovered afterwards.
+ *
+ * **With a task key, the key leads**: `agent/nw-4120-quota-meter-goes-amber`.
+ * It is stable, short, greppable and survives the title being edited; a few
+ * words of the title follow because a branch list of bare keys tells you
+ * nothing about what any of them was.
+ *
+ * Without one, this is what it has always been — the first line, slugged.
+ * A task with a URL and no key falls back to exactly that.
+ */
+export function branchFor(first: string, taskKey?: string | null): string {
+  const key = taskKey ? slug(taskKey) : "";
+  const stem = key ? [key, fewWords(first)].filter(Boolean).join("-") : slug(first);
+  return `agent/${stem || "work"}`;
+}
+
+/**
+ * What the composer opens with, from whatever the launch already knew.
+ *
+ * **A task prefills it.** This was the premise that needed correcting: the
+ * composer was never prefilled — `useState(seed?.prompt ?? "")`, and a task's
+ * Start sets `title`, `repo`, `issue`, `taskKey` and `taskUrl` and never
+ * `prompt`. The title and URL did reach the agent, as a draft handed over
+ * *after* the session started, so nobody saw them before pressing send and
+ * the page you landed on was blank — indistinguishable from *Start did
+ * nothing*.
+ *
+ * The URL is on its own line under the title because that is what the agent
+ * needs to go and read the thing, and because it is the one part nobody wants
+ * to retype.
+ */
+export function seeded(seed?: Seed): string {
+  if (seed?.prompt) return seed.prompt;
+  if (!seed?.taskKey && !seed?.taskUrl) return "";
+  return [seed.title, seed.taskUrl].filter(Boolean).join("\n");
+}
+
 export function StartComposer({
   mid,
   above,
@@ -107,7 +175,13 @@ export function StartComposer({
   bare?: boolean;
   children: React.ReactNode;
 }) {
-  const seed = useMemo(() => consumeSeed(), []);
+  /* **Read without taking, and dropped when this goes away.** The read is
+     idempotent because it happens twice for one press — `StrictMode`
+     double-invokes the factory — and because a remount between the navigation
+     and the first paint would otherwise hand the seed to the instance that is
+     discarded. `start.tsx` has the measurement. */
+  const seed = useMemo(() => seedWaiting(), []);
+  useEffect(() => (seed ? () => dropSeed(seed) : undefined), [seed]);
 
   const { data: repos } = useRepos();
   const { data: allSkills } = useSkills();
@@ -117,7 +191,9 @@ export function StartComposer({
   const profiles = useListRoles().data ?? [];
   const create = useCreateSession();
 
-  const [prompt, setPrompt] = useState(seed?.prompt ?? "");
+  const [prompt, setPrompt] = useState(() => seeded(seed));
+  /** Arrived from a task's *Start*, carrying what it was. */
+  const task = !!(seed?.taskKey || seed?.taskUrl);
   const [checkouts, setCheckouts] = useState<Checkout[]>([]);
   const [where, setWhere] = useState<Where>(() => ({
     machine: "",
@@ -213,20 +289,26 @@ export function StartComposer({
   /* Arriving from "Create with AI", the composer is already half-written — put
      the cursor after it and grow the box, so the person just keeps typing.
 
-     And arriving by ⌘N or from a task's *Start*, the box takes focus empty:
-     the gesture means "I want to say something", and landing on a screen with
-     the cursor somewhere else makes somebody click before they can type. Not
-     on an ordinary visit to the Dashboard, where the thing to read is the
-     question an agent asked, not the box. */
+     And arriving by ⌘N, the box takes focus empty: the gesture means "I want
+     to say something", and landing on a screen with the cursor somewhere else
+     makes somebody click before they can type. Not on an ordinary visit to
+     the Dashboard, where the thing to read is the question an agent asked,
+     not the box.
+
+     **From a task, the cursor lands at the end of the first line** rather
+     than at the end of the text. The last line is the issue URL, which is the
+     one part nobody is going to edit; the title is the part you might. */
   const asked = usePathname().startsWith("/new");
   useEffect(() => {
     const el = box.current;
-    if (!el || (!seed?.prompt && !asked)) return;
+    if (!el || (!seed?.prompt && !task && !asked)) return;
     el.focus();
-    el.setSelectionRange(el.value.length, el.value.length);
+    const at = task && !seed?.prompt ? el.value.indexOf("\n") : -1;
+    const caret = at < 0 ? el.value.length : at;
+    el.setSelectionRange(caret, caret);
     el.style.height = "auto";
     el.style.height = Math.min(el.scrollHeight, 240) + "px";
-  }, [seed?.prompt, asked]);
+  }, [seed?.prompt, task, asked]);
 
   /* A task seeds the repository once the server has mapped its slug to an id. */
   useEffect(() => {
@@ -323,14 +405,19 @@ export function StartComposer({
     };
   }, []);
 
+  /* **What this will be, computed in render rather than in `go`.** The branch
+     is drawn in the footer before it is cut, and a branch shown on screen and
+     a branch sent to the server that are computed in two places are two
+     branches within a release. */
+  const first = prompt.split("\n")[0].trim();
+  const name = (seed?.title || first || checkouts[0]?.slug || "Workspace").slice(0, 80);
+  const branch = checkouts.length ? branchFor(first || name, seed?.taskKey) : undefined;
+
   const go = () => {
     if (!ready || !kind || !account) return;
     // What was actually used, so the next New page opens on it.
     remember(LAST_AGENT, kind);
     remember(LAST_ACCOUNT, account.id);
-    const first = prompt.split("\n")[0].trim();
-    const name = (seed?.title || first || checkouts[0]?.slug || "Workspace").slice(0, 80);
-    const branch = checkouts.length ? `agent/${slug(first || name) || "work"}` : undefined;
 
     /* With something attached the prompt cannot ride along with the launch.
        `NewSession` carries text and nothing else, and the message this has to
@@ -392,13 +479,16 @@ export function StartComposer({
            under a long setup script takes it. A sentence is exactly what that
            handoff is for; the pictures cannot go in it and do not. Written
            before `post`, which takes it out again as soon as the attempt is
-           over, whichever way it went. */
-        const handoff = [
-          attached ? prompt.trim() : "",
-          seed?.taskUrl ? `${seed.title ?? ""}\n${seed.taskUrl}`.trim() : "",
-        ]
-          .filter(Boolean)
-          .join("\n\n");
+           over, whichever way it went.
+
+           **The task's own line is not added here any more.** It used to be:
+           the composer was never prefilled, so the title and the URL were
+           handed over as a draft after the session started. They are in the
+           prompt now, which means adding them here would hand the agent the
+           same two lines twice — once as what was asked and once as a draft
+           underneath it. Seeding the composer and this line are the same fact
+           said in two places, and only one of them is visible before send. */
+        const handoff = attached ? prompt.trim() : "";
         if (handoff) leaveDraft(s.id, handoff);
         /* The session's id, not the workspace's: a turn and an attachment are
            both addressed to the agent running in it. The workspace's too,
@@ -435,7 +525,27 @@ export function StartComposer({
 
       <div className={mid ? "home" : "dock"}>
         <div className={mid ? "hcol" : "wrap"} data-bare={mid && bare ? "true" : undefined}>
-          {mid && <div className="air">{above}</div>}
+          {/* **What the page says, when you arrived carrying something.** The
+              greeting is stateless by design, and arriving from a task makes
+              the loudest thing on the screen contradict the arrival. It names
+              the task instead, and deliberately does not repeat the title —
+              which is three inches below it, in the composer. */}
+          {mid && (
+            <div className="air">
+              {task ? (
+                <>
+                  <h1>{seed?.taskKey ? `Start ${seed.taskKey}` : "Start this task"}</h1>
+                  <p className="hsub">
+                    {seed?.repo
+                      ? "Edit anything below, then send it."
+                      : "This task names no repository, so there is nothing to check out yet."}
+                  </p>
+                </>
+              ) : (
+                above
+              )}
+            </div>
+          )}
           <div className={mid ? "mid" : "contents"}>
           {/* What was not taken — too big, too many, a folder — in the words
               the conversation's composer uses for the same refusals. */}
@@ -472,6 +582,31 @@ export function StartComposer({
 
           {/* The shelf: what the workspace will be made of. */}
           <div className="shelf">
+            {/* **Given, not chosen — and first, because it is why you are
+                here.** `taskKey` and `taskUrl` are parameters of the workspace
+                exactly as the repository and the machine are, and they travel
+                into `NewSession` beside them. It wears a link-out glyph and
+                **no chevron**: the other two are pickers, this one arrived
+                with you and cannot be changed here. The missing chevron is the
+                statement — the drawing makes the same point by dropping the
+                ring these chips carry there, which has no analogue here
+                because ours carry none. */}
+            {task && (
+              <button
+                onClick={() => seed?.taskUrl && void openExternal(seed.taskUrl)}
+                disabled={!seed?.taskUrl}
+                data-set="true"
+                data-given="true"
+                className="chip"
+                title={seed?.taskUrl ? `${seed.taskKey ?? "The task"} — opens the tracker` : (seed?.taskKey ?? "The task")}
+              >
+                <span className="grid place-items-center text-mute">
+                  <Icon of={CircleAlert} size={14} />
+                </span>
+                {seed?.taskKey ?? seed?.issue ?? "The task"}
+                {seed?.taskUrl && <Icon of={ExternalLink} size={12} className="text-mute" />}
+              </button>
+            )}
             <button
               onClick={(e) => toggle("repo", e.currentTarget)}
               data-set={checkouts.length > 0}
@@ -593,6 +728,25 @@ export function StartComposer({
                   onPickControl={(k, v) => setChosen((p) => ({ ...p, [k]: v }))}
                 />
               )}
+              {/* **The branch, before you commit to it rather than after.**
+                  Mono, quiet, and it tracks the first line as you type, so
+                  editing the title is visibly editing the branch. It is drawn
+                  only from a task, because that is the arrival where what is
+                  about to happen is not otherwise on the screen.
+
+                  `margin-left: auto` so it right-aligns whether or not
+                  dictation is available on this machine; the mic keeps its
+                  own, which does nothing once this has taken the slack. */}
+              {task && (
+                <span
+                  className="br"
+                  title={branch ? `The branch this will be cut on` : "Nothing is checked out, so there is no branch to cut"}
+                >
+                  <Icon of={GitBranch} size={12} />
+                  {branch ? <b>{branch}</b> : "no branch — nothing checked out"}
+                </span>
+              )}
+
               {/* **At the right-hand end**, where the drawing puts it: the
                   chips on the left are what this run will be, and dictation
                   is a way of typing — it belongs beside the thing it types

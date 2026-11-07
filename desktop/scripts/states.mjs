@@ -74,6 +74,19 @@ const at = (page, path, wait = 1100) =>
 const byTitle = (page, t) => page.locator(`[title="${t}"]`).first();
 const pause = (page, ms = 500) => page.waitForTimeout(ms);
 
+/**
+ * Press a task's *Start* and land where it takes you.
+ *
+ * The row is found by its title and the button inside it — `getByRole` over
+ * the whole page would find the first *Start* on it, which is a different
+ * task's.
+ */
+async function fromTask(page, title) {
+  await at(page, "/tasks", 1500);
+  await page.locator("div.r").filter({ hasText: title }).first().getByRole("button", { name: "Start" }).click();
+  await pause(page, 1600);
+}
+
 /** The inspector's tabs are buttons in its header strip. */
 async function inspectorTab(page, label) {
   await at(page, "/sessions/s_1", 1800);
@@ -168,6 +181,15 @@ export const SHOTS = [
   },
   { id: "starting-work__panel-nothing-running", scene: "ws-none", go: (p) => at(p, "/", 1400) },
   { id: "starting-work__tasks-has-work", go: (p) => at(p, "/tasks") },
+  /* **The seeded home** — proposition 5. Driven through the task's own Start,
+     because what is being checked is that the seed survives the navigation:
+     `consumeSeed` was read once and cleared as it read, and one press counts
+     two reads. A state that set the seed directly would not have found it. */
+  { id: "starting-work__seeded-home", go: (p) => fromTask(p, "Quota meter rounds the wrong way at 99.5%") },
+  {
+    id: "starting-work__seeded-home-no-repository",
+    go: (p) => fromTask(p, "Decide whether we keep the v1 embed"),
+  },
   { id: "starting-work__tasks-nothing-open", scene: "no-tasks", go: (p) => at(p, "/tasks") },
   { id: "starting-work__tasks-not-connected", scene: "no-trackers", go: (p) => at(p, "/tasks") },
   {

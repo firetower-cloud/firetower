@@ -1303,6 +1303,10 @@ const TASKS = {
     { id: "github:acme/api#812", key: "#812", kind: "issue", source: "github", state: "open", title: "Webhook signatures from Gitea are refused", repo: "acme/api", url: "https://example.invalid/812", updatedAt: minutesAgo(220), body: "Gitea signs with SHA-256.", labels: [{ name: "tracker", colour: "0e8a16" }], assignees: [] },
     { id: "github:acme/web#5141", key: "#5141", kind: "pullRequest", source: "github", state: "open", title: "Light mode for the whole app", repo: "acme/web", url: "https://example.invalid/5141", updatedAt: minutesAgo(90), body: null, labels: [], assignees: [{ login: "ana", avatar: null }] },
     { id: "github:acme/jobs#77", key: "#77", kind: "issue", source: "github", state: "open", title: "Backfill the invoice index out of hours", repo: "acme/jobs", url: "https://example.invalid/77", updatedAt: minutesAgo(1500), body: null, labels: [{ name: "chore", colour: "cfd3d7" }], assignees: [] },
+    /* **A task that names no repository**, which the seeded home has to say
+       rather than leaving two controls looking broken. Every fixture named
+       one, so the state could not be driven at all. */
+    { id: "github:acme#91", key: "#91", kind: "issue", source: "github", state: "open", title: "Decide whether we keep the v1 embed", repo: null, url: "https://example.invalid/91", updatedAt: minutesAgo(600), body: null, labels: [], assignees: [] },
   ],
 };
 
