@@ -83,6 +83,55 @@ dark ground and do not invert. Designing in light and deriving dark produces
 both honestly, because light is the harder constraint: there is less room above
 white than below black.
 
+### Four kinds of overlay, and the test that tells them apart
+
+Written down because this was the fourth thing in the project that was
+consistent by luck rather than by rule — and the first three each cost a bug.
+`--color-scrim` shipped and **one file in the whole client used it**.
+
+> **Does the thing the overlay is about stay on screen behind it?**
+> If yes, it is a popover and must not dim. If no, it is a sheet and should.
+
+| kind | what it is | backdrop | dismiss |
+|---|---|---|---|
+| **Sheet** | interrupts; what it is about is not on the page | `--color-scrim` | Esc, click outside, Cancel |
+| **Popover** | anchored to something you are still reading | **none** — an invisible catcher only | Esc, click outside |
+| **Bar** | not modal; the page keeps working | **nothing at all** | its own close |
+| **Screen** | replaces the body rather than covering it | opaque surface | the action on it |
+
+**Sheets:** the palette and QuickOpen, all three sharing steps, Confirm, connect
+a git host, add a machine, add another agent, what a profile may reach,
+repositories here, which port, the five dictation dialogs, the limit hand-off.
+
+**Popovers:** Annotate in both its forms, the five pickers, the context menu,
+the profile and Firetower-switch menus.
+
+**Bars:** the find bar — and only that.
+
+**Screens:** the Gate and the Boundary. Both keep the titlebar, which is what
+makes Account reachable while the Gate is up.
+
+**Annotate must not dim, and that is the rule rather than an oversight.**
+`Annotate.tsx`'s own header argues it: the note opens *where you pointed*
+because the whole point of annotating rather than typing into the composer is
+that the note is attached to a specific piece of text. Dimming the page would
+hide the thing the note is about. It gets an invisible full-screen catcher so
+clicking away still closes it, and a lift with a hairline ring so it separates
+without a scrim doing the work.
+
+**One scrim value, from the shipped token.** `rgb(22 22 23 / .22)` in light,
+`rgb(0 0 0 / .55)` in dark — `globals.css:290` and `:127` verbatim. A scrim is
+its own thing rather than a surface at an alpha: `--color-ground` at 40% is a
+pale wash on a pale page, and in light the dim still has to be *dark*, which is
+the half a surface token cannot express.
+
+**A name that meant two things.** This document had `--scrim` as the composer's
+bottom **gradient fade** while the product has `--color-scrim` as the modal
+**dim**. An engineer mapping one onto the other would have put a dim where a
+fade belongs. The fade is `--fade` now. For the same reason the transparent
+click-catcher class is `.catcher`, not `.scrim` — it is the opposite of a scrim
+and was a rename waiting to be a bug.
+
 ### An artifact preview is a poster, never a live frame
 
 Non-negotiable, and the reason is security rather than taste. An artifact is
