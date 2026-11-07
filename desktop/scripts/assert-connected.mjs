@@ -41,9 +41,25 @@ const HERE = process.env.HERE ?? "http://localhost:4401";
 const ONLY = process.env.ONLY ?? "";
 mkdirSync(OUT, { recursive: true });
 
-const CATALOGUE = await fetch(`${HERE}/__entities`).then((r) => r.json());
-/* Longest first, so "acme/design-system" wins over "acme/design". */
-CATALOGUE.sort((a, b) => b.name.length - a.name.length);
+/**
+ * The catalogue, **per state**.
+ *
+ * It was fetched once from the default scene, and states that set their own
+ * scene have their own ids — so a row reading "Backfill the invoice index" in
+ * the `team` scene was matched against a same-named session from a scene that
+ * was not on screen, and landing on the right one was reported as wrong.
+ * Scenes are per page, so this is too.
+ */
+const catalogues = new Map();
+async function catalogue(page, scene) {
+  if (!catalogues.has(scene)) {
+    const got = await page.request.get(`${HERE}/__entities`).then((r) => r.json());
+    /* Longest first, so "acme/design-system" wins over "acme/design". */
+    got.sort((a, b) => b.name.length - a.name.length);
+    catalogues.set(scene, got);
+  }
+  return catalogues.get(scene);
+}
 
 const browser = await chromium.launch({ channel: "chrome" });
 attach(browser);
@@ -55,7 +71,7 @@ let pressed = 0;
 const BY_DESIGN = `
   [role="tab"], [role="switch"], [role="checkbox"], [role="menuitemcheckbox"],
   [aria-pressed], [aria-expanded], [aria-haspopup],
-  input, label, summary, [data-filter], .seg button, .itab, .tab, .sk-tabs button
+  input, label, summary, [data-filter], [data-gesture], .seg button, .itab, .tab, .sk-tabs button
 `;
 
 for (const s of SHOTS) {
@@ -69,6 +85,7 @@ for (const s of SHOTS) {
     const page = await fresh("dark", { servers: s.servers ?? REGISTRY, scene: s.scene ?? "default", at: s.at ?? null });
     try {
       await s.go(page);
+      const CATALOGUE = await catalogue(page, s.scene ?? "default");
       candidates = await page.evaluate(
         ([catalogue, byDesign]) => {
           const out = [];
@@ -83,9 +100,16 @@ for (const s of SHOTS) {
             /* The most specific thing it names. A row reading "auth refactor ·
                acme/web" names both; the row is the workspace. */
             const entity = names[0];
+            /* **Every id that name could mean.** Two sessions can be called
+               the same thing, and a row naming one of them is satisfied by
+               landing on either — the check is "did it open the thing it
+               names", not "did it pick the one I happened to list first". */
+            entity.ids = [
+              ...new Set(catalogue.filter((e) => e.name === entity.name).flatMap((e) => [e.id, e.also]).filter(Boolean)),
+            ];
             /* Already on it? Then "stayed put" is the right answer and this
                tells us nothing. */
-            if (location.hash.includes(entity.id)) continue;
+            if (entity.ids.some((id) => location.hash.includes(id))) continue;
             const key = `${entity.id}|${txt}`;
             if (seen.has(key)) continue;
             seen.add(key);
@@ -93,8 +117,11 @@ for (const s of SHOTS) {
               entity,
               label: txt.slice(0, 60),
               byDesign: !!el.closest(byDesign),
-              /* How the presser will find it again on a fresh page. */
-              nth: [...document.querySelectorAll('button, a[href], [role="button"], [role="menuitem"], [role="option"]')].indexOf(el),
+              /* **Found again by its words, not its position.** An index
+                 taken on one render and used on the next lands on whatever
+                 happens to be there — which reported a row as inert that
+                 navigates perfectly well when you actually press it. */
+              find: txt,
             });
           }
           /* A cap, because a list of forty rows tells you the same thing
@@ -111,7 +138,7 @@ for (const s of SHOTS) {
 
   for (const c of candidates) {
     if (c.byDesign) {
-      findings.push({ state: s.id, label: c.label, names: `${c.entity.kind} ${c.entity.id}`, outcome: "by-design", landed: "—" });
+      findings.push({ state: s.id, label: c.label, names: `${c.entity.kind} ${c.entity.ids.join(" / ")}`, outcome: "by-design", landed: "—" });
       continue;
     }
     const page = await fresh("dark", { servers: s.servers ?? REGISTRY, scene: s.scene ?? "default", at: s.at ?? null });
@@ -124,7 +151,26 @@ for (const s of SHOTS) {
            distinction that matters and the one a URL cannot make. */
         shape: document.body.innerText.replace(/\s+/g, " ").length + ":" + document.querySelectorAll("*").length,
       }));
-      const hit = page.locator('button, a[href], [role="button"], [role="menuitem"], [role="option"]').nth(c.nth);
+      /* **The one whose words match, not the first that contains them.**
+         `hasText` is a substring filter, so two different controls naming the
+         same thing both resolved to whichever came first in the DOM — in the
+         workspace that is the title button, which renames on *double* click
+         and correctly does nothing on one. Both candidates were pressing it
+         and both came back inert. The index is computed on this page, now,
+         which is the only version of an index that is safe. */
+      const SEL = 'button, a[href], [role="button"], [role="menuitem"], [role="option"]';
+      const idx = await page.evaluate(
+        ([sel, want]) =>
+          [...document.querySelectorAll(sel)].findIndex(
+            (el) => (el.textContent || "").replace(/\s+/g, " ").trim() === want,
+          ),
+        [SEL, c.find],
+      );
+      if (idx < 0) {
+        await page.close();
+        continue;
+      }
+      const hit = page.locator(SEL).nth(idx);
       await hit.click({ timeout: 4000 });
       await page.waitForTimeout(700);
       const after = await page.evaluate(() => ({
@@ -149,7 +195,7 @@ for (const s of SHOTS) {
       );
       const outcome = threw
         ? "it-threw"
-        : after.hash.includes(c.entity.id) || inSheet
+        : c.entity.ids.some((id) => after.hash.includes(id)) || inSheet
           ? "connected"
           : after.hash !== before.hash
             ? "wrong-thing"
@@ -160,7 +206,7 @@ for (const s of SHOTS) {
         findings.push({
           state: s.id,
           label: c.label,
-          names: `${c.entity.kind} ${c.entity.id}`,
+          names: `${c.entity.kind} ${c.entity.ids.join(" / ")}`,
           outcome,
           landed: threw
             ? `${after.hash} — and threw`

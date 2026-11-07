@@ -487,7 +487,16 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
               className="w-56 rounded-md border border-line bg-ground px-2 py-1 text-ui text-bone focus:outline-none"
             />
           ) : (
-            <button onDoubleClick={() => mayAct && setRenaming(place.name)} title={mayAct ? "Double-click to rename" : place.name} className="nm flex items-center gap-1.5">
+            <button
+            onDoubleClick={() => mayAct && setRenaming(place.name)}
+            /* It answers a double click and nothing else, which the title
+               says to a person and nothing said to anything else. A single
+               press doing nothing is correct here and indistinguishable from
+               broken without this. */
+            data-gesture="dblclick"
+            title={mayAct ? "Double-click to rename" : place.name}
+            className="nm flex items-center gap-1.5"
+          >
               {place.name}
               {mayAct && <Pencil className="h-3 w-3 shrink-0 text-mute opacity-0 transition-opacity hover:opacity-100" strokeWidth={1.75} />}
             </button>

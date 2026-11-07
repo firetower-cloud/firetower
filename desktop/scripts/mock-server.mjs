@@ -693,7 +693,10 @@ const server = createServer(async (req, res) => {
       ...HOSTS.map((h) => ({ kind: "machine", id: h.id, name: h.name })),
       ...ARTIFACTS.map((a) => ({ kind: "artifact", id: a.id, name: a.title })),
       ...SKILLS.map((k) => ({ kind: "skill", id: k.id, name: k.name })),
-      ...dashboard().map((x) => ({ kind: "session", id: x.id, name: x.title })),
+      /* A session and the workspace it lives in are one thing to a row that
+         names it: the rail lists workspaces by their session's title and
+         navigates to the *workspace*. Both ids are a correct landing. */
+      ...dashboard().map((x) => ({ kind: "session", id: x.id, also: x.workspaceId ?? null, name: x.name ?? x.title })),
     ],
     "/api/v1/updates/runs": scene === "upgrading" ? [RUNNING, DONE_RUN] : [DONE_RUN],
     /* One run, by id. The list was served and the detail was not, so the
