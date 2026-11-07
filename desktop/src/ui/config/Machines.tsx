@@ -35,12 +35,13 @@ import { Group, Rows, Section, WhereTo } from "~/ui/config/bits";
 import { WhoCanAccess } from "~/ui/Sharing";
 import { useMe } from "~/api/generated/auth/auth";
 import { useConfirm } from "~/ui/Confirm";
+import { useOpened } from "~/ui/opened";
 
-export function Machines({ live }: { live: boolean }) {
+export function Machines({ live, open: asked = null }: { live: boolean; open?: string | null }) {
   const me = useMe();
   const hosts = useHosts();
   const [adding, setAdding] = useState(false);
-  const [open, setOpen] = useState<string | null>(null);
+  const [open, setOpen] = useOpened(asked);
 
   return (
     /* **Machines**, which is what the rail calls it and what the drawing says.

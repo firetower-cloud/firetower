@@ -37,6 +37,7 @@ import type { Artifact } from "~/api/generated/model";
 import { elapsed, minutesSince } from "~/api/view";
 import { ArtifactTab } from "~/ui/ArtifactTab";
 import { why } from "~/data";
+import { useOpened } from "~/ui/opened";
 import { useStart } from "~/start";
 import { ArtifactShot } from "~/components/ArtifactShot";
 
@@ -46,7 +47,7 @@ type Look = "grid" | "list";
 
 const LOOK_KEY = "firetower.artifacts.look";
 
-export function ArtifactsPage() {
+export function ArtifactsPage({ open: asked = null }: { open?: string | null }) {
   const start = useStart();
   /* No interval of its own — `Posters` polls for every screen. Two screens
      each naming a cadence is how the list came to be fetched on two timers. */
@@ -56,7 +57,7 @@ export function ArtifactsPage() {
   const [scope, setScope] = useState<Scope>("all");
   const [sort, setSort] = useState<Sort>("recent");
   const [query, setQuery] = useState("");
-  const [open, setOpen] = useState<string | null>(null);
+  const [open, setOpen] = useOpened(asked);
   const [expanded, setExpanded] = useState(false);
   const [look, setLook] = useState<Look>(() => {
     try {

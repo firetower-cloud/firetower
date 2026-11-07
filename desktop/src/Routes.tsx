@@ -18,6 +18,7 @@ import { Setup } from "~/ui/Setup";
 import { navigate } from "~/shims/next-navigation";
 import type { Backend } from "~/fleet";
 import { usePathname } from "~/shims/next-navigation";
+import { askedFor } from "~/ui/opened";
 
 export function Routes({ backend, onSwitch, onForgot }: { backend: Backend; onSwitch: (serverId: string) => void; onForgot: () => void }) {
   const path = usePathname();
@@ -28,7 +29,10 @@ export function Routes({ backend, onSwitch, onForgot }: { backend: Backend; onSw
      job over. */
   if (path.startsWith("/new")) return <Home backend={backend} onSwitch={onSwitch} />;
   if (path.startsWith("/tasks")) return <TasksPage backend={backend} />;
-  if (path.startsWith("/artifacts")) return <ArtifactsPage />;
+  /* `startsWith` matched `/artifacts/a_1` and rendered the library, so a
+     link that named an artifact opened the list of them. The id is read
+     here and the page opens it. */
+  if (path.startsWith("/artifacts")) return <ArtifactsPage open={askedFor(path, 1)} />;
   if (path.startsWith("/configuration")) return <Configuration backend={backend} onForgot={onForgot} />;
   if (path.startsWith("/updates")) return <Updates />;
   if (path.startsWith("/account")) return <Account backend={backend} onForgot={onForgot} />;

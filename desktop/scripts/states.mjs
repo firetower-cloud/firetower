@@ -315,12 +315,15 @@ export const SHOTS = [
   },
   {
     id: "artifacts-and-skills__a-new-version",
+    /* **The held one**, which is `deploy-runbook` and not `pr-screenshots`.
+       This opened a skill nobody had dropped a version on and then clicked
+       Versions, which draws the note about who takes the next one — a real
+       screen, and not the one the drawing names. The state the drawing shows
+       is the review that replaces the tabs when a folder has arrived. */
     go: async (p) => {
       await at(p, "/configuration/skills", 1400);
-      await p.locator(".sk", { hasText: "pr-screenshots" }).first().click();
-      await pause(p, 900);
-      await p.locator(".sk-tabs button", { hasText: "Versions" }).click();
-      await pause(p, 900);
+      await p.locator(".sk", { hasText: "deploy-runbook" }).first().click();
+      await pause(p, 1100);
     },
   },
   {

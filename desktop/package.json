@@ -19,7 +19,8 @@
     "orval": "orval",
     "test": "vitest run",
     "check:states": "node scripts/check-states.mjs",
-    "assert:design": "node scripts/assert-design.mjs"
+    "assert:design": "node scripts/assert-design.mjs",
+    "assert:connected": "node scripts/assert-connected.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.101.4",

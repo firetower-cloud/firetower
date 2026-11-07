@@ -669,6 +669,19 @@ const server = createServer(async (req, res) => {
     "/api/v1/secrets": scene === "no-secrets" ? { ...SECRETS, held: [], access: [] } : SECRETS,
     "/api/v1/roles": scene === "no-roles" ? [] : ROLES,
     "/api/v1/provider-kinds": PROVIDER_KINDS,
+    /* **The catalogue, for `assert-connected.mjs`.** Not an API route — a
+       harness one, under a name no client asks for. The connectedness check
+       has to know what each control *names* before it can say whether
+       pressing it landed on that thing, and the alternative was tagging
+       every row in the app with a `data-opens` attribute it does not
+       otherwise need. */
+    "/__entities": [
+      ...REPOS.map((r) => ({ kind: "repository", id: r.id, name: r.slug })),
+      ...HOSTS.map((h) => ({ kind: "machine", id: h.id, name: h.name })),
+      ...ARTIFACTS.map((a) => ({ kind: "artifact", id: a.id, name: a.title })),
+      ...SKILLS.map((k) => ({ kind: "skill", id: k.id, name: k.name })),
+      ...dashboard().map((x) => ({ kind: "session", id: x.id, name: x.title })),
+    ],
     "/api/v1/updates/runs": scene === "upgrading" ? [RUNNING, DONE_RUN] : [DONE_RUN],
     /* One run, by id. The list was served and the detail was not, so the
        screen that draws the steps had nothing to draw them from and the

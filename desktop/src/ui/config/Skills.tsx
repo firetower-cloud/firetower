@@ -41,10 +41,11 @@ import type { Skill } from "~/api/generated/model";
 import { useConfirm } from "~/ui/Confirm";
 import { Markdown } from "~/components/Markdown";
 import { readDrop, readFiles, size, RISK_SAYS, type Found } from "~/skills";
+import { useOpened } from "~/ui/opened";
 
-export function Skills() {
+export function Skills({ open: asked = null }: { open?: string | null }) {
   const [adding, setAdding] = useState(false);
-  const [open, setOpen] = useState<string | null>(null);
+  const [open, setOpen] = useOpened(asked);
   const [query, setQuery] = useState("");
   const [over, setOver] = useState(false);
   /* A folder dropped on the list goes straight into the review, so the way in

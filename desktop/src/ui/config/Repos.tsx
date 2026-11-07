@@ -65,6 +65,7 @@ import { useConnect } from "~/ui/config/connect";
 import { AddHost } from "~/ui/config/GitHosts";
 import { Pop } from "~/ui/Pop";
 import { useConfirm } from "~/ui/Confirm";
+import { useOpened } from "~/ui/opened";
 
 /** `paste` is not a host — it is the way in for a remote no host can list. */
 const PASTE = "paste";
@@ -77,7 +78,7 @@ const PASTE = "paste";
  */
 const ALL = "all";
 
-export function Repos({ live }: { live: boolean }) {
+export function Repos({ live, open: asked = null }: { live: boolean; open?: string | null }) {
   const repos = useRepos();
   const cache = useQueryClient();
   const providers = useProviders();
@@ -100,7 +101,7 @@ export function Repos({ live }: { live: boolean }) {
   );
 
   const [q, setQ] = useState("");
-  const [open, setOpen] = useState<string | null>(null);
+  const [open, setOpen] = useOpened(asked);
   const [adding, setAdding] = useState(false);
 
   const needle = q.trim().toLowerCase();

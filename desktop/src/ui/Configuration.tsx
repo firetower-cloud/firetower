@@ -22,6 +22,7 @@ import { useBackendKey, dropCache } from "~/backend";
 import { dropFleet, type Backend } from "~/fleet";
 import { forget, servers } from "~/servers";
 import { usePathname } from "~/shims/next-navigation";
+import { askedFor } from "~/ui/opened";
 import { paneAt } from "~/ui/config/panes";
 import { Facts, Section } from "~/ui/config/bits";
 import { Machines } from "~/ui/config/Machines";
@@ -49,25 +50,28 @@ export function Configuration({ backend, onForgot }: { backend: Backend; onForgo
        panes had been rebuilt and the 48rem column was drawing a 770px page
        inside a 1120px one. */
     <div className="scroll-slim flex h-full min-h-0 flex-col overflow-y-auto">
-      <Pane at={paneAt(path)} backend={backend} onForgot={onForgot} />
+      <Pane at={paneAt(path)} open={askedFor(path, 2)} backend={backend} onForgot={onForgot} />
     </div>
   );
 }
 
-function Pane({ at, backend, onForgot }: { at: string; backend: Backend; onForgot: () => void }) {
+/* `open` is the id after the pane's own segment — `/configuration/skills/sk_1`.
+   The panes keep their own "which is open" state because most of the time it
+   is opened by clicking a row; this is how an address gets a word in. */
+function Pane({ at, open, backend, onForgot }: { at: string; open: string | null; backend: Backend; onForgot: () => void }) {
   switch (at) {
     case "repositories":
-      return <Repos live />;
+      return <Repos live open={open} />;
     case "git-hosts":
       return <GitHosts live />;
     case "trackers":
       return <Trackers live />;
     case "machines":
-      return <Machines live />;
+      return <Machines live open={open} />;
     case "agents":
       return <Agents live />;
     case "skills":
-      return <Skills />;
+      return <Skills open={open} />;
     case "roles":
       return <Roles />;
     case "people":

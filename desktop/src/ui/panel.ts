@@ -1,5 +1,5 @@
 /**
- * Whether the rail's panel is pinned open, per destination.
+ * Whether the rail's panel is pinned open.
  *
  * A module rather than state in `Rail`, because two things set it and they are
  * not each other's children: the panel's own header has a close button, and
@@ -7,21 +7,30 @@
  * collapsed panel could only be restored with ⌘\ — which is fine for somebody
  * who knows, and a dead end for everybody else.
  *
- * **Per destination, and it survives a reload.** The panel is collapsed when a
- * workspace opens, because the sheet there is a conversation and the width
- * belongs to it, and pinned everywhere else. A workspace gets its own key
- * rather than the Dashboard's: you are still in Dashboard when you are reading
- * one, but the answer to "how wide should this be" is not the same question.
+ * **One answer, and it survives a reload.** It used to be one answer *per
+ * destination*, which is why collapsing the panel did not stay collapsed:
+ * clicking another destination icon read a different slot, and every slot
+ * defaulted to open. From the outside that is the panel refusing to stay
+ * shut — "if it's collapsed, it's collapsed", which is what was asked for and
+ * what the drawing does with its single `S.panel`.
+ *
+ * The workspace keeps a separate answer, because the drawing keeps it too —
+ * its sheet patches every workspace state to `panel:"collapsed"`. The sheet
+ * there is a conversation and the width belongs to it, and you are still in
+ * Dashboard while you read one, so "how wide should this be" is genuinely a
+ * different question.
+ *
+ * Read at module load, before React renders, so a collapsed panel does not
+ * flash open on launch and then shut — the same approach `main.tsx` takes for
+ * the theme.
  */
 import { useEffect, useState } from "react";
-import { destinationAt } from "~/ui/destinations";
 
 const KEY = "firetower.panel";
 
 /** Whose answer a path uses. */
 export function panelKeyOf(path: string): string {
-  if (path.startsWith("/sessions")) return "work";
-  return destinationAt(path) ?? "home";
+  return path.startsWith("/sessions") ? "work" : "chrome";
 }
 
 function read(): Record<string, boolean> {
@@ -40,6 +49,7 @@ const watchers = new Set<() => void>();
 export function panelPinned(at: string): boolean {
   return held[at] ?? at !== "work";
 }
+
 
 export function setPanelPinned(at: string, pinned: boolean) {
   held = { ...held, [at]: pinned };

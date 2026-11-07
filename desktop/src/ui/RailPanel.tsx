@@ -272,7 +272,7 @@ function Customize() {
               sit here decoded to nothing (`it` for incident-timeline); a 17px
               spacer keeps the column aligned with the rows above. */}
           {skills.data.slice(0, 8).map((s) => (
-            <button key={s.id} onClick={() => navigate("/configuration/skills")} className="prow">
+            <button key={s.id} onClick={() => navigate(`/configuration/skills/${s.id}`)} className="prow">
               <span className="w-[17px] shrink-0" />
               <span className="lbl">{s.name}</span>
             </button>
@@ -294,7 +294,7 @@ function Repositories() {
         <>
           <Label>Checked out</Label>
           {repos.data.slice(0, 10).map((r) => (
-            <button key={r.id} onClick={() => navigate("/configuration/repositories")} className="prow">
+            <button key={r.id} onClick={() => navigate(`/configuration/repositories/${r.id}`)} className="prow">
               <span className="min-w-0 flex-1 truncate">{r.slug}</span>
             </button>
           ))}
@@ -314,7 +314,7 @@ function Machines() {
         <>
           <Label>Yours</Label>
           {hosts.data.map((h) => (
-            <button key={h.id} onClick={() => navigate("/configuration/machines")} className="prow">
+            <button key={h.id} onClick={() => navigate(`/configuration/machines/${h.id}`)} className="prow">
               <span className="grid w-[17px] shrink-0 place-items-center text-mute">
                 <Icon of={h.machine === "local" ? Monitor : Server} size={14} />
               </span>
@@ -350,7 +350,7 @@ function Artifacts() {
         <>
           <Label>Recent</Label>
           {recent.map((a) => (
-            <button key={a.id} onClick={() => navigate("/artifacts")} className="prow">
+            <button key={a.id} onClick={() => navigate(`/artifacts/${a.id}`)} className="prow">
               <span className="min-w-0 flex-1 truncate">{a.title}</span>
               <span className="shrink-0 text-meta tabular-nums text-dim">
                 {elapsed(minutesSince(a.updatedAt))}

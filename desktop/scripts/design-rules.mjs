@@ -97,15 +97,25 @@ export const RULES = function collect() {
   }
 
   /* ── 2. The ember budget ──────────────────────────────────────────── */
-  const EMBER = ["--color-ember", "--color-ember-ink"].map((n) =>
-    getComputedStyle(document.documentElement).getPropertyValue(n).trim().toLowerCase(),
-  );
+  /* **The token, resolved — not "orange-ish".** The heuristic read amber as
+     ember, so a skill's five risk lines, which are amber by design, counted
+     against a budget that is about ember alone. Resolving the two ember
+     tokens through a probe and comparing exactly has no hue to get wrong. */
+  const EMBER = (() => {
+    const d = document.createElement("div");
+    document.body.append(d);
+    const out = new Set();
+    for (const n of ["--color-ember", "--color-ember-ink"]) {
+      d.style.color = `var(${n})`;
+      out.add(getComputedStyle(d).color.replace(/\s/g, ""));
+    }
+    d.remove();
+    return out;
+  })();
   const isEmber = (v) => {
     const c = rgb(v);
     if (!c || c.a < 0.5) return false;
-    /* Saturated orange, however it was written. */
-    const mx = Math.max(c.r, c.g, c.b), mn = Math.min(c.r, c.g, c.b);
-    return mx > 180 && mx - mn > 90 && c.r === mx && c.b === mn;
+    return EMBER.has(`rgb(${Math.round(c.r)},${Math.round(c.g)},${Math.round(c.b)})`);
   };
   let embers = 0;
   const emberAt = [];
@@ -157,7 +167,17 @@ export const RULES = function collect() {
          the eight real candidates were buried under three hundred. */
       const gp = n.parentElement && getComputedStyle(n.parentElement);
       if (!gp || gp.display !== "flex" || gp.flexDirection !== "column") continue;
-      say("min-h-0-above-a-scroller", n, "min-height: 0", p.minHeight);
+      /* **And only when it actually overflowed.** A missing `min-height: 0`
+         is harmless on a column whose height is constrained some other way —
+         `h-full`, an explicit height, a parent that clips. What the handoff's
+         trap looks like from outside is a column *taller than the box it
+         sits in*, with a scroller inside it that therefore never scrolls. So
+         measure that, not the property: the property is the usual cause, not
+         the defect. */
+      const box = n.getBoundingClientRect();
+      const room = n.parentElement.getBoundingClientRect();
+      if (box.height <= room.height + 1) continue;
+      say("min-h-0-above-a-scroller", n, `fits its ${Math.round(room.height)}px parent`, `${Math.round(box.height)}px, so the scroller inside cannot scroll`);
     }
   }
 
@@ -207,9 +227,14 @@ export const RULES = function collect() {
     const common = Object.entries(tally).sort((a, b) => b[1] - a[1])[0];
     if (common[1] < kids.length) {
       kids.forEach((k, i) => {
-        /* Within a pixel is the same inset; sub-pixel layout is not a bug. */
-        if (Math.abs(Number(insets[i]) - Number(common[0])) > 1)
-          say("page-column-inset", k, `${common[0]}px from the column edge`, `${insets[i]}px`);
+        /* Within a pixel is the same inset; sub-pixel layout is not a bug.
+           And **a bleed two siblings share is a pattern** — rows commonly
+           extend past the text so their hover ground does, and reporting
+           eight identical rows says nothing. The `.sk-tabs` defect was the
+           *lone* odd one out, so that is what this reports. */
+        if (Math.abs(Number(insets[i]) - Number(common[0])) <= 1) return;
+        if (tally[insets[i]] > 1) return;
+        say("page-column-inset", k, `${common[0]}px from the column edge`, `${insets[i]}px`);
       });
     }
   }
