@@ -584,12 +584,20 @@
     gap: 3px;
     height: 8px;
   }
+  /* `currentColor`, so the one table that says what a status means can say
+     it here too. These were `--color-mute` wherever they appeared, which is
+     why *working* in the team rail read as the same grey as *handed back*
+     and *ended* — three different facts told apart by an 11px shape. */
   .typing i {
     width: 4px;
     height: 4px;
     border-radius: 99px;
-    background: var(--color-mute);
+    background: currentColor;
     animation: typing 1.4s ease-in-out infinite;
+  }
+  /* Everywhere that is not saying a status keeps the colour it had. */
+  .typing:not([class*="text-"]) {
+    color: var(--color-mute);
   }
   .typing i:nth-child(2) {
     animation-delay: 0.18s;

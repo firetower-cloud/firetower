@@ -592,6 +592,19 @@ const server = createServer(async (req, res) => {
         other({ id: "s_k3", workspaceId: "w_1", parentId: "s_1", number: 4, name: "Token audit", title: "Token audit", status: "HandedBack", agent: "Cursor", createdAt: minutesAgo(62) }),
       ];
     }
+    /* **A child that failed**, which the drawing added with `S.teamfail`
+       because the artifact could not draw the state at all. `OverviewTab`
+       has always returned `failed` and drawn it; nothing could reach it
+       here, so the mark that was a round pip two rows under a round ember
+       dot had never been photographed. */
+    if (scene === "team-failed") {
+      return [
+        session(),
+        other({ id: "s_k1", workspaceId: "w_1", parentId: "s_1", number: 2, name: "Quota band thresholds", title: "Quota band thresholds", status: "NeedsYou", createdAt: minutesAgo(4), note: "Should a plan with no soft limit show the band at all?" }),
+        other({ id: "s_k2", workspaceId: "w_1", parentId: "s_1", number: 3, name: "Backfill the invoice index", title: "Backfill the invoice index", status: "Failed", agent: "Codex", createdAt: minutesAgo(9), note: "the migration would not apply" }),
+        other({ id: "s_k3", workspaceId: "w_1", parentId: "s_1", number: 4, name: "Token audit", title: "Token audit", status: "Ended", agent: "Cursor", createdAt: minutesAgo(62) }),
+      ];
+    }
     if (scene === "calm") return [session(), ...working];
     const asking = [
       other({

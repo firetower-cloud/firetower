@@ -171,6 +171,81 @@ for (const theme of ["light", "dark"]) {
   await page.close();
 }
 
+/* ── The team rail's five marks ───────────────────────────────────────
+   `BEAT_TONE` in `api/view.ts` is the one table that says what a status
+   means, and this rail drew every one of them in neutral ink — so *working*,
+   *handed back* and *ended* were one grey thing told apart by an 11px shape.
+   These are visible in a screenshot and nobody read them, which is the same
+   failure the hover had: a hundred and ninety-eight pictures is not a thing
+   a person checks carefully.
+
+   **Never hue alone**, so the shapes are asserted too: `failed` is a warning
+   glyph rather than a second circle, because a brick circle two rows under
+   an ember circle is one shape told apart by colour, which a dichromat
+   cannot do. */
+for (const [scene, want] of [
+  ["team", [["needs you", "--color-ember", "dot"], ["working", "--color-slate", "typing"], ["handed back", "--color-sage", "svg"]]],
+  ["team-failed", [["failed", "--color-brick", "svg"], ["ended", "--color-mute", "svg"]]],
+]) {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 824 }, deviceScaleFactor: 2 });
+  await page.addInitScript(
+    ([registry]) => {
+      window.localStorage.setItem("firetower.servers", registry);
+      window.localStorage.setItem("firetower.current", "o_1");
+      window.localStorage.setItem("firetower.theme", "light");
+    },
+    [REGISTRY],
+  );
+  await page.request.post(`${HERE}/__reset?scene=${scene}`);
+  await page.goto(`${APP}/#/sessions/s_1`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(2200);
+
+  for (const [note, token, shape] of want) {
+    const got = await page.evaluate(
+      ([note, token]) => {
+        const d = document.createElement("div");
+        document.body.append(d);
+        d.style.color = `var(${token})`;
+        const wanted = getComputedStyle(d).color;
+        d.remove();
+        /* The row whose second line says this, then its mark. */
+        const row = [...document.querySelectorAll(".kids .tm, .tm")].find((r) =>
+          (r.querySelector("s")?.textContent || "").trim() === note,
+        );
+        if (!row) return { missing: true };
+        const mark = row.querySelector(".rt > :not(.age)");
+        if (!mark) return { noMark: true };
+        const s = getComputedStyle(mark);
+        return {
+          wanted,
+          /* A glyph carries its tone in `color`; the two that are solid
+             shapes carry it in `background`. */
+          got: mark.classList.contains("typing")
+            ? getComputedStyle(mark.querySelector("i")).backgroundColor
+            : mark.classList.contains("dot")
+              ? s.backgroundColor
+              : s.color,
+          shape: mark.classList.contains("dot") ? "dot" : mark.classList.contains("typing") ? "typing" : mark.tagName.toLowerCase(),
+        };
+      },
+      [note, token],
+    );
+    if (got.missing || got.noMark) {
+      failed++;
+      console.log(`  FAILED team: no mark for "${note}" in the ${scene} scene`);
+      continue;
+    }
+    const okColour = sameish(got.got, got.wanted);
+    const okShape = got.shape === shape;
+    if (!okColour || !okShape) failed++;
+    console.log(
+      `  ${okColour && okShape ? "ok    " : "FAILED"} team: "${note}" is ${token.replace("--color-", "")} as a ${shape}` +
+        (okColour && okShape ? "" : ` — got ${got.got} as a ${got.shape}, wanted ${got.wanted}`),
+    );
+  }
+  await page.close();
+}
+
 await browser.close();
 if (failed) {
   console.error(`\n  ${failed} state(s) are not what the design says.`);

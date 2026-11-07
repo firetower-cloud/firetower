@@ -12,10 +12,10 @@
  * (`consumption_events`) but not yet exposed per session, so it isn't drawn.
  */
 import { useMemo } from "react";
-import { Check, ExternalLink, FileText, GitBranch, GitPullRequest, LayoutList, Link2 } from "lucide-react";
+import { Check, ExternalLink, FileText, GitBranch, GitPullRequest, LayoutList, Link2, TriangleAlert } from "lucide-react";
 import { navigate } from "~/shims/next-navigation";
 import { AgentMark } from "~/components/AgentMark";
-import { elapsed, minutesSince } from "~/api/view";
+import { BEAT_TONE, beatOf, elapsed, minutesSince } from "~/api/view";
 import { useConversation } from "~/api/conversation";
 import { relays } from "~/api/relay";
 import { useHosts } from "~/data";
@@ -99,30 +99,43 @@ function Panel({
 const age = (at: string) => elapsed(minutesSince(at));
 
 /**
- * One mark, and never a word beside it.
+ * One mark per state, in the colour that state already has.
  *
- * **Three, and only three**: an ember dot for *asked you a question*, typing
- * dots for *working*, a tick for *handed back*. The island's four-quadrant
- * `Blocks` was here, which is a different alphabet — it has to carry every
- * status at eleven pixels on a surface with no room for words, and this row
- * has the words right beside it.
+ * **No new hue.** `BEAT_TONE` in `api/view.ts` is the one table that says
+ * what a status means — working: slate, blocked: ember, done: sage, broken:
+ * brick, over: mute — and it has shipped all along. This rail drew every one
+ * of them in neutral ink, so three different facts looked like one grey
+ * thing, told apart by an 11px shape. The Plan two inches below already drew
+ * a finished step in sage while *handed back* up here was grey: one meaning,
+ * one panel, two renderings.
+ *
+ * **Never hue alone.** `failed` used to be a round pip, two rows under a
+ * round ember dot — one circle told from another by colour, which is the one
+ * thing `STYLE.md` forbids and a dichromat cannot do. It is a warning glyph
+ * now: a tick and a triangle read apart with the colour off.
+ *
+ * The ember budget is unmoved. This rail contributes exactly one mark —
+ * *asked you a question* — and that was ember before.
  */
 function TeamMark({ status }: { status: SessionStatus }) {
+  const tone = BEAT_TONE[beatOf({ status })];
   if (status === "NeedsYou") return <span className="dot" title="asked you a question" />;
   if (status === "Working" || status === "Starting") {
     return (
-      <span className="typing" title="working">
+      <span className={`typing ${tone}`} title="working">
         <i />
         <i />
         <i />
       </span>
     );
   }
-  if (status === "HandedBack" || status === "Ready") {
-    return <Check className="h-3.5 w-3.5 text-dim" strokeWidth={2} aria-label="handed back" />;
+  if (status === "Failed") {
+    return <TriangleAlert className={`h-3.5 w-3.5 ${tone}`} strokeWidth={2} aria-label="failed" />;
   }
-  if (status === "Failed") return <span className="st" data-s="bad" title="failed" />;
-  return <span className="st" data-s="off" title="ended" />;
+  if (status === "Ended") {
+    return <Check className={`h-3.5 w-3.5 ${tone}`} strokeWidth={2} aria-label="ended" />;
+  }
+  return <Check className={`h-3.5 w-3.5 ${tone}`} strokeWidth={2} aria-label="handed back" />;
 }
 
 /** The manager at the top of the Team panel — the level above. The active card
