@@ -201,9 +201,9 @@ through the flow ended on "not a Firetower".
 
 | Screen | Verdict | What differed |
 |---|---|---|
-| ⌘K — the palette | **to compare** | |
+| ⌘K — the palette | **differs → fixed** | One flat list where the drawing groups Workspaces from Go to, and no footer. The footer carries the one fact about this list that is not obvious anywhere else: it spans every connected Firetower, and the mark says whose. |
 | ⌘P — go to a file | **to compare** | |
-| Before something is undone | **to compare** | |
+| Before something is undone | **differs → fixed** | A bordered card with a tinted strip under its buttons — two surfaces and a rule for a box with four lines in it. One sheet now, actions on the same ground as the words, brick only when the thing is destructive. |
 | A usage limit is reached | **not reached** | Needs a session whose account reports a limit; the mock reports none. |
 | What happens on a limit | **to compare** | |
 | A screen that threw | **not reached** | Nothing in the mock throws on purpose. `Boundary` is covered by its own test. |
