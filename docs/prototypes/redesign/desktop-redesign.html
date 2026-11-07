@@ -1742,6 +1742,66 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
 .cs-cap{font-size:13.5px;line-height:1.4;color:var(--quiet)}
 .cs-tile:hover .cs-cap{color:var(--ink)}
 </style>
+<style>
+/* ═══ THE HOME ═════════════════════════════════════════════════════
+   Folded in from the approved exploration. Sizes carry this document's
+   current scale — the source artifact predates the +1 pass and the
+   icon refinement, so it is the layout that came across, not the
+   stylesheet. */
+.home{min-height:0;flex:1;overflow-y:auto;position:relative}
+.hcol{width:100%;max-width:748px;margin:0 auto;padding:18px 34px 12px;
+  display:flex;flex-direction:column;min-height:100%}
+/* Nothing waiting and nothing made: the greeting stops holding the page
+   open and the composer comes up to meet it. */
+.hcol[data-bare="true"] .air{min-height:0;padding-bottom:26px}
+.air{min-height:192px;padding-bottom:28px;display:flex;flex-direction:column;justify-content:flex-end}
+.air h1{font-size:34px;line-height:1.14;letter-spacing:-.026em;font-weight:530;color:var(--ink)}
+
+/* The same composer card as the workspace's, with one difference that is
+   the point: at rest it is three lines tall rather than one. A docked
+   composer is a thing you reach for; this one is the thing you came to
+   use, and it should look like somewhere to write. */
+.mid{position:relative;z-index:1;flex:none}
+/* Softer than the docked card's drop. That one floats over scrolling text
+   and has to separate itself from it; this sits in still white with
+   content above and below, where a 44px shadow reads as a dialog. */
+.mid .composer{box-shadow:0 14px 36px -16px rgb(21 22 26 / .22), 0 2px 6px rgb(21 22 26 / .05)}
+.mid .composer .in{min-height:64px;font-size:18px}
+
+/* One shape, two contents. *Agents waiting for you* is work asking for
+   you and *Recent artifacts* is work you made, so the actionable one goes
+   first. Same heading, same size, same colour — the only thing telling
+   them apart is the ember on the chips. */
+.sect{margin-top:20px;flex:none}
+.sect .hd{display:flex;align-items:baseline;gap:10px}
+.sect h2{font-size:15px;font-weight:400;color:var(--quiet);letter-spacing:.004em}
+.sect .all{margin-left:auto;display:inline-flex;align-items:center;gap:3px;
+  font-size:14.5px;color:var(--quiet);flex:none;transition:color var(--quick) var(--swift)}
+.sect .all:hover{color:var(--ink)}
+.sect .none{margin-top:10px;font-size:14.5px;line-height:1.6;color:var(--quiet);max-width:56ch}
+.three{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:22px;margin-top:14px}
+
+.chips{display:flex;align-items:center;gap:8px;margin-top:12px;flex-wrap:wrap;flex:none}
+.chips .sw{display:inline-flex;align-items:center;gap:9px;height:34px;padding:0 14px;border-radius:99px;
+  background:var(--raised);font-size:14.5px;color:var(--body);flex:none;max-width:306px;
+  transition:background var(--quick) var(--swift)}
+.chips .sw:hover{background:var(--sunk)}
+.chips .sw b{font-weight:400;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chips .sw .age{color:var(--hush);font-variant-numeric:tabular-nums;flex:none}
+.chips .sw[data-over="true"]{color:var(--quiet)}
+
+/* Somewhere you are not — the whole of what the "all servers" scope and
+   the Fleet screen used to do, in one line that is only here while it is
+   true. Below the artifacts: it is about another Firetower, which is a
+   tier below the one you are looking at. */
+.hcol .elsewhere{margin-top:10px;align-self:flex-start;display:inline-flex;align-items:center;gap:9px;
+  height:38px;padding:0 6px 0 15px;border-radius:99px;background:var(--raised);color:var(--quiet);
+  font-size:14.5px;transition:background var(--quick) var(--swift)}
+.hcol .elsewhere:hover{background:var(--sunk)}
+.hcol .elsewhere b{font-weight:500;color:var(--body)}
+.hcol .elsewhere .go{display:inline-flex;align-items:center;gap:2px;height:26px;padding:0 10px;
+  border-radius:99px;background:var(--sheet);color:var(--ink);font-size:13.5px}
+</style>
 
 </head>
 <body>
@@ -1920,7 +1980,7 @@ const WORKING=[
 ];
 const WORDS=["no","One","Two","Three","Four","Five","Six","Seven","Eight","Nine"];
 
-const S={theme:"light",state:"waiting",panel:"pinned",peek:null,menu:null,tower:"nw",
+const S={theme:"light",panel:"pinned",peek:null,menu:null,tower:"nw",
   rt:"home",                 // home | work | artifacts | skills
   insp:true, itab:"overview",// the workspace rail
   lib:"full", scope:"all", look:"grid",  // Artifacts
@@ -1953,6 +2013,8 @@ const S={theme:"light",state:"waiting",panel:"pinned",peek:null,menu:null,tower:
   scopesheet:false,          // what a profile may reach
   repos:null,                // what is checked out here: 1 | pick
   gate:null,                 // held at the door mid-session: locked | setup
+  home:"both",               // both | nowait | noart | neither
+  when:null,                 // force a greeting: morning | afternoon | evening
   pvw:"desktop", pvpick:true, port:false};
 const DEST=[
  {id:"home",label:"Dashboard",icon:"house",key:"1"},
@@ -1966,8 +2028,10 @@ const FOOT=[
 ];
 const tower=()=>TOWERS.find(t=>t.id===S.tower)||TOWERS[0];
 const elsewhere=()=>TOWERS.filter(t=>t.id!==S.tower&&t.reach==="live"&&t.waiting>0);
-const asks=()=>S.state==="waiting"?ASKS:[];
-const working=()=>S.state==="empty"?[]:WORKING;
+/* The home's four states drive the whole window, so the rail's ember dot
+   and the panel agree with the page rather than tracking a second flag. */
+const asks=()=> (S.home==="both"||S.home==="noart") ? ASKS : [];
+const working=()=> S.home==="neither" ? [] : WORKING;
 
 /* A rail icon is the same weight whether it is on or off.
    An earlier pass made the current one heavier *and* lighter-backed, which is
@@ -2002,9 +2066,9 @@ function rail(){
 }
 
 /* ── The panel ───────────────────────────────────────────────── */
-/* Only the Dashboard is designed in this pass. The rail still previews the
-   others, because that interaction is the point — but it says what it is
-   rather than showing the Dashboard's panel under somebody else's name. */
+/* Superseded by panelFor2, which draws every destination's panel. Kept only
+   because the hover-preview still routes through it for the two settings
+   doors. */
 function panelFor(r){
   if(r==="home") return panel();
   const label=[...DEST,...FOOT].find(d=>d.id===r)?.label||"";
@@ -2073,52 +2137,103 @@ function laterPass(){
     </div></div>`;
 }
 
-function dashboard(){
-  const a=asks(), w=working(), el=elsewhere();
-  if(S.state==="empty"){
-    return `<div class="blank"><div class="in">
-        <span class="glyph">${ic("terminal",24)}</span>
-        <h2>What should we build?</h2>
-        <p>Describe it, and an agent starts on it in its own copy of the code.</p>
-      </div></div>${composer()}`;
-  }
-  const head = a.length
-    ? `<h1 class="t-display">${WORDS[a.length]} agent${a.length>1?"s":""} ${a.length>1?"are":"is"} waiting on you.</h1>`
-    : `<h1 class="t-display">${WORDS[w.length]} agents are working.</h1>
-       <p class="hero-sub">Nothing needs you right now.</p>`;
-  return `<div class="scroll"><div class="col">
-    ${head}
-    ${a.length?`<div class="asks">${a.map(x=>`
-      <button class="ask" data-act="noop">
-        <span class="top"><span class="dot"></span><span class="nm">${esc(x.name)}</span><span class="age">${x.age}</span></span>
-        <span class="q" style="display:block">${esc(x.q)}</span>
-      </button>`).join("")}</div>`:""}
+/* ── The home ────────────────────────────────────────────────────
+   Drawn by another designer, approved by the user, and folded in here
+   so there is one drawing of it rather than two. The record of the
+   exploration — and of the Dashboard it replaces — stays in
+   docs/prototypes/redesign/home-alternative.html.
 
-    ${el.length?`<button class="elsewhere" data-act="menu" data-menu="switch">
-      <span>${WORDS[el[0].waiting]} more waiting in <b>${el[0].org}</b> — you are not in it</span>
-      <span class="go">Switch${ic("chevron-right",13)}</span>
-    </button>`:""}
+   Its own reasoning, kept because it is the part worth inheriting:
+   the page opens with a greeting and a composer because starting work
+   is what you are here to do, and the two things under it are *work
+   that wants you* and *work you made*, in that order when both exist.
 
-    ${w.length?`<section class="also">
-      <h2>${a.length?`${WORDS[w.length]} other${w.length>1?"s":""} ${w.length>1?"are":"is"} still working`:"Working"}</h2>
-      <div class="rows">${w.map(x=>`
-        <button class="wrow" data-act="noop">
-          <span class="top">
-            <span class="nm">${esc(x.name)}</span>
-            ${x.live?`<span class="typing" title="Working now"><i></i><i></i><i></i></span>`:""}
-            <span class="age">${x.age}</span>
-          </span>
-          <span class="more"><span>
-            <i>${AGENT[x.agent](13)}</i>
-            ${x.branch?`<span class="br">${x.branch}</span>`:`<span>no branch yet</span>`}
-            <i>${ic("monitor",13)}</i><span>${x.where}</span>
-          </span></span>
-        </button>`).join("")}</div>
-    </section>`:""}
-  </div></div>${composer()}`;
+   What it costs is in Spec and in the handoff: the answer to "is
+   anything waiting on me" moves from 34px near the top to a 14.5px
+   chip most of the way down, and the agent's own question leaves the
+   page. The dock badge and the island are untouched and still sum
+   across every Firetower, which is what carries the thesis. */
+
+/* Two chips carry a dot; everything past that is a count without one.
+   The budget is three ember marks on screen and the rail's avatar can
+   take the third. (The constant is DOTTED, not IN_FULL.) */
+const DOTTED=2;
+const GREETINGS={morning:"Good morning",afternoon:"Good afternoon",evening:"Good evening"};
+function partOfDay(){
+  if(S.when) return S.when;
+  const h=new Date().getHours();
+  return h<5 ? "evening" : h<12 ? "morning" : h<18 ? "afternoon" : "evening";
+}
+const homeAsks=asks;
+const homeArts=()=> (S.home==="both"||S.home==="nowait") ? ARTS.filter(a=>a.p).slice(0,3) : [];
+
+function waitingSection(){
+  const a=homeAsks();
+  if(!a.length) return "";
+  const over=a.length-DOTTED;
+  return `<section class="sect">
+    <div class="hd"><h2>Agents waiting for you</h2></div>
+    <div class="chips">
+      ${a.slice(0,DOTTED).map(x=>`<button class="sw" data-act="open" title="${esc(x.name)} — ${esc(x.q)}">
+        <span class="dot"></span><b>${esc(x.name)}</b><span class="age">${x.age}</span></button>`).join("")}
+      ${over>0?`<button class="sw" data-over="true" data-act="noop" title="${over} more waiting">
+        <b>${over} more</b></button>`:""}
+    </div>
+  </section>`;
 }
 
-/* ── Menus ───────────────────────────────────────────────────── */
+function artifactsSection(){
+  const ar=homeArts();
+  /* First run gets nothing at all — not a heading over three grey plates,
+     and not a sentence explaining what artifacts are. The composer is the
+     only thing to do and the page says so by having nothing else on it. */
+  if(!ar.length) return homeAsks().length ? `<section class="sect">
+    <p class="none">Nothing published yet. Ask an agent to show you something and the page it makes lands here.</p>
+  </section>` : "";
+  return `<section class="sect">
+    <div class="hd"><h2>Recent artifacts</h2>
+      <button class="all" data-act="go" data-to="artifacts">View all${ic("chevron-right",14)}</button></div>
+    <div class="three">${ar.map(a=>`<button class="art" data-act="go" data-to="artifact">
+      ${shot(a,"big")}
+      <span class="nm">${esc(a.t)}</span>
+      <span class="mt"><span class="from">${esc(a.from)}</span><span class="age">${a.age}</span></span>
+    </button>`).join("")}</div>
+  </section>`;
+}
+
+function dashboard(){
+  const el=elsewhere();
+  const bare = !homeAsks().length && !homeArts().length;
+  const pct=Math.round(WS.context.used/WS.context.of*100);
+  return `<div class="home"><div class="hcol" data-bare="${bare}">
+    <div class="air"><h1>${GREETINGS[partOfDay()]}, what should we work on?</h1></div>
+    <div class="mid">
+      <div class="shelf">
+        <button class="sc" data-act="pick" data-pick="repo" data-set="true">
+          <span class="ic">${ic("folder-git-2",15)}</span>northwind/api${ic("chevron-down",13)}</button>
+        <button class="sc" data-act="pick" data-pick="machine" data-set="true">
+          <span class="ic">${ic("monitor",15)}</span>Firetower’s machine<span class="ok" title="Ready"></span>${ic("chevron-down",13)}</button>
+      </div>
+      <div class="composer">
+        <div class="in" contenteditable="true" role="textbox" aria-label="Start something new"
+          data-ph="Start something new…"></div>
+        <div class="bar">
+          <button class="chip" title="Attach a file or an image">${ic("paperclip",16)}</button>
+          <button class="chip" data-act="pick" data-pick="profile"><span class="ic">${ic("users-round",15)}</span>Just an agent${ic("chevron-down",13)}</button>
+          <button class="chip" data-act="pick" data-pick="run" data-set="true"><span class="ic">${AGENT.claude(14)}</span>Claude Code · Opus 5${ic("chevron-down",13)}</button>
+          <button class="chip" data-act="voice" data-voice="denied" style="margin-left:auto" title="Dictate">${ic("mic",16)}</button>
+          <button class="send" title="Start it   ⏎" aria-label="Start it">${ic("arrow-up",17)}</button>
+        </div>
+      </div>
+    </div>
+    ${waitingSection()}${artifactsSection()}
+    ${el.length?`<button class="elsewhere" data-act="menu" data-menu="switch">
+      <span>${WORDS[el[0].waiting]} more waiting in <b>${esc(el[0].org)}</b> — you are not in it</span>
+      <span class="go">Switch${ic("chevron-right",13)}</span>
+    </button>`:""}
+  </div></div>`;
+}
+
 function popProfile(){
   const t=tower(), el=elsewhere(), n=el.reduce((s,x)=>s+x.waiting,0);
   return `<div class="pop" style="left:68px;bottom:14px">
@@ -3073,7 +3188,7 @@ function updates(){
    THE GROUPING PROPOSAL
    ═══════════════════════════════════════════════════════════════════ */
 const IA=[
-  {icon:"house",n:"Dashboard",sub:"⌘1",why:"What is waiting on you, and where work starts.",
+  {icon:"house",n:"Dashboard",sub:"⌘1",why:"Where work starts — a greeting, a composer, then what is waiting on you and what you have made.",
    items:[["New workspace","the composer"],["Your workspaces","grouped where it helps"]],keep:true},
   {icon:"list-todo",n:"Tasks",sub:"⌘2",why:"Work that came from somewhere else, and the places it comes from.",
    items:[["Everything",""],["Assigned to you",""],["Trackers","from Work"]]},
@@ -3866,7 +3981,7 @@ const SPEC_MEASURE=[
   ["Sheet, panel open","958px","1280 − 62 − 252 − 8"],
   ["Sheet, panel hidden","1210px","1280 − 62 − 8"],
   ["Sheet radius","14px, left corners only","the window's own radius does the right"],
-  ["Dashboard column","740px box, 672px content","34px padding each side"],
+  ["Home column","748px box, 680px content","34px padding each side"],
   ["Conversation column","716px box, 648px content","max-w-46rem in today's build is 736"],
   ["Inspector rail","344px","inside the sheet, on the desk colour"],
   ["Pane column","1000px box, 912px content","44px padding each side"],
@@ -3879,7 +3994,7 @@ const SPEC_MEASURE=[
   ["Picker popover","306–330px","anchored to the chip that opened it"],
 ];
 const SPEC_TYPE=[
-  ["Dashboard sentence","40px / 1.08 / −0.028em / 530","--color-ink"],
+  ["The greeting","34px / 1.14 / −0.026em / 530","--color-ink"],
   ["Page title","32px / 1.14 / −0.026em / 530","--color-ink"],
   ["Section heading","<b>19–20px</b> / 1.3 / −0.012em / 530","--color-ink"],
   ["An agent's question","<b>18px</b> / 1.55 / −0.004em","--color-body"],
@@ -3936,8 +4051,7 @@ const SPEC_DELTA=[
   ["desktop/src/ui/Titlebar.tsx","modified","Keeps <code>org / user</code> as text; loses the ember count (the dock and the island carry it)."],
   ["desktop/src/ui/config/panes.ts","restructured","Twelve panes in seven groups become six destinations and two settings doors. See the Grouping tab."],
   ["desktop/src/ui/Configuration.tsx","deleted","There is no Configuration screen; its panes live in their destinations."],
-  ["desktop/src/ui/Dashboard.tsx","replaced","Headline, the waiting questions at reading size, the composer, then the rest."],
-  ["desktop/src/ui/NewPage.tsx","merged","The composer moves onto the Dashboard; <code>/new</code> goes."],
+  ["desktop/src/ui/NewPage.tsx","merged","The composer moves onto the home, in the middle of the page; <code>/new</code> goes."],
   ["desktop/src/ui/ArtifactsPage.tsx","modified","Grid of borderless posters; list keeps a 64px floor."],
   ["desktop/src/ui/config/Skills.tsx","moved","Becomes the Skills pane under Customize, plus a detail screen and two create flows."],
   ["desktop/src/ui/config/Roles.tsx","moved","Agent profiles, under Customize. The form reveals conditional fields rather than drawing them always."],
@@ -3958,6 +4072,8 @@ const SPEC_DELTA=[
   ["desktop/src/styles.css — icons","modified","<b>One stroke weight everywhere: 1.5.</b> Rail glyphs are 20px and do <i>not</i> thicken when current — the earlier pass thickened the glyph <i>and</i> lightened its background, which is two signals for one fact. The rail's current destination becomes a filled <code>--ink</code> square with a <code>--sheet</code> glyph, replacing the white pill; a current list row keeps its raised fill and loses its shadow."],
   ["web/app/globals.css — surfaces","<b>no change</b>","<b>Measured, and deliberately left alone.</b> In light, <code>--sunk</code> and <code>--hair</code> sit <b>ΔE 1.1</b> apart where dark holds a clean <b>3.7</b>. Merging them was tried and reverted: it lightened every recessed fill in <i>dark</i> by ΔE 3.7, and separating them in light means a <i>darker hairline</i>, which is the opposite of what this pass is for. They are never adjacent, so the overlap costs nothing. <b>No token moves.</b>"],
   ["Surface tokens — usage","tidied","No value changes. <code>--sunk</code> now carries every recessed <i>fill</i> and <code>--hair</code> every <i>rule</i>; the two had drifted across each other's jobs. Invisible on screen, but it is what lets either be retuned later without hunting."],
+  ["desktop/src/ui/Dashboard.tsx","replaced","<b>The home replaces it.</b> A greeting with three times of day, the composer in the middle of the page, then <i>Agents waiting for you</i> and <i>Recent artifacts</i>. Approved from <code>docs/prototypes/redesign/home-alternative.html</code> and folded in here so there is one drawing of it; that file is now a record of the exploration. Two chips carry an ember dot and the rest is a count — the constant is <code>DOTTED = 2</code>."],
+  ["What the home costs","noted","The answer to <i>is anything waiting on me</i> moves from a 34px headline near the top to a <b>14.5px chip about two thirds down</b>, and the agent's own question leaves the page. <b>What still carries the thesis is untouched:</b> <code>App.tsx:85</code> and <code>:97</code> — the dock badge and the island — sum across every Firetower and do not change."],
   ["Type scale","modified","<b>Every size below 28px rises by 1px.</b> One uniform step, applied to the tier rather than to screens — it raises the operating tiers the complaint named and is the only change that cannot disturb the gaps between them. Row minimums grow 2px to match (34→36, 40→42, 44→46, 54→58). Costs one row in a configuration list at 1280 × 824; the panel loses none."],
   ["Type weights","modified","<b>Fourteen weights become three — 400, 500, 530.</b> Mechanical: 420/450→400, 460/480/500/520→500, 540/560/600/650/700→530."],
   ["Mono","corrected","Skill names, profile names and dropped-folder names move to the text face. Paths, branches, codes, keys and diffs keep the mono face. The test: <i>would you ever read it character by character?</i>"],
@@ -4059,7 +4175,7 @@ function spec(){
     </ul>
 
     <h2 style="margin-top:46px">Widths</h2>
-    <p>Nothing in the layout changes between 1120 and 1680 except how much of the sheet is sheet. Checked: at <b>1120</b> with the panel open the conversation gets 706px and the approval card is 646px, so its three buttons sit on one row with <b>181px</b> spare — and <code>flex-wrap</code> is the fallback if a label grows, so <i>always</i> is never hidden behind a menu. At <b>1680</b> the Dashboard column stays 740 and centres; the pane column stays 1000. The artifact grid is <code>minmax(228px, 1fr)</code> and gains a column at about 1500.</p>
+    <p>Nothing in the layout changes between 1120 and 1680 except how much of the sheet is sheet. Checked: at <b>1120</b> with the panel open the conversation gets 706px and the approval card is 646px, so its three buttons sit on one row with <b>181px</b> spare — and <code>flex-wrap</code> is the fallback if a label grows, so <i>always</i> is never hidden behind a menu. At <b>1680</b> the home column stays 748 and centres; the pane column stays 1000. The artifact grid is <code>minmax(228px, 1fr)</code> and gains a column at about 1500.</p>
 
     <h2 style="margin-top:46px">The light palette, re-gated</h2>
     <p class="prose-lead">Nine file kinds and four chart series, which <code>globals.css</code> gates against the dark panel and which had no light values. Each is the dark hue with <b>L* lowered and a*, b* held</b> — so the hue and its chroma direction survive — until it clears the floor the dark set's own weakest member clears on <code>#111113</code>: <b>5.7:1</b> for a kind, <b>4.8:1</b> for a series.</p>
@@ -4525,7 +4641,15 @@ const COV=[
  ]],
 
  ["Everything else",[
-  ["Dashboard — waiting · calm · nothing yet","Y",""],
+  ["Home (replaces the Dashboard)",null,"<b>Approved and folded in from <code>home-alternative.html</code>.</b> That file is now a record of the exploration rather than a specification",[
+    ["Greeting, three times of day","Y","Morning · afternoon · evening, from the clock"],
+    ["The composer, in the middle","Y","Three lines tall at rest, with its repository and machine shelf"],
+    ["Agents waiting for you","Y","Two chips carry a dot; the rest is a count without one (<code>DOTTED = 2</code>)"],
+    ["Recent artifacts, three across","Y","Posters, with <i>View all</i> out to the library"],
+    ["All four states","Y","Waiting and artifacts · nothing waiting · no artifacts yet · neither"],
+    ["Waiting somewhere you are not","Y","Below the artifacts, and only while it is true"],
+  ]],
+  ["The Dashboard it replaces","—","<b>Superseded, not deleted.</b> The headline that counted waiting agents and carried their questions. It is drawn in <code>home-alternative.html</code> beside the home that replaced it, which is where the comparison belongs"],
   ["Composer — shelf and footer","Y",""],
   ["RunPicker — agent, account, model, effort, permissions","Y",""],
   ["Artifacts — grid, list, reading, annotating","Y",""],
@@ -5562,16 +5686,19 @@ const BASE = JSON.parse(JSON.stringify(S));
 
 const SHEET = [
  ["Starting work", [
-  ["Dashboard — two waiting",      {tab:"home", rt:"home", state:"waiting"}],
-  ["Dashboard — nothing waiting",  {tab:"home", rt:"home", state:"calm"}],
-  ["Dashboard — nothing yet",      {tab:"home", rt:"home", state:"empty"}],
+  ["Home — waiting and artifacts", {tab:"home", rt:"home", home:"both"}],
+  ["Home — nothing waiting",       {tab:"home", rt:"home", home:"nowait"}],
+  ["Home — no artifacts yet",      {tab:"home", rt:"home", home:"noart"}],
+  ["Home — neither",               {tab:"home", rt:"home", home:"neither"}],
+  ["Home — good morning",          {tab:"home", rt:"home", home:"both", when:"morning"}],
+  ["Home — good evening",          {tab:"home", rt:"home", home:"both", when:"evening"}],
   ["Tasks — has work",             {tab:"tasks", rt:"tasks", tasks:"full"}],
   ["Tasks — nothing open",         {tab:"tasks", rt:"tasks", tasks:"empty"}],
   ["Tasks — not connected",        {tab:"tasks", rt:"tasks", tasks:"off"}],
-  ["Agent · model · effort",       {tab:"home", rt:"home", pick:"run"}],
-  ["Which repository",             {tab:"home", rt:"home", pick:"repo"}],
-  ["Which machine",                {tab:"home", rt:"home", pick:"machine"}],
-  ["Which profile",                {tab:"home", rt:"home", pick:"profile"}],
+  ["Agent · model · effort",       {tab:"home", rt:"home", home:"both", pick:"run"}],
+  ["Which repository",             {tab:"home", rt:"home", home:"both", pick:"repo"}],
+  ["Which machine",                {tab:"home", rt:"home", home:"both", pick:"machine"}],
+  ["Which profile",                {tab:"home", rt:"home", home:"both", pick:"profile"}],
  ]],
  ["In a workspace", [
   ["Conversation",                 {tab:"work", rt:"work", wb:"chat", panel:"collapsed"}],
@@ -5661,14 +5788,14 @@ const SHEET = [
   ["Held — mid-setup",             {tab:"first", gate:"setup"}],
  ]],
  ["Over any screen", [
-  ["⌘K — the palette",             {tab:"home", rt:"home", pal:"k"}],
+  ["⌘K — the palette",             {tab:"home", rt:"home", home:"both", pal:"k"}],
   ["⌘P — go to a file",            {tab:"work", rt:"work", wb:"file", pal:"p", panel:"collapsed"}],
-  ["Before something is undone",   {tab:"home", rt:"home", confirm:true}],
-  ["A usage limit is reached",     {tab:"home", rt:"home", hand:"hit"}],
-  ["What happens on a limit",      {tab:"home", rt:"home", hand:"set"}],
-  ["A screen that threw",          {tab:"home", rt:"home", threw:true}],
-  ["Switch Firetower",             {tab:"home", rt:"home", menu:"switch"}],
-  ["The profile menu",             {tab:"home", rt:"home", menu:"profile"}],
+  ["Before something is undone",   {tab:"home", rt:"home", home:"both", confirm:true}],
+  ["A usage limit is reached",     {tab:"home", rt:"home", home:"both", hand:"hit"}],
+  ["What happens on a limit",      {tab:"home", rt:"home", home:"both", hand:"set"}],
+  ["A screen that threw",          {tab:"home", rt:"home", home:"both", threw:true}],
+  ["Switch Firetower",             {tab:"home", rt:"home", home:"both", menu:"switch"}],
+  ["The profile menu",             {tab:"home", rt:"home", home:"both", menu:"profile"}],
   ["Dictation — blocked",          {tab:"work", rt:"work", wb:"chat", voice:"denied", panel:"collapsed"}],
   ["Dictation — key refused",      {tab:"work", rt:"work", wb:"chat", voice:"rejected", panel:"collapsed"}],
   ["Dictation — no key",           {tab:"work", rt:"work", wb:"chat", voice:"unset", panel:"collapsed"}],
@@ -5715,7 +5842,9 @@ function contact(){
 const TABS=[["home","Dashboard"],["sheet","Every screen"],["work","Workspace"],["artifacts","Artifacts"],
   ["customize","Customize"],["sources","Sources"],["settings","Settings"],
   ["tasks","Tasks"],["account","Account"],["updates","Updates"],["first","First run"],["coverage","Coverage"],["grouping","Grouping"],["spec","Spec"],["notes","Notes"]];
-const STATES=[["waiting","Two waiting"],["calm","Nothing waiting"],["empty","Nothing yet"]];
+const HOMES=[["both","Waiting and artifacts"],["nowait","Nothing waiting"],
+             ["noart","No artifacts yet"],["neither","Neither"]];
+const WHENS=[["morning","Morning"],["afternoon","Afternoon"],["evening","Evening"]];
 /* Which pane each tab's state segment selects. */
 const SUB={
   customize:[["skills","Skills"],["skill","One skill"],["skillup","A new version"],["profiles","Agent profiles"],["agents","Agents"]],
@@ -5740,7 +5869,7 @@ function chrome(){
     `<button data-act="${act}" data-${key}="${id}" aria-pressed="${S[key]===id}">${l}</button>`).join("")}</span>`;
   document.getElementById("ctl").innerHTML=`
     <span class="seg">${TABS.map(([id,l])=>`<button data-act="tab" data-tab="${id}" aria-pressed="${S.tab===id}">${l}</button>`).join("")}</span>
-    ${S.tab==="home"?seg("state","state",STATES):""}
+    ${S.tab==="home"?seg("home","home",HOMES)+seg("when","when",WHENS):""}
     ${S.tab==="work"?`<span class="seg">${
       [["chat","Conversation"],["file","A file"],["diff","A diff"],["pv","Preview"],["image","A picture"],["noting","Noting code"],["kept","Notes kept"]]
       .map(([id,l])=>`<button data-act="wb" data-wb="${id}" aria-pressed="${S.wb===id}">${l}</button>`).join("")}</span>
@@ -5845,7 +5974,8 @@ document.addEventListener("click",e=>{
   if(!b){ if(S.menu){S.menu=null;render();} return; }
   const a=b.dataset.act;
   const shut=()=>{S.menu=null;S.pick=null;S.pane=null;S.pickAt=null;};
-  if(a==="state") S.state=b.dataset.state;
+  if(a==="home"){ S.home=b.dataset.home; S.rt="home"; S.tab="home"; }
+  else if(a==="when"){ S.when=b.dataset.when; S.rt="home"; S.tab="home"; }
   else if(a==="theme") S.theme=b.dataset.theme;
   else if(a==="panel"){ S.panel=S.panel==="pinned"?"collapsed":"pinned"; S.peek=null; }
   else if(a==="tower"){ S.tower=b.dataset.tower; shut(); }
