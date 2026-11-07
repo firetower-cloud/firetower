@@ -13,14 +13,18 @@
  * screen; it is a section under the composer rather than the first thing the
  * page says.
  *
- * ## The ember budget, again
+ * ## One section, ordered by status
  *
- * Two chips carry a dot. Everything past them collapses into one chip reading
- * "N more" with no dot at all. That is the Dashboard's `IN_FULL = 2` rule said
- * in a different shape, and it is not a layout convenience: the budget is
- * three ember marks on screen, the rail's avatar can take the third, and five
- * dots in a row is the exact failure the redesign's first round was rejected
- * for.
+ * It was three — *Waiting for you*, *Handed back*, *Working* — and they were
+ * reversed as soon as they were built: with one chip under each, a heading per
+ * category costs more than it returns. Three words of chrome to label three
+ * words of content.
+ *
+ * What makes one section work is that **the marks are shapes rather than
+ * colours** — ember dot, sage tick, slate typing, brick triangle, all told
+ * apart with the colour off. That has only been true since `BeatMark` existed;
+ * before it a single row would have been four greys and the headings would
+ * have been load-bearing.
  */
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChevronRight, ChevronUp } from "lucide-react";
@@ -29,7 +33,7 @@ import { ArtifactShot } from "~/components/ArtifactShot";
 import { BeatMark } from "~/components/BeatMark";
 import { useListArtifacts } from "~/api/generated/artifacts/artifacts";
 import type { Artifact } from "~/api/generated/model";
-import { elapsed, minutesSince, needsYou } from "~/api/view";
+import { elapsed, minutesSince, needsYou, type Beat } from "~/api/view";
 import { flat, group, isChild, placeBeat, type Workspace } from "~/api/workspaces";
 import { useSessions } from "~/data";
 import { useFleet, waitingIn, type Backend } from "~/fleet";
@@ -43,32 +47,46 @@ const WORDS = ["no", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eig
 const say = (n: number) => WORDS[n] ?? String(n);
 
 /**
- * The three sections, in order, above *Recent artifacts*.
+ * The order of *Recent agents*: severity first, then what has finished, then
+ * what is still going.
  *
- * They key off `BEAT` through `placeBeat`, the same rollup the rail's mark
- * and the panel's dot use — one fact, one function. Each chip carries its own
- * tone, which is what makes three sections legible rather than three
- * identical grey rows.
+ * It is `placeBeat`'s own precedence with `broken` lifted to the front —
+ * **a failed run is the one thing here you cannot act on by waiting.** That
+ * precedence spends ember on being stuck and on nothing else, which is right
+ * for choosing *one* mark for a row; it is not right for ordering a list
+ * somebody scans left to right.
+ *
+ * `over` is not in it. The home draws live sessions only, so nothing here can
+ * roll up to ended — and a beat this does not name sorts last rather than
+ * first, which is what `indexOf`'s `-1` would have done.
  */
-const BANDS = [
-  { beat: "blocked", title: "Waiting for you" },
-  { beat: "done", title: "Handed back" },
-  { beat: "working", title: "Working" },
-] as const;
-
-/** How many waiting chips carry a dot. See the ember budget above. */
-export const DOTTED = 2;
+const AGENT_ORDER: Beat[] = ["broken", "blocked", "done", "working"];
+const rank = (beat: Beat) => {
+  const at = AGENT_ORDER.indexOf(beat);
+  return at < 0 ? AGENT_ORDER.length : at;
+};
 
 /**
- * The split, as a function, so the budget can be tested rather than eyeballed.
+ * How many rows of chips are drawn before the rest is behind *View all*.
  *
- * It was two `slice` calls inline and a test that pointed at the Dashboard's
- * version of the same rule — a screen this one replaced. An eye cannot check
- * a count reliably and a test can, so the rule gets a name.
+ * **A parameter, because it was asked for as two, then one, then two.** The
+ * drawing carries both in its masthead for the same reason. Two is the
+ * default: measured at the 748px column, one row holds 2–3 chips and two hold
+ * 4–5 — not double, because the second row only exists once the first
+ * overflows.
  */
-export function drawnInFull<T>(waiting: T[]): { inFull: T[]; quieter: T[] } {
-  return { inFull: waiting.slice(0, DOTTED), quieter: waiting.slice(DOTTED) };
-}
+export const ROWS = 2;
+
+/**
+ * Worst first, for the home's one section. A comparator rather than a sort in
+ * place, so the order is a thing a test can hold.
+ *
+ * `placeBeat` reads one hop past what is drawn — a child in a workspace of its
+ * own is hidden here and belongs to its lead — so it needs the whole list and
+ * not the list being ordered.
+ */
+export const severityFirst = (every: Workspace[]) => (a: Workspace, b: Workspace) =>
+  rank(placeBeat(a, every)) - rank(placeBeat(b, every));
 
 /**
  * Three greetings off the machine's own clock.
@@ -94,34 +112,18 @@ export function Home({ backend, onSwitch }: { backend: Backend; onSwitch: (serve
      renders of its own. */
   useNow();
 
-  const { bands, asks, every } = useMemo(() => {
+  const { agents, asks, every } = useMemo(() => {
     const live = sessions.filter((s) => s.status !== "Ended");
     const places = flat(group(live));
     /* A child in its own workspace lives under its lead in the Overview tab,
-       not as a chip of its own here.
-
-       **The section still lists all three.** `needsYou` is right that handed
-       back and failed both want you — what changes is that each chip wears
-       its own tone. The section says *these need you*; the dot says what
-       kind of needing. */
+       not as a chip of its own here. */
     const top = places.filter((p) => !isChild(p, places));
     return {
-      /* **An empty section is not drawn at all.** Three headings with
-         nothing under two of them is worse than one heading, and a section
-         that is sometimes there reads more easily than a section that is
-         sometimes empty. So *nothing waiting* is not a state of this page —
-         it is the Waiting section not existing while the other two carry
-         on, and all three gone is first run. */
-      bands: BANDS.map((b) => ({
-        ...b,
-        list: top.filter((p) => {
-          const beat = placeBeat(p, places);
-          /* **`broken` has no section of its own.** It sits in *Waiting for
-             you* with its brick triangle, which is the status quo; giving it
-             a fourth section is a question the user has deferred. */
-          return beat === b.beat || (b.beat === "blocked" && beat === "broken");
-        }),
-      })).filter((b) => b.list.length > 0),
+      /* **No agents at all is not a state of this page.** It is first run,
+         and first run has no section rather than an empty one. `group()` has
+         already put what needs you first and the newest next, and `sort` is
+         stable, so that survives inside each beat. */
+      agents: [...top].sort(severityFirst(places)),
       asks: top.filter((p) => p.runs.some(needsYou)),
       /* `placeBeat` reads one hop past what is drawn, so it needs them all. */
       every: places,
@@ -135,40 +137,43 @@ export function Home({ backend, onSwitch }: { backend: Backend; onSwitch: (serve
     (f) => f.backend.id !== backend.id && f.backend.reach === "live" && waitingIn(f.sessions) > 0,
   );
 
-  /* Nothing waiting and nothing published: first run. It has to look
+  /* Nothing running and nothing published: first run. It has to look
      deliberate rather than broken, so the column centres and the sections are
      simply absent — no heading over three grey plates, and no sentence
      explaining what an artifact is. The composer is the only thing to do and
      the page says so by having nothing else on it. */
-  const bare = bands.length === 0 && recent.length === 0;
+  const bare = agents.length === 0 && recent.length === 0;
 
-  /** Which section is open, if any. */
-  const [expanded, setExpanded] = useState<string | null>(null);
+  /** Whether the section is showing everything. */
+  const [expanded, setExpanded] = useState(false);
 
   /**
-   * **What *View more* does — one function, by design.**
+   * **What *View all* does — one function, so it stays one line to change.**
    *
-   * Expanding in place is what was asked for and what the drawing defaults
-   * to. The alternative is opening the Workspaces panel at that band, which
-   * matters because expanding measured **5 ember at 36 workspaces against a
-   * budget of 3**, and the home has no exemption where the panel does.
+   * It expands in place, which is the drawing's default and what was asked
+   * for. The alternative — opening the workspaces panel at the same list —
+   * was built and withdrawn: **the panel is usually already pinned open**, so
+   * on the common path the press would do nothing at all. A control that is
+   * inert depending on state the press does not change is a worse defect than
+   * a loud screen, and it is the exact class `assert-connected.mjs` exists to
+   * find.
    *
-   * That decision is still with the user, so switching it is this body and
-   * not a refactor: replace the two lines with a navigate and a band.
+   * The ember cost is real and accepted, and it is **not** the expansion's.
+   * Measured on a rendered page at 36 workspaces: two rows put **5 ember on
+   * screen against a budget of 3** — four chips and the rail's avatar — and
+   * expanding to all 36 chips puts up **5 as well**. Severity first is why:
+   * every ember chip is at the front of the row, so two rows already shows
+   * all of them and what expanding reveals is sage and slate. The overrun
+   * belongs to the two-row default, which was chosen with the number in
+   * hand; *View all* costs nothing on top of it.
    */
-  const openBand = (beat: string) => setExpanded((held) => (held === beat ? null : beat));
+  const openBand = () => setExpanded((held) => !held);
 
   return (
     <StartComposer mid bare={bare} above={<h1>{greeting()}, what should we work on?</h1>}>
-      {bands.map((band) => (
-        <Band
-          key={band.beat}
-          band={band}
-          every={every}
-          open={expanded === band.beat}
-          onMore={() => openBand(band.beat)}
-        />
-      ))}
+      {agents.length > 0 && (
+        <Recent list={agents} every={every} open={expanded} onAll={openBand} />
+      )}
 
       {recent.length > 0 ? (
         <section className="sect">
@@ -233,30 +238,37 @@ function Poster({ artifact }: { artifact: Artifact }) {
 }
 
 /**
- * One section: a heading, one line of chips, and *View more* when there is
- * more than a line.
+ * *Recent agents*: a heading, `ROWS` rows of chips, and *View all* when there
+ * is more than that.
  *
- * **The clip is measured, not counted.** A fixed number of chips is wrong the
- * moment a name is long, and a wrapped flex row moves a whole item down
- * rather than slicing one — so clipping to the first chip's height hides
- * chips entirely and never cuts through a name. *View more* appears only
- * when something is actually on a second row, which is read off the layout
- * rather than assumed.
+ * **Both the clip and the control are decided by measurement.** A chip is as
+ * wide as a workspace name, so how many fit on a row is not a number anybody
+ * can write down and a guessed `max-height` is wrong the moment a name
+ * changes. The rows are found from the chips themselves: group them by
+ * `offsetTop`, keep the first `ROWS` of them, clip to the bottom of the last
+ * one kept. **The cut is always between rows, never through a chip**, because
+ * a wrapped flex row moves a whole item down rather than slicing one.
  *
- * The chip caps at 306px and truncates, so one name can never fill the line
- * alone; the column is capped at 748px, which makes how many fit a constant
- * of the design rather than of the window.
+ * If nothing falls past the limit there is nothing to view and the control is
+ * not drawn at all.
+ *
+ * **And no hairline where the order turns.** The workspaces panel rules its
+ * bands because it is a tall list you scan down; this is two to five chips,
+ * and at two rows a rule would land somewhere different every time a name
+ * changed length. A break that moves is worse than no break — the marks are
+ * the ordering, and they are shapes.
  */
-function Band({
-  band,
+function Recent({
+  list,
   every,
   open,
-  onMore,
+  onAll,
 }: {
-  band: { beat: string; title: string; list: Workspace[] };
+  list: Workspace[];
   every: Workspace[];
+  /** Expanded: every chip, no clip, and the control reads *View less*. */
   open: boolean;
-  onMore: () => void;
+  onAll: () => void;
 }) {
   const row = useRef<HTMLDivElement>(null);
   const [spills, setSpills] = useState(false);
@@ -269,34 +281,36 @@ function Band({
       const chips = [...el.children] as HTMLElement[];
       el.style.maxHeight = "";
       if (chips.length === 0) return setSpills(false);
-      const top = chips[0].offsetTop;
-      const over = chips.some((c) => c.offsetTop > top + 2);
+      const tops = [...new Set(chips.map((c) => c.offsetTop))].sort((a, b) => a - b);
+      const over = tops.length > ROWS;
+      /* **Whether the control is drawn is measured while expanded too.** It
+         is what turns *View less* back off; reading it only while clipped
+         would leave the control showing after the last chip went away. */
       setSpills(over);
-      if (over && !open) el.style.maxHeight = `${chips[0].offsetHeight}px`;
+      if (!over || open) return;
+      /* The first chip on the last row kept — every chip on a row shares its
+         top and its height, so any of them gives the same bottom edge. */
+      const last = chips.find((c) => c.offsetTop === tops[ROWS - 1]);
+      if (last) el.style.maxHeight = `${last.offsetTop - chips[0].offsetTop + last.offsetHeight}px`;
     };
     measure();
     const watch = new ResizeObserver(measure);
     watch.observe(el);
     return () => watch.disconnect();
-  }, [band.list, open]);
+  }, [list, open]);
 
   return (
     <section className="sect">
       <div className="hd">
-        <h2>{band.title}</h2>
-        {/* **One function, so the target is a line to change.** What *View
-            more* does is still with the user: expanding in place measured 5
-            ember at 36 workspaces against a budget of 3, and the home has no
-            exemption — opening the Workspaces panel at this band measures 3.
-            It expands, because that is what was asked for; `onMore` is where
-            it switches. */}
-        <button hidden={!spills} onClick={onMore} className="all">
-          {open ? "View less" : "View more"}
+        <h2>Recent agents</h2>
+        <button hidden={!spills} onClick={onAll} className="all">
+          {open ? "View less" : "View all"}
           <Icon of={open ? ChevronUp : ChevronRight} size={14} />
         </button>
       </div>
-      <div ref={row} className="chips" data-one={!open}>
-        {band.list.map((place) => {
+      {/* No `data-rows` while expanded, which is what takes the clip off. */}
+      <div ref={row} className="chips" data-rows={open ? undefined : ROWS}>
+        {list.map((place) => {
           const beat = placeBeat(place, every);
           const asking = place.runs.find(needsYou);
           const note = asking?.note?.trim();
@@ -311,7 +325,7 @@ function Band({
                   `.dot` wearing the beat as a colour, so a failed workspace
                   was a brick circle here beside ember circles — one shape
                   told from another by hue, which is the one thing the guide
-                  forbids. `broken` is the warning triangle. */}
+                  forbids. `broken` is the warning triangle, and it leads. */}
               <BeatMark beat={beat} />
               <b>{place.name}</b>
               <span className="age">{elapsed(minutesSince((asking ?? place.runs[0]).createdAt))}</span>

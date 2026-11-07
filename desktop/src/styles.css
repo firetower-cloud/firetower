@@ -3280,18 +3280,18 @@ html:not([data-platform="macos"]) {
 }
 
 /* ═══════════════════════════════════════════════════════════════════
-   THE HOME — a greeting, a composer, and two sections
+   THE HOME — a greeting, a composer, and two sections under it
    ═══════════════════════════════════════════════════════════════════
 
    Drawn in `docs/prototypes/redesign/home-alternative.html`, which
    supersedes the Dashboard in `desktop-redesign.html` for this screen only.
 
    **The headline is always a greeting, never a status.** The same sentence
-   whether four agents are waiting or none are. What is waiting goes into a
-   section beneath the composer, as chips — which is also where the ember
-   budget is enforced: two chips carry a dot and everything past them
-   collapses into a count with none. Five dots in a row is the failure the
-   whole redesign's first round was rejected for.
+   whether four agents are waiting or none are. What is running goes into
+   *Recent agents* beneath the composer, as chips — two rows of them, which
+   is also where the ember budget is enforced: the rows are clipped, and
+   what is clipped away is not on screen to count. Five dots in a row is the
+   failure the whole redesign's first round was rejected for.
    ═══════════════════════════════════════════════════════════════════ */
 @layer components {
   .home {
@@ -3407,9 +3407,9 @@ html:not([data-platform="macos"]) {
     color: var(--color-dim);
   }
 
-  /* **Two dots, then a count.** `DOTTED` is the Dashboard's own `IN_FULL`
-     rule said again: the budget is three ember marks on screen and the
-     rail's avatar can take the third. */
+  /* The chips of *Recent agents*, one section ordered broken → blocked →
+     done → working. No rule where the order turns: the marks are shapes and
+     they carry it. */
   .chips {
     display: flex;
     align-items: center;
@@ -3418,13 +3418,13 @@ html:not([data-platform="macos"]) {
     gap: 8px;
     margin-top: 12px;
   }
-  /* **One row, clipped to a measured height.** A wrapped flex row moves a
-     whole item down rather than slicing one, so clipping hides chips
-     entirely and never cuts through a name. The height is read off the
-     first chip after layout — a fixed count is wrong the moment a name is
-     long, and the column is capped at 748px so how many fit is a constant
+  /* **Clipped to a row count, and the cut is between rows.** A wrapped flex
+     row moves a whole item down rather than slicing one, so clipping hides
+     chips entirely and never cuts through a name. The height is read off the
+     chips' own rows after layout — a fixed count is wrong the moment a name
+     is long, and the column is capped at 748px so how many fit is a constant
      of the design rather than of the window. */
-  .chips[data-one="true"] {
+  .chips[data-rows] {
     overflow: hidden;
   }
   .sect .all[hidden] {

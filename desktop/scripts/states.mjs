@@ -136,6 +136,27 @@ export const SHOTS = [
   { id: "starting-work__home-neither", scene: "bare", go: (p) => at(p, "/") },
   { id: "starting-work__home-good-morning", scene: "waiting", at: "2026-11-07T09:30:00", go: (p) => at(p, "/") },
   { id: "starting-work__home-good-evening", scene: "waiting", at: "2026-11-07T21:30:00", go: (p) => at(p, "/") },
+  /* **Recent agents**, the one section that replaced three. Two rows of
+     chips clipped off a measurement, so the three states worth driving are
+     the one that spills, the one that does not, and the long name that is
+     what breaks a row of chips in the first place. Forty is where the
+     ember count is taken. */
+  { id: "starting-work__recent-agents-two-lines", scene: "waiting", go: (p) => at(p, "/") },
+  { id: "starting-work__recent-agents-one-row", scene: "ws-few", go: (p) => at(p, "/") },
+  { id: "starting-work__recent-agents-a-long-name", scene: "longname", go: (p) => at(p, "/") },
+  { id: "starting-work__recent-agents-forty", scene: "ws-many", go: (p) => at(p, "/", 1600) },
+  {
+    /* Expanded. *View all* opens the row in place — the version that opened
+       the workspaces panel instead was withdrawn, because the panel is
+       usually already pinned and the press would have done nothing. */
+    id: "starting-work__recent-agents-expanded",
+    scene: "ws-many",
+    go: async (p) => {
+      await at(p, "/", 1600);
+      await p.locator(".sect", { hasText: "Recent agents" }).locator(".all").click();
+      await pause(p, 600);
+    },
+  },
   /* The four states proposition C was chosen against. The panel's argument
      is entirely about what it does at forty rows. */
   { id: "starting-work__panel-forty-workspaces", scene: "ws-many", go: (p) => at(p, "/", 1600) },

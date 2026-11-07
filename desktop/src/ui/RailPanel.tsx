@@ -163,6 +163,12 @@ const pane = (path: string) => path.split("/").filter(Boolean)[1] ?? "";
  * How a workspace is grouped in the panel. One answer, kept, because it is a
  * preference and asking again every launch is the same complaint that got the
  * rail's collapsed state persisted.
+ *
+ * State here rather than a module with watchers, because the segment below is
+ * the only thing that sets it. It was briefly a module, for a *View all* on
+ * the home that would have put the panel in Status — and that control was
+ * withdrawn, because opening a panel that is usually already open is a button
+ * that does nothing. The abstraction went with it.
  */
 const BY_KEY = "firetower.workspaces-by";
 type By = "status" | "repo";

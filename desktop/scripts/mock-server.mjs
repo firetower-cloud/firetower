@@ -656,6 +656,13 @@ const server = createServer(async (req, res) => {
     }
     if (scene === "ws-none") return [];
     if (scene === "calm") return [session(), ...working];
+    /* **Two or three workspaces, which is the row that does not spill.**
+       *View all* is drawn off a measurement, so the state where it is *not*
+       drawn has to be reachable or the measurement is only ever checked one
+       way round. */
+    if (scene === "ws-few") {
+      return [session(), other({ id: "s_6", workspaceId: "w_6", number: 8, name: "Quota meter rounding", status: "NeedsYou", repo: "acme/web", createdAt: minutesAgo(12), note: "Should a plan with no soft limit show the band at all?" })];
+    }
     const asking = [
       other({
         id: "s_6", workspaceId: "w_6", number: 8, name: "Quota meter rounding", status: "NeedsYou",
@@ -675,6 +682,16 @@ const server = createServer(async (req, res) => {
         note: "Gitea signs with SHA-256 and GitHub with SHA-1. Verify both, or refuse the older one?",
       }),
     ];
+    /* **One long name**, which is the state that breaks a row of chips —
+       and a real workspace name gets this long. The drawing renames its
+       first workspace for exactly this; so does this. */
+    if (scene === "longname") {
+      return [
+        { ...session(), name: "Reconcile the webhook retries against the ledger-sync mirror" },
+        ...asking,
+        ...working,
+      ];
+    }
     return [session(), ...asking, ...working];
   };
 

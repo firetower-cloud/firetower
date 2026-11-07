@@ -388,6 +388,134 @@ for (const [scene, want] of [
   await page.close();
 }
 
+/* ── *View all* on the home, and the clip it is drawn off ─────────────
+   Two states no screenshot can hold.
+
+   **The clip.** `Recent agents` shows `ROWS` rows of chips and hides the
+   rest, measured off the chips' own `offsetTop` after layout — a chip is as
+   wide as a workspace name, so no fixed count is right. A picture of a
+   clipped row and a picture of a short row are the same picture; what has to
+   be asserted is that the cut landed *between* rows and that the chips below
+   it are not reachable.
+
+   **That *View all* does something, in both panel states.** It expands in
+   place. The version that opened the workspaces panel instead was built and
+   withdrawn for exactly the reason this check is written the way it is: the
+   panel is usually already pinned open, so on the common path the press did
+   nothing, and nothing in a screenshot or in a single-state sweep would have
+   said so. So the press is driven **twice** — once with the panel open and
+   once collapsed — and both runs have to change the row. */
+{
+  const say = (ok, what, got) => {
+    if (!ok) failed++;
+    console.log(`  ${ok ? "ok    " : "FAILED"} recent agents: ${what}${ok ? "" : ` — ${got}`}`);
+  };
+
+  /** What the section is drawing, right now. */
+  const readRow = (page) =>
+    page.evaluate(() => {
+      const sect = [...document.querySelectorAll(".sect")].find((x) =>
+        x.querySelector("h2")?.textContent?.includes("Recent agents"),
+      );
+      if (!sect) return null;
+      const el = sect.querySelector(".chips");
+      const chips = [...el.children];
+      const clip = el.getBoundingClientRect();
+      const inside = (c) => {
+        const b = c.getBoundingClientRect();
+        return b.bottom <= clip.bottom + 1 && b.top >= clip.top - 1;
+      };
+      const mark = (c) => {
+        const m = c.firstElementChild;
+        if (m?.classList.contains("dot")) return "blocked";
+        if (m?.classList.contains("typing")) return "working";
+        return m?.getAttribute("aria-label") ?? "?";
+      };
+      const shown = chips.filter(inside);
+      return {
+        chips: chips.length,
+        rows: [...new Set(chips.map((c) => c.offsetTop))].length,
+        rowsShown: [...new Set(shown.map((c) => c.offsetTop))].length,
+        shown: shown.length,
+        sliced: chips.filter((c) => {
+          const b = c.getBoundingClientRect();
+          return b.top < clip.bottom - 1 && b.bottom > clip.bottom + 1;
+        }).length,
+        order: chips.map(mark),
+        control: sect.querySelector(".all")?.hidden === false ? sect.querySelector(".all").textContent.trim() : null,
+        /* A rule inside the section would be a break that moves every time a
+           name changed length. The drawing says there is none. */
+        hairlines: [...sect.querySelectorAll("*")].filter((e) => {
+          const st = getComputedStyle(e);
+          const b = e.getBoundingClientRect();
+          return b.height <= 1.5 && b.width > 20 && st.backgroundColor !== "rgba(0, 0, 0, 0)";
+        }).length,
+      };
+    });
+
+  /* **A page per run.** `addInitScript` accumulates and `goto` to an
+     identical hash URL is a same-document navigation, so re-using one page
+     silently kept the first run's answer — which is the same class of
+     false pass this check exists to close. */
+  for (const [panel, how] of [[true, "panel open"], [false, "panel collapsed"]]) {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 824 }, deviceScaleFactor: 2 });
+    await page.request.post(`${HERE}/__reset?scene=ws-many`);
+    await page.addInitScript(
+      ([registry, held]) => {
+        window.localStorage.setItem("firetower.servers", registry);
+        window.localStorage.setItem("firetower.current", "o_1");
+        window.localStorage.setItem("firetower.theme", "light");
+        window.localStorage.setItem("firetower.panel", held);
+      },
+      [REGISTRY, JSON.stringify({ chrome: panel })],
+    );
+    await page.goto(`${APP}/#/`, { waitUntil: "networkidle" });
+    await page.waitForTimeout(1700);
+
+    const shut = await readRow(page);
+    if (!shut) {
+      say(false, `${how}: the section is on the page`, "no Recent agents section");
+      await page.close();
+      continue;
+    }
+    say(
+      (await page.evaluate(() => !!document.querySelector("[data-rail-panel]"))) === panel,
+      `${how}: the panel really is ${panel ? "open" : "collapsed"}`,
+      "the fixture did not take",
+    );
+    say(shut.chips > 6, `${how}: the fixture is long enough to clip`, `${shut.chips} chips`);
+    say(shut.rows > shut.rowsShown, `${how}: more rows exist than are shown`, `${shut.rows} rows, ${shut.rowsShown} shown`);
+    say(shut.sliced === 0, `${how}: the cut is between rows, never through a chip`, `${shut.sliced} chip(s) cut`);
+    say(shut.hairlines === 0, `${how}: no rule where the order turns`, `${shut.hairlines} hairline(s)`);
+    say(shut.control === "View all", `${how}: the control reads *View all*`, `it reads ${shut.control}`);
+
+    /* broken → blocked → done → working, as a non-decreasing rank. */
+    const ORDER = ["failed", "blocked", "handed back", "working"];
+    const ranks = shut.order.map((m) => ORDER.indexOf(m));
+    say(
+      ranks.every((r) => r >= 0) && ranks.every((r, i) => i === 0 || r >= ranks[i - 1]),
+      `${how}: ordered broken → blocked → done → working`,
+      shut.order.join(", "),
+    );
+
+    await page.locator(".sect", { hasText: "Recent agents" }).locator(".all").click();
+    await page.waitForTimeout(500);
+    const wide = await readRow(page);
+    say(wide.shown > shut.shown, `${how}: pressing it shows more than it did`, `${shut.shown} before, ${wide.shown} after`);
+    say(wide.shown === wide.chips, `${how}: and shows all of them`, `${wide.shown} of ${wide.chips}`);
+    say(wide.control === "View less", `${how}: the control turns into *View less*`, `it reads ${wide.control}`);
+
+    await page.locator(".sect", { hasText: "Recent agents" }).locator(".all").click();
+    await page.waitForTimeout(500);
+    const back = await readRow(page);
+    say(back.shown === shut.shown, `${how}: and *View less* puts it back`, `${back.shown}, was ${shut.shown}`);
+
+    /* Put the mock back, so a long scene does not leak into whatever runs next. */
+    await page.request.post(`${HERE}/__reset`);
+    await page.close();
+  }
+}
+
 await browser.close();
 if (failed) {
   console.error(`\n  ${failed} state(s) are not what the design says.`);
