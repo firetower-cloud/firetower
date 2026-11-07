@@ -596,7 +596,14 @@ function Editor({
       <div className="pg-head mt-4">
         <div>
           <h1>{draft.name.trim() || "New profile"}</h1>
-          <p className="sub">What it is for, what it may do, and who it may hand work to.</p>
+          {/* A new one has to say what a profile *is*; an existing one is
+              already in front of you and says what it is for. The drawing
+              has two ledes and the build was using the second for both. */}
+          <p className="sub">
+            {existing
+              ? "What it is for, what it may do, and who it may hand work to."
+              : "A saved way of working. Name it, say what it is for, and decide whether it leads or works."}
+          </p>
         </div>
       </div>
 
@@ -855,30 +862,30 @@ function Editor({
           </p>
         )}
 
-        <div className="flex items-center gap-2 pt-1">
-          <button
-            onClick={save}
-            disabled={!valid || busy}
-            className="control border border-sage-deep bg-sage-tint font-medium text-sage hover:bg-sage-deep/40 disabled:border-line disabled:bg-raise disabled:text-mute"
-          >
-            {existing ? "Save changes" : "Create profile"}
-          </button>
-          <button
-            onClick={onClose}
-            className="btn plain"
-          >
-            Cancel
-          </button>
+        {/* **`.formfoot`, and the message first.** It was a plain row with
+            the primary at the left and no sentence at all, so the one thing
+            worth knowing before you press — that nothing exists until you
+            do — was nowhere on the screen. The primary is the ordinary pill:
+            a sage-tinted button here said "this went well", which is a
+            verdict about something that has not happened yet. */}
+        <div className="formfoot">
+          <span className="msg">
+            {existing
+              ? "Saved when you press it. Running workspaces keep the profile they started with."
+              : "Nothing is created until you press this."}
+          </span>
           {existing && (
-            <button
-              onClick={remove}
-              disabled={busy}
-              className="control ml-auto border border-line bg-raise text-mute hover:border-brick-deep hover:text-brick"
-            >
+            <button onClick={remove} disabled={busy} className="btn danger">
               <Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} />
               Delete
             </button>
           )}
+          <button onClick={onClose} className="btn quiet">
+            Cancel
+          </button>
+          <button onClick={save} disabled={!valid || busy} className="btn primary">
+            {existing ? "Save changes" : "Create profile"}
+          </button>
         </div>
       </div>
     </div>

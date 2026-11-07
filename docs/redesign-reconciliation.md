@@ -135,11 +135,47 @@ landed:
 |---|---|
 | `connected` | landed somewhere carrying that thing's id, or opened a sheet carrying its name |
 | `wrong-thing` | went somewhere else, usually the list instead of the item |
-| `inert` | nothing moved at all |
-| `by-design` | a tab, a toggle, a filter, a disclosure — recognised and marked, not counted |
+| `it-threw` | it arrived, and the screen there died |
+| `opened-in-place` | the address did not move and the screen did — a popover, a disclosure, a tab beside the conversation. **Listed, not failed.** |
+| `inert` | nothing happened at all |
+| `by-design` | a tab, a filter, a switch, a control that answers a different gesture — recognised and marked, not counted |
 
-**The fourth row is the point.** A check that cannot tell *inert by design*
-from *broken* is the check that let this through.
+**The middle rows are the point**, and both were learned the hard way. The
+first full run reported twenty-six controls as inert and *not one of them
+was*: the workspace's repository chip opens a popover, an artifact row opens a
+tab beside the conversation, a Ship row expands in place. None navigates; all
+answer. A check that calls those and a broken row the same thing is the check
+that let the original bug through.
+
+`it-threw` came from the one real finding. **Opening a child agent from the
+team rail took the whole workspace to the error boundary** — the row navigated
+correctly and the screen it arrived at died, which a check that stops at the
+URL calls connected. `AccountSwitcher` read `current.data?.limits.find(...)`,
+where the `?.` guards `data` and not `limits`; an answer that is *there* but
+is not that shape throws. Guarded on shape now, the same lesson as the Skills
+review, because `[]` is truthy.
+
+### Triaging it honestly
+
+The first run claimed forty problems and one was real. That is worth recording
+because a check with a 2.5% hit rate is one people learn to ignore, which is
+worse than not having it. Four faults, all in the harness:
+
+- **It matched against the wrong scene.** The catalogue was fetched once from
+  the default scene; states that set their own have their own ids. Fourteen
+  findings, one cause.
+- **It insisted on one id per name.** Two sessions can share a name, and a
+  session and its workspace are one thing to a row that names it.
+- **It pressed by position.** An index taken on one render and used on the
+  next lands on whatever is there.
+- **It pressed the wrong one of two.** `hasText` is a substring filter, so two
+  controls naming the same thing resolved to whichever came first — in the
+  workspace, the title button, which renames on *double* click and correctly
+  does nothing on one. It carries `data-gesture="dblclick"` now.
+
+The same discipline applied to the layer-2 rules: 578 findings on their first
+run, 57 after four rules were tightened, with contrast, uppercase and mono
+clean. **A rule that fires on every screen teaches people to ignore it.**
 
 ### Sequences, which no single screenshot holds
 
@@ -231,7 +267,7 @@ untouched, deliberately, and does not appear in the table.
 | Skills | **matches** | Built to the drawing under criterion 55 (`c53b317c`), and the gallery's primary action is now the filled pill rather than `CreateMenu`'s grey outline. |
 | One skill | **differs → fixed** | Close already, after the tabs pass. Two gaps in the action row: **"Who can use it" was a bare glyph** among four labelled buttons — the sharing control is glyph-only in the dense toolbars where it also appears, so it takes an optional label rather than every toolbar taking words it does not want. And **Download is absent**: there is no download in the generated client, so it is in *Where the endpoint cannot answer what the drawing shows* rather than here. The asides differ too — the drawing closes with "On by default", the build with an **Access** card the drawing has no counterpart for. |
 | A new version | **differs** | **The harness was opening the wrong skill** — `pr-screenshots`, which nobody had dropped a version on — and then clicking Versions, which draws a real screen and not the one the drawing names. Pointed at `deploy-runbook`, the held one, the review is reachable and the two can be compared. They argue differently. The drawing shows **what changed**: a line per file with `changed`/`added`/`same`/`removed` and `+38 −11` against each, under a chip reading "This is your v6, changed — it would become v7", closing with `✓ Keep it as v7` / `Discard` and a note that the executable scripts do not change with this version. The build shows **what it is**: an amber band saying an agent wrote this and it runs code, a facts pair, then every file's full contents inlined. The build's framing is right for a skill arriving for the first time and wrong for a sixth version, where the question is what moved. |
-| Create with AI | **to compare** | |
+| Create with AI | **differs** | Two answers to the same job. The drawing gives it **a screen of its own** under Skills: "Describe the skill", a paragraph saying an agent writes it and what it produces is held for your review before it can run anywhere, one labelled field with its own help line — "The description is the expensive field: it is in context every turn" — the agent and machine chips, and a footer reading "It opens as a workspace you can watch and answer." beside `Start writing it`. The build **prefills the home composer** with "Create a Firetower skill that" and leaves the rest to the composer. Same mechanism underneath; the drawing's version says what is about to happen and the build's assumes you know. |
 | Held for review | **matches** | The build lands a held skill on the gallery rather than at the end of a create flow — criterion 43's reading. The card and its two-pixel amber rule are the drawing's. |
 | Upload a folder | **to compare** | |
 
@@ -241,7 +277,7 @@ untouched, deliberately, and does not appear in the table.
 |---|---|---|
 | Profiles | **differs → fixed** | Small heading, no lede, an **outlined** primary, rows in a bordered card, three coloured chips and a trash icon per row at rest. Now the drawing's: display heading, filled pill, rows on the page, quiet facts, and the closing note. Also renamed **Agent profiles**, which is what the rail calls it. |
 | One profile | **differs → fixed** | **The placement offered two of three.** `Role.placement` is documented as `lead | here | new`, the drawing draws all three with "Let the lead choose" first, and the build had a comment asserting there was no such option. A profile that does not pin a placement is a real thing — the one that works wherever the lead puts it. Added. **Two differences left**: the drawing's chips carry no glyph where the build's do, and the drawing's help line under Placement is "Where a workspace it is given runs." against the build's longer "Where a child runs when a lead delegates to it. Every spawn runs the same way." |
-| New profile | **to compare** | |
+| New profile | **differs → fixed** | Three things, all copy and shape. **The lede was the wrong one** — a new profile has to say what a profile *is* ("A saved way of working. Name it, say what it is for, and decide whether it leads or works."), and the build reused the lede for one you are already reading. **The footer was a plain row** with the primary at the left and no sentence, so the one thing worth knowing before you press — "Nothing is created until you press this." — was nowhere on the screen; it is `.formfoot` now, message first, Cancel then the primary, as the drawing has it. **And the primary was sage-tinted**, which is a verdict colour about something that has not happened yet; it is the ordinary pill. The third placement chip, "Let the lead choose", came with the One profile fix and the drawing makes it the default on a new one. **One difference left**: the drawing puts `Who can use it` on a profile that does not exist yet. |
 | Read-only profile | **differs** | **Criterion 39 holds in both, differently.** The drawing keeps the *editing form's shape* and fills it with values — Name, Description, Placement with the three options drawn as chips and the chosen one filled, Machine — so you can see what a copy of it would give you. The build replaces the form with a **facts table**. Both avoid greyed-out controls, which is what the criterion asks. **Two real gaps**: the drawing opens with a notice — "You can use this profile but not change it. *ana* administers `d/eng`, where it is filed — ask there, or make your own copy from it." — carrying a **Duplicate** button, and the build has neither the notice nor any way to take a copy. The drawing also puts a `‹ All profiles` back link above the title where the build puts an `All profiles` button at the top right. |
 | What it may reach | **not reached** | The scope sheet opens from a profile being edited; the mock's roles are read-only to this user. |
 | Agents | **differs → fixed** | Same family as Profiles. Still missing against the drawing: per-account sub-rows, the weekly-limit figures, and "Connect another account". |
