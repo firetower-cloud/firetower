@@ -242,11 +242,11 @@
 [data-theme="light"] {
   /* Ground. `--color-panel` is the one white: the page you are reading.
      `--color-ground` is the chrome it sits on. */
-  --color-ground: #eceef1;
+  --color-ground: #f2f2f3;
   --color-panel: #ffffff;
-  --color-raise: #f5f6f8;
-  --color-overlay: #e6e8ed;
-  --color-line: #e3e5ea;
+  --color-raise: #f6f6f9;
+  --color-overlay: #e8e8ec;
+  --color-line: #e5e5ea;
   /* 1.09:1 on the sheet, holding the dark pair's 1.09. The rare, fainter
      hairline — still a line, barely. */
   --color-line-soft: #f3f5fb;
@@ -255,16 +255,16 @@
   --color-settling: #c2c1cb;
 
   /* Text. Four tiers, the same real gaps: 18.1, 9.3, 4.2 and 2.4 on white. */
-  --color-bone: #15161a;
-  --color-text: #45474f;
+  --color-bone: #161617;
+  --color-text: #47474d;
   /* 4.22 on the sheet, and **3.45 on `--color-overlay`** — the one tier that
      is tighter here than in dark, where it holds 5.58. Secondary text on a
      recessed surface is the composition to watch. */
-  --color-dim: #787b85;
+  --color-dim: #7b7b83;
   /* 2.40 on the sheet, 2.07 on the chrome. See the note in `@theme`: the
      faintest tier is under the floor in both branches and that is the
      design's own published value, not a light-mode regression. */
-  --color-mute: #a4a7b1;
+  --color-mute: #a6a6af;
 
   /* Signals. Tints against the sheet, colours and deeps against their tint. */
   --color-ember: #ff5e1a;
@@ -287,7 +287,7 @@
   --color-slate-deep: #a6b9d1;
   /* Lighter than dark's, because less is needed: the card below it is the one
      pure white and the page it covers is already a step down from that. */
-  --color-scrim: rgb(21 22 26 / 0.22);
+  --color-scrim: rgb(22 22 23 / 0.22);
 
   /* Series: the dark hue with L* lowered until it clears 4.8:1 on white. */
   --color-series-1: #2575bd;
@@ -318,8 +318,8 @@
   /* Elevation inverts. A top highlight in white says "lit from above" over a
      dark ground and says nothing at all over a pale one, so light spends a
      soft drop and a hairline ring instead. */
-  --shadow-raise: 0 2px 6px rgb(21 22 26 / 0.06), 0 0 0 1px rgb(21 22 26 / 0.04);
-  --shadow-float: 0 18px 44px -18px rgb(21 22 26 / 0.26), 0 2px 8px rgb(21 22 26 / 0.05);
+  --shadow-raise: 0 2px 6px rgb(22 22 23 / 0.06), 0 0 0 1px rgb(22 22 23 / 0.04);
+  --shadow-float: 0 18px 44px -18px rgb(22 22 23 / 0.26), 0 2px 8px rgb(22 22 23 / 0.05);
 
   color-scheme: light;
 }

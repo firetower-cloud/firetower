@@ -667,7 +667,12 @@ export function toBase64(bytes: Uint8Array): string {
 }
 
 /** `12.4 KB`, for a row that has to say how big something is. */
-export function size(bytes: number): string {
+export function size(bytes: number | null | undefined): string {
+  /* **`NaN MB` is worse than nothing.** A server that does not carry a byte
+     count — an older one, or a skill that has not been measured — printed
+     "NaN MB" into a facts table, which reads as the app being broken rather
+     than as a figure being absent. */
+  if (typeof bytes !== "number" || !Number.isFinite(bytes)) return "—";
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`;

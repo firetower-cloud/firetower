@@ -574,7 +574,7 @@ const server = createServer(async (req, res) => {
      of them are this person's; two are not, which is what the drawing has. */
   const other = (over) => ({ ...session(), path: "u/kevin", ...over, checkouts: [], steps: undefined });
   const dashboard = () => {
-    if (scene === "empty") return [];
+    if (scene === "empty" || scene === "bare") return [];
     const working = [
       other({ id: "s_2", workspaceId: "w_2", number: 4, name: "Poke at the deploy script", status: "Working", repo: null, branch: null, createdAt: minutesAgo(8) }),
       other({ id: "s_3", workspaceId: "w_3", number: 5, name: "Reconcile the webhook retries", status: "Working", agent: "Cursor", repo: "acme/api", branch: "fix/webhook-retry", createdAt: minutesAgo(120), path: "u/ana" }),
@@ -633,7 +633,7 @@ const server = createServer(async (req, res) => {
     "/api/v1/sessions/s_1/diff": BIG ? bigDiff(url.searchParams.get("namesOnly") === "true") : QUOTA_DIFF,
     "/api/v1/sessions/s_1/files": listing(url.searchParams.get("path") ?? ""),
     "/api/v1/sessions/s_1/turn": { sent: true },
-    "/api/v1/artifacts": scene === "no-artifacts" ? [] : ARTIFACTS,
+    "/api/v1/artifacts": scene === "no-artifacts" || scene === "bare" ? [] : ARTIFACTS,
     "/api/v1/sessions/s_1/conversation": conversation(),
     "/api/v1/sessions/s_1/controls": scene.startsWith("codex") ? [] : CLAUDE_CONTROLS,
     "/api/v1/sessions/s_1/account":
@@ -733,6 +733,21 @@ const server = createServer(async (req, res) => {
      — and which the composer's machine picker drew as a red band. */
   /* What an agent wrote and is waiting on. Without this the held skill — the
      first row of the gallery — opened onto a screen that threw. */
+  const detail_of = /^\/api\/v1\/skills\/([^/]+)\/detail$/.exec(path);
+  if (detail_of) {
+    const k = SKILLS.find((x) => x.id === detail_of[1]);
+    if (!k) return json(res, { code: "NotFound", message: "no such skill" }, 404);
+    return json(res, {
+      ...k,
+      body: `## When to use this\n\nReach for it when a change is visual and a reviewer cannot tell from the diff whether it is right — a new screen, a layout that moves, anything where "it looks correct" is the acceptance test.\n\n## What it does\n\n- Finds how this project starts its app, and starts it.\n- Drives the routes the change touches and photographs each one, light and dark.\n- Attaches the set to the pull request with a one-line caption each.\n\n## Frontmatter\n\n\`\`\`\nname: ${k.name}\ndescription: ${k.description}\nallowed-tools: Bash, Read, Write\n\`\`\`\n\nFiretower stores the folder verbatim and interprets six fields.\n`,
+      files: [
+        { path: "SKILL.md", size: 1840, shared: false },
+        { path: "scripts/shoot.ts", size: 7420, shared: false },
+        { path: "references/playwright.md", size: 52010, shared: true },
+      ],
+    });
+  }
+
   const review_of = /^\/api\/v1\/skills\/([^/]+)\/review$/.exec(path);
   if (review_of) {
     const held = SKILLS.find((k) => k.id === review_of[1]);
@@ -887,7 +902,7 @@ server.on("upgrade", (req, socket) => {
  * wrote that is waiting to be read.
  */
 const skill = (over) => ({
-  id: "sk_x", name: "a-skill", description: "", version: 1, tokens: 900,
+  id: "sk_x", name: "a-skill", description: "", version: 1, tokens: 900, bytes: 61270, files: 3,
   alwaysOn: false, builtin: false, held: false, mayShare: true, mayWrite: true,
   author: null, risk: [], defaultIn: [], path: "u/kevin", currentVersionId: "sv_1",
   createdAt: minutesAgo(9000), updatedAt: minutesAgo(90), ...over,

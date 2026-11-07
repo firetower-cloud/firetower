@@ -294,10 +294,13 @@
     position: relative;
     display: grid;
     place-items: center;
-    width: 42px;
-    height: 42px;
+    /* 7px around a 20px glyph rather than 11 — a tight square, not a tile.
+       Hover and current share one box, so the rail never resizes under the
+       pointer. */
+    width: 34px;
+    height: 34px;
     flex: none;
-    border-radius: 13px;
+    border-radius: 11px;
     /* **The glyph recedes.** It rested at `--text` and brightened on hover,
        which is two signals for one fact — the icon thickening *and* a ground
        appearing. The container carries the state now; the glyph sits at
@@ -313,14 +316,14 @@
     color: var(--color-text);
   }
   [data-theme="light"] .rbtn:hover {
-    background: rgb(21 22 26 / 0.05);
+    background: rgb(22 22 23 / 0.05);
   }
   .rbtn[data-peek="true"] {
     background: rgb(255 255 255 / 0.07);
     color: var(--color-text);
   }
   [data-theme="light"] .rbtn[data-peek="true"] {
-    background: rgb(21 22 26 / 0.07);
+    background: rgb(22 22 23 / 0.07);
   }
   /* **Inverted, and the only thing in the chrome that is.** It was a white
      pill with a lift — the same *direction* as hover, so on and hovered read
@@ -334,8 +337,8 @@
      agent is waiting on *you*, and a newer build is not that. */
   .rbtn > .news {
     position: absolute;
-    top: 9px;
-    right: 9px;
+    top: 5px;
+    right: 5px;
     width: 5.5px;
     height: 5.5px;
     border-radius: 99px;
@@ -1034,6 +1037,77 @@
   :root[data-theme="dark"] .sk:hover .plate,
   :root:not([data-theme]) .sk:hover .plate {
     background: var(--color-overlay);
+  }
+
+  /* A group of facts, as a card. The build's aside was bare text on the
+     sheet with a rule down its left edge, which is a gutter; these are
+     objects, and each carries its own ground. */
+  .facts-card {
+    padding: 16px 18px;
+    border-radius: 14px;
+    background: var(--color-raise);
+  }
+  .facts-card + .facts-card {
+    margin-top: 12px;
+  }
+  .facts-card h3 {
+    font-size: 0.875rem;
+    letter-spacing: 0.004em;
+    color: var(--color-dim);
+  }
+  .facts-card dl {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 7px 14px;
+    margin-top: 10px;
+  }
+  .facts-card dt {
+    font-size: 0.90625rem;
+    color: var(--color-dim);
+    white-space: nowrap;
+  }
+  .facts-card dd {
+    min-width: 0;
+    font-size: 0.90625rem;
+    color: var(--color-bone);
+    text-align: right;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .facts-card .line {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    margin-top: 9px;
+    font-size: 0.90625rem;
+    color: var(--color-text);
+  }
+  .facts-card .line i {
+    width: 6px;
+    height: 6px;
+    border-radius: 99px;
+    flex: none;
+  }
+  .facts-card .line.ok i {
+    background: var(--color-sage);
+  }
+  .facts-card .line.warn i {
+    background: var(--color-amber-soft);
+  }
+
+  /* The instructions, and a rail of facts cards beside them. */
+  .sk-body {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 268px;
+    gap: 40px;
+    align-items: start;
+    margin-top: 28px;
+  }
+  @media (max-width: 1100px) {
+    .sk-body {
+      grid-template-columns: minmax(0, 1fr);
+    }
   }
 
   /* A skill, opened. The plate is the gallery's at 62px, the name is the
@@ -2290,7 +2364,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
   }
   [data-theme="light"] .dlg {
     background: var(--color-panel);
-    box-shadow: var(--shadow-float), 0 0 0 1px rgb(21 22 26 / 0.07);
+    box-shadow: var(--shadow-float), 0 0 0 1px rgb(22 22 23 / 0.07);
   }
   .dlg h2 {
     font-size: 1.1875rem;
@@ -2855,7 +2929,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
   }
   [data-theme="light"] .pop {
     background: var(--color-panel);
-    box-shadow: var(--shadow-float), 0 0 0 1px rgb(21 22 26 / 0.055);
+    box-shadow: var(--shadow-float), 0 0 0 1px rgb(22 22 23 / 0.055);
   }
   .mi {
     display: flex;
@@ -2946,7 +3020,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
     opacity: 0.4;
   }
   [data-theme="light"] .gbtn:hover {
-    background: rgb(21 22 26 / 0.05);
+    background: rgb(22 22 23 / 0.05);
   }
 
   /* ── Two or three exclusive choices, inline ──────────────────────── */
@@ -3163,7 +3237,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
   }
   [data-theme="light"] .sheet2 {
     background: var(--color-panel);
-    box-shadow: var(--shadow-float), 0 0 0 1px rgb(21 22 26 / 0.07);
+    box-shadow: var(--shadow-float), 0 0 0 1px rgb(22 22 23 / 0.07);
   }
   .sh-head {
     display: flex;
@@ -3359,8 +3433,8 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
   }
   .mid .composer {
     box-shadow:
-      0 14px 36px -16px rgb(21 22 26 / 0.22),
-      0 2px 6px rgb(21 22 26 / 0.05);
+      0 14px 36px -16px rgb(22 22 23 / 0.22),
+      0 2px 6px rgb(22 22 23 / 0.05);
   }
   [data-theme="dark"] .mid .composer,
   :root:not([data-theme]) .mid .composer {
@@ -3368,7 +3442,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
   }
   .mid .composer textarea {
     min-height: 64px;
-    font-size: 1.0625rem;
+    font-size: 1.125rem;
   }
   .mid .composer .bar {
     margin-top: 14px;
@@ -3432,7 +3506,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
     align-items: center;
     gap: 9px;
     flex: none;
-    height: 32px;
+    height: 34px;
     max-width: 306px;
     padding: 0 14px;
     border-radius: 99px;

@@ -603,8 +603,13 @@ function Detail({
   const where = root === "d" ? `d/${place}` : "Only you";
 
   return (
-    <section data-wide className="flex min-w-0 flex-1 flex-col">
-      <div className="px-8 pt-6">
+    /* **One padded column**, which is what `openSkill()` is in the drawing:
+       a `.pcol` with everything inside it. The build inset seven children
+       individually instead, and the one that was forgotten — the tab strip —
+       went flush to the window edge with its rule running off it. A page
+       whose padding is a property of the page cannot have that happen. */
+    <section data-wide className="pcol">
+      <div>
       <button onClick={onBack} className="flex items-center gap-1 text-meta text-mute hover:text-bone">
         <ChevronLeft className="h-3.5 w-3.5" strokeWidth={2} />
         All skills
@@ -662,22 +667,25 @@ function Detail({
         ))}
       </div>
 
-      {saving && <p className="px-8 pt-3 text-meta text-brick">{saving}</p>}
+      {saving && <p className="pt-3 text-meta text-brick">{saving}</p>}
 
       {tab === "details" && (
-        <div className="grid flex-1 lg:grid-cols-[minmax(0,1fr)_19rem]">
-          <div className="min-w-0 px-8 py-6">
+        /* The drawing's two columns: the instructions, and a 268px rail of
+           facts cards beside them. The build's aside was a bordered gutter;
+           the drawing's cards carry their own ground and need no rule. */
+        <div className="sk-body">
+          <div className="min-w-0">
             <Instructions id={skill.id} />
           </div>
 
-          <aside className="flex flex-col gap-5 border-t border-line-soft px-6 py-6 text-meta lg:border-t-0 lg:border-l">
+          <aside className="flex flex-col gap-3 text-meta">
             <Facts
               title="About"
               rows={[
                 ["Version", `v${skill.version}`],
-                ["Updated", new Date(skill.updatedAt).toLocaleDateString()],
+                ["Updated", `${elapsed(minutesSince(skill.updatedAt))} ago`],
                 ["Author", skill.builtin ? "Firetower" : (skill.author ?? "somebody who has left")],
-                ["Size", `${size(skill.bytes)}, ${skill.files} files`],
+                ["Size", skill.files ? `${size(skill.bytes)}, ${skill.files} files` : size(skill.bytes)],
                 ["Context", `${skill.tokens} tokens a turn`],
               ]}
             />
@@ -688,35 +696,35 @@ function Detail({
                 ["You can", skill.mayShare ? "manage" : skill.mayWrite ? "edit" : "view"],
               ]}
             />
-            <div>
-              <h3 className="text-ui text-bone">What it does</h3>
-              <div className="mt-2 flex flex-col gap-1.5">
-                {skill.risk.length === 0 ? (
-                  <span className="flex items-center gap-2 text-dim">
-                    <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-sage" />
-                    Reads and instructs only
+            <div className="facts-card">
+              <h3>What it does to a session</h3>
+              {skill.risk.length === 0 ? (
+                <span className="line ok">
+                  <i />
+                  Reads and instructs only
+                </span>
+              ) : (
+                /* **Amber, not brick.** "Worth reading before you approve" is
+                   what amber means; brick says it is broken. */
+                skill.risk.map((r) => (
+                  <span key={r} className="line warn">
+                    <i />
+                    {RISK_SAYS[r] ?? r}
                   </span>
-                ) : (
-                  skill.risk.map((r) => (
-                    <span key={r} className="flex items-center gap-2 text-dim">
-                      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-brick" />
-                      {RISK_SAYS[r] ?? r}
-                    </span>
-                  ))
-                )}
-              </div>
+                ))
+              )}
             </div>
             {/* Where the drawing puts this fact — and, since it is a fact
                 somebody may change, where the control for it goes too. */}
-            <div>
-              <h3 className="text-ui text-bone">On by default</h3>
+            <div className="facts-card">
+              <h3>On by default</h3>
               <Defaults skill={skill} onChanged={onChanged} />
             </div>
           </aside>
         </div>
       )}
 
-      <div className="max-w-[56rem] px-8 pb-16">
+      <div className="max-w-[56rem]">
         {tab === "bundle" && <Bundle id={skill.id} />}
         {tab === "versions" && <Versions id={skill.id} />}
       </div>
@@ -786,7 +794,7 @@ function Review({
    */
   if (q.isPending) {
     return (
-      <div className="max-w-[56rem] px-8 py-6">
+      <div className="max-w-[56rem] py-6">
         <p className="flex items-center gap-2 text-ui text-mute">
           <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={2} />
           Reading what the agent wrote…
@@ -801,7 +809,7 @@ function Review({
      is checked here. */
   if (q.error || !Array.isArray((q.data as { files?: unknown } | undefined)?.files)) {
     return (
-      <div className="max-w-[56rem] px-8 py-6">
+      <div className="max-w-[56rem] py-6">
         <Blank icon={TriangleAlert} title="That did not load">
           {q.error ? `${why(q.error)} ` : ""}The skill is still held — nothing has been approved and
           nothing has been discarded.
@@ -812,7 +820,7 @@ function Review({
 
   const review = q.data;
   return (
-    <div className="max-w-[56rem] px-8 py-6">
+    <div className="max-w-[56rem] py-6">
       <div className="rounded-xl border border-amber-deep bg-amber-tint/40 px-5 py-4">
         <div className="flex items-start gap-3">
           <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-amber" strokeWidth={1.75} />
@@ -926,13 +934,13 @@ function Switch({ on, busy, onFlip }: { on: boolean; busy: boolean; onFlip: () =
 /** A small table of facts, for the sidebar. */
 function Facts({ title, rows }: { title: string; rows: [string, string][] }) {
   return (
-    <div>
-      <h3 className="text-ui text-bone">{title}</h3>
-      <dl className="mt-2 grid grid-cols-[5.5rem_1fr] gap-x-3 gap-y-1.5">
+    <div className="facts-card">
+      <h3>{title}</h3>
+      <dl>
         {rows.map(([k, v]) => (
           <div key={k} className="contents">
-            <dt className="text-mute">{k}</dt>
-            <dd className="min-w-0 truncate text-text">{v}</dd>
+            <dt>{k}</dt>
+            <dd>{v}</dd>
           </div>
         ))}
       </dl>

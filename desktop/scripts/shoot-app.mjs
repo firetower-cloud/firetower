@@ -30,10 +30,28 @@ const REGISTRY = JSON.stringify([
 const browser = await chromium.launch({ channel: "chrome" });
 
 /** A page per state: `theme.ts` writes the attribute at import, so a theme is a reload. */
-async function fresh(theme, { servers = REGISTRY, scene = "default" } = {}) {
+async function fresh(theme, { servers = REGISTRY, scene = "default", at = null } = {}) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 824 }, deviceScaleFactor: 2 });
   page.on("pageerror", (e) => console.log("    pageerror:", String(e).slice(0, 160)));
   await page.request.post(`${HERE}/__reset?scene=${scene}`);
+  if (at) {
+    /* Pin the clock before any module runs, so `greeting()` reads the hour
+       the state is named for. Only `Date.now` and the no-argument
+       constructor move; everything that parses an ISO string still works. */
+    await page.addInitScript((iso) => {
+      const fixed = new Date(iso).getTime();
+      const Real = Date;
+      // @ts-expect-error — the harness is replacing the global on purpose.
+      window.Date = class extends Real {
+        constructor(...args) {
+          super(...(args.length ? args : [fixed]));
+        }
+        static now() {
+          return fixed;
+        }
+      };
+    }, at);
+  }
   await page.addInitScript(
     ([registry, choice]) => {
       if (registry) window.localStorage.setItem("firetower.servers", registry);
@@ -102,10 +120,18 @@ async function address(page, typed, settle) {
    id: the prototype's own, from `shoot-proto.mjs`.
    go: drives a fresh page into the state. scene/servers set up the mock.   */
 const SHOTS = [
-  /* Starting work */
-  { id: "starting-work__dashboard-two-waiting", scene: "waiting", go: (p) => at(p, "/") },
-  { id: "starting-work__dashboard-nothing-waiting", scene: "calm", go: (p) => at(p, "/") },
-  { id: "starting-work__dashboard-nothing-yet", scene: "empty", go: (p) => at(p, "/") },
+  /* Starting work.
+
+     The home's six states. The greeting comes off the machine's clock, so
+     the two greeting tiles are driven by moving the clock rather than by a
+     prop — which is also the only way to check that the boundaries are where
+     `greeting()` says they are. */
+  { id: "starting-work__home-waiting-and-artifacts", scene: "waiting", go: (p) => at(p, "/") },
+  { id: "starting-work__home-nothing-waiting", scene: "calm", go: (p) => at(p, "/") },
+  { id: "starting-work__home-no-artifacts-yet", scene: "no-artifacts", go: (p) => at(p, "/") },
+  { id: "starting-work__home-neither", scene: "bare", go: (p) => at(p, "/") },
+  { id: "starting-work__home-good-morning", scene: "waiting", at: "2026-11-07T09:30:00", go: (p) => at(p, "/") },
+  { id: "starting-work__home-good-evening", scene: "waiting", at: "2026-11-07T21:30:00", go: (p) => at(p, "/") },
   { id: "starting-work__tasks-has-work", go: (p) => at(p, "/tasks") },
   { id: "starting-work__tasks-nothing-open", scene: "no-tasks", go: (p) => at(p, "/tasks") },
   { id: "starting-work__tasks-not-connected", scene: "no-trackers", go: (p) => at(p, "/tasks") },
@@ -281,7 +307,8 @@ const SHOTS = [
     id: "artifacts-and-skills__one-skill",
     go: async (p) => {
       await at(p, "/configuration/skills", 1400);
-      await p.locator(".sk").first().click();
+      /* Not the first row — that is the held one, which is its own state. */
+      await p.locator(".sk", { hasText: "pr-screenshots" }).first().click();
       await pause(p, 1100);
     },
   },
@@ -588,7 +615,7 @@ for (const s of SHOTS) {
     continue;
   }
   for (const theme of ["light", "dark"]) {
-    const page = await fresh(theme, { servers: s.servers ?? REGISTRY, scene: s.scene ?? "default" });
+    const page = await fresh(theme, { servers: s.servers ?? REGISTRY, scene: s.scene ?? "default", at: s.at ?? null });
     try {
       await s.go(page);
       await page.screenshot({ path: `${OUT}/${s.id}-${theme}.png` });
