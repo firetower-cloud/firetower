@@ -24,6 +24,7 @@ import { anchorIn } from "~/preview/anchor";
 import { usePickerBridge, type Selection } from "~/preview/bridge";
 import { usePreviewNotes } from "~/preview/notes";
 import { AddAgent } from "~/ui/AddAgent";
+import { Segmented } from "~/components/ui";
 
 const WIDTHS = [
   { id: "full", label: "Full width", icon: Monitor, px: 0 },
@@ -164,13 +165,13 @@ export function PreviewTab({ session, port, path: initialPath = "/", onPath }: {
           />
         </div>
 
-        <div className="track ml-2 shrink-0">
-          {WIDTHS.map((w) => (
-            <button key={w.id} data-on={width === w.id} onClick={() => setWidth(w.id)} title={w.label}>
-              <w.icon className="h-3.5 w-3.5" strokeWidth={1.75} />
-            </button>
-          ))}
-        </div>
+        <Segmented
+          className="ml-2"
+          label="How wide to draw it"
+          value={width}
+          onChange={setWidth}
+          options={WIDTHS.map((w) => [w.id, <w.icon key={w.id} className="h-3.5 w-3.5" strokeWidth={1.75} />, w.label] as const)}
+        />
 
         <button
           disabled={!bridge.ready}

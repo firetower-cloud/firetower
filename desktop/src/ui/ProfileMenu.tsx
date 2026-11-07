@@ -28,7 +28,7 @@ import {
   BookOpen,
 } from "lucide-react";
 import { useMutation } from "@tanstack/react-query";
-import { Icon } from "~/components/ui";
+import { Icon, Segmented } from "~/components/ui";
 import { useLogout, useMe } from "~/api/generated/auth/auth";
 import { dropCache } from "~/backend";
 import { useFleet, waitingIn, type Backend } from "~/fleet";
@@ -195,19 +195,20 @@ function Profile({
           </span>
           <span className="min-w-0 flex-1 truncate">Appearance</span>
         </p>
-        <span className="track mt-1.5 ml-[26px] flex">
-          {(["system", "light", "dark"] as Theme[]).map((t) => (
-            <button
-              key={t}
-              onClick={() => setChoice(t)}
-              data-on={choice === t}
-              title={t === "system" ? `Follow the Mac — ${resolved} right now` : undefined}
-              className="flex-1 px-2 text-center text-meta capitalize"
-            >
-              {t}
-            </button>
-          ))}
-        </span>
+        {/* `Segmented`, not a third copy of it. This was a hand-rolled
+            `.track` beside the component that exists for it, which is why it
+            drifted far enough for somebody to notice. */}
+        <Segmented
+          className="mt-1.5 ml-[26px] flex"
+          label="Appearance"
+          value={choice}
+          onChange={setChoice}
+          options={[
+            ["system", "System", `Follow the Mac — ${resolved} right now`],
+            ["light", "Light"],
+            ["dark", "Dark"],
+          ] as const}
+        />
       </div>
 
       <Rule />

@@ -131,6 +131,30 @@ for (const theme of ["light", "dark"]) {
     if (r !== g) add("tokens", theme, "neutral-r-equals-g", n, `R = G in #${h}`, `R ${r} ≠ G ${g}`);
   }
 
+  /* **A ΔE is not enough at the ends of the range.** `ground → panel` in
+     dark was ΔE 2.2, which looks fine on paper, and a **1.68x relative
+     luminance jump**, which is what read as a hard edge — the thing the user
+     actually complained about. A check comparing only ΔE would have passed
+     it. The ratio of the luminances is the second reading, and near black it
+     is the one that matters. */
+  const LADDER = ["--color-ground", "--color-panel", "--color-raise", "--color-overlay", "--color-line"];
+  const lum = (h) => {
+    const [r, g, b] = [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16) / 255);
+    const f = (x) => (x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4);
+    return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+  };
+  for (let i = 0; i < LADDER.length - 1; i++) {
+    const a = hex(got[LADDER[i]] ?? ""), b = hex(got[LADDER[i + 1]] ?? "");
+    if (!a || !b) continue;
+    const [lo, hi] = [lum(a) + 0.05, lum(b) + 0.05].sort((x, y) => x - y);
+    const jump = hi / lo;
+    /* 1.5x is the line between "a step" and "an edge". The shipped dark
+       ladder was 1.68 at the bottom; derived it is 1.37. */
+    if (jump > 1.5) {
+      add("tokens", theme, "surface-step", `${LADDER[i]} → ${LADDER[i + 1]}`, "at most 1.50x luminance", `${jump.toFixed(2)}x`);
+    }
+  }
+
   await page.close();
 }
 console.log(`  layer 1 · tokens · ${findings.length} finding(s)`);

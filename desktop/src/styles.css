@@ -179,6 +179,79 @@
    chroma cap takes another six points off it. It is still unmistakably not a
    string or a keyword; it no longer reads as "yellow". The alternative is to
    let numbers sit at the kinds' floor (5.7:1) instead of their own. */
+/* ── Dark, derived rather than inherited ───────────────────────────
+   **The only part of this design that was taken verbatim**, as criterion 1
+   asks — and those values were made for an interface that was dark-only and
+   had no floating sheet on chrome. The structure changed under them and the
+   numbers never moved. The rails sat at L* 3.0, 0.34% luminance — a void,
+   not a frame — and the chrome-to-sheet edge was a **1.68x relative
+   luminance jump**, which is why a ΔE of 2.2 read as a hard edge at the
+   bottom of the range. The whole ladder is lifted: 1.37x now, and the steps
+   even out at 3.1 / 3.4 / 3.4 / 4.2 where they were 2.2 / 2.9 / 3.6 / 4.0.
+
+   **Here rather than in `globals.css`.** The cause is desktop-specific — the
+   desktop gained a floating sheet on chrome, mobile is full-bleed and web is
+   a page — so criterion 1 and criterion 6 both hold untouched. The type pass
+   set the precedent. The cost is a second source of truth for dark, and what
+   retires it is named: when web and mobile opt into light, the whole sheet is
+   re-derived and these move into `globals.css` as its dark branch.
+
+   `data-theme="dark"` is always written, so this is safe to scope. */
+[data-theme="dark"] {
+  --color-ground: #1d1d1e;
+  --color-panel: #232325;
+  --color-raise: #2a2a2d;
+  --color-overlay: #313135;
+  --color-line: #3a3a3f;
+  /* The soft line moves with the line it is a quieter version of. */
+  --color-line-soft: #2a2a2e;
+
+  /* Brought down from near-white, which is most of what read as cheap.
+     `--color-mute` is **held** at 2.94:1 — it is the tier nobody has ruled
+     on, so it was pinned rather than allowed to drift while the rest moved. */
+  --color-bone: #eaeaeb; /* 17.16 → 13.05:1 */
+  --color-text: #b9b9bf; /*  11.32 →  8.03:1 */
+  --color-dim: #8a8a92; /*    5.58 →  4.58:1 */
+  /* The drawing has `#6b6a74`, whose green is one point under its red —
+     which breaks the rule the palette states about itself and `assert-design`
+     caught on its first run after the change. `#6a6a74` holds R = G and
+     measures 2.933:1 against the new panel, inside 0.01 of the 2.94 being
+     held. Reported to the designer. */
+  --color-mute: #6a6a74; /*   2.94 →  2.93:1, held */
+
+  /* **A tint is not ratio-held.** Holding the ratio sent two of these
+     *darker* than the surface they sit on — a hole rather than a wash. A
+     tint is a lift above the panel and holds its ΔL*. */
+  --color-sage-tint: #24382c;
+  --color-brick-tint: #3e2626;
+  --color-amber-tint: #3d321c;
+
+  /* Everything gated against the panel, re-derived to hold **its own**
+     original ratio against the new one. Lifting the panel drops every ratio
+     by about 17%, so leaving these put five of seven file kinds and all four
+     chart series under their floors. */
+  --color-kind-source: #8aa2c7;
+  --color-kind-native: #c8926d;
+  --color-kind-data: #d3bb73;
+  --color-kind-style: #a99bd4;
+  --color-kind-media: #89c69d;
+  --color-kind-store: #cd88b0;
+  --color-kind-prose: #a9a9b4;
+
+  --color-series-1: #5194de;
+  --color-series-2: #34aa82;
+  --color-series-3: #9a88e8;
+  --color-series-4: #dc6a94;
+
+  --color-syn-comment: #777781;
+  --color-syn-string: #9fcaaa;
+  --color-syn-keyword: #a99bd4;
+  --color-syn-type: #8ca4bf;
+  --color-syn-number: #d3bb73;
+  --color-syn-fn: #c8926d;
+  --color-syn-attr: #9898a3;
+}
+
 [data-theme="light"] {
   --color-panel-vibrant: rgb(255 255 255 / 0.72);
   --color-strip: rgb(236 238 241 / 0.82);
@@ -1631,31 +1704,11 @@
 
   /* A segmented control, the way the platform draws one: a recessed track and
      a raised knob, rather than two flat buttons that change colour. */
-  .track {
-    display: inline-flex;
-    gap: 2px;
-    padding: 2px;
-    border-radius: var(--radius-md);
-    background: var(--color-ground);
-    box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.35);
-  }
-  .track > button {
-    padding: 0.25rem 0.625rem;
-    border-radius: 6px;
-    font-size: var(--text-ui);
-    color: var(--color-mute);
-    transition:
-      background var(--dur-native) var(--ease-swift),
-      color var(--dur-native) var(--ease-swift);
-  }
-  .track > button:hover {
-    color: var(--color-dim);
-  }
-  .track > button[data-on="true"] {
-    background: var(--color-overlay);
-    color: var(--color-bone);
-    box-shadow: var(--shadow-raise);
-  }
+  /* `.track` was here: a second segmented control, hand-rolled at three call
+     sites beside `Segmented`, which existed and was imported by none of them.
+     The component is the authority and `.seg` is its class. Removed rather
+     than left as a thing the next screen could reach for. */
+
 
   /* A keyboard hint, inline. Desk software tells you its shortcuts where you
      use them rather than hiding them in a menu. */

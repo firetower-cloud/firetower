@@ -20,6 +20,7 @@ import type { Fleet } from "~/fleet";
 import type { Session } from "~/api/generated/model";
 import { marksOf } from "~/fleet";
 import { useTheme, type Theme } from "~/theme";
+import { Segmented } from "~/components/ui";
 
 /**
  * Every class on this page is written out, never interpolated.
@@ -98,13 +99,13 @@ export function StylePage() {
     <div className="scroll-slim h-full w-full overflow-y-auto bg-ground">
       <header {...drag} className="sticky top-0 z-10 flex h-(--chrome-title) items-center gap-3 border-b border-line bg-panel px-4">
         <span className="text-ui font-medium text-bone">Firetower — style</span>
-        <span className="track no-drag ml-auto">
-          {(["system", "light", "dark"] as Theme[]).map((t) => (
-            <button key={t} data-on={choice === t} onClick={() => setChoice(t)} className="capitalize">
-              {t}
-            </button>
-          ))}
-        </span>
+        <Segmented
+          className="no-drag ml-auto"
+          label="Appearance"
+          value={choice}
+          onChange={setChoice}
+          options={[["system", "System"], ["light", "Light"], ["dark", "Dark"]] as const}
+        />
         <span className="text-meta text-mute">{resolved}</span>
         <button
           onClick={() => navigate("/")}
