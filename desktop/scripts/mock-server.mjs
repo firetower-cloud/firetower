@@ -1196,9 +1196,13 @@ const SECRETS = {
   ],
 };
 
+/* **`placement` is `here | new | lead`**, not a directory. Every role here
+   carried "Yours" or "Platform" — which is `path`'s job — so no screen was
+   ever shown a real placement: the list drew "lead picks where" for all
+   three, and the editor's coercion fired on every open. */
 const role = (over) => ({
   id: "r_x", name: "A profile", does: "", instructions: "", path: "u/kevin",
-  placement: "Yours", agent: "ClaudeCode", account: null, machine: null,
+  placement: "here", agent: "ClaudeCode", account: null, machine: null,
   isDefault: false, canDelegate: false, delegateScope: [], skillScope: [],
   mayShare: true, mayWrite: true, settings: { model: null, effort: null, mode: null, sandbox: null },
   createdAt: minutesAgo(20000), updatedAt: minutesAgo(400), ...over,
@@ -1212,12 +1216,17 @@ const ROLES = [
   }),
   role({
     id: "r_2", name: "Release captain", canDelegate: true, delegateScope: ["r_1"],
+    placement: "new", machine: "h_1",
     does: "Cuts a release, watches the smoke suite, and rolls back when it fails.",
     instructions: "Follow the deploy runbook. Stop at the first failing check and say so.",
     settings: { model: "claude-sonnet-5", effort: "medium", mode: null, sandbox: "workspace" },
   }),
   role({
-    id: "r_3", name: "Triager", path: "d/platform", placement: "Platform", mayWrite: false, mayShare: false,
+    /* **The retired `lead`**, which the server will still hand back and will
+       not take: `CreateRoleBody.placement` is "here" or "new" and `roles.rs`
+       refuses the rest. A profile written before it was retired looks like
+       this, and the client has to read it without offering it. */
+    id: "r_3", name: "Triager", path: "d/platform", placement: "lead", mayWrite: false, mayShare: false,
     does: "Reads an inbox of issues and files each one where it belongs.",
     instructions: "Label, assign and close duplicates. Ask before closing anything with a customer on it.",
     settings: { model: "claude-haiku-4-5", effort: null, mode: null, sandbox: null },

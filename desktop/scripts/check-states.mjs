@@ -693,6 +693,94 @@ for (const [theme, motion] of [["light", false], ["dark", false], ["light", true
   await page.close();
 }
 
+/* ── The placement picker, and ⌘P ─────────────────────────────────────
+   **A pill that will not stay pressed.** The profile editor offered three
+   placements, reasoning from `Role.placement` — documented `lead | here |
+   new`. That is the *response* model: `CreateRoleBody.placement` says
+   *Required: "here" or "new"* and `roles.rs` enforces
+   `PLACEMENT: ["here", "new"]`. So `lead` is readable and not writable, and
+   an effect that coerces any unknown placement to `here` ran on every render
+   — pressing *Let the lead choose* snapped the selection straight back.
+
+   No screenshot holds that: a picture of the editor shows *Same workspace*
+   selected, which is what it shows after the snap and also what it shows when
+   everything is fine. The press has to be driven and the result read back.
+
+   **And ⌘P.** A key that is bound to nothing looks exactly like a key that is
+   bound, right up until you press it. */
+{
+  const page = await browser.newPage({ viewport: { width: 1280, height: 824 }, deviceScaleFactor: 2 });
+  await page.request.post(`${HERE}/__reset`);
+  await page.addInitScript(
+    ([registry]) => {
+      window.localStorage.setItem("firetower.servers", registry);
+      window.localStorage.setItem("firetower.current", "o_1");
+      window.localStorage.setItem("firetower.theme", "light");
+    },
+    [REGISTRY],
+  );
+  const say = (ok, what, got) => {
+    if (!ok) failed++;
+    console.log(`  ${ok ? "ok    " : "FAILED"} placement: ${what}${ok ? "" : ` — ${got}`}`);
+  };
+
+  /* A writable editor: a new profile, rather than one the mock marks read-only. */
+  await page.goto(`${APP}/#/configuration/roles`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(1400);
+  await page.getByRole("button", { name: /New profile/ }).first().click();
+  await page.waitForTimeout(400);
+  await page.getByText("Write it myself").click();
+  await page.waitForTimeout(900);
+
+  const pills = () =>
+    page.evaluate(() => {
+      const row = [...document.querySelectorAll(".pickrow")].find((r) =>
+        [...r.querySelectorAll("button")].some((b) => /workspace/i.test(b.textContent ?? "")),
+      );
+      if (!row) return null;
+      return [...row.querySelectorAll("button.pk")].map((b) => ({
+        says: (b.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 40),
+        on: b.getAttribute("aria-pressed") === "true",
+      }));
+    });
+
+  const before = await pills();
+  say(!!before, "the placement picker is on the page", "no .pickrow with a workspace option");
+  if (before) {
+    say(before.length === 2, "two placements, because the server takes two", `${before.length}: ${before.map((p) => p.says).join(" / ")}`);
+    /* The option by its name, not by the word *lead* — *Same workspace*'s own
+       note reads "Shares the lead's directory and branch", which is correct
+       copy and was failing this. */
+    say(
+      !before.some((p) => /let the lead choose/i.test(p.says)),
+      "and none of them is *Let the lead choose*, which the server refuses",
+      before.map((p) => p.says).join(" / "),
+    );
+    say(before.filter((p) => p.on).length === 1, "exactly one is selected", `${before.filter((p) => p.on).length} selected`);
+
+    /* **Every pill has to stay pressed.** This is the whole defect: it is not
+       that one option was wrong, it is that pressing it did nothing visible. */
+    for (let i = 0; i < before.length; i++) {
+      const row = page.locator(".pickrow", { hasText: /workspace/i }).first();
+      await row.locator("button.pk").nth(i).click();
+      await page.waitForTimeout(400);
+      const after = await pills();
+      say(after[i].on, `pressing *${after[i].says}* leaves it pressed`, "it snapped back");
+    }
+  }
+
+  /* ⌘P, in a workspace, where it used to open the finder. */
+  await page.goto(`${APP}/#/sessions/s_1`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(1800);
+  const shape = () => page.evaluate(() => document.body.innerText.replace(/\s+/g, " ").length + ":" + document.querySelectorAll("*").length);
+  const was = await shape();
+  await page.keyboard.press(process.platform === "darwin" ? "Meta+p" : "Control+p");
+  await page.waitForTimeout(700);
+  say((await shape()) === was, "⌘P in a workspace does nothing at all, deliberately", "something opened");
+
+  await page.close();
+}
+
 await browser.close();
 if (failed) {
   console.error(`\n  ${failed} state(s) are not what the design says.`);

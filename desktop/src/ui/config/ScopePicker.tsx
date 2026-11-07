@@ -9,6 +9,7 @@
  */
 import { useMemo, useState } from "react";
 import { Check, Minus, Search } from "lucide-react";
+import { Segmented } from "~/components/ui";
 
 export type ScopeItem = {
   id: string;
@@ -76,27 +77,28 @@ export function ScopePicker({
             {selected.length === 0 ? "· all" : `· ${selected.length} of ${items.length}`}
           </span>
         </div>
-        {/* **`.seg`, not a hand-rolled one.** This was a `bg-ground` track
-            with two `rounded-md` buttons whose active one took `bg-overlay`
-            — the recessed fill, on the thumb. `.seg` has it the right way
-            round and has since the components pass: **the track is recessed
-            and the thumb is raised**, which is the whole reason a segmented
-            control reads as one. Two surfaces, one agreed component. */}
-        <span className="seg" role="group" aria-label="Which of these it may reach">
-          <button
-            type="button"
-            aria-pressed={!expanded}
-            onClick={() => {
-              setExpanded(false);
-              onChange([]);
-            }}
-          >
-            All
-          </button>
-          <button type="button" aria-pressed={expanded} onClick={() => setExpanded(true)}>
-            Only these
-          </button>
-        </span>
+        {/* **`Segmented`, not a hand-rolled one.** This was a `bg-ground`
+            track with two `rounded-md` buttons whose active one took
+            `bg-overlay` — the recessed fill, on the knob. The component has
+            it the right way round and has since the components pass: **the
+            track is recessed and the knob is raised**, which is the whole
+            reason a segmented control reads as one. Reaching for the bare
+            class instead of the component is the same mistake one level up,
+            and `reuse.test.ts` catches that too — its detector cannot tell
+            markup from prose quoting markup, so this sentence does not quote
+            it. */}
+        <Segmented
+          label="Which of these it may reach"
+          value={expanded ? "some" : "all"}
+          onChange={(next) => {
+            setExpanded(next === "some");
+            if (next === "all") onChange([]);
+          }}
+          options={[
+            ["all", "All"],
+            ["some", "Only these"],
+          ]}
+        />
       </div>
       <p className="mt-1 text-micro text-mute">{hint}</p>
 

@@ -19,7 +19,6 @@ import {
   FolderGit2,
   GitBranch,
   GitBranchPlus,
-  GitFork,
   Box,
   Cpu,
   Gauge,
@@ -62,19 +61,31 @@ import { useConfirm } from "~/ui/Confirm";
 import { Badge, IconButton } from "~/components/ui";
 
 /**
- * Where a child runs.
+ * Where a child runs. **Two, because the server takes two.**
  *
- * **Three, not two.** This offered `here` and `new` and said in a comment
- * that there was no "let the lead choose" — but `Role.placement` is
- * documented as `lead | here | new`, and the drawing puts all three on the
- * screen with "Let the lead choose" first. A profile that does not pin a
- * placement is a real and useful thing: it is the profile that works
- * wherever the lead puts it.
+ * A third was added here — *Let the lead choose* — reasoning from
+ * `Role.placement`, documented as `lead | here | new`. **That is the response
+ * model.** `CreateRoleBody.placement` and `UpdateRoleBody.placement` both say
+ * *Required: "here" or "new"*, and `roles.rs` enforces it:
+ * `PLACEMENT: [&str; 2] = ["here", "new"]`, refusing anything else with
+ * *placement is "here" (the lead's workspace) or "new" (its own)*. So `lead`
+ * is **readable and not writable** — a value the server will hand you and
+ * will not take back.
  *
- * It carries no note, because the label is already the whole of it.
+ * **A value in a response model is not an option in a request model.** That
+ * is the whole mistake, and the comment this replaces made it in writing.
+ *
+ * What the user saw was not a save-time refusal. The effect below — main's,
+ * which already called `lead` retired — coerces any unknown placement to
+ * `here` on every render, so pressing *Let the lead choose* snapped the
+ * selection straight back to *Same workspace*. A pill that cannot stay
+ * pressed is a button that does not work, which is exactly how it was
+ * reported.
+ *
+ * `lead` is still **read**: an older profile may carry it, and a profile you
+ * cannot open is worse than one with an option you cannot set.
  */
 const PLACEMENTS: { value: string; icon: LucideIcon; label: string; note: string }[] = [
-  { value: "lead", icon: GitFork, label: "Let the lead choose", note: "" },
   { value: "here", icon: GitBranch, label: "Same workspace", note: "Shares the lead's directory and branch." },
   { value: "new", icon: GitBranchPlus, label: "Its own workspace", note: "A fresh branch, on the machine you pin below." },
 ];
@@ -249,12 +260,18 @@ function RoleRow({
   onOpen: () => void;
   onDelete: () => void;
 }) {
+  /* `lead` is readable and not writable, so a row may still carry it. Named
+     rather than lumped in with the unknown: labelling *anything* unrecognised
+     as "lead picks where" is the same mistake as offering it as a choice —
+     saying something definite about a value you do not know. */
   const place =
     role.placement === "here"
       ? "same workspace"
       : role.placement === "new"
         ? "new workspace"
-        : "lead picks where";
+        : role.placement === "lead"
+          ? "lead picks where"
+          : role.placement;
   const agent = role.agent as Agent | null;
 
   return (
@@ -520,8 +537,17 @@ function Editor({
     if (draft.placement === "new" && !draft.machine && firstMachine) set("machine", firstMachine);
   }, [draft.placement, draft.machine, firstMachine]);
 
-  // An older profile may hold the retired "lead" placement; coerce it to a
-  // concrete one so the draft matches what the picker shows and can be saved.
+  /* An older profile may hold the retired `lead` placement — the server will
+     hand it back and will not take it, so the draft has to become one of the
+     two it accepts. `here` for the same reason `BLANK` uses it: it is the one
+     that needs nothing else chosen, and it is the server's own fallback when
+     nothing says otherwise (`delegate.rs` defaults an open placement to
+     `here`).
+
+     **This is why the third pill did not work.** It ran on every render, so
+     setting `lead` was undone before the press finished. Main added it when it
+     retired the value; the pill was added here afterwards, against the read
+     model, and the two have been fighting since. */
   useEffect(() => {
     if (draft.placement !== "here" && draft.placement !== "new") set("placement", "here");
   }, [draft.placement]);

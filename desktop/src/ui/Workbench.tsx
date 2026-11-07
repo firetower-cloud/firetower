@@ -31,7 +31,6 @@ import {
 import { PortPicker } from "~/ui/PortPicker";
 import { AddAgent } from "~/ui/AddAgent";
 import { Repositories } from "~/ui/Repositories";
-import { QuickOpen } from "~/ui/QuickOpen";
 import { TabStrip, type Tab } from "~/ui/Tabs";
 import { Inspector } from "~/ui/Inspector";
 import { Shell } from "~/ui/Shell";
@@ -148,7 +147,6 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
   const [active, setActive] = useState("chat");
   const activeRef = useRef(active);
   activeRef.current = active;
-  const [finding, setFinding] = useState(false);
 
   /**
    * Open a file, the way an editor does.
@@ -365,11 +363,17 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
         setShell(true);
         setTerm((t) => !t);
       }
-      // The editor gesture for "go to a file", on the key editors use for it.
-      if (e.key.toLowerCase() === "p") {
-        e.preventDefault();
-        setFinding(true);
-      }
+      /* **⌘P is deliberately unbound.** It opened `QuickOpen` — a finder
+         scoped to this workspace's files — which was deprecated and is gone.
+         Nothing is put in its place, because reassigning a key somebody has
+         muscle memory for is worse than leaving it quiet. Changing that is
+         the user's call, not this file's.
+
+         **What went with it: there is no way to reach a file by typing its
+         name.** `Palette.tsx` searches workspaces and the rail's
+         destinations, not files — the drawing's own palette specimen draws a
+         file row, which the build has never done. The file tree is the only
+         route now. Recorded in `check-hook-delta.mjs` as REPORTED. */
       if (e.key.toLowerCase() === "w") {
         e.preventDefault();
         if (activeRef.current !== "chat") closeTab(activeRef.current);
@@ -789,7 +793,6 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
         />
       )}
       {adding && <AddAgent session={run} workspaceId={place.id} onClose={() => setAdding(false)} />}
-      <QuickOpen sessionId={run.id} open={finding} onClose={() => setFinding(false)} onPick={(p) => openFile(p, true)} />
     </div>
   );
 }

@@ -205,16 +205,28 @@ for (const s of SHOTS) {
 await browser.close();
 console.log("");
 
-for (const [name, n] of exemptions) {
-  if (n > 0) continue;
-  add(
-    "every state",
-    "both",
-    "ember-exemption-expired",
-    name,
-    "the exemption still applies to something",
-    "it suppressed nothing in the whole sweep — the anchor has moved, and the budget will now fail as a violation",
-  );
+/* **Only on a whole sweep.** With `ONLY` set this is a handful of states and
+   an exemption suppressing nothing there says nothing at all — the first run
+   of this check reported both exemptions expired on an eight-state subset,
+   which is the check being wrong rather than the build. */
+if (!ONLY) {
+  for (const [key, n] of exemptions) {
+    const [intent, name] = key.split("|");
+    /* **Both directions.** A load-bearing exemption that stops suppressing
+       has lost its anchor, and the budget will fail as a violation. A
+       defensive one that *starts* suppressing means the false positive it
+       guards against has come back, and somebody should look at that too. */
+    if (intent === "load-bearing" && n === 0) {
+      add("every state", "both", "ember-exemption-expired", name,
+        "a load-bearing exemption still applies to something",
+        "it suppressed nothing in the whole sweep — the anchor has moved, and the budget will now fail as a violation");
+    }
+    if (intent === "defensive" && n > 0) {
+      add("every state", "both", "ember-exemption-woke-up", name,
+        "a defensive exemption suppresses nothing",
+        `it suppressed ${n} — the false positive it guards against is back, which is worth looking at rather than hiding`);
+    }
+  }
 }
 
 /* ── Report ──────────────────────────────────────────────────────────── */

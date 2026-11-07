@@ -162,8 +162,17 @@ export const RULES = function collect() {
     /* **An agent's mark is not an ember.** Claude's glyph is orange because
        Claude's glyph is orange; the budget is about ember used as a *signal*
        — somebody is waiting on you — and counting brand marks against it
-       made a workspace with four agents in it permanently over budget. */
-    ["an agent's brand mark", "[data-mark], .face, .agentmark, [data-agent]"],
+       made a workspace with four agents in it permanently over budget.
+
+       **Defensive, and measured as such.** It suppressed nothing across 103
+       states in two themes — which is right: it was load-bearing against the
+       *old* counter, which read "orange-ish" and so caught Claude's glyph,
+       and it stopped being needed the moment the counter was corrected to
+       compare resolved ember tokens exactly. A brand mark drawn in
+       `currentColor` is never literally `--color-ember`. It stays so the old
+       false positive cannot come back, and the sweep alarms if it ever
+       *starts* suppressing something — which would mean it has. */
+    ["an agent's brand mark", "[data-mark], .face, .agentmark, [data-agent]", "defensive"],
     /* **The workspaces panel is exempt, by the user, on 7 November 2026.**
        Every row carries its own status mark in both modes — they were shown
        it with the marks capped and without them, and a panel where one row of
@@ -173,9 +182,10 @@ export const RULES = function collect() {
        Scoped rather than removed: a rule that fails on intended behaviour is
        one the next person switches off wholesale, and it is still worth
        having everywhere else. */
-    ["the workspaces panel", "[data-rail-panel]"],
+    ["the workspaces panel", "[data-rail-panel]", "load-bearing"],
   ];
   const suppressed = new Map(EXEMPT.map(([name]) => [name, 0]));
+  const intentOf = new Map(EXEMPT.map(([name, , intent]) => [name, intent]));
 
   let embers = 0;
   const emberAt = [];
@@ -198,7 +208,7 @@ export const RULES = function collect() {
   /* Not a finding — a tally the driver aggregates across the sweep. Filtered
      out of the report there. */
   for (const [name, n] of suppressed) {
-    out.push({ rule: "ember-exemption-tally", at: name, expected: "applies somewhere", actual: String(n) });
+    out.push({ rule: "ember-exemption-tally", at: `${intentOf.get(name)}|${name}`, expected: "applies somewhere", actual: String(n) });
   }
 
   /* ── 3. Mono only where it means something ────────────────────────── */
