@@ -405,23 +405,24 @@ drives it to `#970100`, a dark red that no longer reads as ember. That is the
 same trade amber made at `#653400`. Whoever needs it should decide knowingly
 rather than discover it.
 
-### Four surface greys, not five
+### The greys were measured and left alone
 
-The light scale had `--sunk` (a recessed fill) and `--hair` (a hairline)
-**ΔE 1.1 apart** — the same colour under two names. They are now one token,
-`--hair`, doing both jobs.
+Worth recording because it was nearly changed. In light, `--sunk` (a recessed
+fill) and `--hair` (a hairline) sit **ΔE 1.1** apart — the same colour under two
+names — where the dark branch holds a clean **3.7**. Two fixes were tried and
+both were worse than the overlap:
 
-Worth knowing *why*, because it will recur on any light derivation: **light has
-less room below white than dark has above black.** The dark scale steps
-ground → panel → raise → overlay → line at ΔE 2.2, 2.9, 3.6, 4.0 — an even
-ladder. Deriving each light value independently let the bottom two collapse.
-**Derive a light scale as a ladder**, checking each rung against its neighbour,
-not each value against the page.
+* **Merging them** lightened every recessed fill in *dark* by ΔE 3.7, because
+  dark's pair is a legitimate step. A light-branch fault is not a token fault.
+* **Separating them in light** means a **darker hairline**, and this design is
+  trying to draw fewer and fainter lines, not stronger ones.
 
-The other steps were left alone. `--desk` sits ΔE 6.2 below `--sheet`, which
-looks like an outlier beside dark's 2.2 — it is not a bug. That step is the
-window edge, and dark cannot open it wider because it has already run out of
-room at `#0b0b0c`.
+They are never adjacent — a fill and a rule inside the same 2px of screen does
+not occur — so the overlap costs nothing. **No surface token moved.**
+
+The general lesson is still worth having: **derive a light scale as a ladder**,
+each rung measured against its neighbour rather than against the page, or the
+bottom rungs collapse into each other without anybody noticing.
 
 ### Host marks
 

@@ -26,6 +26,12 @@
   --desk:#ECEEF1;        /* the chrome the sheet sits on */
   --sheet:#FFFFFF;       /* the one white: the page you are reading */
   --raised:#F5F6F8;      /* a control, a chip, a hovered row */
+  /* These two measure ΔE 1.1 apart in light, where dark holds a clean 3.7.
+     **Left overlapping on purpose.** Separating them means a darker hairline,
+     and this design is trying to draw fewer and fainter lines, not stronger
+     ones. They are never adjacent — a fill and a rule in the same 2px of
+     screen does not occur — so the overlap costs nothing and closing it would
+     cost the thing the pass is for. Recorded rather than silently "fixed". */
   --sunk:#E6E8ED;        /* a pressed chip, a recessed track */
   --hair:#E3E5EA;        /* the rare hairline */
 
@@ -138,7 +144,7 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
    ═══════════════════════════════════════════════════════════════════ */
 .t-display{font-size:40px;line-height:1.08;letter-spacing:-.028em;font-weight:530;color:var(--ink)}
 .t-lede   {font-size:17px;line-height:1.58;letter-spacing:-.004em}
-.t-name   {font-size:16px;line-height:1.35;letter-spacing:-.008em;font-weight:520;color:var(--ink)}
+.t-name   {font-size:16px;line-height:1.35;letter-spacing:-.008em;font-weight:500;color:var(--ink)}
 .t-body   {font-size:15px;line-height:1.6}
 .t-ui     {font-size:14px;line-height:1.45}
 .t-meta   {font-size:13px;line-height:1.4;letter-spacing:.004em;color:var(--hush)}
@@ -153,7 +159,7 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
    ═══════════════════════════════════════════════════════════════════ */
 .sheetpage{max-width:1480px;margin:0 auto;padding:40px clamp(16px,3vw,40px) 120px}
 .head{display:flex;align-items:flex-end;gap:28px;flex-wrap:wrap;margin-bottom:26px}
-.head h1{font-size:19px;line-height:1.3;letter-spacing:-.016em;font-weight:560;color:var(--ink)}
+.head h1{font-size:19px;line-height:1.3;letter-spacing:-.016em;font-weight:530;color:var(--ink)}
 .head p{font-size:13.5px;color:var(--quiet);margin-top:3px;max-width:60ch}
 .head .ctl{margin-left:auto;display:flex;gap:18px;align-items:center;flex-wrap:wrap}
 .seg{display:inline-flex;gap:2px;padding:3px;border-radius:11px;background:var(--sunk)}
@@ -192,7 +198,7 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
 .ftid:hover{background:rgb(21 22 26 / .05)}
 :root[data-theme="dark"] .ftid:hover{background:rgb(255 255 255 / .06)}
 .mark{display:grid;place-items:center;flex:none;border-radius:7px;background:var(--raised);
-  color:var(--quiet);font-family:"Archivo Narrow",var(--font);font-weight:700;letter-spacing:.02em;
+  color:var(--quiet);font-family:"Archivo Narrow",var(--font);font-weight:530;letter-spacing:.02em;
   box-shadow:var(--lift-1)}
 .mark[data-reach="dark"]{background:transparent;box-shadow:none;border:1px dashed var(--hair);color:var(--hush)}
 .ftid .org{font-size:14px;font-weight:530;color:var(--ink);letter-spacing:-.006em}
@@ -212,21 +218,25 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
    selected destination is the sheet's own handle. Nothing else fills. */
 .rail{width:62px;flex:none;display:flex;flex-direction:column;align-items:center;gap:4px;
   padding:2px 0 14px;position:relative;z-index:5}
-.rbtn{width:42px;height:42px;border-radius:13px;display:grid;place-items:center;color:var(--body);
+.rbtn{width:42px;height:42px;border-radius:13px;display:grid;place-items:center;color:var(--quiet);
   position:relative;flex:none;transition:background var(--quick) var(--swift),color var(--quick) var(--swift),
   box-shadow var(--quick) var(--swift)}
-.rbtn:hover{background:rgb(21 22 26 / .06);color:var(--ink)}
+.rbtn:hover{background:rgb(21 22 26 / .05);color:var(--body)}
 :root[data-theme="dark"] .rbtn:hover{background:rgb(255 255 255 / .06)}
-.rbtn[aria-current="page"]{background:var(--sheet);color:var(--ink);box-shadow:var(--lift-2)}
-.rbtn[data-peek="true"]{background:rgb(21 22 26 / .07);color:var(--ink)}
+/* The one place in the chrome that inverts. Everywhere else marks the
+   current thing with a raised surface; the rail has no label to help, so
+   the glyph alone has to carry it and a fill is the only unambiguous
+   answer. A white pill was the same direction as hover and read as one. */
+.rbtn[aria-current="page"]{background:var(--ink);color:var(--sheet)}
+.rbtn[data-peek="true"]{background:rgb(21 22 26 / .07);color:var(--body)}
 :root[data-theme="dark"] .rbtn[data-peek="true"]{background:rgb(255 255 255 / .07)}
 .rbtn .news{position:absolute;top:9px;right:9px;width:5.5px;height:5.5px;border-radius:99px;
   background:var(--body);box-shadow:0 0 0 2px var(--desk)}
 .rgrow{flex:1}
-.rail .sep{width:22px;height:1px;background:var(--hair);margin:7px 0;flex:none}
+.rail .sep{width:22px;height:1px;background:var(--sunk);margin:7px 0;flex:none}
 .avatar{position:relative;width:40px;height:40px;display:grid;place-items:center;border-radius:99px;flex:none}
 .avatar .face{width:30px;height:30px;border-radius:99px;display:grid;place-items:center;background:var(--raised);
-  box-shadow:var(--lift-2);color:var(--quiet);font-size:11.5px;font-weight:650;letter-spacing:.02em;
+  box-shadow:var(--lift-2);color:var(--quiet);font-size:11.5px;font-weight:530;letter-spacing:.02em;
   transition:color var(--quick) var(--swift)}
 .avatar:hover .face{color:var(--ink)}
 .avatar[aria-expanded="true"] .face{background:var(--sheet);color:var(--ink)}
@@ -238,7 +248,7 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
   border-radius:14px;box-shadow:var(--lift-3);animation:panel-in 220ms var(--swift)}
 @keyframes panel-in{from{opacity:0;transform:translateX(-14px) scale(.985)}}
 .phead{height:38px;flex:none;display:flex;align-items:center;gap:2px;padding:0 8px 0 14px}
-.phead .nm{flex:1;font-size:14px;font-weight:560;color:var(--ink);letter-spacing:-.008em;
+.phead .nm{flex:1;font-size:14px;font-weight:530;color:var(--ink);letter-spacing:-.008em;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pscroll{min-height:0;flex:1;overflow-y:auto;padding:2px 8px 16px}
 /* A section label is a sentence, not an instrument-panel legend. */
@@ -249,15 +259,15 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
   color:var(--body);transition:background var(--quick) var(--swift),color var(--quick) var(--swift)}
 .prow:hover{background:rgb(21 22 26 / .045)}
 :root[data-theme="dark"] .prow:hover{background:rgb(255 255 255 / .05)}
-.prow[aria-current="true"]{background:var(--sheet);box-shadow:var(--lift-2);color:var(--ink)}
+.prow[aria-current="true"]{background:var(--sheet);color:var(--ink)}
 .prow .lbl{flex:1;min-width:0;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
   letter-spacing:-.004em}
 .prow .age{flex:none;font-size:12px;color:var(--quiet);font-variant-numeric:tabular-nums}
-.prow.strong .lbl{color:var(--ink);font-weight:520}
+.prow.strong .lbl{color:var(--ink);font-weight:500}
 /* A workspace that is waiting on you, in the panel. Weight and the
    brightest text tier — never a second ember dot. The system already
    says it: anything new is shape, weight or position, not a new hue. */
-.prow.hot .lbl{color:var(--ink);font-weight:520}
+.prow.hot .lbl{color:var(--ink);font-weight:500}
 .prow.hot .age{color:var(--body)}
 .kbd{flex:none;font-size:11px;color:var(--hush);letter-spacing:.04em}
 @keyframes settling{0%,100%{opacity:1}50%{opacity:.5}}
@@ -325,7 +335,7 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
    A name and one timestamp. The branch, the agent and the machine are
    facts about the row, not things you read — so they arrive on hover. */
 .also{margin-top:52px}
-.also h2{font-size:13.5px;font-weight:450;color:var(--quiet);letter-spacing:.004em}
+.also h2{font-size:13.5px;font-weight:400;color:var(--quiet);letter-spacing:.004em}
 .rows{margin-top:6px}
 .wrow{display:block;width:calc(100% + 32px);padding:11px 16px;margin:0 -16px;border-radius:12px;
   transition:background 180ms var(--swift)}
@@ -408,11 +418,11 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
 :root[data-theme="dark"] .mi:hover{background:var(--sunk)}
 .mi .ic{color:var(--hush);display:grid;place-items:center;flex:none}
 .mi .tx{flex:1;min-width:0}
-.mi .tx b{display:block;font-weight:460;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mi .tx b{display:block;font-weight:500;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .mi .tx s{display:block;text-decoration:none;font-size:12.5px;color:var(--hush)}
 .mi[data-tone="danger"]{color:var(--brick)}
 .mi[data-tone="danger"] .ic{color:var(--brick)}
-.mline{height:1px;background:var(--hair);margin:6px 10px}
+.mline{height:1px;background:var(--sunk);margin:6px 10px}
 .mhead{padding:9px 10px 5px}
 .mhead b{display:block;font-size:14px;font-weight:500;color:var(--ink)}
 .mhead s{display:block;text-decoration:none;font-size:12.5px;color:var(--hush)}
@@ -451,7 +461,7 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
 .turn{margin:26px 0}
 .turn p{font-size:16px;line-height:1.72;color:var(--body);letter-spacing:-.003em}
 .turn p + p{margin-top:14px}
-.turn strong{font-weight:560;color:var(--ink)}
+.turn strong{font-weight:530;color:var(--ink)}
 .turn code{font-family:var(--mono);font-size:13px;color:var(--ink);background:var(--raised);
   padding:.12em .38em;border-radius:5px}
 .turn ul{margin:12px 0;padding-left:20px}
@@ -497,7 +507,7 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
   align-items:center;gap:7px;flex:none;transition:background var(--quick) var(--swift),
   opacity var(--quick) var(--swift),transform 110ms ease-out}
 .btn:active{transform:scale(.97)}
-.btn.primary{background:var(--ink);color:var(--sheet);font-weight:480}
+.btn.primary{background:var(--ink);color:var(--sheet);font-weight:500}
 .btn.primary:hover{opacity:.86}
 .btn.plain{background:var(--sheet);color:var(--body);box-shadow:var(--lift-1)}
 :root[data-theme="dark"] .btn.plain{background:var(--sunk);box-shadow:none}
@@ -543,7 +553,7 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
 :root[data-theme="dark"] .tm[data-here="true"]{background:var(--raised);box-shadow:none}
 .tm .ag{color:var(--quiet);display:grid;place-items:center;flex:none}
 .tm .tx{min-width:0;flex:1}
-.tm .tx b{display:block;font-size:13.5px;font-weight:480;color:var(--ink);letter-spacing:-.004em;
+.tm .tx b{display:block;font-size:13.5px;font-weight:500;color:var(--ink);letter-spacing:-.004em;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .tm .tx s{display:block;text-decoration:none;font-size:12.5px;color:var(--quiet);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -627,7 +637,7 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
 .art .shot .pic{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:top;display:block}
 .art .shot .plate{position:absolute;inset:0;display:grid;place-items:center;color:var(--hush)}
 .art .shot .pending{position:absolute;left:12px;right:12px;bottom:12px;height:3px;border-radius:2px;
-  background:var(--hair);overflow:hidden}
+  background:var(--sunk);overflow:hidden}
 .art .shot .pending i{display:block;width:40%;height:100%;border-radius:2px;background:var(--quiet);
   animation:slide 1.8s ease-in-out infinite}
 @keyframes slide{0%{transform:translateX(-120%)}100%{transform:translateX(320%)}}
@@ -648,7 +658,7 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
 .ar .shot .pic{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:top;display:block}
 .ar .shot .plate{position:absolute;inset:0;display:grid;place-items:center;color:var(--hush)}
 .ar .tx{min-width:0;flex:1}
-.ar .tx b{display:block;font-size:15px;font-weight:450;color:var(--ink);letter-spacing:-.005em;
+.ar .tx b{display:block;font-size:15px;font-weight:400;color:var(--ink);letter-spacing:-.005em;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ar .tx s{display:block;text-decoration:none;font-size:12.5px;color:var(--quiet);margin-top:2px}
 .ar .from{flex:none;width:200px;font-size:13.5px;color:var(--quiet);
@@ -664,7 +674,7 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
 .sksec{margin-top:40px}
 .sksec:first-of-type{margin-top:30px}
 .sksec .hd{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
-.sksec h2{font-size:18px;line-height:1.3;letter-spacing:-.014em;font-weight:540;color:var(--ink)}
+.sksec h2{font-size:18px;line-height:1.3;letter-spacing:-.014em;font-weight:530;color:var(--ink)}
 .sksec .n{font-size:13px;color:var(--hush);font-variant-numeric:tabular-nums}
 .sksec .all{margin-left:auto;display:inline-flex;align-items:center;gap:3px;font-size:13.5px;color:var(--quiet)}
 .sksec .all:hover{color:var(--ink)}
@@ -675,7 +685,7 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
 .sk:hover{background:var(--raised)}
 .sk .plate{width:38px;height:38px;border-radius:11px;background:var(--raised);box-shadow:var(--lift-1);
   display:grid;place-items:center;flex:none;margin-top:1px;
-  font-family:"Archivo Narrow",var(--font);font-size:14px;font-weight:700;letter-spacing:.02em;
+  font-family:"Archivo Narrow",var(--font);font-size:14px;font-weight:530;letter-spacing:.02em;
   text-transform:none;color:var(--quiet)}
 .sk:hover .plate{background:var(--sheet)}
 :root[data-theme="dark"] .sk:hover .plate{background:var(--sunk)}
@@ -732,7 +742,7 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
 .opt .g{color:var(--quiet);display:grid;place-items:center;flex:none}
 .opt[aria-selected="true"] .g{color:var(--ink)}
 .opt .tx{min-width:0;flex:1}
-.opt .tx b{display:block;font-size:14px;font-weight:450;color:var(--ink);
+.opt .tx b{display:block;font-size:14px;font-weight:400;color:var(--ink);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .opt .tx s{display:block;text-decoration:none;font-size:12.5px;color:var(--quiet);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -786,7 +796,7 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
 .dochead .back{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 10px 0 7px;border-radius:9px;
   font-size:13.5px;color:var(--quiet);flex:none;transition:background var(--quick) var(--swift)}
 .dochead .back:hover{background:var(--raised);color:var(--ink)}
-.dochead .nm{font-size:15.5px;font-weight:520;color:var(--ink);letter-spacing:-.008em;
+.dochead .nm{font-size:15.5px;font-weight:500;color:var(--ink);letter-spacing:-.008em;
   min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .dochead .v{font-size:12.5px;color:var(--hush);font-variant-numeric:tabular-nums;flex:none}
 .dochead .right{margin-left:auto;display:flex;align-items:center;gap:3px;flex:none}
@@ -803,13 +813,13 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
 /* A real published page. Deliberately light in both themes: an artifact is
    its author's document and the app does not restyle it. */
 .sheetdoc .inner{padding:40px 48px 56px;color:#15161A;font-family:var(--font)}
-.sheetdoc h1{font-size:30px;line-height:1.14;letter-spacing:-.024em;font-weight:560}
+.sheetdoc h1{font-size:30px;line-height:1.14;letter-spacing:-.024em;font-weight:530}
 .sheetdoc .lede{margin-top:9px;font-size:16px;line-height:1.6;color:#5A5D66;max-width:60ch}
-.sheetdoc h2{margin-top:34px;font-size:17px;font-weight:560;letter-spacing:-.01em}
+.sheetdoc h2{margin-top:34px;font-size:17px;font-weight:530;letter-spacing:-.01em}
 .sheetdoc p{margin-top:9px;font-size:14.5px;line-height:1.68;color:#45474F;max-width:68ch}
 .sheetdoc .figrow{display:flex;gap:18px;margin-top:18px;flex-wrap:wrap}
 .sheetdoc .fig{flex:1;min-width:150px;background:#F6F7F9;border-radius:10px;padding:16px}
-.sheetdoc .fig b{display:block;font-size:26px;letter-spacing:-.02em;font-weight:560;font-variant-numeric:tabular-nums}
+.sheetdoc .fig b{display:block;font-size:26px;letter-spacing:-.02em;font-weight:530;font-variant-numeric:tabular-nums}
 .sheetdoc .fig s{display:block;text-decoration:none;margin-top:3px;font-size:12.5px;color:#7C7F89}
 .sheetdoc .bars{display:flex;align-items:flex-end;gap:10px;height:120px;margin-top:20px;
   padding-bottom:10px;border-bottom:1px solid #E3E5EA}
@@ -819,7 +829,7 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
   box-shadow:0 0 0 1px rgb(125 149 176 / .42)}
 /* A kept note, in the margin of the thing it is about. */
 .marker{display:inline-grid;place-items:center;width:17px;height:17px;border-radius:99px;
-  background:#15161A;color:#fff;font-size:10px;font-weight:600;vertical-align:2px;margin-left:6px;
+  background:#15161A;color:#fff;font-size:10px;font-weight:530;vertical-align:2px;margin-left:6px;
   font-variant-numeric:tabular-nums}
 
 /* The note card, where you pointed. */
@@ -865,7 +875,7 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
 .sk-head{display:flex;gap:18px;align-items:flex-start;margin-top:22px}
 .sk-head .plate{width:62px;height:62px;border-radius:18px;background:var(--raised);box-shadow:var(--lift-1);
   display:grid;place-items:center;flex:none;font-family:"Archivo Narrow",var(--font);
-  font-size:22px;font-weight:700;letter-spacing:.02em;color:var(--body)}
+  font-size:22px;font-weight:530;letter-spacing:.02em;color:var(--body)}
 .sk-head .tx{min-width:0;flex:1}
 .sk-head h1{font-size:28px;line-height:1.15;letter-spacing:-.022em;font-weight:530;color:var(--ink);
   font-family:var(--mono);letter-spacing:-.03em}
@@ -877,13 +887,13 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
 .sk-tabs button{position:relative;padding:0 0 11px;font-size:14px;color:var(--quiet);
   transition:color var(--quick) var(--swift)}
 .sk-tabs button:hover{color:var(--body)}
-.sk-tabs button[aria-selected="true"]{color:var(--ink);font-weight:520}
+.sk-tabs button[aria-selected="true"]{color:var(--ink);font-weight:500}
 .sk-tabs button[aria-selected="true"]::after{content:"";position:absolute;left:0;right:0;bottom:-1px;
   height:2px;border-radius:2px;background:var(--ink)}
 
 .sk-body{display:grid;gap:40px;grid-template-columns:minmax(0,1fr) 268px;margin-top:28px;align-items:start}
 @media (max-width:1100px){.sk-body{grid-template-columns:minmax(0,1fr)}}
-.md h2{font-size:17px;font-weight:560;letter-spacing:-.01em;color:var(--ink);margin-top:26px}
+.md h2{font-size:17px;font-weight:530;letter-spacing:-.01em;color:var(--ink);margin-top:26px}
 .md h2:first-child{margin-top:0}
 .md p{font-size:15px;line-height:1.68;color:var(--body);margin-top:9px;max-width:66ch}
 .md ul{margin-top:10px;padding-left:20px;max-width:66ch}
@@ -941,21 +951,21 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
 .upd-row{display:flex;align-items:center;gap:16px;padding:16px 18px;border-radius:14px;
   background:var(--raised);margin-top:12px}
 .upd-row .tx{min-width:0;flex:1}
-.upd-row .tx b{display:block;font-size:15px;font-weight:520;color:var(--ink);letter-spacing:-.006em}
+.upd-row .tx b{display:block;font-size:15px;font-weight:500;color:var(--ink);letter-spacing:-.006em}
 .upd-row .tx s{display:block;text-decoration:none;margin-top:2px;font-size:13.5px;color:var(--quiet)}
 .upd-row .ver{font-family:var(--mono);font-size:13px;color:var(--ink);flex:none;
   background:var(--sheet);padding:4px 10px;border-radius:8px}
 :root[data-theme="dark"] .upd-row .ver{background:var(--sunk)}
 .upd-row .acts{display:flex;gap:7px;flex:none}
 .upd-sec{margin-top:36px}
-.upd-sec h2{font-size:18px;line-height:1.3;letter-spacing:-.014em;font-weight:540;color:var(--ink)}
+.upd-sec h2{font-size:18px;line-height:1.3;letter-spacing:-.014em;font-weight:530;color:var(--ink)}
 .upd-sec .note{margin-top:3px;font-size:13.5px;line-height:1.55;color:var(--quiet);max-width:70ch}
 .mach{display:flex;align-items:center;gap:13px;padding:13px 16px;border-radius:13px;margin-top:2px;
   transition:background var(--quick) var(--swift)}
 .mach:hover{background:var(--raised)}
 .mach .g{color:var(--quiet);display:grid;place-items:center;flex:none}
 .mach .tx{min-width:0;flex:1}
-.mach .tx b{display:block;font-size:14.5px;font-weight:480;color:var(--ink)}
+.mach .tx b{display:block;font-size:14.5px;font-weight:500;color:var(--ink)}
 .mach .tx s{display:block;text-decoration:none;margin-top:1px;font-size:13px;color:var(--quiet)}
 .mach .ver{font-family:var(--mono);font-size:12.5px;color:var(--quiet);flex:none}
 .mach .box{width:17px;height:17px;border-radius:6px;flex:none;display:grid;place-items:center;
@@ -966,7 +976,7 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
 /* A run, as it goes. */
 .run{margin-top:14px;border-radius:16px;background:var(--raised);padding:18px 20px}
 .run .top{display:flex;align-items:center;gap:11px}
-.run .top b{font-size:15px;font-weight:520;color:var(--ink);flex:1}
+.run .top b{font-size:15px;font-weight:500;color:var(--ink);flex:1}
 .steps{margin-top:14px;display:flex;flex-direction:column;gap:2px}
 .stepr{display:flex;align-items:center;gap:11px;font-size:13.5px;color:var(--quiet);padding:4px 0}
 .stepr .g{flex:none;display:grid;place-items:center;width:17px}
@@ -989,7 +999,7 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
   place-items:center;color:var(--ink);flex:none}
 .ia-card.quiet .ico{background:var(--sheet)}
 :root[data-theme="dark"] .ia-card.quiet .ico{background:var(--sunk)}
-.ia-card h3{font-size:16px;font-weight:540;letter-spacing:-.01em;color:var(--ink)}
+.ia-card h3{font-size:16px;font-weight:530;letter-spacing:-.01em;color:var(--ink)}
 .ia-card .sub{font-size:12.5px;color:var(--hush)}
 .ia-card .why{margin-top:10px;font-size:13.5px;line-height:1.6;color:var(--quiet)}
 .ia-card ul{margin-top:12px;display:flex;flex-direction:column;gap:1px}
@@ -1005,7 +1015,7 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
   border-bottom:1px solid var(--hair)}
 .movetable td{padding:9px 14px 9px 0;border-bottom:1px solid var(--hair);color:var(--body);vertical-align:top}
 .movetable tr:last-child td{border-bottom:0}
-.movetable td b{font-weight:520;color:var(--ink)}
+.movetable td b{font-weight:500;color:var(--ink)}
 .movetable td.why{color:var(--quiet)}
 </style>
 
@@ -1027,7 +1037,7 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
 
 .lsec{margin-top:34px}
 .lsec:first-of-type{margin-top:30px}
-.lsec > h2{font-size:17px;line-height:1.3;letter-spacing:-.012em;font-weight:540;color:var(--ink);
+.lsec > h2{font-size:17px;line-height:1.3;letter-spacing:-.012em;font-weight:530;color:var(--ink);
   display:flex;align-items:baseline;gap:9px}
 .lsec > h2 .n{font-size:13px;color:var(--hush);font-variant-numeric:tabular-nums;font-weight:400}
 .lsec > .note{margin-top:3px;font-size:13.5px;line-height:1.55;color:var(--quiet);max-width:72ch}
@@ -1041,7 +1051,7 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
 .r .hov{opacity:0;transition:opacity var(--quick) var(--swift)}
 .r .g{color:var(--quiet);display:grid;place-items:center;flex:none}
 .r .tx{min-width:0;flex:1}
-.r .tx b{display:block;font-size:14.5px;font-weight:480;color:var(--ink);letter-spacing:-.005em;
+.r .tx b{display:block;font-size:14.5px;font-weight:500;color:var(--ink);letter-spacing:-.005em;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .r .tx s{display:block;text-decoration:none;margin-top:2px;font-size:13px;line-height:1.45;color:var(--quiet);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -1052,11 +1062,11 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
 .r .chip3{flex:none;font-size:12px;color:var(--quiet);background:var(--raised);padding:3px 9px;border-radius:99px}
 .r:hover .chip3{background:var(--sunk)}
 .r.sub{padding-left:48px;min-height:40px}
-.r.sub .tx b{font-size:13.5px;font-weight:420;color:var(--body)}
+.r.sub .tx b{font-size:13.5px;font-weight:400;color:var(--body)}
 
 /* A face, for a person. Derived from the name, never stored. */
 .face{width:24px;height:24px;border-radius:99px;display:grid;place-items:center;flex:none;
-  background:var(--raised);color:var(--quiet);font-size:11px;font-weight:600;letter-spacing:.02em}
+  background:var(--raised);color:var(--quiet);font-size:11px;font-weight:530;letter-spacing:.02em}
 .r:hover .face{background:var(--sunk)}
 .tface{width:24px;height:24px;border-radius:99px;display:grid;place-items:center;flex:none;
   background:var(--raised);color:var(--quiet)}
@@ -1117,7 +1127,7 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
   display:flex;align-items:center;gap:12px}
 .whereto .g{color:var(--quiet);display:grid;place-items:center;flex:none}
 .whereto p{flex:1;min-width:0;font-size:13.5px;line-height:1.55;color:var(--body)}
-.whereto p b{font-weight:520;color:var(--ink)}
+.whereto p b{font-weight:500;color:var(--ink)}
 /* Rows from a server that is not answering. Readable, obviously stale. */
 .stale2{opacity:.45;filter:saturate(.4);pointer-events:none}
 </style>
@@ -1151,12 +1161,12 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
 .sh-row:hover{background:var(--raised)}
 :root[data-theme="dark"] .sh-row:hover{background:var(--sunk)}
 .sh-row .tx{min-width:0;flex:1}
-.sh-row .tx b{display:block;font-size:14px;font-weight:460;color:var(--ink);
+.sh-row .tx b{display:block;font-size:14px;font-weight:500;color:var(--ink);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sh-row .tx s{display:block;text-decoration:none;font-size:12.5px;color:var(--quiet);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sh-row.inner{padding-left:44px;min-height:36px}
-.sh-row.inner .tx b{font-size:13.5px;font-weight:420;color:var(--body)}
+.sh-row.inner .tx b{font-size:13.5px;font-weight:400;color:var(--body)}
 /* A row that will change when Save is pressed. Slate, not green: green reads
    as done, and none of this has happened yet. An inset bar, not a border, so
    a row does not shift two pixels the moment it is edited. */
@@ -1165,7 +1175,7 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
 .sh-foot{flex:none;display:flex;align-items:center;gap:9px;padding:12px 16px 14px;
   border-top:1px solid var(--hair)}
 .sh-foot .where{flex:1;min-width:0;font-size:13px;color:var(--quiet)}
-.sh-foot .where b{color:var(--ink);font-weight:480}
+.sh-foot .where b{color:var(--ink);font-weight:500}
 .sh-foot .chg{color:var(--slate-ink);margin-left:6px}
 .sh-foot .chg:hover{text-decoration:underline}
 .sh-field{margin:6px;padding:11px 13px;border-radius:12px;background:var(--raised);display:flex;gap:10px;align-items:center}
@@ -1192,11 +1202,11 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
 .first .found{margin-top:22px;display:flex;align-items:center;gap:12px;padding:14px 16px;
   border-radius:14px;background:var(--raised)}
 .first .found .tx{min-width:0;flex:1}
-.first .found .tx b{display:block;font-size:14.5px;font-weight:520;color:var(--ink)}
+.first .found .tx b{display:block;font-size:14.5px;font-weight:500;color:var(--ink)}
 .first .found .tx s{display:block;text-decoration:none;margin-top:2px;font-size:13px;color:var(--quiet)}
 .first .bad{margin-top:16px;padding:13px 15px;border-radius:12px;background:var(--raised);
   border-left:2px solid var(--brick);font-size:13.5px;line-height:1.6;color:var(--body)}
-.first .bad b{font-weight:520;color:var(--ink);display:block;margin-bottom:2px}
+.first .bad b{font-weight:500;color:var(--ink);display:block;margin-bottom:2px}
 .first .prog{display:flex;gap:6px;margin-bottom:24px}
 .first .steps i{height:3px;border-radius:2px;background:var(--sunk);flex:1}
 .first .steps i[data-on="true"]{background:var(--ink)}
@@ -1237,7 +1247,7 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
   display:flex;align-items:center;gap:12px}
 .ro-note .g{color:var(--quiet);display:grid;place-items:center;flex:none}
 .ro-note p{flex:1;min-width:0;font-size:13.5px;line-height:1.55;color:var(--body)}
-.ro-note p b{font-weight:520;color:var(--ink)}
+.ro-note p b{font-weight:500;color:var(--ink)}
 
 /* A swatch sheet, for the colour derivation in the notes. */
 .swgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:10px;margin:16px 0}
@@ -1335,7 +1345,7 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
   border-radius:14px 14px 0 0;margin:0 0 0 8px;overflow:hidden}
 :root[data-theme="dark"] .term{background:#09090B}
 .term .bar{height:34px;flex:none;display:flex;align-items:center;gap:9px;padding:0 10px 0 16px}
-.term .bar b{font-size:13px;font-weight:480;color:var(--ink)}
+.term .bar b{font-size:13px;font-weight:500;color:var(--ink)}
 .term .bar .where{flex:1;min-width:0;font-family:var(--mono);font-size:12px;color:var(--quiet);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 :root[data-theme="dark"] .term .bar b{color:#E8E8EC}
@@ -1352,10 +1362,10 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
 /* A drag handle between panes. */
 .grip{flex:none;height:5px;cursor:row-resize;position:relative}
 .grip::after{content:"";position:absolute;left:50%;top:1px;width:34px;height:3px;border-radius:2px;
-  transform:translateX(-50%);background:var(--hair)}
+  transform:translateX(-50%);background:var(--sunk)}
 .gripv{flex:none;width:5px;cursor:col-resize;position:relative}
 .gripv::after{content:"";position:absolute;top:50%;left:1px;width:3px;height:34px;border-radius:2px;
-  transform:translateY(-50%);background:var(--hair)}
+  transform:translateY(-50%);background:var(--sunk)}
 </style>
 
 <style>
@@ -1420,7 +1430,7 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
 .frame .topbar{height:46px;display:flex;align-items:center;gap:14px;padding:0 20px;background:#F6F7F9}
 .frame .topbar i{display:block;height:8px;border-radius:4px;background:#C9CBD2}
 .frame .body2{padding:26px 24px}
-.frame h3{font-size:19px;font-weight:560;letter-spacing:-.015em}
+.frame h3{font-size:19px;font-weight:530;letter-spacing:-.015em}
 .frame .gauge{margin-top:16px;height:10px;border-radius:6px;background:#EDEEF1;overflow:hidden}
 .frame .gauge i{display:block;height:100%;border-radius:6px;background:#3F86CF}
 .frame .picked{outline:2px solid #7D95B0;outline-offset:2px;border-radius:4px}
@@ -1442,13 +1452,13 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
   box-shadow:var(--lift-3),0 0 0 1px rgb(21 22 26 / .07);animation:sheet2 180ms var(--swift)}
 :root[data-theme="dark"] .cbox{background:var(--raised);box-shadow:var(--lift-3),0 0 0 1px rgb(255 255 255 / .08)}
 .cbox .in2{padding:22px 24px 18px}
-.cbox h2{font-size:18px;line-height:1.3;letter-spacing:-.014em;font-weight:540;color:var(--ink)}
+.cbox h2{font-size:18px;line-height:1.3;letter-spacing:-.014em;font-weight:530;color:var(--ink)}
 .cbox p{margin-top:9px;font-size:14.5px;line-height:1.6;color:var(--body)}
 .cbox ul{margin-top:11px;padding-left:18px}
 .cbox li{font-size:13.5px;line-height:1.6;color:var(--quiet);margin:3px 0}
 .cbox .small{margin-top:12px;font-size:12.5px;line-height:1.55;color:var(--quiet)}
 .cbox .acts{display:flex;align-items:center;gap:8px;padding:0 24px 20px;justify-content:flex-end}
-.btn.harm{background:var(--brick);color:#fff;font-weight:480}
+.btn.harm{background:var(--brick);color:#fff;font-weight:500}
 .btn.harm:hover{filter:brightness(1.08)}
 .threw{flex:1;min-height:0;display:grid;place-items:center;padding:40px;background:var(--sheet);
   border-radius:14px 0 0 14px}
@@ -1464,15 +1474,15 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
   display:flex;align-items:flex-start;gap:11px}
 .hand .g{color:var(--quiet);display:grid;place-items:center;flex:none;margin-top:1px}
 .hand p{flex:1;min-width:0;font-size:13px;line-height:1.55;color:var(--body)}
-.hand p b{font-weight:520;color:var(--ink)}
+.hand p b{font-weight:500;color:var(--ink)}
 .ord{width:20px;height:20px;border-radius:7px;background:var(--sunk);color:var(--quiet);flex:none;
-  display:grid;place-items:center;font-size:11.5px;font-weight:600;font-variant-numeric:tabular-nums}
+  display:grid;place-items:center;font-size:11.5px;font-weight:530;font-variant-numeric:tabular-nums}
 .sh-row[data-on="true"] .ord{background:var(--ink);color:var(--sheet)}
 </style>
 
 <style>
 /* ═══ TASKS ════════════════════════════════════════════════════════ */
-.filterline .fsep{width:1px;height:17px;background:var(--hair);margin:0 4px;flex:none}
+.filterline .fsep{width:1px;height:17px;background:var(--sunk);margin:0 4px;flex:none}
 .sent{margin-top:9px;font-family:var(--mono);font-size:11px;color:var(--hush);letter-spacing:0}
 .sent code{font-family:inherit;color:var(--quiet)}
 .tlist{margin-top:14px;display:flex;flex-direction:column}
@@ -1484,7 +1494,7 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
 .trow .g[data-k="pull"]{color:var(--color-syn-string)}
 .trow .g[data-k="ticket"]{color:var(--color-syn-keyword)}
 .trow .tx{min-width:0;flex:1;display:block}
-.trow .tx b{display:block;font-size:14.5px;font-weight:460;color:var(--ink);letter-spacing:-.005em;
+.trow .tx b{display:block;font-size:14.5px;font-weight:500;color:var(--ink);letter-spacing:-.005em;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .trow .tx s{display:block;margin-top:2px;font-size:12.5px;color:var(--quiet);text-decoration:none;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -1531,7 +1541,7 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
 .ref{display:inline-flex;align-items:center;gap:4px;height:24px;padding:0 4px 0 9px;border-radius:99px;
   background:var(--sunk);font-size:12px;color:var(--quiet)}
 .ref .x{display:grid;place-items:center;width:17px;height:17px;border-radius:99px;color:var(--hush)}
-.ref .x:hover{background:var(--hair);color:var(--ink)}
+.ref .x:hover{background:var(--sunk);color:var(--ink)}
 .draftline{margin-top:10px;display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--quiet)}
 .draftline input{width:14px;height:14px;accent-color:var(--ink)}
 .shipfiles{margin-top:14px}
@@ -1549,7 +1559,7 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
 .shipfiles .add{color:var(--touched-ink)}
 .shipfiles .del{color:var(--brick)}
 .btn.ship{width:100%;justify-content:center;margin-top:15px;height:36px;background:var(--ink);color:var(--sheet);
-  font-weight:480}
+  font-weight:500}
 .btn.ship:hover{opacity:.88}
 .btn.ship:disabled{background:var(--sunk);color:var(--hush);cursor:default;opacity:1}
 .shipdone{margin-top:14px;padding:14px;border-radius:13px;background:var(--sheet)}
@@ -1558,7 +1568,7 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
 .berth{margin-top:11px;border-radius:12px;background:var(--sheet);overflow:hidden}
 :root[data-theme="dark"] .berth{background:var(--raised)}
 .berth .bhead{display:flex;align-items:center;gap:8px;width:100%;padding:10px 12px;font-size:13.5px;color:var(--ink);text-align:left}
-.berth .bhead b{font-weight:480;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.berth .bhead b{font-weight:500;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .berth .bhead .g{color:var(--hush);display:grid;place-items:center;flex:none}
 .bstate{flex:none;font-size:11.5px;color:var(--quiet)}
 .bstate[data-bad="true"]{color:var(--brick)}
@@ -1576,14 +1586,14 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
   box-shadow:0 10px 30px -14px rgb(21 22 26 / .3)}
 :root[data-theme="dark"] .imgfake{background:#17181c}
 .if-bar{height:17px;display:flex;align-items:center;gap:4px;padding:0 7px;background:var(--raised)}
-.if-bar i{width:5px;height:5px;border-radius:99px;background:var(--hair)}
+.if-bar i{width:5px;height:5px;border-radius:99px;background:var(--sunk)}
 .if-body{display:flex;height:calc(100% - 17px)}
 .if-col{width:19%;background:var(--raised)}
 .if-main{flex:1;padding:13px}
-.if-h{width:44%;height:9px;border-radius:3px;background:var(--hair)}
-.if-meter{margin-top:11px;height:7px;border-radius:99px;background:var(--hair);overflow:hidden}
+.if-h{width:44%;height:9px;border-radius:3px;background:var(--sunk)}
+.if-meter{margin-top:11px;height:7px;border-radius:99px;background:var(--sunk);overflow:hidden}
 .if-meter i{display:block;height:100%;background:var(--color-amber-soft)}
-.if-l{margin-top:8px;height:5px;border-radius:3px;background:var(--hair);opacity:.7}
+.if-l{margin-top:8px;height:5px;border-radius:3px;background:var(--sunk);opacity:.7}
 .spot{position:absolute;transform:translate(-50%,-50%);width:21px;height:21px;border-radius:99px;
   background:var(--ink);color:var(--sheet);font-size:11px;font-weight:530;display:grid;place-items:center;
   box-shadow:0 0 0 3px var(--sheet)}
@@ -1615,7 +1625,7 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
 .pr2[data-off="true"]{opacity:.55}
 .pr2 .g{flex:none;display:grid;place-items:center;color:var(--quiet)}
 .pr2 .tx{flex:1;min-width:0}
-.pr2 .tx b{display:block;font-size:14px;font-weight:460;color:var(--ink)}
+.pr2 .tx b{display:block;font-size:14px;font-weight:500;color:var(--ink)}
 .pr2 .tx s{display:block;margin-top:1px;font-size:12.5px;color:var(--quiet);text-decoration:none}
 .pr2 .tick{color:var(--ink)}
 .pr2 .why{flex:none;font-size:11.5px;color:var(--hush)}
@@ -1634,7 +1644,7 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
 .ctx button:hover,.ctx button[data-on="true"]{background:var(--sunk)}
 .ctx button[data-harm="true"]{color:var(--brick)}
 .ctx button[data-harm="true"]:hover{background:var(--color-brick-tint)}
-.ctx .sep{display:block;height:1px;margin:4px 9px;background:var(--hair)}
+.ctx .sep{display:block;height:1px;margin:4px 9px;background:var(--sunk)}
 
 /* ═══ A DIALOG THAT REFUSES ════════════════════════════════════════ */
 .dlg{position:relative;width:428px;max-height:100%;overflow:auto;padding:22px 22px 0;border-radius:17px;
@@ -1679,7 +1689,7 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
    Rows rather than a table: a sub-feature is indented under its
    parent, and a parent carries a tally instead of a verdict. */
 .covlegend{display:flex;gap:22px;flex-wrap:wrap;margin-top:14px;font-size:13px;color:var(--quiet)}
-.covgroup{margin-top:34px;font-size:15px;font-weight:540;letter-spacing:-.008em;color:var(--ink)}
+.covgroup{margin-top:34px;font-size:15px;font-weight:530;letter-spacing:-.008em;color:var(--ink)}
 .covtable{margin-top:8px}
 .covrow{display:flex;align-items:baseline;gap:14px;padding:7px 0;border-top:1px solid var(--hair)}
 .covrow:first-child{border-top:none}
@@ -1715,10 +1725,10 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
 <style>
 /* ═══ THE CONTACT SHEET ════════════════════════════════════════════ */
 .cs{max-width:1340px;margin:88px auto 0;padding:0 2px}
-.cs h2{font-size:22px;line-height:1.2;letter-spacing:-.02em;font-weight:540;color:var(--ink)}
-.cs-group{margin-top:38px;font-size:15px;font-weight:540;letter-spacing:-.008em;color:var(--ink);
+.cs h2{font-size:22px;line-height:1.2;letter-spacing:-.02em;font-weight:530;color:var(--ink)}
+.cs-group{margin-top:38px;font-size:15px;font-weight:530;letter-spacing:-.008em;color:var(--ink);
   display:flex;align-items:baseline;gap:9px}
-.cs-group .n{font-size:12px;font-weight:450;color:var(--hush)}
+.cs-group .n{font-size:12px;font-weight:400;color:var(--hush)}
 .cs-grid{margin-top:12px;display:grid;gap:18px 16px;
   grid-template-columns:repeat(auto-fill,minmax(384px,1fr))}
 .cs-tile{display:flex;flex-direction:column;gap:8px;text-align:left;cursor:pointer;border-radius:12px}
@@ -1739,7 +1749,7 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
   <header class="head">
     <div>
       <h1>Firetower desktop — redesigned</h1>
-      <p>A specification you can click through. Every screen, every state, and the measurements, tokens, motion and code delta behind them — in <b style="font-weight:520;color:var(--body)">Spec</b> and <b style="font-weight:520;color:var(--body)">Grouping</b>. Light is the design; dark follows from it.</p>
+      <p>A specification you can click through. Every screen, every state, and the measurements, tokens, motion and code delta behind them — in <b style="font-weight:500;color:var(--body)">Spec</b> and <b style="font-weight:500;color:var(--body)">Grouping</b>. Light is the design; dark follows from it.</p>
     </div>
     <div class="ctl" id="ctl"></div>
   </header>
@@ -1754,12 +1764,12 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
 
 <script>
 const ICONS = {"house":"<path d=\"M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8\"/><path d=\"M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z\"/>","list-todo":"<path d=\"M13 5h8\"/><path d=\"M13 12h8\"/><path d=\"M13 19h8\"/><path d=\"m3 17 2 2 4-4\"/><rect x=\"3\" y=\"4\" width=\"6\" height=\"6\" rx=\"1\"/>","shapes":"<path d=\"M8.3 10a.7.7 0 0 1-.626-1.079L11.4 3a.7.7 0 0 1 1.198-.043L16.3 8.9a.7.7 0 0 1-.572 1.1Z\"/><rect x=\"3\" y=\"14\" width=\"7\" height=\"7\" rx=\"1\"/><circle cx=\"17.5\" cy=\"17.5\" r=\"3.5\"/>","puzzle":"<path d=\"M15.39 4.39a1 1 0 0 0 1.68-.474 2.5 2.5 0 1 1 3.014 3.015 1 1 0 0 0-.474 1.68l1.683 1.682a2.414 2.414 0 0 1 0 3.414L19.61 15.39a1 1 0 0 1-1.68-.474 2.5 2.5 0 1 0-3.014 3.015 1 1 0 0 1 .474 1.68l-1.683 1.682a2.414 2.414 0 0 1-3.414 0L8.61 19.61a1 1 0 0 0-1.68.474 2.5 2.5 0 1 1-3.014-3.015 1 1 0 0 0 .474-1.68l-1.683-1.682a2.414 2.414 0 0 1 0-3.414L4.39 8.61a1 1 0 0 1 1.68.474 2.5 2.5 0 1 0 3.014-3.015 1 1 0 0 1-.474-1.68l1.683-1.682a2.414 2.414 0 0 1 3.414 0z\"/>","settings-2":"<path d=\"M14 17H5\"/><path d=\"M19 7h-9\"/><circle cx=\"17\" cy=\"17\" r=\"3\"/><circle cx=\"7\" cy=\"7\" r=\"3\"/>","circle-fading-arrow-up":"<path d=\"M12 2a10 10 0 0 1 7.38 16.75\"/><path d=\"m16 12-4-4-4 4\"/><path d=\"M12 16V8\"/><path d=\"M2.5 8.875a10 10 0 0 0-.5 3\"/><path d=\"M2.83 16a10 10 0 0 0 2.43 3.4\"/><path d=\"M4.636 5.235a10 10 0 0 1 .891-.857\"/><path d=\"M8.644 21.42a10 10 0 0 0 7.631-.38\"/>","plus":"<path d=\"M5 12h14\"/><path d=\"M12 5v14\"/>","search":"<path d=\"m21 21-4.34-4.34\"/><circle cx=\"11\" cy=\"11\" r=\"8\"/>","chevron-down":"<path d=\"m6 9 6 6 6-6\"/>","chevron-right":"<path d=\"m9 18 6-6-6-6\"/>","chevron-left":"<path d=\"m15 18-6-6 6-6\"/>","chevron-up":"<path d=\"m18 15-6-6-6 6\"/>","panel-left":"<rect width=\"18\" height=\"18\" x=\"3\" y=\"3\" rx=\"2\"/><path d=\"M9 3v18\"/>","panel-left-close":"<rect width=\"18\" height=\"18\" x=\"3\" y=\"3\" rx=\"2\"/><path d=\"M9 3v18\"/><path d=\"m16 15-3-3 3-3\"/>","moon":"<path d=\"M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401\"/>","sun":"<circle cx=\"12\" cy=\"12\" r=\"4\"/><path d=\"M12 2v2\"/><path d=\"M12 20v2\"/><path d=\"m4.93 4.93 1.41 1.41\"/><path d=\"m17.66 17.66 1.41 1.41\"/><path d=\"M2 12h2\"/><path d=\"M20 12h2\"/><path d=\"m6.34 17.66-1.41 1.41\"/><path d=\"m19.07 4.93-1.41 1.41\"/>","ellipsis":"<circle cx=\"12\" cy=\"12\" r=\"1\"/><circle cx=\"19\" cy=\"12\" r=\"1\"/><circle cx=\"5\" cy=\"12\" r=\"1\"/>","layout-grid":"<rect width=\"7\" height=\"7\" x=\"3\" y=\"3\" rx=\"1\"/><rect width=\"7\" height=\"7\" x=\"14\" y=\"3\" rx=\"1\"/><rect width=\"7\" height=\"7\" x=\"14\" y=\"14\" rx=\"1\"/><rect width=\"7\" height=\"7\" x=\"3\" y=\"14\" rx=\"1\"/>","rows-3":"<rect width=\"18\" height=\"18\" x=\"3\" y=\"3\" rx=\"2\"/><path d=\"M21 9H3\"/><path d=\"M21 15H3\"/>","arrow-right":"<path d=\"M5 12h14\"/><path d=\"m12 5 7 7-7 7\"/>","arrow-up":"<path d=\"m5 12 7-7 7 7\"/><path d=\"M12 19V5\"/>","check":"<path d=\"M20 6 9 17l-5-5\"/>","shield-alert":"<path d=\"M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z\"/><path d=\"M12 8v4\"/><path d=\"M12 16h.01\"/>","folder-down":"<path d=\"M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z\"/><path d=\"M12 10v6\"/><path d=\"m15 13-3 3-3-3\"/>","sparkles":"<path d=\"M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z\"/><path d=\"M20 2v4\"/><path d=\"M22 4h-4\"/><circle cx=\"4\" cy=\"20\" r=\"2\"/>","git-branch":"<path d=\"M15 6a9 9 0 0 0-9 9V3\"/><circle cx=\"18\" cy=\"6\" r=\"3\"/><circle cx=\"6\" cy=\"18\" r=\"3\"/>","monitor":"<rect width=\"20\" height=\"14\" x=\"2\" y=\"3\" rx=\"2\"/><line x1=\"8\" x2=\"16\" y1=\"21\" y2=\"21\"/><line x1=\"12\" x2=\"12\" y1=\"17\" y2=\"21\"/>","server":"<rect width=\"20\" height=\"8\" x=\"2\" y=\"2\" rx=\"2\" ry=\"2\"/><rect width=\"20\" height=\"8\" x=\"2\" y=\"14\" rx=\"2\" ry=\"2\"/><line x1=\"6\" x2=\"6.01\" y1=\"6\" y2=\"6\"/><line x1=\"6\" x2=\"6.01\" y1=\"18\" y2=\"18\"/>","circle-slash-2":"<circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M22 2 2 22\"/>","bell":"<path d=\"M10.268 21a2 2 0 0 0 3.464 0\"/><path d=\"M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326\"/>","pencil":"<path d=\"M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z\"/><path d=\"m15 5 4 4\"/>","paperclip":"<path d=\"m16 6-8.414 8.586a2 2 0 0 0 2.829 2.829l8.414-8.586a4 4 0 1 0-5.657-5.657l-8.379 8.551a6 6 0 1 0 8.485 8.485l8.379-8.551\"/>","log-out":"<path d=\"m16 17 5-5-5-5\"/><path d=\"M21 12H9\"/><path d=\"M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4\"/>","key-round":"<path d=\"M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z\"/><circle cx=\"16.5\" cy=\"7.5\" r=\".5\" fill=\"currentColor\"/>","external-link":"<path d=\"M15 3h6v6\"/><path d=\"M10 14 21 3\"/><path d=\"M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6\"/>","user-plus":"<path d=\"M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2\"/><circle cx=\"9\" cy=\"7\" r=\"4\"/><line x1=\"19\" x2=\"19\" y1=\"8\" y2=\"14\"/><line x1=\"22\" x2=\"16\" y1=\"11\" y2=\"11\"/>","circle-dashed":"<path d=\"M10.1 2.182a10 10 0 0 1 3.8 0\"/><path d=\"M13.9 21.818a10 10 0 0 1-3.8 0\"/><path d=\"M17.609 3.721a10 10 0 0 1 2.69 2.7\"/><path d=\"M2.182 13.9a10 10 0 0 1 0-3.8\"/><path d=\"M20.279 17.609a10 10 0 0 1-2.7 2.69\"/><path d=\"M21.818 10.1a10 10 0 0 1 0 3.8\"/><path d=\"M3.721 6.391a10 10 0 0 1 2.7-2.69\"/><path d=\"M6.391 20.279a10 10 0 0 1-2.69-2.7\"/>","x":"<path d=\"M18 6 6 18\"/><path d=\"m6 6 12 12\"/>","arrow-left":"<path d=\"m12 19-7-7 7-7\"/><path d=\"M19 12H5\"/>","layout-list":"<rect width=\"7\" height=\"7\" x=\"3\" y=\"3\" rx=\"1\"/><rect width=\"7\" height=\"7\" x=\"3\" y=\"14\" rx=\"1\"/><path d=\"M14 4h7\"/><path d=\"M14 9h7\"/><path d=\"M14 15h7\"/><path d=\"M14 20h7\"/>","file-text":"<path d=\"M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z\"/><path d=\"M14 2v5a1 1 0 0 0 1 1h5\"/><path d=\"M10 9H8\"/><path d=\"M16 13H8\"/><path d=\"M16 17H8\"/>","download":"<path d=\"M12 15V3\"/><path d=\"M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4\"/><path d=\"m7 10 5 5 5-5\"/>","refresh-cw":"<path d=\"M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8\"/><path d=\"M21 3v5h-5\"/><path d=\"M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16\"/><path d=\"M8 16H3v5\"/>","command":"<path d=\"M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3\"/>","corner-down-left":"<path d=\"M20 4v7a4 4 0 0 1-4 4H4\"/><path d=\"m9 10-5 5 5 5\"/>","users":"<path d=\"M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2\"/><path d=\"M16 3.128a4 4 0 0 1 0 7.744\"/><path d=\"M22 21v-2a4 4 0 0 0-3-3.87\"/><circle cx=\"9\" cy=\"7\" r=\"4\"/>","triangle-alert":"<path d=\"m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3\"/><path d=\"M12 9v4\"/><path d=\"M12 17h.01\"/>","info":"<circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M12 16v-4\"/><path d=\"M12 8h.01\"/>","clock":"<circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M12 6v6l4 2\"/>","inbox":"<polyline points=\"22 12 16 12 14 15 10 15 8 12 2 12\"/><path d=\"M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z\"/>","terminal":"<path d=\"M12 19h8\"/><path d=\"m4 17 6-6-6-6\"/>","mic":"<path d=\"M12 19v3\"/><path d=\"M19 10v2a7 7 0 0 1-14 0v-2\"/><rect x=\"9\" y=\"2\" width=\"6\" height=\"13\" rx=\"3\"/>","list-filter":"<path d=\"M2 5h20\"/><path d=\"M6 12h12\"/><path d=\"M9 19h6\"/>","sliders-horizontal":"<path d=\"M10 5H3\"/><path d=\"M12 19H3\"/><path d=\"M14 3v4\"/><path d=\"M16 17v4\"/><path d=\"M21 12h-9\"/><path d=\"M21 19h-5\"/><path d=\"M21 5h-7\"/><path d=\"M8 10v4\"/><path d=\"M8 12H3\"/>","file-code":"<path d=\"M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z\"/><path d=\"M14 2v5a1 1 0 0 0 1 1h5\"/><path d=\"M10 12.5 8 15l2 2.5\"/><path d=\"m14 12.5 2 2.5-2 2.5\"/>","folder":"<path d=\"M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z\"/>","star":"<path d=\"M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z\"/>","trash-2":"<path d=\"M10 11v6\"/><path d=\"M14 11v6\"/><path d=\"M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6\"/><path d=\"M3 6h18\"/><path d=\"M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2\"/>","filter":"<path d=\"M10 20a1 1 0 0 0 .553.895l2 1A1 1 0 0 0 14 21v-7a2 2 0 0 1 .517-1.341L21.74 4.67A1 1 0 0 0 21 3H3a1 1 0 0 0-.742 1.67l7.225 7.989A2 2 0 0 1 10 14z\"/>","settings":"<path d=\"M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915\"/><circle cx=\"12\" cy=\"12\" r=\"3\"/>","package":"<path d=\"M11 21.73a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73z\"/><path d=\"M12 22V12\"/><polyline points=\"3.29 7 12 12 20.71 7\"/><path d=\"m7.5 4.27 9 5.15\"/>","cpu":"<path d=\"M12 20v2\"/><path d=\"M12 2v2\"/><path d=\"M17 20v2\"/><path d=\"M17 2v2\"/><path d=\"M2 12h2\"/><path d=\"M2 17h2\"/><path d=\"M2 7h2\"/><path d=\"M20 12h2\"/><path d=\"M20 17h2\"/><path d=\"M20 7h2\"/><path d=\"M7 20v2\"/><path d=\"M7 2v2\"/><rect x=\"4\" y=\"4\" width=\"16\" height=\"16\" rx=\"2\"/><rect x=\"8\" y=\"8\" width=\"8\" height=\"8\" rx=\"1\"/>","layers":"<path d=\"M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z\"/><path d=\"M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12\"/><path d=\"M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17\"/>","messages-square":"<path d=\"M16 10a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 14.286V4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z\"/><path d=\"M20 9a2 2 0 0 1 2 2v10.286a.71.71 0 0 1-1.212.502l-2.202-2.202A2 2 0 0 0 17.172 19H10a2 2 0 0 1-2-2v-1\"/>","folder-git-2":"<path d=\"M18 19a5 5 0 0 1-5-5v8\"/><path d=\"M9 20H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H20a2 2 0 0 1 2 2v5\"/><circle cx=\"13\" cy=\"12\" r=\"2\"/><circle cx=\"20\" cy=\"19\" r=\"2\"/>","blocks":"<path d=\"M10 22V7a1 1 0 0 0-1-1H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5a1 1 0 0 0-1-1H2\"/><rect x=\"14\" y=\"2\" width=\"8\" height=\"8\" rx=\"1\"/>","wand-sparkles":"<path d=\"m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72\"/><path d=\"m14 7 3 3\"/><path d=\"M5 6v4\"/><path d=\"M19 14v4\"/><path d=\"M10 2v2\"/><path d=\"M7 8H3\"/><path d=\"M21 16h-4\"/><path d=\"M11 3H9\"/>","server-cog":"<path d=\"m10.852 14.772-.383.923\"/><path d=\"M13.148 14.772a3 3 0 1 0-2.296-5.544l-.383-.923\"/><path d=\"m13.148 9.228.383-.923\"/><path d=\"m13.53 15.696-.382-.924a3 3 0 1 1-2.296-5.544\"/><path d=\"m14.772 10.852.923-.383\"/><path d=\"m14.772 13.148.923.383\"/><path d=\"M4.5 10H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-.5\"/><path d=\"M4.5 14H4a2 2 0 0 0-2 2v4a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-4a2 2 0 0 0-2-2h-.5\"/><path d=\"M6 18h.01\"/><path d=\"M6 6h.01\"/><path d=\"m9.228 10.852-.923-.383\"/><path d=\"m9.228 13.148-.923.383\"/>","key":"<path d=\"m2 21 9.6-9.6\"/><path d=\"m7.5 15.5 2.3 2.3a1 1 0 0 1 0 1.4l-2.1 2.1a1 1 0 0 1-1.4 0L4 19\"/><circle cx=\"15.5\" cy=\"7.5\" r=\"5.5\"/>","shield":"<path d=\"M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z\"/>","building":"<path d=\"M12 10h.01\"/><path d=\"M12 14h.01\"/><path d=\"M12 6h.01\"/><path d=\"M16 10h.01\"/><path d=\"M16 14h.01\"/><path d=\"M16 6h.01\"/><path d=\"M8 10h.01\"/><path d=\"M8 14h.01\"/><path d=\"M8 6h.01\"/><path d=\"M9 22v-3a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3\"/><rect x=\"4\" y=\"2\" width=\"16\" height=\"20\" rx=\"2\"/>","user-round":"<circle cx=\"12\" cy=\"8\" r=\"5\"/><path d=\"M20 21a8 8 0 0 0-16 0\"/>","users-round":"<path d=\"M18 21a8 8 0 0 0-16 0\"/><circle cx=\"10\" cy=\"8\" r=\"5\"/><path d=\"M22 20c0-3.37-2-6.5-4-8a5 5 0 0 0-.45-8.3\"/>","maximize-2":"<path d=\"M15 3h6v6\"/><path d=\"m21 3-7 7\"/><path d=\"m3 21 7-7\"/><path d=\"M9 21H3v-6\"/>","minimize-2":"<path d=\"m14 10 7-7\"/><path d=\"M20 10h-6V4\"/><path d=\"m3 21 7-7\"/><path d=\"M4 14h6v6\"/>","share-2":"<circle cx=\"18\" cy=\"5\" r=\"3\"/><circle cx=\"6\" cy=\"12\" r=\"3\"/><circle cx=\"18\" cy=\"19\" r=\"3\"/><line x1=\"8.59\" x2=\"15.42\" y1=\"13.51\" y2=\"17.49\"/><line x1=\"15.41\" x2=\"8.59\" y1=\"6.51\" y2=\"10.49\"/>","link-2":"<path d=\"M9 17H7A5 5 0 0 1 7 7h2\"/><path d=\"M15 7h2a5 5 0 1 1 0 10h-2\"/><line x1=\"8\" x2=\"16\" y1=\"12\" y2=\"12\"/>","message-square-plus":"<path d=\"M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z\"/><path d=\"M12 8v6\"/><path d=\"M9 11h6\"/>","rotate-ccw":"<path d=\"M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8\"/><path d=\"M3 3v5h5\"/>","circle-alert":"<circle cx=\"12\" cy=\"12\" r=\"10\"/><line x1=\"12\" x2=\"12\" y1=\"8\" y2=\"12\"/><line x1=\"12\" x2=\"12.01\" y1=\"16\" y2=\"16\"/>","circle-check":"<circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"m16 9-5.5 5.5L8 12\"/>","circle-dot":"<circle cx=\"12\" cy=\"12\" r=\"1\"/><circle cx=\"12\" cy=\"12\" r=\"10\"/>","pencil-line":"<path d=\"M13 21h8\"/><path d=\"m15 5 4 4\"/><path d=\"M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z\"/>","file-diff":"<path d=\"M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z\"/><path d=\"M9 10h6\"/><path d=\"M12 13V7\"/><path d=\"M9 17h6\"/>","save":"<path d=\"M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z\"/><path d=\"M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7\"/><path d=\"M7 3v4a1 1 0 0 0 1 1h7\"/>","play":"<path d=\"M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z\"/>","square":"<rect width=\"18\" height=\"18\" x=\"3\" y=\"3\" rx=\"2\"/>","loader":"<path d=\"M12 2v4\"/><path d=\"m16.2 7.8 2.9-2.9\"/><path d=\"M18 12h4\"/><path d=\"m16.2 16.2 2.9 2.9\"/><path d=\"M12 18v4\"/><path d=\"m4.9 19.1 2.9-2.9\"/><path d=\"M2 12h4\"/><path d=\"m4.9 4.9 2.9 2.9\"/>","list-tree":"<path d=\"M8 5h13\"/><path d=\"M13 12h8\"/><path d=\"M13 19h8\"/><path d=\"M3 10a2 2 0 0 0 2 2h3\"/><path d=\"M3 5v12a2 2 0 0 0 2 2h3\"/>","hard-drive":"<path d=\"M10 16h.01\"/><path d=\"M2.212 11.577a2 2 0 0 0-.212.896V18a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-5.527a2 2 0 0 0-.212-.896L18.55 5.11A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z\"/><path d=\"M21.946 12.013H2.054\"/><path d=\"M6 16h.01\"/>","git-pull-request":"<circle cx=\"18\" cy=\"18\" r=\"3\"/><circle cx=\"6\" cy=\"6\" r=\"3\"/><path d=\"M13 6h3a2 2 0 0 1 2 2v7\"/><line x1=\"6\" x2=\"6\" y1=\"9\" y2=\"21\"/>","ticket":"<path d=\"M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z\"/><path d=\"M13 5v2\"/><path d=\"M13 17v2\"/><path d=\"M13 11v2\"/>","scan-text":"<path d=\"M3 7V5a2 2 0 0 1 2-2h2\"/><path d=\"M17 3h2a2 2 0 0 1 2 2v2\"/><path d=\"M21 17v2a2 2 0 0 1-2 2h-2\"/><path d=\"M7 21H5a2 2 0 0 1-2-2v-2\"/><path d=\"M7 8h8\"/><path d=\"M7 12h10\"/><path d=\"M7 16h6\"/>","highlighter":"<path d=\"m9 11-6 6v3h9l3-3\"/><path d=\"m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4\"/>","type":"<path d=\"M12 4v16\"/><path d=\"M4 7V5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v2\"/><path d=\"M9 20h6\"/>","book-open":"<path d=\"M12 5v16\"/><path d=\"M20.001 19A2 2 0 0022 17V5a2 2 0 00-1.999-2L16 3.002A5 5 0 0012 5a5 5 0 00-4-2H4a2 2 0 00-2 2v12a2 2 0 001.999 2H8a5 5 0 014 2 5 5 0 014-2z\"/>","arrow-up-right":"<path d=\"M7 7h10v10\"/><path d=\"M7 17 17 7\"/>","lock":"<rect width=\"18\" height=\"11\" x=\"3\" y=\"11\" rx=\"2\" ry=\"2\"/><path d=\"M7 11V7a5 5 0 0 1 10 0v4\"/>","scroll-text":"<path d=\"M15 12h-5\"/><path d=\"M15 8h-5\"/><path d=\"M19 17V5a2 2 0 0 0-2-2H4\"/><path d=\"M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3\"/>","file-clock":"<path d=\"M16 22h2a2 2 0 0 0 2-2V8a2.4 2.4 0 0 0-.706-1.706l-3.588-3.588A2.4 2.4 0 0 0 14 2H6a2 2 0 0 0-2 2v2.85\"/><path d=\"M14 2v5a1 1 0 0 0 1 1h5\"/><path d=\"M8 14v2.2l1.6 1\"/><circle cx=\"8\" cy=\"16\" r=\"6\"/>","trending-up":"<path d=\"M16 7h6v6\"/><path d=\"m22 7-8.5 8.5-5-5L2 17\"/>","gauge":"<path d=\"m12 14 4-4\"/><path d=\"M3.34 19a10 10 0 1 1 17.32 0\"/>"};
-function ic(n,s){const d=ICONS[n];return d?`<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`:"";}
+function ic(n,s){const d=ICONS[n];return d?`<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`:"";}
 const AGENT={
  claude:s=>`<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z"/></svg>`,
  codex:s=>`<svg width="${s}" height="${s}" viewBox="0 0 2406 2406" fill="currentColor" aria-hidden="true">${[0,60,120,180,240,300].map(d=>`<path d="M1107.3 299.1c-198 0-373.9 127.3-435.2 315.3L650 743.5v427.9c0 21.4 11 40.4 29.4 51.4l344.5 198.515V833.3h.1v-27.9L1372.7 604c33.715-19.52 70.44-32.857 108.47-39.828L1447.6 450.3C1361 353.5 1237.1 298.5 1107.3 299.1zm0 117.5-.6.6c79.699 0 156.3 27.5 217.6 78.4-2.5 1.2-7.4 4.3-11 6.1L952.8 709.3c-18.4 10.4-29.4 30-29.4 51.4V1248l-155.1-89.4V755.8c-.1-187.099 151.601-338.9 339-339.2z" transform="rotate(${d} 1203 1203)"/>`).join("")}</svg>`,
  cursor:s=>`<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M11.503.131 1.891 5.678a.84.84 0 0 0-.42.726v11.188c0 .3.162.575.42.724l9.609 5.55a1 1 0 0 0 .998 0l9.61-5.55a.84.84 0 0 0 .42-.724V6.404a.84.84 0 0 0-.42-.726L12.497.131a1.01 1.01 0 0 0-.996 0M2.657 6.338h18.55c.263 0 .43.287.297.515L12.23 22.918c-.062.107-.229.064-.229-.06V12.335a.59.59 0 0 0-.295-.51l-9.11-5.257c-.109-.063-.064-.23.061-.23"/></svg>`,
- shell:s=>`<svg width="${s}" height="${s}" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4.5L7.5 8L4 11.5M8.5 11.5h3.5"/></svg>`};
+ shell:s=>`<svg width="${s}" height="${s}" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4.5L7.5 8L4 11.5M8.5 11.5h3.5"/></svg>`};
 /* The host marks, from components/ui/Brand.tsx. A server is a mark and never
    a colour, so these inherit currentColor like every other glyph. */
 const GITHUB=s=>`<svg width="${s}" height="${s}" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.42 7.42 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>`;
@@ -1959,12 +1969,15 @@ const elsewhere=()=>TOWERS.filter(t=>t.id!==S.tower&&t.reach==="live"&&t.waiting
 const asks=()=>S.state==="waiting"?ASKS:[];
 const working=()=>S.state==="empty"?[]:WORKING;
 
-/* A rail icon is read before it is clicked, so it is drawn heavier than an
-   icon inside a list and it brightens rather than fills when it is on. */
-function railIcon(name, on){
+/* A rail icon is the same weight whether it is on or off.
+   An earlier pass made the current one heavier *and* lighter-backed, which is
+   two signals for one fact and is what made the rail read as loud furniture.
+   The glyph now recedes at every state and the *container* carries which one
+   you are on — so the icon can be thin and the state still unmistakable. */
+function railIcon(name){
   const d=ICONS[name]; if(!d) return "";
   return `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-    stroke-width="${on?2:1.8}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+    stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
 }
 
 /* ── The rail ────────────────────────────────────────────────── */
@@ -1973,7 +1986,7 @@ function rail(){
   const btn=(d,on)=>`<button class="rbtn" data-act="peekgo" data-to="${d.id}" data-rail="${d.id}"
     aria-current="${on?"page":"false"}" data-peek="${S.peek===d.id&&!on}"
     title="${d.label}${d.key?`   ⌘${d.key}`:""}" aria-label="${d.label}">
-    ${railIcon(d.icon, on)}${d.news?`<span class="news" title="A newer build is out"></span>`:""}</button>`;
+    ${railIcon(d.icon)}${d.news?`<span class="news" title="A newer build is out"></span>`:""}</button>`;
   return `<nav class="rail" data-railzone aria-label="Destinations">
     ${DEST.map(d=>btn(d,d.id===(S.rt==="work"?"home":S.rt))).join("")}
     <span class="sep"></span>
@@ -2534,7 +2547,7 @@ function pickRun(){
         <span class="g">${AGENT[a.k](17)}</span>
         <span class="tx"><b>${a.label}</b><s>${a.sub}</s></span>${tick}</button>`).join("")}
     </div>
-    <div style="height:1px;background:var(--hair);margin:7px 11px"></div>
+    <div style="height:1px;background:var(--sunk);margin:7px 11px"></div>
     <div class="lab2">How it runs</div>
     <div class="list">
       ${CONTROLS.map(c=>`<button class="opt" data-act="pane" data-pane="${c.k}">
@@ -2686,10 +2699,16 @@ function panelFor2(r){
     ${panelRow("Agents","blocks",at==="agents","go","agents")}
     ${lab("Your skills")}
     ${MY_SKILLS.map(s=>`<button class="prow" data-act="go" data-to="skill" aria-current="${S.rt==="skill"&&s.n==="pr-screenshots"}">
-      <span style="width:17px;flex:none;display:grid;place-items:center">
-        <span style="width:17px;height:17px;border-radius:5px;background:var(--sheet);box-shadow:var(--lift-1);
-          display:grid;place-items:center;font-family:'Archivo Narrow',var(--font);font-size:9px;font-weight:700;color:var(--quiet)">${s.m}</span></span>
-      <span class="lbl" style="font-family:var(--mono);font-size:13px;letter-spacing:-.02em">${s.n}</span>
+      ${/* One quiet glyph rather than six invented two-letter tiles. The
+            monograms encoded nothing a reader could decode — `it` for
+            incident-timeline is not guessable — and each white tile was an
+            object competing with the name beside it. */""}
+      ${/* No glyph at all. Six copies of one shape encode nothing — the same
+            fault the two-letter tiles had — and "Your skills" above already
+            says what these are. The spacer stays so the column still lines up
+            with the rows that do carry a mark. */""}
+      <span style="width:17px;flex:none"></span>
+      <span class="lbl">${s.n}</span>
       ${S.rt==="skill"&&s.n==="pr-screenshots"?`<span class="gbtn" style="width:20px;height:20px">${ic("ellipsis",14)}</span>`:""}
     </button>`).join("")}
     ${lab("Your profiles")}
@@ -2737,7 +2756,7 @@ function panelFor2(r){
     ${lab("Recent")}
     ${ARTS.slice(0,6).map((a,i)=>`<button class="prow" data-act="go" data-to="artifact" aria-current="${S.rt==="artifact"&&i===0}">
       <span style="width:26px;height:17px;border-radius:4px;overflow:hidden;flex:none;position:relative;
-        background:${a.p?"#fff":"var(--sunk)"};box-shadow:var(--lift-1)">
+        background:${a.p?"#fff":"var(--hair)"};box-shadow:var(--lift-1)">
         ${a.p?`<img style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:top"
           src="data:image/svg+xml;charset=utf-8,${encodeURIComponent(poster(a.p))}" alt="">`:""}</span>
       <span class="lbl">${esc(a.t)}</span><span class="age">${a.age}</span></button>`).join("")}`);
@@ -3259,7 +3278,7 @@ function pDirs(){
           <button class="lvl">${lvl}${ic("chevron-down",13)}</button>
           <span class="gbtn hov">${ic("x",14)}</span>
         </div>`).join("")+`<div class="r sub"><span class="g" style="width:24px">${ic("plus",15)}</span>
-          <span class="tx" style="color:var(--quiet)"><b style="font-weight:420;color:var(--quiet)">Add people or a team</b></span></div>`:""}
+          <span class="tx" style="color:var(--quiet)"><b style="font-weight:400;color:var(--quiet)">Add people or a team</b></span></div>`:""}
     `).join(""))
     + `<div class="whereto"><span class="g">${ic("info",17)}</span>
         <p><b>A grant is not an exception.</b> Letting one person into one workspace is the sharing sheet’s job, and the two are kept apart on purpose — they were one flat list once and read as equivalents, which they are not. An exception can never be <i>Admin</i>.</p></div>`);
@@ -3446,7 +3465,7 @@ function pAgents(){
             <s>${x.used}% ${x.unit}</s></span>
           <span class="gbtn hov">${ic("ellipsis",15)}</span>
         </div>`).join("")+`<div class="r sub"><span class="g" style="width:24px">${ic("plus",15)}</span>
-          <span class="tx"><b style="font-weight:420;color:var(--quiet)">Connect another account</b></span></div>`:""}`).join(""))
+          <span class="tx"><b style="font-weight:400;color:var(--quiet)">Connect another account</b></span></div>`:""}`).join(""))
     + `<div class="whereto"><span class="g">${ic("info",17)}</span>
         <p>When an account runs out, a workspace can be handed to another one mid-conversation — the composer offers it, and says plainly if the hand-off changes what the agent is allowed to do.</p></div>`);
 }
@@ -3536,7 +3555,7 @@ function sharing(){
   } else if(step==="newdir"){
     body=`<p class="sh-note">Whoever makes a directory administers it, so there is no window where one exists with nobody able to decide about it.</p>
       <div class="sh-field">${ic("folder",16)}<input placeholder="Design" autofocus aria-label="Directory name"></div>
-      <p class="sh-note" style="padding-top:8px">It will be <b style="color:var(--ink);font-weight:480">d/design</b>. You can let people in once it exists.</p>`;
+      <p class="sh-note" style="padding-top:8px">It will be <b style="color:var(--ink);font-weight:500">d/design</b>. You can let people in once it exists.</p>`;
     foot=`<span class="where">A new directory is a pending answer like any other.</span>
       <button class="btn quiet" data-act="share" data-share="where">Back</button>
       <button class="btn primary" data-act="share" data-share="who">Create</button>`;
@@ -3559,7 +3578,7 @@ function sharing(){
       <div class="sh-row"><span class="face">L</span><span class="tx"><b>lisa</b></span>
         <button class="lvl">Viewer${ic("chevron-down",13)}</button><span class="gbtn">${ic("x",14)}</span></div>
       <button class="sh-row"><span class="g" style="color:var(--quiet);display:grid">${ic("user-plus",16)}</span>
-        <span class="tx"><b style="font-weight:420;color:var(--quiet)">Let somebody in…</b></span></button>
+        <span class="tx"><b style="font-weight:400;color:var(--quiet)">Let somebody in…</b></span></button>
       <p class="sh-note" style="padding-top:10px">An exception can never be <i>Admin</i> — somebody let into one thing cannot administer it. Share the directory it is in instead.</p>`;
     foot=`<span class="where">Lives in <b>d/eng</b><button class="chg" data-act="share" data-share="where">Change</button></span>
       <button class="btn quiet" data-act="share" data-share="">Cancel</button>
@@ -3788,7 +3807,7 @@ function makeSkill(){
   if(how==="held") return `<div class="pcol">
     <button class="back" data-act="go" data-to="skills" style="display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 10px 0 7px;border-radius:9px;font-size:13.5px;color:var(--quiet)">${ic("chevron-left",15)}All skills</button>
     <div class="pg-head" style="margin-top:18px"><div style="min-width:0">
-      <h1 style="font-size:30px">Ada wrote <span style="font-family:var(--mono);letter-spacing:-.03em">pr-screenshots</span></h1>
+      <h1 style="font-size:30px">Ada wrote <span style="font-weight:530">pr-screenshots</span></h1>
       <p class="sub">It is in your library and held: it will not run for you or for anybody you share it with until you have read it.</p>
     </div></div>
     <div class="review" style="margin-top:22px">
@@ -3814,7 +3833,7 @@ function makeSkill(){
       ${FOUND.map(f=>`<div class="r" style="align-items:flex-start;padding-top:14px;padding-bottom:14px">
         <span style="width:17px;height:17px;border-radius:5px;flex:none;margin-top:3px;display:grid;place-items:center;
           border:1.5px solid ${f.ok?"var(--ink)":"var(--hair)"};background:${f.ok?"var(--ink)":"transparent"};color:var(--sheet)">${f.ok?ic("check",11):""}</span>
-        <span class="tx"><b style="font-family:var(--mono);letter-spacing:-.02em">${f.n}</b>
+        <span class="tx"><b>${f.n}</b>
           <s>${f.files} files · ${f.kb} KB · ${f.v}</s>
           ${f.err?`<s style="color:var(--brick);margin-top:4px;white-space:normal">${f.err}</s>`:""}
           ${f.risk.length?`<span class="risks" style="margin-top:7px">${f.risk.map(r=>`<span class="risk"><i></i>${r}</span>`).join("")}</span>`:""}
@@ -3936,7 +3955,13 @@ const SPEC_DELTA=[
   ["web/app/globals.css","modified","Gains a light scheme. <b>Shared with web and mobile</b> — keep every current value as the dark branch and add light under <code>[data-theme]</code>, with a <code>prefers-color-scheme</code> default, so neither other client changes until it opts in."],
   ["web/app/globals.css — amber and brick","modified","<b>No new names.</b> <code>--color-amber</code>, <code>--color-amber-tint</code>, <code>--color-amber-deep</code> and <code>--color-brick-tint</code> all exist at <b>77–85</b> and are dark-tuned; what was missing is a light value for each, which goes in the same <code>[data-theme=&quot;light&quot;]</code> block as the kinds, the series and the syntax. The call sites are then untouched and resolve in both themes."],
   ["web/app/globals.css — <code>--color-amber-soft</code>","<b>proposed</b>","<b>One genuine addition, and the only one.</b> On a dark ground the readable-on-tint amber and the amber of a status dot are the same colour; on a light ground they cannot be — see <i>Amber and brick</i> above. Named after <code>--color-ember-soft</code>, which is the precedent for a second step inside one signal namespace. <b>In dark it equals <code>--color-amber</code></b>, so no dark-mode pixel moves."],
-  ["desktop/src/styles.css","modified","<code>--row</code>/<code>--row-tight</code> stay; the new content row is 46px. <code>.eyebrow</code> is unused by the desktop after this."],
+  ["desktop/src/styles.css — icons","modified","<b>One stroke weight everywhere: 1.5.</b> Rail glyphs are 20px and do <i>not</i> thicken when current — the earlier pass thickened the glyph <i>and</i> lightened its background, which is two signals for one fact. The rail's current destination becomes a filled <code>--ink</code> square with a <code>--sheet</code> glyph, replacing the white pill; a current list row keeps its raised fill and loses its shadow."],
+  ["web/app/globals.css — surfaces","<b>no change</b>","<b>Measured, and deliberately left alone.</b> In light, <code>--sunk</code> and <code>--hair</code> sit <b>ΔE 1.1</b> apart where dark holds a clean <b>3.7</b>. Merging them was tried and reverted: it lightened every recessed fill in <i>dark</i> by ΔE 3.7, and separating them in light means a <i>darker hairline</i>, which is the opposite of what this pass is for. They are never adjacent, so the overlap costs nothing. <b>No token moves.</b>"],
+  ["Surface tokens — usage","tidied","No value changes. <code>--sunk</code> now carries every recessed <i>fill</i> and <code>--hair</code> every <i>rule</i>; the two had drifted across each other's jobs. Invisible on screen, but it is what lets either be retuned later without hunting."],
+  ["Type weights","modified","<b>Fourteen weights become three — 400, 500, 530.</b> Mechanical: 420/450→400, 460/480/500/520→500, 540/560/600/650/700→530."],
+  ["Mono","corrected","Skill names, profile names and dropped-folder names move to the text face. Paths, branches, codes, keys and diffs keep the mono face. The test: <i>would you ever read it character by character?</i>"],
+  ["Panel skill rows","simplified","The two-letter monogram tiles are gone — they encoded nothing a reader could decode, and six white tiles were six objects competing with six names. No glyph replaces them; the section heading already says what they are."],
+    ["desktop/src/styles.css","modified","<code>--row</code>/<code>--row-tight</code> stay; the new content row is 46px. <code>.eyebrow</code> is unused by the desktop after this."],
   ["desktop/STYLE.md","corrected","34px appears three times and no window row is 34. The pair is 32 (chrome) and 40–46 (content)."],
   ["justfile — check-style","extended","It greps <code>web/</code> and <code>mobile/</code> but not <code>desktop/src</code>. Three arbitrary values this design needed would have been caught."],
   ["desktop/src/ui/Tabs.tsx","kept","Preview-in-italic, pinned conversation and the top-edge active mark all survive. Only the shell around them changes."],
@@ -3953,7 +3978,7 @@ const SPEC_DELTA=[
 const SPEC_IMPLIED=[
   ["Per-session token spend","<code>consumption_events</code> records it; it is not exposed per session. The team rail's share bar is left out until it is."],
   ["Two-letter server monogram","A derivation change in <code>fleet.ts</code>, not an endpoint."],
-  ["Light re-gating","Eleven hues, derived below. No server involvement."],
+  ["Light re-gating","Thirteen hues, derived below. No server involvement."],
 ];
 function specRow(r){ return `<tr>${r.map((c,i)=>`<td class="${i===0?"n":i===1?"k":""}">${c}</td>`).join("")}</tr>`; }
 function spec(){
@@ -4034,7 +4059,7 @@ function spec(){
     <p>Nothing in the layout changes between 1120 and 1680 except how much of the sheet is sheet. Checked: at <b>1120</b> with the panel open the conversation gets 706px and the approval card is 646px, so its three buttons sit on one row with 207px spare — and <code>flex-wrap</code> is the fallback if a label grows, so <i>always</i> is never hidden behind a menu. At <b>1680</b> the Dashboard column stays 740 and centres; the pane column stays 1000. The artifact grid is <code>minmax(228px, 1fr)</code> and gains a column at about 1500.</p>
 
     <h2 style="margin-top:46px">The light palette, re-gated</h2>
-    <p class="prose-lead">Seven file kinds and four chart series, which <code>globals.css</code> gates against the dark panel and which had no light values. Each is the dark hue with <b>L* lowered and a*, b* held</b> — so the hue and its chroma direction survive — until it clears the floor the dark set's own weakest member clears on <code>#111113</code>: <b>5.7:1</b> for a kind, <b>4.8:1</b> for a series.</p>
+    <p class="prose-lead">Nine file kinds and four chart series, which <code>globals.css</code> gates against the dark panel and which had no light values. Each is the dark hue with <b>L* lowered and a*, b* held</b> — so the hue and its chroma direction survive — until it clears the floor the dark set's own weakest member clears on <code>#111113</code>: <b>5.7:1</b> for a kind, <b>4.8:1</b> for a series.</p>
     <h3 style="margin-top:22px">File kinds</h3>
     ${sw(KINDS,"--color-kind-")}
     <h3 style="margin-top:22px">Chart series</h3>
@@ -4644,7 +4669,7 @@ function connectHost(){
     body=`<div style="padding:10px 16px 16px;text-align:center">
         <span style="width:46px;height:46px;border-radius:14px;background:var(--raised);display:grid;
           place-items:center;color:var(--touched-ink);margin:0 auto">${ic("check",22)}</span>
-        <p style="margin-top:16px;font-size:16px;font-weight:520;color:var(--ink)">Connected as kevinp</p>
+        <p style="margin-top:16px;font-size:16px;font-weight:500;color:var(--ink)">Connected as kevinp</p>
         <p style="margin-top:6px;font-size:13.5px;line-height:1.6;color:var(--quiet)">
           38 repositories are visible to you. Import the ones you want to start workspaces on.</p>
       </div>
@@ -4719,7 +4744,7 @@ function addMachine(){
     body=`<div style="padding:10px 16px 6px;display:flex;align-items:center;gap:13px">
         <span style="width:40px;height:40px;border-radius:13px;background:var(--raised);display:grid;
           place-items:center;color:var(--touched-ink);flex:none">${ic("check",20)}</span>
-        <div style="min-width:0"><div style="font-size:15.5px;font-weight:520;color:var(--ink)">Reached it</div>
+        <div style="min-width:0"><div style="font-size:15.5px;font-weight:500;color:var(--ink)">Reached it</div>
           <div style="font-size:13px;color:var(--quiet)">Ubuntu 24.04 · 16 vCPU · 32 GB · x86_64</div></div></div>
       <div class="sh-lab">What it already has</div>
       ${[["ok","git","2.47.1"],["ok","node","22.9.0"],["warn","Claude Code","not installed"],
@@ -6256,16 +6281,16 @@ render();
 </script>
 <style>
 .prose{max-width:1340px;margin:88px auto 0;padding:0 2px}
-.prose h2{font-size:22px;line-height:1.2;letter-spacing:-.02em;font-weight:540;color:var(--ink);margin:52px 0 4px}
+.prose h2{font-size:22px;line-height:1.2;letter-spacing:-.02em;font-weight:530;color:var(--ink);margin:52px 0 4px}
 .prose h2:first-child{margin-top:0}
 .cols{display:grid;gap:32px 52px;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));margin-top:22px}
 .prose .prose-lead{font-size:15px;line-height:1.6;color:var(--quiet);max-width:70ch;margin-top:6px}
-.prose h3{font-size:15px;line-height:1.35;letter-spacing:-.008em;font-weight:540;color:var(--ink);margin-bottom:5px}
+.prose h3{font-size:15px;line-height:1.35;letter-spacing:-.008em;font-weight:530;color:var(--ink);margin-bottom:5px}
 .prose p{font-size:14.5px;line-height:1.65;color:var(--body);max-width:62ch;margin-top:11px}
 .prose ul{margin-top:14px;padding-left:1.1rem;max-width:74ch}
 .prose li{font-size:14.5px;line-height:1.65;color:var(--body);margin:9px 0}
 .prose li::marker{color:var(--hush)}
-.prose b{font-weight:560;color:var(--ink)}
+.prose b{font-weight:530;color:var(--ink)}
 .prose i{font-style:italic;color:var(--ink)}
 .prose code{font-family:var(--mono);font-size:12.5px;color:var(--ink);background:var(--raised);
   padding:.1em .4em;border-radius:5px}
