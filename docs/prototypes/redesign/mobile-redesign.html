@@ -68,6 +68,11 @@
   --p-syn-comment:#878792; --p-syn-string:#2d5439; --p-syn-keyword:#65598e;
   --p-syn-type:#4c647d; --p-syn-number:#5a4c14; --p-syn-fn:#895a37; --p-syn-attr:#676771;
   /* The platform's own chrome, which is not ours and does not follow our ramp. */
+  /* The system keyboard. Borrowed, not invented — but held to the same
+     R = G rule as everything else, so it sits in the document without a
+     colour cast nothing else on the page has. */
+  --p-kb-bg:#CDCDD3; --p-kb-key:#FFFFFF; --p-kb-alt:#ACACB4;
+  --p-kb-under:#8A8A93; --p-kb-edge:rgb(22 22 23 / .14);
   --p-sys-bar:rgb(255 255 255 / .72); --p-sys-line:rgb(22 22 23 / .10);
   --p-scrim:rgb(22 22 23 / .34);
   --p-raise-shadow:0 1px 2px rgb(22 22 23 / .06);
@@ -108,6 +113,8 @@
   --p-kind-prose:#9a9aa4;
   --p-syn-comment:#6a6a74; --p-syn-string:#8fb99a; --p-syn-keyword:#9a8cc4;
   --p-syn-type:#7d95b0; --p-syn-number:#c2ab63; --p-syn-fn:#b8845f; --p-syn-attr:#8a8a94;
+  --p-kb-bg:#1A1A1E; --p-kb-key:#3A3A42; --p-kb-alt:#26262B;
+  --p-kb-under:#121214; --p-kb-edge:rgb(255 255 255 / .09);
   --p-sys-bar:rgb(11 11 12 / .72); --p-sys-line:rgb(255 255 255 / .10);
   --p-scrim:rgb(0 0 0 / .45);
   --p-raise-shadow:inset 0 1px 0 rgb(255 255 255 / .04), 0 1px 2px rgb(0 0 0 / .4);
@@ -375,6 +382,9 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;text-a
 
 .p-scroll{flex:1;min-height:0;overflow:hidden;position:relative}
 .p-col{width:100%;max-width:640px;margin:0 auto}
+/* Sinks its content to the foot of the scroller when there is room to spare,
+   and scrolls normally when there is not. */
+.p-col[data-sink="1"]{min-height:100%;display:flex;flex-direction:column;justify-content:flex-end}
 .p-read{width:100%;max-width:560px;margin:0 auto}
 
 /* ── Type ──────────────────────────────────────────────────────────────────
@@ -438,8 +448,38 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;text-a
   justify-content:flex-end}
 .p-air[data-bare="1"]{min-height:0;padding-top:28px}
 .p-greet{font-size:28px;line-height:1.16;letter-spacing:-.024em;font-weight:530;color:var(--p-bone)}
-.p-homecomp{padding-bottom:4px}
+/* The composer at the foot of the home. `flex:none` under a `flex:1` scroller
+   is the whole mechanism: the sections take what is left and the box does not
+   move. The fade above it is the scroll edge effect — a hairline divider under
+   floating chrome is the tell that the chrome was not floating. */
+.p-homecomp{flex:none;padding-bottom:6px;position:relative;z-index:20}
+.p-homecomp::before{content:"";position:absolute;left:0;right:0;top:-24px;height:24px;
+  background:linear-gradient(to top,var(--p-ground),transparent);pointer-events:none}
 .p-homecomp .p-box{box-shadow:var(--p-float-shadow)}
+/* On the keyboard, not on the home indicator. */
+.p-homecomp[data-kb="1"]{padding-bottom:9px}
+
+/* The keyboard. Drawn because this screen is mostly this state, and a
+   composer the keys cover is the entire reason the box moved down here.
+   It is a likeness at the right height, not a working keyboard: the keys
+   carry no handlers and the whole block is aria-hidden. */
+.p-kb{flex:none;background:var(--p-kb-bg);display:flex;flex-direction:column;
+  padding:0 3px 4px;gap:11px;z-index:25;position:relative;
+  box-shadow:0 -.5px 0 var(--p-kb-edge)}
+.p-kbsuggest{height:44px;display:flex;align-items:center;justify-content:space-around;
+  font-size:17px;color:var(--p-bone);flex:none;margin:0 -3px;
+  box-shadow:inset 0 -.5px 0 var(--p-kb-edge)}
+.p-kbsuggest span{flex:1;text-align:center;box-shadow:1px 0 0 var(--p-kb-edge)}
+.p-kbsuggest span:last-child{box-shadow:none}
+.p-kbrow{display:flex;gap:6px;justify-content:center}
+.p-key{flex:1;height:42px;border-radius:5px;background:var(--p-kb-key);
+  box-shadow:0 1px 0 var(--p-kb-under);display:flex;align-items:center;justify-content:center;
+  font-size:22px;font-weight:400;color:var(--p-bone);letter-spacing:0}
+.p-key[data-wide="1"]{flex:1.4;font-size:15px;background:var(--p-kb-alt);box-shadow:0 1px 0 var(--p-kb-under)}
+.p-key[data-space="1"]{flex:5;font-size:15px;color:var(--p-dim)}
+.p-kbrow[data-last="1"] .p-key[data-wide="1"]{font-size:19px}
+.p-caret{display:inline-block;width:2px;height:19px;margin:0 0 -3px 1px;
+  background:var(--p-bone);border-radius:1px;vertical-align:baseline}
 
 /* One shape, two contents. *Agents waiting for you* is work asking for you
    and *Recent artifacts* is work you made, so the actionable one goes first.
@@ -451,6 +491,19 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;text-a
 .p-chiprow{display:flex;gap:8px;flex:1;min-width:0;overflow:hidden;
   mask-image:linear-gradient(to right,#000 calc(100% - 26px),transparent);
   -webkit-mask-image:linear-gradient(to right,#000 calc(100% - 26px),transparent)}
+/* In the side pane the chips stack, and the reason is the opposite of the
+   reason they scroll on a phone.
+   Measured: the pane's strip is 190pt and the first chip is 240, so a
+   scrolling strip there never shows one whole chip. Height is what is scarce
+   at 390 — which is why wrapping was rejected there. In a 340pt column with
+   284pt of room to spare it is abundant, so the chips take a line each and
+   the count goes under them. */
+.p-side .p-chipwrap{flex-wrap:wrap;align-items:stretch;gap:8px}
+.p-side .p-chiprow{flex:1 0 100%;flex-wrap:wrap;overflow:visible;
+  mask-image:none;-webkit-mask-image:none}
+.p-side .p-wchip{max-width:100%;min-width:0}
+.p-side .p-wchip>span{overflow:hidden;text-overflow:ellipsis;min-width:0}
+.p-side .p-wchip .p-when{flex:none}
 .p-wchip[data-more="1"]{color:var(--p-dim);background:none;
   box-shadow:inset 0 0 0 1px var(--p-line)}
 .p-wchip{display:flex;align-items:center;gap:9px;height:44px;padding:0 15px;border-radius:99px;
@@ -544,8 +597,8 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;text-a
    to a two-pixel sliver reads as a rendering fault, and a chip fading out
    reads as more of them. */
 .p-picks{flex:1;min-width:0;display:flex;gap:4px;overflow:hidden;
-  mask-image:linear-gradient(to right,#000 76%,transparent);
-  -webkit-mask-image:linear-gradient(to right,#000 76%,transparent)}
+  mask-image:linear-gradient(to right,#000 calc(100% - 22px),transparent);
+  -webkit-mask-image:linear-gradient(to right,#000 calc(100% - 22px),transparent)}
 .p-pick{display:flex;align-items:center;gap:7px;height:34px;padding:0 5px;font-size:15.5px;
   color:var(--p-dim);white-space:nowrap;flex:none}
 .p-meter{height:2px;border-radius:2px;background:var(--p-line);overflow:hidden;margin:0 18px 8px}
@@ -901,6 +954,9 @@ const TASKS = [
 const ARTIFACTS = [
   { title:"Quota meter, four shapes", path:"quota-meter/index.html", v:3, poster:true },
   { title:"Light mode token derivation", path:"light-tokens/index.html", v:1, poster:true },
+  { title:"Quota band, before and after", path:"quota-band/index.html", v:1, poster:true },
+  /* One without a poster, on purpose: it is what the library's “not
+     photographed yet” row looks like next to ones that have been. */
   { title:"Webhook retry timeline", path:"retry-timeline/index.html", v:2, poster:false },
 ];
 const REPOS = [
@@ -1065,6 +1121,11 @@ function device(p, body, opts) {
      phone. It does not cover the trailing rail, because the rail belongs to
      the system and the stack pushes inside it. */
   const bottom = !railOn(p) && !o.noTabs && !o.pushed;
+  /* The keyboard belongs to the screen rather than to the pane it was raised
+     from: it spans the window and covers the trailing rail, which is why it
+     is drawn here and not inside `body`. It covers the tab bar and the home
+     indicator too — see `keyboard()`. */
+  const kb = !o.bare && !o.pushed && kbUp(o.era) ? keyboard(p) : "";
   const inner =
     '<div class="p-body">'+
       (vertical
@@ -1078,10 +1139,11 @@ function device(p, body, opts) {
     '<div class="p-screen" style="width:'+p.w+'px;height:'+p.h+'px">'+
       (o.bare ? "" : statusBar(p))+
       inner+
-      (bottom ? tabBar(p, o.tab || "dash", o.shipped) : "")+
+      kb+
+      (bottom && !kb ? tabBar(p, o.tab || "dash", o.shipped) : "")+
       /* The home indicator is the device's, not the tab bar's — a pushed
          route hides the bar and keeps the indicator. */
-      (o.bare ? "" : '<div class="p-home"'+(p.kind==="android"?' data-kind="android"':'')+
+      (o.bare || kb ? "" : '<div class="p-home"'+(p.kind==="android"?' data-kind="android"':'')+
         '><i class="p-homebar"></i></div>')+
       (o.over || "")+
     '</div>'+
@@ -1227,28 +1289,45 @@ function partOfDay() {
 /**
  * The home.
  *
- * The desk's order, kept: greeting, composer, *agents waiting for you*, then
- * *recent artifacts*. Three things are the phone's, and each is a width
- * decision rather than a change of mind \u2014 see <b>Dashboard</b> for the
- * arithmetic.
+ * The desk's four things, in the phone's order: greeting, *agents waiting for
+ * you*, *recent artifacts*, and the composer **pinned to the foot**. The desk
+ * puts the box under the greeting because a cursor belongs where the eye
+ * lands and a mouse reaches everywhere equally. A thumb does not, so on a
+ * phone the box goes where the thumb already rests and the two sections take
+ * the room it leaves \u2014 which also lifts them out of the bottom third,
+ * where the first draft had the only answer to *what is waiting* sitting
+ * 58% down the screen.
+ *
+ * The rest is width decisions rather than changes of mind \u2014 see
+ * <b>Dashboard</b> for the arithmetic.
  */
 function homePage(p, st) {
   const mode = st.home || "both";
   const cw = contentW(p);
   const blocked = PLACES.filter(isBlocked);
   const show = mode === "nowait" || mode === "bare" ? [] : blocked;
-  /* `DOTTED` is the budget; what fits is what shows. A chip carrying a name
-     and a timestamp is about 200pt, so two sit side by side from 466 and one
-     does at 390 — below that the second clips to its leading dot, which is
-     an ember mark attached to nothing. The count absorbs the difference and
-     stays exact either way. Same kind of width decision as two posters
-     rather than three. */
-  const fits = cw >= 460 ? DOTTED : 1;
+  /* `DOTTED` is the budget; what fits is what shows, and the threshold is
+     measured rather than guessed.
+     A chip carrying a name and a time is 240 to 287pt laid out. The strip
+     is the container less 40 of padding and 87 for the pinned count, so it
+     is 263 at 390, 339 at 466 and 468 at 595. Two chips want 535. The
+     second is worth drawing when most of its name lands — at 466 it gets
+     91pt of 287 and reads as an ember dot with two letters after it, which
+     is the orphan this rule exists to prevent; at 595 it gets 220 and reads.
+     Hence 577, which is 450 of strip. The count absorbs the difference and
+     stays exact either way, because it counts dots rather than pixels. */
+  const fits = cw >= 577 ? DOTTED : 1;
   const dotted = show.slice(0, fits);
   const rest = show.length - dotted.length;
-  const arts = mode === "bare" || mode === "norepo" ? [] : ARTIFACTS.filter(a => a.poster).slice(0, 2);
+  /* How many posters the row shows is the same number as the columns it has
+     — one full row, never a ragged second one. The threshold is derived
+     where the grid is written, below. */
+  const cols = band(p) === "dock" ? 2 : cw >= 573 ? 3 : 2;
+  const arts = mode === "bare" || mode === "norepo"
+    ? [] : ARTIFACTS.filter(a => a.poster).slice(0, cols);
   const seeded = mode === "task";
   const bare = mode === "norepo";
+  const typing = mode === "typing";
 
   const bar =
     '<div class="p-head" style="padding-bottom:8px">'+
@@ -1285,9 +1364,12 @@ function homePage(p, st) {
     '</div>';
 
   const composer =
-    '<div class="p-homecomp">'+shelf+
+    '<div class="p-homecomp"'+(typing ? ' data-kb="1"' : '')+'>'+shelf+
       '<div class="p-box" data-open="1" style="margin:0 20px">'+
-        (seeded
+        (typing
+          ? '<div class="p-typed">Quota meter goes amber too early on the free '+
+            'plan<i class="p-caret"></i></div>'
+          : seeded
           ? '<div class="p-typed">Quota meter goes amber too early on the free plan</div>'
           : '<div class="p-ph" style="padding:0 6px;line-height:27px">Start something new\u2026</div>')+
         '<div class="p-ctlrow">'+
@@ -1298,7 +1380,7 @@ function homePage(p, st) {
             '<button class="p-pick" data-go="noop">'+agentMark("ClaudeCode",14,"var(--p-mute)")+
               'Claude Code'+ic("chevron-down",13)+'</button>'+
           '</span>'+
-          (bare
+          (bare && !typing
             ? '<button class="p-ctl" data-go="noop" aria-label="Dictate">'+ic("mic",19)+'</button>'
             : '<button class="p-send" data-go="goto:workspace" aria-label="Start">'+
                 ic("arrow-up",20)+'</button>')+
@@ -1335,8 +1417,15 @@ function homePage(p, st) {
 
   const made = arts.length
     ? heading("Recent artifacts", true)+
-      '<div class="p-grid" style="grid-template-columns:repeat('+
-        (band(p) === "dock" ? 2 : cw >= 620 ? 3 : 2)+',1fr)">'+
+      /* Three posters earn their place once each one is at least as big as
+         the two-up on a phone. The grid is 16 of gap in 20 of padding, so
+         two at 390 are 167 each and three at W are (W - 72) / 3 — which
+         reaches 167 at 573. The inner portrait display lays out in 595 and
+         gets 174pt posters; every narrower pose keeps two. The side column
+         of the split keeps two whatever its width, because three in 340
+         would be 89 and the whole reason a grid of pictures exists is that
+         you can tell them apart. */
+      '<div class="p-grid" style="grid-template-columns:repeat('+cols+',1fr)">'+
         arts.map(a => '<button class="p-card" data-go="goto:artifact">'+
           '<span class="p-poster">'+poster()+'</span>'+
           '<span style="display:block;padding:10px 12px 12px">'+
@@ -1359,18 +1448,27 @@ function homePage(p, st) {
    * At 951 landscape the home splits, and the measurement is why.
    *
    * It is the only pose with room for two things and the only one that is
-   * *short* — 669 against the others' 844 to 951. Stacked, the page needed
-   * 598 into 527 and scrolled; beside each other it fits, and the pose stops
-   * wasting the width it exists for. Reading order top-to-bottom becomes
-   * left-to-right: what you came to do, then what is waiting.
+   * *short* — 669 against the others' 844 to 951. The composer is pinned to
+   * the foot of the left column, where a thumb is on a device held in two
+   * hands, and the sections sit beside it rather than under it.
+   *
+   * The greeting sinks to meet the box rather than floating at the top of a
+   * column with 280pt of nothing under it. It is a salutation *to the
+   * composer*, so the two read as one thing; at every other pose the
+   * sections fill that gap and the question does not arise.
    */
+  /* The keyboard does not close the panel. `references/surfaces.md` is
+     explicit that an open sheet survives a change of pose, and raising a
+     keyboard is less than that — it is not a pose change at all. Both
+     columns get shorter and the side one starts to scroll; nothing moves. */
   if (band(p) === "dock" && panelW(cw) > 0) {
     const side = panelW(cw);
     return bar+
       '<div class="p-panes">'+
         '<div style="flex:1;min-width:0;display:flex;flex-direction:column;min-height:0">'+
-          '<div class="p-scroll"><div class="p-col">'+head+composer+
-            (bare ? under : "")+'<div style="height:20px"></div></div></div>'+
+          '<div class="p-scroll"><div class="p-col" data-sink="1">'+head+
+            (bare ? under : "")+'<div style="height:12px"></div></div></div>'+
+          composer+
         '</div>'+
         (bare ? "" : '<div class="p-side" style="width:'+side+'px">'+
           '<div class="p-scroll"><div style="padding-top:8px">'+under+
@@ -1378,10 +1476,67 @@ function homePage(p, st) {
       '</div>';
   }
 
+  /**
+   * The composer is pinned to the bottom, and everything else scrolls above it.
+   *
+   * `mobile/STYLE.md` gives **the bottom of the screen to the message**, and
+   * the first version of this page carried the desk's centred composer
+   * across without re-deciding it for a thumb. A box you type into belongs
+   * where the thumb already is; the two sections take the room it leaves.
+   *
+   * **The greeting scrolls.** It is a salutation, read once on arrival, and
+   * pinning it would spend on a fixed line the space the sections want. At
+   * 390 nothing scrolls in the resting state anyway — measured in Spec — so
+   * the choice only bites once there is more to show, which is exactly when
+   * the sections are what you want on screen.
+   */
   return bar+
-    '<div class="p-scroll"><div class="p-col">'+head+composer+under+
-      '<div style="height:28px"></div>'+
-    '</div></div>';
+    '<div class="p-scroll"><div class="p-col">'+head+under+
+      '<div style="height:16px"></div>'+
+    '</div></div>'+
+    composer;
+}
+
+/**
+ * The keyboard, and the rule that matters most on this screen.
+ *
+ * **The composer sits on the keyboard, not on the home indicator.** The
+ * bottom inset belongs to the indicator and the keyboard covers it; holding
+ * that 34pt open once the keys are up leaves a band of nothing between the
+ * box and the keyboard, which `mobile/STYLE.md` names as the single clearest
+ * tell that a layout was written for a browser. The tab bar goes the same
+ * way — the keyboard is over it.
+ *
+ * It rides the keyboard's real frame on the UI thread rather than animating
+ * to a guessed height afterwards, which is the difference between a composer
+ * that arrives with the keys and one that arrives a frame or four later.
+ *
+ * The height is **291pt at 390 portrait** — iOS, English, with the predictive
+ * bar. Stated because it is assumed rather than measured on a device, and it
+ * is the number every figure below it depends on.
+ */
+/* The comparison device next to it is drawn from a *copy* of the state with a
+   different era, so this cannot read `S.era` — both phones would raise a
+   keyboard and only one of them is on the home. */
+function kbUp(era) {
+  return (era || S.era) === "home" && S.screen === "inbox" && S.home === "typing";
+}
+function keyboard(p) {
+  const rows = ["QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM"];
+  const kh = p.kind === "android" ? 270 : 291;
+  return '<div class="p-kb" style="height:'+kh+'px" aria-hidden="true">'+
+    '<div class="p-kbsuggest"><span>Quota</span><span>quota</span><span>Quote</span></div>'+
+    rows.map((r, i) => '<div class="p-kbrow"'+(i === 2 ? ' data-last="1"' : '')+'>'+
+      (i === 1 ? '<span style="flex:.5"></span>' : "")+
+      (i === 2 ? '<span class="p-key" data-wide="1">\u21e7</span>' : "")+
+      [...r].map(ch => '<span class="p-key">'+ch+'</span>').join("")+
+      (i === 2 ? '<span class="p-key" data-wide="1">\u232b</span>' : "")+
+      (i === 1 ? '<span style="flex:.5"></span>' : "")+
+    '</div>').join("")+
+    '<div class="p-kbrow"><span class="p-key" data-wide="1">123</span>'+
+      '<span class="p-key" data-space="1">space</span>'+
+      '<span class="p-key" data-wide="1">return</span></div>'+
+  '</div>';
 }
 
 /**
@@ -2552,11 +2707,11 @@ function tabInbox() {
      all three so the comparison is always live. */
   const other = { home:"accepted", accepted:"now", now:"home" }[S.era] || "accepted";
   const LABEL = { home:"The home", accepted:"The Dashboard it replaces", now:"Today\u2019s Inbox tab" };
-  const SUB = { home:"greeting, composer, two sections", accepted:"accepted, then outgrown",
+  const SUB = { home:"greeting, two sections, composer at the foot", accepted:"accepted, then outgrown",
     now:"app/(tabs)/index.tsx, redrawn here" };
   return '<div class="d-stage"><div class="d-row">'+
       plinth(p, inboxScreen(p, Object.assign({}, S, { era:other })),
-        { tab:"dash", over:"", noBand:true, shipped: other === "now",
+        { tab:"dash", over:"", noBand:true, shipped: other === "now", era: other,
           label: LABEL[other], sub: SUB[other] })+
       live(p.id, "inbox")+
     '</div></div>'+
@@ -2566,10 +2721,16 @@ function tabInbox() {
 
     '<div class="d-note"><h2>The home is a greeting</h2>'+
       '<p>The desk\u2019s Dashboard no longer opens with <i>Two agents are waiting on you.</i> It '+
-      'opens with a greeting that never changes with state, the composer under it, and two '+
-      'sections below that: <b>Agents waiting for you</b>, then <b>Recent artifacts</b>. Starting '+
-      'work is what you open the app to do, so the page opens with somewhere to type rather than '+
-      'with a report.</p>'+
+      'opens with a greeting that never changes with state, and two sections: <b>Agents waiting '+
+      'for you</b>, then <b>Recent artifacts</b>. Starting work is what you open the app to do, so '+
+      'the page opens with somewhere to type rather than with a report.</p>'+
+      '<p><b>The phone puts the box at the foot, and that is the one place the two differ.</b> The '+
+      'desk sets it under the greeting because a cursor belongs where the eye lands and a mouse '+
+      'reaches every part of a window equally. A thumb does not. <code>mobile/STYLE.md</code> '+
+      'already gives the bottom of the screen to the message, and the first version of this page '+
+      'carried the desk\u2019s arrangement across without re-deciding it \u2014 a composer in the '+
+      'middle of a 844pt screen is a reach on every single use of the app\u2019s most-used '+
+      'control.</p>'+
       '<p>Three versions are drawn here, and the chips switch between them. <b>Home</b> is the '+
       'design. <b>Accepted</b> is the Dashboard it replaces \u2014 accepted, drawn, then outgrown, and '+
       'it keeps its record for the same reason a rejected alternative does. <b>Now</b> is what '+
@@ -2585,29 +2746,93 @@ function tabInbox() {
       '<p>And the path differs: when something <i>is</i> waiting, a phone does not reach this '+
       'screen at all. The notification deep-links to the workspace. The home is what you see when '+
       'you opened the app yourself \u2014 which is exactly when you want somewhere to type.</p>'+
-      '<div class="d-flag"><b>The cost, recorded the way the desk recorded its own.</b> On the desk '+
-      'the answer moved from a 34px headline 12% down the window to a 14.5px chip 63% down. Here it '+
-      'moves from a 32px headline 14% down to a 16px chip <b>about 58%</b> down, and the '+
-      'agent\u2019s question leaves the screen entirely. One thing is worse on a phone and should be '+
-      'said: within the app, after a notification is dismissed, the chip row is the <i>only</i> '+
-      'on-screen answer \u2014 the badge is on the OS home screen, which you are not looking at.</div>'+
+      '<div class="d-flag"><b>The cost, re-measured after the composer moved \u2014 and most of it '+
+      'came back.</b> On the desk the answer to <i>is anything waiting on me</i> moved from a 34px '+
+      'headline 12% down the window to a 14.5px chip 63% down. The first version of this page put '+
+      'the phone\u2019s chip at what it recorded as \u201cabout 58%\u201d down; laid out and '+
+      'measured, it was <b>53%</b>. With the composer at the foot the same chip sits at '+
+      '<b>34%</b> \u2014 measured, both numbers, in <b>Spec</b>, and better than the desk\u2019s own '+
+      '63%. The sections moved up into the room the box left, and the chip row went with them.</div>'+
+      '<p>Two parts of the cost are unchanged and still worth saying. The mark is a 16px chip '+
+      'rather than a 32px headline, and the agent\u2019s question leaves the screen entirely. And '+
+      'one part is worse on a phone than on a desk: within the app, after a notification is '+
+      'dismissed, the chip row is the <i>only</i> on-screen answer \u2014 the badge is on the OS '+
+      'home screen, which you are not looking at.</p>'+
 
       '<h3>Three things are the phone\u2019s, and each is a width decision</h3>'+
       '<p><b>The air above the greeting.</b> The desk holds it open with 192px, 23% of its window. '+
       'The same proportion of 390 \u00d7 844 is 194pt of nothing on the scarce axis, and the page '+
-      'would not then fit. At <b>44</b> the greeting still breathes and greeting, composer and both '+
-      'sections sit on one screen at 390 with no scroll \u2014 measured in Spec.</p>'+
+      'would not then fit. At <b>44</b> the greeting still breathes and the greeting and both '+
+      'sections sit above the composer at 390 with no scroll at all \u2014 445 of content in 480 of '+
+      'room, measured in Spec.</p>'+
       '<p><b>Two posters, not three.</b> Three at 390 is 110pt each, too small to recognise, which '+
-      'defeats the only reason a grid of pictures exists. Three return at 669, where a grid '+
-      'reflows.</p>'+
-      '<p><b>The chips scroll and the count does not.</b> Two chips do not fit side by side at 390, '+
-      'and wrapping turns each into a full-width pill \u2014 a row wearing a chip\u2019s shape. So the '+
-      'dotted chips scroll under a fade, and <b>N more</b> is pinned outside the strip. It is the '+
-      'mechanism that makes the ember budget legible; scrolled off the end it says nothing.</p>'+
+      'defeats the only reason a grid of pictures exists. The threshold is the point at which '+
+      'three are no smaller than the two a phone gets: two at 390 are 167pt, three at <i>W</i> are '+
+      '(<i>W</i>\u2009\u2212\u200972)/3, and those meet at <b>573</b>. The inner portrait display '+
+      'lays out in 595, so three return there at 174pt each.</p>'+
+      '<p><b>The chips scroll and the count does not.</b> A chip carrying a name and a time is '+
+      '240 to 287pt measured, and the strip at 390 is 263 \u2014 two do not fit side by side, and '+
+      'wrapping turns each into a full-width pill, a row wearing a chip\u2019s shape. So the dotted '+
+      'chips scroll under a fade, and <b>N more</b> is pinned outside the strip. It counts dots, '+
+      'not pixels: it is the mechanism that makes the ember budget legible, and scrolled off the '+
+      'end it says nothing.</p>'+
+      '<div class="d-keep"><b>In the landscape side column they stack instead, for the opposite '+
+      'reason.</b> That pane leaves a 190pt strip and the first chip is 240, so a scrolling strip '+
+      'there never shows one whole chip \u2014 the pin held but the thing it was pinned beside did '+
+      'not. Wrapping was refused at 390 because height is what is scarce there. In a 340pt column '+
+      'with 91pt to spare it is not, so the chips take a line each and the count goes under them. '+
+      'Both dots whole, at the pose where neither was.</div>'+
       '<div class="d-keep"><b>The budget survives intact.</b> <code>DOTTED = 2</code>, as on the '+
       'desk. The desk\u2019s third ember mark is the rail avatar; a phone has no rail, so on screen '+
       'the budget is two and the third mark is the icon badge \u2014 which is the stronger surface for '+
       'it and is not on this screen.</div>'+
+
+      '<h2 style="margin-top:34px">The keyboard is most of this screen</h2>'+
+      '<p>A home whose main control is a text box is, in use, mostly a home with a keyboard up. '+
+      'It is drawn here \u2014 <b>Keyboard up</b>, in the chips above \u2014 because a composer the '+
+      'keys cover, or one that jumps when they arrive, is the entire thing the move to the foot '+
+      'was meant to prevent, and a prototype that only shows the resting state cannot be checked '+
+      'for it.</p>'+
+      '<p><b>The box sits on the keyboard, not on the home indicator.</b> The 34pt inset belongs '+
+      'to the indicator and the keyboard covers it; holding it open once the keys are up leaves a '+
+      'band of nothing between the box and the keyboard, which <code>STYLE.md</code> names as the '+
+      'clearest tell that a layout was written for a browser. The tab bar goes the same way \u2014 '+
+      'the keyboard is over it, so it is not drawn. It rides the keyboard\u2019s real frame on the '+
+      'UI thread rather than animating to a guessed height after the fact, which is the difference '+
+      'between a box that arrives with the keys and one that arrives four frames later.</p>'+
+      '<div class="d-flag"><b>The keyboard height is assumed, not measured on hardware.</b> 291pt '+
+      'at 390 portrait, iOS, English, with the predictive bar; 270 on Android. Every figure in '+
+      'this section stands on it, so it is stated rather than buried.</div>'+
+      '<p>What that leaves at 390 is <b>256pt</b> of page above the box, and the greeting plus the '+
+      'whole <i>Agents waiting for you</i> row is <b>203</b> of it. So the thing the keyboard '+
+      'covers is the artifact grid, every time \u2014 the ember marks are on screen in both states. '+
+      'Measured in <b>Spec</b>.</p>'+
+
+      '<h3>The greeting scrolls, and the sections do not move</h3>'+
+      '<p>With the box pinned, something has to give when the page is taller than the screen, and '+
+      'it is the greeting. It is a salutation \u2014 read once, on arrival, and it carries no state '+
+      'and no control. Pinning it would spend on a fixed line the room the sections want, and the '+
+      'moment you have scrolled at all, the thing worth having on screen is what is waiting.</p>'+
+      '<p>At 390 the resting page does not scroll at all \u2014 445 of content in 480 of room, 35 to '+
+      'spare \u2014 so the choice only bites once there is more to show, which is exactly when the '+
+      'sections are what you want. <b>The landscape column is the one exception</b>: there the '+
+      'greeting sinks to sit against the box rather than floating above 280pt of nothing, because '+
+      'it is a salutation <i>to the composer</i> and at that pose nothing else is under it.</p>'+
+
+      '<h3>What is now at the top, and whether that costs anything</h3>'+
+      '<p>Moving the box down moves everything else up, and two things a thumb reaches for now sit '+
+      'further away. Worth naming even though both are left where they are:</p>'+
+      '<p><b>The waiting chips, at 34% down.</b> These are the most-tapped things on the screen '+
+      'and they are no longer the closest to the thumb. The reason to leave them is that the reach '+
+      'is the one every list on every phone already asks for \u2014 a first row is at the top \u2014 '+
+      'and 34% of 844 is 287pt, inside the arc of a thumb on a 390-wide phone. The persistent '+
+      'control is what has to be low; a list item does not.</p>'+
+      '<p><b>The Firetower switcher, in the header.</b> Top-left, the far corner for a right '+
+      'thumb, and it is reached from the <b>You</b> tab as well \u2014 which is at the bottom. Two '+
+      'ways in, one of them low, is the answer rather than moving it.</p>'+
+      '<p><b>Waiting stays above artifacts</b>, which puts the actionable section further from the '+
+      'thumb than the browsable one. That is the desk\u2019s order and it is reading order: what is '+
+      'asking comes before what was made. 150pt of thumb distance does not outrank it.</p>'+
 
       '<h3>And the <code>+</code> is gone</h3>'+
       '<p>The desk merged <code>/new</code> into this composer, so the phone did too: the screen '+
@@ -2615,7 +2840,6 @@ function tabInbox() {
       'control fewer, and <i>seeded from a task</i> and <i>nothing to cut from</i> become states of '+
       'the home rather than screens of their own.</p>'+
 
-      '<h2 style="margin-top:34px">Count what is on each screen</h2>'+
       '<h2 style="margin-top:34px">Count what is on each screen</h2>'+
       '<p>The row on the left carries seven things: a four-quadrant glyph, a name, a timestamp, a '+
       'status word, a branch in monospace, an agent mark, and a chevron. The row on the right '+
@@ -2928,9 +3152,11 @@ function tabMoving() {
       'conversation rather than taking width from it, and the reference says plainly that an open '+
       'sheet’s state must survive the change. It stays open.</p>'+
       '<h3>Not covered</h3>'+
-      '<p>Three transitions are named and not drawn: <b>unfolding with the keyboard up</b> (the '+
-      'keyboard is dismissed by the system on a size-class change on iOS, so the composer returns to '+
-      'its pill with the draft in it — stated, not verified); <b>unfolding mid-upload</b>, where the '+
+      '<p>Three transitions are named and not drawn: <b>unfolding with the keyboard up</b> — the '+
+      'keyboard is dismissed by the system on a size-class change on iOS, so the composer keeps the '+
+      'draft and the keys go, which is stated and not verified. Both <i>ends</i> of that one are now '+
+      'drawn (<b>Keyboard up</b> on the Dashboard tab, at every pose), but a pair of end states is '+
+      'not a transition and should not be read as one. Then <b>unfolding mid-upload</b>, where the '+
       'attachment chip has to keep its own id rather than its index; and <b>the app being launched '+
       'directly into the inner display from a notification</b>, where there is no previous pose to '+
       'carry anything from.</p>'+
@@ -3148,16 +3374,19 @@ const COV = [
 ]],
 ["The home", [
   ["The greeting, and it never changes with state", "Y", "morning · afternoon · evening, late night taking evening"],
-  ["The composer, under it", "Y", "the desk merged <code>/new</code> into it and the phone followed"],
+  ["The composer, pinned to the foot", "Y", "<code>STYLE.md</code> gives the bottom of the screen to the message"],
+  ["The keyboard-up state", "Y", "on the keyboard, not on the home indicator; no tab bar under it"],
+  ["The greeting scrolls; the composer does not", "Y", "and sinks to meet the box in the landscape column"],
   ["The shelf — repository, machine", "Y", "a shelf here and none in a workspace"],
   ["Agents waiting for you", null, "", [
     ["Chips with an ember dot, a name and a time", "Y", ""],
     ["<code>DOTTED = 2</code>, and the rest collapse to a count", "Y", "a count with no dot"],
-    ["What fits is what shows — one chip at 390, two from 466", "Y", "the count stays exact"],
+    ["What fits is what shows — one chip below 577, two from 669", "Y", "measured: a chip is 240–287pt, the strip at 390 is 263"],
     ["The count is pinned outside the scrolling strip", "Y", "scrolled off the end it says nothing"],
+    ["They stack in the landscape side column", "Y", "a 190pt strip never shows one whole 240pt chip"],
   ]],
   ["Recent artifacts", null, "", [
-    ["Two posters at 390, three at 669", "Y", "three at phone width is too small to recognise"],
+    ["Two posters at 390, three from 573", "Y", "the width at which three are no smaller than the two a phone gets"],
     ["View all", "Y", "to the Artifacts destination"],
     ["Same heading as the section above it", "Y", "the only thing telling them apart is the ember"],
   ]],
@@ -3444,7 +3673,8 @@ const TOKENS = (function () {
       "sage","sage-tint","sage-deep","brick","brick-tint","brick-deep",
       "amber","amber-soft","amber-tint","amber-deep","slate","slate-tint","slate-deep",
       "kind-source","kind-native","kind-data","kind-style","kind-media","kind-store","kind-prose",
-      "syn-comment","syn-string","syn-keyword","syn-type","syn-number","syn-fn","syn-attr"])
+      "syn-comment","syn-string","syn-keyword","syn-type","syn-number","syn-fn","syn-attr",
+      "kb-bg","kb-key","kb-alt","kb-under"])
       out[n] = cs.getPropertyValue("--p-"+n).trim();
     return out;
   };
@@ -3475,6 +3705,11 @@ const PAIRS = [
   ["amber","amber-tint","its own tint","the handoff's own value",8.7],
   ["amber-soft","ground","the page","a mark, 3:1 — the token this work adds",3],
   ["slate","ground","the page","a pending change",3],
+  /* The keyboard is the system's, but it is drawn here, so it is held to the
+     same floors as everything else that carries a letter. */
+  ["bone","kb-key","a key","the letter on it",7],
+  ["bone","kb-alt","a modifier key","shift, delete, 123, return",4.5],
+  ["dim","kb-key","a key","the word on the space bar",3],
 ];
 const KINDS = ["kind-source","kind-native","kind-data","kind-style","kind-media","kind-store","kind-prose"];
 const SYNTAX = ["syn-comment","syn-string","syn-keyword","syn-type","syn-number","syn-fn","syn-attr"];
@@ -3807,20 +4042,59 @@ function auditNaming() {
  * measured. This lays each pose out off-screen at its real size and compares
  * the scroller's content against the room it has.
  */
+/**
+ * Does the home fit, and where does the ember mark land.
+ *
+ * Both numbers moved when the composer went to the foot, so both are taken
+ * again here rather than carried over. `need` is the scrolling region's
+ * content and `room` is the region left above the pinned composer — the
+ * composer itself is `pinned`, outside both, because it no longer scrolls.
+ *
+ * `chip` is the centre of the first waiting chip as a fraction of the
+ * screen, and it exists because the page records the cost of trading a
+ * headline for a chip. A recorded cost that is never re-measured is a claim.
+ */
 function auditFit() {
   const keep = JSON.stringify(S);
   const stage = document.createElement("div");
   stage.style.cssText = "position:absolute;left:-10000px;top:0;visibility:hidden";
   document.body.appendChild(stage);
+  const read = (p, patch) => {
+    Object.assign(S, JSON.parse(keep), { era:"home", home:"both" }, patch || {});
+    stage.innerHTML = device(p, renderScreen("inbox", p), { tab:"dash" });
+    const scr = stage.querySelector(".p-screen");
+    /* Every scrolling region at this pose, not the first one.
+       The split pose has two, and the left column is pinned to its own
+       height by `min-height:100%` — measuring only that one would report
+       `need === room` at every width, which is a number that can never
+       fail and therefore never says anything. */
+    const all = [].slice.call(stage.querySelectorAll(".p-scroll"))
+      .map(el => ({ el, need: el.firstElementChild ? el.firstElementChild.scrollHeight : 0,
+                    room: el.clientHeight }))
+      .filter(x => x.room > 0);
+    const worst = all.slice().sort((a, b) => (b.need - b.room) - (a.need - a.room))[0] ||
+      { need:0, room:0 };
+    const sc = worst.el;
+    const comp = stage.querySelector(".p-homecomp");
+    const chip = stage.querySelector(".p-wchip");
+    let at = null;
+    if (chip && scr) {
+      const a = chip.getBoundingClientRect(), b = scr.getBoundingClientRect();
+      at = (a.top + a.height / 2 - b.top) / b.height;
+    }
+    /* The split pose reports both columns. The left one is sunk to its own
+       height so its slack is 0 by construction; the column that can actually
+       overflow is the one holding the sections. */
+    return { need: worst.need, room: worst.room,
+      panes: all.map(x => x.need + "/" + x.room),
+      pinned: comp ? comp.offsetHeight : 0, chip: at };
+  };
   const out = POSE_ORDER.map(id => {
     const p = POSES[id];
-    Object.assign(S, JSON.parse(keep), { era:"home", home:"both" });
-    stage.innerHTML = device(p, renderScreen("inbox", p), { tab:"dash" });
-    const sc = stage.querySelector(".p-scroll");
-    const inner = sc && sc.firstElementChild;
-    const need = inner ? inner.scrollHeight : 0;
-    const room = sc ? sc.clientHeight : 0;
-    return { name:p.name, w:p.w, need, room, fits: need <= room };
+    const now = read(p);
+    const kb = read(p, { home:"typing" });
+    return Object.assign({ name:p.name, w:p.w, h:p.h, fits: now.need <= now.room,
+      kbNeed: kb ? kb.need : null, kbRoom: kb ? kb.room : null }, now);
   });
   stage.remove();
   Object.assign(S, JSON.parse(keep));
@@ -3887,16 +4161,31 @@ function tabSpec() {
   'done on hardware are listed at the foot of Notes.</div>'+
 
   '<h3>The home, and whether it fits</h3>'+
-  '<p>The desk holds its greeting open with <b>192px</b> of air \u2014 23% of an 824px window. The '+
-  'same proportion of a 390 \u00d7 844 phone is 194pt spent on nothing, on the axis a phone has least '+
-  'of. At <b>44</b> the whole page sits on one screen at every pose. Measured by laying each one '+
-  'out at its real size and comparing the scroller\u2019s content against the room it has.</p>'+
-  '<table class="d-tbl"><thead><tr><th>Pose</th><th>Content</th><th>Room</th><th></th></tr>'+
-    '</thead><tbody>'+
-  fit.map(r => '<tr><td>'+esc(r.name)+'</td><td class="d-num">'+r.need+'</td>'+
-    '<td class="d-num">'+r.room+'</td><td class="'+(r.fits?"d-ok":"d-bad")+'">'+
-    (r.fits ? "fits, "+(r.room-r.need)+" to spare" : "scrolls by "+(r.need-r.room))+'</td></tr>').join("")+
+  '<p>The composer is pinned to the foot, so it is outside the scroller and outside these two '+
+  'numbers: <b>content</b> is the greeting and the two sections, <b>room</b> is what is left above '+
+  'the box. The box itself is <b>'+(fit[0] ? fit[0].pinned : 0)+'pt</b> at every pose \u2014 it does '+
+  'not reflow, which is the point of pinning it. Measured by laying each pose out at its real size '+
+  'and comparing every scrolling region it has against the room that region has.</p>'+
+  '<table class="d-tbl"><thead><tr><th>Pose</th><th>Content</th><th>Room</th><th>Spare</th>'+
+    '<th>Room, keys up</th><th>First ember mark</th></tr></thead><tbody>'+
+  fit.map(r => '<tr><td>'+esc(r.name)+'</td><td class="d-num">'+
+    r.panes.map(x => x.split("/")[0]).join(" + ")+'</td>'+
+    '<td class="d-num">'+r.panes.map(x => x.split("/")[1]).join(" + ")+'</td>'+
+    '<td class="'+(r.fits?"d-ok":"d-bad")+'">'+
+    (r.fits ? "+"+r.panes.map(x => Number(x.split("/")[1]) - Number(x.split("/")[0])).join(" / ")
+            : "scrolls by "+(r.need-r.room))+'</td>'+
+    '<td class="d-num">'+(r.kbRoom === null ? "\u2014" : r.kbRoom)+'</td>'+
+    '<td class="d-num">'+(r.chip === null ? "\u2014" : Math.round(r.chip * 100)+"% down")+
+    '</td></tr>').join("")+
   '</tbody></table>'+
+  '<p>The landscape pose reports two columns because it has two. The left one is sunk to its own '+
+  'height \u2014 the greeting sits against the composer rather than floating above 280pt of nothing '+
+  '\u2014 so its spare is 0 by construction and the column that can actually overflow is the one '+
+  'holding the sections.</p>'+
+  '<div class="d-keep"><b>The keyboard takes the posters and never the dots.</b> At 390 the keys '+
+  'leave <b>256pt</b> of page above the composer. The greeting, the <i>Agents waiting for you</i> '+
+  'heading and the chip row are <b>203</b> of it. So what goes under the keyboard is the artifact '+
+  'grid, every time, and the ember marks are on screen in both states.</div>'+
   '<h3>The poses</h3>'+
   '<table class="d-tbl"><thead><tr><th>Pose</th><th>Window</th><th>System rail</th>'+
     '<th>Laid out in</th><th>Band</th><th>COLUMN here</th><th>READING here</th></tr></thead><tbody>'+
@@ -3909,6 +4198,10 @@ function tabSpec() {
   [["Status bar, iOS","54 pt","the safe-area inset on a notched phone"],
    ["Status bar, Android","30 dp",""],
    ["Home indicator","34 pt","the composer sits on the keyboard, not on this"],
+   ["Keyboard, iOS portrait","291 pt","assumed, not measured on hardware — English, with the predictive bar"],
+   ["Keyboard, Android portrait","270 dp","assumed"],
+   ["Keyboard, landscape","200 pt","assumed; wider keys, shorter rows"],
+   ["The home composer, pinned","161 pt","shelf, box and controls; it does not reflow at any pose"],
    ["Gesture bar, Android","24 dp",""],
    ["Tab bar, iOS","56 + 34 pt","translucent; content scrolls under"],
    ["Navigation bar, Android","66 dp","label under icon, active pill behind it"],
@@ -4193,11 +4486,11 @@ function tabNotes() {
 
   dec("The home is a greeting, and it crosses",
     "the Dashboard opens with <i>Good morning, what should we work on?</i> \u2014 a greeting that "+
-      "never changes with state \u2014 then the composer, then <b>Agents waiting for you</b> and "+
-      "<b>Recent artifacts</b>. The sentence that counted the waiting agents is superseded and "+
-      "kept as a record.",
+      "never changes with state \u2014 then <b>Agents waiting for you</b>, then <b>Recent "+
+      "artifacts</b>, with the composer <b>pinned to the foot</b>. The sentence that counted the "+
+      "waiting agents is superseded and kept as a record.",
     "the answer to <i>is anything waiting on me</i> moves from a 32px headline 14% down the screen "+
-      "to a 16px chip about 58% down, and the agent\u2019s own question \u2014 the thing you would "+
+      "to a 16px chip <b>34%</b> down, and the agent\u2019s own question \u2014 the thing you would "+
       "actually answer \u2014 leaves the screen entirely.",
     "starting work is what you open the app to do, so the page opens with somewhere to type rather "+
       "than with a report. And the reason it is affordable is <i>stronger</i> on a phone than on a "+
@@ -4219,9 +4512,15 @@ function tabNotes() {
   '<div class="d-flag"><b>One thing is genuinely worse here and should not be smoothed over.</b> '+
   'On a desk the island is on the same screen you are already looking at. On a phone the badge is '+
   'on the OS home screen, which you are not. So <i>within the app</i>, once a notification has '+
-  'been dismissed, the chip row is the only on-screen answer to <i>is anything waiting</i> \u2014 '+
-  'and it is about 58% down. That is the one place where the desk\u2019s reasoning is weaker here '+
-  'rather than stronger, and it is the thing to watch if anybody reports losing track of work.</div>'+
+  'been dismissed, the chip row is the only on-screen answer to <i>is anything waiting</i>. That '+
+  'is the one place where the desk\u2019s reasoning is weaker here rather than stronger, and it is '+
+  'the thing to watch if anybody reports losing track of work.</div>'+
+  '<div class="d-keep"><b>Most of the cost came back when the composer moved.</b> The first '+
+  'version of this page recorded that chip as \u201cabout 58%\u201d down; laid out and measured it '+
+  'was <b>53%</b>. With the box pinned to the foot the sections moved up and the same chip is at '+
+  '<b>34%</b> \u2014 better than the desk\u2019s own 63%, and both numbers are now measured rather '+
+  'than estimated. What is left of the cost is the two parts that do not move: a 16px chip instead '+
+  'of a 32px headline, and the question gone from the screen.</div>'+
 
   dec("Four destinations: Dashboard, Tasks, Artifacts, You",
     "the first three are the desk\u2019s \u2318\u20091, \u2318\u20092 and \u2318\u20093 \u2014 same object, same "+
@@ -4631,12 +4930,22 @@ function tabNotes() {
   'landscape did not</b> \u2014 598 of content into 527 of room, over by 71.</p>'+
   '<p>It is the only pose that is <i>short</i>: 669 tall against the others\u2019 844 to 951. It is '+
   'also the only one with room for two things, which it was spending on nothing. So the home '+
-  'splits there \u2014 greeting and composer on the left, the two sections beside them \u2014 and the '+
-  'same measurement now reads 249 into 527. Reading order top-to-bottom becomes left-to-right: '+
-  'what you came to do, then what is waiting.</p>'+
+  'splits there \u2014 greeting and composer on the left, the two sections beside them. Reading '+
+  'order top-to-bottom becomes left-to-right: what you came to do, then what is waiting.</p>'+
   '<div class="d-keep"><b>That is the check doing the job the handoff describes.</b> A number this '+
   'page computes about itself found a layout fault in the pose the whole brief is about, and it '+
   'found it in the one case a 390pt render would never have shown.</div>'+
+  '<p>Every one of those numbers was taken again when the composer moved to the foot, because all '+
+  'five changed. The current set is in <b>Spec</b>; the headline is that the page still fits at '+
+  'all five poses and the tightest is still the iPhone, at 445 of content into 480 of room.</p>'+
+  '<div class="d-flag"><b>And the second pass found two things the first did not.</b> The fit '+
+  'check was reading only the <i>first</i> scrolling region on the page, which at the split pose '+
+  'is the left column \u2014 and that column is pinned to its own height, so it reported '+
+  '<code>need === room</code> at every width. A number that can never fail never says anything. '+
+  'It now reads every region and reports the worst. The second: the <b>N more</b> pin held '+
+  'everywhere, but in the landscape side column the strip it is pinned beside is 190pt and the '+
+  'first chip is 240 \u2014 so no whole chip was ever visible there. The chips stack in that column '+
+  'now.</div>'+
 
   '<h3>A screen that disagrees with what opens it</h3>'+
   '<p>The desktop sweep found four \u2014 Secrets under Vault, Compute under Machines, Profiles under '+
@@ -4744,7 +5053,8 @@ function tabNotes() {
    ═══════════════════════════════════════════════════════════════════════════ */
 const SHEET = [
   ["Answering", [
-    ["The home", "inbox", { tab:"inbox", era:"home", home:"both" }, "greeting, composer, two sections"],
+    ["The home", "inbox", { tab:"inbox", era:"home", home:"both" }, "the composer is at the foot"],
+    ["Typing into it", "inbox", { tab:"inbox", era:"home", home:"typing" }, "on the keyboard, not the indicator"],
     ["Nothing waiting", "inbox", { tab:"inbox", era:"home", home:"nowait" }, ""],
     ["Nothing yet", "inbox", { tab:"inbox", era:"home", home:"bare" }, "the greeting stops holding it open"],
     ["Seeded from a task", "inbox", { tab:"inbox", era:"home", home:"task" }, ""],
@@ -5020,9 +5330,9 @@ function subsFor(id) {
     case "inbox":
       return chips("Version", [["home","Home"],["accepted","Accepted"],["now","Now"]], "era", S.era)+
         (S.era === "home"
-          ? chips("State", [["both","Both sections"],["nowait","Nothing waiting"],
-              ["bare","Nothing yet"],["task","From a task"],["norepo","No repository"],
-              ["error","Unreachable"]], "home", S.home)+
+          ? chips("State", [["both","Both sections"],["typing","Keyboard up"],
+              ["nowait","Nothing waiting"],["bare","Nothing yet"],["task","From a task"],
+              ["norepo","No repository"],["error","Unreachable"]], "home", S.home)+
             chips("Time", [["morning","Morning"],["afternoon","Afternoon"],["evening","Evening"]],
               "when", S.when || partOfDay())
           : gos("Filter", [["filter:all","All"],["filter:waiting","Waiting"],
