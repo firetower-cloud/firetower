@@ -24,6 +24,7 @@ own. Five scripts drive it:
 | `pnpm shoot:app` | Drives the running app into the same states against `mock-server.mjs`. A state it cannot reach records **why**, in `index.json`, rather than quietly photographing the nearest screen. |
 | `pnpm reconcile` | One sheet per state: the drawing and the build, light along the top and dark underneath. Four panes is the unit that can actually be compared — a contact sheet of ninety-nine thumbnails tells you a screen exists and nothing about whether it matches. |
 | `pnpm assert:design` | The same states, **asserted rather than looked at**. See *Asserting instead of looking* below. |
+| `desktop/scripts/check-backend-untouched.sh` | Criteria 52–53, asked of **our own commits**. It used to be `git diff --stat main -- api/ crates/ migrations/`, expected empty — which held until the branch merged main and *contained* main's backend commits, at which point the diff said 148 files and meant nothing. The question was never "does this differ from a base"; it is "did we write anything there". |
 | `pnpm assert:connected` | Presses every control that *names* something and asks where it landed. See *Layer 2b* below. |
 | `pnpm check:states` | The states a screenshot cannot see — hover, and sequences. |
 
