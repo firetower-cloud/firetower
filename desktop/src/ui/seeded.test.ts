@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { branchFor, seeded } from "./StartComposer";
+import { branchFor, seeded, taskHeadline } from "./StartComposer";
 
 /**
  * The seeded home: what a task's *Start* puts on the page before anybody
@@ -37,6 +37,23 @@ describe("what the composer opens with", () => {
   test("a task with a URL and no key still seeds", () => {
     expect(seeded({ title: "Keep the v1 embed?", taskUrl: "https://x.invalid/9" })).toBe(
       "Keep the v1 embed?\nhttps://x.invalid/9",
+    );
+  });
+});
+
+describe("what the page says", () => {
+  test("it names the task and does not repeat the title", () => {
+    const seed = { taskKey: "NW-4120", title: "Quota meter goes amber too early" };
+    expect(taskHeadline(seed)).toBe("Start NW-4120");
+    expect(taskHeadline(seed)).not.toContain(seed.title);
+  });
+
+  test("a URL with no key falls back, which no fixture can reach", () => {
+    /* A tracker that does not give its issues short names. Driven states
+       cannot get here — every task in the mock has a key — so this is the
+       only thing asserting the fallback exists. */
+    expect(taskHeadline({ taskUrl: "https://x.invalid/9", title: "Keep the v1 embed?" })).toBe(
+      "Start this task",
     );
   });
 });

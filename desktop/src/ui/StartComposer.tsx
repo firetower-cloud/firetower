@@ -159,6 +159,22 @@ export function branchFor(first: string, taskKey?: string | null): string {
  * needs to go and read the thing, and because it is the one part nobody wants
  * to retype.
  */
+/**
+ * What the page says when you arrived carrying a task.
+ *
+ * The greeting is stateless by design, and arriving from a task makes the
+ * loudest thing on the screen contradict the arrival. This names the thing —
+ * and **deliberately does not repeat the title**, which is three inches below
+ * it in the composer.
+ *
+ * A URL with no key is the state no fixture has: a tracker that does not give
+ * its issues short names. *Start this task* is as specific as the launch can
+ * honestly be, and it is still about the thing you came here for.
+ */
+export function taskHeadline(seed?: Seed): string {
+  return seed?.taskKey ? `Start ${seed.taskKey}` : "Start this task";
+}
+
 export function seeded(seed?: Seed): string {
   if (seed?.prompt) return seed.prompt;
   if (!seed?.taskKey && !seed?.taskUrl) return "";
@@ -542,7 +558,7 @@ export function StartComposer({
             <div className="air">
               {task ? (
                 <>
-                  <h1>{seed?.taskKey ? `Start ${seed.taskKey}` : "Start this task"}</h1>
+                  <h1>{taskHeadline(seed)}</h1>
                   <p className="hsub">
                     {seed?.repo
                       ? "Edit anything below, then send it."
