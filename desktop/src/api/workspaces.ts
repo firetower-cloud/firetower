@@ -11,7 +11,7 @@
  */
 
 import type { Session } from "./generated/model";
-import { inFlight, needsYou } from "./view";
+import { BEAT, inFlight, needsYou, type Beat } from "./view";
 
 /** A workspace: a checkout on a host, and the agents working in it. */
 export type Workspace = {
@@ -48,6 +48,29 @@ export function doing(place: Workspace): "waiting" | "working" | "idle" {
   if (place.runs.some(inFlight)) return "working";
   if (place.runs.some(needsYou)) return "waiting";
   return "idle";
+}
+
+/**
+ * The worst thing happening in a place, as a `Beat`.
+ *
+ * **`doing()` cannot answer this.** It returns `waiting | working | idle`,
+ * and its `waiting` spans `NeedsYou`, `HandedBack` *and* `Failed`, because
+ * `NEEDS_YOU` is all three — so a finished workspace and a failed one report
+ * the same thing. `view.ts` argues why that is the wrong grouping for a
+ * colour in its own words: "finished, blocked and broken are three different
+ * things to feel, and a product that paints them the same has told you to go
+ * and look without telling you what at."
+ *
+ * Worst first, so a place with one broken run says broken however many of its
+ * runs are fine. No server change — `BEAT` has always mapped every status and
+ * the statuses are already on the wire; this is the rollup over a place's
+ * runs that was missing.
+ */
+const WORST: Beat[] = ["broken", "blocked", "working", "done", "over"];
+
+export function beatOfPlace(place: Workspace): Beat {
+  const beats = new Set(place.runs.map((r) => BEAT[r.status]));
+  return WORST.find((b) => beats.has(b)) ?? "over";
 }
 
 export function group(sessions: Session[]): Repositories {

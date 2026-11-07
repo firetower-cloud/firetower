@@ -37,24 +37,6 @@ import type { Agent, Artifact, PlanStep, Session, SessionStatus } from "~/api/ge
  * back somewhere it belongs, which is not the team rail.
  */
 
-/** The word beside a child's mark, when it has posted nothing of its own. */
-function labelOf(s: SessionStatus): string {
-  switch (s) {
-    case "Working":
-    case "Starting":
-      return "working";
-    case "NeedsYou":
-      return "needs you";
-    case "HandedBack":
-      return "handed back";
-    case "Ready":
-      return "ready";
-    case "Failed":
-      return "failed";
-    default:
-      return "ended";
-  }
-}
 const RANK: Record<string, number> = { Working: 0, Starting: 0, NeedsYou: 1, Ready: 2, HandedBack: 3, Failed: 4, Ended: 5 };
 
 /** A delegated child is named `"<lead> / <agent>"`; inside the lead's own rail
@@ -143,27 +125,25 @@ function TeamMark({ status }: { status: SessionStatus }) {
 function ManagerRow({ manager, active }: { manager: Session; active: boolean }) {
   const inner = (
     <>
-      {/* **The status leads.** It was the last thing on the row, after the
-          agent mark, the name and a second line that began with the status
-          *word* — so the thing you scan for was the thing you reached last,
-          and it was said twice. Both were already marks, so the swap costs
-          the system nothing; it only changes which one the eye reaches
-          first.
+      {/* **The status leads, and every row has one.** It used to be the last
+          thing on the row, after the agent mark, the name and a second line
+          that began with the status *word* — so the thing you scan for was
+          the thing you reached last, and it was said twice.
 
-          Active, there is no mark: this is the workspace you are reading and
-          its state is the title bar and the composer. As a link *up* to a
-          parent it is another workspace you are not looking at, and its
-          status is worth exactly what a sibling's is — drawn **working**,
-          because a manager blocked on its child is working and ember stays
-          reserved for waiting on *you*. */}
-      <span className="lead">{!active && <TeamMark status="Working" />}</span>
-      <span className="tx">
+          The active row carries a mark too. It was left bare on the argument
+          that this is the workspace you are reading and its state is the
+          title bar — but a row with no mark in a column of marks reads as
+          missing, and the manager's state is a fact like any other. */}
+      <span className="lead">
+        <TeamMark status={active ? manager.status : "Working"} />
+      </span>
+      <span className="tx one">
         <b>{agentName(manager.name)}</b>
-        {/* On the name line, not the mark slot: `here` is a label about
-            which row you are standing in rather than a status, and at ~40px
-            in a 16px slot it printed `hereAda`. */}
+        {/* **`here` says where you are, not how it is going.** Placement and
+            status are two different facts and both belong. On the name line
+            rather than the mark slot: at ~40px in a 16px slot it printed
+            `hereAda`. */}
         {active && <span className="here-badge">here</span>}
-        <s>{active ? "manager" : "the workspace above"}</s>
       </span>
       <span className="rt">
         <span className="ag">
@@ -186,26 +166,28 @@ function ManagerRow({ manager, active }: { manager: Session; active: boolean }) 
 
 /** One agent on the team. The active one — the session you're reading — is a
  *  plain highlighted row; the rest are links to open them. */
-function MemberRow({ member, active, shared, checkIn }: { member: Session; active: boolean; shared: boolean; checkIn?: string }) {
-  /* **Not the branch, and not the status either.** Every child of one
-     workspace is on the same branch, so repeating it on four rows says
-     nothing. And `labelOf(status)` was a *fallback prefix* — used only when
-     there was no check-in — so the word was absent half the time and
-     duplicating the glyph beside it the other half. The line is one thing
-     now, always: what the agent is doing, or why it exists. That string is
-     the only one saying what the mark is *about*, and deciding which child
-     to open without opening one is this rail's whole job. */
-  const sub = checkIn ?? member.spawnReason ?? "";
+function MemberRow({ member, active, shared }: { member: Session; active: boolean; shared: boolean }) {
+  /* **One line, and the second one is gone entirely.**
+     It was the branch, then what the agent was doing, then the status word
+     in front of that. The branch said nothing — every child of one workspace
+     is on the same one. The status word was a fallback prefix, absent half
+     the time and duplicating the glyph the other half. And the check-in,
+     which was the last thing left, went too: asked for twice, after seeing
+     it both ways.
+
+     What a row is now: a status mark, a name, whose agent, and how long.
+     Four facts, one line, and every row in the rail the same shape. */
   // A same-workspace child's `name` is the shared workspace's; its own name is
   // its `title`. Everyone else reads off the workspace name.
   const label = agentName(shared ? member.title : member.name);
   const inner = (
     <>
-      <span className="lead">{!active && <TeamMark status={member.status} />}</span>
-      <span className="tx">
+      <span className="lead">
+        <TeamMark status={member.status} />
+      </span>
+      <span className="tx one">
         <b>{label}</b>
         {active && <span className="here-badge">here</span>}
-        <s>{checkIn ? `“${sub}”` : sub}</s>
       </span>
       <span className="rt">
         <span className="ag">
@@ -247,21 +229,6 @@ export function OverviewTab({
   // cross-engine path, which rides on the session and so lands a poll later.
   const live: PlanStep[] = conversation.plan;
   const plan: PlanStep[] = live.length > 0 ? live : (session.plan ?? []);
-  // The latest check-in each child has posted, read straight out of this
-  // workspace's own transcript — every update arrived here as a relay-marked
-  // turn, so nothing new is fetched. Items are chronological, so the last one
-  // per child wins.
-  const latestCheckIn = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const it of conversation.items) {
-      for (const r of relays(it.text)) {
-        if (r.kind === "update") {
-          m.set(r.id, r.body.split("\n").find((l) => l.trim())?.trim() ?? r.body);
-        }
-      }
-    }
-    return m;
-  }, [conversation.items]);
   // The top of this local view: the workspace itself when it leads a team, or
   // the manager that started it when this is a child — one level up.
   const manager = lead ?? session;
@@ -340,7 +307,6 @@ export function OverviewTab({
                   // that name says nothing — use its session title, which the
                   // control plane sets to the child's own name.
                   shared={!!manager.workspaceId && r.workspaceId === manager.workspaceId}
-                  checkIn={latestCheckIn.get(r.id)}
                 />
               ))}
             </div>

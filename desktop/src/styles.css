@@ -2978,6 +2978,12 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
   .tm .tx .here-badge {
     flex: none;
   }
+  /* One line: there is no second row to stack against, so the name centres
+     on the marks beside it. */
+  .tm .tx.one {
+    flex-wrap: nowrap;
+    align-self: center;
+  }
   .tm .tx s {
     flex-basis: 100%;
     text-decoration: none;
@@ -4179,6 +4185,11 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
   }
   .wdot[data-t="broken"] {
     background: var(--color-brick);
+  }
+  /* Nothing running and nothing owed. Ember is the default because `blocked`
+     is the one state with no modifier, so every other beat names itself. */
+  .wdot[data-t="over"] {
+    background: var(--color-mute);
   }
 
   .pnone {

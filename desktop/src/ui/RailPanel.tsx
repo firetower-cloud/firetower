@@ -46,7 +46,7 @@ import { Icon } from "~/components/ui";
 import { useListArtifacts } from "~/api/generated/artifacts/artifacts";
 import { useMe } from "~/api/generated/auth/auth";
 import { elapsed, minutesSince, needsYou } from "~/api/view";
-import { doing, flat, group, isChild, rowLabel, type Repositories, type Workspace } from "~/api/workspaces";
+import { beatOfPlace, doing, flat, group, isChild, rowLabel, type Repositories, type Workspace } from "~/api/workspaces";
 import { useHosts, useRepos, useSessions, useSkills } from "~/data";
 import { isPersonal } from "~/filing";
 import { key } from "~/platform";
@@ -191,18 +191,28 @@ const BANDS: { of: ReturnType<typeof doing>; says: string }[] = [
   { of: "idle", says: "Idle" },
 ];
 const BAND_ORDER = { waiting: 0, working: 1, idle: 2 } as const;
+/* Worst first, within whatever grouping is on. The band is still `doing()`'s,
+   so the bands stay contiguous; inside one, the beat decides — which is what
+   makes the dots run ember, brick, sage rather than interleaving. */
+const BEAT_ORDER = { broken: 0, blocked: 1, working: 2, done: 3, over: 4 } as const;
+const worstFirst = (a: Workspace, b: Workspace) =>
+  BAND_ORDER[doing(a)] - BAND_ORDER[doing(b)] || BEAT_ORDER[beatOfPlace(a)] - BEAT_ORDER[beatOfPlace(b)];
 
-/**
- * In Repository mode the band is a repository, so status has nowhere else to
- * live and the dot returns — **capped at one**.
- *
- * The drawing says two. Counted in a render rather than assumed, two puts
- * **four** ember marks on the Dashboard at forty workspaces, against a budget
- * of three: the home's waiting chips already carry two before this panel
- * draws anything. The budget is for the screen, not for the panel, and the
- * panel is the last thing to arrive on it — so it gets what is left.
- */
-const EMBER_CAP = 1;
+/* **Every row carries a dot, in both modes.** The design had none in Status
+   mode — on the argument that the band heading already says *Needs you* —
+   and a capped one in Repository mode. The user has seen it rendered both
+   ways and overruled both: a panel where one row of three has a mark reads
+   as *missing*, not as restraint.
+
+   Each dot takes its own row's tone from `BEAT_TONE`, so the mark says which
+   of the three kinds of waiting a row is: ember blocked, slate working, sage
+   done, brick broken. Under a band reading *Waiting on you* that is more
+   than the heading says, not a repeat of it.
+
+   This breaches the three-ember budget on a busy screen — four waiting rows
+   are four ember dots — and that is accepted, by the person the budget was
+   for. `design-rules.mjs` exempts this panel and keeps counting everywhere
+   else. */
 
 function Workspaces({ stale, onCollapse }: { stale: boolean; onCollapse: () => void }) {
   const path = usePathname();
@@ -319,7 +329,6 @@ function Listing({
   path: string;
 }) {
   if (by === "repo") {
-    let embers = 0;
     return (
       <>
         {places.byRepo.map(([repo, held]) => (
@@ -330,29 +339,17 @@ function Listing({
               <span className="n">{held.length}</span>
             </div>
             {[...held]
-              .sort((a, b) => BAND_ORDER[doing(a)] - BAND_ORDER[doing(b)])
-              .map((place) => {
-                /* Past the cap a waiting row keeps its place and loses its
-                   dot; the repository's count still says how many. */
-                const hot = doing(place) === "waiting";
-                const show = hot ? ++embers <= EMBER_CAP : true;
-                return (
-                  <Place
-                    key={place.id}
-                    place={place}
-                    places={held}
-                    mark={show}
-                    on={path === `/sessions/${place.id}`}
-                  />
-                );
-              })}
+              .sort(worstFirst)
+              .map((place) => (
+                <Place key={place.id} place={place} places={held} on={path === `/sessions/${place.id}`} />
+              ))}
           </Fragment>
         ))}
       </>
     );
   }
 
-  const sorted = [...places.flat].sort((a, b) => BAND_ORDER[doing(a)] - BAND_ORDER[doing(b)]);
+  const sorted = [...places.flat].sort(worstFirst);
   let last: string | null = null;
   return (
     <>
@@ -370,12 +367,7 @@ function Listing({
                 <span className="n">{n}</span>
               </div>
             )}
-            {/* **No mark in Status mode.** The band above already says the
-                state and counts it, so a dot on every row repeats the
-                heading — and measuring it found worse: the Dashboard's
-                chips, the rail's avatar and a dotted panel put five ember
-                marks on one screen against a budget of three. */}
-            <Place place={place} places={sorted} mark={false} on={path === `/sessions/${place.id}`} />
+            <Place place={place} places={sorted} on={path === `/sessions/${place.id}`} />
           </Fragment>
         );
       })}
@@ -391,8 +383,9 @@ function Listing({
  * the dot, and the rule the whole design turns on is that ember is rare — six
  * of a thing that means "the one loud thing" is none of them.
  */
-function Place({ place, places, on, mark }: { place: Workspace; places: Workspace[]; on: boolean; mark: boolean }) {
+function Place({ place, places, on }: { place: Workspace; places: Workspace[]; on: boolean }) {
   const hot = place.runs.some(needsYou);
+  const beat = beatOfPlace(place);
   return (
     <button
       onClick={() => navigate(`/sessions/${place.id}`)}
@@ -400,9 +393,9 @@ function Place({ place, places, on, mark }: { place: Workspace; places: Workspac
       title={hot ? `${place.name} — waiting on you` : place.name}
       className="prow"
     >
-      {/* The column is held whether or not there is a mark in it, so a capped
-          row does not shift its name left of the rows above. */}
-      <span className="mk">{mark && hot && <i className="wdot" />}</span>
+      <span className="mk">
+        <i className="wdot" data-t={beat} />
+      </span>
       <span className={`min-w-0 flex-1 truncate ${hot ? "font-medium text-bone" : ""}`}>
         {rowLabel(place, places)}
       </span>

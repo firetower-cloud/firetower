@@ -125,6 +125,16 @@ export const RULES = function collect() {
        — somebody is waiting on you — and counting brand marks against it
        made a workspace with four agents in it permanently over budget. */
     if (el.closest("[data-mark], .face, .agentmark, [data-agent]")) continue;
+    /* **The workspaces panel is exempt, by the user, on 7 November 2026.**
+       Every row carries its own status dot in both modes — they were shown
+       it with the dots capped and without them, and a panel where one row of
+       three has a mark reads as missing rather than restrained. Four waiting
+       rows are four ember dots and that is the intended drawing.
+
+       Scoped rather than removed: a rule that fails on intended behaviour is
+       one the next person switches off wholesale, and it is still worth
+       having everywhere else. */
+    if (el.closest("[data-rail-panel]")) continue;
     const s = getComputedStyle(el);
     const hit = isEmber(s.color) || isEmber(s.backgroundColor) || isEmber(s.borderTopColor);
     /* Count the mark, not its ancestors: an inherited colour is one ember. */
