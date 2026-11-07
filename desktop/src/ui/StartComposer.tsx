@@ -551,7 +551,7 @@ export function StartComposer({
               }}
               placeholder="Start something new…"
               rows={1}
-              className="scroll-slim w-full resize-none bg-transparent text-lede leading-normal text-bone placeholder:text-mute focus:outline-none"
+              className="in scroll-slim resize-none bg-transparent placeholder:text-mute focus:outline-none"
             />
 
             {/* The footer: who does the work, and how. */}

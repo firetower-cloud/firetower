@@ -184,7 +184,7 @@ for (const theme of ["light", "dark"]) {
    an ember circle is one shape told apart by colour, which a dichromat
    cannot do. */
 for (const [scene, want] of [
-  ["team", [["needs you", "--color-ember", "dot"], ["working", "--color-slate", "typing"], ["handed back", "--color-sage", "svg"]]],
+  ["team", [["asked you a question", "--color-ember", "dot"], ["working", "--color-slate", "typing"], ["handed back", "--color-sage", "svg"]]],
   ["team-failed", [["failed", "--color-brick", "svg"], ["ended", "--color-mute", "svg"]]],
 ]) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 824 }, deviceScaleFactor: 2 });
@@ -208,12 +208,18 @@ for (const [scene, want] of [
         d.style.color = `var(${token})`;
         const wanted = getComputedStyle(d).color;
         d.remove();
-        /* The row whose second line says this, then its mark. */
-        const row = [...document.querySelectorAll(".kids .tm, .tm")].find((r) =>
-          (r.querySelector("s")?.textContent || "").trim() === note,
+        /* The row whose mark means this, found by its accessible name —
+           the second line says what the agent is *doing* now, not what its
+           status is, so it is no longer the thing to match on. */
+        const row = [...document.querySelectorAll(".tm")].find((r) =>
+          r.querySelector(".lead > *")?.getAttribute("aria-label") === note ||
+          r.querySelector(".lead > *")?.getAttribute("title") === note,
         );
         if (!row) return { missing: true };
-        const mark = row.querySelector(".rt > :not(.age)");
+        /* The mark leads the row now — it was in `.rt` beside the age until
+           the status moved to the front and the agent's mark took its
+           place. */
+        const mark = row.querySelector(".lead > *");
         if (!mark) return { noMark: true };
         const s = getComputedStyle(mark);
         return {

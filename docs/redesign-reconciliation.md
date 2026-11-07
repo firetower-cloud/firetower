@@ -13,12 +13,15 @@ and the harness below is how anybody looks again.
 ## How this was checked
 
 The prototype's `Every screen` tab is generated from one table, `SHEET`, which
-holds **96 states**. Three scripts drive it:
+holds **104 states**, of which 103 are distinct — the sheet carries
+`in-a-workspace__the-team-a-child-failed` twice. Every script reads the count
+out of the sheet rather than holding one, so it follows the drawing on its
+own. Five scripts drive it:
 
 | | |
 |---|---|
-| `pnpm shoot:proto` | Reads `SHEET` out of the artifact and photographs all 96 states at the window's own 1280×824, in light and dark. It reads the prototype and writes nothing into it. |
-| `pnpm shoot:app` | Drives the running app into the same 96 states against `mock-server.mjs`. A state it cannot reach records **why**, in `index.json`, rather than quietly photographing the nearest screen. |
+| `pnpm shoot:proto` | Reads `SHEET` out of the artifact and photographs every state at the window's own 1280×824, in light and dark. It reads the prototype and writes nothing into it. |
+| `pnpm shoot:app` | Drives the running app into the same states against `mock-server.mjs`. A state it cannot reach records **why**, in `index.json`, rather than quietly photographing the nearest screen. |
 | `pnpm reconcile` | One sheet per state: the drawing and the build, light along the top and dark underneath. Four panes is the unit that can actually be compared — a contact sheet of ninety-nine thumbnails tells you a screen exists and nothing about whether it matches. |
 | `pnpm assert:design` | The same states, **asserted rather than looked at**. See *Asserting instead of looking* below. |
 | `pnpm assert:connected` | Presses every control that *names* something and asks where it landed. See *Layer 2b* below. |

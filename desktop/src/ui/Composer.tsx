@@ -560,7 +560,7 @@ export function Composer({
             placeholder={
               disabled ? "This session has ended." : asking ? "Answer above, or say something else" : "Say something to the agent"
             }
-            className="scroll-slim block w-full resize-none bg-transparent px-4 py-3.5 text-read text-text placeholder:text-mute focus:outline-none"
+            className="in scroll-slim block resize-none bg-transparent px-4 py-3.5 placeholder:text-mute focus:outline-none"
           />
 
           {/* The controls wrap; send does not.

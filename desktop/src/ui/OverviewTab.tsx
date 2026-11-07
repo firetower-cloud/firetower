@@ -143,15 +143,32 @@ function TeamMark({ status }: { status: SessionStatus }) {
 function ManagerRow({ manager, active }: { manager: Session; active: boolean }) {
   const inner = (
     <>
-      <span className="ag">
-        <AgentMark agent={manager.agent as Agent} size={15} />
-      </span>
+      {/* **The status leads.** It was the last thing on the row, after the
+          agent mark, the name and a second line that began with the status
+          *word* — so the thing you scan for was the thing you reached last,
+          and it was said twice. Both were already marks, so the swap costs
+          the system nothing; it only changes which one the eye reaches
+          first.
+
+          Active, there is no mark: this is the workspace you are reading and
+          its state is the title bar and the composer. As a link *up* to a
+          parent it is another workspace you are not looking at, and its
+          status is worth exactly what a sibling's is — drawn **working**,
+          because a manager blocked on its child is working and ember stays
+          reserved for waiting on *you*. */}
+      <span className="lead">{!active && <TeamMark status="Working" />}</span>
       <span className="tx">
         <b>{agentName(manager.name)}</b>
-        <s>manager</s>
+        {/* On the name line, not the mark slot: `here` is a label about
+            which row you are standing in rather than a status, and at ~40px
+            in a 16px slot it printed `hereAda`. */}
+        {active && <span className="here-badge">here</span>}
+        <s>{active ? "manager" : "the workspace above"}</s>
       </span>
       <span className="rt">
-        {active && <span className="here-badge">here</span>}
+        <span className="ag">
+          <AgentMark agent={manager.agent as Agent} size={15} />
+        </span>
         <span className="age">{age(manager.createdAt)}</span>
       </span>
     </>
@@ -170,27 +187,30 @@ function ManagerRow({ manager, active }: { manager: Session; active: boolean }) 
 /** One agent on the team. The active one — the session you're reading — is a
  *  plain highlighted row; the rest are links to open them. */
 function MemberRow({ member, active, shared, checkIn }: { member: Session; active: boolean; shared: boolean; checkIn?: string }) {
-  /* **Not the branch.** Every child of one workspace is on the same branch,
-     so repeating it on four rows says nothing and crowds out the thing worth
-     reading — what this agent is actually doing. Its own check-in first, then
-     why it was started, then the status on its own. */
+  /* **Not the branch, and not the status either.** Every child of one
+     workspace is on the same branch, so repeating it on four rows says
+     nothing. And `labelOf(status)` was a *fallback prefix* — used only when
+     there was no check-in — so the word was absent half the time and
+     duplicating the glyph beside it the other half. The line is one thing
+     now, always: what the agent is doing, or why it exists. That string is
+     the only one saying what the mark is *about*, and deciding which child
+     to open without opening one is this rail's whole job. */
   const sub = checkIn ?? member.spawnReason ?? "";
   // A same-workspace child's `name` is the shared workspace's; its own name is
   // its `title`. Everyone else reads off the workspace name.
   const label = agentName(shared ? member.title : member.name);
   const inner = (
     <>
-      <span className="ag">
-        <AgentMark agent={member.agent as Agent} size={15} />
-      </span>
+      <span className="lead">{!active && <TeamMark status={member.status} />}</span>
       <span className="tx">
         <b>{label}</b>
-        {/* What it is doing, in a few words. Its own check-in when it has
-            posted one, and what the status means when it has not. */}
-        <s>{checkIn ? `“${sub}”` : `${labelOf(member.status)}${sub ? ` · ${sub}` : ""}`}</s>
+        {active && <span className="here-badge">here</span>}
+        <s>{checkIn ? `“${sub}”` : sub}</s>
       </span>
       <span className="rt">
-        <TeamMark status={member.status} />
+        <span className="ag">
+          <AgentMark agent={member.agent as Agent} size={15} />
+        </span>
         <span className="age">{age(member.createdAt)}</span>
       </span>
     </>

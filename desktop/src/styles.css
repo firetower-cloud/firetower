@@ -750,6 +750,26 @@
   :root:not([data-theme]) .composer {
     background: var(--color-raise);
   }
+  /* **The same words before and after you press send.** 16.5px, which is
+     what the sent message reads back at — typing at 18 and reading it back
+     at 16.5 shrank the text the moment it was committed. 18 also put what
+     you type at the size of an agent's question, which is the loudest
+     reading tier there is, and above the prose you read at length. The type
+     pass stepped everything under 28px up a pixel, which was right, and this
+     is the one place that uniform step landed where the scale did not
+     intend. A composer is a control, not a headline.
+
+     One rule for both composers, because they were always the same size: the
+     home's restated 18 rather than setting it, and the workspace's was a
+     Tailwind utility at 16. */
+  .in {
+    width: 100%;
+    font-size: 1.03125rem; /* 16.5px */
+    line-height: 1.5;
+    letter-spacing: -0.004em;
+    color: var(--color-bone);
+    min-height: 26px;
+  }
   .composer .bar {
     display: flex;
     align-items: center;
@@ -2916,12 +2936,37 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
     flex: none;
     color: var(--color-dim);
   }
+  /* **The status leads the row.** The slot is held whether or not a mark is
+     in it — the active row has none — so the names line up down the rail. */
+  .tm .lead {
+    width: 16px;
+    flex: none;
+    display: grid;
+    place-items: center;
+  }
+  /* The agent's mark moves here, beside the age. */
+  .tm .rt .ag {
+    display: grid;
+    place-items: center;
+    color: var(--color-dim);
+    flex: none;
+  }
+  /* A wrapping row rather than the drawing's `b{display:inline}`: inline
+     drops `text-overflow`, and a workspace can be called anything. The name
+     and the `here` badge share line one, the second line is forced onto its
+     own by `flex-basis`, and the name still truncates. Same picture, and a
+     long name still ends in an ellipsis instead of pushing the badge out. */
   .tm .tx {
     min-width: 0;
     flex: 1;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    column-gap: 7px;
   }
   .tm .tx b {
-    display: block;
+    flex: 0 1 auto;
+    min-width: 0;
     font-size: 0.90625rem;
     font-weight: 500;
     letter-spacing: -0.004em;
@@ -2930,8 +2975,11 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
     overflow: hidden;
     text-overflow: ellipsis;
   }
+  .tm .tx .here-badge {
+    flex: none;
+  }
   .tm .tx s {
-    display: block;
+    flex-basis: 100%;
     text-decoration: none;
     font-size: 0.84375rem;
     color: var(--color-dim);
@@ -3538,9 +3586,11 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
   :root:not([data-theme]) .mid .composer {
     box-shadow: var(--shadow-float);
   }
+  /* **Restated 18px, it did not set it** — which is exactly what the drawing
+     says of its own `.mid .composer .in`. The size belongs to the base rule
+     and both composers were always the same; only the height differs here. */
   .mid .composer textarea {
     min-height: 64px;
-    font-size: 1.125rem;
   }
   .mid .composer .bar {
     margin-top: 14px;
