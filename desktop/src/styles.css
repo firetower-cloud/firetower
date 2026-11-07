@@ -366,9 +366,9 @@
   /* ── The rail ──────────────────────────────────────────────────
      Six destinations and the avatar; no rule and no doors under them, since
      Settings and Updates became rows in the profile menu and nothing else.
-     Selection is a pill in the *sheet's*
-     own colour, because the selected destination is the sheet's handle —
-     nothing else in here fills. Hover and preview are the same gesture at two
+     Selection is a pill in the *sheet's* own colour, because the selected
+     destination is the sheet's handle — nothing else in here fills. Hover
+     and preview are the same gesture at two
      strengths, drawn in the ink rather than in a hue: a rail that lights up is
      a rail competing with the one thing on screen that is allowed to. */
   .rbtn {
@@ -434,7 +434,8 @@
      drew it. That icon has gone and the mark is the avatar's now, so the
      position comes off the class and goes to the one site that places it;
      `ProfileMenu.tsx` carries the rule about what may and may not set it. The
-     ring is still `--color-ground` because both sites sit on the desk. */
+     ring stays `--color-ground`: the avatar sits on the desk, as the rail
+     button did. */
   .news {
     position: absolute;
     width: 5.5px;
@@ -1947,8 +1948,10 @@ html:not([data-platform="macos"]) {
     color: var(--color-bone);
     font-weight: var(--font-weight-mid);
   }
-  /* The same mark the inspector's tabs use, down to the 2px and the offset —
-     one underline in the product, not two that nearly match. */
+  /* The inspector tabs' mark — 2px, bone, full width of the word — so there
+     is one underline in the product rather than two that nearly match. A
+     pixel lower than theirs, because these sit on 1px of padding where an
+     `.itab` sits on 4 and the optical gap has to come out the same. */
   .sitem .ul {
     position: absolute;
     right: 0;
