@@ -22,7 +22,13 @@ rule still governs, `exempt` is this panel's own.
 """
 import subprocess, pathlib, sys, re
 ART="/Users/kevinpiacentini/.firetower/worker/worktrees/agent-redesign-w5z9f71c/.firetower/artifacts/firetower-redesign/index.html"
-EXEMPT = ".pscroll i.wdot"   # the workspaces panel; see the docstring
+# The workspaces panel's status marks; see the docstring. **Anchored on the
+# row's mark slot rather than on the mark's own class**: the first version said
+# `.pscroll i.wdot`, and when the panel adopted the shared alphabet it stopped
+# drawing `.wdot` — so the exemption silently stopped applying and the count
+# jumped from 3 to 5 with nothing having changed about the design. An exemption
+# keyed to an implementation detail expires without saying so.
+EXEMPT = ".pscroll .mk .dot, .pscroll .mk .wdot"
 BUDGET = 3
 tab, extra = sys.argv[1], (sys.argv[2] if len(sys.argv)>2 else "")
 s = pathlib.Path(ART).read_text().replace('</body>', f'''<script>

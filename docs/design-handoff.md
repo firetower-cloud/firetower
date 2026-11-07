@@ -590,6 +590,70 @@ Drawing it ember would have added one more to that rail for a state nobody is
 being asked about — which is how a signal that means one thing stops meaning
 it.
 
+### One status alphabet, and the panel joins it
+
+**Decided:** the rail panel adopts the shared set — **filled dot, three pips,
+tick, warning triangle** — the same marks the team rail and the home chips
+already draw. It was the one surface left behind when the other two converged.
+
+**This is not a consistency argument, and it should not be made as one.** The
+panel drew `.wdot`: one circle in four tones. That is *hue alone*, and it fails
+on measurement.
+
+Simulating the two commonest dichromacies and comparing the luminance of the
+four tones — because once the shape is identical, luminance is all that is left:
+
+| | | |
+|---|---|---|
+| light, protanope | *needs you* vs *done* | **1.07 : 1** |
+| light, protanope | *needs you* vs *broken* | **1.14 : 1** |
+| dark, deuteranope | *working* vs *done* | **1.00 : 1** |
+
+**Three of the four states collapse**, in both themes, and the pair that
+collapses hardest is the one that matters most in this product: an agent
+waiting on you, against one that has finished. A filled circle, three pips, a
+tick and a triangle survive 1.00:1 intact, because none of them is asking
+colour to do the work.
+
+**What it costs, measured.** The shaped set does not drop in: the panel's lead
+slot is 9px and a typing mark is 18. The slot widens to 16px and every label
+moves 7px right. At 37 rows that truncates **two more labels — three to five**.
+Row height, band rules and the 252px width are unchanged. That is the whole
+bill, and it buys three states back.
+
+**One gain that was not the reason but is worth having.** In a column of
+strokes, the solid circle is the only filled mark in the panel. Ember stops
+being one colour among four identical circles and becomes a different *weight* —
+the signal the design spends most of its effort protecting gets louder without
+getting bigger.
+
+**And the animation answers for itself.** The typing mark is three pips that
+happen to animate, not an animation: under `prefers-reduced-motion` the
+duration drops to effectively zero and the pips hold at `opacity .55` — static,
+legible, still a distinct shape. Eight of them on screen at once never depended
+on movement to say anything.
+
+**The honest case for keeping dots** was that a dot is smaller and at a 32px
+chrome row it might be the only thing that fits. Drawn at 36 rows in both
+themes, it is not: the shaped column reads *lighter* than the dotted one,
+because a thin tick weighs less than a filled circle and twenty-three of them
+weigh a great deal less. The argument for dots was real and the render does not
+support it.
+
+### An exemption keyed to a class name expires without saying so
+
+Worth recording because it cost a wrong number for five minutes. `ember.py`
+exempted the workspaces panel with the selector `.pscroll i.wdot`. When the
+panel adopted the shared alphabet it stopped drawing `.wdot` — so **the
+exemption silently stopped applying** and the count jumped from 3 to 5 with
+nothing having changed about the design.
+
+The selector is now anchored on the row's mark *slot* rather than on the mark's
+own class. The general shape of the mistake: **an exemption written against an
+implementation detail stops protecting the thing it was written for the moment
+that detail changes, and it fails loudly in the wrong direction** — as a
+violation, not as a missing exemption. Anchor exemptions on structure.
+
 ### Every workspace row carries a dot, in both modes, uncapped
 
 **Decided:** a status dot on every row of the workspaces panel, in Status mode
@@ -1122,7 +1186,7 @@ component list.
 **`desktop-redesign.html`** — fifteen tabs. Ten are mock-ups of a 1280×824
 window; five are documents:
 
-* **Every screen** — the contact sheet, and **read this one first**. All 112
+* **Every screen** — the contact sheet, and **read this one first**. All 113
   states at a third scale, grouped as Coverage is, each tile a control that
   opens it full size. It exists because a reader looking for the connect screen
   could not find it and reported it missing: it is the eleventh of fifteen tabs

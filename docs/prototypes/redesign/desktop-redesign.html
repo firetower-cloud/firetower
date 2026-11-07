@@ -1953,6 +1953,15 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
 .sw .typing{transform:scale(.86)}
 .sw .bm{display:grid;place-items:center}
 </style>
+<style>
+/* The shaped set does not fit the panel's 9px lead slot: a typing mark is
+   three 4px pips with two 3px gaps — 18px — and the glyphs are 13–14. Shown
+   at the panel's own size, the slot has to widen to 16px, and every label in
+   the panel moves 7px right. That is the cost, drawn rather than asserted. */
+.panel[data-mark="shape"] .prow .mk{width:16px}
+.panel[data-mark="shape"] .prow .bm{width:14px;height:14px}
+.panel[data-mark="shape"] .prow .typing{transform:scale(.8);transform-origin:left center}
+</style>
 
 </head>
 <body>
@@ -2190,6 +2199,10 @@ const S={theme:"light",panel:"pinned",peek:null,menu:null,tower:"nw",
      a thing to look at rather than specify, so both are here and the masthead
      switches them. Two is the default because that is where it landed twice. */
   rows:2,
+  /* The rail panel's status mark. **"shape" ships** — the set the team rail
+     and the home chips already share. "dot" is what the panel draws today and
+     is kept switchable, because the comparison is the argument. */
+  pmark:"shape",
   /* What *View more* does. "expand" is what was asked for — the section opens
      in place. "panel" opens the Workspaces panel at that band instead, which
      is the alternative the ember count argues for. */
@@ -2382,9 +2395,25 @@ function panel(){
    that needs you looks the same wherever the panel has put it. */
 function wrow(w){
   const on = S.rt==="work" && w.id===WS.id;
+  /* **One alphabet, everywhere.** The panel drew its own `.wdot`: one circle
+     in four tones, which is *hue alone* — the one thing the guide forbids —
+     and it fails quantitatively rather than as a matter of taste. Simulated
+     for a protanope in light, `needs you` and `done` sit at **1.07:1**; for a
+     deuteranope in dark, `working` and `done` are **1.00:1**. Three of the
+     four states collapse, and the pair that collapses hardest is the one that
+     matters most: an agent waiting on you, and one that has finished.
+
+     The shaped set survives a luminance of 1.00:1 because the shapes differ:
+     a filled dot, three pips, a tick, a warning triangle. It does not drop
+     in — the panel's lead slot is 9px and a typing mark is 18 — so the slot
+     widens to 16 and every label moves 7px right. Measured cost at 37 rows:
+     **two more labels truncate**, 3 to 5. That is what it buys. */
+  const mk = S.pmark==="shape"
+    ? beatMark(MARK_FOR[w.beat])
+    : `<i class="wdot" data-t="${w.beat}"></i>`;
   return `<button class="prow" data-act="open" aria-current="${!!on}"
     title="${esc(w.name)} — ${BEAT_BAND[w.beat].toLowerCase()}">
-    <span class="mk"><i class="wdot" data-t="${w.beat}"></i></span>
+    <span class="mk">${mk}</span>
     <span class="lbl">${esc(w.name)}</span><span class="age">${w.age}</span></button>`;
 }
 
@@ -2656,7 +2685,7 @@ function renderWin(){
     </div>
     <div class="body">
       ${rail2()}
-      ${show?`<div class="panel" data-float="${floating}" data-navzone>${panelFor2(peeking?S.peek:S.rt)}</div>`:""}
+      ${show?`<div class="panel" data-float="${floating}" data-mark="${S.pmark}" data-navzone>${panelFor2(peeking?S.peek:S.rt)}</div>`:""}
       <main class="sheet">${
         S.threw           ? threw()
       : S.rt==="work"      ? workspace()
@@ -4519,6 +4548,10 @@ const SPEC_DELTA=[
   ["The rename pencil comes out","reverted","<b>Drawn, then removed by the person using it.</b> A pencil sat beside the workspace title always-on at <code>--hush</code>, on the argument that <i>a hover state cannot be the whole affordance — you have to already be pointing at a thing to learn it is a control</i>. That argument still stands; the cost was chosen anyway, and it is a fair one: <b>a permanent mark beside the one name on the screen is a second thing to read every time you look at it, forever, to solve a problem you have once.</b> Hover is the affordance again. <b>Rename is unchanged</b> — single click and double click both open the field. <i>How a title announces itself is still open</i>: a tooltip nobody reads and a mark nobody wants are both answers that have been tried."],
   ["The rail&rsquo;s hover preview — the rule","clarified","<b>Specified three different ways in one day, so it is written down rather than inferred.</b> Active destination + panel open: <b>no preview</b>, it is already on screen. Active + panel collapsed: <b>preview</b>. Any other destination, either state: <b>preview</b>. One sentence: <i>preview unless you are pointing at the thing the open panel is already showing.</i> Two rows were unreachable in the drawing — <code>startPeek</code> refused <code>home</code> outright, and the panel only floated when collapsed, so hovering a <i>different</i> destination with the panel open did nothing. Both are drawn now, and all four rows are asserted in a render by <code>peek.py</code>."],
   ["Clicking a destination does not pin the panel","corrected","<code>peekgo</code> set <code>panel = \"pinned\"</code> on every navigation. <b>It navigates and nothing else.</b> Pinned or collapsed is the person&rsquo;s last choice and persists across destinations; a navigation is not a vote about chrome."],
+  ["The rail panel joins the shared alphabet","corrected","<b>One set everywhere: filled dot, three pips, tick, warning triangle.</b> The team rail and the home chips already share it; the panel was the one surface left behind, still drawing <code>.wdot</code> — one circle in four tones. <b>That is hue alone, and it fails on measurement rather than on taste.</b> Simulated protanope in light: <i>needs you</i> vs <i>done</i> is <b>1.07:1</b>, <i>needs you</i> vs <i>broken</i> <b>1.14:1</b>. Simulated deuteranope in dark: <i>working</i> vs <i>done</i> is <b>1.00:1</b> — the same mark. <b>Three of four states collapse</b>, and the pair that collapses hardest is an agent waiting on you against one that has finished."],
+  ["What it costs, measured","noted","The shaped set does not drop in: the panel&rsquo;s lead slot is <b>9px</b> and a typing mark is <b>18</b>. The slot widens to <b>16px</b> and every label moves 7px right. At 37 rows that truncates <b>two more labels — 3 to 5</b>. That is the whole bill. <b>Nothing else in the panel moves</b>: row height, band rules and the 252px width are unchanged."],
+  ["Ember becomes the only filled mark","noted","An unexpected gain. In a column of strokes — ticks, triangles, pips — <b>the solid circle is the only filled thing on the panel</b>, so ember stops being one colour among four circles and becomes a different <i>weight</i>. The signal the whole design protects gets louder without getting bigger."],
+  ["Animation in a 36-row list","noted","<b>The typing mark is three pips that happen to animate, not an animation.</b> Under <code>prefers-reduced-motion</code> the duration drops to <code>1e-06s</code> and the pips sit at <code>opacity .55</code> — static, legible, and still a distinct shape. So the list is not relying on motion to say anything, which is the test that matters when eight rows of it are on screen at once."],
   ["desktop/src/ui/Dashboard — <i>Recent agents</i>","added","<b>One section, not three.</b> Ordered <code>broken &rarr; blocked &rarr; done &rarr; working</code> — severity first, then what has finished, then what is still going — with <i>View all</i> at its top right in the treatment <i>Recent artifacts</i> uses. Each chip takes its mark from the same <code>beatMark</code> the team rail uses. <b>Three sections were built first and reversed:</b> with one chip under each heading, a heading per category costs more than it returns. See the handoff."],
   ["What makes one section legible","noted","<b>The marks are shapes, not colours</b> — ember dot, sage tick, slate typing, brick triangle, each readable with the colour off. That has only been true since the team-rail pass; before it a single row would have been four greys and the headings would have been load-bearing. <b>The ordering is carried by the marks alone and gets no hairline.</b> The workspaces panel rules its bands because it is a tall list you scan down; this is two to five chips, and at two rows a rule would land somewhere different every time a name changed length. A break that moves is worse than no break."],
   ["One line or two — both drawn","open","<b>Asked for as two, then one, then two within a few minutes</b>, so both are in the masthead and nothing needs rebuilding if it moves again. <b>Two is the default.</b> Measured at the 748px column: <b>one line holds 2&ndash;3 chips, two lines 4&ndash;5</b> — not double, because the second row only exists once the first overflows. Identical at 1280 and 1680."],
@@ -4912,7 +4945,8 @@ const COV=[
   ["The workspaces panel",null,"Proposition C, chosen from <code>workspaces-exploration.html</code>",[
     ["Flat, status-ordered, banded","Y","One hairline and a word where the band turns"],
     ["Status / Repository switch","Y","Its own row — the header cannot hold a fourth thing at 252px"],
-    ["A status dot on every row, in both modes","Y","<b>Uncapped, and not mode dependent.</b> <code>BEAT_TONE</code>'s own tones. Earlier drafts drew none in Status mode and capped ember in Repository mode; both overruled — see Spec"],
+    ["One status alphabet, shared with the team rail and the home","Y","<b>Filled dot, three pips, tick, warning triangle.</b> The panel&rsquo;s own four-tone <code>.wdot</code> was hue alone and collapsed to two distinguishable marks under simulated colour blindness. Costs 7px of label width and two more truncated rows in 37"],
+    ["A status mark on every row, in both modes","Y","<b>Uncapped, and not mode dependent.</b> <code>BEAT_TONE</code>'s own tones. Earlier drafts drew none in Status mode and capped ember in Repository mode; both overruled — see Spec"],
     ["Seven · forty · all finished · none","Y","The states C was chosen against"],
     ["A <i>Done</i> or <i>Broken</i> band the data can fill","N","<code>doing()</code> returns <code>idle</code> for finished, never-started and failed alike. Needs a <code>BEAT</code> rollup — see Spec"],
   ]],
@@ -6228,6 +6262,7 @@ const SHEET = [
   ["Recent agents — expanded",     {tab:"home", rt:"home", home:"both", ws:"many", band:"all"}],
   ["Recent agents — a long name",  {tab:"home", rt:"home", home:"both", longname:true}],
   ["Panel — by status, forty",     {tab:"home", rt:"home", home:"both", ws:"many"}],
+  ["Panel — the dots it ships today",{tab:"home", rt:"home", home:"both", ws:"many", pmark:"dot"}],
   // The row of the preview rule the build never had: you are on this
   // destination, the panel is hidden, and you hover the one you are already on.
   ["Hovering the one you are on",  {tab:"home", rt:"home", home:"both", panel:"collapsed", peek:"home"}],
@@ -6517,6 +6552,8 @@ function chrome(){
       [["","No sheet"],["1","What it may reach"]]
       .map(([id,l])=>`<button data-act="scopesheet" data-scopesheet="${id}" aria-pressed="${(S.scopesheet?"1":"")===id}">${l}</button>`).join("")}</span>`:""}
     ${S.tab==="updates"?seg("up","up",[["read","What is running"],["plan","What it will write"],["run","Upgrading"]]):""}
+    <span class="seg">${[["dot","Panel · dots"],["shape","Panel · shapes"]]
+      .map(([id,l])=>`<button data-act="pmark" data-pmark="${id}" aria-pressed="${(S.pmark||"dot")===id}">${l}</button>`).join("")}</span>
     <span class="seg">${
       [["small","7 workspaces"],["many","40, 30 in one repo"],["done","All finished"],["none","None"]]
       .map(([id,l])=>`<button data-act="ws" data-ws="${id}" aria-pressed="${S.ws===id}">${l}</button>`).join("")}</span>
@@ -6688,6 +6725,7 @@ document.addEventListener("click",e=>{
   /* The four rows of the preview rule, as four states you can step through.
      The third and fourth were unreachable before: `startPeek` refused `home`
      outright and the panel only floated when it was collapsed. */
+  else if(a==="pmark"){ S.pmark=b.dataset.pmark; S.panel="pinned"; }
   else if(a==="rows"){ S.rows=+b.dataset.rows; S.band=null; S.tab="home"; S.rt="home"; }
   else if(a==="bandgo"){ S.bandgo=b.dataset.bandgo; S.band=null; S.tab="home"; S.rt="home"; }
   /* The panel is already flat, status-ordered and banded by exactly these
