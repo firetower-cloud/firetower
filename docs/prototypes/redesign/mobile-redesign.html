@@ -34,19 +34,29 @@
    ────────────────────────────────────────────────────────────────────────── */
 :root{
   /* The document, light. */
-  --d-desk:#ECEEF1; --d-sheet:#FFFFFF; --d-raised:#F5F6F8; --d-sunk:#E6E8ED;
-  --d-hair:#E3E5EA; --d-ink:#15161A; --d-body:#45474F; --d-quiet:#787B85;
-  --d-hush:#A4A7B1; --d-ember:#FF5E1A; --d-ember-ink:#BF4714; --d-brick:#B83A30;
+  /* Every neutral holds R = G. The shipped dark scale always did — it lifts
+     blue and never green — and the first light derivation had green 1–3
+     points above red, which is a different hue rather than a cooler grey.
+     These are the handoff's corrected nine, each holding its old L* to
+     within 0.15 so no contrast ratio moved by more than 0.03. */
+  --d-desk:#F2F2F3; --d-sheet:#FFFFFF; --d-raised:#F6F6F9; --d-sunk:#E8E8EC;
+  --d-hair:#E5E5EA; --d-ink:#161617; --d-body:#47474D; --d-quiet:#7B7B83;
+  --d-hush:#A6A6AF; --d-ember:#FF5E1A; --d-ember-ink:#BF4714; --d-brick:#B83A30;
   --d-amber:#A8780F; --d-good:#2F7D52; --d-good-bg:#EAF6EE; --d-slate:#44607E;
-  --d-lift-1:0 1px 2px rgb(21 22 26 / .05);
-  --d-lift-2:0 2px 6px rgb(21 22 26 / .06), 0 0 0 1px rgb(21 22 26 / .04);
-  --d-lift-3:0 18px 44px -18px rgb(21 22 26 / .26), 0 2px 8px rgb(21 22 26 / .05);
-  --d-device:0 1px 1px rgb(21 22 26 / .10), 0 32px 70px -26px rgb(21 22 26 / .34);
+  --d-lift-1:0 1px 2px rgb(22 22 23 / .05);
+  --d-lift-2:0 2px 6px rgb(22 22 23 / .06), 0 0 0 1px rgb(22 22 23 / .04);
+  --d-lift-3:0 18px 44px -18px rgb(22 22 23 / .26), 0 2px 8px rgb(22 22 23 / .05);
+  --d-device:0 1px 1px rgb(22 22 23 / .10), 0 32px 70px -26px rgb(22 22 23 / .34);
 
   /* The phone, light. Derived; measured in Spec. */
-  --p-ground:#FFFFFF; --p-panel:#F7F8FA; --p-raise:#F1F3F6; --p-overlay:#E6E8ED;
-  --p-line:#E3E5EA; --p-line-soft:#EDEEF2; --p-settling:#C9CCD3;
-  --p-bone:#15161A; --p-text:#45474F; --p-dim:#787B85; --p-mute:#A4A7B1;
+  /* R = G here too, mapped role for role onto the document's corrected nine:
+     ground is the sheet, raise is raised, overlay is sunk, line is hair, and
+     the ink ramp is ink/body/quiet/hush. The phone's *dark* branch needed
+     nothing — it is `tokens.generated.ts`, and every one of its neutrals
+     already held R = G, which is the rule this came from. */
+  --p-ground:#FFFFFF; --p-panel:#FAFAFB; --p-raise:#F6F6F9; --p-overlay:#E8E8EC;
+  --p-line:#E5E5EA; --p-line-soft:#EFEFF2; --p-settling:#CBCBD1;
+  --p-bone:#161617; --p-text:#47474D; --p-dim:#7B7B83; --p-mute:#A6A6AF;
   --p-ember:#FF5E1A; --p-ember-ink:#BF4714; --p-ember-tint:#FFF0E8; --p-ember-deep:#EAA078;
   --p-sage:#2F7D52; --p-sage-tint:#EAF6EE; --p-sage-deep:#A9D6BB;
   --p-brick:#B83A30; --p-brick-tint:#FFF3F2; --p-brick-deep:#F7A9A0;
@@ -58,11 +68,11 @@
   --p-syn-comment:#878792; --p-syn-string:#2d5439; --p-syn-keyword:#65598e;
   --p-syn-type:#4c647d; --p-syn-number:#5a4c14; --p-syn-fn:#895a37; --p-syn-attr:#676771;
   /* The platform's own chrome, which is not ours and does not follow our ramp. */
-  --p-sys-bar:rgb(255 255 255 / .72); --p-sys-line:rgb(21 22 26 / .10);
-  --p-scrim:rgb(21 22 26 / .34);
-  --p-raise-shadow:0 1px 2px rgb(21 22 26 / .06);
-  --p-rest-shadow:0 1px 2px rgb(21 22 26 / .05), 0 0 0 1px rgb(21 22 26 / .055);
-  --p-float-shadow:0 20px 48px -18px rgb(21 22 26 / .26), 0 2px 8px rgb(21 22 26 / .05), 0 0 0 1px rgb(21 22 26 / .04);
+  --p-sys-bar:rgb(255 255 255 / .72); --p-sys-line:rgb(22 22 23 / .10);
+  --p-scrim:rgb(22 22 23 / .34);
+  --p-raise-shadow:0 1px 2px rgb(22 22 23 / .06);
+  --p-rest-shadow:0 1px 2px rgb(22 22 23 / .05), 0 0 0 1px rgb(22 22 23 / .055);
+  --p-float-shadow:0 20px 48px -18px rgb(22 22 23 / .26), 0 2px 8px rgb(22 22 23 / .05), 0 0 0 1px rgb(22 22 23 / .04);
 
   --d-font:"Archivo",ui-sans-serif,-apple-system,system-ui,sans-serif;
   --d-narrow:"Archivo Narrow",var(--d-font);
@@ -71,9 +81,13 @@
   color-scheme:light;
 }
 :root[data-theme="dark"]{
-  --d-desk:#060608; --d-sheet:#131317; --d-raised:#1B1C20; --d-sunk:#232429;
-  --d-hair:#2A2C31; --d-ink:#F5F5F7; --d-body:#C6C8CF; --d-quiet:#8B8E98;
-  --d-hush:#60636D; --d-ember:#FF6B2C; --d-ember-ink:#FF9A6B; --d-brick:#E5645A;
+  /* `globals.css` byte for byte. The desktop artifact's dark branch had
+     drifted — its `--desk` was `#060608` against the real `#0b0b0c` — and I
+     copied the drift when I copied the sheet. Five of the nine carried the
+     same green contamination the light branch had. */
+  --d-desk:#0b0b0c; --d-sheet:#111113; --d-raised:#17171a; --d-sunk:#1e1e22;
+  --d-hair:#26262b; --d-ink:#f4f4f5; --d-body:#c8c8ce; --d-quiet:#8b8b93;
+  --d-hush:#5e5e67; --d-ember:#FF6B2C; --d-ember-ink:#FF9A6B; --d-brick:#E5645A;
   --d-amber:#fab219; --d-good:#6EC08A; --d-good-bg:#12251A; --d-slate:#7D95B0;
   --d-lift-1:inset 0 1px 0 rgb(255 255 255 / .03);
   --d-lift-2:inset 0 1px 0 rgb(255 255 255 / .04), 0 1px 2px rgb(0 0 0 / .4);
@@ -195,7 +209,7 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;text-a
 .d-bad{color:var(--d-brick)}
 .d-warn{color:var(--d-amber)}
 .d-swatch{display:inline-block;width:11px;height:11px;border-radius:3px;
-  vertical-align:-1px;margin-right:6px;box-shadow:inset 0 0 0 1px rgb(21 22 26 / .12)}
+  vertical-align:-1px;margin-right:6px;box-shadow:inset 0 0 0 1px rgb(22 22 23 / .12)}
 
 /* Coverage. */
 .d-cov{margin:4px 0 18px}
@@ -307,7 +321,7 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;text-a
 .p-dev[data-kind="android"]{border-radius:30px;padding:7px}
 .p-dev[data-kind="front"]{border-radius:30px;padding:8px}
 .p-screen{position:relative;overflow:hidden;border-radius:32px;background:var(--p-ground);
-  color:var(--p-text);font-family:var(--d-font);font-size:15px;line-height:1.5;
+  color:var(--p-text);font-family:var(--d-font);font-size:16px;line-height:1.5;
   display:flex;flex-direction:column;font-feature-settings:"cv05" 1}
 .p-dev[data-kind="android"] .p-screen{border-radius:24px}
 .p-dev[data-kind="front"] .p-screen{border-radius:23px}
@@ -316,10 +330,10 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;text-a
 
 /* The system's own bars. Translucent, content scrolls under. */
 .p-status{height:54px;flex:none;display:flex;align-items:flex-end;justify-content:space-between;
-  padding:0 26px 7px;font-size:14px;font-weight:600;color:var(--p-bone);
+  padding:0 26px 7px;font-size:14px;font-weight:530;color:var(--p-bone);
   letter-spacing:-.01em;z-index:30;position:relative}
 .p-status[data-kind="android"]{height:30px;padding:0 15px 4px;font-size:12px;font-weight:500}
-.p-status[data-kind="front"]{height:44px;padding:0 20px 6px;font-size:13px}
+.p-status[data-kind="front"]{height:44px;padding:0 20px 6px;font-size:14px}
 .p-glyphs{display:flex;gap:5px;align-items:center;opacity:.85}
 .p-notch{position:absolute;top:10px;left:50%;transform:translateX(-50%);width:112px;height:30px;
   border-radius:99px;background:#0A0A0C;z-index:35}
@@ -337,8 +351,8 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;text-a
 .p-tab{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;
   color:var(--p-mute);padding-bottom:4px}
 .p-tab[aria-selected="true"]{color:var(--p-bone)}
-.p-tablab{font-size:10.5px;font-weight:530;letter-spacing:.004em}
-.p-tabs[data-kind="android"] .p-tablab{font-size:12px}
+.p-tablab{font-size:11.5px;font-weight:530;letter-spacing:.004em}
+.p-tabs[data-kind="android"] .p-tablab{font-size:13px}
 .p-pillbg{width:60px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:99px}
 .p-tabs[data-kind="android"] .p-tab[aria-selected="true"] .p-pillbg{background:var(--p-overlay)}
 .p-home{flex:none;height:34px;display:flex;align-items:center;justify-content:center;
@@ -357,7 +371,7 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;text-a
 .p-railitem{width:62px;display:flex;flex-direction:column;align-items:center;gap:4px;
   padding:10px 0;color:var(--p-mute);border-radius:14px}
 .p-railitem[aria-selected="true"]{color:var(--p-bone)}
-.p-raillab{font-size:10.5px;font-weight:530}
+.p-raillab{font-size:11.5px;font-weight:530}
 
 .p-scroll{flex:1;min-height:0;overflow:hidden;position:relative}
 .p-col{width:100%;max-width:640px;margin:0 auto}
@@ -367,15 +381,15 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;text-a
    The scale is `tokens.generated.ts`. Tracking is size-specific: large text
    wants it negative, small text a touch positive.
    ──────────────────────────────────────────────────────────────────────── */
-.p-lede{font-size:32px;line-height:1.1;letter-spacing:-.028em;font-weight:560;color:var(--p-bone)}
-.p-display{font-size:28px;line-height:1.18;letter-spacing:-.024em;font-weight:560;color:var(--p-bone)}
-.p-title{font-size:18px;line-height:1.35;letter-spacing:-.012em;font-weight:560;color:var(--p-bone)}
-.p-readtx{font-size:17px;line-height:1.62;color:var(--p-text);letter-spacing:-.003em}
-.p-ui{font-size:15px;line-height:1.5;color:var(--p-text)}
-.p-meta{font-size:13px;line-height:1.45;color:var(--p-dim)}
-.p-micro{font-size:12.5px;line-height:1.45;color:var(--p-mute);letter-spacing:.004em}
-.p-mono{font-family:var(--d-mono);font-size:13px;letter-spacing:-.016em;color:var(--p-dim)}
-.p-sec{font-size:13.5px;color:var(--p-dim);font-weight:500;letter-spacing:-.002em}
+.p-lede{font-size:32px;line-height:1.1;letter-spacing:-.028em;font-weight:530;color:var(--p-bone)}
+.p-display{font-size:28px;line-height:1.18;letter-spacing:-.024em;font-weight:530;color:var(--p-bone)}
+.p-title{font-size:19px;line-height:1.35;letter-spacing:-.012em;font-weight:530;color:var(--p-bone)}
+.p-readtx{font-size:18px;line-height:1.62;color:var(--p-text);letter-spacing:-.003em}
+.p-ui{font-size:16px;line-height:1.5;color:var(--p-text)}
+.p-meta{font-size:14px;line-height:1.45;color:var(--p-dim)}
+.p-micro{font-size:13.5px;line-height:1.45;color:var(--p-mute);letter-spacing:.004em}
+.p-mono{font-family:var(--d-mono);font-size:14px;letter-spacing:-.016em;color:var(--p-dim)}
+.p-sec{font-size:14.5px;color:var(--p-dim);font-weight:500;letter-spacing:-.002em}
 .p-ink{color:var(--p-bone)}
 .p-dimtx{color:var(--p-dim)}
 .p-mutetx{color:var(--p-mute)}
@@ -390,8 +404,8 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;text-a
 .p-who{display:flex;align-items:center;gap:9px;height:44px;padding:0 6px;border-radius:12px}
 .p-who:active{opacity:.45}
 .p-mono-sq{width:26px;height:26px;border-radius:7px;background:var(--p-raise);display:flex;
-  align-items:center;justify-content:center;font-size:12px;font-weight:600;color:var(--p-dim);flex:none}
-.p-mono-sq[data-big="1"]{width:38px;height:38px;border-radius:10px;font-size:16px}
+  align-items:center;justify-content:center;font-size:13px;font-weight:530;color:var(--p-dim);flex:none}
+.p-mono-sq[data-big="1"]{width:38px;height:38px;border-radius:10px;font-size:17px}
 .p-mono-sq[data-dark="1"]{border:1px dashed var(--p-settling);color:var(--p-mute);background:none}
 
 /* ── The signals ───────────────────────────────────────────────────────────
@@ -413,65 +427,96 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;text-a
   .p-dots i{animation:none;opacity:.55}
 }
 
+/* ── The home ──────────────────────────────────────────────────────────────
+   The desk holds the greeting open with 192px of air above it, which is 23%
+   of its window. The same proportion of a 390pt phone is 194pt of nothing on
+   the scarce axis, and the whole page would not then fit. 44 lets the
+   greeting breathe and keeps greeting, composer and both sections on one
+   screen at 390 — measured in Spec.
+   ──────────────────────────────────────────────────────────────────────── */
+.p-air{min-height:44px;padding:16px 20px 22px;display:flex;flex-direction:column;
+  justify-content:flex-end}
+.p-air[data-bare="1"]{min-height:0;padding-top:28px}
+.p-greet{font-size:28px;line-height:1.16;letter-spacing:-.024em;font-weight:530;color:var(--p-bone)}
+.p-homecomp{padding-bottom:4px}
+.p-homecomp .p-box{box-shadow:var(--p-float-shadow)}
+
+/* One shape, two contents. *Agents waiting for you* is work asking for you
+   and *Recent artifacts* is work you made, so the actionable one goes first.
+   Same heading, same size, same colour — the only thing telling them apart
+   is the ember on the chips. */
+.p-secrow{display:flex;align-items:baseline;gap:10px;padding:22px 20px 10px}
+.p-all{display:inline-flex;align-items:center;gap:3px;font-size:15px;color:var(--p-dim)}
+.p-chipwrap{display:flex;gap:8px;padding:0 20px 2px;align-items:center}
+.p-chiprow{display:flex;gap:8px;flex:1;min-width:0;overflow:hidden;
+  mask-image:linear-gradient(to right,#000 calc(100% - 26px),transparent);
+  -webkit-mask-image:linear-gradient(to right,#000 calc(100% - 26px),transparent)}
+.p-wchip[data-more="1"]{color:var(--p-dim);background:none;
+  box-shadow:inset 0 0 0 1px var(--p-line)}
+.p-wchip{display:flex;align-items:center;gap:9px;height:44px;padding:0 15px;border-radius:99px;
+  background:var(--p-raise);font-size:16px;color:var(--p-bone);white-space:nowrap;flex:none}
+.p-wchip:active{opacity:.6}
+.p-wchip .p-when{margin-left:1px}
+
 /* ── The inbox ─────────────────────────────────────────────────────────── */
 .p-item{display:block;width:100%;padding:0 20px;margin-bottom:34px;text-align:left}
 .p-item:active{opacity:.5}
 .p-itemtop{display:flex;align-items:center;gap:11px;margin-bottom:6px}
-.p-itemname{font-size:18px;line-height:1.3;letter-spacing:-.012em;font-weight:560;color:var(--p-bone);
+.p-itemname{font-size:19px;line-height:1.3;letter-spacing:-.012em;font-weight:530;color:var(--p-bone);
   min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.p-when{font-size:13px;color:var(--p-mute);flex:none;font-variant-numeric:tabular-nums}
+.p-when{font-size:14px;color:var(--p-mute);flex:none;font-variant-numeric:tabular-nums}
 /* `display:block`, not an inline span: padding-left on an inline box lands
    on the first line only, which indents the opening line and leaves the rest
    under the dot. The question has to align with the name on every line. */
-.p-itemsay{display:block;font-size:17px;line-height:1.62;color:var(--p-text);
+.p-itemsay{display:block;font-size:18px;line-height:1.62;color:var(--p-text);
   letter-spacing:-.003em;padding-left:19px}
-.p-quiet{display:flex;align-items:center;gap:11px;width:100%;min-height:50px;padding:0 20px;text-align:left}
+.p-quiet{display:flex;align-items:center;gap:11px;width:100%;min-height:52px;padding:0 20px;text-align:left}
 .p-quiet:active{opacity:.5}
-.p-quietname{font-size:18px;line-height:1.3;letter-spacing:-.012em;color:var(--p-bone);
+.p-quietname{font-size:19px;line-height:1.3;letter-spacing:-.012em;color:var(--p-bone);
   min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .p-quiet[data-soft="1"] .p-quietname{color:var(--p-dim)}
 .p-grow{flex:1}
 .p-sechead{padding:18px 20px 8px}
 .p-switch{margin:2px 20px 28px;display:flex;align-items:center;gap:14px;background:var(--p-raise);
-  border-radius:22px;padding:11px 11px 11px 18px;font-size:15px;line-height:1.4;
+  border-radius:22px;padding:11px 11px 11px 18px;font-size:16px;line-height:1.4;
   color:var(--p-dim);text-align:left}
 .p-switch:active{opacity:.6}
-.p-switchgo{background:var(--p-ground);border-radius:99px;padding:8px 15px;font-size:15px;
+.p-switchgo{background:var(--p-ground);border-radius:99px;padding:8px 15px;font-size:16px;
   font-weight:530;color:var(--p-bone);box-shadow:var(--p-raise-shadow);display:flex;align-items:center;gap:4px}
 
 /* ── The transcript ────────────────────────────────────────────────────── */
 .p-tr{padding:6px 20px 10px}
 .p-you{max-width:86%;background:var(--p-raise);border-radius:18px;padding:12px 16px;
-  margin:0 0 22px auto;font-size:17px;line-height:1.55;color:var(--p-bone);width:fit-content}
-.p-agent{font-size:17px;line-height:1.62;color:var(--p-text);margin-bottom:20px;letter-spacing:-.003em}
-.p-agent b{color:var(--p-bone);font-weight:560}
-.p-agent code{font-family:var(--d-mono);font-size:15px;letter-spacing:-.018em;color:var(--p-bone)}
+  margin:0 0 22px auto;font-size:18px;line-height:1.55;color:var(--p-bone);width:fit-content}
+.p-agent{font-size:18px;line-height:1.62;color:var(--p-text);margin-bottom:20px;letter-spacing:-.003em}
+.p-agent b{color:var(--p-bone);font-weight:530}
+.p-agent code{font-family:var(--d-mono);font-size:16px;letter-spacing:-.018em;color:var(--p-bone)}
 .p-work{margin:0 0 20px;display:flex;flex-direction:column;gap:7px}
-.p-step{display:flex;align-items:center;gap:9px;font-size:13.5px;color:var(--p-mute);min-height:22px}
-.p-step em{font-style:normal;font-family:var(--d-mono);font-size:13px;letter-spacing:-.016em;
+.p-step{display:flex;align-items:center;gap:9px;font-size:14.5px;color:var(--p-mute);min-height:22px}
+.p-step em{font-style:normal;font-family:var(--d-mono);font-size:14px;letter-spacing:-.016em;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.p-fold{display:flex;align-items:center;gap:8px;font-size:13.5px;color:var(--p-mute);min-height:30px}
+.p-fold{display:flex;align-items:center;gap:8px;font-size:14.5px;color:var(--p-mute);min-height:30px}
 .p-sub{box-shadow:inset 1px 0 0 var(--p-line);padding-left:15px;margin-left:4px;
   display:flex;flex-direction:column;gap:7px}
-.p-think{font-size:13.5px;color:var(--p-mute);margin-bottom:20px}
+.p-think{font-size:14.5px;color:var(--p-mute);margin-bottom:20px}
 .p-artcard{display:block;width:100%;text-align:left;border-radius:14px;overflow:hidden;
   background:var(--p-raise);margin:0 0 20px}
 .p-artcard:active{opacity:.7}
 .p-pill{display:inline-flex;align-items:center;gap:8px;padding:10px 17px;border-radius:99px;
-  background:var(--p-raise);font-size:15px;color:var(--p-dim)}
+  background:var(--p-raise);font-size:16px;color:var(--p-dim)}
 
 /* ── The approval: the one loud surface in the app ─────────────────────── */
 .p-askcard{background:var(--p-ember-tint);border-radius:20px;margin:0 12px 10px;
   padding:18px 20px 20px;display:flex;flex-direction:column;gap:13px}
-.p-asklab{font-size:14px;color:var(--p-ember-ink);font-weight:530;letter-spacing:-.004em}
-.p-askq{font-size:19px;line-height:1.38;font-weight:560;color:var(--p-bone);letter-spacing:-.016em}
-.p-askcode{font-family:var(--d-mono);font-size:13px;line-height:1.55;color:var(--p-dim);
+.p-asklab{font-size:15px;color:var(--p-ember-ink);font-weight:530;letter-spacing:-.004em}
+.p-askq{font-size:20px;line-height:1.38;font-weight:530;color:var(--p-bone);letter-spacing:-.016em}
+.p-askcode{font-family:var(--d-mono);font-size:14px;line-height:1.55;color:var(--p-dim);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .p-askrow{display:flex;gap:12px;margin-top:3px}
 .p-askno{flex:1;height:48px;background:var(--p-ground);border-radius:14px;display:flex;
-  align-items:center;justify-content:center;font-size:16px;font-weight:530;color:var(--p-text)}
+  align-items:center;justify-content:center;font-size:17px;font-weight:530;color:var(--p-text)}
 .p-askyes{flex:1;height:48px;background:var(--p-bone);border-radius:14px;display:flex;
-  align-items:center;justify-content:center;font-size:16px;font-weight:600;color:var(--p-ground)}
+  align-items:center;justify-content:center;font-size:17px;font-weight:530;color:var(--p-ground)}
 .p-askno:active,.p-askyes:active{opacity:.6}
 
 /* ── The composer: a pill at rest, a card to write in ──────────────────── */
@@ -484,9 +529,9 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;text-a
   display:flex;align-items:center;gap:8px;box-shadow:var(--p-rest-shadow)}
 .p-box[data-open="1"]{margin:0 12px;border-radius:22px;padding:16px 12px 10px;
   flex-direction:column;align-items:stretch;gap:12px;box-shadow:var(--p-float-shadow)}
-.p-ph{flex:1;font-size:17px;color:var(--p-mute);min-width:0;overflow:hidden;
+.p-ph{flex:1;font-size:18px;color:var(--p-mute);min-width:0;overflow:hidden;
   text-overflow:ellipsis;white-space:nowrap;letter-spacing:-.003em}
-.p-typed{font-size:17px;line-height:26px;color:var(--p-bone);padding:0 6px;letter-spacing:-.003em}
+.p-typed{font-size:18px;line-height:26px;color:var(--p-bone);padding:0 6px;letter-spacing:-.003em}
 .p-ctl{width:40px;height:40px;border-radius:99px;display:flex;align-items:center;
   justify-content:center;flex:none;color:var(--p-mute)}
 .p-ctl[data-rest="1"]{width:38px;height:38px}
@@ -501,7 +546,7 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;text-a
 .p-picks{flex:1;min-width:0;display:flex;gap:4px;overflow:hidden;
   mask-image:linear-gradient(to right,#000 76%,transparent);
   -webkit-mask-image:linear-gradient(to right,#000 76%,transparent)}
-.p-pick{display:flex;align-items:center;gap:7px;height:34px;padding:0 5px;font-size:14.5px;
+.p-pick{display:flex;align-items:center;gap:7px;height:34px;padding:0 5px;font-size:15.5px;
   color:var(--p-dim);white-space:nowrap;flex:none}
 .p-meter{height:2px;border-radius:2px;background:var(--p-line);overflow:hidden;margin:0 18px 8px}
 .p-meterfill{height:100%;background:var(--p-settling);border-radius:2px}
@@ -515,7 +560,7 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;text-a
   mask-image:linear-gradient(to right,#000 92%,transparent);
   -webkit-mask-image:linear-gradient(to right,#000 92%,transparent)}
 .p-chip{display:flex;align-items:center;gap:8px;height:40px;padding:0 14px;border-radius:99px;
-  background:var(--p-raise);font-size:15px;color:var(--p-text);white-space:nowrap;flex:none}
+  background:var(--p-raise);font-size:16px;color:var(--p-text);white-space:nowrap;flex:none}
 .p-chip:active{opacity:.6}
 .p-chip[data-want="1"]{color:var(--p-dim);background:none;box-shadow:inset 0 0 0 1px var(--p-line)}
 .p-plate{width:58px;height:58px;border-radius:18px;background:var(--p-raise);display:flex;
@@ -523,7 +568,7 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;text-a
 
 /* Where the workspace's own facts live: under the header, quiet, no bar. */
 .p-facts{flex:none;display:flex;align-items:center;gap:15px;padding:0 20px 16px;
-  font-size:13.5px;color:var(--p-mute);min-height:34px}
+  font-size:14.5px;color:var(--p-mute);min-height:34px}
 .p-facts b{color:var(--p-dim);font-weight:500}
 
 /* ── Sheets, menus, scrims ─────────────────────────────────────────────── */
@@ -534,8 +579,8 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;text-a
 .p-grab{width:38px;height:5px;border-radius:99px;background:var(--p-settling);
   margin:9px auto 2px;flex:none}
 .p-sheethead{padding:12px 22px 14px;flex:none}
-.p-menuitem{display:flex;align-items:center;gap:15px;min-height:52px;padding:0 22px;
-  font-size:17px;color:var(--p-text)}
+.p-menuitem{display:flex;align-items:center;gap:15px;min-height:54px;padding:0 22px;
+  font-size:18px;color:var(--p-text)}
 .p-menuitem:active{background:var(--p-raise)}
 .p-menuitem[data-danger="1"]{color:var(--p-brick)}
 .p-menurule{height:1px;background:var(--p-line-soft);margin:8px 0}
@@ -544,10 +589,10 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;text-a
   transform-origin:bottom left;animation:p-grow 170ms var(--swift)}
 @keyframes p-grow{from{opacity:0;transform:scale(.94)}to{opacity:1;transform:scale(1)}}
 @media (prefers-reduced-motion:reduce){.p-pop{animation:none}}
-.p-popitem{display:flex;align-items:flex-start;gap:14px;min-height:50px;padding:10px 14px;
-  border-radius:13px;color:var(--p-text);font-size:17px;width:100%}
+.p-popitem{display:flex;align-items:flex-start;gap:14px;min-height:52px;padding:10px 14px;
+  border-radius:13px;color:var(--p-text);font-size:18px;width:100%}
 .p-popitem:active{background:var(--p-raise)}
-.p-popnote{font-size:13px;color:var(--p-mute);line-height:1.35;margin-top:2px;display:block}
+.p-popnote{font-size:14px;color:var(--p-mute);line-height:1.35;margin-top:2px;display:block}
 
 /* ── Columns at 951, panels at 669 ─────────────────────────────────────── */
 .p-side{flex:none;display:flex;flex-direction:column;min-height:0;background:var(--p-ground);
@@ -556,9 +601,9 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;text-a
   box-shadow:-10px 0 42px -14px rgb(0 0 0 / .3);display:flex;flex-direction:column;min-height:0}
 
 /* ── The overview ──────────────────────────────────────────────────────── */
-.p-member{display:flex;align-items:center;gap:11px;padding:11px 20px;min-height:48px}
+.p-member{display:flex;align-items:center;gap:11px;padding:11px 20px;min-height:50px}
 .p-member[data-on="1"]{background:var(--p-raise)}
-.p-planstep{display:flex;align-items:flex-start;gap:12px;padding:7px 20px;font-size:16px;
+.p-planstep{display:flex;align-items:flex-start;gap:12px;padding:7px 20px;font-size:17px;
   color:var(--p-text);line-height:1.45}
 .p-planbox{width:16px;height:16px;border-radius:5px;box-shadow:inset 0 0 0 1.5px var(--p-settling);
   flex:none;margin-top:3px;display:flex;align-items:center;justify-content:center}
@@ -568,30 +613,30 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;text-a
 
 /* ── Diff, files, ship ─────────────────────────────────────────────────── */
 .p-texttabs{display:flex;gap:24px;padding:0 20px 16px}
-.p-texttab{font-size:17px;color:var(--p-mute);padding-bottom:8px;letter-spacing:-.008em;
+.p-texttab{font-size:18px;color:var(--p-mute);padding-bottom:8px;letter-spacing:-.008em;
   box-shadow:inset 0 -2px 0 transparent}
 .p-texttab[aria-selected="true"]{color:var(--p-bone);font-weight:530;box-shadow:inset 0 -2px 0 var(--p-bone)}
-.p-difffile{display:flex;align-items:center;gap:12px;padding:13px 20px;min-height:48px}
-.p-diffline{display:flex;font-family:var(--d-mono);font-size:15px;line-height:22px;letter-spacing:-.018em}
-.p-gutter{width:46px;flex:none;text-align:right;padding-right:11px;color:var(--p-mute);font-size:12.5px}
+.p-difffile{display:flex;align-items:center;gap:12px;padding:13px 20px;min-height:50px}
+.p-diffline{display:flex;font-family:var(--d-mono);font-size:16px;line-height:22px;letter-spacing:-.018em}
+.p-gutter{width:46px;flex:none;text-align:right;padding-right:11px;color:var(--p-mute);font-size:13.5px}
 .p-src{padding-left:12px;white-space:pre;overflow:hidden;color:var(--p-text);flex:1}
 .p-diffline[data-d="+"]{background:var(--p-sage-tint)}
 .p-diffline[data-d="+"] .p-gutter{color:var(--p-sage)}
 .p-diffline[data-d="-"]{background:var(--p-brick-tint)}
 .p-diffline[data-d="-"] .p-gutter{color:var(--p-brick)}
-.p-tree{display:flex;align-items:center;gap:11px;min-height:46px;padding:0 20px;
-  font-size:16px;color:var(--p-text)}
+.p-tree{display:flex;align-items:center;gap:11px;min-height:48px;padding:0 20px;
+  font-size:17px;color:var(--p-text)}
 .p-primary{height:52px;border-radius:15px;background:var(--p-bone);color:var(--p-ground);
-  display:flex;align-items:center;justify-content:center;gap:8px;font-size:17px;font-weight:600;
+  display:flex;align-items:center;justify-content:center;gap:8px;font-size:18px;font-weight:530;
   margin:0 20px}
 .p-primary:active{opacity:.75}
 .p-second{height:52px;border-radius:15px;background:var(--p-raise);color:var(--p-text);
-  display:flex;align-items:center;justify-content:center;font-size:17px;font-weight:530;margin:0 20px}
-.p-field{background:var(--p-raise);border-radius:14px;padding:14px 16px;font-size:17px;
+  display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:530;margin:0 20px}
+.p-field{background:var(--p-raise);border-radius:14px;padding:14px 16px;font-size:18px;
   color:var(--p-bone);min-height:52px;display:flex;align-items:center;letter-spacing:-.003em}
 .p-field:active{opacity:.7}
 .p-fieldlab{display:flex;align-items:baseline;gap:9px;padding:0 2px 7px}
-.p-stab{display:flex;align-items:center;gap:8px;height:42px;padding:0 13px;font-size:14px;
+.p-stab{display:flex;align-items:center;gap:8px;height:42px;padding:0 13px;font-size:15px;
   color:var(--p-mute);white-space:nowrap;box-shadow:inset 0 -2px 0 transparent}
 .p-stab[aria-selected="true"]{color:var(--p-bone);box-shadow:inset 0 -2px 0 var(--p-bone)}
 .p-stab[data-preview="1"]{font-style:italic}
@@ -612,14 +657,14 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;text-a
 .p-steps{display:flex;align-items:center;gap:6px;margin-bottom:26px}
 .p-steps i{width:22px;height:3px;border-radius:2px;background:var(--p-line)}
 .p-steps i[data-on="1"]{background:var(--p-settling)}
-.p-steps span{font-size:13px;color:var(--p-mute);margin-left:5px}
+.p-steps span{font-size:14px;color:var(--p-mute);margin-left:5px}
 .p-found{display:flex;align-items:center;gap:13px;background:var(--p-raise);border-radius:14px;
-  padding:13px 10px 13px 14px;font-size:15px;color:var(--p-dim)}
+  padding:13px 10px 13px 14px;font-size:16px;color:var(--p-dim)}
 .p-found > span{min-width:0}
 .p-found .p-micro{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .p-bad{background:var(--p-brick-tint);border-radius:14px;padding:14px 16px;margin-top:22px;
-  font-size:15px;line-height:1.55;color:var(--p-text)}
-.p-bad b{display:block;color:var(--p-brick);font-weight:560;margin-bottom:4px}
+  font-size:16px;line-height:1.55;color:var(--p-text)}
+.p-bad b{display:block;color:var(--p-brick);font-weight:530;margin-bottom:4px}
 
 .p-sheen{display:inline-flex}
 .p-sheen span{color:var(--p-mute);animation:p-sheen 1.6s linear infinite;white-space:pre}
@@ -629,7 +674,7 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;text-a
 /* ── The three surfaces a window does not have ─────────────────────────── */
 .p-lock{background:linear-gradient(168deg,#1d2432,#0e1219 58%,#16131b);height:100%;
   display:flex;flex-direction:column;align-items:center;padding-top:76px;gap:30px}
-.p-locktime{font-size:80px;font-weight:560;color:#fff;letter-spacing:-.035em;line-height:1}
+.p-locktime{font-size:80px;font-weight:530;color:#fff;letter-spacing:-.035em;line-height:1}
 .p-lockdate{font-size:17px;color:rgb(255 255 255 / .76);margin-top:-20px}
 .p-push{width:88%;border-radius:20px;background:rgb(255 255 255 / .16);
   backdrop-filter:blur(30px) saturate(170%);-webkit-backdrop-filter:blur(30px) saturate(170%);
@@ -637,7 +682,7 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;text-a
   box-shadow:0 10px 30px -12px rgb(0 0 0 / .5)}
 .p-pushapp{width:38px;height:38px;border-radius:10px;background:#15161A;display:flex;
   align-items:center;justify-content:center;flex:none}
-.p-pushtitle{font-size:15.5px;font-weight:600;color:#fff;letter-spacing:-.008em}
+.p-pushtitle{font-size:15.5px;font-weight:530;color:#fff;letter-spacing:-.008em}
 .p-pushbody{font-size:15.5px;color:rgb(255 255 255 / .88);line-height:1.4;margin-top:2px}
 .p-pushwhen{font-size:12.5px;color:rgb(255 255 255 / .58);flex:none}
 .p-springboard{display:grid;grid-template-columns:repeat(4,1fr);gap:24px 16px;padding:44px 24px}
@@ -645,7 +690,7 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;text-a
 .p-iconart{width:62px;height:62px;border-radius:15px;background:#15161A;display:flex;
   align-items:center;justify-content:center;position:relative}
 .p-badge{position:absolute;top:-5px;right:-5px;min-width:22px;height:22px;border-radius:99px;
-  background:var(--p-ember);color:#fff;font-size:13px;font-weight:600;display:flex;
+  background:var(--p-ember);color:#fff;font-size:13px;font-weight:530;display:flex;
   align-items:center;justify-content:center;padding:0 6px;border:2px solid #0A0A0C}
 .p-iconlab{font-size:11px;color:rgb(255 255 255 / .9)}
 
@@ -757,6 +802,15 @@ const PLACES = [
     status:"Failed", agent:"Codex", when:"2h", say:"The test runner was killed on the host" },
   { id:"w7", name:"Token audit", repo:"northwind/tools", branch:"agent/token-audit",
     status:"Ready", agent:"Prompt", when:"4h", say:"Ready" },
+  /* Four blocked rather than two, so the home's ember budget is actually
+     exercised: `DOTTED` chips carry a dot and the rest collapse into a count
+     that carries none. With two it never draws. */
+  { id:"w8", name:"Retry the flaky integration test", repo:"northwind/api",
+    branch:"agent/flaky-retry", status:"NeedsYou", agent:"ClaudeCode", when:"1h",
+    say:"It passes on a rerun every time. Quarantine it, or keep failing the build until somebody fixes the race?" },
+  { id:"w9", name:"Drop the legacy webhook route", repo:"ledger/core",
+    branch:"agent/drop-legacy-hook", status:"NeedsYou", agent:"Codex", when:"5h",
+    say:"Two installs still call it. Remove it behind a deprecation header, or leave it until they move?" },
 ];
 
 /* Sessions grouped by repository, the way `group()` does it. A branch is only
@@ -1152,83 +1206,249 @@ function rowNow(p) {
   '</button>';
 }
 
-function inboxScreen(p, st) {
-  const now = st.era === "now";
-  const blocked = PLACES.filter(isBlocked);
-  const rest = PLACES.filter(x => !isBlocked(x));
+/* ═══════════════════════════════════════════════════════════════════════════
+   THE HOME
 
-  /* Whose Firetower, quietly, and the one thing you start from here. */
+   Two chips carry a dot and anything past that is a count without one. The
+   constant is `DOTTED`, and the desk's budget is three ember marks with the
+   rail's avatar taking the third. **A phone has no rail avatar**, so on
+   screen the budget is two — the third mark is the app icon badge, which is
+   not on this screen and is the stronger surface for it anyway.
+   ═══════════════════════════════════════════════════════════════════════════ */
+const DOTTED = 2;
+const GREETINGS = { morning:"Good morning", afternoon:"Good afternoon", evening:"Good evening" };
+/* Late night takes *Good evening* rather than a fourth greeting. */
+function partOfDay() {
+  if (S.when) return S.when;
+  const h = new Date().getHours();
+  return h < 5 ? "evening" : h < 12 ? "morning" : h < 18 ? "afternoon" : "evening";
+}
+
+/**
+ * The home.
+ *
+ * The desk's order, kept: greeting, composer, *agents waiting for you*, then
+ * *recent artifacts*. Three things are the phone's, and each is a width
+ * decision rather than a change of mind \u2014 see <b>Dashboard</b> for the
+ * arithmetic.
+ */
+function homePage(p, st) {
+  const mode = st.home || "both";
+  const cw = contentW(p);
+  const blocked = PLACES.filter(isBlocked);
+  const show = mode === "nowait" || mode === "bare" ? [] : blocked;
+  /* `DOTTED` is the budget; what fits is what shows. A chip carrying a name
+     and a timestamp is about 200pt, so two sit side by side from 466 and one
+     does at 390 — below that the second clips to its leading dot, which is
+     an ember mark attached to nothing. The count absorbs the difference and
+     stays exact either way. Same kind of width decision as two posters
+     rather than three. */
+  const fits = cw >= 460 ? DOTTED : 1;
+  const dotted = show.slice(0, fits);
+  const rest = show.length - dotted.length;
+  const arts = mode === "bare" || mode === "norepo" ? [] : ARTIFACTS.filter(a => a.poster).slice(0, 2);
+  const seeded = mode === "task";
+  const bare = mode === "norepo";
+
   const bar =
-    '<div class="p-head" style="padding-bottom:10px">'+
+    '<div class="p-head" style="padding-bottom:8px">'+
       '<button class="p-who" data-go="menu:servers" aria-label="Firetower: Northwind">'+
-        '<span class="p-mono-sq"'+(st.mode === "error" ? ' data-dark="1"' : '')+'>N</span>'+
+        '<span class="p-mono-sq"'+(mode === "error" ? ' data-dark="1"' : '')+'>N</span>'+
         '<span class="p-ui p-ink" style="font-weight:530">Northwind</span>'+
-        ic("down", 14, "var(--p-mute)")+'</button>'+
+        ic("chevron-down", 14, "var(--p-mute)")+'</button>'+
       '<span class="p-grow"></span>'+
-      '<button class="p-tap" data-go="goto:new" aria-label="New workspace">'+ic("plus",21)+'</button>'+
     '</div>';
 
-  if (now) {
-    const live = PLACES.filter(x => st.filter === "all" ||
-      (st.filter === "waiting" ? isWaiting(x) : st.filter === "working" ? working(x) : !isWaiting(x) && !working(x)));
-    return bar+
-      '<div style="padding:4px 18px 10px"><div class="p-display">Inbox</div>'+
-        '<div class="p-ui" style="color:var(--p-ember-ink);font-weight:530;margin-top:3px">'+
-        blocked.length+' waiting on you</div></div>'+
-      '<div style="padding:0 16px 12px"><div style="display:flex;background:var(--p-raise);'+
-        'padding:3px;border-radius:12px;gap:2px">'+
-        [["all","All"],["waiting","Waiting"],["working","Working"],["idle","Idle"]].map(([id,lab]) =>
-          '<button data-go="filter:'+id+'" style="flex:1;height:36px;display:flex;align-items:center;'+
-          'justify-content:center;border-radius:9px;font-size:15px;font-weight:500;'+
-          (st.filter===id?'background:var(--p-ground);color:var(--p-bone);box-shadow:var(--p-raise-shadow)'
-                         :'color:var(--p-dim)')+'">'+lab+'</button>').join("")+'</div></div>'+
-      '<div class="p-scroll"><div class="p-col" style="padding:0 8px">'+
-        groups(live).map(([repo, places]) =>
-          '<div style="margin:10px 0 2px"><div style="font-family:var(--d-narrow);font-size:12px;'+
-          'text-transform:uppercase;letter-spacing:.18em;color:var(--p-mute);padding:14px 14px 6px">'+
-          esc(shortRepo(repo))+'</div>'+places.map(rowNow).join("")+'</div>').join("")+
-      '</div></div>';
+  if (mode === "error") {
+    return bar+'<div class="p-scroll"><div class="p-empty">'+
+      '<div class="p-display" style="font-size:24px">Northwind is not answering.</div>'+
+      '<div class="p-readtx p-dimtx" style="max-width:30ch">A Firetower is never on the public '+
+      'internet, so this phone reaches one over your mesh VPN. Is Tailscale on?</div>'+
+      '<button class="p-pill" style="margin-top:10px" data-go="noop">Try again</button></div></div>';
   }
 
-  /* ── Next ─────────────────────────────────────────────────────────────── */
-  let body;
-  if (st.mode === "loading") {
-    body = '<div class="p-empty">'+sheen("Reading your workspaces")+'</div>';
-  } else if (st.mode === "error") {
-    body = '<div class="p-empty"><div class="p-display" style="font-size:24px">Northwind is not answering.</div>'+
-      '<div class="p-readtx p-dimtx" style="max-width:30ch">A Firetower is never on the public internet, '+
-      'so this phone reaches one over your mesh VPN. Is Tailscale on?</div>'+
-      '<button class="p-pill" style="margin-top:10px" data-go="noop">Try again</button></div>';
-  } else if (st.mode === "empty") {
-    body = '<div class="p-empty"><div class="p-display" style="font-size:24px">Nothing is running yet.</div>'+
-      '<div class="p-readtx p-dimtx" style="max-width:30ch">A workspace is a checkout on a machine '+
-      'with an agent in it. Starting one is what this screen is for.</div>'+
-      '<button class="p-pill" style="margin-top:10px" data-go="goto:new">'+ic("plus",15)+'Start one</button></div>';
-  } else {
-    const n = blocked.length;
-    const said = ["Nothing","One agent","Two agents","Three agents","Four agents"][n] || (n+" agents");
-    body =
-      '<h1 class="p-lede" style="padding:12px 20px 30px">'+(n === 0
-        ? "Nothing is waiting on you."
-        : esc(said)+(n === 1 ? " is" : " are")+" waiting on you.")+'</h1>'+
-      blocked.map(itemNext).join("")+
-      /* The desktop's own line, and the reason the phone can afford one
-         Firetower at a time: the machine-wide answer is the badge. */
-      '<button class="p-switch" data-go="menu:servers" style="width:calc(100% - 40px)">'+
-        '<span style="flex:1;min-width:0">One more waiting in '+
-          '<b style="color:var(--p-bone);font-weight:530">Ledger</b> \u2014 you are not in it</span>'+
-        '<span class="p-switchgo">Switch'+ic("right",14)+'</span></button>'+
-      (rest.length
-        /* Not "still working": one of these failed and one handed back, and a
-           line that is wrong about a third of its list is the kind of small
-           lie that makes somebody stop trusting the screen. It says how many
-           there are and leaves the rows to say what they are. */
-        ? '<div class="p-sechead"><span class="p-sec">'+
-            ["Nothing","One other","Two others","Three others","Four others","Five others"][rest.length]+
-            ', none of them asking</span></div>'+rest.map(quietNext).join("")
-        : "");
+  const greeting = seeded
+    ? "Start from #482?"
+    : bare
+      ? "Nothing to cut from yet."
+      : GREETINGS[partOfDay()]+", what should we work on?";
+
+  const shelf =
+    '<div class="p-shelf">'+
+      (bare
+        ? '<button class="p-chip" data-go="goto:repos" data-want="1">'+ic("folder-git-2",15)+
+            'Connect a repository'+ic("chevron-down",13)+'</button>'
+        : '<button class="p-chip" data-go="noop">'+ic("folder-git-2",15)+'northwind/api'+
+            ic("chevron-down",13)+'</button>')+
+      '<button class="p-chip" data-go="noop">'+ic("monitor",15)+'Firetower\u2019s machine'+
+        ic("chevron-down",13)+'</button>'+
+    '</div>';
+
+  const composer =
+    '<div class="p-homecomp">'+shelf+
+      '<div class="p-box" data-open="1" style="margin:0 20px">'+
+        (seeded
+          ? '<div class="p-typed">Quota meter goes amber too early on the free plan</div>'
+          : '<div class="p-ph" style="padding:0 6px;line-height:27px">Start something new\u2026</div>')+
+        '<div class="p-ctlrow">'+
+          '<button class="p-ctl" data-go="noop" aria-label="Attach">'+ic("paperclip",19)+'</button>'+
+          '<span class="p-picks">'+
+            '<button class="p-pick" data-go="noop">'+ic("user-round",14)+'Just an agent'+
+              ic("chevron-down",13)+'</button>'+
+            '<button class="p-pick" data-go="noop">'+agentMark("ClaudeCode",14,"var(--p-mute)")+
+              'Claude Code'+ic("chevron-down",13)+'</button>'+
+          '</span>'+
+          (bare
+            ? '<button class="p-ctl" data-go="noop" aria-label="Dictate">'+ic("mic",19)+'</button>'
+            : '<button class="p-send" data-go="goto:workspace" aria-label="Start">'+
+                ic("arrow-up",20)+'</button>')+
+        '</div>'+
+      '</div>'+
+    '</div>';
+
+  const heading = (text, all) =>
+    '<div class="p-secrow"><span class="p-sec">'+text+'</span>'+
+      (all ? '<span class="p-grow"></span><button class="p-all" data-go="tab:artifacts">View all'+
+        ic("chevron-right",14)+'</button>' : "")+'</div>';
+
+  const waiting = show.length
+    ? heading("Agents waiting for you")+
+      /* The chips scroll, and the count does not.
+         At 390 two chips do not fit side by side, and wrapping makes each one
+         a full-width pill — a row wearing a chip's shape. Scrolling keeps the
+         shape and costs no height, which is the scarce axis here.
+         But the desk's *N more* is the mechanism that makes the ember budget
+         legible, and at this width it scrolls off the end, where it says
+         nothing. So it is pinned outside the strip: the dotted chips scroll
+         under the fade, the count stays. Two dots and one number, always
+         both on screen. */
+      '<div class="p-chipwrap">'+
+        '<div class="p-chiprow">'+
+          dotted.map(x => '<button class="p-wchip" data-go="open:'+x.id+'">'+
+            '<i class="p-dot"></i><span>'+esc(x.name)+'</span>'+
+            '<span class="p-when">'+x.when+'</span></button>').join("")+
+        '</div>'+
+        (rest > 0 ? '<button class="p-wchip" data-more="1" data-go="tab:inbox"><span>'+rest+
+          ' more</span></button>' : "")+
+      '</div>'
+    : "";
+
+  const made = arts.length
+    ? heading("Recent artifacts", true)+
+      '<div class="p-grid" style="grid-template-columns:repeat('+
+        (band(p) === "dock" ? 2 : cw >= 620 ? 3 : 2)+',1fr)">'+
+        arts.map(a => '<button class="p-card" data-go="goto:artifact">'+
+          '<span class="p-poster">'+poster()+'</span>'+
+          '<span style="display:block;padding:10px 12px 12px">'+
+            '<span class="p-ui p-ink" style="display:block;font-weight:530;overflow:hidden;'+
+              'text-overflow:ellipsis;white-space:nowrap">'+esc(a.title)+'</span>'+
+            '<span class="p-micro" style="display:block;margin-top:2px">v'+a.v+'</span>'+
+          '</span></button>').join("")+
+      '</div>'
+    : "";
+
+  const head = '<div class="p-air"'+(show.length || arts.length ? '' : ' data-bare="1"')+'>'+
+    '<h1 class="p-greet">'+esc(greeting)+'</h1></div>';
+  const under = bare
+    ? '<div class="p-readtx p-mutetx" style="padding:22px 20px 0;font-size:16px">A workspace '+
+      'is cut from a repository, and this Firetower has none connected. Connecting one is two '+
+      'taps and it is the only setting a phone owns.</div>'
+    : waiting+made;
+
+  /**
+   * At 951 landscape the home splits, and the measurement is why.
+   *
+   * It is the only pose with room for two things and the only one that is
+   * *short* — 669 against the others' 844 to 951. Stacked, the page needed
+   * 598 into 527 and scrolled; beside each other it fits, and the pose stops
+   * wasting the width it exists for. Reading order top-to-bottom becomes
+   * left-to-right: what you came to do, then what is waiting.
+   */
+  if (band(p) === "dock" && panelW(cw) > 0) {
+    const side = panelW(cw);
+    return bar+
+      '<div class="p-panes">'+
+        '<div style="flex:1;min-width:0;display:flex;flex-direction:column;min-height:0">'+
+          '<div class="p-scroll"><div class="p-col">'+head+composer+
+            (bare ? under : "")+'<div style="height:20px"></div></div></div>'+
+        '</div>'+
+        (bare ? "" : '<div class="p-side" style="width:'+side+'px">'+
+          '<div class="p-scroll"><div style="padding-top:8px">'+under+
+          '<div style="height:20px"></div></div></div></div>')+
+      '</div>';
   }
-  return bar+'<div class="p-scroll"><div class="p-col">'+body+'<div style="height:30px"></div></div></div>';
+
+  return bar+
+    '<div class="p-scroll"><div class="p-col">'+head+composer+under+
+      '<div style="height:28px"></div>'+
+    '</div></div>';
+}
+
+/**
+ * Which of the three the Dashboard draws.
+ *
+ * `home` is the design. `accepted` is the Dashboard it replaces \u2014 a headline
+ * counting the waiting agents with their questions on the page, which was
+ * accepted, drawn, and then outgrown. `now` is what ships. A design that was
+ * right and then superseded deserves the same record as one that was
+ * rejected, which is the desk\u2019s own position on it.
+ */
+function inboxScreen(p, st) {
+  if (st.era === "now") return nowScreen(p, st);
+  if (st.era === "accepted") return acceptedScreen(p, st);
+  return homePage(p, st);
+}
+
+function nowScreen(p, st) {
+  const blocked = PLACES.filter(isBlocked);
+  const live = PLACES.filter(x => st.filter === "all" ||
+    (st.filter === "waiting" ? isWaiting(x) : st.filter === "working" ? working(x) : !isWaiting(x) && !working(x)));
+  return '<div class="p-head" style="padding-bottom:10px">'+
+      '<button class="p-who" data-go="menu:servers"><span class="p-mono-sq">N</span>'+
+        '<span class="p-ui p-ink" style="font-weight:530">Northwind</span>'+
+        ic("chevron-down",14,"var(--p-mute)")+'</button>'+
+      '<span class="p-grow"></span>'+
+      '<button class="p-tap" data-go="noop" aria-label="New workspace">'+ic("plus",21)+'</button>'+
+    '</div>'+
+    '<div style="padding:4px 18px 10px"><div class="p-display">Inbox</div>'+
+      '<div class="p-ui" style="color:var(--p-ember-ink);font-weight:530;margin-top:3px">'+
+      blocked.length+' waiting on you</div></div>'+
+    '<div style="padding:0 16px 12px"><div style="display:flex;background:var(--p-raise);'+
+      'padding:3px;border-radius:12px;gap:2px">'+
+      [["all","All"],["waiting","Waiting"],["working","Working"],["idle","Idle"]].map(([id,lab]) =>
+        '<button data-go="filter:'+id+'" style="flex:1;height:36px;display:flex;align-items:center;'+
+        'justify-content:center;border-radius:9px;font-size:16px;font-weight:500;'+
+        (st.filter===id?'background:var(--p-ground);color:var(--p-bone);box-shadow:var(--p-raise-shadow)'
+                       :'color:var(--p-dim)')+'">'+lab+'</button>').join("")+'</div></div>'+
+    '<div class="p-scroll"><div class="p-col" style="padding:0 8px">'+
+      groups(live).map(([repo, places]) =>
+        '<div style="margin:10px 0 2px"><div style="font-family:var(--d-narrow);font-size:13px;'+
+        'text-transform:uppercase;letter-spacing:.18em;color:var(--p-mute);padding:14px 14px 6px">'+
+        esc(shortRepo(repo))+'</div>'+places.map(rowNow).join("")+'</div>').join("")+
+    '</div></div>';
+}
+
+function acceptedScreen(p, st) {
+  const blocked = PLACES.filter(isBlocked);
+  const rest = PLACES.filter(x => !isBlocked(x));
+  const n = blocked.length;
+  const said = ["Nothing","One agent","Two agents","Three agents","Four agents"][n] || (n+" agents");
+  return '<div class="p-head" style="padding-bottom:10px">'+
+      '<button class="p-who" data-go="menu:servers"><span class="p-mono-sq">N</span>'+
+        '<span class="p-ui p-ink" style="font-weight:530">Northwind</span>'+
+        ic("chevron-down",14,"var(--p-mute)")+'</button>'+
+      '<span class="p-grow"></span>'+
+      '<button class="p-tap" data-go="noop" aria-label="New workspace">'+ic("plus",21)+'</button>'+
+    '</div>'+
+    '<div class="p-scroll"><div class="p-col">'+
+      '<h1 class="p-lede" style="padding:12px 20px 30px">'+esc(said)+
+        (n === 1 ? " is" : " are")+' waiting on you.</h1>'+
+      blocked.map(itemNext).join("")+
+      '<div class="p-sechead"><span class="p-sec">'+
+        ["Nothing","One other","Two others","Three others","Four others","Five others"][rest.length]+
+        ', none of them asking</span></div>'+rest.map(quietNext).join("")+
+      '<div style="height:30px"></div>'+
+    '</div></div>';
 }
 
 /** The peek: a phone's answer to the desktop rail's hover preview. */
@@ -1395,7 +1615,7 @@ function overviewBody() {
     : st === "HandedBack" ? '<span style="color:var(--p-mute)">'+ic("check",14)+'</span>' : "";
   return '<div>'+
     '<div style="padding:16px 20px 2px"><div class="p-readtx">In <b style="color:var(--p-bone);'+
-      'font-weight:560">northwind/api</b>, on <span class="p-mono" style="font-size:15px;'+
+      'font-weight:530">northwind/api</b>, on <span class="p-mono" style="font-size:16px;'+
       'color:var(--p-text)">fix/quota-rounding</span></div>'+
       '<div class="p-meta" style="margin-top:4px">Firetower\u2019s machine, twelve minutes in</div></div>'+
 
@@ -1552,11 +1772,14 @@ function repoScreen(p, st) {
   if (tab === "diff") {
     body = DIFF.map((f,i) =>
       '<div><button class="p-difffile" data-go="goto:file" style="width:100%">'+
-        '<span class="p-mono" style="flex:1;min-width:0;color:var(--p-text);font-size:14px;'+
+        '<span class="p-mono" style="flex:1;min-width:0;color:var(--p-text);font-size:15px;'+
           'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left;'+
           'direction:rtl">'+esc(f.path)+'</span>'+
-        '<span class="p-mono" style="color:var(--p-sage);font-size:13px">+'+f.add+'</span>'+
-        '<span class="p-mono" style="color:var(--p-brick);font-size:13px">−'+f.del+'</span>'+
+        /* A count, not a thing you read character by character. */
+        '<span style="color:var(--p-sage);font-size:14px;font-variant-numeric:tabular-nums">+'+
+          f.add+'</span>'+
+        '<span style="color:var(--p-brick);font-size:14px;font-variant-numeric:tabular-nums">−'+
+          f.del+'</span>'+
       '</button>'+
       (i === 0 ? '<div style="overflow:hidden;margin-bottom:10px">'+HUNK.map(l =>
         '<div class="p-diffline" data-d="'+l.d+'"><span class="p-gutter">'+l.n+'</span>'+
@@ -1579,7 +1802,7 @@ function repoScreen(p, st) {
       '<div class="p-fieldlab" style="padding-top:20px">'+
         '<span class="p-ui p-ink" style="font-weight:530">Body</span></div>'+
       '<div class="p-field" style="min-height:120px;align-items:flex-start;line-height:1.55;'+
-        'font-size:16px;color:var(--p-text)">A free plan has no soft limit, so the meter was '+
+        'font-size:17px;color:var(--p-text)">A free plan has no soft limit, so the meter was '+
         'computing 80% of its hard ceiling and going amber at a number that meant nothing. '+
         'Both call sites now read one helper.</div>'+
       '<div style="height:22px"></div></div>'+
@@ -1605,7 +1828,7 @@ function fileScreen() {
   ];
   return '<div class="p-head">'+
       '<button class="p-tap" data-go="goto:repo" aria-label="Back">'+ic("left",23)+'</button>'+
-      '<div class="p-hgrow"><span class="p-mono" style="font-size:14px;display:block;'+
+      '<div class="p-hgrow"><span class="p-mono" style="font-size:15px;display:block;'+
         'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left">'+
         'crates/ft-server/src/quota.rs</span></div></div>'+
     '<div style="display:flex;padding:0 14px 8px;overflow:hidden">'+
@@ -1628,7 +1851,7 @@ function tasksScreen(p, st) {
       '<div class="p-hgrow"><div class="p-lede" style="font-size:28px">Tasks</div></div></div>';
   if (st.tasks === "none") {
     return head_+'<div class="p-scroll"><div class="p-empty">'+
-      '<div class="p-display" style="font-size:24px">No trackers connected.</div>'+
+      '<div class="p-display" style="font-size:25px">No trackers connected.</div>'+
       '<div class="p-readtx p-dimtx" style="max-width:32ch">Connect GitHub or Linear on the desktop '+
       'or the web console, and what you could work on shows up here.</div></div></div>';
   }
@@ -1642,7 +1865,7 @@ function tasksScreen(p, st) {
           '<span style="color:var(--p-mute);display:flex">'+ic(KIND[t.kind],15)+'</span>'+
           '<span class="p-itemname" style="flex:1;white-space:normal;font-weight:530">'+esc(t.title)+'</span>'+
           '<span class="p-when">'+t.when+'</span></span>'+
-        '<span class="p-itemsay" style="font-size:14px;color:var(--p-mute);'+
+        '<span class="p-itemsay" style="font-size:15px;color:var(--p-mute);'+
           'font-family:var(--d-mono);letter-spacing:-.016em">'+esc(t.key)+
           (t.repo ? "   "+esc(t.repo) : "")+'</span>'+
       '</button>').join("")+
@@ -1651,108 +1874,24 @@ function tasksScreen(p, st) {
     '</div></div>';
 }
 
-/**
- * Starting work: an empty page with a composer on it.
- *
- * The desk merged `/new` into the Dashboard composer, and the page you land
- * on is one question — *What should we build?* — with the box under it. The
- * phone takes the same shape rather than a second one.
- *
- * **The six fields are still all there.** `NewSession` wants a repository, a
- * base, a machine, an agent and an account, and `app/new.tsx` is right that a
- * three-field form cannot express a workspace. They are chips above and below
- * the input rather than a stack of labelled fields — the shelf carries the
- * two that are about *where the work happens*, the footer the two that are
- * about *who does it*, and the branch lives inside the repository's own
- * sheet, where the base it is cut from is.
- *
- * The name and the branch are derived from the first message, which is what
- * the desk does and what `slug()` in `app/new.tsx` already half-does.
- *
- * **A shelf here and none in a workspace.** On this screen those choices are
- * unmade, and making them is the act of starting work. Inside a workspace
- * they are settled, so a shelf repeating them is furniture implying they are
- * still open.
- */
-function newScreen(p, st) {
-  const seeded = st && st.newstate === "task";
-  const bare = st && st.newstate === "norepo";
-  const shelf =
-    '<div class="p-shelf">'+
-      (bare
-        /* The chip says what the screen it opens is called. With none
-           connected there is nothing to *choose*, and the button on the same
-           page already says Connect — two words for one act on one screen. */
-        ? '<button class="p-chip" data-go="goto:repos" data-want="1">'+ic("folder",15)+
-            'Connect a repository'+ic("down",13)+'</button>'
-        : '<button class="p-chip" data-go="noop">'+ic("folder",15)+'northwind/api'+ic("down",13)+'</button>')+
-      '<button class="p-chip" data-go="noop">'+ic("machine",15)+'Firetower\u2019s machine'+ic("down",13)+'</button>'+
-    '</div>';
-  const box =
-    '<div class="p-comp">'+shelf+
-      '<div class="p-box" data-open="1">'+
-        (seeded
-          ? '<div class="p-typed">Quota meter goes amber too early on the free plan</div>'
-          : '<div class="p-ph" style="padding:0 6px;line-height:26px">Start something new\u2026</div>')+
-        '<div class="p-ctlrow">'+
-          '<button class="p-ctl" data-go="noop" aria-label="Attach">'+ic("clip",19)+'</button>'+
-          '<span class="p-picks">'+
-            '<button class="p-pick" data-go="noop">'+ic("person",14)+'Just an agent'+ic("down",13)+'</button>'+
-            '<button class="p-pick" data-go="noop">'+agentMark("ClaudeCode",14,"var(--p-mute)")+
-              'Claude Code <span style="color:var(--p-mute)">Opus 5</span>'+ic("down",13)+'</button>'+
-          '</span>'+
-          (seeded || !bare
-            ? '<button class="p-send" data-go="goto:workspace" aria-label="Start">'+ic("arrowup",20)+'</button>'
-            : '<button class="p-ctl" data-go="comp:dictate" aria-label="Dictate">'+ic("mic",19)+'</button>')+
-        '</div>'+
-      '</div>'+
-    '</div>';
+/* `newScreen` is retired. The desk merged `/new` into the home composer and
+   the phone follows: the screen the `+` used to open is the screen you are
+   already on, so the `+` goes with it. Its three states are the home's. */
 
-  return '<div class="p-head">'+
-      '<button class="p-tap" data-go="goto:inbox" aria-label="Close">'+ic("x",22)+'</button>'+
-      '<div class="p-hgrow"></div></div>'+
-    '<div class="p-scroll"><div class="p-read" style="height:100%;display:flex;flex-direction:column;'+
-      'align-items:center;justify-content:center;padding:0 28px;text-align:center">'+
-      '<span class="p-plate">'+ic("terminal",24)+'</span>'+
-      '<h1 class="p-lede" style="margin-top:22px">'+(seeded
-        ? "Start from #482?"
-        : bare ? "Nothing to cut from yet." : "What should we build?")+'</h1>'+
-      '<p class="p-readtx p-dimtx" style="margin-top:12px">'+(seeded
-        ? "The task\u2019s title and repository came with it. Nothing is sent until you do \u2014 an "+
-          "agent starts and waits."
-        : bare
-          ? "A workspace is cut from a repository, and this Firetower has none connected. Connecting "+
-            "one is two taps and it is the only setting a phone owns."
-          : "Describe it, and an agent starts on it in its own copy of the code.")+'</p>'+
-      (bare ? '<button class="p-pill" style="margin-top:18px" data-go="goto:repos">'+
-        'Connect a repository'+ic("right",15)+'</button>' : "")+
-    '</div></div>'+
-    (bare ? "" : box);
-}
-
-/**
- * Repositories, reached from You and from the composer's shelf.
- *
- * It was a tab, and the argument for that was precise: *the new-workspace
- * form asks for a repository, and this client had no way to produce one*. The
- * redesign spends that argument — the shelf's repository chip opens this same
- * picker at the moment it is wanted. What is left is one list, which is a
- * page rather than a quarter of the index.
- */
 function configScreen() {
   return pageHead('Repositories', '', 'goto:you')+
     '<div class="p-readtx p-dimtx" style="padding:0 20px 24px">On Northwind. A workspace is cut '+
       'from one of these.</div>'+
     '<div class="p-scroll"><div class="p-col">'+
       REPOS.map(r => '<button class="p-quiet" data-go="goto:repos">'+
-        '<span class="p-quietname" style="font-family:var(--d-mono);font-size:16px;'+
+        '<span class="p-quietname" style="font-family:var(--d-mono);font-size:17px;'+
           'letter-spacing:-.016em">'+esc(r.slug)+'</span>'+
         '<span class="p-grow"></span>'+
         (r.base ? '<span class="p-when" style="font-family:var(--d-mono)">'+esc(r.base)+'</span>' : "")+
         '</button>').join("")+
       '<button class="p-quiet" data-go="goto:repos" style="color:var(--p-dim);margin-top:4px">'+
-        ic("plus",18)+'<span style="font-size:17px">Connect a repository</span></button>'+
-      '<div class="p-readtx p-mutetx" style="padding:34px 20px 0;font-size:15px">Machines, secrets, '+
+        ic("plus",18)+'<span style="font-size:18px">Connect a repository</span></button>'+
+      '<div class="p-readtx p-mutetx" style="padding:34px 20px 0;font-size:16px">Machines, secrets, '+
         'agent accounts and updates are set up from the desktop or the web console. They are a '+
         'first-day job, and both of those have room for them.</div>'+
       '<div style="height:26px"></div></div></div>';
@@ -1762,11 +1901,11 @@ function reposScreen(p, st) {
   if (st.repos === "noauth") {
     return pageHead("Connect a repository")+
       '<div class="p-scroll"><div class="p-empty">'+
-      '<div class="p-display" style="font-size:24px">This account has not authorised GitHub.</div>'+
+      '<div class="p-display" style="font-size:25px">This account has not authorised GitHub.</div>'+
       '<div class="p-readtx p-dimtx" style="max-width:34ch">It is done once, in a browser, on the '+
       'desktop app — a device code typed into the browser you are holding is the worst place to '+
       'run that flow.</div>'+
-      '<div class="p-readtx p-mutetx" style="max-width:34ch;font-size:15px;margin-top:4px">Pasting a '+
+      '<div class="p-readtx p-mutetx" style="max-width:34ch;font-size:16px;margin-top:4px">Pasting a '+
       'remote by hand is not here either: a URL typed on a phone keyboard is the worst way to enter '+
       'one.</div></div></div>';
   }
@@ -1778,16 +1917,16 @@ function reposScreen(p, st) {
   ];
   return pageHead("Connect a repository")+
     '<div class="p-readtx p-dimtx" style="padding:0 20px 20px">What your GitHub account can see.</div>'+
-    '<div style="padding:0 20px 18px"><div class="p-field" style="color:var(--p-mute);font-size:16px">'+
+    '<div style="padding:0 20px 18px"><div class="p-field" style="color:var(--p-mute);font-size:17px">'+
       ic("search",16)+'<span style="margin-left:10px">Filter</span></div></div>'+
     '<div class="p-scroll">'+list.map(r =>
       '<button class="p-quiet" data-go="noop" style="min-height:58px">'+
         '<span style="flex:1;min-width:0">'+
-          '<span class="p-quietname" style="display:block;font-family:var(--d-mono);font-size:16px;'+
+          '<span class="p-quietname" style="display:block;font-family:var(--d-mono);font-size:17px;'+
             'letter-spacing:-.016em">'+esc(r.slug)+'</span>'+
           (r.d ? '<span class="p-micro" style="display:block">'+esc(r.d)+'</span>' : "")+'</span>'+
         (r.on ? '<span class="p-when">connected</span>'
-              : '<span class="p-pill" style="padding:7px 15px;font-size:14px">Connect</span>')+
+              : '<span class="p-pill" style="padding:7px 15px;font-size:15px">Connect</span>')+
       '</button>').join("")+'</div>';
 }
 
@@ -1802,8 +1941,9 @@ function reposScreen(p, st) {
  */
 function youScreen() {
   const servers = [
-    { org:"Northwind", url:"ft-e1.tail9c2b.ts.net", on:true, dark:false },
-    { org:"Ledger", url:"192.168.1.40:4400", on:false, dark:true },
+    { org:"Northwind", url:"ft-e1.tail9c2b.ts.net", on:true, dark:false, waiting:0 },
+    { org:"Ledger", url:"ledger.tail9c2b.ts.net", on:false, dark:false, waiting:1 },
+    { org:"Harbour", url:"192.168.1.40:4400", on:false, dark:true, waiting:0 },
   ];
   return '<div class="p-head" style="padding-bottom:2px">'+
       '<div class="p-hgrow"><div class="p-lede" style="font-size:28px">You</div></div></div>'+
@@ -1817,11 +1957,13 @@ function youScreen() {
           '<span class="p-micro" style="display:block;font-family:var(--d-mono);'+
             'letter-spacing:-.016em">'+esc(s.url)+'</span></span>'+
         (s.dark ? '<span class="p-when">not reachable</span>'
-                : '<span style="color:var(--p-mute);display:flex">'+ic("check",18)+'</span>')+
+          : s.waiting ? '<span class="p-wchip" style="height:30px;padding:0 11px;font-size:14px">'+
+              '<i class="p-dot"></i>'+s.waiting+' waiting</span>'
+          : '<span style="color:var(--p-mute);display:flex">'+ic("check",18)+'</span>')+
       '</button>').join("")+
       '<button class="p-quiet" data-go="goto:connect" style="color:var(--p-dim);min-height:58px">'+
         '<span class="p-mono-sq" data-big="1" data-dark="1">'+ic("plus",17)+'</span>'+
-        '<span style="font-size:17px">Connect a Firetower</span></button>'+
+        '<span style="font-size:18px">Connect a Firetower</span></button>'+
 
       /* Named for the server, because that is the answer to "whose is this"
          and it changes the moment you pick another one above. */
@@ -1844,7 +1986,7 @@ function youScreen() {
         '<span class="p-ui" style="display:block">kevin@northwind.co</span>'+
         '<span class="p-micro" style="display:block">Signed in on Northwind</span></span></div>'+
 
-      '<div class="p-readtx p-mutetx" style="padding:30px 20px 0;font-size:15px">Who else is here, '+
+      '<div class="p-readtx p-mutetx" style="padding:30px 20px 0;font-size:16px">Who else is here, '+
         'what they may do, and who may reach a workspace are set on the control plane\u2019s own site. '+
         'This phone reads and starts work.</div>'+
       '<div style="height:26px"></div></div></div>';
@@ -1862,7 +2004,7 @@ function artifactsScreen(p, st) {
 
   if (st && st.art === "none") {
     return head_+'<div class="p-scroll"><div class="p-empty">'+
-      '<div class="p-display" style="font-size:24px">Nothing published yet.</div>'+
+      '<div class="p-display" style="font-size:25px">Nothing published yet.</div>'+
       '<div class="p-readtx p-dimtx" style="max-width:32ch">An agent publishes one when you ask it '+
       'to show you something \u2014 a mock-up, a chart, a report. They outlive the workspace that '+
       'made them.</div></div></div>';
@@ -1880,10 +2022,10 @@ function artifactsScreen(p, st) {
             'text-overflow:ellipsis;white-space:nowrap">'+esc(a.title)+'</span>'+
           '<span class="p-micro" style="display:block;margin-top:3px">v'+a.v+'</span></span>'+
       '</button>').join("")+'</div>'+
-      (fresh ? '<div class="p-readtx p-mutetx" style="padding:22px 20px 0;font-size:15px">'+
+      (fresh ? '<div class="p-readtx p-mutetx" style="padding:22px 20px 0;font-size:16px">'+
         'A version is published before anything has photographed it, so a fresh library looks like '+
         'this. The plate is the state, not a failure.</div>' : "")+
-      '<div class="p-readtx p-mutetx" style="padding:26px 20px 0;font-size:15px">Who else can reach '+
+      '<div class="p-readtx p-mutetx" style="padding:26px 20px 0;font-size:16px">Who else can reach '+
         'these is set on the control plane\u2019s own site. This phone reads them.</div>'+
       '<div style="height:26px"></div></div></div>';
 }
@@ -1924,13 +2066,13 @@ function artifactScreen(p) {
       '<div class="p-hgrow"><div class="p-title">Quota meter, four shapes</div></div>'+
       '<span class="p-when" style="margin-right:12px">v3</span>'+
       '<button class="p-tap" data-go="menu:art" aria-label="More">'+ic("dots",21)+'</button></div>'+
-    '<div class="p-mono" style="padding:0 20px 14px;font-size:12.5px">quota-meter/index.html</div>'+
+    '<div class="p-mono" style="padding:0 20px 14px;font-size:13.5px">quota-meter/index.html</div>'+
     '<div class="p-scroll" style="background:var(--p-raise)">'+
       '<div style="background:#fff;color:#15161A;min-height:100%;padding:26px 22px;'+
         'font-family:var(--d-font)">'+
-        '<div style="font-size:21px;font-weight:600;letter-spacing:-.02em">Four shapes for the '+
+        '<div style="font-size:22px;font-weight:530;letter-spacing:-.02em">Four shapes for the '+
           'quota band</div>'+
-        '<div style="font-size:14px;color:#5c5f68;margin-top:7px;line-height:1.55">What the meter '+
+        '<div style="font-size:15px;color:#5c5f68;margin-top:7px;line-height:1.55">What the meter '+
           'should paint when a plan has no soft limit. Invented data.</div>'+
         '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:20px">'+
           [["Neutral until hard","#E6E8ED","#9AA0AA"],["Amber at 80% soft","#FCEBCE","#B79045"],
@@ -1938,9 +2080,9 @@ function artifactScreen(p) {
           .map(([lab,bg,bar]) =>
             '<div style="background:'+bg+';border-radius:9px;padding:11px 12px">'+
               '<div style="height:5px;border-radius:4px;background:'+bar+';width:72%"></div>'+
-              '<div style="font-size:11.5px;color:#45474F;margin-top:9px">'+lab+'</div></div>').join("")+
+              '<div style="font-size:12.5px;color:#45474F;margin-top:9px">'+lab+'</div></div>').join("")+
         '</div>'+
-        '<div style="font-size:13px;color:#787B85;margin-top:18px;line-height:1.6">The second is '+
+        '<div style="font-size:14px;color:#787B85;margin-top:18px;line-height:1.6">The second is '+
           'what ships. The fourth is the proposal.</div>'+
       '</div>'+
     '</div>';
@@ -2079,7 +2221,7 @@ function connectScreen(p, st) {
       'you. Not a code \u2014 a code carries no address, and there is nowhere to look one up that '+
       'would not be a service holding every install\u2019s whereabouts.</p>'+
     '<div class="p-field" style="margin-top:26px">'+ic("globe",18)+
-      '<span style="margin-left:11px;font-family:var(--d-mono);font-size:16px;'+
+      '<span style="margin-left:11px;font-family:var(--d-mono);font-size:17px;'+
       'letter-spacing:-.016em">ft-e1.tail9c2b.ts.net</span></div>'+
     '<div class="p-primary" style="margin:12px 0 0" data-go="connect:reaching">Continue'+
       ic("arrowright",17)+'</div>'+
@@ -2112,7 +2254,7 @@ function lockScreen() {
   '</div>';
 }
 
-function homeScreen() {
+function springboard() {
   const apps = [["Messages","#2BC24B"],["Mail","#1A7AF8"],["Maps","#49C96D"],["Photos","#F6C945"],
     ["Calendar","#FF3B30"],["Firetower",""],["Notes","#FFD149"],["Settings","#8E8E93"]];
   return '<div style="background:linear-gradient(168deg,#1d2432,#0e1219 58%,#16131b);height:100%">'+
@@ -2138,21 +2280,21 @@ function homeScreen() {
    ═══════════════════════════════════════════════════════════════════════════ */
 const S = {
   tab:"poses", pose:"iphone", screen:"inbox", era:"next",
-  filter:"all", mode:"ok", comp:"rest", rail:null,
+  filter:"all", mode:"ok", comp:"rest", rail:null, era:"home",
   repo:"diff", tasks:"ok", repos:"list", connect:"where",
   menu:null, peek:null, inset:true, theme:"light", duo:"innerp", morphing:false, scale:1,
-  newstate:"blank", art:"library", scaleSet:false,
+  home:"both", when:null, art:"library", scaleSet:false,
 };
 /* Which destination is lit while you are on a given screen. */
 const HOME_TAB = { inbox:"dash", workspace:"dash", overview:"dash", repo:"dash",
-  file:"dash", new:"dash", tasks:"tasks", artifacts:"art", artifact:"art",
+  file:"dash", tasks:"tasks", artifacts:"art", artifact:"art",
   you:"you", config:"you", repos:"you" };
 /* A pushed route covers the bottom bar. It does not cover the trailing rail,
    because the rail belongs to the system and the stack pushes inside it —
    which is why on the inner display the destinations stay reachable from
    inside a workspace, and on a phone they do not. */
 const PUSHED = new Set(["workspace","overview","repo","file","repos","artifact","config"]);
-const MODAL = new Set(["new","connect","lock","home"]);
+const MODAL = new Set(["connect","lock","springboard"]);
 
 function renderScreen(name, p) {
   switch (name) {
@@ -2163,7 +2305,6 @@ function renderScreen(name, p) {
     case "repo":      return repoScreen(p, S);
     case "file":      return fileScreen(p);
     case "tasks":     return tasksScreen(p, S);
-    case "new":       return newScreen(p, S);
     case "config":    return configScreen(p);
     case "repos":     return reposScreen(p, S);
     case "you":       return youScreen(p);
@@ -2171,7 +2312,7 @@ function renderScreen(name, p) {
     case "artifact":  return artifactScreen(p);
     case "connect":   return connectScreen(p, S);
     case "lock":      return lockScreen();
-    case "home":      return homeScreen();
+    case "springboard": return springboard();
     default:          return '<div class="p-empty">Nothing here.</div>';
   }
 }
@@ -2188,7 +2329,7 @@ function live(poseId, screen, extra) {
     else if (S.menu === "art") over = artifactMenu();
     if (S.peek) over = peekOver(p, S.peek);
   }
-  const bare = name === "lock" || name === "home";
+  const bare = name === "lock" || name === "springboard";
   return plinth(p, renderScreen(name, p), Object.assign({
     tab: HOME_TAB[name] || "dash",
     noTabs: MODAL.has(name) || bare,
@@ -2202,10 +2343,18 @@ function serversSheet() {
     '<div class="p-sheet"><i class="p-grab"></i>'+
       '<div class="p-sheethead"><div class="p-title">Firetowers</div>'+
       '<div class="p-meta">Only the current one holds a socket.</div></div>'+
+      /* The sheet carries each server's reachability **and its waiting
+         count**, which is what `docs/mobile.md` specifies it for. That count
+         is where the desk's *one more waiting in Ledger* line goes: the home
+         has no room for it at 390 and this is where you would act on it. */
       '<button class="p-menuitem" data-go="menu:"><span class="p-mono-sq">N</span>'+
-        '<span style="flex:1">Northwind</span>'+ic("check",18,"var(--p-sage)")+'</button>'+
-      '<button class="p-menuitem" data-go="menu:"><span class="p-mono-sq" data-dark="1">L</span>'+
-        '<span style="flex:1;color:var(--p-mute)">Ledger</span>'+
+        '<span style="flex:1">Northwind</span>'+ic("check",18,"var(--p-mute)")+'</button>'+
+      '<button class="p-menuitem" data-go="menu:"><span class="p-mono-sq">L</span>'+
+        '<span style="flex:1">Ledger</span>'+
+        '<span class="p-wchip" style="height:30px;padding:0 11px;font-size:14px">'+
+          '<i class="p-dot"></i>1 waiting</span></button>'+
+      '<button class="p-menuitem" data-go="menu:"><span class="p-mono-sq" data-dark="1">H</span>'+
+        '<span style="flex:1;color:var(--p-mute)">Harbour</span>'+
         '<span class="p-micro">not reachable</span></button>'+
       '<div class="p-menurule"></div>'+
       '<button class="p-menuitem" data-go="goto:connect">'+ic("plus",20)+'Connect a Firetower</button>'+
@@ -2399,27 +2548,74 @@ function columnsWhatChanged() {
 
 function tabInbox() {
   const p = POSES[S.pose] || POSES.iphone;
-  const other = S.era === "next" ? "now" : "next";
+  /* The second device shows the one you are not looking at, cycling through
+     all three so the comparison is always live. */
+  const other = { home:"accepted", accepted:"now", now:"home" }[S.era] || "accepted";
+  const LABEL = { home:"The home", accepted:"The Dashboard it replaces", now:"Today\u2019s Inbox tab" };
+  const SUB = { home:"greeting, composer, two sections", accepted:"accepted, then outgrown",
+    now:"app/(tabs)/index.tsx, redrawn here" };
   return '<div class="d-stage"><div class="d-row">'+
       plinth(p, inboxScreen(p, Object.assign({}, S, { era:other })),
         { tab:"dash", over:"", noBand:true, shipped: other === "now",
-          label: other === "now" ? "Now \u2014 a rebuild of what ships" : "Next",
-          sub: other === "now" ? "app/(tabs)/index.tsx, redrawn here" : "" })+
+          label: LABEL[other], sub: SUB[other] })+
       live(p.id, "inbox")+
     '</div></div>'+
-    '<div class="d-cap"><b>The same screen, twice.</b>'+
+    '<div class="d-cap"><b>The same destination, three ways.</b>'+
       '<span>The left phone is a rebuild of <code>app/(tabs)/index.tsx</code> as it stands, not a '+
       'screenshot of it.</span><span>'+p.w+' \u00d7 '+p.h+' pt</span></div>'+
 
-    '<div class="d-note"><h2>It is the Dashboard, on both</h2>'+
-      '<p>Same object, same word, same glyph as \u2318\u20091 on the desk. <b>Inbox is legacy.</b> The '+
-      'desktop redesign retired <code>Fleet.tsx</code> \u2014 which its own delta table calls <i>the '+
-      'unified inbox as a screen</i> \u2014 and the word survives there in exactly two places: an icon '+
-      'name, and the note recording the deletion. A phone still calling it the Inbox would be the '+
-      'only client naming a concept the product removed.</p>'+
-      '<p>The screen on the left is the shipped <b>Inbox</b> tab, rebuilt; the one on the right is '+
-      'the <b>Dashboard</b>. What follows is why they differ by more than a word.</p>'+
+    '<div class="d-note"><h2>The home is a greeting</h2>'+
+      '<p>The desk\u2019s Dashboard no longer opens with <i>Two agents are waiting on you.</i> It '+
+      'opens with a greeting that never changes with state, the composer under it, and two '+
+      'sections below that: <b>Agents waiting for you</b>, then <b>Recent artifacts</b>. Starting '+
+      'work is what you open the app to do, so the page opens with somewhere to type rather than '+
+      'with a report.</p>'+
+      '<p>Three versions are drawn here, and the chips switch between them. <b>Home</b> is the '+
+      'design. <b>Accepted</b> is the Dashboard it replaces \u2014 accepted, drawn, then outgrown, and '+
+      'it keeps its record for the same reason a rejected alternative does. <b>Now</b> is what '+
+      'ships, wearing the shipped <i>Inbox \u00b7 Tasks \u00b7 Config \u00b7 You</i> bar.</p>'+
 
+      '<h3>It crosses, and the reason is stronger on a phone</h3>'+
+      '<p>Moving the answer to <i>is anything waiting on me</i> off the first screen is affordable '+
+      'on the desk because the dock badge and the menu-bar island are untouched and still sum '+
+      'across every Firetower. The phone\u2019s equivalents are the <b>app icon badge</b> and the '+
+      '<b>push notification</b> \u2014 and a notification does not wait to be glanced at, it '+
+      'interrupts. The machine-wide answer is carried harder here than on a desk, not more '+
+      'weakly.</p>'+
+      '<p>And the path differs: when something <i>is</i> waiting, a phone does not reach this '+
+      'screen at all. The notification deep-links to the workspace. The home is what you see when '+
+      'you opened the app yourself \u2014 which is exactly when you want somewhere to type.</p>'+
+      '<div class="d-flag"><b>The cost, recorded the way the desk recorded its own.</b> On the desk '+
+      'the answer moved from a 34px headline 12% down the window to a 14.5px chip 63% down. Here it '+
+      'moves from a 32px headline 14% down to a 16px chip <b>about 58%</b> down, and the '+
+      'agent\u2019s question leaves the screen entirely. One thing is worse on a phone and should be '+
+      'said: within the app, after a notification is dismissed, the chip row is the <i>only</i> '+
+      'on-screen answer \u2014 the badge is on the OS home screen, which you are not looking at.</div>'+
+
+      '<h3>Three things are the phone\u2019s, and each is a width decision</h3>'+
+      '<p><b>The air above the greeting.</b> The desk holds it open with 192px, 23% of its window. '+
+      'The same proportion of 390 \u00d7 844 is 194pt of nothing on the scarce axis, and the page '+
+      'would not then fit. At <b>44</b> the greeting still breathes and greeting, composer and both '+
+      'sections sit on one screen at 390 with no scroll \u2014 measured in Spec.</p>'+
+      '<p><b>Two posters, not three.</b> Three at 390 is 110pt each, too small to recognise, which '+
+      'defeats the only reason a grid of pictures exists. Three return at 669, where a grid '+
+      'reflows.</p>'+
+      '<p><b>The chips scroll and the count does not.</b> Two chips do not fit side by side at 390, '+
+      'and wrapping turns each into a full-width pill \u2014 a row wearing a chip\u2019s shape. So the '+
+      'dotted chips scroll under a fade, and <b>N more</b> is pinned outside the strip. It is the '+
+      'mechanism that makes the ember budget legible; scrolled off the end it says nothing.</p>'+
+      '<div class="d-keep"><b>The budget survives intact.</b> <code>DOTTED = 2</code>, as on the '+
+      'desk. The desk\u2019s third ember mark is the rail avatar; a phone has no rail, so on screen '+
+      'the budget is two and the third mark is the icon badge \u2014 which is the stronger surface for '+
+      'it and is not on this screen.</div>'+
+
+      '<h3>And the <code>+</code> is gone</h3>'+
+      '<p>The desk merged <code>/new</code> into this composer, so the phone did too: the screen '+
+      'the <code>+</code> used to open is the screen you are already on. One destination fewer, one '+
+      'control fewer, and <i>seeded from a task</i> and <i>nothing to cut from</i> become states of '+
+      'the home rather than screens of their own.</p>'+
+
+      '<h2 style="margin-top:34px">Count what is on each screen</h2>'+
       '<h2 style="margin-top:34px">Count what is on each screen</h2>'+
       '<p>The row on the left carries seven things: a four-quadrant glyph, a name, a timestamp, a '+
       'status word, a branch in monospace, an agent mark, and a chevron. The row on the right '+
@@ -2788,12 +2984,10 @@ function tabRepo() {
 function tabStart() {
   const p = POSES[S.pose] || POSES.iphone;
   return '<div class="d-stage"><div class="d-row">'+
-      live(p.id, ["tasks","new"].includes(S.screen) ? S.screen : "new")+
-      plinth(POSES.iphone, newScreen(POSES.iphone, Object.assign({}, S,
-        { newstate: S.newstate === "task" ? "norepo" : "task" })),
-        { noTabs:true, noBand:true,
-          label: S.newstate === "task" ? "Nothing connected yet" : "Seeded from a task",
-          sub: S.newstate === "task" ? "the one setting a phone owns" : "the title and the repository came with it" })+
+      live(p.id, "tasks")+
+      plinth(POSES.iphone, inboxScreen(POSES.iphone, Object.assign({}, S,
+        { era:"home", home:"task" })), { tab:"dash", noBand:true,
+          label:"Seeded from a task", sub:"the title and the repository came with it" })+
     '</div></div>'+
     '<div class="d-cap"><b>From <i>what could I work on</i> to <i>an agent is running</i>.</b>'+
       '<span>Tasks · New · Config · Connect a repository · Connect a Firetower</span></div>'+
@@ -2839,7 +3033,7 @@ function tabYou() {
       live(p.id, ["you","config","repos"].includes(S.screen) ? S.screen : "you")+
       plinth(POSES.iphone, lockScreen(),
         { bare:true, noTabs:true, noBand:true, label:"The notification", sub:"and the lock screen it lands on" })+
-      plinth(POSES.iphone, homeScreen(),
+      plinth(POSES.iphone, springboard(),
         { bare:true, noTabs:true, noBand:true, label:"The badge", sub:"set from the payload, not from a poll" })+
     '</div></div>'+
     '<div class="d-cap"><b>You, and the three surfaces a window does not have.</b>'+
@@ -2947,25 +3141,33 @@ const COV = [
   ["The tab bar takes no ember", "Y", "it is furniture"],
   ["The server monogram in the header", "Y", "a mark, never a colour"],
   ["The switcher sheet, with each server's reachability", "Y", ""],
+  ["\u2026 and its waiting count", "Y", "where the desk's <i>one more waiting in Ledger</i> line goes; the home has no room for it at 390"],
   ["An unreachable server is dimmed and dashed, never red", "Y", "walking out of the office is not an error"],
   ["Rows from a dark server stay visible at 45%", "X", "only one server is ever current here, so no list mixes them"],
   ["Back out of everything, including a sheet", "X", "a gesture; a screenshot cannot verify one. See <i>Evidence</i> in Spec"],
 ]],
-["The inbox", [
-  ["The sentence — <i>Two agents are waiting on you.</i>", "Y", "the answer, at display size"],
-  ["Ranked, not grouped by repository", "Y", "the desktop Dashboard's order"],
-  ["Today's grouped-by-repository list", "Y", "drawn as <b>Now</b>, a rebuild of the current route"],
-  ["A waiting row carries the agent's own words, at reading size", "Y", ""],
-  ["A quiet row is a name and a time", "Y", ""],
-  ["No repository, branch, agent mark or chevron on a row", "Y", "the one change the whole brief turns on"],
-  ["Filter — All · Waiting · Working · Idle", "X", "removed: the ranking already answers it, and the chrome costs a tenth of the screen. Drawn in <b>Now</b>"],
-  ["The signals", null, "", [
-    ["Waiting on you — an ember dot, the only saturated thing on the screen", "Y", ""],
-    ["Working — three grey dots, the only thing that moves at rest", "Y", ""],
-    ["Everything else — no mark at all; weight tells them apart", "Y", "ink, dim, mute"],
-    ["<code>Blocks</code>, the four-quadrant glyph, on a row", "X", "retired from the list — four hues is four accents. See Notes; drawn in <b>Now</b>"],
-    ["reduced motion — the dots hold still, the ember dot stops pulsing", "Y", ""],
+["The home", [
+  ["The greeting, and it never changes with state", "Y", "morning · afternoon · evening, late night taking evening"],
+  ["The composer, under it", "Y", "the desk merged <code>/new</code> into it and the phone followed"],
+  ["The shelf — repository, machine", "Y", "a shelf here and none in a workspace"],
+  ["Agents waiting for you", null, "", [
+    ["Chips with an ember dot, a name and a time", "Y", ""],
+    ["<code>DOTTED = 2</code>, and the rest collapse to a count", "Y", "a count with no dot"],
+    ["What fits is what shows — one chip at 390, two from 466", "Y", "the count stays exact"],
+    ["The count is pinned outside the scrolling strip", "Y", "scrolled off the end it says nothing"],
   ]],
+  ["Recent artifacts", null, "", [
+    ["Two posters at 390, three at 669", "Y", "three at phone width is too small to recognise"],
+    ["View all", "Y", "to the Artifacts destination"],
+    ["Same heading as the section above it", "Y", "the only thing telling them apart is the ember"],
+  ]],
+  ["It fits one screen without scrolling", "Y", "measured at all five poses in Spec"],
+  ["At 951 it splits rather than scrolls", "Y", "the only short pose, and the only one with room for two things"],
+  ["Nothing waiting · nothing yet · no repository · from a task", "Y", "four states"],
+  ["Unreachable", "Y", "said as what to do, not what went wrong"],
+  ["The Dashboard it replaces", "Y", "accepted, then outgrown — kept as a record"],
+  ["Today's Inbox tab", "Y", "a rebuild, wearing the shipped tab bar"],
+  ["The <code>+</code>", "X", "retired with <code>/new</code> — the screen it opened is the screen you are on"],
   ["Long-press peek", null, "", [
     ["The question, readable without opening", "Y", ""],
     ["Allow / No answered from the list", "Y", "the point of the whole gesture"],
@@ -2974,13 +3176,6 @@ const COV = [
   ]],
   ["Swipe a row for rename · end", "N", "named in <code>docs/mobile.md</code>; the menu covers both"],
   ["Pull to refresh", "N", "a gesture, and not drawable as a still"],
-  ["Four absences", null, "", [
-    ["Reading your workspaces", "Y", "nothing for the first 350ms"],
-    ["That server is not answering", "Y", ""],
-    ["No workspaces yet, with the one action worth offering", "Y", ""],
-    ["Nothing here is <i>working</i>", "Y", ""],
-  ]],
-  ["The + to a new workspace", "Y", ""],
 ]],
 ["The conversation", [
   ["The agent speaks onto the ground", "Y", "no bubble, no avatar"],
@@ -3569,13 +3764,16 @@ function auditReach() {
  *   artifact, a path. Nothing to compare it against but itself.
  */
 const NAMING = [
-  ["Dashboard", "inbox", "answer", {}],
-  ["Dashboard \u2014 unreachable", "inbox", "answer", { mode:"error" }],
-  ["Dashboard \u2014 nothing yet", "inbox", "answer", { mode:"empty" }],
+  ["Dashboard", "inbox", "answer", { era:"home", home:"both" }],
+  ["Dashboard \u2014 nothing waiting", "inbox", "answer", { era:"home", home:"nowait" }],
+  ["Dashboard \u2014 nothing yet", "inbox", "answer", { era:"home", home:"bare" }],
+  ["Dashboard \u2014 from a task", "inbox", "answer", { era:"home", home:"task" }],
+  ["Dashboard \u2014 no repository", "inbox", "answer", { era:"home", home:"norepo" }],
+  ["Dashboard \u2014 unreachable", "inbox", "answer", { era:"home", home:"error" }],
+  ["Dashboard \u2014 the one it replaces", "inbox", "answer", { era:"accepted" }],
   ["Tasks", "tasks", "same", {}],
   ["Artifacts", "artifacts", "same", {}],
   ["You", "you", "same", {}],
-  ["New workspace", "new", "answer", { newstate:"blank" }],
   ["Connect a Firetower", "connect", "answer", { connect:"where" }],
   ["Repositories", "config", "same", {}],
   ["Connect a repository", "repos", "same", { repos:"list" }],
@@ -3589,7 +3787,7 @@ function auditNaming() {
     Object.assign(S, JSON.parse(keep), patch);
     let html = ""; try { html = renderScreen(screen, POSES.iphone); } catch (e) {}
     const box = document.createElement("div"); box.innerHTML = html;
-    const el = box.querySelector(".p-lede, .p-display, .p-title");
+    const el = box.querySelector(".p-greet, .p-lede, .p-display, .p-title");
     const head = el ? el.textContent.trim() : "";
     let ok;
     if (rule === "same") ok = head === opener;
@@ -3601,10 +3799,48 @@ function auditNaming() {
   return out;
 }
 
+/**
+ * Does the home fit without scrolling?
+ *
+ * The claim that 44pt of air rather than the desk's 192 keeps greeting,
+ * composer and both sections on one screen is only worth making if it is
+ * measured. This lays each pose out off-screen at its real size and compares
+ * the scroller's content against the room it has.
+ */
+function auditFit() {
+  const keep = JSON.stringify(S);
+  const stage = document.createElement("div");
+  stage.style.cssText = "position:absolute;left:-10000px;top:0;visibility:hidden";
+  document.body.appendChild(stage);
+  const out = POSE_ORDER.map(id => {
+    const p = POSES[id];
+    Object.assign(S, JSON.parse(keep), { era:"home", home:"both" });
+    stage.innerHTML = device(p, renderScreen("inbox", p), { tab:"dash" });
+    const sc = stage.querySelector(".p-scroll");
+    const inner = sc && sc.firstElementChild;
+    const need = inner ? inner.scrollHeight : 0;
+    const room = sc ? sc.clientHeight : 0;
+    return { name:p.name, w:p.w, need, room, fits: need <= room };
+  });
+  stage.remove();
+  Object.assign(S, JSON.parse(keep));
+  return out;
+}
+
 /** Nothing tappable under 44 points. The phone's floor, from `STYLE.md`. */
 const TAPPABLE = ".p-tap,.p-ctl,.p-send,.p-item,.p-quiet,.p-menuitem,.p-popitem,.p-askno,"+
   ".p-askyes,.p-tab,.p-railitem,.p-primary,.p-second,.p-who,.p-difffile,.p-tree,"+
   ".p-facts,.p-stab,.p-pill,.p-field,.p-card,.p-texttab,.p-member,.p-switch";
+/**
+ * What a control adds to its drawn size to make a target.
+ *
+ * `mobile/STYLE.md` sets the composer's controls at **40pt circles with 8pt
+ * of air** — the drawn circle is 40 and the thing your thumb hits is 56. The
+ * app spells the same idea as `hitSlop`. Declared here with its citation
+ * rather than excluded quietly, because a check that silently skips its
+ * awkward cases is the check that cannot fail.
+ */
+const HIT_SLOP = { "p-ctl":8, "p-send":8, "p-tap":0 };
 function auditTargets() {
   const bad = [];
   let n = 0;
@@ -3615,10 +3851,12 @@ function auditTargets() {
        on the page failed the 44pt floor the moment the default view stopped
        being 1:1. The layout size ignores transforms, which is the number a
        stylesheet actually holds. */
-    const w = el.offsetWidth, h = el.offsetHeight;
+    const cls = el.className.split(" ")[0];
+    const slop = (HIT_SLOP[cls] || 0) * 2;
+    const w = el.offsetWidth + slop, h = el.offsetHeight + slop;
     if (!h && !w) return;
     n++;
-    if (h < 44 || w < 44) bad.push({ cls: el.className.split(" ")[0], h, w });
+    if (h < 44 || w < 44) bad.push({ cls, h, w });
   });
   const by = new Map();
   bad.forEach(b => { const k = b.cls+" "+b.w+"×"+b.h; by.set(k, (by.get(k)||0)+1); });
@@ -3627,6 +3865,7 @@ function auditTargets() {
 function tabSpec() {
   const cls = auditClasses(), ctl = auditControls(), reach = auditReach(), tgt = auditTargets();
   const nam = auditNaming(), namBad = nam.filter(r => !r.ok);
+  const fit = auditFit(), fitBad = fit.filter(r => !r.fits);
   const missed = reach.filter(r => !r.ok);
   const poseRow = p => {
     const rail = railOn(p) && S.inset ? RAIL : 0, cw = p.w - rail;
@@ -3647,6 +3886,17 @@ function tabSpec() {
   'simulator, no foldable. The four checks the surfaces reference asks for that <i>can</i> only be '+
   'done on hardware are listed at the foot of Notes.</div>'+
 
+  '<h3>The home, and whether it fits</h3>'+
+  '<p>The desk holds its greeting open with <b>192px</b> of air \u2014 23% of an 824px window. The '+
+  'same proportion of a 390 \u00d7 844 phone is 194pt spent on nothing, on the axis a phone has least '+
+  'of. At <b>44</b> the whole page sits on one screen at every pose. Measured by laying each one '+
+  'out at its real size and comparing the scroller\u2019s content against the room it has.</p>'+
+  '<table class="d-tbl"><thead><tr><th>Pose</th><th>Content</th><th>Room</th><th></th></tr>'+
+    '</thead><tbody>'+
+  fit.map(r => '<tr><td>'+esc(r.name)+'</td><td class="d-num">'+r.need+'</td>'+
+    '<td class="d-num">'+r.room+'</td><td class="'+(r.fits?"d-ok":"d-bad")+'">'+
+    (r.fits ? "fits, "+(r.room-r.need)+" to spare" : "scrolls by "+(r.need-r.room))+'</td></tr>').join("")+
+  '</tbody></table>'+
   '<h3>The poses</h3>'+
   '<table class="d-tbl"><thead><tr><th>Pose</th><th>Window</th><th>System rail</th>'+
     '<th>Laid out in</th><th>Band</th><th>COLUMN here</th><th>READING here</th></tr></thead><tbody>'+
@@ -3685,6 +3935,13 @@ function tabSpec() {
   '</tbody></table>'+
 
   '<h3>Type</h3>'+
+  '<div class="d-flag"><b>Every size below 28 is one pixel larger than the first draft</b>, and 28 '+
+  'and above are unchanged \u2014 the same uniform step the desk took. Uniform because adding the '+
+  'same number to everything is the only move that <i>cannot</i> disturb the gaps between tiers, '+
+  'which is what makes a dense screen readable and what a well-meaning per-screen pass destroys. '+
+  'Prose sits 1.5 above a row name before and after. Row minimums grew 2 with it, because a name '+
+  'and a sub-line each grew one. The system\u2019s own chrome \u2014 the status bar, the notification, '+
+  'the springboard \u2014 did not move: it is not ours to set.</div>'+
   '<p>The scale is <code>tokens.generated.ts</code>, which is <code>globals.css</code> moved up '+
   'about a sixth. Six sizes and a mono, exactly as on the desk — not a seventh voice. Tracking is '+
   'size-specific, which is the one typographic rule that is wrong if it is a single number: large '+
@@ -3697,7 +3954,7 @@ function tabSpec() {
    ["--text-read","17 / 1.62 / −0.003em","prose, a turn, the question in a row","--color-text"],
    ["--text-body","16 / 1.65","a long caption","--color-text"],
    ["--text-ui","15 / 1.45","controls and labels","--color-text"],
-   ["--text-meta","13 / 1.45","timestamps, counts, paths","--color-dim"],
+   ["--text-meta","14 / 1.45","timestamps and counts","--color-dim"],
    ["--text-micro","12.5 / 1.45 / +0.004em","a hint under a field label","--color-mute"],
    ["(section label)","13.5 / 1.45","Team, Made, Plan — sentence case, never a tracked capital","--color-dim"],
    ["--text-code","15 / 1.6 / −0.018em","a diff, a file, a command in an approval","inherits"],
@@ -3711,11 +3968,29 @@ function tabSpec() {
   'the generated set still carries <code>input: 17</code>, and nothing in <code>mobile/src</code> '+
   'reads it.</div>'+
 
+  '<h3>Three weights, and mono where the characters matter</h3>'+
+  '<p><b>400 \u00b7 500 \u00b7 530.</b> Body, label, heading. The first draft of this document used four '+
+  '\u2014 500, 530, 560, 600 \u2014 which is a slider somebody kept nudging rather than a scale. If a '+
+  'thing needs emphasis beyond 530 it needs a different size or more space around it, not another '+
+  '20 units of weight.</p>'+
+  '<p>Monospace carries one question: <b>would you ever read it character by character?</b> A path, '+
+  'a branch, an address, a command, a diff, an issue key \u2014 yes. A count, a version badge, a '+
+  'timestamp, a person\u2019s name \u2014 no. Two were wrong and are fixed: <code>+137</code> and '+
+  '<code>\u221220</code> in the repository header were mono and are now tabular figures, which is '+
+  'what a count wants.</p>'+
   '<h3>Light, derived</h3>'+
   '<p>The method is the handoff’s: hold a* and b*, move L* until the value clears the floor for '+
   'what it is measured <i>against</i> — and what it is measured against is the part that was got '+
   'wrong the first time. A badge is composed the same way in both themes, the colour on its tint '+
   'inside its deep, so a signal is gated against its own tint and never against the page.</p>'+
+  '<div class="d-keep"><b>Every neutral holds R = G.</b> The shipped dark scale always did \u2014 it '+
+  'lifts blue and never green \u2014 and the first light derivation had green 1\u20133 points above '+
+  'red, which reads as a different hue rather than a cooler grey. All nine are corrected here, and '+
+  'so are the translucent blacks: every hover, shadow and scrim went from '+
+  '<code>rgb(21 22 26 / \u2026)</code> to <code>rgb(22 22 23 / \u2026)</code>. The phone\u2019s <i>dark</i> '+
+  'branch needed nothing \u2014 it is <code>tokens.generated.ts</code>, and every one of its neutrals '+
+  'already held the rule this came from. The document\u2019s dark branch did need it: I had copied '+
+  'the desktop artifact\u2019s drift, <code>#060608</code> against the real <code>#0b0b0c</code>.</div>'+
   contrastTable()+
   '<div class="d-flag"><b>This design needs a second new token, and the handoff names only one.</b> '+
   '§4 adds <code>--color-amber-soft</code> and says it is "the one token this work adds". It also '+
@@ -3854,6 +4129,11 @@ function tabSpec() {
     '<td class="d-num '+(missed.length?"d-bad":"d-ok")+'">'+(REACH.length-missed.length)+' of '+
     REACH.length+' states open from inside a phone</td>'+
     '<td>a state you can only reach from a chip in the masthead does not exist to a reader</td></tr>'+
+  '<tr><td>The home fits on one screen</td>'+
+    '<td class="d-num '+(fitBad.length?"d-bad":"d-ok")+'">'+(fit.length-fitBad.length)+' of '+
+    fit.length+' poses</td>'+
+    '<td>greeting, composer and both sections without scrolling. If this fails, the air above the '+
+    'greeting is the first thing to take</td></tr>'+
   '<tr><td>A screen that disagrees with what opens it</td>'+
     '<td class="d-num '+(namBad.length?"d-bad":"d-ok")+'">'+namBad.length+' of '+nam.length+'</td>'+
     '<td>the desktop sweep found four of these. A destination called one thing and a page calling '+
@@ -3910,6 +4190,38 @@ function tabNotes() {
     "staying dark-only and letting the desktop have light. It keeps the two clients visibly "+
       "different for no reason either of them can state, and it means the token work reaches "+
       "<code>mobile/src/design/</code> and is never used.")+
+
+  dec("The home is a greeting, and it crosses",
+    "the Dashboard opens with <i>Good morning, what should we work on?</i> \u2014 a greeting that "+
+      "never changes with state \u2014 then the composer, then <b>Agents waiting for you</b> and "+
+      "<b>Recent artifacts</b>. The sentence that counted the waiting agents is superseded and "+
+      "kept as a record.",
+    "the answer to <i>is anything waiting on me</i> moves from a 32px headline 14% down the screen "+
+      "to a 16px chip about 58% down, and the agent\u2019s own question \u2014 the thing you would "+
+      "actually answer \u2014 leaves the screen entirely.",
+    "starting work is what you open the app to do, so the page opens with somewhere to type rather "+
+      "than with a report. And the reason it is affordable is <i>stronger</i> on a phone than on a "+
+      "desk: the desk can give this up because the dock badge and the menu-bar island still sum "+
+      "across every Firetower, and the phone\u2019s equivalents \u2014 the icon badge and the push "+
+      "notification \u2014 do not wait to be glanced at. A notification interrupts. And when "+
+      "something is waiting, a phone does not reach this screen at all: the notification "+
+      "deep-links to the workspace. This is what you see when you opened the app yourself.",
+    "keeping the sentence on the phone while the desk moved on. It would make the phone the only "+
+      "client still leading with a report, which is the same class of mistake as keeping the word "+
+      "<i>Inbox</i> \u2014 and this document has now made that one twice.")+
+
+  '<p><b>One line of the desk\u2019s home does not come across.</b> <i>One more waiting in Ledger '+
+  '\u2014 you are not in it</i> sits at the foot of its page; at 390 the home has no room for it '+
+  'without pushing something else off. It goes where a phone would act on it anyway: the server '+
+  'switcher carries each Firetower\u2019s reachability <b>and its waiting count</b>, which is what '+
+  '<code>docs/mobile.md</code> specifies that sheet for, and the same count is on the '+
+  '<b>You</b> list.</p>'+
+  '<div class="d-flag"><b>One thing is genuinely worse here and should not be smoothed over.</b> '+
+  'On a desk the island is on the same screen you are already looking at. On a phone the badge is '+
+  'on the OS home screen, which you are not. So <i>within the app</i>, once a notification has '+
+  'been dismissed, the chip row is the only on-screen answer to <i>is anything waiting</i> \u2014 '+
+  'and it is about 58% down. That is the one place where the desk\u2019s reasoning is weaker here '+
+  'rather than stronger, and it is the thing to watch if anybody reports losing track of work.</div>'+
 
   dec("Four destinations: Dashboard, Tasks, Artifacts, You",
     "the first three are the desk\u2019s \u2318\u20091, \u2318\u20092 and \u2318\u20093 \u2014 same object, same "+
@@ -4294,7 +4606,7 @@ function tabNotes() {
   '</tbody></table>'+
 
   '<h2 style="margin-top:38px">What this page caught in itself</h2>'+
-  '<p>Six, all worth recording because the method is as much of the deliverable as the design is.</p>'+
+  '<p>Seven, all worth recording because the method is as much of the deliverable as the design is.</p>'+
   '<h3>The first version of this document looked like the old app</h3>'+
   '<p>It carried <code>northwind/api \u00b7 fix/quota-rounding</code> under every row, a four-colour '+
   'glyph on each one, a chevron at the end, and a segmented filter above the list. Every one of '+
@@ -4312,6 +4624,20 @@ function tabNotes() {
   '<code>CSSStyleRule</code> carries an empty <code>CSSRuleList</code>, so <code>if (r.cssRules)</code> '+
   'is true for every rule on the page and the walk recursed into nothing for all 305 of them. '+
   'Fixed, it examines 171 classes and finds 8 base-plus-variant pairs and no leaks.</p>'+
+  '<h3>Measuring the home found a pose it did not fit</h3>'+
+  '<p>The claim that 44pt of air rather than the desk\u2019s 192 keeps the whole page on one screen '+
+  'was worth checking rather than asserting, so it is a check: each pose laid out at its real size, '+
+  'the scroller\u2019s content against the room it has. Four fitted. <b>The Duo\u2019s inner display in '+
+  'landscape did not</b> \u2014 598 of content into 527 of room, over by 71.</p>'+
+  '<p>It is the only pose that is <i>short</i>: 669 tall against the others\u2019 844 to 951. It is '+
+  'also the only one with room for two things, which it was spending on nothing. So the home '+
+  'splits there \u2014 greeting and composer on the left, the two sections beside them \u2014 and the '+
+  'same measurement now reads 249 into 527. Reading order top-to-bottom becomes left-to-right: '+
+  'what you came to do, then what is waiting.</p>'+
+  '<div class="d-keep"><b>That is the check doing the job the handoff describes.</b> A number this '+
+  'page computes about itself found a layout fault in the pose the whole brief is about, and it '+
+  'found it in the one case a 390pt render would never have shown.</div>'+
+
   '<h3>A screen that disagrees with what opens it</h3>'+
   '<p>The desktop sweep found four \u2014 Secrets under Vault, Compute under Machines, Profiles under '+
   'Agent profiles, Commit under Ship. Renaming a destination here made it worth checking this '+
@@ -4418,11 +4744,15 @@ function tabNotes() {
    ═══════════════════════════════════════════════════════════════════════════ */
 const SHEET = [
   ["Answering", [
-    ["The Dashboard", "inbox", { tab:"inbox", era:"next" }, "the sentence, and what is asking"],
+    ["The home", "inbox", { tab:"inbox", era:"home", home:"both" }, "greeting, composer, two sections"],
+    ["Nothing waiting", "inbox", { tab:"inbox", era:"home", home:"nowait" }, ""],
+    ["Nothing yet", "inbox", { tab:"inbox", era:"home", home:"bare" }, "the greeting stops holding it open"],
+    ["Seeded from a task", "inbox", { tab:"inbox", era:"home", home:"task" }, ""],
+    ["No repository", "inbox", { tab:"inbox", era:"home", home:"norepo" }, ""],
+    ["Not answering", "inbox", { tab:"inbox", era:"home", home:"error" }, ""],
+    ["The Dashboard it replaces", "inbox", { tab:"inbox", era:"accepted" }, "accepted, then outgrown"],
     ["Today's Inbox tab", "inbox", { tab:"inbox", era:"now" }, "a rebuild of what ships"],
-    ["Nothing waiting", "inbox", { tab:"inbox", era:"next", mode:"empty" }, ""],
-    ["Not answering", "inbox", { tab:"inbox", era:"next", mode:"error" }, ""],
-    ["The peek", "inbox", { tab:"inbox", era:"next", peek:"w1" }, "hold a row"],
+    ["The peek", "inbox", { tab:"inbox", era:"accepted", peek:"w1" }, "hold a row"],
   ]],
   ["The conversation", [
     ["Reading it", "workspace", { tab:"workspace", comp:"rest" }, ""],
@@ -4442,9 +4772,6 @@ const SHEET = [
     ["One file", "file", { tab:"repo" }, "with the strip above it"],
   ]],
   ["Starting work", [
-    ["What should we build?", "new", { tab:"start", screen:"new", newstate:"blank" }, "the + lands here"],
-    ["Seeded from a task", "new", { tab:"start", screen:"new", newstate:"task" }, ""],
-    ["Nothing to cut from", "new", { tab:"start", screen:"new", newstate:"norepo" }, ""],
     ["Tasks", "tasks", { tab:"start", screen:"tasks", tasks:"ok" }, ""],
     ["No trackers", "tasks", { tab:"start", screen:"tasks", tasks:"none" }, ""],
   ]],
@@ -4470,7 +4797,7 @@ const SHEET = [
     ["You", "you", { tab:"you", screen:"you" }, "this phone's"],
     ["Switching Firetower", "you", { tab:"you", screen:"you", menu:"servers" }, ""],
     ["The notification", "lock", { tab:"you" }, ""],
-    ["The badge", "home", { tab:"you" }, "set from the payload"],
+    ["The badge", "springboard", { tab:"you" }, "set from the payload"],
   ]],
 ];
 
@@ -4691,9 +5018,15 @@ function subsFor(id) {
         "scale", String(poseScale()))+
         '<span class="d-spacer"></span>'+t;
     case "inbox":
-      return chips("Version", [["now","Now"],["next","Next"]], "era", S.era)+
-        gos("State", [["filter:all","All"],["filter:waiting","Waiting"],["filter:working","Working"]], S.filter)+
-        chips("Absence", [["ok","Has rows"],["loading","Loading"],["error","Unreachable"],["empty","Nothing yet"]], "mode", S.mode)+
+      return chips("Version", [["home","Home"],["accepted","Accepted"],["now","Now"]], "era", S.era)+
+        (S.era === "home"
+          ? chips("State", [["both","Both sections"],["nowait","Nothing waiting"],
+              ["bare","Nothing yet"],["task","From a task"],["norepo","No repository"],
+              ["error","Unreachable"]], "home", S.home)+
+            chips("Time", [["morning","Morning"],["afternoon","Afternoon"],["evening","Evening"]],
+              "when", S.when || partOfDay())
+          : gos("Filter", [["filter:all","All"],["filter:waiting","Waiting"],
+              ["filter:working","Working"]], S.filter))+
         chips("Pose", POSE_CHIPS, "pose", S.pose)+'<span class="d-spacer"></span>'+t;
     case "workspace":
       return gos("Composer", [["comp:rest","At rest"],["comp:open","Writing"],["comp:ask","An approval"],
@@ -4715,7 +5048,7 @@ function subsFor(id) {
       return gos("Tab", [["repo:diff","Diff"],["repo:files","Files"],["repo:ship","Ship"]], S.repo)+
         chips("Pose", POSE_CHIPS, "pose", S.pose)+'<span class="d-spacer"></span>'+t;
     case "start":
-      return gos("Screen", [["goto:new","New workspace"],["goto:tasks","Tasks"]], S.screen)+
+      return gos("Screen", [["goto:tasks","Tasks"]], S.screen)+
         chips("New workspace", [["blank","Empty"],["task","From a task"],["norepo","No repository"]],
           "newstate", S.newstate)+
         chips("Repositories", [["list","The picker"],["noauth","Not authorised"]], "repos", S.repos)+
