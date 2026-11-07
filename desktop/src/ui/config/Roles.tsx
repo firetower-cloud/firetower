@@ -19,6 +19,7 @@ import {
   FolderGit2,
   GitBranch,
   GitBranchPlus,
+  GitFork,
   Box,
   Cpu,
   Gauge,
@@ -59,8 +60,20 @@ import { machineLabel, machines } from "~/api/environments";
 import type { Agent, Control, ControlKind, Role, NewRole } from "~/api/generated/model";
 import { useConfirm } from "~/ui/Confirm";
 
-/** Where a child runs — a profile pins one. No "let the lead choose". */
+/**
+ * Where a child runs.
+ *
+ * **Three, not two.** This offered `here` and `new` and said in a comment
+ * that there was no "let the lead choose" — but `Role.placement` is
+ * documented as `lead | here | new`, and the drawing puts all three on the
+ * screen with "Let the lead choose" first. A profile that does not pin a
+ * placement is a real and useful thing: it is the profile that works
+ * wherever the lead puts it.
+ *
+ * It carries no note, because the label is already the whole of it.
+ */
 const PLACEMENTS: { value: string; icon: LucideIcon; label: string; note: string }[] = [
+  { value: "lead", icon: GitFork, label: "Let the lead choose", note: "" },
   { value: "here", icon: GitBranch, label: "Same workspace", note: "Shares the lead's directory and branch." },
   { value: "new", icon: GitBranchPlus, label: "Its own workspace", note: "A fresh branch, on the machine you pin below." },
 ];

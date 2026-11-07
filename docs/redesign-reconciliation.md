@@ -21,7 +21,8 @@ holds **96 states**. Three scripts drive it:
 | `pnpm shoot:app` | Drives the running app into the same 96 states against `mock-server.mjs`. A state it cannot reach records **why**, in `index.json`, rather than quietly photographing the nearest screen. |
 | `pnpm reconcile` | One sheet per state: the drawing and the build, light along the top and dark underneath. Four panes is the unit that can actually be compared — a contact sheet of ninety-nine thumbnails tells you a screen exists and nothing about whether it matches. |
 | `pnpm assert:design` | The same states, **asserted rather than looked at**. See *Asserting instead of looking* below. |
-| `pnpm check:states` | The states a screenshot cannot see — hover, and anything else behind a pseudo-class. |
+| `pnpm assert:connected` | Presses every control that *names* something and asks where it landed. See *Layer 2b* below. |
+| `pnpm check:states` | The states a screenshot cannot see — hover, and sequences. |
 
 ```
 pnpm mock &   pnpm dev &   pnpm shoot:proto && pnpm shoot:app && pnpm reconcile
@@ -115,6 +116,44 @@ Results land in `.firetower/reconcile/design-assertions.md` and `.json`, one
 row per finding, each carrying **which state, which theme, which element,
 expected versus actual**. A red tick with no locator costs more than it saves.
 
+### Layer 2b — does pressing a named thing open that thing?
+
+The user's words: *"Many things like this are not connected, check
+everything and fix."* That is a statement about a category, and three
+instances had already been found by hand — an artifact tile on the home
+opened the library, a skill row in the rail opened Skills, an artifact row
+opened Artifacts.
+
+The sweep already presses hundreds of controls and asserts none throws.
+**That is a weak assertion**: a control that silently does nothing passes it,
+and all three of those did. `assert-connected.mjs` presses every control that
+*names* something — what it names comes from the mock's own catalogue at
+`/__entities`, so nothing in the app needs tagging — and classifies where it
+landed:
+
+| | |
+|---|---|
+| `connected` | landed somewhere carrying that thing's id, or opened a sheet carrying its name |
+| `wrong-thing` | went somewhere else, usually the list instead of the item |
+| `inert` | nothing moved at all |
+| `by-design` | a tab, a toggle, a filter, a disclosure — recognised and marked, not counted |
+
+**The fourth row is the point.** A check that cannot tell *inert by design*
+from *broken* is the check that let this through.
+
+### Sequences, which no single screenshot holds
+
+`check:states` covers what a still frame cannot: a pseudo-class, and an
+order of events. Two sequences live there now — the rail's hover, on a
+current and a non-current destination in both themes, and the panel's whole
+collapse story: collapse it, visit three destinations, reload, re-open.
+
+The second one earned its place immediately. After fixing the panel's state
+to one answer instead of one per destination, three of its six assertions
+still failed, because `Rail.go` also called `setPinned(true)` on every
+destination click. Every individual screen in that sequence looks right in a
+screenshot; only the order is wrong.
+
 ### What this cannot do
 
 Worth being plain about, because a green run is going to get quoted:
@@ -191,7 +230,7 @@ untouched, deliberately, and does not appear in the table.
 | Notes kept | **not reached** | Follows the selection above. |
 | Skills | **matches** | Built to the drawing under criterion 55 (`c53b317c`), and the gallery's primary action is now the filled pill rather than `CreateMenu`'s grey outline. |
 | One skill | **differs → fixed** | Close already, after the tabs pass. Two gaps in the action row: **"Who can use it" was a bare glyph** among four labelled buttons — the sharing control is glyph-only in the dense toolbars where it also appears, so it takes an optional label rather than every toolbar taking words it does not want. And **Download is absent**: there is no download in the generated client, so it is in *Where the endpoint cannot answer what the drawing shows* rather than here. The asides differ too — the drawing closes with "On by default", the build with an **Access** card the drawing has no counterpart for. |
-| A new version | **to compare** | |
+| A new version | **differs** | **The harness was opening the wrong skill** — `pr-screenshots`, which nobody had dropped a version on — and then clicking Versions, which draws a real screen and not the one the drawing names. Pointed at `deploy-runbook`, the held one, the review is reachable and the two can be compared. They argue differently. The drawing shows **what changed**: a line per file with `changed`/`added`/`same`/`removed` and `+38 −11` against each, under a chip reading "This is your v6, changed — it would become v7", closing with `✓ Keep it as v7` / `Discard` and a note that the executable scripts do not change with this version. The build shows **what it is**: an amber band saying an agent wrote this and it runs code, a facts pair, then every file's full contents inlined. The build's framing is right for a skill arriving for the first time and wrong for a sixth version, where the question is what moved. |
 | Create with AI | **to compare** | |
 | Held for review | **matches** | The build lands a held skill on the gallery rather than at the end of a create flow — criterion 43's reading. The card and its two-pixel amber rule are the drawing's. |
 | Upload a folder | **to compare** | |
@@ -201,7 +240,7 @@ untouched, deliberately, and does not appear in the table.
 | Screen | Verdict | What differed |
 |---|---|---|
 | Profiles | **differs → fixed** | Small heading, no lede, an **outlined** primary, rows in a bordered card, three coloured chips and a trash icon per row at rest. Now the drawing's: display heading, filled pill, rows on the page, quiet facts, and the closing note. Also renamed **Agent profiles**, which is what the rail calls it. |
-| One profile | **to compare** | |
+| One profile | **differs → fixed** | **The placement offered two of three.** `Role.placement` is documented as `lead | here | new`, the drawing draws all three with "Let the lead choose" first, and the build had a comment asserting there was no such option. A profile that does not pin a placement is a real thing — the one that works wherever the lead puts it. Added. **Two differences left**: the drawing's chips carry no glyph where the build's do, and the drawing's help line under Placement is "Where a workspace it is given runs." against the build's longer "Where a child runs when a lead delegates to it. Every spawn runs the same way." |
 | New profile | **to compare** | |
 | Read-only profile | **differs** | **Criterion 39 holds in both, differently.** The drawing keeps the *editing form's shape* and fills it with values — Name, Description, Placement with the three options drawn as chips and the chosen one filled, Machine — so you can see what a copy of it would give you. The build replaces the form with a **facts table**. Both avoid greyed-out controls, which is what the criterion asks. **Two real gaps**: the drawing opens with a notice — "You can use this profile but not change it. *ana* administers `d/eng`, where it is filed — ask there, or make your own copy from it." — carrying a **Duplicate** button, and the build has neither the notice nor any way to take a copy. The drawing also puts a `‹ All profiles` back link above the title where the build puts an `All profiles` button at the top right. |
 | What it may reach | **not reached** | The scope sheet opens from a profile being edited; the mock's roles are read-only to this user. |
@@ -290,7 +329,7 @@ through the flow ended on "not a Firetower".
 | ⌘P — go to a file | **to compare** | |
 | Before something is undone | **differs → fixed** | A bordered card with a tinted strip under its buttons — two surfaces and a rule for a box with four lines in it. One sheet now, actions on the same ground as the words, brick only when the thing is destructive. |
 | A usage limit is reached | **not reached** | Needs a session whose account reports a limit; the mock reports none. |
-| What happens on a limit | **to compare** | |
+| What happens on a limit | **differs** | The drawing titles it **"When this account runs out"**; the build says "When this account reaches its limit". The drawing opens with the paragraph that explains the default — "Off by default, because switching spends somebody else's allowance. Turning it on is choosing the accounts to try, **in order**; the server does the rest whether this window is open or not, and tries each one at most once." — and has **no checkbox at all**: ticking accounts *is* turning it on. The build leads with a "Switch automatically, in this order" checkbox and scatters the explanation into fragments below. Its footer note, "Saved for this workspace.", is absent. **The populated state is unverified**: the mock has no second Claude Code account, so what the sheet draws with a numbered, removable list could not be compared. |
 | A screen that threw | **not reached** | Nothing in the mock throws on purpose. `Boundary` is covered by its own test. |
 | Switch Firetower | **matches** | Built and photographed under criterion 12. |
 | The profile menu | **matches** | Built and photographed under criterion 3. |
