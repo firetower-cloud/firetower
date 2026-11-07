@@ -486,6 +486,13 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
               }}
               className="w-56 rounded-md border border-line bg-ground px-2 py-1 text-ui text-bone focus:outline-none"
             />
+          ) : !mayAct ? (
+            /* **The read-only state is the absence.** Not a disabled button
+                and nothing greyed — a `span`, no pencil, and the screen has
+                said what it is by not offering it. */
+            <span className="nm" title={place.name}>
+              {place.name}
+            </span>
           ) : (
             <button
             /* **One click renames.** It answered a double click and nothing
@@ -496,16 +503,17 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
                way — so there is no gesture to give up.
 
                Double click still works: somebody who learnt the old way
-               should not find it gone. It lands in the same place, because a
-               second click on an input that is already open is a selection
-               and not a second rename. */
-            onClick={() => mayAct && setRenaming(place.name)}
-            onDoubleClick={() => mayAct && setRenaming(place.name)}
-            title={mayAct ? "Rename" : place.name}
-            className="nm flex items-center gap-1.5"
+               should not find it gone. */
+            onClick={() => setRenaming(place.name)}
+            onDoubleClick={() => setRenaming(place.name)}
+            title="Rename"
+            className="nm rn"
           >
               {place.name}
-              {mayAct && <Pencil className="h-3 w-3 shrink-0 text-mute opacity-0 transition-opacity hover:opacity-100" strokeWidth={1.75} />}
+              {/* **Always drawn**, 13px. It was `opacity-0` until hover,
+                  which is an affordance you can only find by having already
+                  found it. */}
+              <Pencil className="h-[13px] w-[13px] shrink-0" strokeWidth={1.75} />
             </button>
           )}
 

@@ -46,7 +46,7 @@ import { Icon } from "~/components/ui";
 import { useListArtifacts } from "~/api/generated/artifacts/artifacts";
 import { useMe } from "~/api/generated/auth/auth";
 import { elapsed, minutesSince, needsYou } from "~/api/view";
-import { doing, flat, group, isChild, placeBeat, rowLabel, type Repositories, type Workspace } from "~/api/workspaces";
+import { childrenElsewhere, doing, flat, group, isChild, placeBeat, rowLabel, type Repositories, type Workspace } from "~/api/workspaces";
 import { useHosts, useRepos, useSessions, useSkills } from "~/data";
 import { isPersonal } from "~/filing";
 import { key } from "~/platform";
@@ -54,6 +54,11 @@ import { navigate, usePathname } from "~/shims/next-navigation";
 import { useStart } from "~/start";
 import { useNow } from "~/ui/clock";
 import { EVERY, type DestinationId } from "~/ui/destinations";
+import { ContextMenu, useMenu } from "~/ui/ContextMenu";
+import { usePrompt } from "~/ui/Confirm";
+import { useEndWorkspace } from "~/ui/end";
+import { useQueryClient } from "@tanstack/react-query";
+import { getListSessionsQueryKey, renameSession } from "~/api/generated/sessions/sessions";
 
 export function RailPanel({
   at,
@@ -398,9 +403,64 @@ function Listing({
 function Place({ place, places, every, on }: { place: Workspace; places: Workspace[]; every: Workspace[]; on: boolean }) {
   const hot = place.runs.some(needsYou);
   const beat = placeBeat(place, every);
+  const menu = useMenu<null>();
+  const prompt = usePrompt();
+  const endWorkspace = useEndWorkspace();
+  const cache = useQueryClient();
+
+  /* **`mayWrite`, not `maySpeak`.** `Chat.tsx` separates them: `mayWrite` is
+     *the place* — may I work in this workspace at all — and `maySpeak` is
+     *this conversation*, true only for whoever started it, because the agent
+     runs on their subscription and pushes with their token. Renaming and
+     ending are facts about the place.
+
+     `!== false` rather than `=== true`: a control plane older than this app
+     sends neither, and reading absence as "you may only watch" takes every
+     control from the person whose work it is.
+
+     Asked of the runs rather than of `runs[0]`, which is whichever one
+     `group()` sorted first and not the place — the mistake main spent two
+     commits undoing. */
+  const mayAct = place.runs.some((r) => r.mayWrite !== false);
+
+  const rename = async () => {
+    const name = await prompt({ title: "Rename this workspace", initial: place.name, placeholder: "A name", action: "Rename" });
+    if (!name || name === place.name) return;
+    await renameSession(place.id, { name });
+    await cache.invalidateQueries({ queryKey: getListSessionsQueryKey() });
+  };
+
   return (
+    <>
+    {/* **A row you may not act on gets no menu**, rather than a menu with
+        dead entries in it. The only item that would survive the gate is
+        *Open*, which left-clicking already does. */}
+    {menu.open && (
+      <ContextMenu
+        at={menu.open.at}
+        onClose={menu.close}
+        items={[
+          { label: "Open", onPick: () => navigate(`/sessions/${place.id}`) },
+          { label: "Rename…", onPick: () => void rename() },
+          "-",
+          /* No second question. `ui/end.ts` already confirms, and builds its
+             body out of `sessionWork` — the uncommitted files, the unpushed
+             commits, how many agents stop. Asking again here would be the
+             same question in worse words. */
+          {
+            label: "End workspace",
+            tone: "danger" as const,
+            onPick: () =>
+              void endWorkspace(place, childrenElsewhere(place, every)).then(
+                ({ ended }) => ended && on && navigate("/"),
+              ),
+          },
+        ]}
+      />
+    )}
     <button
       onClick={() => navigate(`/sessions/${place.id}`)}
+      onContextMenu={mayAct ? (e) => menu.show(e, null) : undefined}
       aria-current={on}
       title={hot ? `${place.name} — waiting on you` : place.name}
       className="prow"
@@ -415,6 +475,7 @@ function Place({ place, places, every, on }: { place: Workspace; places: Workspa
         {elapsed(minutesSince(place.runs[0].createdAt))}
       </span>
     </button>
+    </>
   );
 }
 

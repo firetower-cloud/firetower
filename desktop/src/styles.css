@@ -3958,4 +3958,34 @@ html:not([data-platform="macos"]) {
     inset: 0;
     cursor: default;
   }
+
+  /* ── The title is the rename control ───────────────────────────
+     So it has to say so standing still. A hover state cannot be the whole
+     affordance — you must already be pointing at a thing to learn it is a
+     control — and the tooltip it replaced was a thing nobody read. The
+     pencil is always drawn, at `--mute`, and comes up to `--dim` under the
+     pointer with the title on `--raise`.
+
+     **Its absence is the read-only state.** No disabled control, nothing
+     greyed: a `span` rather than a button, no pencil, and the screen has
+     said what it is. */
+  .whead .nm.rn {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    border-radius: 7px;
+    margin-left: -7px;
+    padding: 2px 7px;
+    color: var(--color-bone);
+  }
+  .whead .nm.rn svg {
+    color: var(--color-mute);
+    transition: color var(--dur-native) var(--ease-swift);
+  }
+  .whead .nm.rn:hover {
+    background: var(--color-raise);
+  }
+  .whead .nm.rn:hover svg {
+    color: var(--color-dim);
+  }
 }
