@@ -7,7 +7,6 @@ import { AgentMark } from "~/components/AgentMark";
 import { Readout } from "~/components/HostReadiness";
 import {
   environmentLabel,
-  isLocal,
   machineLabel,
   machines,
   type Machine,
@@ -43,6 +42,21 @@ export function WhereItRuns({
   onAddMachine: () => void;
 }) {
   const all = machines(hosts);
+
+  // Nothing to choose between, so nothing that looks like a choice. A select
+  // whose only entry is "+ Add a machine…" is a control that looks like a
+  // picker and is not one, with the action buried inside it.
+  if (all.length === 0) {
+    return (
+      <div className="flex flex-col gap-1.5">
+        <span className="text-meta font-medium text-dim">Where it runs</span>
+        <div className="overflow-hidden rounded-md border border-line bg-raise">
+          <NoMachine onAddMachine={onAddMachine} />
+        </div>
+      </div>
+    );
+  }
+
   // Defaulted only while nothing has been chosen. A machine that was chosen and
   // has since gone is not a reason to run somewhere else — this form must never
   // quietly move a workspace to a different worker.
@@ -141,11 +155,38 @@ export function WhereItRuns({
             <Readout key={`${host.id}:${agentKind}`} host={host} agent={agentKind} agentLabel={chosen?.label} />
           ) : (
             <p role="status" className="px-3 py-2.5 text-meta text-dim">
-              Nowhere to run anything yet. Add a machine.
+              That machine is no longer here. Choose another.
             </p>
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * No machine to run on — one block, used by all three forms that ask.
+ *
+ * The three disagreed: a verdict strip here, "No machine is connected" as a
+ * non-choice inside `NewWorkspace`'s select, and "No machine connected." with
+ * no way out in `NewPage`'s menu. That was survivable while Firetower
+ * registered its own container as a machine and the state was unreachable. It
+ * is what every fresh install opens on now, so there is one of it, and it
+ * carries the one thing to do.
+ */
+export function NoMachine({ onAddMachine }: { onAddMachine: () => void }) {
+  return (
+    <div className="px-3 py-3">
+      <p className="text-ui text-bone">No machine to run on</p>
+      <p className="mt-1 max-w-[46ch] text-meta text-dim">
+        Agents run on a machine you add over ssh. Firetower does not run them on itself.
+      </p>
+      <button
+        onClick={onAddMachine}
+        className="control mt-2.5 border border-line bg-panel text-ui text-bone hover:bg-overlay"
+      >
+        Add a machine
+      </button>
     </div>
   );
 }
@@ -180,7 +221,11 @@ export function whereItRuns(host: Host | undefined, hosts: Host[]) {
   if (!host) return null;
   const machine = machines(hosts).find((m) => m.hosts.some((h) => h.id === host.id));
   return {
-    name: isLocal(machine) ? "Firetower's machine" : (machine?.label ?? host.name),
+    /* **No "Firetower's machine" any more.** `Compute::Local` named the
+       control plane's own container and main retired it — `listHosts` never
+       returns one, so the branch could only ever have been dead weight. A
+       machine is one somebody added, and it has a name. */
+    name: machine?.label ?? host.name,
     how: "on the machine",
     Mark: Monitor,
     quiet: host.state === "Unreachable" || !!host.reconnecting,

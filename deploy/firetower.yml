@@ -34,10 +34,15 @@
 # than by answering a connection: the name never has to be reachable from the
 # internet, and it should not be. See the Caddyfile.
 #
-# Sessions run in the control plane's own container, the same way they run on a
-# laptop: as a child process, with `localhost` in the fleet. To run them
-# somewhere else instead, add that machine over ssh — Compute → Add compute →
-# A server — and drain `localhost`.
+# **Agents run on machines you add, not here.** This container holds the
+# database credentials, the vault's root key and the updater's token, and the
+# updater holds the Docker socket; an agent in here would have all of it. So
+# the control plane runs no worker at all, and a fresh install's first job is
+# Compute → Add a machine, which reaches it over ssh.
+#
+# That machine should not be this one. A worker on the box holding the volume
+# below is a worker beside the root key on disk, which is most of the way back
+# to where this started. See docs/host-execution.md.
 
 # The namespace for the containers, the network and the volumes below. Fixed,
 # because changing it would orphan the volumes of every installation that
@@ -107,9 +112,10 @@ services:
       # Treat one like a share link.
       FIRETOWER_PREVIEW_DOMAIN: ${FIRETOWER_PREVIEW_DOMAIN:-localhost}
     volumes:
-      # The root key, the token, and everything the worker on this machine
-      # keeps: repository mirrors, worktrees, the event log, and the agent's
-      # own directory.
+      # The root key, the token, and the control plane's own state: the event
+      # log, its ssh known_hosts, and the repository mirrors and worktrees left
+      # by the version that could run agents in here. Those stay on disk and
+      # nothing reads them any more.
       - firetower:/var/lib/firetower
 
   # Upgrades, from the Updates screen.

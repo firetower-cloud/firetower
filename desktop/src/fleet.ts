@@ -11,10 +11,10 @@
  * Polled on a slow tick, and stirred by the stream. The sweep is the floor —
  * it catches servers with no socket, reconnects, and anything the stream did
  * not carry — but a ten-second floor is the whole of the lag between the rail
- * and the island. They are drawn in the same window from different sources:
- * the rail reads a cache that `applyEvent` keeps fresh frame by frame, while
- * the island is drawn from this, and so changed colour up to ten seconds
- * after the row behind it did. `stirFleet` closes that gap.
+ * and the dock badge. They are drawn from different sources: the rail reads a
+ * cache that `applyEvent` keeps fresh frame by frame, while the badge and the
+ * fleet screen are drawn from this, and so lit up to ten seconds after the row
+ * that caused it did. `stirFleet` closes that gap.
  */
 import { useEffect, useState } from "react";
 import type { Session } from "~/api/generated/model";

@@ -45,6 +45,17 @@ const say = (n: number) => WORDS[n] ?? String(n);
 export const DOTTED = 2;
 
 /**
+ * The split, as a function, so the budget can be tested rather than eyeballed.
+ *
+ * It was two `slice` calls inline and a test that pointed at the Dashboard's
+ * version of the same rule — a screen this one replaced. An eye cannot check
+ * a count reliably and a test can, so the rule gets a name.
+ */
+export function drawnInFull<T>(waiting: T[]): { inFull: T[]; quieter: T[] } {
+  return { inFull: waiting.slice(0, DOTTED), quieter: waiting.slice(DOTTED) };
+}
+
+/**
  * Three greetings off the machine's own clock.
  *
  * The boundaries are the ordinary ones and the late-night window is the only

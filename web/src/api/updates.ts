@@ -31,7 +31,7 @@ export function nothingChosen(chosen: Chosen): boolean {
 }
 
 /**
- * The sessions that end if the chosen targets are recreated now, by title
+ * The sessions that end if the chosen targets are reinstalled now, by title
  * and by where they are — what the confirmation has to say out loud.
  */
 export function wouldEnd(
@@ -39,9 +39,9 @@ export function wouldEnd(
   chosen: Chosen,
 ): { where: string; sessions: string[] }[] {
   const ended: { where: string; sessions: string[] }[] = [];
-  if (chosen.controlPlane && status.controlPlane.sessions.length > 0) {
-    ended.push({ where: "this machine", sessions: status.controlPlane.sessions });
-  }
+  // Nothing for the control plane. A session could once run as a child of its
+  // process, so recreating the container ended whatever was in it; nothing
+  // runs there now, and `ControlPlaneTarget` has no `sessions` to read.
   for (const host of status.hosts) {
     if (chosen.hostIds.includes(host.hostId) && host.sessions.length > 0) {
       ended.push({ where: host.name, sessions: host.sessions });

@@ -7,7 +7,8 @@
  * quadrant blinking out stays a crisp edge the whole way round.
  *
  * The states are the ones in `BEAT` — the single table that says what a
- * status means — so this and `Signal` cannot disagree about a colour again.
+ * status means — so this and `Signal`, beside it here, cannot disagree about
+ * a colour again.
  * Each says what it is by how it moves and not only by how it is coloured:
  * working turns, blocked breathes, done and broken are perfectly still.
  * Movement means work is happening, which is why the state that is stuck is

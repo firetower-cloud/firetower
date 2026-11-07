@@ -67,6 +67,21 @@ pub fn log_path(workspace: &Path, session_id: &str) -> PathBuf {
     dir_for(workspace).join(format!("agent-{session_id}.ndjson"))
 }
 
+/// Where the profile's system prompt waits for the supervisor that reads it.
+///
+/// On disk rather than in the environment because the environment reaches the
+/// agent along a tmux command line, and tmux takes one of those in a single
+/// message of about 16 kB. A persona is written by a person: there is no
+/// length it cannot be, and the launch is what broke when it was long. Here it
+/// is read by `agent-run` — this worker's own binary, started inside the pane
+/// — which needs nothing on the command line but the session it is for.
+///
+/// Per session, like the log beside it: two agents in one workspace are two
+/// profiles.
+pub fn persona_path(workspace: &Path, session_id: &str) -> PathBuf {
+    dir_for(workspace).join(format!("persona-{session_id}.md"))
+}
+
 /// The per-session log, or the shared one an older session is still using.
 ///
 /// Reading only: what gets written is always the per-session path.

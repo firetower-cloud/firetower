@@ -36,7 +36,8 @@ import type {
   PublicIdentity,
   Reached,
   Readiness,
-  Rename
+  Rename,
+  RetiredMachine
 } from '../model';
 
 import { http } from '../../../client/http';
@@ -357,7 +358,134 @@ export const useProbeHost = <TError = ApiError,
       > => {
       return useMutation(getProbeHostMutationOptions(options), queryClient);
     }
-    export const getDeleteHostUrl = (id: string,
+    export const getRetiredHostsUrl = () => {
+
+
+
+
+  return `/api/v1/hosts/retired`
+}
+
+/**
+ * `list_hosts` does not carry them: a retired machine is absent from the
+ * fleet rather than flagged in it, because "inert" has to be enforced at
+ * every site that enumerates machines — three pickers, the profile screen,
+ * the update targets, the phone — and one of them being missed makes it
+ * selectable again.
+ *
+ * Absent, though, it would take the record of what ran there with it off the
+ * screen. So the way in is sessions rather than machines: this names the
+ * machine, and the client counts the sessions it already holds and opens
+ * them. Nothing here can be run on, drained, renamed or connected to.
+ * @summary The machines that are gone, for the one line that says so.
+ */
+export const retiredHosts = async ( options?: Parameters<typeof http>[1]): Promise<RetiredMachine[]> => {
+
+  return http<RetiredMachine[]>(getRetiredHostsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getRetiredHostsQueryKey = () => {
+    return [
+    `/api/v1/hosts/retired`
+    ] as const;
+    }
+
+
+export const getRetiredHostsQueryOptions = <TData = Awaited<ReturnType<typeof retiredHosts>>, TError = unknown>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof retiredHosts>>, TError, TData>>, request?: SecondParameter<typeof http>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getRetiredHostsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof retiredHosts>>> = ({ signal }) => retiredHosts({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof retiredHosts>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type RetiredHostsQueryResult = NonNullable<Awaited<ReturnType<typeof retiredHosts>>>
+export type RetiredHostsQueryError = unknown
+
+
+export function useRetiredHosts<TData = Awaited<ReturnType<typeof retiredHosts>>, TError = unknown>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof retiredHosts>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof retiredHosts>>,
+          TError,
+          Awaited<ReturnType<typeof retiredHosts>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useRetiredHosts<TData = Awaited<ReturnType<typeof retiredHosts>>, TError = unknown>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof retiredHosts>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof retiredHosts>>,
+          TError,
+          Awaited<ReturnType<typeof retiredHosts>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useRetiredHosts<TData = Awaited<ReturnType<typeof retiredHosts>>, TError = unknown>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof retiredHosts>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary The machines that are gone, for the one line that says so.
+ */
+
+export function useRetiredHosts<TData = Awaited<ReturnType<typeof retiredHosts>>, TError = unknown>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof retiredHosts>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getRetiredHostsQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+/**
+ * @summary The machines that are gone, for the one line that says so.
+ */
+export const useSetRetiredHostsQueryData = () => {
+  const queryClient = useQueryClient();
+  return (updater: Awaited<ReturnType<typeof retiredHosts>> | undefined | ((old: Awaited<ReturnType<typeof retiredHosts>> | undefined) => Awaited<ReturnType<typeof retiredHosts>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof retiredHosts>>>({ exact: $exactMatch, queryKey: getRetiredHostsQueryKey() }, updater);
+  };
+}
+
+/**
+ * @summary The machines that are gone, for the one line that says so.
+ */
+export const useGetRetiredHostsQueryData = () => {
+  const queryClient = useQueryClient();
+  return () =>
+    queryClient.getQueryData<Awaited<ReturnType<typeof retiredHosts>>>(getRetiredHostsQueryKey());
+}
+
+
+export const getDeleteHostUrl = (id: string,
     params?: DeleteHostParams,) => {
   const normalizedParams = new URLSearchParams();
 

@@ -54,7 +54,12 @@ export function Setup({ onDone }: { onDone: () => void }) {
         <Check className="h-6 w-6" strokeWidth={2} />
       </span>
       <h1>{s.organization?.name ?? "This Firetower"} is set up</h1>
-      <p>Connect a git host and add a machine when you are ready — both are one click away. Nothing else is needed to start.</p>
+      {/* **Main's words, our shape.** Two things, in this order, and neither
+          is optional: a machine is where an agent runs, and a repository
+          cannot even be read without one. It used to say "when you are ready.
+          Nothing else is needed to start", which was true only while
+          Firetower ran agents on itself — and that machine is retired. */}
+      <p>Two things before anything can run, and they go in this order: an agent runs on a machine, and a repository is read by that machine.</p>
       {/* Said here because this is the last screen before the app, and an
           opt-out nobody was told about is not one. Short on purpose: the full
           list, and the switch, are one click away where the setting lives. */}

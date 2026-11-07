@@ -468,12 +468,11 @@ async fn upgrade_control_plane(
     log: &Log,
 ) -> Result<String> {
     let updater = updater(state)?;
-    let local = local_host(state).await?;
 
-    if !run.when_idle {
-        end_sessions_on(state, &local, log).await?;
-    }
-
+    // Nothing to end, drain or wait for. The control plane has no worker of
+    // its own: an agent could once run as a child of this process, which is
+    // why recreating the container had sessions to end first, and that is
+    // exactly what was removed.
     let files = run.plan.files.clone();
     if !files.is_empty() {
         log.say(&format!(
@@ -817,9 +816,9 @@ async fn settle_control_plane(
 
 async fn drain_targets(state: &AppState, store: &Store, run: &Run) -> Result<()> {
     for step in store.steps(&run.id).await? {
-        let host = if step.target == CONTROL_PLANE {
-            local_host(state).await?
-        } else if let Some(id) = step.target.strip_prefix(HOST_PREFIX) {
+        // The control plane is not a machine in the fleet and takes no work,
+        // so there is nothing to take out of service.
+        let host = if let Some(id) = step.target.strip_prefix(HOST_PREFIX) {
             match state
                 .db
                 .host_by_id(&ft_core::HostId::from_stored(id.to_string()))
@@ -852,9 +851,7 @@ async fn put_back(state: &AppState, store: &Store, run_id: &str) {
         if step.was_drained != Some(false) {
             continue;
         }
-        let host = if step.target == CONTROL_PLANE {
-            local_host(state).await.ok()
-        } else if let Some(id) = step.target.strip_prefix(HOST_PREFIX) {
+        let host = if let Some(id) = step.target.strip_prefix(HOST_PREFIX) {
             state
                 .db
                 .host_by_id(&ft_core::HostId::from_stored(id.to_string()))
@@ -872,13 +869,12 @@ async fn put_back(state: &AppState, store: &Store, run_id: &str) {
     }
 }
 
+/// Whether every machine this run is about to touch is empty.
+///
+/// The control plane is not one of them: nothing runs there, so it is idle by
+/// construction and waiting on it would be waiting for a number that is
+/// already zero.
 async fn all_idle(state: &AppState, run: &Run) -> Result<bool> {
-    if run.targets.control_plane {
-        let local = local_host(state).await?;
-        if !state.db.live_sessions_on(&local.id).await?.is_empty() {
-            return Ok(false);
-        }
-    }
     for id in &run.targets.host_ids {
         let id = ft_core::HostId::from_stored(id.clone());
         if !state.db.live_sessions_on(&id).await?.is_empty() {
@@ -951,16 +947,6 @@ fn updater(state: &AppState) -> Result<&super::client::Updater> {
         .updater
         .as_ref()
         .map_err(|absent| anyhow!("{}", absent.explain()))
-}
-
-async fn local_host(state: &AppState) -> Result<ft_core::Host> {
-    state
-        .db
-        .hosts()
-        .await?
-        .into_iter()
-        .find(|h| h.compute == ft_core::Compute::Local)
-        .context("this machine is not in the fleet")
 }
 
 #[cfg(test)]

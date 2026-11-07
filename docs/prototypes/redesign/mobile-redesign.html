@@ -55,6 +55,13 @@
      nothing — it is `tokens.generated.ts`, and every one of its neutrals
      already held R = G, which is the rule this came from. */
   --p-ground:#FFFFFF; --p-panel:#FAFAFB; --p-raise:#F6F6F9; --p-overlay:#E8E8EC;
+  /* The fill of a surface that floats above the page — the composer, a
+     card, a sheet, a popover, the peek. In light it is the page's own white
+     and the separation is the shadow, which is what a shadow is for. In dark
+     there is nothing below 0.34% luminance to cast into, so it lifts instead.
+     One token, one rule, and the five surfaces that used to hardcode
+     `ground` now say what they mean. */
+  --p-float:#FFFFFF;
   --p-line:#E5E5EA; --p-line-soft:#EFEFF2; --p-settling:#CBCBD1;
   --p-bone:#161617; --p-text:#47474D; --p-dim:#7B7B83; --p-mute:#A6A6AF;
   --p-ember:#FF5E1A; --p-ember-ink:#BF4714; --p-ember-tint:#FFF0E8; --p-ember-deep:#EAA078;
@@ -101,8 +108,14 @@
 
   /* The phone, dark. `mobile/src/design/tokens.generated.ts`, verbatim. */
   --p-ground:#0b0b0c; --p-panel:#111113; --p-raise:#17171a; --p-overlay:#1e1e22;
+  --p-float:#1E1E22;
   --p-line:#26262b; --p-line-soft:#1a1a1e; --p-settling:#3e3e46;
-  --p-bone:#f4f4f5; --p-text:#c8c8ce; --p-dim:#8b8b93; --p-mute:#5e5e67;
+  /* Ink down from near-white, which is the one part of the desk's dark pass
+     that is about the ink rather than about rails. `bone` was 17.90:1 on the
+     page; dark prose does not need that and at a phone's reading distance a
+     pure white on a near-black page haloes. These are the desk's own new
+     values — the ink is shared, the grounds are not. */
+  --p-bone:#EAEAEB; --p-text:#B9B9BF; --p-dim:#8b8b93; --p-mute:#5e5e67;
   --p-ember:#ff6b2c; --p-ember-ink:#ff9a6b; --p-ember-tint:#2a1509; --p-ember-deep:#7a3417;
   --p-sage:#6ec08a; --p-sage-tint:#12251a; --p-sage-deep:#2c5b3d;
   --p-brick:#e5645a; --p-brick-tint:#2a1414; --p-brick-deep:#6e2f2b;
@@ -117,9 +130,14 @@
   --p-kb-under:#121214; --p-kb-edge:rgb(255 255 255 / .09);
   --p-sys-bar:rgb(11 11 12 / .72); --p-sys-line:rgb(255 255 255 / .10);
   --p-scrim:rgb(0 0 0 / .45);
+  /* A black blur on a 0.34%-luminance page is arithmetic that renders
+     nothing. It is kept because where a floating surface overlaps something
+     lighter — the keyboard at 1.05%, a poster well — it does register, but
+     the ring is what actually draws the boundary on the page. */
   --p-raise-shadow:inset 0 1px 0 rgb(255 255 255 / .04), 0 1px 2px rgb(0 0 0 / .4);
   --p-rest-shadow:inset 0 1px 0 rgb(255 255 255 / .05), 0 0 0 1px rgb(255 255 255 / .07);
-  --p-float-shadow:inset 0 1px 0 rgb(255 255 255 / .06), 0 20px 48px -18px rgb(0 0 0 / .76);
+  --p-float-shadow:inset 0 1px 0 rgb(255 255 255 / .07),
+    0 0 0 1px rgb(255 255 255 / .05), 0 24px 52px -20px rgb(0 0 0 / .9);
   color-scheme:dark;
 }
 /* ──────────────────────────────────────────────────────────────────────────
@@ -523,6 +541,12 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;text-a
    under the dot. The question has to align with the name on every line. */
 .p-itemsay{display:block;font-size:18px;line-height:1.62;color:var(--p-text);
   letter-spacing:-.003em;padding-left:19px}
+/* A row in Workspaces. One line, and the mark is the first thing on it —
+   the desk ruled the status leads the row rather than trailing it. */
+.p-all-row{display:flex;align-items:center;gap:12px;width:100%;min-height:54px;
+  padding:0 20px;text-align:left}
+.p-all-row:active{background:var(--p-raise)}
+.p-beat{width:8px;height:8px;border-radius:99px;flex:none}
 .p-quiet{display:flex;align-items:center;gap:11px;width:100%;min-height:52px;padding:0 20px;text-align:left}
 .p-quiet:active{opacity:.5}
 .p-quietname{font-size:19px;line-height:1.3;letter-spacing:-.012em;color:var(--p-bone);
@@ -578,7 +602,7 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;text-a
 .p-comp{flex:none;padding-bottom:10px;position:relative}
 .p-comp::before{content:"";position:absolute;left:0;right:0;top:-26px;height:26px;
   background:linear-gradient(to top,var(--p-ground),transparent);pointer-events:none}
-.p-box{background:var(--p-ground);border-radius:26px;margin:0 26px;padding:6px 6px 6px 20px;
+.p-box{background:var(--p-float);border-radius:26px;margin:0 26px;padding:6px 6px 6px 20px;
   display:flex;align-items:center;gap:8px;box-shadow:var(--p-rest-shadow)}
 .p-box[data-open="1"]{margin:0 12px;border-radius:22px;padding:16px 12px 10px;
   flex-direction:column;align-items:stretch;gap:12px;box-shadow:var(--p-float-shadow)}
@@ -625,8 +649,17 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;text-a
 .p-facts b{color:var(--p-dim);font-weight:500}
 
 /* ── Sheets, menus, scrims ─────────────────────────────────────────────── */
+/* ── Two backdrops, and the test that picks between them ──────────────
+   <b>Does the thing the overlay is about stay on screen behind it?</b> If
+   yes, you are still reading it and it must not be dimmed. If no, the
+   overlay is the task and the scrim says so.
+   On a phone that is a question about the <i>backdrop</i>, not about the
+   shape: every menu here is a bottom sheet, because a phone has no centred
+   modal. `.p-catcher` is the invisible dismiss target a popover needs — the
+   literal opposite of a scrim, and named so it cannot be mistaken for one. */
 .p-scrim{position:absolute;inset:0;background:var(--p-scrim);z-index:45}
-.p-sheet{position:absolute;left:0;right:0;bottom:0;background:var(--p-ground);
+.p-catcher{position:absolute;inset:0;background:none;z-index:45}
+.p-sheet{position:absolute;left:0;right:0;bottom:0;background:var(--p-float);
   border-radius:22px 22px 0 0;z-index:46;box-shadow:var(--p-float-shadow);
   padding-bottom:14px;max-height:84%;display:flex;flex-direction:column}
 .p-grab{width:38px;height:5px;border-radius:99px;background:var(--p-settling);
@@ -637,7 +670,7 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;text-a
 .p-menuitem:active{background:var(--p-raise)}
 .p-menuitem[data-danger="1"]{color:var(--p-brick)}
 .p-menurule{height:1px;background:var(--p-line-soft);margin:8px 0}
-.p-pop{position:absolute;z-index:46;background:var(--p-ground);border-radius:20px;
+.p-pop{position:absolute;z-index:46;background:var(--p-float);border-radius:20px;
   box-shadow:var(--p-float-shadow);padding:8px;min-width:234px;
   transform-origin:bottom left;animation:p-grow 170ms var(--swift)}
 @keyframes p-grow{from{opacity:0;transform:scale(.94)}to{opacity:1;transform:scale(1)}}
@@ -655,6 +688,10 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;text-a
 
 /* ── The overview ──────────────────────────────────────────────────────── */
 .p-member{display:flex;align-items:center;gap:11px;padding:11px 20px;min-height:50px}
+/* On the manager's row, which is itself raised — so the chip takes the next
+   rung up or it is grey text in a grey box. */
+.p-here{font-size:14px;line-height:1;padding:4px 8px;border-radius:7px;flex:none;
+  background:var(--p-overlay);color:var(--p-dim);letter-spacing:-.002em}
 .p-member[data-on="1"]{background:var(--p-raise)}
 .p-planstep{display:flex;align-items:flex-start;gap:12px;padding:7px 20px;font-size:17px;
   color:var(--p-text);line-height:1.45}
@@ -697,7 +734,7 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;text-a
 /* Cards and posters. A grid of pictures is the one place a card is right.
    The tile needs an edge, because a poster of a page that is itself white
    has no boundary against a white ground. */
-.p-card{border-radius:14px;overflow:hidden;background:var(--p-ground);display:block;
+.p-card{border-radius:14px;overflow:hidden;background:var(--p-float);display:block;
   text-align:left;outline:1px solid var(--p-line);outline-offset:-1px}
 .p-card:active{opacity:.7}
 .p-poster{aspect-ratio:16/10;background:var(--p-raise);display:flex;align-items:center;
@@ -749,7 +786,7 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;text-a
 
 /* The peek: the phone's answer to a hover preview. */
 .p-peek{position:absolute;z-index:47;left:16px;right:16px;border-radius:22px;
-  background:var(--p-ground);box-shadow:0 30px 70px -20px rgb(0 0 0 / .5);
+  background:var(--p-float);box-shadow:var(--p-float-shadow);
   overflow:hidden;animation:p-peekin 220ms var(--swift)}
 @keyframes p-peekin{from{opacity:0;transform:scale(.93)}to{opacity:1;transform:scale(1)}}
 @media (prefers-reduced-motion:reduce){.p-peek{animation:none}}
@@ -1136,7 +1173,11 @@ function device(p, body, opts) {
         : body)+
     '</div>';
   return '<div class="p-dev" data-kind="'+p.kind+'" data-pose="'+p.id+'" style="width:'+(p.w+18)+'px">'+
-    '<div class="p-screen" style="width:'+p.w+'px;height:'+p.h+'px">'+
+    /* The screen this device is showing, so an audit can ask a control which
+       screen it is actually drawn on rather than inferring it from the tab
+       — several tabs draw two devices showing two different screens. */
+    '<div class="p-screen"'+(o.screen ? ' data-screen="'+o.screen+'"' : '')+
+      ' style="width:'+p.w+'px;height:'+p.h+'px">'+
       (o.bare ? "" : statusBar(p))+
       inner+
       kb+
@@ -1410,7 +1451,7 @@ function homePage(p, st) {
             '<i class="p-dot"></i><span>'+esc(x.name)+'</span>'+
             '<span class="p-when">'+x.when+'</span></button>').join("")+
         '</div>'+
-        (rest > 0 ? '<button class="p-wchip" data-more="1" data-go="tab:inbox"><span>'+rest+
+        (rest > 0 ? '<button class="p-wchip" data-more="1" data-go="goto:all"><span>'+rest+
           ' more</span></button>' : "")+
       '</div>'
     : "";
@@ -1606,6 +1647,58 @@ function acceptedScreen(p, st) {
     '</div></div>';
 }
 
+/* ════════════════════════════════════════════════════════════════════════════
+   WORKSPACES
+
+   The screen <b>N more</b> opens, and it did not exist.
+
+   The chip was drawn, pinned and measured, and its <code>data-go</code> was
+   <code>tab:inbox</code> — the screen you are already on. A dead control, and
+   the reachability audit walked straight past it because landing on the
+   screen you started from is a legal state transition rather than a thrown
+   error. <i>Reachable</i> was checking that a press goes somewhere, not that
+   it goes somewhere else.
+
+   It is also where the desk's new rule lands. <b>Every row carries a dot,
+   in its own tone</b> — ember blocked, brick broken, slate working, sage
+   done — because a list where one row of three has a mark reads as missing
+   rather than as restraint. Flat and status-ordered, which is the desk's
+   recommendation; status-<i>grouped</i> is the one not to ship, because a
+   workspace changes state while you are looking at it and the row you
+   reached for jumps sections.
+   ════════════════════════════════════════════════════════════════════════════ */
+const BEAT_ORDER = { blocked:0, broken:1, working:2, done:3, over:4 };
+
+/** One line: the mark, the name, what it is doing, the age. */
+function rowAll(p) {
+  const beat = BEAT[p.status];
+  const soft = beat === "done" || beat === "over";
+  return '<button class="p-all-row" data-go="open:'+p.id+'" data-peek="'+p.id+'">'+
+    '<i class="p-beat" style="background:'+toneOf(p.status)+'"></i>'+
+    '<span class="p-quietname"'+(soft ? ' style="color:var(--p-dim)"' : '')+'>'+esc(p.name)+'</span>'+
+    (working(p) ? '<span class="p-dots"><i></i><i></i><i></i></span>' : "")+
+    '<span class="p-grow"></span>'+
+    '<span class="p-when">'+p.when+'</span></button>';
+}
+
+function allScreen(p) {
+  const rows = PLACES.slice().sort((a, b) =>
+    BEAT_ORDER[BEAT[a.status]] - BEAT_ORDER[BEAT[b.status]]);
+  const waiting = PLACES.filter(isBlocked).length;
+  return '<div class="p-head">'+
+      '<button class="p-tap" data-go="tab:inbox" aria-label="Back">'+ic("left",22)+'</button>'+
+      '<span class="p-title" style="flex:1">Workspaces</span>'+
+      '<button class="p-tap" data-go="noop" aria-label="New workspace">'+ic("plus",21)+'</button>'+
+    '</div>'+
+    '<div class="p-scroll"><div class="p-col">'+
+      '<div class="p-secrow" style="padding-top:6px"><span class="p-sec">'+
+        (waiting ? waiting+' waiting on you \u00b7 '+PLACES.length+' in all'
+                 : PLACES.length+' in all, none waiting')+'</span></div>'+
+      rows.map(rowAll).join("")+
+      '<div style="height:30px"></div>'+
+    '</div></div>';
+}
+
 /** The peek: a phone's answer to the desktop rail's hover preview. */
 function peekOver(p, id) {
   const place = PLACES.find(x => x.id === id) || PLACES[0];
@@ -1736,8 +1829,10 @@ function composer(st) {
     '</div></div>';
 }
 
+/* A popover: you are mid-sentence and the composer behind it is the thing
+   it is about. No scrim — only a catcher. */
 function attachPop() {
-  return '<button class="p-scrim" data-go="menu:" aria-label="Dismiss"></button>'+
+  return '<button class="p-catcher" data-go="menu:" aria-label="Dismiss"></button>'+
     '<div class="p-pop" style="left:14px;bottom:82px">'+
       '<button class="p-popitem" data-go="menu:">'+ic("camera",20)+'<span>Camera</span></button>'+
       '<button class="p-popitem" data-go="menu:">'+ic("image",20)+'<span>Photos</span></button>'+
@@ -1776,14 +1871,27 @@ function overviewBody() {
 
     '<div class="p-sechead" style="padding-top:26px"><span class="p-sec">Team</span>'+
       '<span class="p-when" style="margin-left:9px">4</span></div>'+
+    /* One line everywhere: status mark · name · agent mark · age.
+       The manager carries a mark in <b>both</b> its states — being the
+       workspace you are looking at is not a state the row can show, and a
+       row with no mark in a column of marked ones reads as missing. The
+       word <i>manager</i> goes; <b>here</b> says where you are, the mark
+       says what state it is in, and the two were doing different jobs under
+       one label. */
     '<div class="p-member" data-on="1">'+
-      '<span class="p-quietname" style="flex:1">Ada</span>'+
-      '<span class="p-micro">manager</span><span class="p-when">12m</span></div>'+
+      mark("Working")+
+      '<span class="p-quietname">Ada</span>'+
+      '<span class="p-here">here</span>'+
+      '<span class="p-grow"></span>'+
+      agentMark("ClaudeCode", 15, "var(--p-mute)")+
+      '<span class="p-when">12m</span></div>'+
     TEAM.map(t => '<button class="p-member" data-go="noop" style="width:100%;text-align:left">'+
       mark(t.status)+
       '<span class="p-quietname"'+(t.status==="Working"?'':' style="color:var(--p-dim)"')+
         '>'+esc(t.name)+'</span>'+
-      '<span class="p-grow"></span><span class="p-when">'+t.when+'</span></button>').join("")+
+      '<span class="p-grow"></span>'+
+      agentMark(t.agent, 15, "var(--p-mute)")+
+      '<span class="p-when">'+t.when+'</span></button>').join("")+
 
     '<div class="p-sechead" style="padding-top:26px"><span class="p-sec">Made</span></div>'+
     MADE.map(m => '<button class="p-member" data-go="goto:artifact" style="width:100%;text-align:left">'+
@@ -1882,7 +1990,9 @@ function workspaceScreen(p, st) {
   const body =
     header+strip+
     '<div class="p-panes">'+column+(beside ? sideColumn(pw) : "")+
-      (floating ? '<button class="p-scrim" data-go="rail" aria-label="Dismiss"></button>'+
+      /* The floated panel is a popover by the test: the conversation stays
+         behind it and is exactly what you are reading it against. */
+      (floating ? '<button class="p-catcher" data-go="rail" aria-label="Dismiss"></button>'+
         '<div class="p-float" style="width:'+Math.min(340, cw-80)+'px">'+
         '<div class="p-scroll">'+overviewBody()+'</div></div>' : "")+
     '</div>';
@@ -2244,8 +2354,11 @@ function artifactScreen(p) {
 }
 
 /** What the \u22ef offers on an artifact, and what it does not. */
+/* A popover by the test: the artifact stays rendered behind it, and
+   <i>earlier versions</i> and <i>the workspace that made it</i> are decisions
+   you take while looking at the thing. */
 function artifactMenu() {
-  return '<button class="p-scrim" data-go="menu:" aria-label="Dismiss"></button>'+
+  return '<button class="p-catcher" data-go="menu:" aria-label="Dismiss"></button>'+
     '<div class="p-sheet"><i class="p-grab"></i>'+
       '<div class="p-sheethead"><div class="p-title">Quota meter, four shapes</div>'+
         '<div class="p-mono">quota-meter/index.html \u00b7 v3</div></div>'+
@@ -2441,19 +2554,20 @@ const S = {
   home:"both", when:null, art:"library", scaleSet:false,
 };
 /* Which destination is lit while you are on a given screen. */
-const HOME_TAB = { inbox:"dash", workspace:"dash", overview:"dash", repo:"dash",
+const HOME_TAB = { inbox:"dash", all:"dash", workspace:"dash", overview:"dash", repo:"dash",
   file:"dash", tasks:"tasks", artifacts:"art", artifact:"art",
   you:"you", config:"you", repos:"you" };
 /* A pushed route covers the bottom bar. It does not cover the trailing rail,
    because the rail belongs to the system and the stack pushes inside it —
    which is why on the inner display the destinations stay reachable from
    inside a workspace, and on a phone they do not. */
-const PUSHED = new Set(["workspace","overview","repo","file","repos","artifact","config"]);
+const PUSHED = new Set(["all","workspace","overview","repo","file","repos","artifact","config"]);
 const MODAL = new Set(["connect","lock","springboard"]);
 
 function renderScreen(name, p) {
   switch (name) {
     case "inbox":     return inboxScreen(p, S);
+    case "all":       return allScreen(p);
     case "workspace": return workspaceScreen(p, S).body;
     case "overview":  return pageHead("Quota meter rounding","","goto:workspace")+
                              '<div class="p-scroll">'+overviewBody()+'</div>';
@@ -2486,6 +2600,7 @@ function live(poseId, screen, extra) {
   }
   const bare = name === "lock" || name === "springboard";
   return plinth(p, renderScreen(name, p), Object.assign({
+    screen: name,
     tab: HOME_TAB[name] || "dash",
     noTabs: MODAL.has(name) || bare,
     pushed: PUSHED.has(name),
@@ -2713,7 +2828,7 @@ function tabInbox() {
       plinth(p, inboxScreen(p, Object.assign({}, S, { era:other })),
         { tab:"dash", over:"", noBand:true, shipped: other === "now", era: other,
           label: LABEL[other], sub: SUB[other] })+
-      live(p.id, "inbox")+
+      live(p.id, S.screen === "all" ? "all" : "inbox")+
     '</div></div>'+
     '<div class="d-cap"><b>The same destination, three ways.</b>'+
       '<span>The left phone is a rebuild of <code>app/(tabs)/index.tsx</code> as it stands, not a '+
@@ -3372,6 +3487,15 @@ const COV = [
   ["Rows from a dark server stay visible at 45%", "X", "only one server is ever current here, so no list mixes them"],
   ["Back out of everything, including a sheet", "X", "a gesture; a screenshot cannot verify one. See <i>Evidence</i> in Spec"],
 ]],
+["Workspaces", [
+  ["The list <b>N more</b> opens", "Y", "flat and status-ordered; grouping makes a row jump sections under you"],
+  ["Every row carries a dot, in its own tone", "Y", "ember blocked · brick broken · slate working · sage done"],
+  ["One line a row", "Y", "mark, name, working dots, age"],
+  ["A count that says how many are waiting", "Y", ""],
+  ["Hold a row to peek", "P", "the peek is drawn; the long-press is a gesture a screenshot cannot verify"],
+  ["Grouped by repository, behind a switch", "N", "the desk's recommendation; not drawn"],
+  ["Forty rows, and what that does to the dots", "N", "the desk measured its panel at 40; this fixture is 9"],
+]],
 ["The home", [
   ["The greeting, and it never changes with state", "Y", "morning · afternoon · evening, late night taking evening"],
   ["The composer, pinned to the foot", "Y", "<code>STYLE.md</code> gives the bottom of the screen to the message"],
@@ -3384,6 +3508,7 @@ const COV = [
     ["What fits is what shows — one chip below 577, two from 669", "Y", "measured: a chip is 240–287pt, the strip at 390 is 263"],
     ["The count is pinned outside the scrolling strip", "Y", "scrolled off the end it says nothing"],
     ["They stack in the landscape side column", "Y", "a 190pt strip never shows one whole 240pt chip"],
+    ["<b>N more</b> opens Workspaces", "Y", "it carried <code>tab:inbox</code> — the screen it was on"],
   ]],
   ["Recent artifacts", null, "", [
     ["Two posters at 390, three from 573", "Y", "the width at which three are no smaller than the two a phone gets"],
@@ -3663,6 +3788,96 @@ function ratio(a, b) {
   const l1 = relLum(x), l2 = relLum(y);
   return (Math.max(l1,l2)+0.05) / (Math.min(l1,l2)+0.05);
 }
+/* L* and CIE76 ΔE, because the desk's dark pass left a rule that needs both:
+   **a ΔE is not enough at the ends of the range — check the ratio of the
+   luminances too.** A ΔE of 2.2 near black is a 68% jump in light; the same
+   ΔE higher up is nothing. */
+function lstar(h) {
+  const y = relLum(hexToRgb(h));
+  return y > 216/24389 ? 116*Math.cbrt(y)-16 : y*24389/27;
+}
+function labOf(h) {
+  /* `hexToRgb` returns a triple, not an object — destructuring it as
+     `{r,g,b}` gave three `undefined`s and a ΔE of NaN, which the table
+     printed without complaint. */
+  const c = hexToRgb(h), f = v => {
+    v /= 255; return v <= 0.04045 ? v/12.92 : Math.pow((v+0.055)/1.055, 2.4);
+  };
+  const [r, g, b] = c.map(f);
+  const X = (0.4124564*r+0.3575761*g+0.1804375*b)/0.95047;
+  const Y = 0.2126729*r+0.7151522*g+0.0721750*b;
+  const Z = (0.0193339*r+0.1191920*g+0.9503041*b)/1.08883;
+  const k = t => t > 216/24389 ? Math.cbrt(t) : (24389/27*t+16)/116;
+  const fx = k(X), fy = k(Y), fz = k(Z);
+  return [116*fy-16, 500*(fx-fy), 200*(fy-fz)];
+}
+function deltaE(a, b) {
+  const p = labOf(a), q = labOf(b);
+  return Math.hypot(p[0]-q[0], p[1]-q[1], p[2]-q[2]);
+}
+/** The jump in light, which is what a step at the bottom of the range is. */
+function relJump(a, b) {
+  const x = relLum(hexToRgb(a)), y = relLum(hexToRgb(b));
+  return Math.max(x,y) / Math.min(x,y);
+}
+
+/**
+ * The phone's dark, measured the way the desk's was.
+ *
+ * Two questions, and they have different answers here. **Is the page a
+ * void?** — the desk's rails were, at L* 3.0. **Do the surfaces that sit on
+ * it separate from it?** — which on a phone is the whole question, because
+ * every one of them used to fill with the page's own colour and lean on a
+ * shadow that near-black cannot receive.
+ */
+function auditDark() {
+  const root = document.documentElement, was = root.dataset.theme;
+  root.dataset.theme = "dark";
+  const cs = getComputedStyle(root);
+  const v = n => cs.getPropertyValue("--p-"+n).trim();
+  const ladder = ["ground","panel","raise","overlay","line","settling"];
+  const rungs = ladder.map(n => ({ name:n, hex:v(n), L:lstar(v(n)), Y:relLum(hexToRgb(v(n)))*100 }));
+  const steps = rungs.slice(0, -1).map((r, i) => ({
+    from:r.name, to:rungs[i+1].name,
+    dE:deltaE(r.hex, rungs[i+1].hex), jump:relJump(r.hex, rungs[i+1].hex),
+  }));
+  const page = v("ground"), float = v("float");
+  const floats = [
+    ["the composer", float], ["an artifact card", float],
+    ["a sheet", float], ["a popover", float], ["the peek", float],
+    ["a chip, a poster well", v("raise")],
+  ].map(([what, hex]) => ({ what, hex, dE:deltaE(page, hex), jump:relJump(page, hex) }));
+  const ink = [["bone", v("bone")], ["text", v("text")], ["dim", v("dim")], ["mute", v("mute")]]
+    .map(([n, hex]) => ({ n, hex, onPage:ratio(hex, page), onFloat:ratio(hex, float) }));
+  root.dataset.theme = was || "light";
+  return { rungs, steps, floats, ink };
+}
+
+/**
+ * The composer is the size of *your message*, not of *an agent's question*.
+ *
+ * The desk moved its composer 18 → 16.5 for that reason. The phone's scale
+ * is a pixel up and its tiers are not the desk's, so the rule is checked
+ * rather than the number copied — see <b>Notes</b>.
+ */
+function auditType() {
+  const stage = document.createElement("div");
+  stage.style.cssText = "position:absolute;left:-10000px;top:0;visibility:hidden";
+  stage.innerHTML = '<div class="p-screen"><span class="p-askq">q</span>'+
+    '<span class="p-agent">a</span><span class="p-you">y</span>'+
+    '<span class="p-ph">c</span><span class="p-typed">t</span></div>';
+  document.body.appendChild(stage);
+  const px = sel => parseFloat(getComputedStyle(stage.querySelector(sel)).fontSize);
+  const out = {
+    question: px(".p-askq"), prose: px(".p-agent"), yours: px(".p-you"),
+    empty: px(".p-ph"), typed: px(".p-typed"),
+  };
+  stage.remove();
+  out.matchesYours = out.empty === out.yours && out.typed === out.yours;
+  out.belowQuestion = out.empty < out.question;
+  return out;
+}
+
 /** Both branches of the real sheet, read off the real document. */
 const TOKENS = (function () {
   const root = document.documentElement, was = root.dataset.theme;
@@ -3873,13 +4088,32 @@ function auditClasses() {
   return { classes:any.size, variants, leaks, unmatched:[...unmatched.entries()] };
 }
 
-/** Drive every control on every tab and report anything that throws. */
+/**
+ * Drive every control on every tab and report anything that throws — and
+ * anything that goes nowhere.
+ *
+ * The second half is here because of <b>N more</b>, which carried
+ * <code>tab:inbox</code> while sitting on the inbox. Three passes drew it,
+ * pinned it, measured it and wrote about it, and this walk pressed it every
+ * time without complaint, because landing on the screen you started from
+ * throws nothing. A dead control is not an exception; it is a control whose
+ * state after equals its state before. So that is what is tested.
+ */
+/* The screen each document tab is about, so a control is judged against the
+   state it is really drawn in rather than against the default. */
+const WALK_SCREEN = { inbox:"inbox", workspace:"workspace", repo:"repo", start:"tasks",
+  art:"artifacts", connect:"connect", you:"you", duo:"workspace", moving:"inbox",
+  poses:"inbox" };
 function auditControls() {
   const keep = JSON.stringify(S);
-  const seen = new Set(), bad = [];
+  const seen = new Set(), bad = [], dead = [];
   let n = 0;
   WALKED.forEach(id => {
     S.tab = id;
+    /* Walk each tab in the screen it is actually about. Without this a
+       back arrow on the workspace tab resolves against `screen:"inbox"`
+       and reports itself dead for going where it already is. */
+    if (WALK_SCREEN[id]) S.screen = WALK_SCREEN[id];
     let html = ""; try { html = bodyFor(id); } catch (e) { bad.push({ where:"render "+id, err:String(e) }); return; }
     const box = document.createElement("div"); box.innerHTML = html;
     box.querySelectorAll("[data-go]").forEach(el => {
@@ -3900,12 +4134,31 @@ function auditControls() {
         else if (verb === "rail") S.rail = !S.rail;
         else if (verb === "connect") S.connect = arg;
         bodyFor(id);
+        /* Nothing moved. A press that cannot change the state is a control
+           that says it leads somewhere and does not. */
+        /* One invariant, stated narrowly so it has no false positives:
+           **a navigation control must not target the screen it is on.**
+           A mode toggle that happens to be at its current value is not a
+           dead control, and the selected item of a tab bar is the tab you
+           are on rather than a link to nowhere. */
+        const nav = verb === "tab" || verb === "goto";
+        const selected = el.getAttribute("aria-selected") === "true";
+        /* Which screen is this control *on*? The device says so; the tab
+           cannot, because several tabs draw two devices showing two
+           different screens and the file view's back arrow correctly
+           targets the repo. */
+        const dev = el.closest("[data-screen]");
+        const on = dev ? dev.dataset.screen : null;
+        if (nav && !selected && on && arg === on) {
+          dead.push({ where:id+" \u2192 "+go, label:(el.textContent||"").trim().slice(0, 40),
+                      on });
+        }
       } catch (e) { bad.push({ where:id+" → "+go, err:String(e) }); }
       Object.assign(S, JSON.parse(snap));
     });
   });
   Object.assign(S, JSON.parse(keep));
-  return { controls:n, bad };
+  return { controls:n, bad, dead };
 }
 
 /**
@@ -3917,6 +4170,7 @@ function auditControls() {
  */
 const REACH = [
   ["The conversation", "open:w1", "a row in the inbox"],
+  ["Workspaces", "goto:all", "N more, on the home"],
   ["The peek", "peek", "hold a row for 420ms"],
   ["Answering from the peek", "peek:", "No / Allow on the peek"],
   ["The attach menu", "menu:attach", "the + in the composer"],
@@ -4006,6 +4260,9 @@ const NAMING = [
   ["Dashboard \u2014 no repository", "inbox", "answer", { era:"home", home:"norepo" }],
   ["Dashboard \u2014 unreachable", "inbox", "answer", { era:"home", home:"error" }],
   ["Dashboard \u2014 the one it replaces", "inbox", "answer", { era:"accepted" }],
+  /* Opened by a count rather than by a name, so the screen owes the reader
+     the noun the count was counting. */
+  ["Workspaces", "all", "same", {}],
   ["Tasks", "tasks", "same", {}],
   ["Artifacts", "artifacts", "same", {}],
   ["You", "you", "same", {}],
@@ -4137,6 +4394,7 @@ function auditTargets() {
   return { n, bad:[...by.entries()] };
 }
 function tabSpec() {
+  const dk = auditDark(), ty = auditType();
   const cls = auditClasses(), ctl = auditControls(), reach = auditReach(), tgt = auditTargets();
   const nam = auditNaming(), namBad = nam.filter(r => !r.ok);
   const fit = auditFit(), fitBad = fit.filter(r => !r.fits);
@@ -4186,6 +4444,83 @@ function tabSpec() {
   'leave <b>256pt</b> of page above the composer. The greeting, the <i>Agents waiting for you</i> '+
   'heading and the chip row are <b>203</b> of it. So what goes under the keyboard is the artifact '+
   'grid, every time, and the ember marks are on screen in both states.</div>'+
+  '<h3>Dark, measured \u2014 and what the measurement did <i>not</i> say</h3>'+
+  '<p>The desk re-derived its dark and found three faults in one: rails at L* 3.0 that were a '+
+  'void rather than a frame, a <code>ground \u2192 panel</code> step of \u0394E 2.2 that read as a hard '+
+  'edge because at the bottom of the range it is a <b>1.68\u00d7 jump in light</b>, and prose at '+
+  '17.16:1. The phone inherited the same numbers from <code>globals.css</code>, so it had the same '+
+  'ladder \u2014 identical to three decimal places. It did not have the same <i>fault</i>.</p>'+
+  '<table class="d-tbl"><thead><tr><th>Rung</th><th>Value</th><th>L*</th><th>Luminance</th>'+
+    '<th>Step from the one above</th></tr></thead><tbody>'+
+  dk.rungs.map((r, i) => {
+    const st = i > 0 ? dk.steps[i-1] : null;
+    return '<tr><td><code>--p-'+r.name+'</code></td>'+
+      '<td><span class="d-swatch" style="background:'+r.hex+'"></span>'+
+        '<span class="d-num">'+r.hex+'</span></td>'+
+      '<td class="d-num">'+r.L.toFixed(1)+'</td>'+
+      '<td class="d-num">'+r.Y.toFixed(3)+'%</td>'+
+      '<td class="d-num">'+(st ? "\u0394E "+st.dE.toFixed(2)+" \u00b7 "+st.jump.toFixed(2)+"\u00d7" : "\u2014")+
+      '</td></tr>';
+  }).join("")+'</tbody></table>'+
+  '<p><b>The page stays at L* 3.0 and that is the finding, not an omission.</b> The desk\u2019s '+
+  'complaint was <i>chrome beside content</i> \u2014 an adjacency a full-bleed phone does not have. '+
+  'A phone is one page, it is usually OLED, and iOS\u2019s own <code>systemBackground</code> in dark '+
+  'is pure black. Lifting the phone to the desk\u2019s <code>#1D1D1E</code> would have spent the '+
+  'platform\u2019s idiom and the battery to fix a structure the phone has not got.</p>'+
+  '<div class="d-flag"><b>What it does have is the same fault in the place a phone keeps it.</b> '+
+  'Five surfaces \u2014 the composer, an artifact card, a sheet, a popover, the peek \u2014 filled with '+
+  '<code>--p-ground</code> and separated themselves with a shadow. In light that is exactly right. '+
+  'In dark the shadow is <code>rgb(0 0 0 / .76)</code> over 0.337% luminance, which renders '+
+  'nothing, so every one of them measured <b>\u0394E 0.00 against the page</b>. The most-used control '+
+  'in the app was drawn in the page\u2019s own colour with an invisible edge.</div>'+
+  '<p>They now take <code>--p-float</code>, which is the page\u2019s white in light and a lift in '+
+  'dark. <b>A shadow is a light-theme device</b>; below about 1% luminance there is nothing left '+
+  'under a surface to cast into, so elevation has to be carried by the fill.</p>'+
+  '<table class="d-tbl"><thead><tr><th>Surface</th><th>Fill</th><th>From the page</th>'+
+    '<th>In light</th></tr></thead><tbody>'+
+  dk.floats.map(f => '<tr><td>'+esc(f.what)+'</td>'+
+    '<td><span class="d-swatch" style="background:'+f.hex+'"></span>'+
+      '<span class="d-num">'+f.hex+'</span></td>'+
+    '<td class="d-num d-ok">\u0394E '+f.dE.toFixed(2)+' \u00b7 '+f.jump.toFixed(2)+'\u00d7</td>'+
+    '<td class="d-num">'+(f.hex === dk.floats[0].hex ? "#FFFFFF, and the shadow does it" : "\u2014")+
+    '</td></tr>').join("")+'</tbody></table>'+
+  '<p>The ink comes down, which is the part of the desk\u2019s pass that <i>is</i> about ink rather '+
+  'than about rails, and takes the desk\u2019s own new values \u2014 the ink is shared between the two '+
+  'clients, the grounds are not.</p>'+
+  '<table class="d-tbl"><thead><tr><th>Ink</th><th>Value</th><th>On the page</th>'+
+    '<th>On a floating surface</th></tr></thead><tbody>'+
+  dk.ink.map(i => '<tr><td><code>--p-'+i.n+'</code></td>'+
+    '<td><span class="d-swatch" style="background:'+i.hex+'"></span>'+
+      '<span class="d-num">'+i.hex+'</span></td>'+
+    '<td class="d-num">'+i.onPage.toFixed(2)+':1</td>'+
+    '<td class="d-num">'+i.onFloat.toFixed(2)+':1</td></tr>').join("")+'</tbody></table>'+
+  '<div class="d-keep"><b>The rule the desk left behind, which is what actually transferred.</b> '+
+  'A \u0394E is not enough at the ends of the range \u2014 check the ratio of the luminances too. It is '+
+  'what makes <code>\u0394E 0.00</code> and <code>1.00\u00d7</code> the same sentence twice here, and it '+
+  'is why the step that reads as a <i>hard edge</i> between chrome and content at 1.68\u00d7 is the '+
+  'same measurement that reads as a <i>clear boundary</i> around a card at 3.92\u00d7. The number '+
+  'says how hard the edge will read; whether hard is a fault depends on whether the edge is a '+
+  'seam or a boundary.</div>'+
+
+  '<h3>The composer is the size of your own message</h3>'+
+  '<p>The desk moved its composer from 18 to 16.5 because 18 was the size of <i>an agent\u2019s '+
+  'question</i> \u2014 its loudest reading tier \u2014 and larger than the prose above it. The phone\u2019s '+
+  'scale is a pixel up from the desk\u2019s and its tiers are not the same, so this is checked rather '+
+  'than copied.</p>'+
+  '<table class="d-tbl"><thead><tr><th>Tier</th><th>Size</th><th></th></tr></thead><tbody>'+
+  [["An agent\u2019s question", ty.question, "the loudest thing that reads"],
+   ["An agent\u2019s prose", ty.prose, ""],
+   ["Your message, sent", ty.yours, "the words after you send them"],
+   ["The composer", ty.empty, "the same words before you send them"]]
+   .map(r => '<tr><td>'+r[0]+'</td><td class="d-num">'+r[1]+'px</td><td>'+r[2]+'</td></tr>').join("")+
+  '</tbody></table>'+
+  '<p class="'+(ty.matchesYours && ty.belowQuestion ? "d-ok" : "d-bad")+'">'+
+   (ty.matchesYours && ty.belowQuestion
+     ? "The composer equals <i>your message</i> and sits below <i>an agent\u2019s question</i> \u2014 "+
+       "the rule the desk\u2019s change expresses, already true here. Setting 16.5 would have made "+
+       "the composer smaller than its own sent messages and broken it."
+     : "The composer does not hold the tier.")+'</p>'+
+
   '<h3>The poses</h3>'+
   '<table class="d-tbl"><thead><tr><th>Pose</th><th>Window</th><th>System rail</th>'+
     '<th>Laid out in</th><th>Band</th><th>COLUMN here</th><th>READING here</th></tr></thead><tbody>'+
@@ -4418,6 +4753,12 @@ function tabSpec() {
   '<tr><td>Control sweep</td>'+
     '<td class="d-num '+(ctl.bad.length?"d-bad":"d-ok")+'">'+ctl.controls+' driven, '+ctl.bad.length+
     ' threw</td><td>a pane that throws before rendering simply does not change, and nothing says why</td></tr>'+
+  '<tr><td>Dead controls</td>'+
+    '<td class="d-num '+(ctl.dead.length?"d-bad":"d-ok")+'">'+ctl.dead.length+'</td>'+
+    '<td>a navigation control that targets the screen it is drawn on. Added because '+
+    '<b>N more</b> carried <code>tab:inbox</code> while sitting on the inbox for three passes, '+
+    'and a sweep that only catches exceptions never noticed \u2014 going nowhere throws '+
+    'nothing</td></tr>'+
   '<tr><td>Reachability</td>'+
     '<td class="d-num '+(missed.length?"d-bad":"d-ok")+'">'+(REACH.length-missed.length)+' of '+
     REACH.length+' states open from inside a phone</td>'+
@@ -4442,6 +4783,8 @@ function tabSpec() {
     '.'+b.cls).join(" \u00b7 ")+'</p>'+
   (cls.unmatched.length ? '<p class="d-bad">Unmatched: '+cls.unmatched.map(([c,n]) =>
     '<code>.'+c+'</code> ×'+n).join(", ")+'</p>' : "")+
+  (ctl.dead.length ? '<p class="d-bad">Dead: '+ctl.dead.map(d =>
+    esc(d.label || d.where)+" on "+esc(d.on)).join("; ")+'</p>' : "")+
   (ctl.bad.length ? '<p class="d-bad">Threw: '+ctl.bad.map(b =>
     esc(b.where)+" — "+esc(b.err)).join("; ")+'</p>' : "")+
   (missed.length ? '<p class="d-bad">Not reachable by tapping: '+missed.map(m =>
@@ -4470,6 +4813,45 @@ function tabNotes() {
   return '<div class="d-note"><h2>Notes</h2>'+
   '<p>A decision recorded without its rejected alternative is one somebody will relitigate. These '+
   'are the live ones, in the order they would come up.</p>'+
+
+  dec("Dark: the page stays black, and the surfaces on it stop pretending",
+    "the phone keeps <code>--p-ground</code> at <code>#0b0b0c</code> and does <b>not</b> take the "+
+      "desk\u2019s lift to <code>#1D1D1E</code>. What it does take is the ink \u2014 "+
+      "<code>bone</code> <code>#f4f4f5\u2009\u2192\u2009#EAEAEB</code>, <code>text</code> "+
+      "<code>#c8c8ce\u2009\u2192\u2009#B9B9BF</code> \u2014 and a new token, <code>--p-float</code>, for "+
+      "the five surfaces that used to fill with the page\u2019s own colour.",
+    "a second source of truth for the phone\u2019s dark ink, with the same expiry the desk named: "+
+      "when the clients opt into light, the sheet is re-derived and these move into "+
+      "<code>globals.css</code> as its dark branch.",
+    "the desk\u2019s three symptoms were one fault and it was <i>chrome beside content</i> \u2014 rails "+
+      "at L* 3.0 next to a sheet. A phone is full-bleed: there is no chrome, no adjacency, and no "+
+      "rail to be a void beside anything. It is also usually OLED, and iOS\u2019s own "+
+      "<code>systemBackground</code> in dark is pure black. So the page stays. <b>But measuring it "+
+      "the same way found the phone\u2019s own version of the fault in the place a phone keeps "+
+      "it:</b> the composer, artifact cards, sheets, popovers and the peek all filled with "+
+      "<code>--p-ground</code> and separated themselves with a drop shadow \u2014 "+
+      "<code>rgb(0 0 0 / .76)</code> over 0.337% luminance, which renders nothing. Every one of "+
+      "them measured <b>\u0394E 0.00 against the page</b>. A shadow is a light-theme device; below "+
+      "about 1% luminance there is nothing under a surface to cast into, so elevation has to be "+
+      "carried by the fill. Measured in <b>Spec</b>.",
+    "lifting the whole ladder to the desk\u2019s values. It fixes a structure the phone has not got, "+
+      "spends the platform\u2019s own idiom and the battery an OLED black buys, and would have left "+
+      "the real fault \u2014 the invisible card edge \u2014 exactly where it was, because that fault is "+
+      "about the <i>relationship</i> between a surface and the page rather than about either "+
+      "one\u2019s value.")+
+
+  dec("The composer stays at 18, which is what the decision asks for",
+    "the phone\u2019s composer is not moved to 16.5.",
+    "the two clients now print the same control at different sizes, which has to be read as a "+
+      "scale difference rather than a disagreement.",
+    "the desk\u2019s change expresses a rule \u2014 <i>the composer is the size of your message, not of "+
+      "an agent\u2019s question</i> \u2014 and the number is how that rule lands on the desk\u2019s scale. "+
+      "The phone\u2019s scale is a pixel up and its tiers are not the same: an agent\u2019s question is "+
+      "<b>20</b>, your sent message is <b>18</b>, and the composer is <b>18</b>. The rule is "+
+      "already satisfied. Asserted as a check in <b>Spec</b> rather than in prose, so it cannot "+
+      "quietly stop being true.",
+    "copying 16.5. It would put the composer <i>below</i> the size of your own sent messages \u2014 "+
+      "breaking the very relationship the desk changed it to hold, while appearing to comply.")+
 
   dec("Mobile opts in to light, and follows the system",
     "the phone takes the redesign’s light branch and lets the OS choose, rather than staying dark.",
@@ -4947,6 +5329,32 @@ function tabNotes() {
   'first chip is 240 \u2014 so no whole chip was ever visible there. The chips stack in that column '+
   'now.</div>'+
 
+  '<h3>Four things the sync found, three of them in other people\u2019s files</h3>'+
+  '<div class="d-flag"><b>\u201cN more\u201d opened nothing.</b> Its <code>data-go</code> was '+
+  '<code>tab:inbox</code> \u2014 the screen it is already on. The chip was drawn, pinned, measured '+
+  'and written about across three passes, and the reachability audit walked past it every time, '+
+  'because landing on the screen you started from is a legal transition rather than a thrown '+
+  'error. <i>Reachable</i> was checking that a press goes somewhere, not that it goes somewhere '+
+  '<i>else</i>. The audit now fails a control whose destination is its origin, and the screen it '+
+  'should have opened \u2014 <b>Workspaces</b> \u2014 is drawn.</p></div>'+
+  '<p>Three in the files this sync pulled from, each small and each checkable:</p>'+
+  '<ul>'+
+  '<li><b>Two light neutrals in <code>globals.css</code> still break R = G.</b> '+
+  '<code>--color-line-soft</code> is <code>#f3f5fb</code> \u2014 green two above red and blue eight '+
+  'above that, which is the \u201ccast rather than cool\u201d bug <code>531562fe</code> was written to '+
+  'kill \u2014 and <code>--color-settling</code> is <code>#c2c1cb</code>, green one <i>below</i> red. '+
+  'This artifact resolves neither: it carries <code>#EFEFF2</code> and <code>#CBCBD1</code>, both '+
+  'at R = G, from the earlier pass. Worth fixing at source, because the phone reads these through '+
+  '<code>tokens.generated</code>.</li>'+
+  '<li><b>The desk\u2019s new dark scale has one neutral off R = G</b>, in the commit that says the '+
+  'rule holds throughout: <code>--hush</code> went <code>#5E5E67</code> \u2192 <code>#6B6A74</code>, '+
+  'where green is one below red. <code>#6B6B74</code> is the same L* and holds the rule.</li>'+
+  '<li><b>The phone had no workspace list at all.</b> The two row renderers that exist \u2014 '+
+  '<code>itemNext</code> and <code>quietNext</code> \u2014 serve only the <i>accepted</i> record, '+
+  'which is a drawing of a superseded design and must not be edited. So the instruction '+
+  '\u201ccheck what the phone\u2019s equivalent lists do\u201d had no equivalent list to check.</li>'+
+  '</ul>'+
+
   '<h3>A screen that disagrees with what opens it</h3>'+
   '<p>The desktop sweep found four \u2014 Secrets under Vault, Compute under Machines, Profiles under '+
   'Agent profiles, Commit under Ship. Renaming a destination here made it worth checking this '+
@@ -5062,6 +5470,7 @@ const SHEET = [
     ["Not answering", "inbox", { tab:"inbox", era:"home", home:"error" }, ""],
     ["The Dashboard it replaces", "inbox", { tab:"inbox", era:"accepted" }, "accepted, then outgrown"],
     ["Today's Inbox tab", "inbox", { tab:"inbox", era:"now" }, "a rebuild of what ships"],
+    ["Workspaces", "all", { tab:"inbox", screen:"all", era:"home" }, "what \u201cN more\u201d opens"],
     ["The peek", "inbox", { tab:"inbox", era:"accepted", peek:"w1" }, "hold a row"],
   ]],
   ["The conversation", [
@@ -5328,8 +5737,10 @@ function subsFor(id) {
         "scale", String(poseScale()))+
         '<span class="d-spacer"></span>'+t;
     case "inbox":
-      return chips("Version", [["home","Home"],["accepted","Accepted"],["now","Now"]], "era", S.era)+
-        (S.era === "home"
+      return gos("Screen", [["tab:inbox","The home"],["goto:all","Workspaces"]],
+          S.screen === "all" ? "goto:all" : "tab:inbox")+
+        chips("Version", [["home","Home"],["accepted","Accepted"],["now","Now"]], "era", S.era)+
+        (S.era === "home" && S.screen !== "all"
           ? chips("State", [["both","Both sections"],["typing","Keyboard up"],
               ["nowait","Nothing waiting"],["bare","Nothing yet"],["task","From a task"],
               ["norepo","No repository"],["error","Unreachable"]], "home", S.home)+

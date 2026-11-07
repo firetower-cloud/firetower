@@ -12,15 +12,6 @@ import type { Forwarded } from './forwarded.ts';
  */
 export interface Ports {
   /**
-     * Whether a port needs forwarding at all.
-     *
-     * A worker that is a child process of this control plane shares this
-     * machine's network, so its dev server is already on `localhost`. There
-     * is nothing to tunnel, and forwarding anyway would bind a second port
-     * that loops out and straight back in.
-     */
-  alreadyReachable: boolean;
-  /**
      * Whether opening one would reach the person asking.
      *
      * False when the control plane is somewhere other than the machine

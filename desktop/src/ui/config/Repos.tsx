@@ -739,7 +739,12 @@ function Paste({ onDone, onCancel }: { onDone: () => void; onCancel: () => void 
           Cancel
         </button>
         <button
-          disabled={!found || create.isPending}
+          /* A probe that failed does not mean the server will refuse this.
+             `create_repo` saves the URL either way — the row *is* a URL, and
+             its name and default branch are read the first time a workspace
+             clones it — so a fleet that is empty or down used to hard-block a
+             save the server would have accepted. */
+          disabled={!remote.trim() || create.isPending}
           onClick={() =>
             create.mutate(
               { data: { slug: found?.slug ?? "", remote: remote.trim() } },
@@ -754,7 +759,7 @@ function Paste({ onDone, onCancel }: { onDone: () => void; onCancel: () => void 
           }
           className="control bg-bone font-medium text-ground hover:opacity-90 disabled:bg-raise disabled:text-mute"
         >
-          {create.isPending ? "Adding…" : "Add it"}
+          {create.isPending ? "Adding…" : found || probe.isPending ? "Add it" : "Save it anyway"}
         </button>
       </div>
       <div className="mt-1.5 min-h-5 text-meta">
@@ -764,7 +769,12 @@ function Paste({ onDone, onCancel }: { onDone: () => void; onCancel: () => void 
             Reaching it…
           </span>
         )}
-        {probe.isError && <span className="text-brick">{why(probe.error)}</span>}
+        {probe.isError && (
+          <span className="text-brick">
+            {why(probe.error)} Saving it anyway keeps the URL; its name and default branch are read
+            the first time a workspace clones it.
+          </span>
+        )}
         {found && !probe.isPending && (
           <span className="text-sage">
             <Check className="mr-1 inline h-3.5 w-3.5" strokeWidth={2} />

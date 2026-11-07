@@ -314,7 +314,7 @@ const subagent = (reported) => [
   ...delegated("d_2", "CommandExecution", "ran grep -rn SessionStatus desktop/src", "task_1"),
   ...delegated("d_3", "CommandExecution", "ran grep -rn BEAT_TONE mobile/src", "task_1"),
   ...delegated("d_4", "FileRead", "read desktop/src/api/view.ts", "task_1"),
-  { lineNo: 20, type: "TaskProgress", task: "task_1", detail: "Reading desktop/src/island/state.ts" },
+  { lineNo: 20, type: "TaskProgress", task: "task_1", detail: "Reading desktop/src/api/view.ts" },
   // The turn ends here. The subagent does not.
   { lineNo: 40, type: "TurnCompleted", turn: "t_1", status: "Completed", usage: null },
   ...(reported
@@ -325,7 +325,7 @@ const subagent = (reported) => [
           task: "task_1",
           status: "Completed",
           summary:
-            "Seven surfaces read `SessionStatus`. Two of them — `Signal` and the island's blocks — draw the resting tick, and neither consults in-flight tasks.",
+            "Seven surfaces read `SessionStatus`. Two of them — `Signal` and `Blocks` — draw the resting tick, and neither consults in-flight tasks.",
         },
         { lineNo: 42, type: "ItemCompleted", item: "call_1", status: "Completed" },
       ]

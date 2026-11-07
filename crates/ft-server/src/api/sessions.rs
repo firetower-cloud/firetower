@@ -5,7 +5,6 @@
 //! is asking the worker that holds the workspace.
 
 use super::agents::{agent_credential, agent_env, agent_home};
-use super::repos::is_local_path;
 use super::{credential_for, ApiError, ApiResult, ErrorCode};
 use crate::auth::Principal;
 use crate::oauth;
@@ -246,6 +245,56 @@ pub(super) async fn get_session(
         .ok_or_else(|| ApiError::not_found("session"))
 }
 
+/// What a session is running as.
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Persona {
+    /// The profile's name as it stands now, when it still exists. A profile
+    /// deleted since the session started leaves the text and loses the name.
+    pub profile: Option<String>,
+    /// The system prompt the agent was handed, composed when this run
+    /// launched. Empty for a plain agent, which is most of them.
+    pub text: String,
+}
+
+/// The system prompt this session is working from.
+///
+/// As it was sent, not as the profile stands now — the two part company the
+/// moment somebody edits the profile, and what explains an agent's behaviour
+/// is the text it was actually given. A session that is no profile answers
+/// with an empty one rather than a 404: "this run has no persona" is an
+/// ordinary answer, not a missing page.
+#[utoipa::path(
+    get, path = "/api/v1/sessions/{id}/persona", tag = "sessions",
+    params(("id" = String, Path, description = "Session id")),
+    responses((status = 200, body = Persona), (status = 404, body = ApiError)),
+)]
+pub(super) async fn session_persona(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Persona>> {
+    let owner = owner(&principal)?;
+    let id = SessionId::from_stored(id);
+    let session = state
+        .db
+        .session_of(owner, &id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("session"))?;
+
+    let text = state.db.persona(&id).await?.unwrap_or_default();
+    let profile = match &session.profile_id {
+        Some(pid) => state
+            .roles
+            .one(owner, pid, crate::access::Level::Viewer)
+            .await?
+            .map(|p| p.name),
+        None => None,
+    };
+
+    Ok(Json(Persona { profile, text }))
+}
+
 #[utoipa::path(
     post, path = "/api/v1/sessions", tag = "sessions",
     request_body = NewSession,
@@ -414,6 +463,11 @@ pub(crate) async fn create_session_as(
     // for one by id gets the same list, so naming a machine somebody was not
     // given is `no host is available` rather than a refusal that confirms it
     // exists.
+    //
+    // A retired machine is not in this list and cannot be named into it, by
+    // either route — see `Db::IN_THE_FLEET`. That is the whole of "it will
+    // never be scheduled onto again": not a check here, which is a check
+    // somebody has to remember, but a list it is not in.
     let hosts = state
         .db
         .hosts_for(&owner, crate::access::Level::Writer)
@@ -426,7 +480,17 @@ pub(crate) async fn create_session_as(
             .iter()
             .find(|h| h.state == ft_core::HostState::Online && !h.drained),
     }
-    .ok_or_else(|| ApiError::new(ErrorCode::NoCapacity, "no host is available to take this"))?;
+    .ok_or_else(|| match hosts.is_empty() {
+        // The ordinary state of a fresh install, now that nothing is
+        // registered at boot. It is a different problem from a fleet whose
+        // machines are all busy or down, and it has a different answer.
+        true => ApiError::new(
+            ErrorCode::NoCapacity,
+            "No machine is connected yet, and an agent runs on a machine. \
+             Add one under Compute, then start this again.",
+        ),
+        false => ApiError::new(ErrorCode::NoCapacity, "no host is available to take this"),
+    })?;
 
     if host.drained {
         return Err(ApiError::new(
@@ -464,25 +528,6 @@ pub(crate) async fn create_session_as(
     }
 
     require_ready(&state, &host.id, req.agent).await?;
-
-    // Native workers interpret filesystem repository paths on their own host.
-    // Container users should connect by URL unless using the built-in local environment.
-    if let Some((local, _)) = repos.iter().find(|(r, _)| {
-        is_local_path(&r.remote)
-            && !matches!(
-                host.compute,
-                ft_core::Compute::Local | ft_core::Compute::Server { .. }
-            )
-    }) {
-        return Err(ApiError::new(
-            ErrorCode::InvalidRequest,
-            format!(
-                "{} is a filesystem path. Choose direct host execution where that path exists, \
-                 or connect it by URL to use it in {}.",
-                local.remote, host.name
-            ),
-        ));
-    }
 
     // The trunk, for a repository nobody has read yet.
     //
@@ -673,8 +718,16 @@ pub(crate) async fn create_session_as(
 
     // Which profile it was started as, for the same reason: one more thing a
     // session may have, recorded once the row exists.
+    //
+    // The composed persona is kept beside it — not the profile as it is now,
+    // but the system prompt this run was actually given. The two drift the
+    // moment somebody edits the profile, and what the interface has to be able
+    // to show is the one the agent is working from.
     if let Some(profile) = &profile {
         state.db.set_profile(&id, &profile.id).await?;
+    }
+    if let Some(persona) = &persona {
+        state.db.set_persona(&id, persona).await?;
     }
 
     // Shared from the start, when that is what was asked for. `insert_session`
@@ -796,9 +849,6 @@ pub(crate) async fn create_session_as(
     // repository asked for in a *file* stays its own, inside its own checkout.
     let mut env: Vec<(String, String)> = Vec::new();
     carry_preferences(&state, &mut env, &owner, req.agent, &req.settings).await;
-    if let Some(persona) = &persona {
-        env.push((ft_core::PERSONA_ENV.to_string(), persona.clone()));
-    }
     for vars in &per_repo_env {
         for v in vars {
             env.retain(|(existing, _)| *existing != v.name);
@@ -914,6 +964,7 @@ pub(crate) async fn create_session_as(
                 env,
                 agent_home,
                 skills,
+                persona: persona.clone().unwrap_or_default(),
             })),
         )
         .await?;
@@ -1031,6 +1082,60 @@ async fn persona_for(
     Ok(text)
 }
 
+/// Which profile a second agent in a workspace runs as.
+///
+/// Named by the request when something chose one; otherwise the workspace's
+/// own, because an agent started by hand in a profile's workspace is that
+/// profile — which is what somebody adding one to an Orchestrator's workspace
+/// means by it. Without this, a run added to a Manager's workspace came up as
+/// a plain agent that could not delegate, said nothing about why, and read as
+/// the profile having silently stopped working.
+///
+/// A delegated child is the exception: its instructions are already in its
+/// brief, and the lead's persona on top of them would make it the lead.
+///
+/// Inheriting takes the profile and not its engine: the workspace is fixed and
+/// so is the machine, but which agent to add is a choice somebody has just
+/// made, and a pinned engine would quietly overrule it. An inherited profile
+/// its owner cannot see resolves to nothing, so this fails closed.
+pub(super) async fn profile_for_run(
+    state: &AppState,
+    owner: &str,
+    workspace: &ft_core::WorkspaceId,
+    named: Option<&str>,
+    delegated: bool,
+) -> ApiResult<Option<crate::roles::Role>> {
+    if let Some(id) = named {
+        return Ok(Some(
+            state
+                .roles
+                .one(owner, id, crate::access::Level::Viewer)
+                .await?
+                .ok_or_else(|| {
+                    ApiError::new(
+                        ErrorCode::InvalidRequest,
+                        "that profile isn't one you can start an agent as",
+                    )
+                })?,
+        ));
+    }
+    if delegated {
+        return Ok(None);
+    }
+
+    // The workspace carries the id of the session it was cut from — see
+    // `a_workspace_keeps_its_first_sessions_id` — so that session is where its
+    // profile is recorded.
+    let lead = SessionId::from_stored(workspace.as_str().to_string());
+    let Some(pid) = state.db.session(&lead).await?.and_then(|s| s.profile_id) else {
+        return Ok(None);
+    };
+    Ok(state
+        .roles
+        .one(owner, &pid, crate::access::Level::Viewer)
+        .await?)
+}
+
 async fn carry_preferences(
     state: &AppState,
     env: &mut Vec<(String, String)>,
@@ -1135,16 +1240,24 @@ pub(crate) async fn relaunch(
     // Re-composed from the stored profile, so a session that resumes after a
     // restart comes back as the profile it was started as. Best effort: a
     // persona that cannot be read is a plain restart, not a refusal to restart.
+    let mut persona = String::new();
     if let Some(pid) = &session.profile_id {
         if let Ok(Some(profile)) = state
             .roles
             .one(owner, pid, crate::access::Level::Viewer)
             .await
         {
-            if let Ok(persona) = persona_for(state, owner, &profile).await {
-                env.push((ft_core::PERSONA_ENV.to_string(), persona));
+            if let Ok(composed) = persona_for(state, owner, &profile).await {
+                persona = composed;
             }
         }
+    }
+    // Re-composed means possibly different: the profile may have been edited
+    // since this run started. What is stored is what the agent is working
+    // from, so it is written again here rather than left describing the run
+    // that failed.
+    if !persona.is_empty() {
+        let _ = state.db.set_persona(&session.id, &persona).await;
     }
     for (name, value) in agent_env(state, session.agent, &session.id, owner).await? {
         env.retain(|(existing, _)| *existing != name);
@@ -1188,11 +1301,25 @@ pub(crate) async fn relaunch(
                 env,
                 agent_home,
                 skills,
+                persona,
             },
         )
         .await;
     if let Err(error) = started {
-        state.fleet.set_status(&session.id,ft_core::SessionStatus::Failed,Some("The agent did not restart. Its selected account and workspace are preserved; retry the restart.")).await;
+        // With the reason in it. The response says the same thing to whoever
+        // pressed the button, and the note is what is still there afterwards —
+        // on a reload, on another screen, to somebody who did not press it. A
+        // note that said only "it did not restart" left that person with
+        // nothing to act on but the button, so the answer was to press it
+        // again.
+        let note = format!(
+            "The agent did not restart: {error:#}. Its selected account and workspace are \
+             preserved; retry the restart."
+        );
+        state
+            .fleet
+            .set_status(&session.id, ft_core::SessionStatus::Failed, Some(&note))
+            .await;
         return Err(error.into());
     }
 
@@ -1337,6 +1464,28 @@ async fn start_another_agent(
             .await?;
     }
 
+    let profile = profile_for_run(
+        &state,
+        &owner,
+        &place.id,
+        req.profile.as_deref(),
+        lineage.is_some(),
+    )
+    .await?;
+    let persona = match &profile {
+        Some(p) => persona_for(&state, &owner, p).await?,
+        None => String::new(),
+    };
+
+    // What it is, recorded once the row exists — the same shape as the lineage
+    // above, and for the same reason.
+    if let Some(profile) = &profile {
+        state.db.set_profile(&id, &profile.id).await?;
+    }
+    if !persona.is_empty() {
+        state.db.set_persona(&id, &persona).await?;
+    }
+
     // Its own credential and its own environment, resolved against this session
     // so the vault's log names the run that spent it.
     let mut env: Vec<(String, String)> = Vec::new();
@@ -1392,6 +1541,7 @@ async fn start_another_agent(
                 env,
                 agent_home,
                 skills,
+                persona,
             },
         )
         .await?;
@@ -1496,13 +1646,39 @@ pub(super) async fn destroy_session(
                 .map(|h| h.name)
                 .unwrap_or_else(|| "its host".to_string());
 
+            // What `force` costs, said accurately. It marks the session
+            // `Ended` here, which is what puts its workspace in front of
+            // `reclaim::sweep` — and the sweep deletes the workspace, the
+            // sessions under it and `agent_lines` with them, within the
+            // minute. For a machine that is only away that is the right trade
+            // and this is the sentence for it. For one that was removed — the
+            // control plane's own container, whose sessions are the record of
+            // what ran there — it is the trade the retirement migration exists
+            // to refuse, so it is not recommended.
+            // Not in the fleet, which for a session that still exists means
+            // retired: an ordinary host removal takes its sessions with it.
+            let gone = !state
+                .db
+                .hosts()
+                .await?
+                .iter()
+                .any(|h| h.id == session.host_id);
+
             return Err(ApiError::new(
                 ErrorCode::HostUnreachable,
-                format!(
-                    "{host} isn't answering, so the workspace can't be torn down. \
-                     Remove it here anyway to stop it filling the inbox — it keeps \
-                     running there until that machine comes back."
-                ),
+                match gone {
+                    true => format!(
+                        "{host} is not in this Firetower any more, so the workspace cannot be \
+                         torn down. Its conversation is the only record of what ran there: \
+                         removing it here would end the session, and what a workspace holds is \
+                         reclaimed once it has ended."
+                    ),
+                    false => format!(
+                        "{host} isn't answering, so the workspace can't be torn down. \
+                         Remove it here anyway to stop it filling the inbox — it keeps \
+                         running there until that machine comes back."
+                    ),
+                },
             ));
         }
 

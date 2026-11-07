@@ -74,7 +74,7 @@ export const inFlight = (s: { status: SessionStatus }) => IN_FLIGHT.includes(s.s
  *
  * So attention and appearance are separated here. `needsYou` keeps deciding
  * who is on the list; this decides what colour they are, and it is the only
- * thing that does — `Signal`'s dot and the island's blocks both read it, so
+ * thing that does — `Signal`'s dot and `Blocks`' quadrants both read it, so
  * they cannot drift apart again.
  */
 export type Beat = "working" | "blocked" | "done" | "broken" | "over";

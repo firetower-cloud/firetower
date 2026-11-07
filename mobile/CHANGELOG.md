@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.12.0](https://github.com/firetower-cloud/firetower/compare/mobile-v0.11.0...mobile-v0.12.0) (2026-11-05)
+
+
+### Features
+
+* **desktop:** drop the island from both platforms ([e57d065](https://github.com/firetower-cloud/firetower/commit/e57d0655c7182d7ee98079811a9aaa20b1205a58))
+
+
+### Bug Fixes
+
+* **worker:** a profile's system prompt no longer rides the tmux command line ([b09b4d8](https://github.com/firetower-cloud/firetower/commit/b09b4d8fb9b6ce3689acca17bf1386c79d20bbb6))
+* **worker:** move profile system prompts off the tmux command line ([720c920](https://github.com/firetower-cloud/firetower/commit/720c920467a31eb8c0a6b69b4b0551f86fea1cca))
+
 ## [0.11.0](https://github.com/firetower-cloud/firetower/compare/mobile-v0.10.0...mobile-v0.11.0) (2026-11-05)
 
 

@@ -34,6 +34,7 @@ import { tokenUsage } from "~/api/generated/sessions/sessions";
 import type {
   DiffSince,
   FileDiff,
+  Host,
   ListTasksParams,
   Page,
   ProviderStatus,
@@ -237,6 +238,40 @@ function hostnameOf(remote: string): string {
 export function useHosts() {
   const q = useListHosts();
   return { data: q.data ?? [], loading: q.isPending, error: q.error ? why(q.error) : null, trouble: trouble(q.error) };
+}
+
+/**
+ * Whether the machine a session ran on is no longer in this Firetower.
+ *
+ * **One place, deliberately.** `listHosts` does not return a machine that was
+ * removed, and a retired one — the control plane's own container, which no
+ * longer runs agents — is absent by construction, which is what keeps every
+ * picker correct without an exclusion in it. So a session that ran there
+ * resolves to no host at all, and every surface that reads a host off a
+ * session has to answer this question. Three of them answered it by accident:
+ * the status bar's machine segment silently did not render, the rail dropped
+ * its glyph, and the composer stayed live because the session is not `Ended`.
+ *
+ * Inferred here rather than read off the server, because the server
+ * deliberately does not say: those sessions are left exactly as they were, so
+ * that nothing marks them `Ended` and `reclaim::sweep` deletes the
+ * conversation that is the record of what ran in that container.
+ *
+ * `false` while the list is loading or failed. Not knowing is not the same as
+ * knowing it is gone, and the difference is every workspace announcing that
+ * its machine was removed for a moment after each restart.
+ */
+export function useMachineGone(hostId: string | null | undefined): boolean {
+  return machineGone(hostId, useHosts());
+}
+
+/** The predicate itself, so it can be reasoned about without a cache. */
+export function machineGone(
+  hostId: string | null | undefined,
+  fleet: Feed<Host[]>,
+): boolean {
+  if (!hostId || fleet.loading || fleet.error !== null) return false;
+  return !fleet.data.some((h) => h.id === hostId);
 }
 
 export function useAgents() {

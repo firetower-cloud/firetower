@@ -30,8 +30,9 @@ import { useAttachFile, useInterruptSession, useListFiles, useSendTurn } from "~
 import { useChooseControl, useSessionControls } from "~/api/generated/conversation/conversation";
 import { takeDraft } from "~/workspace/draft";
 import { delivering, forget as forgetUndelivered, useUndelivered } from "~/workspace/outbox";
-import { AccountNotice } from "~/ui/AccountSwitcher";
+import { AccountLine, AccountNotice } from "~/ui/AccountSwitcher";
 import { FallbackLine } from "~/ui/AccountFallback";
+import { PersonaLine } from "~/ui/Persona";
 import { AgentPicker } from "~/ui/AgentPicker";
 import { Mic } from "~/ui/voice/Mic";
 import { VoiceDialog } from "~/ui/voice/Dialogs";
@@ -77,6 +78,7 @@ export function Composer({
   onRemember,
   onStopping,
   disabled,
+  whyNot,
   asking,
   hand,
 }: {
@@ -87,6 +89,13 @@ export function Composer({
   /** Stop was pressed, or the request to stop came back refused. */
   onStopping: (asked: boolean) => void;
   disabled: boolean;
+  /**
+   * Why it is disabled, when "this session has ended" is not the reason.
+   *
+   * A workspace whose machine was removed is not `Ended` — nothing ended it —
+   * so the placeholder has to say the true thing rather than the usual one.
+   */
+  whyNot?: string;
   asking: boolean;
   /** Filled in with `take`, for the pane's drop surface to call. */
   hand?: RefObject<Hand | null>;
@@ -558,7 +567,7 @@ export function Composer({
               }
             }}
             placeholder={
-              disabled ? "This session has ended." : asking ? "Answer above, or say something else" : "Say something to the agent"
+              disabled ? (whyNot ?? "This session has ended.") : asking ? "Answer above, or say something else" : "Say something to the agent"
             }
             className="in scroll-slim block resize-none bg-transparent px-4 py-3.5 placeholder:text-mute focus:outline-none"
           />
@@ -678,6 +687,12 @@ export function Composer({
             {conversation.limits && conversation.limits.status !== "allowed" && (
               <span className="ml-auto text-ember-ink">{conversation.limits.window}: {conversation.limits.status}</span>
             )}
+            {/* Beside the subscription, because the two answer neighbouring
+                questions: what this session is, and whose allowance it spends.
+                Its own `ml-auto` rather than a shared group, which is how the
+                limit above already joins this row. */}
+            <PersonaLine sessionId={session.id} profileId={session.profileId} />
+            <AccountLine />
           </div>
         )}
       </div>

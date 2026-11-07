@@ -130,11 +130,6 @@ pub async fn status(state: &AppState) -> Result<UpdateStatus> {
         .is_some_and(|l| version::is_newer(l, &current));
 
     let hosts = state.db.hosts().await?;
-    let local = hosts.iter().find(|h| h.compute == ft_core::Compute::Local);
-    let local_sessions = match local {
-        Some(h) => state.db.live_sessions_on(&h.id).await?,
-        None => Vec::new(),
-    };
 
     let updater = updater_view(updates).await;
     let control_plane = ControlPlaneTarget {
@@ -145,7 +140,6 @@ pub async fn status(state: &AppState) -> Result<UpdateStatus> {
         } else {
             updater.problem.clone()
         },
-        sessions: local_sessions,
         updater,
         // Answered for the caller in `api::updates`, which is the layer that
         // knows who is asking. False here so a path that forgets says no.
@@ -153,10 +147,7 @@ pub async fn status(state: &AppState) -> Result<UpdateStatus> {
     };
 
     let mut targets = Vec::new();
-    for host in hosts
-        .iter()
-        .filter(|h| h.compute != ft_core::Compute::Local)
-    {
+    for host in hosts.iter() {
         let online = state.fleet.is_connected(&host.id).await;
         let behind = match (&host.worker_version, &latest_version) {
             (Some(theirs), Some(latest)) => version::parse(theirs)

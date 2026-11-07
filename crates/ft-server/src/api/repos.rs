@@ -489,10 +489,7 @@ async fn nested_groups(state: &AppState, remote: &str, owner: &str) -> bool {
 /// in particular. The answer depends entirely on the machine that gave it —
 /// its network, its credentials, its git — so a failure has to name it.
 fn asked(host: &ft_core::Host) -> String {
-    match host.compute {
-        ft_core::Compute::Local => "this machine".to_string(),
-        _ => host.name.clone(),
-    }
+    host.name.clone()
 }
 
 /// `on` is the git host this remote belongs to, when it belongs to one.
@@ -542,24 +539,59 @@ fn probe_error(
     }
 }
 
-/// This machine, when it can answer.
+/// A machine that can answer a question about a repository.
 ///
-/// Always this one and never a server. A repository belongs to no host — every
-/// host clones it with the same provider token — so which machine looks is
-/// arbitrary, and picking a remote one made the same paste succeed or fail for
-/// reasons that had nothing to do with the repository. This is also the only
-/// machine where a local path means anything.
+/// Any machine that is up and taking work, out of the ones this person may run
+/// on. A repository belongs to no host — every host clones it with the same
+/// provider token — so which machine looks is arbitrary; that one can is the
+/// whole requirement.
 ///
-/// `None` when it isn't reachable. That is not a refusal: saving a URL does not
-/// need a worker, and the caller carries on without one.
-async fn local_host(state: &AppState) -> Option<ft_core::Host> {
+/// This used to be the control plane's own container, always, which is why the
+/// refusals said "this machine". Nothing runs there now, so the question is
+/// which of the fleet is answering — and on a fresh install the answer is none
+/// of them, which is a different sentence. See [`no_machine`].
+///
+/// `None` is not always a refusal: saving a URL does not need a worker, and
+/// `create_repo` carries on without one.
+async fn a_host_to_ask(state: &AppState, asking: &str) -> Option<ft_core::Host> {
     state
         .db
-        .hosts()
+        .hosts_for(asking, crate::access::Level::Writer)
         .await
         .ok()?
         .into_iter()
-        .find(|h| h.compute == ft_core::Compute::Local && h.state == ft_core::HostState::Online)
+        .find(|h| h.state == ft_core::HostState::Online && !h.drained)
+}
+
+/// Why nothing could read it — which of two problems this is.
+///
+/// A fleet nobody has added a machine to yet and a fleet whose machines are
+/// all down have different answers, and the one message for both named a
+/// machine that no longer exists: "this machine's worker isn't running".
+///
+/// `savable` is for the paths where the URL is still worth keeping. Listing a
+/// repository's branches is not one of them — it is already saved.
+async fn no_machine(state: &AppState, asking: &str, remote: &str, savable: bool) -> ApiError {
+    let any = state
+        .db
+        .hosts_for(asking, crate::access::Level::Writer)
+        .await
+        .map(|hosts| !hosts.is_empty())
+        .unwrap_or(false);
+
+    ApiError::new(
+        ErrorCode::HostUnreachable,
+        match (any, savable) {
+            (false, _) => "No machine is connected yet, and a repository is read by a machine. \
+                           Add one under Compute, then try again."
+                .to_string(),
+            (true, true) => format!(
+                "No machine is answering, so nothing can read {remote}. The URL can still be \
+                 saved and read when one comes back."
+            ),
+            (true, false) => format!("No machine is answering, so nothing can read {remote}."),
+        },
+    )
 }
 
 /// Can we reach it, and what is it called?
@@ -599,12 +631,10 @@ pub(super) async fn probe_repo(
         .map(|c| c.label.clone());
     let nested = nested_groups(&state, remote, asking).await;
 
-    let host = local_host(&state).await.ok_or_else(|| {
-        ApiError::new(
-            ErrorCode::HostUnreachable,
-            "this machine's worker isn't running, so nothing can read the remote",
-        )
-    })?;
+    let host = match a_host_to_ask(&state, asking).await {
+        Some(host) => host,
+        None => return Err(no_machine(&state, asking, remote, true).await),
+    };
     let info = state
         .fleet
         .probe(
@@ -657,7 +687,10 @@ pub(super) async fn create_repo(
     // A filesystem path belongs to the execution host selected at launch.
     // The control plane may be in a container or on another machine entirely.
     // Defer reading its default branch until that worker can check it.
-    if let Some(host) = local_host(&state).await.filter(|_| !is_local_path(remote)) {
+    if let Some(host) = a_host_to_ask(&state, asking)
+        .await
+        .filter(|_| !is_local_path(remote))
+    {
         match state
             .fleet
             .probe(
@@ -767,12 +800,10 @@ pub(super) async fn repo_branches(
 
     let on = super::connection_for_repo(&state, &repo, asking).await;
 
-    let host = local_host(&state).await.ok_or_else(|| {
-        ApiError::new(
-            ErrorCode::HostUnreachable,
-            "this machine's worker isn't running, so nothing can read the remote",
-        )
-    })?;
+    let host = match a_host_to_ask(&state, asking).await {
+        Some(host) => host,
+        None => return Err(no_machine(&state, asking, &repo.remote, false).await),
+    };
     let info = state
         .fleet
         .probe(
@@ -919,6 +950,17 @@ mod tests {
         );
     }
 
+    /// Every machine is reached over ssh, so a fixture is one.
+    fn at(host: &str) -> ft_core::Compute {
+        ft_core::Compute::Server {
+            host: host.into(),
+            user: None,
+            port: None,
+            key: ft_core::SshKey::Default,
+            host_key: None,
+        }
+    }
+
     fn somewhere(name: &str, compute: ft_core::Compute) -> ft_core::Host {
         ft_core::Host {
             machine: None,
@@ -943,7 +985,7 @@ mod tests {
         let e = probe_error(
             "https://github.com/acme/private.git",
             ProbeFailure::Denied,
-            &somewhere("localhost", ft_core::Compute::Local),
+            &somewhere("build-box", at("10.0.4.7")),
             Some("GitHub"),
         );
         assert!(e.message.contains("authorize GitHub"), "{}", e.message);
@@ -953,7 +995,7 @@ mod tests {
         let named = probe_error(
             "https://git.acme.internal/acme/private.git",
             ProbeFailure::Denied,
-            &somewhere("localhost", ft_core::Compute::Local),
+            &somewhere("build-box", at("10.0.4.7")),
             Some("GitLab (internal)"),
         );
         assert!(
@@ -968,7 +1010,7 @@ mod tests {
         let e = probe_error(
             "/Users/kevin/code/backend",
             ProbeFailure::Denied,
-            &somewhere("localhost", ft_core::Compute::Local),
+            &somewhere("build-box", at("10.0.4.7")),
             None,
         );
         assert!(e.message.contains("ls-remote"), "{}", e.message);
@@ -982,27 +1024,21 @@ mod tests {
         let e = probe_error(
             "https://github.com/acme/thing.git",
             ProbeFailure::Unreachable,
-            &somewhere(
-                "fire-01",
-                ft_core::Compute::Server {
-                    host: "fire-01".into(),
-                    user: None,
-                    port: None,
-                    key: ft_core::SshKey::Default,
-                    host_key: None,
-                },
-            ),
+            &somewhere("fire-01", at("fire-01")),
             None,
         );
         assert!(e.message.contains("fire-01"), "{}", e.message);
 
-        let here = probe_error(
+        // What it is called, not where it is: the name is the one thing on
+        // screen beside it, and an address nobody chose is not an answer to
+        // "which machine".
+        let named = probe_error(
             "https://github.com/acme/thing.git",
             ProbeFailure::Unreachable,
-            &somewhere("localhost", ft_core::Compute::Local),
+            &somewhere("build-box", at("10.0.4.7")),
             None,
         );
-        assert!(here.message.contains("this machine"), "{}", here.message);
+        assert!(named.message.contains("build-box"), "{}", named.message);
     }
 }
 

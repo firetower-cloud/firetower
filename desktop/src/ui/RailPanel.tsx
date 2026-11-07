@@ -46,7 +46,7 @@ import { Icon } from "~/components/ui";
 import { useListArtifacts } from "~/api/generated/artifacts/artifacts";
 import { useMe } from "~/api/generated/auth/auth";
 import { elapsed, minutesSince, needsYou } from "~/api/view";
-import { beatOfPlace, doing, flat, group, isChild, rowLabel, type Repositories, type Workspace } from "~/api/workspaces";
+import { doing, flat, group, isChild, placeBeat, rowLabel, type Repositories, type Workspace } from "~/api/workspaces";
 import { useHosts, useRepos, useSessions, useSkills } from "~/data";
 import { isPersonal } from "~/filing";
 import { key } from "~/platform";
@@ -193,10 +193,19 @@ const BANDS: { of: ReturnType<typeof doing>; says: string }[] = [
 const BAND_ORDER = { waiting: 0, working: 1, idle: 2 } as const;
 /* Worst first, within whatever grouping is on. The band is still `doing()`'s,
    so the bands stay contiguous; inside one, the beat decides — which is what
-   makes the dots run ember, brick, sage rather than interleaving. */
-const BEAT_ORDER = { broken: 0, blocked: 1, working: 2, done: 3, over: 4 } as const;
-const worstFirst = (a: Workspace, b: Workspace) =>
-  BAND_ORDER[doing(a)] - BAND_ORDER[doing(b)] || BEAT_ORDER[beatOfPlace(a)] - BEAT_ORDER[beatOfPlace(b)];
+   makes the dots run ember, brick, sage rather than interleaving.
+
+   **`placeBeat` is main's, and it is better than the `beatOfPlace` written
+   here.** Both roll a place's runs up to one `Beat`; main's also walks one
+   hop into the workspaces those runs started, because a child with a
+   workspace of its own is hidden from this panel and belongs under its lead.
+   Its precedence is blocked › working › broken › done rather than broken
+   first — ember is spent on being stuck and on nothing else. Taken whole on
+   the merge; the duplicate is gone. */
+const BEAT_ORDER = { blocked: 0, working: 1, broken: 2, done: 3, over: 4 } as const;
+const worstFirst = (every: Workspace[]) => (a: Workspace, b: Workspace) =>
+  BAND_ORDER[doing(a)] - BAND_ORDER[doing(b)] ||
+  BEAT_ORDER[placeBeat(a, every)] - BEAT_ORDER[placeBeat(b, every)];
 
 /* **Every row carries a dot, in both modes.** The design had none in Status
    mode — on the argument that the band heading already says *Needs you* —
@@ -233,7 +242,7 @@ function Workspaces({ stale, onCollapse }: { stale: boolean; onCollapse: () => v
     }
   };
 
-  const { mine, theirs } = useMemo(() => {
+  const { mine, theirs, every } = useMemo(() => {
     const running = sessions.filter((s) => s.status !== "Ended");
     const ownBy = group(running.filter((s) => isPersonal(s.path, me.data?.user)));
     const sharedBy = group(running.filter((s) => !isPersonal(s.path, me.data?.user)));
@@ -250,7 +259,7 @@ function Workspaces({ stale, onCollapse }: { stale: boolean; onCollapse: () => v
         .map(([repo, places]) => [repo, places.filter(topOnly)] as [string, Workspace[]])
         .filter(([, places]) => places.length > 0),
     });
-    return { mine: both(ownBy), theirs: both(sharedBy) };
+    return { mine: both(ownBy), theirs: both(sharedBy), every: everyPlace };
   }, [sessions, me.data?.user]);
 
   const nothing = mine.flat.length === 0 && theirs.flat.length === 0;
@@ -299,12 +308,12 @@ function Workspaces({ stale, onCollapse }: { stale: boolean; onCollapse: () => v
           <p className="pnone">Nothing running yet. Start something on the home and it appears here.</p>
         )}
 
-        {mine.flat.length > 0 && <Listing places={mine} by={by} path={path} />}
+        {mine.flat.length > 0 && <Listing places={mine} every={every} by={by} path={path} />}
 
         {theirs.flat.length > 0 && (
           <>
             <Label>Shared with you</Label>
-            <Listing places={theirs} by={by} path={path} />
+            <Listing places={theirs} every={every} by={by} path={path} />
           </>
         )}
       </Scroll>
@@ -321,10 +330,13 @@ function Workspaces({ stale, onCollapse }: { stale: boolean; onCollapse: () => v
  */
 function Listing({
   places,
+  every,
   by,
   path,
 }: {
   places: { flat: Workspace[]; byRepo: [string, Workspace[]][] };
+  /** Every place there is — `placeBeat` reads one hop past what is drawn. */
+  every: Workspace[];
   by: By;
   path: string;
 }) {
@@ -339,9 +351,9 @@ function Listing({
               <span className="n">{held.length}</span>
             </div>
             {[...held]
-              .sort(worstFirst)
+              .sort(worstFirst(every))
               .map((place) => (
-                <Place key={place.id} place={place} places={held} on={path === `/sessions/${place.id}`} />
+                <Place key={place.id} place={place} places={held} every={every} on={path === `/sessions/${place.id}`} />
               ))}
           </Fragment>
         ))}
@@ -349,7 +361,7 @@ function Listing({
     );
   }
 
-  const sorted = [...places.flat].sort(worstFirst);
+  const sorted = [...places.flat].sort(worstFirst(every));
   let last: string | null = null;
   return (
     <>
@@ -367,7 +379,7 @@ function Listing({
                 <span className="n">{n}</span>
               </div>
             )}
-            <Place place={place} places={sorted} on={path === `/sessions/${place.id}`} />
+            <Place place={place} places={sorted} every={every} on={path === `/sessions/${place.id}`} />
           </Fragment>
         );
       })}
@@ -383,9 +395,9 @@ function Listing({
  * the dot, and the rule the whole design turns on is that ember is rare — six
  * of a thing that means "the one loud thing" is none of them.
  */
-function Place({ place, places, on }: { place: Workspace; places: Workspace[]; on: boolean }) {
+function Place({ place, places, every, on }: { place: Workspace; places: Workspace[]; every: Workspace[]; on: boolean }) {
   const hot = place.runs.some(needsYou);
-  const beat = beatOfPlace(place);
+  const beat = placeBeat(place, every);
   return (
     <button
       onClick={() => navigate(`/sessions/${place.id}`)}

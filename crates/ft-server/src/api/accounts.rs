@@ -960,10 +960,7 @@ mod tests {
             .bind(id).bind(owner).bind(label).execute(db.pool()).await.unwrap();
     }
     async fn session(db: &Db, owner: &str) -> SessionId {
-        let host = db
-            .ensure_host("test", ft_core::Compute::Local, owner)
-            .await
-            .unwrap();
+        let host = db.ensure_test_host("test", owner).await.unwrap();
         let id = SessionId::new();
         db.insert_session(
             &id,

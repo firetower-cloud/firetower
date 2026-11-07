@@ -44,8 +44,16 @@ export function Rows<T>({
   children,
 }: {
   feed: { data: T[]; loading: boolean; error: string | null; trouble?: TroubleKind | null };
-  /** The heading when there is simply nothing yet. */
-  empty: string;
+  /**
+   * The heading when there is simply nothing yet — **or a whole block**.
+   *
+   * Main's reasoning, kept: a grey line inside a bordered card reads as a
+   * list that failed to load, which is right for a list that happens to be
+   * empty and wrong for a screen whose empty state is the first thing to do.
+   * Machines is that screen now that nothing is registered for you, so it
+   * passes its own panel; everything else passes a string and gets `Blank`.
+   */
+  empty: React.ReactNode;
   /** The sentence under it, saying how one comes to exist. */
   note?: string;
   /** The way to make the first one, when the reader may. */
@@ -93,6 +101,7 @@ export function Rows<T>({
   }
 
   if (feed.data.length === 0) {
+    if (typeof empty !== "string") return <>{empty}</>;
     return (
       <Blank icon={Shapes} title={empty} action={action}>
         {note}

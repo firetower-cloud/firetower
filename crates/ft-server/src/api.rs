@@ -486,6 +486,7 @@ async fn credential_on(
         ft_core::SshKey,
         crate::sshkey::PublicIdentity,
         hosts::Reached,
+        hosts::RetiredMachine,
         hosts::Installed,
         forwards::Ports,
         forwards::PreviewAddress,
@@ -560,6 +561,7 @@ pub fn router() -> OpenApiRouter<AppState> {
             access::unfile_items
         ))
         .routes(routes!(hosts::list_hosts, hosts::create_host))
+        .routes(routes!(hosts::retired_hosts))
         .routes(routes!(hosts::delete_host))
         .routes(routes!(hosts::rename_host))
         .routes(routes!(hosts::connect_host))
@@ -663,6 +665,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(annotations::send_annotations))
         .routes(routes!(sessions::stop_session))
         .routes(routes!(sessions::relaunch_session))
+        .routes(routes!(sessions::session_persona))
         .routes(routes!(sessions::rename_session))
         .routes(routes!(sessions::set_share))
         .routes(routes!(sessions::push_session))

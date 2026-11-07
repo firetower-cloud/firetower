@@ -2,9 +2,9 @@
  * The two things that draw a status must agree about what it means.
  *
  * They did not. `Signal` painted `HandedBack` sage and `Failed` brick, while
- * the island asked `NEEDS_YOU` — which groups both in with `NeedsYou` — and
- * painted all three ember. The same workspace was green in the sidebar and
- * orange in the menu bar, and a rail row drew both at once.
+ * `Blocks` asked `NEEDS_YOU` — which groups both in with `NeedsYou` — and
+ * painted all three ember. The same workspace was green under one glyph and
+ * orange under the other, and a rail row drew both at once.
  *
  * `BEAT` is now the only table that answers the question, so the way to keep
  * them together is to check that nothing has quietly grown a second opinion.

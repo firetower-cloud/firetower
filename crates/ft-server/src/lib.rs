@@ -185,24 +185,15 @@ pub async fn run(config: Config) -> Result<()> {
         }
     };
 
-    // localhost is a real host. It appears in the fleet, runs sessions, and can
-    // be drained — the only thing it skips is the network.
-    // This machine is always registered. A fresh install has somewhere to run
-    // without anyone configuring anything; it can be removed deliberately.
+    // No machine is registered here. Firetower used to put its own process in
+    // the fleet so that a fresh install had somewhere to run; an agent started
+    // there ran inside this container, with its filesystem, its environment and
+    // its database credentials. A fresh install now has an empty fleet, and the
+    // first thing to do is add a machine over ssh.
     //
-    // Added by whoever set this installation up, because a machine is personal
-    // until it is shared and there is nobody signed in at boot to ask. On a
-    // fresh install that is the only account there is.
-    db.ensure_host(
-        "localhost",
-        ft_core::Compute::Local,
-        &db.first_person().await?,
-    )
-    .await?;
-
-    // Every host, not just this one. A control plane that only reconnected to
-    // itself would silently lose every server you added the moment it
-    // restarted — and restarting is meant to cost nothing.
+    // Every host, every time. A control plane that only reconnected to the
+    // machines added since the last restart would silently lose the rest — and
+    // restarting is meant to cost nothing.
     for host in db.hosts().await? {
         let transport = match Fleet::transport_for(&host, &config.home, Some(&vault)) {
             Ok(t) => t,
@@ -260,7 +251,6 @@ pub async fn run(config: Config) -> Result<()> {
     state.fleet.serve_delegations(delegations).await;
     tokio::spawn(delegate::serve(state.clone(), requests));
     tokio::spawn(crate::api::accounts::watch_fallbacks(state.clone()));
-    tokio::spawn(seed_agents(state.clone()));
     // Firetower's own skills, into every organisation. Idempotent and cheap:
     // a bundle whose bytes are unchanged costs one digest comparison. Spawned
     // rather than awaited because a control plane that will not start over a
@@ -320,27 +310,6 @@ pub async fn run(config: Config) -> Result<()> {
     Ok(())
 }
 
-/// The setting that says we have already done this once.
-const SEEDED: &str = "seeded_local_agent";
-
-/// Put one agent on this machine, the first time Firetower ever runs.
-///
-/// Claude Code used to be in the control plane's image. It is not any more —
-/// agents belong on the volume, installed per host, for the same reasons they
-/// were taken out of the worker image: a few hundred megabytes each, published
-/// on their own schedules, and a baked-in one is a version nobody chose. But a
-/// fresh install with no agent at all is an install where nothing can be run
-/// and the first screen is an error, so start-up fetches one.
-///
-/// **Once, ever.** Guarded by a setting rather than by looking at the disk:
-/// somebody who deliberately removes Claude Code is entitled to have it stay
-/// removed, and a check for "is anything installed" would put it back on the
-/// next restart.
-///
-/// Everything here is best-effort. A machine with no network yet, an npm that
-/// is having a bad day, a worker still connecting — none of them is a reason
-/// for the control plane not to serve. The Agents page can install one at any
-/// time, which is the same code path this uses.
 /// Put the skills this binary ships into every organisation.
 ///
 /// On every boot, not once: the point is that upgrading Firetower upgrades
@@ -357,77 +326,6 @@ async fn seed_builtin_skills(state: AppState) {
     if let Err(e) = state.skills.offer_builtins_once(&state.accounts).await {
         tracing::warn!("offering built-in skills: {e:#}");
     }
-}
-
-async fn seed_agents(state: AppState) {
-    const KIND: ft_core::Agent = ft_core::Agent::ClaudeCode;
-
-    match state.accounts.setting(SEEDED).await {
-        Ok(Some(_)) => return,
-        Ok(None) => {}
-        Err(e) => {
-            tracing::warn!("could not read {SEEDED}: {e:#}");
-            return;
-        }
-    }
-
-    let Ok(hosts) = state.db.hosts().await else {
-        return;
-    };
-    let Some(local) = hosts
-        .into_iter()
-        .find(|h| h.compute == ft_core::Compute::Local)
-    else {
-        return;
-    };
-
-    // It was supervised a moment ago and connects as a child process, so this
-    // is a short wait rather than a hopeful one.
-    if !state
-        .fleet
-        .wait_until_connected(&local.id, std::time::Duration::from_secs(30))
-        .await
-    {
-        tracing::warn!(
-            "this machine's worker never connected; not installing {}",
-            KIND.label()
-        );
-        return;
-    }
-
-    // Somebody else's copy counts. A machine that already answers `claude` —
-    // an image that still has one, an operator who installed it — needs
-    // nothing from us, and fetching a second would be a download to sit beside
-    // a working binary.
-    if let Ok(found) = state.fleet.probe_agents(&local.id).await {
-        if found.iter().any(|a| a.kind == KIND && a.installed) {
-            let _ = state.db.record_presence(&local.id, &found).await;
-            let _ = mark_seeded(&state).await;
-            return;
-        }
-    }
-
-    tracing::info!("first start: installing {} on this machine", KIND.label());
-
-    match state.fleet.install_agent(&local.id, KIND, None).await {
-        Ok(version) => {
-            tracing::info!("installed {} {version}", KIND.label());
-            if let Ok(found) = state.fleet.probe_agents(&local.id).await {
-                let _ = state.db.record_presence(&local.id, &found).await;
-            }
-            let _ = mark_seeded(&state).await;
-        }
-        // Deliberately not marked as done: a failure here is usually the
-        // network, and the next restart is the natural moment to try again.
-        Err(e) => tracing::warn!("could not install {}: {e:#}", KIND.label()),
-    }
-}
-
-async fn mark_seeded(state: &AppState) -> Result<()> {
-    state
-        .accounts
-        .set_setting(SEEDED, &chrono::Utc::now().to_rfc3339())
-        .await
 }
 
 /// Where to open a browser, as far as this process can tell.
@@ -939,19 +837,31 @@ mod tests {
         );
     }
 
+    /// Firetower used to register its own process as a host on every boot, so
+    /// that a fresh install had somewhere to run. An agent started there ran
+    /// inside this container with its filesystem, its environment and its
+    /// database credentials, so nothing is registered now: a fresh install has
+    /// an empty fleet and the first thing to do is add a machine over ssh.
     #[tokio::test]
-    async fn a_fresh_control_plane_registers_localhost() {
-        let (db, owner) = Db::open_for_test_owned().await.unwrap();
-        let host = db
-            .ensure_host("localhost", ft_core::Compute::Local, &owner)
-            .await
-            .unwrap();
-        assert_eq!(
-            host.path.as_str(),
-            "u/admin/localhost",
-            "this machine is the administrator's until they share it"
+    async fn a_fresh_control_plane_registers_no_machine() {
+        let (db, _owner) = Db::open_for_test_owned().await.unwrap();
+        assert!(
+            db.hosts().await.unwrap().is_empty(),
+            "nothing is in the fleet until somebody adds a machine"
         );
-        assert_eq!(host.name, "localhost");
-        assert_eq!(host.compute, ft_core::Compute::Local);
+        assert!(
+            db.host_by_name("localhost").await.unwrap().is_none(),
+            "and nothing is written under the old name either"
+        );
+    }
+
+    /// A machine is personal until it is shared, including the first one.
+    #[tokio::test]
+    async fn a_machine_is_filed_where_whoever_added_it_can_see_it() {
+        let (db, owner) = Db::open_for_test_owned().await.unwrap();
+        let host = db.ensure_test_host("build-box", &owner).await.unwrap();
+        // An ltree label, so the name is slugged on the way in.
+        assert_eq!(host.path.as_str(), "u/admin/build_box");
+        assert_eq!(host.name, "build-box");
     }
 }

@@ -86,11 +86,11 @@ function Sessions({ cache, server }: { cache: QueryClient; server: string }) {
           applyEvent(cache, frame.event);
 
           /* And the fleet, which is not in this cache and does not see this
-             socket. It is what the island is drawn from, and on its own it
-             is a ten-second sweep — so the rail under this window changed on
-             the event while the pill above it waited for the next tick. The
-             two kinds that move the island are a session appearing and a
-             session changing status; the rest are detail inside a row. */
+             socket. It is what the dock badge and the fleet screen are drawn
+             from, and on its own it is a ten-second sweep — so the rail
+             changed on the event while the badge waited for the next tick.
+             The two kinds that move it are a session appearing and a session
+             changing status; the rest are detail inside a row. */
           const kind = frame.event.kind.type;
           if (kind === "StatusChanged" || kind === "SessionCreated") stirFleet(server);
         },

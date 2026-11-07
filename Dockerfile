@@ -5,16 +5,15 @@
 # version in step, and no reverse proxy needed to make two origins look like
 # one. See crates/ft-server/src/web.rs.
 #
-# It can also run sessions itself, exactly as `just dev` does on a laptop: the
-# control plane spawns `firetower worker --stdio` as a child process, and
-# `localhost` is a real host in the fleet. That is why git, tmux, Node and an
-# agent are installed below.
+# **It runs no agents.** It used to: the control plane could spawn a worker as
+# a child of its own process, which put an agent in here as the same user, with
+# this container's filesystem, its environment, and the database credentials,
+# root key and updater token in it. That is gone, and so are the packages it
+# needed — git, tmux and Node. Agents run on machines added over ssh.
 #
-# The trade that makes is the same one a workstation already makes — an agent
-# running as the same user, able to read the root key. Firetower has always
-# treated `localhost` as a real host rather than a special case, and a
-# container is no different. Keep them apart by adding a second machine over
-# ssh, which needs nothing from this image.
+# What is left is what the control plane itself shells out to: `ssh` to reach a
+# machine (transport.rs), `sh` through it, `ssh-keygen` for its own key pair
+# (sshkey.rs), and `curl` at build time for the worker tarballs below.
 
 # The interface first, because the Rust build embeds its output.
 #
@@ -79,36 +78,25 @@ COPY --from=web /web/out ./web/out
 RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,target=/src/target,sharing=locked \
     # Only this binary. The package also builds `firetower-worker`, which
-    # belongs in the worker image and would be dead weight here — `localhost`
-    # runs its worker from this executable, by absolute path.
+    # belongs on a machine rather than in here: nothing in this image runs a
+    # worker.
     cargo build --release -p ft-cli --bin firetower --target "$(cat /target)" \
     && cp "target/$(cat /target)/release/firetower" /firetower
 
 FROM debian:bookworm-slim
 
-# git for repositories, tmux so an agent outlives the connection that started
-# it, openssh-client because a server is reached by ssh-ing to it, and
-# ca-certificates because all of that is over TLS.
+# openssh-client because a machine is reached by ssh-ing to it,
+# ca-certificates because that and everything else is over TLS, and curl for
+# the worker tarballs fetched below.
+#
+# **No git, no tmux, no Node.** They were here because an agent could run in
+# this container: git to clone, tmux so it outlived the connection that started
+# it, Node to fetch and run it. They are what a *machine* needs, which is why
+# `host_readiness` asks a machine for them, and nothing in this image shells
+# out to any of the three. (`vault.rs`'s `GIT` is the name of a credential
+# scope, not a binary.)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        git tmux openssh-client ca-certificates curl \
-    && rm -rf /var/lib/apt/lists/*
-
-# Node, because that is how agents are fetched and how they run. Not for
-# Firetower — the interface is already inside the binary.
-#
-# The agents themselves are *not* here. They go on the volume, installed per
-# host, the same as on a worker: each is a few hundred megabytes, they are
-# published on their own schedules, and one baked in is a version nobody chose
-# and nobody can change without a new Firetower. This image had been the
-# exception to that — `firetower serve` runs this machine's worker itself, so
-# the rule applies to it as much as to any other host.
-#
-# A fresh install is not left with nothing: start-up fetches Claude Code onto
-# the volume the first time, so there is somewhere to run work without anybody
-# configuring anything. See `seed_agents`.
-RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
-    && apt-get install -y --no-install-recommends nodejs \
-    && npm cache clean --force \
+        openssh-client ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /firetower /usr/local/bin/firetower
@@ -138,17 +126,12 @@ ENV FIRETOWER_HOME=/var/lib/firetower
 RUN mkdir -p "$FIRETOWER_HOME"
 VOLUME /var/lib/firetower
 
-# The agent's own directory, on the volume — the same arrangement, and for the
-# same reason, as the worker image.
+# A home on the volume rather than under the container's own root, which is
+# thrown away every time this image is upgraded.
 #
-# This image runs agents too: `firetower serve` supervises this machine's worker
-# itself, so `localhost` is a real host with real sessions on it. Their memory
-# of a conversation lives here, and with it under the container's own root it
-# was thrown away every time this image was upgraded — which is the one moment
-# it is guaranteed to happen, and to every session at once.
-#
-# Not for credentials: what an agent authenticates with is handed to a session
-# as it starts and is never written here.
+# Nothing runs an agent in here any more, so this is the control plane's own:
+# where ssh keeps what it is given and where anything else that wants `$HOME`
+# finds one that outlives the container.
 ENV HOME=/var/lib/firetower/home
 RUN mkdir -p "$HOME"
 

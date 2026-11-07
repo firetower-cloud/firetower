@@ -61,7 +61,12 @@ use serde::{Deserialize, Serialize};
 ///      the connection rather than the request — and the whole point of the
 ///      feature is work leaving a workspace that has no repository to push
 ///      from, which is exactly when nobody has a second way to get it out.
-pub const PROTOCOL_VERSION: u32 = 21;
+/// 22 — a profile's system prompt travels as a field of its own rather than in
+///      the session's environment, because tmux takes the whole launch as one
+///      command line and a long persona no longer fits in it. A worker older
+///      than this reads the field as nothing, and a session started as a
+///      profile on one would come up as a plain agent with no indication why.
+pub const PROTOCOL_VERSION: u32 = 22;
 
 mod codec;
 pub use codec::{Codec, CodecError, FrameReader, FrameWriter};
@@ -629,6 +634,17 @@ pub struct CreateWorkspace {
     /// The whole selection, never a delta — see [`ToWorker::SetSkills`].
     #[serde(default)]
     pub skills: Vec<SkillBundle>,
+    /// The system prompt this session carries, when it was started as a
+    /// profile. Empty for a plain agent, which is the ordinary case.
+    ///
+    /// A field rather than one more variable in `env`, because the worker
+    /// hands a session's environment to tmux on a command line and tmux takes
+    /// the whole of one in a single message — about 16 kB, the environment
+    /// counted twice. A persona is written by a person and has no ceiling, so
+    /// it was the one value that could push a launch past that and fail it
+    /// with `command too long`. See `Tmux::start`.
+    #[serde(default)]
+    pub persona: String,
 }
 
 /// One file of a skill, on its way to a worker.
@@ -728,6 +744,9 @@ pub struct StartAgent {
     /// session, so it gets its own directory and its own selection.
     #[serde(default)]
     pub skills: Vec<SkillBundle>,
+    /// The system prompt this run carries — see [`CreateWorkspace::persona`].
+    #[serde(default)]
+    pub persona: String,
 }
 
 impl std::fmt::Debug for StartAgent {
@@ -824,6 +843,14 @@ pub enum Pty {
 
 impl Pty {
     /// The tmux session it lives in.
+    ///
+    /// The agent's own tmux session is `firetower-<session>`, so **this name
+    /// has that one as a strict prefix** — and tmux matches a `-t` target
+    /// loosely: exact, then fnmatch, then prefix. A shell opened here was
+    /// therefore the answer to every loose question asked about the agent
+    /// beside it: whether it was still running, and which session to kill.
+    /// Anything addressing either of these two names has to ask tmux exactly,
+    /// with the `=` prefix — see `tmux::Tmux::target` in the worker.
     pub fn tmux_name(&self, session: &str) -> String {
         format!("firetower-{session}-shell")
     }
@@ -1182,6 +1209,7 @@ mod tests {
             agent_home: Vec::new(),
             workspace_session: None,
             skills: Vec::new(),
+            persona: String::new(),
         }));
 
         let wire = serde_json::to_string(&frame).expect("encoding");

@@ -62,8 +62,15 @@ describe("when everything is ready", () => {
     expect(draw(server(), report)).toContain("3 checks");
   });
 
-  it("names the machine it runs on", () => {
-    expect(draw(server(), { ...report, user: "editor" })).toContain("on editor@192.0.2.10");
+  /**
+   * The address without the account, because the sentence has already named
+   * the account: with the user in it this read "runs as editor on
+   * editor@192.0.2.10".
+   */
+  it("names the machine it runs on, and the account only once", () => {
+    const out = draw(server(), { ...report, user: "editor" });
+    expect(out).toContain("runs as editor on 192.0.2.10");
+    expect(out).not.toContain("on editor@192.0.2.10");
   });
 });
 

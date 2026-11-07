@@ -42,7 +42,7 @@ export const ListHostsResponseItem = zod.object({
 }).describe('What this machine has and what is being used of it.\n\n`None` from a worker too old to report it, which the interface draws as\nno capacity block rather than as an empty one.')]).optional(),
   "compute": zod.union([zod.object({
   "type": zod.enum(['Local'])
-}).describe('A worker as a child process here. Inherits your environment, and its\nworkspaces are directories you can open.'),zod.object({
+}).describe('**Retired.** A worker as a child process in the control plane\'s own\ncontainer: its filesystem, its environment, its database credentials.\n\nNothing creates one, offers one, schedules onto one or connects to one\nany more. The variant stays because rows still hold it: `host_by_id` is\nwhat resolves a session\'s machine, and a `compute` this build cannot\ndecode is a historical session that errors instead of rendering — the\nrecord of what ran there is the reason it was removed.'),zod.object({
   "host": zod.string().describe('A hostname, an address, or a name from your ssh config.'),
   "hostKey": zod.string().nullish().describe('Recorded when the host is added. Not yet checked against what the\nmachine answers with — connecting trusts a key it hasn\'t seen before\nand remembers it, so this is a record rather than a guarantee.'),
   "key": zod.union([zod.object({
@@ -76,7 +76,7 @@ export const ListHostsResponseItem = zod.object({
   "id": zod.string().describe('Identifies a host.'),
   "machine": zod.string().nullish().describe('Machine grouping; "local" means the machine hosting the control plane.'),
   "memoryMb": zod.int().min(listHostsResponseMemoryMbMin).nullish(),
-  "name": zod.string().describe('What the user calls it. `localhost` is a real host, not a special case.'),
+  "name": zod.string().describe('What the user calls it.'),
   "path": zod.string().describe('Where this machine is filed, and therefore who may run on it.\n\n`u/kevin/fire-01` for a connection somebody added and kept;\n`d/shared/fire-01` once it has been handed to the organisation.'),
   "reconnecting": zod.boolean().optional().describe('Whether we are still trying to reach it.\n\nA fact about the running control plane rather than about the host, so it\nis answered per request and never stored. Distinguishes a machine on its\nway back from one nobody is looking for.'),
   "state": zod.enum(['Online', 'Unreachable', 'Draining']),
@@ -103,7 +103,7 @@ export const createHostBodyComputeTwoPortMin = 0;
 export const CreateHostBody = zod.object({
   "compute": zod.union([zod.object({
   "type": zod.enum(['Local'])
-}).describe('A worker as a child process here. Inherits your environment, and its\nworkspaces are directories you can open.'),zod.object({
+}).describe('**Retired.** A worker as a child process in the control plane\'s own\ncontainer: its filesystem, its environment, its database credentials.\n\nNothing creates one, offers one, schedules onto one or connects to one\nany more. The variant stays because rows still hold it: `host_by_id` is\nwhat resolves a session\'s machine, and a `compute` this build cannot\ndecode is a historical session that errors instead of rendering — the\nrecord of what ran there is the reason it was removed.'),zod.object({
   "host": zod.string().describe('A hostname, an address, or a name from your ssh config.'),
   "hostKey": zod.string().nullish().describe('Recorded when the host is added. Not yet checked against what the\nmachine answers with — connecting trusts a key it hasn\'t seen before\nand remembers it, so this is a record rather than a guarantee.'),
   "key": zod.union([zod.object({
@@ -159,7 +159,7 @@ export const CreateHostResponse = zod.object({
 }).describe('What this machine has and what is being used of it.\n\n`None` from a worker too old to report it, which the interface draws as\nno capacity block rather than as an empty one.')]).optional(),
   "compute": zod.union([zod.object({
   "type": zod.enum(['Local'])
-}).describe('A worker as a child process here. Inherits your environment, and its\nworkspaces are directories you can open.'),zod.object({
+}).describe('**Retired.** A worker as a child process in the control plane\'s own\ncontainer: its filesystem, its environment, its database credentials.\n\nNothing creates one, offers one, schedules onto one or connects to one\nany more. The variant stays because rows still hold it: `host_by_id` is\nwhat resolves a session\'s machine, and a `compute` this build cannot\ndecode is a historical session that errors instead of rendering — the\nrecord of what ran there is the reason it was removed.'),zod.object({
   "host": zod.string().describe('A hostname, an address, or a name from your ssh config.'),
   "hostKey": zod.string().nullish().describe('Recorded when the host is added. Not yet checked against what the\nmachine answers with — connecting trusts a key it hasn\'t seen before\nand remembers it, so this is a record rather than a guarantee.'),
   "key": zod.union([zod.object({
@@ -193,7 +193,7 @@ export const CreateHostResponse = zod.object({
   "id": zod.string().describe('Identifies a host.'),
   "machine": zod.string().nullish().describe('Machine grouping; "local" means the machine hosting the control plane.'),
   "memoryMb": zod.int().min(createHostResponseMemoryMbMin).nullish(),
-  "name": zod.string().describe('What the user calls it. `localhost` is a real host, not a special case.'),
+  "name": zod.string().describe('What the user calls it.'),
   "path": zod.string().describe('Where this machine is filed, and therefore who may run on it.\n\n`u/kevin/fire-01` for a connection somebody added and kept;\n`d/shared/fire-01` once it has been handed to the organisation.'),
   "reconnecting": zod.boolean().optional().describe('Whether we are still trying to reach it.\n\nA fact about the running control plane rather than about the host, so it\nis answered per request and never stored. Distinguishes a machine on its\nway back from one nobody is looking for.'),
   "state": zod.enum(['Online', 'Unreachable', 'Draining']),
@@ -218,7 +218,7 @@ export const probeHostBodyComputeTwoPortMin = 0;
 export const ProbeHostBody = zod.object({
   "compute": zod.union([zod.object({
   "type": zod.enum(['Local'])
-}).describe('A worker as a child process here. Inherits your environment, and its\nworkspaces are directories you can open.'),zod.object({
+}).describe('**Retired.** A worker as a child process in the control plane\'s own\ncontainer: its filesystem, its environment, its database credentials.\n\nNothing creates one, offers one, schedules onto one or connects to one\nany more. The variant stays because rows still hold it: `host_by_id` is\nwhat resolves a session\'s machine, and a `compute` this build cannot\ndecode is a historical session that errors instead of rendering — the\nrecord of what ran there is the reason it was removed.'),zod.object({
   "host": zod.string().describe('A hostname, an address, or a name from your ssh config.'),
   "hostKey": zod.string().nullish().describe('Recorded when the host is added. Not yet checked against what the\nmachine answers with — connecting trusts a key it hasn\'t seen before\nand remembers it, so this is a record rather than a guarantee.'),
   "key": zod.union([zod.object({
@@ -250,6 +250,25 @@ export const ProbeHostResponse = zod.object({
 }).describe('Why not, or what is still wrong once we were in.')]).optional(),
   "reached": zod.boolean().describe('Whether ssh got onto the machine.\n\nNot the same as "everything is fine". A machine with no worker on it has\nbeen reached — the address, the account and the key are all right — and\nis worth adding, because what is left is a command to run over there.')
 }).describe('What a machine would say, before anything is written down.')
+
+/**
+ * `list_hosts` does not carry them: a retired machine is absent from the
+ * fleet rather than flagged in it, because "inert" has to be enforced at
+ * every site that enumerates machines — three pickers, the profile screen,
+ * the update targets, the phone — and one of them being missed makes it
+ * selectable again.
+ *
+ * Absent, though, it would take the record of what ran there with it off the
+ * screen. So the way in is sessions rather than machines: this names the
+ * machine, and the client counts the sessions it already holds and opens
+ * them. Nothing here can be run on, drained, renamed or connected to.
+ * @summary The machines that are gone, for the one line that says so.
+ */
+export const RetiredHostsResponseItem = zod.object({
+  "id": zod.string().describe('Identifies a host.'),
+  "name": zod.string().describe('What it was called while it existed.')
+}).describe('A machine that was removed, named so that what ran on it can be found.')
+export const RetiredHostsResponse = zod.array(RetiredHostsResponseItem)
 
 /**
  * Refuses while sessions are running unless `force`, in which case they are
@@ -317,7 +336,7 @@ export const RenameHostResponse = zod.object({
 }).describe('What this machine has and what is being used of it.\n\n`None` from a worker too old to report it, which the interface draws as\nno capacity block rather than as an empty one.')]).optional(),
   "compute": zod.union([zod.object({
   "type": zod.enum(['Local'])
-}).describe('A worker as a child process here. Inherits your environment, and its\nworkspaces are directories you can open.'),zod.object({
+}).describe('**Retired.** A worker as a child process in the control plane\'s own\ncontainer: its filesystem, its environment, its database credentials.\n\nNothing creates one, offers one, schedules onto one or connects to one\nany more. The variant stays because rows still hold it: `host_by_id` is\nwhat resolves a session\'s machine, and a `compute` this build cannot\ndecode is a historical session that errors instead of rendering — the\nrecord of what ran there is the reason it was removed.'),zod.object({
   "host": zod.string().describe('A hostname, an address, or a name from your ssh config.'),
   "hostKey": zod.string().nullish().describe('Recorded when the host is added. Not yet checked against what the\nmachine answers with — connecting trusts a key it hasn\'t seen before\nand remembers it, so this is a record rather than a guarantee.'),
   "key": zod.union([zod.object({
@@ -351,7 +370,7 @@ export const RenameHostResponse = zod.object({
   "id": zod.string().describe('Identifies a host.'),
   "machine": zod.string().nullish().describe('Machine grouping; "local" means the machine hosting the control plane.'),
   "memoryMb": zod.int().min(renameHostResponseMemoryMbMin).nullish(),
-  "name": zod.string().describe('What the user calls it. `localhost` is a real host, not a special case.'),
+  "name": zod.string().describe('What the user calls it.'),
   "path": zod.string().describe('Where this machine is filed, and therefore who may run on it.\n\n`u/kevin/fire-01` for a connection somebody added and kept;\n`d/shared/fire-01` once it has been handed to the organisation.'),
   "reconnecting": zod.boolean().optional().describe('Whether we are still trying to reach it.\n\nA fact about the running control plane rather than about the host, so it\nis answered per request and never stored. Distinguishes a machine on its\nway back from one nobody is looking for.'),
   "state": zod.enum(['Online', 'Unreachable', 'Draining']),

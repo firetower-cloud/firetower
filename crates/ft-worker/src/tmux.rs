@@ -25,6 +25,15 @@ impl Tmux {
     /// terminal anybody attaches to. tmux is here for what it was always here
     /// for — being the parent that outlives a worker — and no longer for being
     /// a screen.
+    ///
+    /// **This name is a strict prefix of [`Pty::tmux_name`]'s**, which is
+    /// `firetower-<id>-shell` for the same session, and tmux matches a `-t`
+    /// target loosely: exact, then fnmatch, then prefix. So every question
+    /// asked about an agent by name was answered by the shell beside it the
+    /// moment somebody opened one. See `Tmux::target` for what that cost and
+    /// for the one character that turns it off.
+    ///
+    /// [`Pty::tmux_name`]: ft_proto::Pty::tmux_name
     pub fn for_session(session_id: &str) -> Self {
         Self::named(format!("firetower-{session_id}"))
     }
@@ -32,6 +41,39 @@ impl Tmux {
     /// A tmux session by name — the shell a session opens alongside its agent.
     pub fn named(name: String) -> Self {
         Self { name }
+    }
+
+    /// This session and no other, as tmux takes a target.
+    ///
+    /// `-t NAME` does not mean the session called `NAME`. tmux tries an exact
+    /// match, then fnmatch, then a **prefix**, and takes the first thing that
+    /// answers — so with `firetower-<id>-shell` alive, every one of these
+    /// commands aimed at `firetower-<id>` hit the shell instead:
+    ///
+    /// - `has-session` answered true for an agent that had exited, so a
+    ///   watcher's EOF was read as "only the watching stopped" and the control
+    ///   plane was never told the agent had gone. The session sat in the inbox
+    ///   looking alive until somebody typed at it.
+    /// - `kill-session` on a session's agent killed that session's shell.
+    /// - `show-environment` read the shell back to a shell that was being
+    ///   opened to copy the *agent's* environment.
+    ///
+    /// A leading `=` asks for the name itself and nothing else. Verified on
+    /// tmux 3.7c, where `-t =firetower-x` refuses while `-t firetower-x`
+    /// cheerfully finds `firetower-x-shell`.
+    fn target(&self) -> String {
+        format!("={}", self.name)
+    }
+
+    /// The same session, where tmux wants a pane rather than a session.
+    ///
+    /// `capture-pane` and `set-option` take `session:window.pane`, and `=NAME`
+    /// read as a pane target is not a session at all — tmux answers `can't
+    /// find pane: =NAME` and the call fails against a session that is right
+    /// there. The trailing colon is what makes it the session's current pane,
+    /// and the `=` then applies to the session half, where it belongs.
+    fn pane_target(&self) -> String {
+        format!("={}:", self.name)
     }
 
     /// The environment the session was started with.
@@ -43,7 +85,7 @@ impl Tmux {
     /// skipped.
     pub async fn environment(&self) -> Result<Vec<(String, String)>> {
         let output = Command::new("tmux")
-            .args(["show-environment", "-t", &self.name])
+            .args(["show-environment", "-t", &self.target()])
             .output()
             .await
             .context("reading the session environment")?;
@@ -87,18 +129,17 @@ impl Tmux {
             bail!("{} is already running", self.name);
         }
 
-        let mut tmux = Command::new("tmux");
-        tmux.args([
-            "new-session",
-            "-d",
-            "-s",
-            &self.name,
-            "-c",
-            cwd.to_str().unwrap_or("."),
-        ]);
+        let mut args: Vec<String> = ["new-session", "-d", "-s"]
+            .iter()
+            .map(|a| a.to_string())
+            .collect();
+        args.push(self.name.clone());
+        args.push("-c".into());
+        args.push(cwd.to_str().unwrap_or(".").to_string());
 
         for (key, value) in env {
-            tmux.arg("-e").arg(format!("{key}={value}"));
+            args.push("-e".into());
+            args.push(format!("{key}={value}"));
         }
 
         // And again, in front of the command itself.
@@ -125,14 +166,25 @@ impl Tmux {
         // in a workspace's directory, which is the one thing that says which
         // workspace it belongs to — see `cgroup::join_command` for why the
         // pane has to move itself rather than be moved.
-        tmux.arg(format!(
+        args.push(format!(
             "{} {} {}",
             crate::cgroup::join_command(cwd),
             env_prefix(env),
             command
         ));
 
-        let output = tmux.output().await.context("starting tmux")?;
+        // Before tmux is asked, because what tmux says when this is too big is
+        // `command too long` — four words that name neither the session, nor
+        // the environment, nor the variable that did it. This says all three.
+        if let Some(why) = too_long(&args, env) {
+            bail!("{} cannot be started: {why}", self.name);
+        }
+
+        let output = Command::new("tmux")
+            .args(&args)
+            .output()
+            .await
+            .context("starting tmux")?;
         if !output.status.success() {
             bail!(
                 "tmux couldn't start {}: {}",
@@ -144,7 +196,7 @@ impl Tmux {
         // No status bar. It's tmux telling you about tmux, and here the frame
         // around the terminal already says which session you're looking at.
         let _ = Command::new("tmux")
-            .args(["set-option", "-t", &self.name, "status", "off"])
+            .args(["set-option", "-t", &self.pane_target(), "status", "off"])
             .output()
             .await;
 
@@ -153,7 +205,7 @@ impl Tmux {
 
     pub async fn exists(&self) -> bool {
         Command::new("tmux")
-            .args(["has-session", "-t", &self.name])
+            .args(["has-session", "-t", &self.target()])
             .output()
             .await
             .map(|o| o.status.success())
@@ -165,7 +217,7 @@ impl Tmux {
     /// `has-session` miss is enough evidence to close its conversation.
     pub(crate) async fn checked_exists(&self) -> Result<bool> {
         let output = Command::new("tmux")
-            .args(["has-session", "-t", &self.name])
+            .args(["has-session", "-t", &self.target()])
             .output()
             .await
             .context("checking the tmux session")?;
@@ -184,7 +236,15 @@ impl Tmux {
     /// rather than whatever it happens to print next.
     pub async fn scrollback(&self) -> Result<String> {
         let output = Command::new("tmux")
-            .args(["capture-pane", "-p", "-e", "-S", "-", "-t", &self.name])
+            .args([
+                "capture-pane",
+                "-p",
+                "-e",
+                "-S",
+                "-",
+                "-t",
+                &self.pane_target(),
+            ])
             .output()
             .await
             .context("capturing the pane")?;
@@ -205,7 +265,7 @@ impl Tmux {
             return Ok(());
         }
         let output = Command::new("tmux")
-            .args(["kill-session", "-t", &self.name])
+            .args(["kill-session", "-t", &self.target()])
             .output()
             .await
             .context("killing the tmux session")?;
@@ -241,6 +301,63 @@ impl Tmux {
     }
 }
 
+/// What one tmux command line holds, in bytes.
+///
+/// A tmux client packs the whole of `argv` into a single message to its
+/// server, and that message is capped: `MAX_IMSGSIZE` (16384) less the header
+/// (16) less the argument count (4). Measured against tmux 3.3a, which takes
+/// 16364 bytes of packed arguments and refuses 16365 with `command too long`.
+///
+/// Nothing here can raise it. What a session can do is stay under it, which is
+/// why the one value with no ceiling — a profile's system prompt — travels as
+/// a file now rather than as a variable. See `agentd::persona_path`.
+const COMMAND_LIMIT: usize = 16_364;
+
+/// Why this launch will not fit, if it will not.
+///
+/// The environment is counted twice on purpose: it is in `argv` twice, once
+/// as `-e` arguments and once inlined in front of the command, and somebody
+/// reading "9 kB of environment, 16 kB of room" would otherwise be right to
+/// think there was space. Naming the largest variable is the whole point —
+/// it is almost always one value rather than a hundred small ones.
+fn too_long(args: &[String], env: &[(String, String)]) -> Option<String> {
+    // A packed argument is its bytes and a terminator, which is what tmux
+    // measures.
+    let packed: usize = args.iter().map(|arg| arg.len() + 1).sum();
+    if packed <= COMMAND_LIMIT {
+        return None;
+    }
+
+    let biggest = env
+        .iter()
+        .max_by_key(|(key, value)| key.len() + value.len())
+        .map(|(key, value)| {
+            format!(
+                ", the largest being {key} at {}",
+                size(key.len() + value.len() + 1)
+            )
+        });
+
+    Some(format!(
+        "its environment does not fit in a tmux command line. tmux takes {} and this launch is \
+         {}, because a session's environment travels in it twice — {} of variables{}. Shorten \
+         what this session carries: a profile's instructions, or a repository variable holding a \
+         key or a file.",
+        size(COMMAND_LIMIT),
+        size(packed),
+        size(env.iter().map(|(k, v)| k.len() + v.len() + 1).sum()),
+        biggest.unwrap_or_default(),
+    ))
+}
+
+/// Bytes, as somebody reading an error wants them.
+fn size(bytes: usize) -> String {
+    match bytes < 1024 {
+        true => format!("{bytes} B"),
+        false => format!("{:.1} kB", bytes as f64 / 1024.0),
+    }
+}
+
 /// `env 'K=V' 'K=V'` — the environment, set by the shell tmux runs the command
 /// with rather than by tmux itself.
 ///
@@ -273,8 +390,7 @@ fn checked_exists_output(
 
     let stderr = stderr.trim();
     if exit_code == Some(1)
-        && (stderr == format!("can't find session: {name}")
-            || stderr.starts_with("no server running on "))
+        && (said_absent(name, stderr) || stderr.starts_with("no server running on "))
     {
         return Ok(false);
     }
@@ -290,6 +406,31 @@ fn checked_exists_output(
     )
 }
 
+/// Whether tmux said this session is not there, rather than refusing to say.
+///
+/// The distinction is the whole reason [`Tmux::checked_exists`] exists: a
+/// known miss closes a conversation, and anything else must not. So the
+/// wording matters, and there is more than one of it. Asking loosely —
+/// `-t NAME` — gets `can't find session: NAME`; asking exactly, which is the
+/// only way to ask about a session whose name is a prefix of another's, gets
+/// that same sentence on tmux 3.7c with the `=` trimmed back off, and
+/// `NAME not found` on builds that word it the other way.
+///
+/// All four are read, because a worker is not upgraded in step with the tmux
+/// on its host. One unrecognised wording turns "the agent is gone" into "the
+/// probe could not be read", and an unreadable probe is exactly what stops a
+/// dead agent from ever being reported dead.
+fn said_absent(name: &str, stderr: &str) -> bool {
+    [
+        format!("can't find session: {name}"),
+        format!("can't find session: ={name}"),
+        format!("{name} not found"),
+        format!("={name} not found"),
+    ]
+    .iter()
+    .any(|wording| stderr == wording)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -297,7 +438,70 @@ mod tests {
 
     /// Unique per test, so a failure never leaves a name that breaks the next run.
     fn unique(tag: &str) -> Tmux {
-        Tmux::for_session(&format!("test-{tag}-{}", std::process::id()))
+        Tmux::for_session(&unique_id(tag))
+    }
+
+    /// The session id behind it, for a test that needs both an agent's name
+    /// and the name of the shell that sits beside it.
+    fn unique_id(tag: &str) -> String {
+        format!("test-{tag}-{}", std::process::id())
+    }
+
+    /// An ordinary session is nowhere near the ceiling, and must not be told
+    /// it is.
+    #[test]
+    fn an_ordinary_launch_fits() {
+        let env = vec![
+            ("PATH".to_string(), "/usr/bin:/bin".repeat(10)),
+            (
+                "CLAUDE_CODE_OAUTH_TOKEN".to_string(),
+                "sk-ant-oat".repeat(8),
+            ),
+            (
+                "FIRETOWER_SESSION".to_string(),
+                "s_01m6pbz9p4bn16xpj8".into(),
+            ),
+        ];
+        let args = vec![
+            "new-session".to_string(),
+            "-d".into(),
+            "-s".into(),
+            "firetower-s_01m6pbz9p4bn16xpj8".into(),
+        ];
+        assert!(too_long(&args, &env).is_none());
+    }
+
+    /// And when it does not fit, the sentence has to be the one that saves the
+    /// next hour: which variable, and how big.
+    #[test]
+    fn an_oversized_environment_names_what_filled_it() {
+        let persona = "You are the Orchestrator. ".repeat(400);
+        let env = vec![
+            ("PATH".to_string(), "/usr/bin:/bin".to_string()),
+            ("FIRETOWER_PERSONA".to_string(), persona),
+        ];
+        // What `start` builds: the variables as `-e` arguments, then the same
+        // variables again inlined in front of the command.
+        let mut args = vec!["new-session".to_string()];
+        for (key, value) in &env {
+            args.push("-e".into());
+            args.push(format!("{key}={value}"));
+        }
+        args.push(env_prefix(&env));
+
+        let why = too_long(&args, &env).expect("this does not fit");
+        assert!(why.contains("FIRETOWER_PERSONA"), "{why}");
+        assert!(why.contains("twice"), "{why}");
+    }
+
+    /// Exactly at the ceiling still goes — the limit tmux enforces is the one
+    /// measured against it, not one rounded down for comfort.
+    #[test]
+    fn the_last_byte_that_fits_is_allowed() {
+        let args = vec!["x".repeat(COMMAND_LIMIT - 1)];
+        assert!(too_long(&args, &[]).is_none());
+        let args = vec!["x".repeat(COMMAND_LIMIT)];
+        assert!(too_long(&args, &[]).is_some());
     }
 
     #[test]
@@ -339,6 +543,85 @@ mod tests {
             "can't find session: firetower-s_test"
         )
         .is_err());
+    }
+
+    /// Asking exactly changes the sentence, and the sentence is parsed.
+    ///
+    /// `has-session` is asked with `-t =NAME` now, because that is the only
+    /// form that will not answer about the shell beside the agent. tmux 3.7c
+    /// replies to a miss with the familiar `can't find session:` and trims the
+    /// `=` back off; other builds keep the `=` or word it `NAME not found`.
+    /// Every one of those means absent, and reading one of them as "the probe
+    /// failed" is what would stop a dead agent from ever being reported dead —
+    /// the fault this whole path exists to report.
+    #[test]
+    fn an_exact_probe_is_still_read_as_absent_whichever_way_tmux_words_it() {
+        for wording in [
+            "can't find session: firetower-s_test",
+            "can't find session: =firetower-s_test",
+            "firetower-s_test not found",
+            "=firetower-s_test not found",
+        ] {
+            assert!(
+                !checked_exists_output("firetower-s_test", false, Some(1), wording).unwrap(),
+                "{wording:?} says the session is not there"
+            );
+        }
+
+        // And a sentence about another session is still not an answer about
+        // this one.
+        assert!(checked_exists_output(
+            "firetower-s_test",
+            false,
+            Some(1),
+            "can't find session: firetower-s_other"
+        )
+        .is_err());
+    }
+
+    /// The shell beside an agent must not answer for the agent.
+    ///
+    /// `Tmux::for_session` is `firetower-<id>` and `Pty::tmux_name` is
+    /// `firetower-<id>-shell`, so an agent's name is a strict prefix of its
+    /// own shell's, and tmux will take a prefix match when nothing matches
+    /// exactly. With a shell open, `has-session` therefore said yes about an
+    /// agent that had exited — which is how the control plane was told the
+    /// watching had stopped rather than that the agent had gone, and how a
+    /// session sat in the inbox looking alive until somebody typed at it. The
+    /// same slip pointed `kill-session` at the person's shell.
+    #[tokio::test]
+    async fn a_sessions_shell_is_not_its_agent() {
+        let dir = TempDir::new().unwrap();
+        let id = unique_id("prefix");
+        let agent = Tmux::for_session(&id);
+        let shell = Tmux::named(ft_proto::Pty::Shell.tmux_name(&id));
+        assert!(
+            shell.name().starts_with(agent.name()),
+            "the trap this is about is that one name is a prefix of the other"
+        );
+
+        // Only the shell, which is the state a session is in whenever somebody
+        // has opened a terminal and the agent has since gone.
+        shell.start(dir.path(), "sleep 30", &[]).await.unwrap();
+
+        let loosely_there = agent.exists().await;
+        let checked = agent.checked_exists().await;
+        // Tearing down an agent that is not there has to be a no-op, not a
+        // kill of the shell standing next to it.
+        let killing = agent.kill().await;
+        let shell_survived = shell.exists().await;
+        let _ = shell.kill().await;
+
+        assert!(!loosely_there, "the shell is not the agent");
+        assert!(
+            !checked.expect("tmux answered, so this is not an unreadable probe"),
+            "the shell is not the agent"
+        );
+        assert!(killing.is_ok(), "{killing:?}");
+        assert!(
+            shell_survived,
+            "killing a session's agent must not take that session's shell with it"
+        );
     }
 
     /// The one tmux drops.

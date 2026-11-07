@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Titlebar } from "~/ui/Titlebar";
 import { Rail } from "~/ui/Rail";
 import { Routes } from "~/Routes";
@@ -16,7 +16,6 @@ import { Gate } from "~/ui/Gate";
 import { navigate, usePathname } from "~/shims/next-navigation";
 import { offerUpdate, useBuild } from "~/update";
 import { startCourier } from "~/telemetry";
-import { islandState } from "~/island/state";
 import { useConfirm } from "~/ui/Confirm";
 
 const StylePage = import.meta.env.DEV ? lazy(() => import("~/ui/StylePage").then((m) => ({ default: m.StylePage }))) : () => null;
@@ -32,9 +31,9 @@ export function App() {
    * There used to be an "all" scope and a `/fleet` screen behind it, and this
    * key used to be `firetower.scope` because it could hold either. It holds a
    * server id now and nothing else — the unified inbox is a menu under the
-   * avatar, and **the dock badge and `islandState` below are unchanged and
-   * still span every connected Firetower**, which is what carries the product
-   * across them.
+   * avatar, and **the dock badge below is unchanged and still spans every
+   * connected Firetower**, which is what carries the product across them.
+   * `islandState` went with the island.
    */
   const [which, setWhichState] = useState<string | null>(() => {
     try {
@@ -87,27 +86,6 @@ export function App() {
   const fleet = useFleet();
   const waiting = fleet.reduce((n, f) => n + waitingIn(f.sessions), 0);
   useEffect(() => bridge.setBadge(waiting || null), [waiting]);
-
-  /* And ember on the island, from the same poll.
-     This window is the island's only source. It already holds every backend
-     and already pays for the connections, so the pill is *told*; a second
-     webview asking the same servers the same question is the thing
-     `src/api/events.ts` exists to remember. Sent as a string first so a poll
-     that changed nothing costs nothing. */
-  const forIsland = useMemo(() => JSON.stringify(islandState(fleet)), [fleet]);
-  useEffect(() => bridge.island?.push(JSON.parse(forIsland)), [forIsland]);
-
-  /* A row on the island is a way into the app, and the only thing it does.
-     Whichever server it came from, because the island spans all of them. */
-  useEffect(
-    () =>
-      bridge.island?.onOpen(({ serverId, workspaceId }) => {
-        setWhich(serverId);
-        navigate(`/sessions/${workspaceId}`);
-      }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
-  );
 
   const pick = (next: string) => {
     setWhich(next);

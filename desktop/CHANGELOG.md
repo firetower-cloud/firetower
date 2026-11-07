@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.26.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.25.0...desktop-v0.26.0) (2026-11-05)
+
+
+### Features
+
+* **desktop:** drop the island from both platforms ([e57d065](https://github.com/firetower-cloud/firetower/commit/e57d0655c7182d7ee98079811a9aaa20b1205a58))
+* **desktop:** the profile a session is running as, beside the subscription ([588e5b6](https://github.com/firetower-cloud/firetower/commit/588e5b6a0dc5b94462424e52771464de8f796f3c))
+
+
+### Bug Fixes
+
+* **desktop:** a row says what its workspace is, not what one run of it is ([42b7356](https://github.com/firetower-cloud/firetower/commit/42b735671fa9848c2837c703727f532c8af145f7))
+* **desktop:** a workspace is only at rest when nothing under it is working ([c495f92](https://github.com/firetower-cloud/firetower/commit/c495f92619f7bc748e0aefcc63c4f433c033ace4))
+* **worker:** a profile's system prompt no longer rides the tmux command line ([b09b4d8](https://github.com/firetower-cloud/firetower/commit/b09b4d8fb9b6ce3689acca17bf1386c79d20bbb6))
+* **worker:** move profile system prompts off the tmux command line ([720c920](https://github.com/firetower-cloud/firetower/commit/720c920467a31eb8c0a6b69b4b0551f86fea1cca))
+* workspace status accounts for agents it delegated to ([21f8ab5](https://github.com/firetower-cloud/firetower/commit/21f8ab55c29415be68b91896cc64c7436812cc68))
+
 ## [0.25.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.24.0...desktop-v0.25.0) (2026-11-05)
 
 

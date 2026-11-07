@@ -210,6 +210,11 @@ pub struct UpdaterView {
 #[serde(rename_all = "camelCase")]
 pub struct ControlPlaneTarget {
     pub version: String,
+    // No `sessions`. There were sessions here while a worker could be a child
+    // of this process, and the Updates screen warned that recreating the
+    // container would end them. Nothing runs here now, so the field could only
+    // ever be empty — and an always-empty list is a warning the next reader
+    // has to disprove.
     pub upgradable: bool,
     /// Whether the person asking may move it. Only an administrator of the
     /// organisation: the control plane is the whole deployment, not a resource
@@ -217,8 +222,6 @@ pub struct ControlPlaneTarget {
     #[serde(default)]
     pub may_upgrade: bool,
     pub reason: Option<String>,
-    /// Sessions on this machine, by title. They end when it is recreated.
-    pub sessions: Vec<String>,
     pub updater: UpdaterView,
 }
 

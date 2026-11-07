@@ -10,10 +10,15 @@ import type { Host } from "./generated/model";
  * not in meant asking Firetower to ssh to the machine it is already sitting
  * on. That is not a mode of "this server"; it is another machine that happens
  * to be underneath us, and it is chosen like any other.
+ *
+ * Every machine is reached over ssh. A row of any other kind is a retired one
+ * — the control plane's own container, which no longer runs agents — and
+ * `listHosts` does not return those, so nothing here is ever drawn from one.
+ * It still has to be keyed apart from the rest rather than grouped with them.
  */
 export function machineKey(host: Host): string {
   const compute = host.compute;
-  if (compute.type === "Local") return "local";
+  if (compute.type !== "Server") return `retired:${host.id}`;
   return `ssh:${compute.host}:${compute.port ?? 22}`;
 }
 
@@ -42,14 +47,15 @@ export function reachedTheMachine(host: Host): boolean {
 }
 
 export function environmentLabel(host: Host): string {
-  return host.compute.type === "Local" ? "This machine" : host.name;
+  return host.name;
 }
 
+/** Where a machine is: `user@host:port`, as ssh takes it. */
 export function connectionLabel(host: Host): string {
   const c = host.compute;
   if (c.type === "Server")
     return `${c.user ? `${c.user}@` : ""}${c.host}${c.port ? `:${c.port}` : ""}`;
-  return "Alongside the control plane";
+  return host.name;
 }
 
 export type Machine = {
@@ -69,13 +75,10 @@ export function machines(hosts: Host[]): Machine[] {
     if (!machine) {
       machine = {
         key,
-        label:
-          key === "local"
-            ? "This server — alongside Firetower"
-            : // What you call it, never where it is: a list of addresses is a
-              // list nobody can read. `create_host` fills the name in from the
-              // address when the form left it blank, so there is always one.
-              host.name,
+        // What you call it, never where it is: a list of addresses is a list
+        // nobody can read. `create_host` fills the name in from the address
+        // when the form left it blank, so there is always one.
+        label: host.name,
         address: host.compute.type === "Server" ? connectionLabel(host) : undefined,
         hosts: [],
       };
@@ -91,11 +94,6 @@ export function machineLabel(machine: Machine): string {
   return machine.address && machine.address !== machine.label
     ? `${machine.label} · ${machine.address}`
     : machine.label;
-}
-
-/** The machine hosting the control plane: agents run where the control plane runs. */
-export function isLocal(machine: Machine | undefined): boolean {
-  return machine?.key === "local";
 }
 
 /**

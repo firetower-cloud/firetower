@@ -64,9 +64,10 @@ Every check a person starting a session meets, a lead meets.
 
 ## Limits
 
-Flat: a child cannot spawn. At most 4 children in flight per lead and 8 over
-its life. A refusal is a sentence the agent reads — which limit, and what is
-holding it.
+Flat: a child cannot spawn — the only limit left. There is no cap on how many
+children a lead starts, nor on how many of them run at once; the spawn tool
+says so, and asks the agent to dispatch what the work needs rather than what it
+is allowed. A refusal is a sentence the agent reads: which rule, and why.
 
 Money and wall-clock caps are not here. Firetower shows a quota at 100% and
 does not interrupt a running agent; a cap that interrupts is a new behaviour
@@ -80,19 +81,22 @@ lead's row, which is what it is. A lead's row shows `↳N` while N of its
 children are at work. A child's conversation opens with who started it and
 why, and links back.
 
-`needsYou` — and so the inbox, the island and the dock badge — does not count
-a child that handed back to its lead.
+`needsYou` — and so the inbox and the dock badge — does not count a child
+that handed back to its lead.
 
 ## Trying it
 
 ```sh
-just db && just dev           # control plane, localhost worker and web
+just build-worker             # the worker from this checkout
+just db && just dev           # control plane and web
 cd desktop && pnpm app        # the Mac app, connected to http://localhost:4400
 ```
 
-The localhost worker is this build's own binary, so the new tools are there
-without installing anything. Start a workspace on a repository with Claude
-Code, and ask it something like:
+Add a machine first — Firetower runs nothing on itself, so a fresh database
+has an empty fleet. Your own laptop over ssh is fine (see CONTRIBUTING), and
+`just dev` installs the worker you just built onto it, so the new tools are
+there without a release. Start a workspace on a repository with Claude Code,
+and ask it something like:
 
 > Add input validation to the API handlers. Then start a child in this
 > workspace to review the diff and tell me what it finds.

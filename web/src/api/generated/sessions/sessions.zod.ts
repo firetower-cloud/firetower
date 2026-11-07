@@ -938,7 +938,6 @@ export const listForwardsResponseForwardsItemPortMin = 0;
 
 
 export const ListForwardsResponse = zod.object({
-  "alreadyReachable": zod.boolean().describe('Whether a port needs forwarding at all.\n\nA worker that is a child process of this control plane shares this\nmachine\'s network, so its dev server is already on `localhost`. There\nis nothing to tunnel, and forwarding anyway would bind a second port\nthat loops out and straight back in.'),
   "availableHere": zod.boolean().describe('Whether opening one would reach the person asking.\n\nFalse when the control plane is somewhere other than the machine\nholding the browser: the port would be opened there, and sending\nsomebody to `localhost` would send them to their own machine — where\nthere is either nothing, or something else of theirs. The interface\nsays so rather than offering a link that goes to the wrong place.'),
   "forwards": zod.array(zod.object({
   "local": zod.int().min(listForwardsResponseForwardsItemLocalMin).describe('What was actually bound here.\n\nThe same number whenever it can be — see [`Forwards::start`]. When it\nis not, an application that hardcodes its own address will not find\nitself, and whoever is looking has to be told.'),
@@ -1000,6 +999,23 @@ export const InterruptSessionParams = zod.object({
 export const InterruptSessionResponse = zod.object({
   "sent": zod.boolean()
 })
+
+/**
+ * As it was sent, not as the profile stands now — the two part company the
+ * moment somebody edits the profile, and what explains an agent's behaviour
+ * is the text it was actually given. A session that is no profile answers
+ * with an empty one rather than a 404: "this run has no persona" is an
+ * ordinary answer, not a missing page.
+ * @summary The system prompt this session is working from.
+ */
+export const SessionPersonaParams = zod.object({
+  "id": zod.string().describe('Session id')
+})
+
+export const SessionPersonaResponse = zod.object({
+  "profile": zod.string().nullish().describe('The profile\'s name as it stands now, when it still exists. A profile\ndeleted since the session started leaves the text and loses the name.'),
+  "text": zod.string().describe('The system prompt the agent was handed, composed when this run\nlaunched. Empty for a plain agent, which is most of them.')
+}).describe('What a session is running as.')
 
 /**
  * Signed rather than stored, so it survives a restart of the control plane and

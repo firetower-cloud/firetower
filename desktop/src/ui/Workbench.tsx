@@ -12,7 +12,7 @@ import { WhoCanAccess } from "~/ui/Sharing";
 import { useQueryClient } from "@tanstack/react-query";
 import { getListSessionsQueryKey, useRenameSession } from "~/api/generated/sessions/sessions";
 import { AgentMark, AGENT_LABEL } from "~/components/AgentMark";
-import { childrenOf, group, placeOf } from "~/api/workspaces";
+import { childrenElsewhere, group, placeOf } from "~/api/workspaces";
 import type { Backend } from "~/fleet";
 import { useHostOf, useSession, useSessions } from "~/data";
 import { navigate } from "~/shims/next-navigation";
@@ -253,7 +253,7 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
   const place =
     found ??
     (opened.data
-      ? { id: workspace, name: opened.data.name, branch: opened.data.branch ?? undefined, runs: [opened.data] }
+      ? { id: workspace, name: opened.data.name, branch: opened.data.branch ?? undefined, startedAt: opened.data.createdAt, runs: [opened.data] }
       : undefined);
 
   /* The Overview tab's team and artifacts are derived below, from `run`, since
@@ -595,7 +595,7 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
             {mayEndPlace && (
               <IconButton
                 of={Trash2}
-                onClick={() => void endWorkspace(place, childrenOf(place, group(sessions ?? []).groups.flatMap(([, ps]) => ps))).then(({ ended, trouble }) => (ended ? navigate("/") : trouble && void confirm({ title: "It did not end.", body: trouble, action: "OK" })))}
+                onClick={() => void endWorkspace(place, childrenElsewhere(place, group(sessions ?? []).groups.flatMap(([, ps]) => ps))).then(({ ended, trouble }) => (ended ? navigate("/") : trouble && void confirm({ title: "It did not end.", body: trouble, action: "OK" })))}
                 label="End workspace"
                 hint="End workspace — every agent in it stops, and every agent it started"
                 className="hover:text-brick"

@@ -44,11 +44,6 @@ fn relay_marker(kind: &str, id: &SessionId, name: &str) -> String {
     format!("⟦ft:{kind}:{}:{}⟧", id.as_str(), name)
 }
 
-/// How many children a lead may have in flight at once.
-pub const LIVE_CHILDREN: usize = 4;
-/// How many a lead may start over its life.
-pub const CHILDREN_PER_SESSION: usize = 8;
-
 /// One call from a session's agent, as the fleet hands it over.
 #[derive(Debug, Clone)]
 pub struct AgentRequest {
@@ -138,8 +133,10 @@ async fn spawn(state: &AppState, request: &AgentRequest) -> Result<String> {
         .context("the session that asked no longer exists")?;
 
     // Flat, deliberately: a child may not start children of its own. The
-    // lead decides the shape of the work, and a tree nobody can see the
-    // bottom of is how eight workspaces become a hundred.
+    // lead decides the shape of the work, and with no cap on how many
+    // children it starts, depth is the one thing still holding the count
+    // down — a tree nobody can see the bottom of is how a handful of
+    // workspaces becomes a thousand.
     if lead.parent_id.is_some() {
         bail!("this session is itself a child, and children cannot spawn");
     }
@@ -219,26 +216,6 @@ async fn spawn(state: &AppState, request: &AgentRequest) -> Result<String> {
         },
         None => None,
     };
-
-    let siblings = state.db.children_of(&lead.id).await?;
-    let live: Vec<&Session> = siblings.iter().filter(|c| c.status.in_flight()).collect();
-    if live.len() >= LIVE_CHILDREN {
-        let names: Vec<String> = live
-            .iter()
-            .map(|c| format!("{} ({})", c.name, c.id))
-            .collect();
-        bail!(
-            "{} of {LIVE_CHILDREN} child slots are in use by {}; wait for one to hand back, \
-             or batch the work",
-            live.len(),
-            names.join(", ")
-        );
-    }
-    if siblings.len() >= CHILDREN_PER_SESSION {
-        bail!(
-            "this session has started {CHILDREN_PER_SESSION} children, which is the most one may"
-        );
-    }
 
     // A role that pins a field enforces it — the lead's own argument does not
     // override it, which is the point of pinning. A role that leaves a field

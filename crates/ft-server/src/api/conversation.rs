@@ -1546,10 +1546,7 @@ mod tests {
     /// does — and none of those is testable on a `Vec` we built ourselves.
     async fn session_holding(name: &str) -> (crate::db::Db, SessionId) {
         let (db, owner) = crate::db::Db::open_for_test_owned().await.unwrap();
-        let host = db
-            .ensure_host("localhost", ft_core::Compute::Local, &owner)
-            .await
-            .unwrap();
+        let host = db.ensure_test_host("localhost", &owner).await.unwrap();
 
         let id = SessionId::new();
         db.insert_session(
@@ -1590,10 +1587,7 @@ mod tests {
         use serde_json::json;
 
         let (db, owner) = crate::db::Db::open_for_test_owned().await.unwrap();
-        let host = db
-            .ensure_host("localhost", ft_core::Compute::Local, &owner)
-            .await
-            .unwrap();
+        let host = db.ensure_test_host("localhost", &owner).await.unwrap();
         let id = SessionId::new();
         db.insert_session(
             &id,
@@ -1835,10 +1829,7 @@ mod tests {
     #[tokio::test]
     async fn an_empty_session_pages_to_nothing() {
         let (db, owner) = crate::db::Db::open_for_test_owned().await.unwrap();
-        let host = db
-            .ensure_host("localhost", ft_core::Compute::Local, &owner)
-            .await
-            .unwrap();
+        let host = db.ensure_test_host("localhost", &owner).await.unwrap();
         let id = SessionId::new();
         db.insert_session(
             &id,

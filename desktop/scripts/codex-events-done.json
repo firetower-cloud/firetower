@@ -178,7 +178,7 @@
     "type": "TaskProgress"
   },
   {
-    "detail": "Reading desktop/src/island/state.ts",
+    "detail": "Reading desktop/src/api/view.ts",
     "lineNo": 14,
     "task": "th_sub",
     "type": "TaskProgress"
@@ -193,7 +193,7 @@
   {
     "lineNo": 16,
     "status": "Completed",
-    "summary": "Seven surfaces read SessionStatus. Two of them — Signal and the island's blocks — draw the resting tick, and neither consults in-flight tasks.",
+    "summary": "Seven surfaces read SessionStatus. Two of them — Signal and Blocks — draw the resting tick, and neither consults in-flight tasks.",
     "task": "th_sub",
     "type": "TaskCompleted"
   }
