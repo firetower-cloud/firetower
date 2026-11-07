@@ -76,18 +76,16 @@ async function probeMachine(page, settle) {
   await at(page, "/configuration/machines", 1400);
   await page.getByRole("button", { name: /Add a machine/ }).first().click();
   await pause(page, 500);
-  await page.getByPlaceholder(/ubuntu@|host|address/i).first().fill("ubuntu@10.4.0.22");
-  await page.getByRole("button", { name: /probe|check|continue|add/i }).first().click();
+  await page.getByPlaceholder("192.0.2.10").fill("10.4.0.22");
+  await page.getByRole("button", { name: /Add it|Reaching it/ }).first().click();
   await pause(page, settle);
 }
 
 /** Press the microphone in a workspace. */
 async function dictate(page) {
   await at(page, "/sessions/s_1", 1800);
-  await byTitle(page, "Dictate").click().catch(async () => {
-    await page.locator(".composer .control, .bar button").nth(1).click();
-  });
-  await pause(page, 900);
+  await page.locator('[title^="Dictate"]').first().click();
+  await pause(page, 1000);
 }
 
 /** The first-run flow: type an address and press Connect. */
@@ -163,8 +161,10 @@ const SHOTS = [
       await at(p, "/sessions/s_1", 1800);
       await byTitle(p, "Preview a port").click();
       await pause(p, 600);
-      await p.getByText("3000", { exact: false }).first().click();
-      await pause(p, 1400);
+      /* The suggestions come off the conversation; the field is always there
+         and defaults to 3000, which is what the drawing previews. */
+      await p.getByRole("button", { name: "Open" }).first().click();
+      await pause(p, 1800);
     },
   },
   { id: "in-a-workspace__a-picture", go: (p) => openFile(p, { keep: true, named: "shot.png", under: "docs" }) },
@@ -176,8 +176,8 @@ const SHOTS = [
          range is made programmatically and the `mouseup` React's delegated
          listener hears is dispatched by hand. */
       await p.evaluate(() => {
-        const lines = document.querySelectorAll(".code span, .code div");
-        const line = lines[Math.min(14, lines.length - 1)];
+        const cells = document.querySelectorAll("table td:last-child");
+        const line = cells[Math.min(12, cells.length - 1)];
         if (!line) return;
         const r = document.createRange();
         r.selectNodeContents(line);
@@ -185,7 +185,7 @@ const SHOTS = [
         sel?.removeAllRanges();
         sel?.addRange(r);
       });
-      await p.locator(".code").first().dispatchEvent("mouseup");
+      await p.locator("table").first().dispatchEvent("mouseup");
       await pause(p, 900);
     },
   },
@@ -386,8 +386,8 @@ const SHOTS = [
       await at(p, "/configuration/git-hosts", 1400);
       await p.getByRole("button", { name: /^Connect$/ }).first().click();
       await pause(p, 900);
-      await p.getByRole("button", { name: /token/i }).first().click();
-      await pause(p, 800);
+      await p.getByRole("button", { name: /token|paste/i }).first().click();
+      await pause(p, 900);
     },
   },
   { id: "sources__connect-connected", scene: "host-connected", go: (p) => at(p, "/configuration/git-hosts", 1600) },

@@ -67,6 +67,13 @@ than sentence case. Monospace is for things where the individual characters
 carry meaning — a path, a branch, a code, a key, a diff. A branch name in mono
 is right; a section heading in mono is costume.
 
+**The test is whether you would ever read it character by character.** You do
+that with `crates/ft-server/src/quota.rs` and with `WDJB-MJHT`. You do not do
+it with a skill called `pr-screenshots`, a profile called *Ada, the lead*, or a
+person's handle — **those are names, and a name is set in the text face.** This
+rule was written in the first draft and then broken in three places, including
+a panel of six skills that read as a terminal listing.
+
 ### Light is the design; dark follows from it
 
 This is the biggest departure from the app as it stands, which is dark-only.
@@ -114,6 +121,39 @@ leaving the one you are in.
 So on a surface with no hover, an equivalent is a *new feature* to be argued on
 its own merits, not a port that must happen. It may well be worth it; it is not
 owed.
+
+### An icon recedes; the container carries the state
+
+Icons are **lucide at stroke 1.5**, one weight everywhere, and they sit at
+`--quiet` rather than `--body`. A rail glyph is 20px and is *the same weight
+whether it is current or not*.
+
+This is the second time the rail has been reworked, from opposite directions,
+and the resolution is worth keeping. An earlier pass answered "the icons are
+not explicit enough" by making the current one heavier **and** giving it a
+lighter background — two signals for one fact — which is what made the rail
+read as loud furniture beside a quieter product. The fix is not to revert:
+
+> **Let the glyph recede at every state and let the container say which one you
+> are on.** An icon can then be thin and the state still unmistakable.
+
+So the rail's current destination is a **filled square in `--ink` with a
+`--sheet` glyph**. It is the one place in the chrome that inverts; everywhere
+else marks the current thing with a raised surface. It inverts because the rail
+is the only place with no label to help — the glyph alone has to carry it, and
+a white pill was the same *direction* as hover, so on and hovered read alike.
+
+A list row keeps the raised treatment, because the name is already readable and
+the row only needs marking. It lost its shadow: white on the desk grey is
+already a ΔE 6.2 step, and a shadow on top of that is the same second signal.
+
+### Three weights, and no more
+
+**400 · 500 · 530.** The first draft of this design used fourteen — 420, 450,
+460, 480, 520, 540, 560, 600, 650, 700 and the rest — which is not a scale, it
+is a slider somebody kept nudging. Three is enough: body, label, heading. If a
+thing needs emphasis beyond 530, it needs a different size or more space around
+it, not another 20 units of weight.
 
 ### A server is a mark, never a colour
 
@@ -364,6 +404,24 @@ needed — ember text on a pale ember tint — matching the dark pair's 8.34:1
 drives it to `#970100`, a dark red that no longer reads as ember. That is the
 same trade amber made at `#653400`. Whoever needs it should decide knowingly
 rather than discover it.
+
+### Four surface greys, not five
+
+The light scale had `--sunk` (a recessed fill) and `--hair` (a hairline)
+**ΔE 1.1 apart** — the same colour under two names. They are now one token,
+`--hair`, doing both jobs.
+
+Worth knowing *why*, because it will recur on any light derivation: **light has
+less room below white than dark has above black.** The dark scale steps
+ground → panel → raise → overlay → line at ΔE 2.2, 2.9, 3.6, 4.0 — an even
+ladder. Deriving each light value independently let the bottom two collapse.
+**Derive a light scale as a ladder**, checking each rung against its neighbour,
+not each value against the page.
+
+The other steps were left alone. `--desk` sits ΔE 6.2 below `--sheet`, which
+looks like an outlier beside dark's 2.2 — it is not a bug. That step is the
+window edge, and dark cannot open it wider because it has already run out of
+room at `#0b0b0c`.
 
 ### Host marks
 
