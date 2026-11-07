@@ -43,6 +43,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { Icon } from "~/components/ui";
+import { BeatMark } from "~/components/BeatMark";
 import { useListArtifacts } from "~/api/generated/artifacts/artifacts";
 import { useMe } from "~/api/generated/auth/auth";
 import { elapsed, minutesSince, needsYou } from "~/api/view";
@@ -471,8 +472,18 @@ function Place({ place, places, every, on }: { place: Workspace; places: Workspa
       title={hot ? `${place.name} — waiting on you` : place.name}
       className="prow"
     >
+      {/* **One alphabet, and not for tidiness.** This drew its own `.wdot`:
+          one circle in four tones, which is hue alone. Simulated, three of
+          the four states collapse — a protanope in light reads *needs you*
+          against *done* at 1.07:1 and against *broken* at 1.14:1; a
+          deuteranope in dark reads *working* against *done* at 1.00:1, which
+          is the same mark. The pair that collapses hardest is an agent
+          waiting on you against one that has finished.
+
+          The shaped set survives 1.00:1 because the shapes differ. It costs
+          7px of label width — see `.prow .mk` — and that is the whole bill. */}
       <span className="mk">
-        <i className="wdot" data-t={beat} />
+        <BeatMark beat={beat} />
       </span>
       <span className={`min-w-0 flex-1 truncate ${hot ? "font-medium text-bone" : ""}`}>
         {rowLabel(place, places)}

@@ -591,6 +591,108 @@ for (const [title, key, repo] of [
   await page.close();
 }
 
+/* ── The rail panel's marks are shapes ────────────────────────────────
+   It drew `.wdot`: one circle in four tones, which is hue alone. Simulated,
+   three of the four states collapse — a protanope in light reads *needs you*
+   against *done* at 1.07:1 and against *broken* at 1.14:1; a deuteranope in
+   dark reads *working* against *done* at 1.00:1, the same mark.
+
+   **So the assertion is about shape, not colour.** A screenshot cannot make
+   it: four grey circles and four distinct marks photograph as four small
+   things in a column, and the pseudo-state that matters — the typing mark
+   under `prefers-reduced-motion`, where the animation is what makes it read
+   as three pips — never appears in one at all. */
+for (const [theme, motion] of [["light", false], ["dark", false], ["light", true]]) {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 824 }, deviceScaleFactor: 2 });
+  await page.request.post(`${HERE}/__reset?scene=ws-many`);
+  await page.emulateMedia({ reducedMotion: motion ? "reduce" : "no-preference" });
+  await page.addInitScript(
+    ([registry, choice]) => {
+      window.localStorage.setItem("firetower.servers", registry);
+      window.localStorage.setItem("firetower.current", "o_1");
+      window.localStorage.setItem("firetower.theme", choice);
+      window.localStorage.setItem("firetower.workspaces-by", "status");
+    },
+    [REGISTRY, theme],
+  );
+  const how = `${theme}${motion ? " · reduced motion" : ""}`;
+  const say = (ok, what, got) => {
+    if (!ok) failed++;
+    console.log(`  ${ok ? "ok    " : "FAILED"} panel marks ${how}: ${what}${ok ? "" : ` — ${got}`}`);
+  };
+
+  await page.goto(`${APP}/#/`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(1800);
+
+  const seen = await page.evaluate(() => {
+    const panel = document.querySelector("[data-rail-panel]");
+    if (!panel) return null;
+    const rows = [...panel.querySelectorAll(".prow")].filter((r) => r.querySelector(".mk"));
+    /* **The shape, named by what it is made of** — not by its colour, which
+       is the whole point. A dot is one element, a typing mark is three pips,
+       and the two glyphs are `svg` with their own labels. */
+    const shapeOf = (r) => {
+      const m = r.querySelector(".mk")?.firstElementChild;
+      if (!m) return "none";
+      if (m.classList.contains("dot")) return "dot";
+      if (m.classList.contains("typing")) return `pips:${m.children.length}`;
+      return m.getAttribute("aria-label") ?? m.tagName.toLowerCase();
+    };
+    const pip = panel.querySelector(".mk .typing i");
+    const slot = rows[0] && getComputedStyle(rows[0].querySelector(".mk"));
+    return {
+      rows: rows.length,
+      shapes: [...new Set(rows.map(shapeOf))].sort(),
+      wdots: panel.querySelectorAll(".wdot").length,
+      slotWidth: slot && parseFloat(slot.width),
+      /* The mark must sit inside its slot, or widening it bought nothing. */
+      spills: rows.some((r) => {
+        const mk = r.querySelector(".mk");
+        const m = mk.firstElementChild;
+        if (!m) return false;
+        return m.getBoundingClientRect().right > mk.getBoundingClientRect().right + 0.5;
+      }),
+      truncated: rows.filter((r) => {
+        const l = r.querySelector(".mk").nextElementSibling;
+        return l.scrollWidth > l.clientWidth + 1;
+      }).length,
+      width: Math.round(panel.getBoundingClientRect().width),
+      rowHeight: rows[0] && Math.round(rows[0].getBoundingClientRect().height),
+      bands: panel.querySelectorAll(".pband").length,
+      pip: pip && { opacity: parseFloat(getComputedStyle(pip).opacity), pips: pip.parentElement.children.length },
+    };
+  });
+
+  if (!seen) {
+    say(false, "the panel is on screen", "no [data-rail-panel]");
+    await page.close();
+    continue;
+  }
+  say(seen.rows > 20, "the fixture is long enough to carry every beat", `${seen.rows} rows`);
+  say(seen.wdots === 0, "nothing draws the old four-tone circle", `${seen.wdots} .wdot still on screen`);
+  say(
+    seen.shapes.length >= 4 && seen.shapes.includes("dot") && seen.shapes.some((x) => x.startsWith("pips:")),
+    "four beats, four shapes — told apart with the colour off",
+    seen.shapes.join(", "),
+  );
+  say(seen.slotWidth === 16, "the lead slot is 16px, which is what the shapes cost", `${seen.slotWidth}px`);
+  say(!seen.spills, "and every mark fits inside it", "a mark is wider than its slot");
+  say(seen.width === 252 && seen.rowHeight === 36 && seen.bands === 2, "nothing else moved — width, row height, bands", `${seen.width}px · ${seen.rowHeight}px · ${seen.bands} bands`);
+  /* Reported either way: the drawing predicted two more labels truncate at
+     37 rows and this fixture's names are shorter than the drawing's. */
+  console.log(`         ${seen.truncated} label(s) truncate at ${seen.rows} rows`);
+  if (motion) {
+    /* `globals.css` collapses every duration with `!important`, which would
+       land the pips on frame zero. They are held at .55 instead — static,
+       visible, and still three of them. */
+    say(seen.pip?.pips === 3, "the typing mark is still three pips with the motion off", `${seen.pip?.pips} pips`);
+    say(seen.pip && seen.pip.opacity >= 0.5, "held visible rather than on frame zero", `opacity ${seen.pip?.opacity}`);
+  }
+
+  await page.request.post(`${HERE}/__reset`);
+  await page.close();
+}
+
 await browser.close();
 if (failed) {
   console.error(`\n  ${failed} state(s) are not what the design says.`);

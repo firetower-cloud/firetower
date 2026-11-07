@@ -538,11 +538,14 @@
   /* The dot. The only saturated thing on the screen, and it is 8px wide.
      The halo is the pulse; `ember-pulse` in `globals.css` is the same idea at
      the other end of the app and keeps its own timing. */
-  /* **One mark, one table.** The dot wears the beat its workspace is in —
-     the same `data-t` the panel's `.wdot` takes — because two surfaces
-     drawing one fact with two functions is how the home came to say *stuck*
-     where the rail said *finished*. Ember without one, which is the chip
-     that has always been here: a question. */
+  /* **One mark, one table.** The dot wears the beat its workspace is in,
+     because two surfaces drawing one fact with two functions is how the home
+     came to say *stuck* where the rail said *finished*. Ember without one,
+     which is the chip that has always been here: a question.
+
+     The rail panel used to take the same `data-t` on a `.wdot` of its own;
+     it draws `BeatMark` now, so there is one mark alphabet across the three
+     surfaces that have status and no separate dot to keep in step. */
   .dot {
     position: relative;
     width: 8px;
@@ -3990,33 +3993,30 @@ html:not([data-platform="macos"]) {
   }
 
   /* The mark's column is held whether or not there is a mark in it, so a
-     capped row does not shift its name left of the rows above. */
+     capped row does not shift its name left of the rows above.
+
+     **16px, not 9.** It held an 8px dot; it holds `BeatMark` now, and the
+     widest of those is the typing mark — three 4px pips with two 3px gaps,
+     18px — with the glyphs at 14. Scaled to 0.8 from the left, 18 becomes
+     14.4 and the slot is 16. **Every label in the panel moves 7px right**
+     and two more truncate in 37 rows. That is the whole cost of the shapes,
+     and `.wdot` is gone with it: four tones of one circle told apart by hue,
+     which is the one thing the guide forbids. */
   .prow .mk {
-    width: 9px;
+    width: 16px;
     flex: none;
     display: grid;
-    place-items: center;
+    justify-items: start;
+    align-items: center;
   }
-  .wdot {
-    width: 8px;
-    height: 8px;
-    border-radius: 99px;
-    flex: none;
-    background: var(--color-ember);
+  .prow .mk .typing {
+    transform: scale(0.8);
+    transform-origin: left center;
   }
-  .wdot[data-t="working"] {
-    background: var(--color-slate);
-  }
-  .wdot[data-t="done"] {
-    background: var(--color-sage);
-  }
-  .wdot[data-t="broken"] {
-    background: var(--color-brick);
-  }
-  /* Nothing running and nothing owed. Ember is the default because `blocked`
-     is the one state with no modifier, so every other beat names itself. */
-  .wdot[data-t="over"] {
-    background: var(--color-mute);
+  /* The dot and the glyphs are centred in the slot; only the typing mark,
+     which is twice as wide as either, starts at its left edge. */
+  .prow .mk > :not(.typing) {
+    margin-inline: auto;
   }
 
   .pnone {

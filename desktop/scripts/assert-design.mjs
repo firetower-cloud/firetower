@@ -159,6 +159,22 @@ for (const theme of ["light", "dark"]) {
 }
 console.log(`  layer 1 · tokens · ${findings.length} finding(s)`);
 
+/**
+ * **An exemption that stops applying has to say so.**
+ *
+ * The ember budget excuses two things — an agent's brand mark, and the
+ * workspaces panel, which the user exempted on 7 November 2026. Both are
+ * anchored on attributes, and an anchor that moves takes its exemption with
+ * it *silently*: the count jumps and the first person to see it concludes the
+ * design broke rather than that a selector did. The designer hit exactly that
+ * when the panel stopped drawing `.wdot`.
+ *
+ * So each exemption reports what it suppressed, summed over the whole sweep.
+ * Zero across a hundred states in two themes is not restraint; it is an
+ * anchor that no longer matches.
+ */
+const exemptions = new Map();
+
 /* Layer 2, at every state the sweep already drives — the coverage is free. */
 let ran = 0;
 for (const s of SHOTS) {
@@ -169,7 +185,15 @@ for (const s of SHOTS) {
     try {
       await s.go(page);
       const found = await page.evaluate(`(${RULES.toString()})()`);
-      for (const f of found) add(s.id, theme, f.rule, f.at, f.expected, f.actual);
+      for (const f of found) {
+        /* The exemption tallies are not findings; they are how the sweep
+           answers *does each exemption still apply to anything*. */
+        if (f.rule === "ember-exemption-tally") {
+          exemptions.set(f.at, (exemptions.get(f.at) ?? 0) + Number(f.actual));
+          continue;
+        }
+        add(s.id, theme, f.rule, f.at, f.expected, f.actual);
+      }
     } catch (e) {
       add(s.id, theme, "could-not-drive", "—", "the state", String(e).split("\n")[0].slice(0, 140));
     }
@@ -180,6 +204,18 @@ for (const s of SHOTS) {
 }
 await browser.close();
 console.log("");
+
+for (const [name, n] of exemptions) {
+  if (n > 0) continue;
+  add(
+    "every state",
+    "both",
+    "ember-exemption-expired",
+    name,
+    "the exemption still applies to something",
+    "it suppressed nothing in the whole sweep — the anchor has moved, and the budget will now fail as a violation",
+  );
+}
 
 /* ── Report ──────────────────────────────────────────────────────────── */
 

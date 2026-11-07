@@ -141,33 +141,65 @@ export const RULES = function collect() {
     if (!c || c.a < 0.5) return false;
     return EMBER.has(`rgb(${Math.round(c.r)},${Math.round(c.g)},${Math.round(c.b)})`);
   };
-  let embers = 0;
-  const emberAt = [];
-  for (const el of all) {
+  /**
+   * **The two exemptions, and the count of what each one suppressed.**
+   *
+   * An exemption keyed on something that can move is an exemption with an
+   * expiry, and it expires in the worst possible direction: as a *violation*,
+   * so the first person to see the count jump concludes the design broke. The
+   * designer hit exactly this — the panel's exemption was written as
+   * `.pscroll i.wdot`, the panel stopped drawing `.wdot`, and the budget went
+   * 3 → 5 with nothing about the design having changed.
+   *
+   * These are anchored on `[data-rail-panel]` and on `[data-mark]`, which are
+   * attributes that exist *for* assertions rather than for styling — but that
+   * is an argument, not a guarantee. So each one reports how many ember marks
+   * it suppressed, and `assert-design.mjs` fails if one of them suppressed
+   * nothing anywhere in the whole sweep. A silent expiry becomes a named
+   * finding that says which anchor moved.
+   */
+  const EXEMPT = [
     /* **An agent's mark is not an ember.** Claude's glyph is orange because
        Claude's glyph is orange; the budget is about ember used as a *signal*
        — somebody is waiting on you — and counting brand marks against it
        made a workspace with four agents in it permanently over budget. */
-    if (el.closest("[data-mark], .face, .agentmark, [data-agent]")) continue;
+    ["an agent's brand mark", "[data-mark], .face, .agentmark, [data-agent]"],
     /* **The workspaces panel is exempt, by the user, on 7 November 2026.**
-       Every row carries its own status dot in both modes — they were shown
-       it with the dots capped and without them, and a panel where one row of
+       Every row carries its own status mark in both modes — they were shown
+       it with the marks capped and without them, and a panel where one row of
        three has a mark reads as missing rather than restrained. Four waiting
-       rows are four ember dots and that is the intended drawing.
+       rows are four ember marks and that is the intended drawing.
 
        Scoped rather than removed: a rule that fails on intended behaviour is
        one the next person switches off wholesale, and it is still worth
        having everywhere else. */
-    if (el.closest("[data-rail-panel]")) continue;
+    ["the workspaces panel", "[data-rail-panel]"],
+  ];
+  const suppressed = new Map(EXEMPT.map(([name]) => [name, 0]));
+
+  let embers = 0;
+  const emberAt = [];
+  for (const el of all) {
     const s = getComputedStyle(el);
     const hit = isEmber(s.color) || isEmber(s.backgroundColor) || isEmber(s.borderTopColor);
     /* Count the mark, not its ancestors: an inherited colour is one ember. */
-    if (hit && !(el.parentElement && isEmber(getComputedStyle(el.parentElement).color) && isEmber(s.color))) {
-      embers++;
-      if (emberAt.length < 8) emberAt.push(where(el));
+    if (!hit || (el.parentElement && isEmber(getComputedStyle(el.parentElement).color) && isEmber(s.color))) continue;
+    /* Tested *after* the hit, so a count of nothing means the anchor moved
+       rather than that there was nothing on screen to exempt. */
+    const excused = EXEMPT.find(([, sel]) => el.closest(sel));
+    if (excused) {
+      suppressed.set(excused[0], suppressed.get(excused[0]) + 1);
+      continue;
     }
+    embers++;
+    if (emberAt.length < 8) emberAt.push(where(el));
   }
   if (embers > 3) out.push({ rule: "ember-budget", at: emberAt.join("  ·  "), expected: "at most 3", actual: String(embers) });
+  /* Not a finding — a tally the driver aggregates across the sweep. Filtered
+     out of the report there. */
+  for (const [name, n] of suppressed) {
+    out.push({ rule: "ember-exemption-tally", at: name, expected: "applies somewhere", actual: String(n) });
+  }
 
   /* ── 3. Mono only where it means something ────────────────────────── */
   const MONO_OK = ["font-mono", "path", "branch", "code", "mono", "diff", "hljs", "cm-", "sha", "key", "ver", "token", "shell", "term", "log", "pre"];

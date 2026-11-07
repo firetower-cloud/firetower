@@ -31,6 +31,34 @@
  * of them answer. A check that cannot tell *answered without navigating*
  * from *did nothing* is the check that let the original bug through — it
  * would have called the broken rows and the working ones the same thing.
+ *
+ * ## What this cannot see: a control whose effect depends on state
+ *
+ * **A control that answers in one state and does nothing in another is
+ * outside this check, and not cheaply inside it.** The home's *View all* was
+ * briefly built to open the workspaces panel — which does something when the
+ * panel is collapsed and nothing when it is already pinned, the common case.
+ *
+ * Two reasons it would not have been caught, and only the second is fixable:
+ *
+ * 1. **It names nothing.** The pressed set is controls that name an entity
+ *    from `/__entities`, which is what makes *landed on the right thing*
+ *    answerable at all. *View all* names a section. Widening the set to every
+ *    control means pressing every tab, filter and toggle in the app and
+ *    deciding what each one was supposed to do — a different check, with a
+ *    false-positive rate that would bury this one.
+ * 2. **One sample of the state.** Each control is pressed once, on a page
+ *    with whatever `firetower.panel` defaults to. `opened-in-place` under one
+ *    answer could be `inert` under the other and this would report the first.
+ *
+ * Re-pressing every `opened-in-place` control with the panel flipped would
+ * close (2) for roughly forty extra page loads. It is left undone because it
+ * does not close (1), which is what this instance needed — so it would buy
+ * confidence in the wrong place. **The control-level version lives in
+ * `check-states.mjs` instead**, which drives *View all* under both panel
+ * answers and requires the row to change in both. That is the shape to copy
+ * when a control's effect is conditional: name the state it depends on and
+ * drive both values of it.
  */
 import { chromium } from "playwright-core";
 import { mkdirSync, writeFileSync } from "node:fs";
