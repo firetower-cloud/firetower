@@ -76,6 +76,54 @@ a panel of six skills that read as a terminal listing.
 
 ### Light is the design; dark follows from it
 
+**And dark has now been derived too, which it had not been.** For most of this
+project dark was taken from `globals.css` verbatim — correctly, as a regression
+guard. But those values were made for an interface that was **dark-only and had
+no floating sheet sitting on chrome**. The structure changed underneath them and
+the numbers never moved.
+
+What the measurement found:
+
+| | before | after |
+|---|---|---|
+| `ground` — the rails | `#0b0b0c` · L\* 3.0 · **Y 0.34%** | `#1D1D1E` · L\* 10.8 · Y 1.23% |
+| `panel` — the sheet | `#111113` | `#232325` |
+| chrome → sheet | ΔE 2.2, **1.68× relative** | ΔE 3.1, **1.37× relative** |
+| `bone` on the sheet | **17.16:1** | 13.05:1 |
+| `text` on the sheet | 11.32:1 | 8.03:1 |
+
+Three things that read as faults were one fault. **At 0.34% luminance the rails
+are not a dark frame, they are a void** — and at the bottom of the range a small
+absolute difference is a large *relative* one, so a ΔE of 2.2 reads as a hard
+edge where the same ΔE higher up would not. Lifting the whole ladder fixes the
+rails, softens the edge and lets the text come down from near-white, which is
+most of what reads as cheap.
+
+> **A ΔE is not enough at the ends of the range. Check the ratio of the
+> luminances too** — 0.57 over 0.34 is a 68% jump and it looks like one.
+
+Everything gated against the panel — seven file kinds, four chart series, seven
+syntax colours — was re-derived to hold **its own** original ratio against the
+new panel, reproduced within 0.04. **Tints are the exception**: a wash is a
+*lift above* the panel, not a ratio, and holding the ratio sent two of them
+darker than the surface they sit on.
+
+### Where this lives, and what retires it
+
+**In `desktop/src/styles.css`, not `globals.css`.** The cause is
+desktop-specific: the desktop gained a floating sheet on chrome, mobile is
+full-bleed and web is a page, so the complaint describes a structure only this
+client has. Criterion 1 — dark must not drift — and criterion 6 — web and mobile
+stay still until they opt in — both hold untouched, and the type pass set the
+precedent.
+
+**The cost is real and worth naming: a second source of truth for dark**, which
+is the drift this project keeps paying for. What retires it is also known — when
+web and mobile opt into light, the whole sheet gets re-derived and these values
+move into `globals.css` as its dark branch. Until then this is an override with
+a stated expiry rather than a fork.
+
+
 This is the biggest departure from the app as it stands, which is dark-only.
 Designing in dark and deriving light produces a light theme that looks like a
 dark theme with the lights on — the contrast relationships are built around a

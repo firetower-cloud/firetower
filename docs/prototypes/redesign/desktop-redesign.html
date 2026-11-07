@@ -126,25 +126,35 @@
 :root[data-theme="dark"]{
   /* globals.css verbatim — the handoff says the dark branch *is* the
      current values, and this artifact had drifted from them. */
-  --desk:#0B0B0C; --sheet:#111113; --raised:#17171A; --sunk:#1E1E22; --hair:#26262B;
-  --ink:#F4F4F5; --body:#C8C8CE; --quiet:#8B8B93; --hush:#5E5E67;
+  /* ── Dark, derived rather than inherited ─────────────────────────
+     The only part of this design that was taken verbatim. Those values
+     were made for an interface that was dark-only and had no floating
+     sheet on chrome; the structure changed under them and the numbers
+     never moved. The rails sat at L* 3.0 — 0.34% luminance, a void, not
+     a frame — and the chrome-to-sheet edge was a **1.68x relative
+     luminance jump**, which is why a ΔE of 2.2 read as a hard edge at
+     the bottom of the range. The whole ladder is lifted: the jump is
+     now 1.37x and the rails are a frame. Everything gated against the
+     panel was re-derived to hold its own ratio. */
+  --desk:#1D1D1E; --sheet:#232325; --raised:#2A2A2D; --sunk:#313135; --hair:#3A3A3F;
+  --ink:#EAEAEB; --body:#B9B9BF; --quiet:#8A8A92; --hush:#6B6A74;
   --ember:#FF6B2C; --ember-ink:#FF9A6B; --brick:#E5645A;
   /* globals.css verbatim. --color-amber-soft is the one proposed addition and
      equals --color-amber here, so dark does not move at all. */
-  --color-amber:#fab219; --color-amber-soft:#fab219; --color-amber-tint:#2a2008;
-  --color-amber-deep:#7a5a0d; --color-brick-tint:#2a1414; --color-brick-deep:#6e2f2b;
+  --color-amber:#fab219; --color-amber-soft:#fab219; --color-amber-tint:#3d321c;
+  --color-amber-deep:#7a5a0d; --color-brick-tint:#3e2626; --color-brick-deep:#6e2f2b;
   --color-host-github:#f4f4f5; --color-host-gitlab:#fc6d26; --color-host-gitea:#609926;
   --slate-ink:#7D95B0;
-  --color-sage:#6ec08a; --color-sage-tint:#12251a; --color-sage-deep:#2c5b3d;
+  --color-sage:#6ec08a; --color-sage-tint:#24382c; --color-sage-deep:#2c5b3d;
   --color-slate:#7d95b0;
-  --color-kind-source:#7b93b8; --color-kind-native:#b8845f; --color-kind-data:#c2ab63;
-  --color-kind-style:#9a8cc4; --color-kind-media:#79b58d; --color-kind-store:#bd79a1;
-  --color-kind-prose:#9a9aa4;
-  --color-series-1:#3f86cf; --color-series-2:#1f9b74; --color-series-3:#8b7ad8; --color-series-4:#cc5c86;
-  --color-syn-comment:#6a6a74; --color-syn-string:#8fb99a; --color-syn-keyword:#9a8cc4;
-  --color-syn-type:#7d95b0;    --color-syn-number:#c2ab63; --color-syn-fn:#b8845f;
-  --color-syn-attr:#8a8a94;
-  --touched:#12251A; --touched-ink:#6EC08A;
+  --color-kind-source:#8aa2c7; --color-kind-native:#c8926d; --color-kind-data:#d3bb73;
+  --color-kind-style:#a99bd4; --color-kind-media:#89c69d; --color-kind-store:#cd88b0;
+  --color-kind-prose:#a9a9b4;
+  --color-series-1:#5194de; --color-series-2:#34aa82; --color-series-3:#9a88e8; --color-series-4:#dc6a94;
+  --color-syn-comment:#777781; --color-syn-string:#9fcaaa; --color-syn-keyword:#a99bd4;
+  --color-syn-type:#8ca4bf;    --color-syn-number:#d3bb73; --color-syn-fn:#c8926d;
+  --color-syn-attr:#9898a3;
+  --touched:#24382c; --touched-ink:#6EC08A;
   --lift-1:inset 0 1px 0 rgb(255 255 255 / .03);
   --lift-2:inset 0 1px 0 rgb(255 255 255 / .04), 0 1px 2px rgb(0 0 0 / .4);
   --lift-3:inset 0 1px 0 rgb(255 255 255 / .05), 0 18px 44px -18px rgb(0 0 0 / .72);
@@ -4287,6 +4297,11 @@ const SPEC_DELTA=[
   ["What C cannot show today","<b>implied work</b>","<b>There is no “done” and no “broken” at workspace level.</b> A finished place, a never-started one and one whose run <i>failed</i> all return <code>idle</code> from <code>doing()</code>. The <i>Done</i> and <i>Broken</i> bands are drawn here from a <code>BEAT</code> rollup that does not exist yet — <b>do not build a band the data cannot fill.</b> It needs a <code>beatOfPlace()</code> beside <code>doing()</code> in <code>api/workspaces.ts</code>; no server change, the statuses are already on the wire."],
   ["The panel draws no ember in Status mode","measured","Rows carry <b>no mark</b> — the band above already says <i>Needs you</i> and counts them. Measured before and after: a dot per blocked row put <b>five</b> ember marks on the Dashboard against a budget of three. Without them it is <b>3</b> on the Dashboard and <b>1</b> elsewhere. In Repository mode the band is a repository, so the dot returns, capped at two."],
   ["web/app/globals.css — --color-sage","<b>drawing corrected</b>","The drawing had <code>#2F7D52</code>; the build ships <code>#00582b</code>. <b>The shipped value is right and the drawing was wrong by its own rule</b> — §4 says match the dark pair's ratio against the same neighbour, dark sage holds <b>8.60:1</b> on the panel, and <code>#00582b</code> holds <b>8.64:1</b> on the sheet where <code>#2F7D52</code> holds 5.03. Taken into the drawing along with <code>--color-sage-tint</code> and <code>-deep</code>."],
+  ["desktop/src/styles.css — the dark ladder","modified","<b>Route chosen: override on the desk, not <code>globals.css</code>.</b> The cause is desktop-specific — the desktop gained a floating sheet on chrome, mobile is full-bleed and web is a page — so criterion 1 (dark must not drift) and criterion 6 (web and mobile still) both hold untouched, and the type pass set the precedent. <b>The cost is a second source of truth for dark</b>, and what retires it is named: when web and mobile opt into light, the whole sheet is re-derived and these values move into <code>globals.css</code> as its dark branch."],
+  ["Why dark needed it at all","measured","<b>Dark was the only part of this design inherited rather than derived.</b> Those values were made for an interface that was dark-only and had no floating sheet on chrome; the structure changed under them and the numbers never moved. The rails sat at <b>L* 3.0, 0.34% luminance</b> — a void, not a frame — and the chrome-to-sheet edge was a <b>1.68× relative luminance jump</b>, which is why a ΔE of 2.2 read as a hard edge at the bottom of the range."],
+  ["The surfaces","modified","<code>ground #0b0b0c → #1D1D1E</code> · <code>panel #111113 → #232325</code> · <code>raise #17171a → #2A2A2D</code> · <code>overlay #1e1e22 → #313135</code> · <code>line #26262b → #3A3A3F</code>. The relative jump falls to <b>1.37×</b> and the ladder evens out — 3.1 / 3.4 / 3.4 / 4.2 where it was 2.2 / 2.9 / 3.6 / 4.0."],
+  ["The text tiers","modified","Brought down from near-white, which is most of what read as cheap. <code>bone #f4f4f5 → #EAEAEB</code> (<b>17.16 → 13.05:1</b>) · <code>text → #B9B9BF</code> (11.32 → 8.03) · <code>dim → #8A8A92</code> (5.58 → 4.58) · <code>mute → #6B6A74</code> (2.94 → 2.94, held)."],
+  ["Everything gated against the panel","re-derived","Lifting the panel drops every ratio ~17%, so the <b>seven file kinds, four chart series and seven syntax colours</b> were each re-derived to hold <i>their own</i> original ratio against the new panel — reproduced within 0.04. Tints are not ratio-held: a wash is a <b>lift above</b> the panel, and holding the ratio sent two of them darker than it."],
   ["Type scale","modified","<b>Every size below 28px rises by 1px.</b> One uniform step, applied to the tier rather than to screens — it raises the operating tiers the complaint named and is the only change that cannot disturb the gaps between them. Row minimums grow 2px to match (34→36, 40→42, 44→46, 54→58). Costs one row in a configuration list at 1280 × 824; the panel loses none."],
   ["Type weights","modified","<b>Fourteen weights become three — 400, 500, 530.</b> Mechanical: 420/450→400, 460/480/500/520→500, 540/560/600/650/700→530."],
   ["Mono","corrected","Skill names, profile names and dropped-folder names move to the text face. Paths, branches, codes, keys and diffs keep the mono face. The test: <i>would you ever read it character by character?</i>"],
