@@ -12,31 +12,119 @@
  * second frame inside the sheet's own, and what makes a list read as a list is
  * the repeat — every border added is one more thing competing with it.
  */
-import { ExternalLink, Info, Loader2 } from "lucide-react";
+import { CircleSlash2, ExternalLink, Info, Loader2, Lock, RefreshCw, Shapes, TriangleAlert } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Icon } from "~/components/ui";
+import type { Trouble as TroubleKind } from "~/data";
 
-/** The three states a list off a server can be in, drawn the same way everywhere. */
+/**
+ * The five states a list off a server can be in — criterion 49.
+ *
+ * **A fresh install hits every one of them at once**, so none is an edge case,
+ * and they are not one state with five messages. *Refused* is the server
+ * answering with a problem and is worth a retry; *denied* is the server
+ * answering correctly, and a retry will say the same thing; *dark* is nothing
+ * answering at all, where the last thing we knew is still the most useful
+ * thing on the screen. They were one line of brick text — and on Repositories
+ * they were nothing at all: a 503 drew "Nothing imported yet", which is the
+ * worst of the five possible lies.
+ */
+const BLANK = {
+  error: [TriangleAlert, "That did not load"] as const,
+  denied: [Lock, "You cannot see this"] as const,
+  dark: [CircleSlash2, "Can’t reach this Firetower"] as const,
+};
+
 export function Rows<T>({
   feed,
   empty,
+  note,
+  action,
+  onRetry,
   children,
 }: {
-  feed: { data: T[]; loading: boolean; error: string | null };
+  feed: { data: T[]; loading: boolean; error: string | null; trouble?: TroubleKind | null };
+  /** The heading when there is simply nothing yet. */
   empty: string;
+  /** The sentence under it, saying how one comes to exist. */
+  note?: string;
+  /** The way to make the first one, when the reader may. */
+  action?: React.ReactNode;
+  onRetry?: () => void;
   children: React.ReactNode;
 }) {
-  if (feed.loading) {
+  if (feed.loading) return <Settling />;
+
+  /* **The rows stay.** A list that empties itself when the VPN drops reads as
+     work being lost, so a server that is not answering keeps what was last
+     known — visibly stale, and said so above it. */
+  if (feed.trouble === "dark") {
     return (
-      <p className="flex items-center gap-2 py-4 text-ui text-mute">
-        <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={2} />
-        Reading it off the server…
-      </p>
+      <>
+        <WhereTo>
+          <b>Can’t reach this Firetower.</b> Showing what was last known. Rows from a server that is
+          not answering stay visible — a list that empties itself reads as work being lost.
+        </WhereTo>
+        {feed.data.length > 0 && <div className="stale2">{children}</div>}
+      </>
     );
   }
-  if (feed.error) return <p className="py-4 text-ui text-brick">{feed.error}</p>;
-  if (feed.data.length === 0) return <p className="py-4 text-ui text-mute">{empty}</p>;
+
+  if (feed.error) {
+    const [icon, title] = BLANK[feed.trouble === "denied" ? "denied" : "error"];
+    return (
+      <Blank
+        icon={icon}
+        title={title}
+        action={
+          feed.trouble === "denied" ? undefined : onRetry ? (
+            <button onClick={onRetry} className="btn plain">
+              <Icon of={RefreshCw} size={14} />
+              Try again
+            </button>
+          ) : undefined
+        }
+      >
+        {feed.trouble === "denied"
+          ? "Ask an administrator of this Firetower. Nothing is hidden from you by this window — the server decides, and it said no."
+          : `${feed.error} Nothing has been lost — this list is on the server, not in this window.`}
+      </Blank>
+    );
+  }
+
+  if (feed.data.length === 0) {
+    return (
+      <Blank icon={Shapes} title={empty} action={action}>
+        {note}
+      </Blank>
+    );
+  }
   return <>{children}</>;
+}
+
+/**
+ * Rows the shape of the rows that are coming.
+ *
+ * A spinner says only that something is happening; this says *what* — five
+ * rows at the height of a row, with a disc where the glyph goes and two bars
+ * where the name and its sub-line go. The page stops moving when the answer
+ * arrives rather than reflowing from a one-line "Reading it off the server…".
+ */
+function Settling() {
+  return (
+    <div className="lrows mt-5">
+      {[70, 45, 60, 38, 55].map((w, i) => (
+        <div key={i} className="r">
+          <span className="settling h-6 w-6 !rounded-full" />
+          <span className="tx">
+            <span className="settling block h-2.5" style={{ width: `${w}%` }} />
+            <span className="settling mt-1.5 block h-2" style={{ width: `${Math.round(w * 0.4)}%` }} />
+          </span>
+          <span className="settling h-2 w-[54px]" />
+        </div>
+      ))}
+    </div>
+  );
 }
 
 /**
@@ -51,12 +139,31 @@ export function Section({
   note,
   action,
   controls,
+  trouble: bad,
+  error,
+  onRetry,
+  settling,
   children,
 }: {
   title: string;
   note?: string;
   action?: React.ReactNode;
   controls?: React.ReactNode;
+  /**
+   * The pane's own bad answer, when it has one.
+   *
+   * **It replaces the body.** A refusal wedged between a filter line and two
+   * section headings reads as one list of several having a problem; what has
+   * actually happened is that this screen cannot be drawn. The drawing does
+   * the same thing — its `pg()` swaps the whole body out — and the controls
+   * go with it, because narrowing a list nobody can read is not a thing to
+   * offer.
+   */
+  trouble?: TroubleKind | null;
+  error?: string | null;
+  onRetry?: () => void;
+  /** Nothing has arrived yet. The body is five rows the shape of the rows. */
+  settling?: boolean;
   children: React.ReactNode;
 }) {
   return (
@@ -68,9 +175,62 @@ export function Section({
         </div>
         {action && <div className="acts">{action}</div>}
       </div>
-      {controls && <div className="filterline">{controls}</div>}
-      {children}
+      {settling ? (
+        <Settling />
+      ) : bad ? (
+        <Trouble kind={bad} error={error} onRetry={onRetry} />
+      ) : (
+        <>
+          {controls && <div className="filterline">{controls}</div>}
+          {children}
+        </>
+      )}
     </div>
+  );
+}
+
+/** One of the three bad answers, drawn as the thing on the screen. */
+export function Trouble({
+  kind,
+  error,
+  onRetry,
+}: {
+  kind: Exclude<TroubleKind, never>;
+  error?: string | null;
+  onRetry?: () => void;
+}) {
+  if (kind === "dark") {
+    return (
+      <WhereTo>
+        <b>Can’t reach this Firetower.</b> Showing what was last known. Rows from a server that is
+        not answering stay visible — a list that empties itself reads as work being lost.
+      </WhereTo>
+    );
+  }
+  if (kind === "denied") {
+    return (
+      <Blank icon={Lock} title="You cannot see this">
+        Ask an administrator of this Firetower. Nothing is hidden from you by this window — the
+        server decides, and it said no.
+      </Blank>
+    );
+  }
+  return (
+    <Blank
+      icon={TriangleAlert}
+      title="That did not load"
+      action={
+        onRetry ? (
+          <button onClick={onRetry} className="btn plain">
+            <Icon of={RefreshCw} size={14} />
+            Try again
+          </button>
+        ) : undefined
+      }
+    >
+      {error ? `${error} ` : ""}Nothing has been lost — this list is on the server, not in this
+      window.
+    </Blank>
   );
 }
 

@@ -2026,6 +2026,24 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
     pointer-events: none;
   }
 
+  /* A row that has not arrived. Breathing, not spinning: five rows the shape
+     of the rows that are coming say what is coming; a spinner says only that
+     something is happening. */
+  .settling {
+    border-radius: 5px;
+    background: var(--color-overlay);
+    animation: settling 1.6s ease-in-out infinite;
+  }
+  @keyframes settling {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.5;
+    }
+  }
+
   /* ── What a list says when it has nothing to say ──────────────────
      A fresh install hits empty, loading, error, denied and server-dark at
      once, so none of them is an edge case. */

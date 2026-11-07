@@ -157,8 +157,12 @@ describe("the empty state", () => {
     // The import list, for the host that is actually connected.
     expect(html).toContain("Not imported yet on GitLab (internal)");
     expect(html).toContain("platform/infra/deploy");
-    // And the empty upper list says so plainly rather than vanishing.
-    expect(html).toContain("Nothing imported yet");
+    /* And the empty upper list says so plainly rather than vanishing — with
+       the heading the drawing gives it, and a sentence that fits *this*
+       state: a host is connected, so "connect a git host" would be advice for
+       a problem this reader does not have. */
+    expect(html).toContain("No repository yet");
+    expect(html).toContain("Import one below");
   });
 
   /**

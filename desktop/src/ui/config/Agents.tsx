@@ -36,10 +36,14 @@ export function Agents({ live }: { live: boolean }) {
       <Section
         title="Agents"
         note="What is installed where, and whether it is signed in."
+        settling={agents.loading}
+        trouble={agents.trouble}
+        error={agents.error}
         action={live && <button disabled={check.isPending} onClick={() => check.mutate(undefined as never, { onSuccess: () => cache.invalidateQueries({ queryKey: getListAgentsQueryKey() }) })} className="btn plain"><Icon of={RefreshCw} size={12} />{check.isPending ? "Checking…" : "Check all"}</button>}
       >
         <Group>
-        <Rows feed={agents} empty="No agent is configured.">
+        <Rows feed={agents} empty="No agent configured"
+          note="An agent is installed on a machine and runs on somebody’s subscription.">
           {agents.data.map((a) => (
             <div key={a.kind}>
               <button onClick={() => setOpen(open === a.kind ? null : a.kind)} className="r">

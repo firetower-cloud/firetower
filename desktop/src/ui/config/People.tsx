@@ -19,7 +19,7 @@ import { useMe } from "~/api/generated/auth/auth";
 import type { Backend } from "~/fleet";
 import { Avatar } from "~/components/ui";
 import { Group, ManageOnTheWeb, Rows, Section, WhereTo } from "~/ui/config/bits";
-import { why } from "~/data";
+import { trouble, why } from "~/data";
 
 export function People({ backend }: { backend: Backend }) {
   const q = useListColleagues();
@@ -31,6 +31,9 @@ export function People({ backend }: { backend: Backend }) {
     <Section
       title="People"
       note="Everybody with an account on this Firetower."
+      settling={q.isPending}
+      trouble={trouble(q.error)}
+      error={q.error ? why(q.error) : null}
       action={
         <>
           <Find value={find} onChange={setFind} />
@@ -41,7 +44,8 @@ export function People({ backend }: { backend: Backend }) {
       <Group>
         <Rows
           feed={{ data: shown, loading: q.isPending, error: q.error ? why(q.error) : null }}
-          empty={find ? "Nobody by that name." : "Nobody else yet."}
+          empty={find ? "Nobody by that name" : "Nobody else yet"}
+          note={find ? undefined : "Accounts are made on the administration site."}
         >
           {shown.map((p) => (
             <div key={p.id} className="r">

@@ -60,7 +60,7 @@ import {
 } from "~/api/generated/providers/providers";
 import { useHostOf, useProviders, useRepos, why } from "~/data";
 import { navigate } from "~/shims/next-navigation";
-import { Group, Section } from "~/ui/config/bits";
+import { Group, Rows, Section } from "~/ui/config/bits";
 import { useConnect } from "~/ui/config/connect";
 import { AddHost } from "~/ui/config/GitHosts";
 import { Pop } from "~/ui/Pop";
@@ -79,6 +79,7 @@ const ALL = "all";
 
 export function Repos({ live }: { live: boolean }) {
   const repos = useRepos();
+  const cache = useQueryClient();
   const providers = useProviders();
   const hostOf = useHostOf();
 
@@ -132,9 +133,17 @@ export function Repos({ live }: { live: boolean }) {
      While the hosts are still arriving, `Start` is the right place to be: it
      has a loading state of its own, and the alternative is a two-list view
      flashing "Nothing connected yet" before we know whether that is so. */
+  /* **And nothing is in trouble.** A server that is not answering makes both
+     lists empty, which is indistinguishable from a fresh install if you only
+     count rows — so a dead Firetower drew "Pick a git host to start from",
+     which is advice, confidently given, about a state nobody is in. An
+     onboarding screen is for an install with nothing in it, not for an
+     install we cannot see. */
   const bare =
     !pasting &&
     !repos.loading &&
+    !repos.trouble &&
+    !providers.trouble &&
     repos.data.length === 0 &&
     (providers.loading || connectedHosts.length === 0);
 
@@ -142,6 +151,10 @@ export function Repos({ live }: { live: boolean }) {
     <Section
       title="Repositories"
       note="What Firetower cuts worktrees from. Every workspace is a branch of one of these, in a copy of its own."
+      settling={repos.loading}
+      trouble={repos.trouble ?? providers.trouble}
+      error={repos.error ?? providers.error}
+      onRetry={() => void cache.invalidateQueries({ queryKey: getListReposQueryKey() })}
       action={
         live ? (
           <button
@@ -186,16 +199,33 @@ export function Repos({ live }: { live: boolean }) {
           ) : (
             <>
               <Group title="Checked out" count={mine.length}>
-                {repos.loading && <Quiet>Reading your repositories…</Quiet>}
-                {!repos.loading && mine.length === 0 && (
-                  <Quiet>
-                    {needle
-                      ? "Nothing imported matches that."
+                {/* **Through `Rows`.** This read `repos.data` straight and
+                    never looked at `repos.error`, so a server answering 503
+                    drew "Nothing imported yet" — a refusal rendered as an
+                    empty list, which is the worst of the five possible
+                    lies. */}
+                <Rows
+                  feed={repos}
+                  empty={
+                    needle
+                      ? "Nothing matches that"
                       : chosen
-                        ? `Nothing imported from ${chosen.label} yet.`
-                        : "Nothing imported yet."}
-                  </Quiet>
-                )}
+                        ? `Nothing imported from ${chosen.label} yet`
+                        : "No repository yet"
+                  }
+                  /* The drawing's copy assumes no host is connected, which is
+                     the state it draws. With one connected, "connect a git
+                     host" is advice for a problem this reader does not have —
+                     the offers are already on the screen below. */
+                  note={
+                    needle || chosen
+                      ? undefined
+                      : connectedHosts.length > 0
+                        ? "Import one below and it becomes something a workspace can be cut from."
+                        : "Connect a git host and import one. This screen can connect a host on its own."
+                  }
+                  onRetry={() => void cache.invalidateQueries({ queryKey: getListReposQueryKey() })}
+                >
                 {mine.map((r) => (
                   <div key={r.id}>
                     <button onClick={() => setOpen(open === r.id ? null : r.id)} className="r">
@@ -220,6 +250,7 @@ export function Repos({ live }: { live: boolean }) {
                     {open === r.id && live && <Settings repo={r} onGone={() => setOpen(null)} />}
                   </div>
                 ))}
+                </Rows>
               </Group>
 
               {showing.length > 0 && (

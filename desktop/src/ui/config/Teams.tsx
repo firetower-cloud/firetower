@@ -22,7 +22,7 @@ import { useMe } from "~/api/generated/auth/auth";
 import type { Team } from "~/api/generated/model";
 import type { Backend } from "~/fleet";
 import { Group, ManageOnTheWeb, Rows, Section, WhereTo } from "~/ui/config/bits";
-import { why } from "~/data";
+import { trouble, why } from "~/data";
 
 export function Teams({ backend }: { backend: Backend }) {
   const q = useListTeams();
@@ -32,12 +32,16 @@ export function Teams({ backend }: { backend: Backend }) {
     <Section
       title="Teams"
       note="A team holds a grant, so access handed to five people is one row rather than five."
+      settling={q.isPending}
+      trouble={trouble(q.error)}
+      error={q.error ? why(q.error) : null}
       action={<ManageOnTheWeb url={backend.url} may={me.data?.user.role === "admin"} />}
     >
       <Group>
         <Rows
           feed={{ data: q.data ?? [], loading: q.isPending, error: q.error ? why(q.error) : null }}
-          empty="No teams yet."
+          empty="No teams yet"
+          note="A team is made on the administration site, beside the accounts it names."
         >
           {(q.data ?? []).map((t) => (
             <One key={t.id} team={t as Team} />

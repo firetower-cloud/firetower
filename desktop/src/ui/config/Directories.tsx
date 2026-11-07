@@ -50,7 +50,8 @@ export function Directories() {
   const cache = useQueryClient();
   const confirm = useConfirm();
   const me = useMe();
-  const { data, loading, error } = useDirectories();
+  const feed = useDirectories();
+  const { data, loading, error } = feed;
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
@@ -78,6 +79,9 @@ export function Directories() {
     <Section
       title="Directories"
       note="Anything filed in one belongs to it, and everybody it lets in can reach that. Moving something in hands it over."
+      settling={loading}
+      trouble={feed.trouble}
+      error={error}
       action={
         <button
           onClick={() => {
@@ -121,7 +125,8 @@ export function Directories() {
       )}
 
       <Group>
-      <Rows feed={{ data, loading, error }} empty="No directories yet.">
+      <Rows feed={{ data, loading, error }} empty="No directories yet"
+        note="Make one and file things into it. Whoever makes a directory administers it.">
         {data.map((d) => (
           <One
             key={d.id}

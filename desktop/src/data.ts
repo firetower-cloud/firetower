@@ -44,7 +44,29 @@ import type {
 } from "~/api/generated/model";
 
 /** Everything a screen needs to know about where its data came from. */
-export type Feed<T> = { data: T; loading: boolean; error: string | null };
+export type Feed<T> = { data: T; loading: boolean; error: string | null; trouble?: Trouble | null };
+
+/**
+ * Which of the three bad answers this is.
+ *
+ * They are not one state. *Refused* is the server answering with a problem and
+ * is worth a retry; *denied* is the server answering correctly and a retry
+ * will say the same thing; *dark* is nothing answering at all, where the last
+ * thing we knew is still the most useful thing on the screen. Drawing all
+ * three as one line of brick text — or, worse, as an empty list — is how
+ * "you have no repositories" came to mean "the server said 503".
+ */
+export type Trouble = "denied" | "dark" | "error";
+
+export function trouble(e: unknown): Trouble | null {
+  if (!e) return null;
+  const status = (e as { status?: number }).status;
+  /* No status at all is a fetch that never reached anybody: DNS, the VPN, a
+     laptop lid. `ApiError` always carries one. */
+  if (typeof status !== "number") return "dark";
+  if (status === 401 || status === 403) return "denied";
+  return "error";
+}
 
 /**
  * What the server said, off any thrown thing.
@@ -97,7 +119,7 @@ function said(e: unknown): string | null {
  */
 export function useSessions(): Feed<Session[]> {
   const q = useListSessions(undefined, { query: { refetchInterval: 10_000 } });
-  return { data: q.data ?? [], loading: q.isPending, error: q.error ? why(q.error) : null };
+  return { data: q.data ?? [], loading: q.isPending, error: q.error ? why(q.error) : null, trouble: trouble(q.error) };
 }
 
 /**
@@ -109,7 +131,7 @@ export function useSessions(): Feed<Session[]> {
  */
 export function useSession(id: string | null): Feed<Session | null> {
   const q = useGetSession(id ?? "", { query: { enabled: !!id } });
-  return { data: q.data ?? null, loading: !!id && q.isPending, error: q.error ? why(q.error) : null };
+  return { data: q.data ?? null, loading: !!id && q.isPending, error: q.error ? why(q.error) : null, trouble: trouble(q.error) };
 }
 
 /**
@@ -161,7 +183,7 @@ export function useTasks(ask: ListTasksParams, enabled = true): Tasks {
 
 export function useRepos(): Feed<Repo[]> {
   const q = useListRepos();
-  return { data: q.data ?? [], loading: q.isPending, error: q.error ? why(q.error) : null };
+  return { data: q.data ?? [], loading: q.isPending, error: q.error ? why(q.error) : null, trouble: trouble(q.error) };
 }
 
 /**
@@ -214,18 +236,18 @@ function hostnameOf(remote: string): string {
 
 export function useHosts() {
   const q = useListHosts();
-  return { data: q.data ?? [], loading: q.isPending, error: q.error ? why(q.error) : null };
+  return { data: q.data ?? [], loading: q.isPending, error: q.error ? why(q.error) : null, trouble: trouble(q.error) };
 }
 
 export function useAgents() {
   const q = useListAgents();
-  return { data: q.data ?? [], loading: q.isPending, error: q.error ? why(q.error) : null };
+  return { data: q.data ?? [], loading: q.isPending, error: q.error ? why(q.error) : null, trouble: trouble(q.error) };
 }
 
 /** GitHub and the rest: whether they are connected, and as whom. */
 export function useProviders() {
   const q = useListProviders();
-  return { data: q.data ?? [], loading: q.isPending, error: q.error ? why(q.error) : null };
+  return { data: q.data ?? [], loading: q.isPending, error: q.error ? why(q.error) : null, trouble: trouble(q.error) };
 }
 
 /**
@@ -271,7 +293,7 @@ export function useUpdatesRow(): { label: string; loud: boolean; dot: boolean } 
 /** Named agent connections — whose subscription a session runs on. */
 export function useAccounts() {
   const q = useListAccounts();
-  return { data: q.data ?? [], loading: q.isPending, error: q.error ? why(q.error) : null };
+  return { data: q.data ?? [], loading: q.isPending, error: q.error ? why(q.error) : null, trouble: trouble(q.error) };
 }
 
 /**
@@ -289,18 +311,18 @@ export function useAccounts() {
 /** Every skill this person can reach, with their own defaults folded in. */
 export function useSkills() {
   const q = useListSkills();
-  return { data: q.data ?? [], loading: q.isPending, error: q.error ? why(q.error) : null };
+  return { data: q.data ?? [], loading: q.isPending, error: q.error ? why(q.error) : null, trouble: trouble(q.error) };
 }
 
 /** The instructions and the file list of a skill's current version. */
 export function useSkillDetail(id: string) {
   const q = useSkillDetailQuery(id);
-  return { data: q.data, loading: q.isPending, error: q.error ? why(q.error) : null };
+  return { data: q.data, loading: q.isPending, error: q.error ? why(q.error) : null, trouble: trouble(q.error) };
 }
 
 export function useSkillVersions(id: string) {
   const q = useListVersions(id);
-  return { data: q.data ?? [], loading: q.isPending, error: q.error ? why(q.error) : null };
+  return { data: q.data ?? [], loading: q.isPending, error: q.error ? why(q.error) : null, trouble: trouble(q.error) };
 }
 
 /** What one session is reading. Empty until somebody chooses. */
@@ -319,26 +341,26 @@ export function useSessionSkillIds(session: string) {
 
 export function useDirectories() {
   const q = useListDirectories();
-  return { data: q.data ?? [], loading: q.isPending, error: q.error ? why(q.error) : null };
+  return { data: q.data ?? [], loading: q.isPending, error: q.error ? why(q.error) : null, trouble: trouble(q.error) };
 }
 
 /** Where issues come from. */
 export function useTrackers() {
   const q = useListTrackers();
-  return { data: q.data ?? [], loading: q.isPending, error: q.error ? why(q.error) : null };
+  return { data: q.data ?? [], loading: q.isPending, error: q.error ? why(q.error) : null, trouble: trouble(q.error) };
 }
 
 /** What one tracker's list can be narrowed to: repositories, or teams. */
 export function useTrackerScopes(id: string, enabled: boolean): Feed<TaskScope[]> {
   const q = useListTrackerScopes(id, { query: { enabled: enabled && !!id } });
-  return { data: q.data ?? [], loading: enabled && q.isPending, error: q.error ? why(q.error) : null };
+  return { data: q.data ?? [], loading: enabled && q.isPending, error: q.error ? why(q.error) : null, trouble: trouble(q.error) };
 }
 
 /** One directory of a session's workspace, off the worker. */
 export function useWorkspaceFiles(sessionId: string | null, path: string) {
   const on = !!sessionId;
   const q = useListFiles(sessionId ?? "", { path } as never, { query: { enabled: on } });
-  return { data: q.data ?? [], loading: on && q.isPending, error: q.error ? why(q.error) : null };
+  return { data: q.data ?? [], loading: on && q.isPending, error: q.error ? why(q.error) : null, trouble: trouble(q.error) };
 }
 
 /** A changed file: `path` as the server names it, `at` where it sits in the workspace. */
@@ -370,7 +392,7 @@ export function useDiff(
     const only = dirs.length === 1 ? dirs[0] : null;
     return files.map((d) => ({ ...d, at: only && !d.path.startsWith(`${only}/`) ? `${only}/${d.path}` : d.path }));
   }, [q.data, session?.checkouts]);
-  return { data, loading: on && q.isPending, error: q.error ? why(q.error) : null };
+  return { data, loading: on && q.isPending, error: q.error ? why(q.error) : null, trouble: trouble(q.error) };
 }
 
 /**

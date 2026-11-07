@@ -47,9 +47,13 @@ export function Trackers({ live }: { live: boolean }) {
     <Section
       title="Trackers"
       note="Where the tasks list reads from. Every git host is one. An API key can belong to a directory, so one key answers for a team."
+      settling={trackers.loading}
+      trouble={trackers.trouble}
+      error={trackers.error}
     >
       <Group>
-      <Rows feed={trackers} empty="No tracker is available on this server.">
+      <Rows feed={trackers} empty="Nothing to read from"
+        note="Connect a git host and its issues and pull requests appear here.">
         {rows.map((t) => (
           <Tracker key={t.id} t={t} live={live} />
         ))}

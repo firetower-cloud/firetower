@@ -91,6 +91,9 @@ export function GitHosts({ live }: { live: boolean }) {
       <Section
         title="Git hosts"
         note="Signed in as you, because a commit has to be attributable to a person. Everybody here connects their own."
+        settling={providers.loading}
+        trouble={providers.trouble}
+        error={providers.error}
         action={
           live && mayAdd ? (
             <button onClick={() => setAdding(true)} className="btn primary">
@@ -100,7 +103,8 @@ export function GitHosts({ live }: { live: boolean }) {
         }
       >
         <Group>
-        <Rows feed={providers} empty="Nothing to connect to on this server.">
+        <Rows feed={providers} empty="No git host yet"
+          note="Add the address of a GitHub, GitLab or Gitea your company already uses.">
           {rows.map((p) => (
             <Provider
               key={p.id}

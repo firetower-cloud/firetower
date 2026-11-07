@@ -49,10 +49,14 @@ export function Machines({ live }: { live: boolean }) {
     <Section
       title="Machines"
       note="Where agents run. One owner per machine, until sessions are isolated from each other."
+      settling={hosts.loading}
+      trouble={hosts.trouble}
+      error={hosts.error}
       action={live && <button onClick={() => setAdding(true)} className="btn primary"><Icon of={Plus} size={14} />Add a machine</button>}
     >
       <Group>
-      <Rows feed={hosts} empty="No machine is connected yet.">
+      <Rows feed={hosts} empty="No machine connected"
+        note="Firetower’s own machine is always here; add another to run more at once.">
         {hosts.data.map((h) => (
           <div key={h.id}>
             <button onClick={() => setOpen(open === h.id ? null : h.id)} className="r">
