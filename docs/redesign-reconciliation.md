@@ -163,14 +163,20 @@ Criterion 49. The drawing uses Repositories to stand for all of them; the five
 scenes are `no-repos`, `slow-repos`, `repos-error`, `repos-denied` and an
 address nothing answers on.
 
+**Two of these were not style gaps but defects** — a bad answer drawn as a
+good one. Both are fixed.
+
 | Screen | Verdict | What differed |
 |---|---|---|
 | Has things | **differs → fixed** | With Repositories, above. |
-| Empty | **to compare** | |
-| Slow | **to compare** | |
-| Refused | **to compare** | |
-| Not allowed | **to compare** | |
-| Server dark | **to compare** | |
+| Empty | **differs → fixed** | A one-line "Nothing imported yet." Now the drawing's block — glyph, heading, and a sentence saying how one comes to exist — in each pane's own words. |
+| Slow | **differs → fixed** | A line of text that reflowed when the answer landed. Now five rows the shape of the rows that are coming. |
+| Refused | **differs → fixed** | **A 503 drew "Nothing imported yet."** `Repos.tsx` read `repos.data` and never `repos.error`, so a server answering with a problem was rendered as a server answering with an empty list — *you have nothing* where the truth is *we could not ask*. |
+| Not allowed | **differs → fixed** | Same path as Refused, and now told apart from it: a retry will say the same thing, so there is no retry button. |
+| Server dark | **differs → fixed** | **A dead Firetower drew "Pick a git host to start from."** `bare` was keyed on row counts, and a server that is not answering makes every count zero. Now the rows stay, visibly stale, with the reason above them. |
+
+The drawing models a single-list pane; Repositories has two, so its empty state
+keeps the second list's heading below the block. Recorded rather than forced.
 
 ## Getting in, and being held at the door
 
