@@ -441,6 +441,86 @@ tracker, Artifacts has grid-or-list, and the configuration panels are fixed
 lists of panes. A control that appears on one panel needs a reason; that is the
 reason.
 
+### The team rail: the status leads the row
+
+**Decided:** the status mark moves to the **left edge of the row**, ahead of
+the name, and the agent mark takes its old place on the right beside the age.
+The **status word leaves the second line**, which keeps only what the agent is
+doing or why it exists.
+
+**What was wrong is structural, not chromatic.** A colour pass had already
+given each state its own tone and it still read as a wall of grey. The reason
+is that `OverviewTab.tsx:203` orders the row `AgentMark`, name, second line,
+`TeamMark` — so *which model is running* was the first thing in the row and
+*whether it needs you* was the last, at the far edge past a two-line block. The
+fact you scan a team rail for was in the least prominent position in it.
+
+Both are already marks of the same size, so the swap costs nothing: no token,
+no new shape, no extra row height.
+
+**The status was also said twice.** Line `:208` builds the second line as
+`checkIn ?? spawnReason` and prefixes `labelOf(status)` **only when there is no
+check-in**. So the word was already absent half the time, and the other half it
+duplicated a glyph six inches to its right. Dropping the prefix makes that line
+one thing always — *what the agent is doing* — and leaves the status to the
+mark alone.
+
+**Rejected: dropping the whole second line.** The brief said "remove the second
+line", and two shapes were drawn and rendered side by side before choosing. (a)
+leaves a name, a mark and a time; (b) leaves the description. (a) is tighter and
+it deletes the single most useful string in the rail: *"Two readings of the
+band — which do you want?"* tells you what the ember is **about**, where a bare
+*Quota band thresholds* tells you only that something is there. The rail's job
+is to let you decide which child to open without opening one, and (a) removes
+the only text that helps you decide. Both stay in the artifact, switchable,
+under **Workspace → Team row** — the comparison is the argument.
+
+### ManagerRow is one component doing two jobs
+
+**Decided:** the active manager carries **no** status mark; the parent link
+carries one.
+
+`ManagerRow` is a `div` when `active` and a navigating `button` when it is not
+(`OverviewTab.tsx:168`), and only the first was ever drawn. The question "why
+has the manager no status?" has two different answers:
+
+- **Active** — you are standing in it. Its state is the title bar, the
+  conversation and the composer, all of which are on screen and larger than any
+  mark. A mark would be the fourth thing saying it.
+- **As a link up** — it is another workspace you are *not* looking at, reached
+  by pressing it, and its status is worth exactly what a sibling's is. It now
+  carries one.
+
+The `here` chip moves onto the name line. It was in the status slot, where it
+does not belong — it says which row you are standing in, not what state
+anything is in — and at ~40px it overflowed a 16px mark slot and printed
+`hereAda`.
+
+**The parent link draws *working*, not ember.** A manager blocked on its own
+child is `Working` in `api/view.ts`'s terms; `NeedsYou` means waiting on *you*.
+Drawing it ember would have added a fourth one to that rail for a state nobody
+is being asked about — which is precisely how a signal that means one thing
+stops meaning it. Counted in a render rather than in the source: **three**,
+unchanged by the move, in every variant including the busiest.
+
+### What you type is the size of what you sent
+
+**Decided:** the composer is **16.5px**, matching *Your message*.
+
+It was 18px, which is the size of **an agent's question** — the most emphasised
+reading tier in the document — and larger than the **17px** prose you read at
+length. The sharper problem is that *Your message* is 16.5: the same words,
+after you press send. Typing at 18 and reading it back at 16.5 shrank the text
+the moment it was committed, for no reason a reader could name.
+
+This came out of the type pass, where everything under 28px went up a pixel.
+That was the right call and this is the one place the uniform step landed
+somewhere the scale did not intend. A composer is a control, not a headline.
+
+Both composers move together. `.mid .composer .in` **restated** 18px rather
+than changing it, so the home and workspace composers were already the same
+size and do not now disagree; the base rule is the only one that carries a size.
+
 ### Six destinations, not twelve panes
 
 **Decided:** a 62px icon rail with six destinations — Dashboard, Tasks,
@@ -799,7 +879,7 @@ component list.
 **`desktop-redesign.html`** — fifteen tabs. Ten are mock-ups of a 1280×824
 window; five are documents:
 
-* **Every screen** — the contact sheet, and **read this one first**. All 96
+* **Every screen** — the contact sheet, and **read this one first**. All 104
   states at a third scale, grouped as Coverage is, each tile a control that
   opens it full size. It exists because a reader looking for the connect screen
   could not find it and reported it missing: it is the eleventh of fifteen tabs

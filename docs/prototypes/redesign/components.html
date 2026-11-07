@@ -441,6 +441,21 @@ code{font-family:var(--mono);font-size:12.5px;background:var(--raised);border-ra
         <p class="meta2"><b>Section</b> Layout &nbsp;·&nbsp; <code>desktop/src/ui/Shell.tsx</code>
            &nbsp;·&nbsp; .win .titlebar .lights .body</p>
       </footer>
+    </article><article class="ent2" id="c-workspacerow">
+      <header>
+        <h3>WorkspaceRow</h3>
+        <span class="use"><b>49</b> of 51</span>
+        <span class="sprd">9 of the destinations</span>
+        <span class="tags"><span class="tag" data-v="replaced">replaced</span><span class="tag" data-r="desktop">desktop only</span></span>
+      </header>
+      <div class="stage" data-spec="WorkspaceRow"></div>
+      <footer>
+        <p class="for">A workspace in the panel: a name and one timestamp.</p>
+        
+        <p class="meta2"><b>Variants</b> recent · shared with you · current &nbsp;·&nbsp; <b>States</b> rest · hover · current · waiting</p>
+        <p class="meta2"><b>Section</b> Domain &nbsp;·&nbsp; <code>desktop/src/ui/Rail.tsx</code>
+           &nbsp;·&nbsp; .prow .lbl .age</p>
+      </footer>
     </article><article class="ent2" id="c-listrow">
       <header>
         <h3>ListRow</h3>
@@ -455,21 +470,6 @@ code{font-family:var(--mono);font-size:12.5px;background:var(--raised);border-ra
         <p class="meta2"><b>Variants</b> plain · with a status pip · with a hover action &nbsp;·&nbsp; <b>States</b> rest · hover · selected</p>
         <p class="meta2"><b>Section</b> Domain &nbsp;·&nbsp; <code>components/ui/List.tsx</code>
            &nbsp;·&nbsp; .r .lsec .lrows .tx .path .hov</p>
-      </footer>
-    </article><article class="ent2" id="c-workspacerow">
-      <header>
-        <h3>WorkspaceRow</h3>
-        <span class="use"><b>45</b> of 51</span>
-        <span class="sprd">9 of the destinations</span>
-        <span class="tags"><span class="tag" data-v="replaced">replaced</span><span class="tag" data-r="desktop">desktop only</span></span>
-      </header>
-      <div class="stage" data-spec="WorkspaceRow"></div>
-      <footer>
-        <p class="for">A workspace in the panel: a name and one timestamp.</p>
-        
-        <p class="meta2"><b>Variants</b> recent · shared with you · current &nbsp;·&nbsp; <b>States</b> rest · hover · current · waiting</p>
-        <p class="meta2"><b>Section</b> Domain &nbsp;·&nbsp; <code>desktop/src/ui/Rail.tsx</code>
-           &nbsp;·&nbsp; .prow .lbl .age</p>
       </footer>
     </article><article class="ent2" id="c-badge">
       <header>
@@ -666,6 +666,21 @@ code{font-family:var(--mono);font-size:12.5px;background:var(--raised);border-ra
         <p class="meta2"><b>Section</b> Primitives &nbsp;·&nbsp; <code>components/ui/Card.tsx</code>
            &nbsp;·&nbsp; .card .card1 .plate</p>
       </footer>
+    </article><article class="ent2" id="c-chatturn">
+      <header>
+        <h3>ChatTurn</h3>
+        <span class="use"><b>13</b> of 51</span>
+        <span class="sprd">First run, Sources, Updates, Workspace</span>
+        <span class="tags"><span class="tag" data-v="changed">survives, changed</span><span class="tag" data-r="desktop">desktop only</span></span>
+      </header>
+      <div class="stage" data-spec="ChatTurn"></div>
+      <footer>
+        <p class="for">One turn: yours, the agent’s, what it did, what it is asking.</p>
+        
+        <p class="meta2"><b>Variants</b> mine · theirs · tool run · approval · thinking · working &nbsp;·&nbsp; <b>States</b> streaming · settled · folded</p>
+        <p class="meta2"><b>Section</b> Domain &nbsp;·&nbsp; <code>desktop/src/ui/Chat.tsx</code>
+           &nbsp;·&nbsp; .turn .mine .did .tool .approval .atwork .thought .typing</p>
+      </footer>
     </article><article class="ent2" id="c-diffview">
       <header>
         <h3>DiffView</h3>
@@ -695,21 +710,6 @@ code{font-family:var(--mono);font-size:12.5px;background:var(--raised);border-ra
         <p class="meta2"><b>Variants</b> password · mid-setup &nbsp;·&nbsp; <b>States</b> —</p>
         <p class="meta2"><b>Section</b> Layout &nbsp;·&nbsp; <code>desktop/src/ui/Gate.tsx</code>
            &nbsp;·&nbsp; .gate .gatecard .gateacts .gatefoot</p>
-      </footer>
-    </article><article class="ent2" id="c-chatturn">
-      <header>
-        <h3>ChatTurn</h3>
-        <span class="use"><b>7</b> of 51</span>
-        <span class="sprd">First run, Sources, Updates, Workspace</span>
-        <span class="tags"><span class="tag" data-v="changed">survives, changed</span><span class="tag" data-r="desktop">desktop only</span></span>
-      </header>
-      <div class="stage" data-spec="ChatTurn"></div>
-      <footer>
-        <p class="for">One turn: yours, the agent’s, what it did, what it is asking.</p>
-        
-        <p class="meta2"><b>Variants</b> mine · theirs · tool run · approval · thinking · working &nbsp;·&nbsp; <b>States</b> streaming · settled · folded</p>
-        <p class="meta2"><b>Section</b> Domain &nbsp;·&nbsp; <code>desktop/src/ui/Chat.tsx</code>
-           &nbsp;·&nbsp; .turn .mine .did .tool .approval .atwork .thought .typing</p>
       </footer>
     </article><article class="ent2" id="c-codeview">
       <header>
@@ -888,7 +888,7 @@ code{font-family:var(--mono);font-size:12.5px;background:var(--raised);border-ra
     <footer><p class="for">A title, one sentence, one action, then rows. <b>Eleven configuration screens are this shape</b> and each currently re-implements it.</p><p class="note2"><code>bits.tsx</code> has <code>Section</code> and <code>Rows</code>, which is two thirds of it. The missing third is the page head and the single action.</p></footer>
   </article><article class="ent2">
     <header><h3>Create menu</h3>
-      <span class="use"><b>7</b> of 51</span>
+      <span class="use"><b>11</b> of 51</span>
       <span class="sprd">instantiated on</span></header>
     <div class="stage" data-pat="Create menu"></div>
     <footer><p class="for">“Make one” that offers <i>how</i> — by hand, or by asking an agent.</p><p class="note2"><code>config/CreateMenu.tsx</code> already exists and is used twice (Skills, Profiles). Every other <i>Add</i> on every other screen is a plain button. <b>Audit each one: it either belongs to this pattern or has a reason not to.</b></p></footer>
@@ -921,9 +921,9 @@ code{font-family:var(--mono);font-size:12.5px;background:var(--raised);border-ra
 <h2>Already solved on web — stop redrawing<span class="n">4</span></h2>
 <ul><li><b>Checkbox</b> — Needed by Skills’ multi-select, which is a gap on Coverage. Ships on web; absent on desktop.</li><li><b>Menu</b> — Desktop has <code>Pop</code>; web has <code>Menu</code>. Two implementations of one idea — pick one before a third appears.</li><li><b>Table</b> — The Spec and Coverage tabs of the redesign are tables. Nothing on desktop uses a table component because there is not one.</li><li><b>QrCode</b> — Not needed by any desktop screen in this design. Listed so the next person does not add a second one.</li></ul>
 
-<h2>Not yet claimed<span class="n">218</span></h2>
+<h2>Not yet claimed<span class="n">224</span></h2>
 <p>Classes the redesign draws that no entry above accounts for — each is either a component this list is missing or a one-off to fold in.</p>
-<div class="chips"><span>.acts</span><span>.add</span><span>.addr</span><span>.ag</span><span>.ags</span><span>.air</span><span>.all</span><span>.alt</span><span>.aside1</span><span>.back</span><span>.bad</span><span>.bar</span><span>.bars</span><span>.bk</span><span>.body2</span><span>.box</span><span>.br</span><span>.bstate</span><span>.c-attr</span><span>.c-comment</span><span>.c-fn</span><span>.c-keyword</span><span>.c-number</span><span>.c-type</span><span>.caret</span><span>.ccol</span><span>.chg</span><span>.chip3</span><span>.chips</span><span>.conv</span><span>.count</span><span>.cscroll</span><span>.d</span><span>.danger</span><span>.del</span><span>.detail</span><span>.difflist</span><span>.dim</span><span>.dim2</span><span>.doc</span><span>.dochead</span><span>.el</span><span>.elsewhere</span><span>.ent</span><span>.facts</span><span>.facts-card</span><span>.fake</span><span>.fhead</span><span>.fig</span><span>.figrow</span><span>.filterline</span><span>.filters</span><span>.find</span><span>.first</span><span>.fold</span><span>.foot</span><span>.found</span><span>.fp</span><span>.fr</span><span>.frame</span><span>.fsep</span><span>.fsheet</span><span>.gauge</span><span>.ghost</span><span>.go</span><span>.grip</span><span>.hand</span><span>.handto</span><span>.hcol</span><span>.hd</span><span>.here-badge</span><span>.hint</span><span>.home</span><span>.hot</span><span>.if-bar</span><span>.if-body</span><span>.if-col</span><span>.if-h</span><span>.if-l</span><span>.if-main</span><span>.if-meter</span><span>.imgfake</span><span>.imgfoot</span><span>.imghead</span><span>.imgstage</span><span>.imgwrap</span><span>.in</span><span>.in2</span><span>.in3</span><span>.incoming</span><span>.inner</span><span>.k</span><span>.kids</span><span>.l1</span><span>.lbl2</span><span>.lede</span><span>.line</span><span>.list</span><span>.logged</span><span>.mach</span><span>.made</span><span>.main</span><span>.marker</span><span>.masked</span><span>.md</span><span>.mid</span><span>.minilink</span><span>.mono</span><span>.msg</span><span>.mt</span><span>.nm</span><span>.none</span><span>.note</span><span>.notecard</span><span>.notecount</span><span>.notepill</span><span>.ok</span><span>.ok2</span><span>.open</span><span>.ord</span><span>.out</span><span>.p</span><span>.pager</span><span>.paper</span><span>.pending</span><span>.phead2</span><span>.pic</span><span>.picked</span><span>.pickrow</span><span>.pk</span><span>.plan</span><span>.plan-files</span><span>.pr2</span><span>.prog</span><span>.ps</span><span>.pv</span><span>.pvbar</span><span>.pvnote</span><span>.pvside</span><span>.pvstage</span><span>.q</span><span>.qhead</span><span>.quota</span><span>.quote</span><span>.ref</span><span>.refs</span><span>.reveal</span><span>.review</span><span>.right</span><span>.risk</span><span>.risks</span><span>.ro-note</span><span>.row</span><span>.row1</span><span>.rt</span><span>.run</span><span>.said</span><span>.says</span><span>.scope</span><span>.scrim</span><span>.sect</span><span>.sel</span><span>.sel2</span><span>.sent</span><span>.sheetdoc</span><span>.shipblocked</span><span>.shipdone</span><span>.shown</span><span>.sizes</span><span>.sk</span><span>.sk-body</span><span>.sk-head</span><span>.sk-tabs</span><span>.skgrid</span><span>.sksec</span><span>.small</span><span>.spin</span><span>.spot</span><span>.spotnote</span><span>.src</span><span>.st2</span><span>.step</span><span>.stepr</span><span>.steps</span><span>.steps2</span><span>.strong</span><span>.sub</span><span>.sw</span><span>.t</span><span>.tag</span><span>.tagrow</span><span>.team</span><span>.term</span><span>.tface</span><span>.three</span><span>.threw</span><span>.tlist</span><span>.tm</span><span>.to</span><span>.tog</span><span>.top</span><span>.topbar</span><span>.tout</span><span>.trow</span><span>.ul</span><span>.upd-hero</span><span>.upd-row</span><span>.upd-sec</span><span>.v</span><span>.ver</span><span>.verdict</span><span>.warn</span><span>.warnbar</span><span>.whead</span><span>.where</span><span>.why</span><span>.wsheet</span><span>.x</span></div>
+<div class="chips"><span>.acts</span><span>.add</span><span>.addr</span><span>.ag</span><span>.ags</span><span>.air</span><span>.all</span><span>.alt</span><span>.aside1</span><span>.back</span><span>.bad</span><span>.bar</span><span>.bars</span><span>.bk</span><span>.bm</span><span>.body2</span><span>.box</span><span>.br</span><span>.bstate</span><span>.c-attr</span><span>.c-comment</span><span>.c-fn</span><span>.c-keyword</span><span>.c-number</span><span>.c-type</span><span>.caret</span><span>.catcher</span><span>.ccol</span><span>.chg</span><span>.chip3</span><span>.chips</span><span>.conv</span><span>.count</span><span>.cscroll</span><span>.d</span><span>.danger</span><span>.del</span><span>.detail</span><span>.difflist</span><span>.dim</span><span>.dim2</span><span>.doc</span><span>.dochead</span><span>.el</span><span>.elsewhere</span><span>.ent</span><span>.facts</span><span>.facts-card</span><span>.fake</span><span>.fhead</span><span>.fig</span><span>.figrow</span><span>.filterline</span><span>.filters</span><span>.find</span><span>.first</span><span>.fold</span><span>.foot</span><span>.found</span><span>.fp</span><span>.fr</span><span>.frame</span><span>.fsep</span><span>.fsheet</span><span>.gauge</span><span>.ghost</span><span>.go</span><span>.grip</span><span>.hand</span><span>.handto</span><span>.hcol</span><span>.hd</span><span>.here-badge</span><span>.hint</span><span>.home</span><span>.if-bar</span><span>.if-body</span><span>.if-col</span><span>.if-h</span><span>.if-l</span><span>.if-main</span><span>.if-meter</span><span>.imgfake</span><span>.imgfoot</span><span>.imghead</span><span>.imgstage</span><span>.imgwrap</span><span>.in</span><span>.in2</span><span>.in3</span><span>.incoming</span><span>.inner</span><span>.k</span><span>.kids</span><span>.l1</span><span>.lbl2</span><span>.lead</span><span>.lede</span><span>.line</span><span>.list</span><span>.logged</span><span>.mach</span><span>.made</span><span>.main</span><span>.marker</span><span>.masked</span><span>.md</span><span>.mid</span><span>.minilink</span><span>.mono</span><span>.msg</span><span>.mt</span><span>.nm</span><span>.none</span><span>.note</span><span>.notecard</span><span>.notecount</span><span>.notepill</span><span>.ok</span><span>.ok2</span><span>.open</span><span>.ord</span><span>.out</span><span>.p</span><span>.pager</span><span>.paper</span><span>.pband</span><span>.pending</span><span>.phead2</span><span>.pic</span><span>.picked</span><span>.pickrow</span><span>.pk</span><span>.plan</span><span>.plan-files</span><span>.planbar</span><span>.pnone</span><span>.pr2</span><span>.prog</span><span>.ps</span><span>.pswitch</span><span>.pv</span><span>.pvbar</span><span>.pvnote</span><span>.pvside</span><span>.pvstage</span><span>.q</span><span>.qhead</span><span>.quota</span><span>.quote</span><span>.ref</span><span>.refs</span><span>.reveal</span><span>.review</span><span>.right</span><span>.risk</span><span>.risks</span><span>.ro-note</span><span>.row</span><span>.row1</span><span>.rt</span><span>.run</span><span>.said</span><span>.says</span><span>.scope</span><span>.sect</span><span>.seg2</span><span>.sel</span><span>.sel2</span><span>.sent</span><span>.sheetdoc</span><span>.shipblocked</span><span>.shipdone</span><span>.shown</span><span>.sizes</span><span>.sk</span><span>.sk-body</span><span>.sk-head</span><span>.sk-tabs</span><span>.skgrid</span><span>.sksec</span><span>.small</span><span>.spin</span><span>.spot</span><span>.spotnote</span><span>.src</span><span>.st2</span><span>.step</span><span>.stepr</span><span>.steps</span><span>.steps2</span><span>.strong</span><span>.sub</span><span>.sw</span><span>.t</span><span>.tag</span><span>.tagrow</span><span>.team</span><span>.term</span><span>.tface</span><span>.three</span><span>.threw</span><span>.tlist</span><span>.tm</span><span>.to</span><span>.tog</span><span>.top</span><span>.topbar</span><span>.tout</span><span>.trow</span><span>.ul</span><span>.upd-hero</span><span>.upd-row</span><span>.upd-sec</span><span>.v</span><span>.ver</span><span>.verdict</span><span>.warn</span><span>.warnbar</span><span>.whead</span><span>.where</span><span>.why</span><span>.wsheet</span><span>.x</span></div>
 </div>
 
 <script>
