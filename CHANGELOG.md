@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.52.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.51.0...firetower-v0.52.0) (2026-11-07)
+
+
+### Features
+
+* **server:** no cap on how many children a lead starts ([187709e](https://github.com/firetower-cloud/firetower/commit/187709ecfad3fb18d54eb54799428dca2c22953f))
+* **server:** no cap on how many children a lead starts ([05726cb](https://github.com/firetower-cloud/firetower/commit/05726cbdaa76cc9b6232c605eef7a74c54e38e5a))
+
+
+### Bug Fixes
+
+* healthy sessions no longer report that their agent is not running ([348418a](https://github.com/firetower-cloud/firetower/commit/348418aab400a55c8ddf136a80c0b6cfa34f37c0))
+* **server:** a child's hand-back that never arrived is held again ([579698f](https://github.com/firetower-cloud/firetower/commit/579698fb36bb16ad285534dc6a4106faddd5621f))
+* **server:** one child's result in flight to a lead at a time ([7d7f684](https://github.com/firetower-cloud/firetower/commit/7d7f6848ca787e79642636eb70af7aeaa0f76363))
+* **worker:** a message to an agent waits off the read loop, in its session's order ([31253fa](https://github.com/firetower-cloud/firetower/commit/31253fa7fb01b278305097b9eac8d69ac7fbabf9))
+* **worker:** a pane that cannot join its cgroup says nothing about it ([3a82123](https://github.com/firetower-cloud/firetower/commit/3a821239d871389e09151c17cb08a89fbd8446f2))
+* **worker:** a session's shell no longer answers for its agent ([8b850b0](https://github.com/firetower-cloud/firetower/commit/8b850b02931aa7a2e9a84fc439919f95fd13608d))
+* **worker:** what a failed send says upward carries no path ([5be6bda](https://github.com/firetower-cloud/firetower/commit/5be6bdad456d3b3ee002d10fc5896e2f1b8c494a))
+
 ## [0.51.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.50.0...firetower-v0.51.0) (2026-11-05)
 
 
