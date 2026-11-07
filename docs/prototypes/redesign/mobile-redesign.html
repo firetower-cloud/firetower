@@ -932,9 +932,38 @@ function docks(p) { const cw = contentW(p); return band(cw) === "dock" && panelW
 /* ═══════════════════════════════════════════════════════════════════════════
    THE DEVICE SHELL
    ═══════════════════════════════════════════════════════════════════════════ */
+/**
+ * Four destinations, and three of them are the desk's own.
+ *
+ * `Dashboard`, `Tasks` and `Artifacts` are ⌘1, ⌘2 and ⌘3 — same object, same
+ * word, same glyph. The phone does not get a different name for a thing the
+ * desk already named.
+ *
+ * **Not `Inbox`.** The desk retired `Fleet.tsx`, which its own delta table
+ * calls *the unified inbox as a screen*; the word survives there in an icon
+ * name and in the note recording the deletion. A phone still calling it the
+ * Inbox would be the only client naming a concept the product removed.
+ *
+ * **Not `Config`.** The desk's Configuration *screen* is gone too — its panes
+ * moved into the destinations they belong to. A Config tab mirrors a screen
+ * the redesign deleted, which is the same failure one word over. Its single
+ * phone-relevant pane, Repositories, is reachable from the two places it is
+ * wanted: the composer's shelf, and a section of You named for the server.
+ *
+ * The fourth slot is the person, because a phone has no foot of a rail to put
+ * them at. See Notes for the three arrangements rejected.
+ */
 const TABBAR = [
-  ["inbox","tray","Inbox"], ["tasks","checklist","Tasks"],
-  ["config","sliders","Config"], ["you","person","You"],
+  ["dash","house","Dashboard"], ["tasks","list-todo","Tasks"],
+  ["art","shapes","Artifacts"], ["you","user-round","You"],
+];
+/** Which screen a destination opens. */
+const TAB_SCREEN = { dash:"inbox", tasks:"tasks", art:"artifacts", you:"you" };
+
+/** What ships today, for the rebuild to wear. `_layout.tsx:81`. */
+const TABBAR_SHIPPED = [
+  ["dash","inbox","Inbox"], ["tasks","list-todo","Tasks"],
+  ["art","sliders-horizontal","Config"], ["you","user-round","You"],
 ];
 
 function statusBar(p) {
@@ -950,11 +979,11 @@ function statusBar(p) {
     '<i class="p-notch"'+(kind?' data-kind="front"':'')+'></i>';
 }
 
-function tabBar(p, on) {
+function tabBar(p, on, shipped) {
   const k = p.kind === "android" ? "android" : "";
   return '<nav class="p-tabs"'+(k?' data-kind="android"':'')+' aria-label="Destinations">'+
-    TABBAR.map(([id,g,lab]) =>
-      '<button class="p-tab" role="tab" aria-selected="'+(on===id)+'" data-go="tab:'+id+'">'+
+    (shipped ? TABBAR_SHIPPED : TABBAR).map(([id,g,lab]) =>
+      '<button class="p-tab" role="tab" aria-selected="'+(on===id)+'" data-go="tab:'+TAB_SCREEN[id]+'">'+
       '<span class="p-pillbg">'+ic(g, p.kind==="android"?21:25)+'</span>'+
       '<span class="p-tablab">'+lab+'</span></button>').join("")+
     '</nav>';
@@ -963,7 +992,7 @@ function tabBar(p, on) {
 function tabRail(on) {
   return '<nav class="p-rail" aria-label="Destinations">'+
     TABBAR.map(([id,g,lab]) =>
-      '<button class="p-railitem" role="tab" aria-selected="'+(on===id)+'" data-go="tab:'+id+'">'+
+      '<button class="p-railitem" role="tab" aria-selected="'+(on===id)+'" data-go="tab:'+TAB_SCREEN[id]+'">'+
       ic(g,24)+'<span class="p-raillab">'+lab+'</span></button>').join("")+'</nav>';
 }
 
@@ -995,7 +1024,7 @@ function device(p, body, opts) {
     '<div class="p-screen" style="width:'+p.w+'px;height:'+p.h+'px">'+
       (o.bare ? "" : statusBar(p))+
       inner+
-      (bottom ? tabBar(p, o.tab || "inbox") : "")+
+      (bottom ? tabBar(p, o.tab || "dash", o.shipped) : "")+
       /* The home indicator is the device's, not the tab bar's — a pushed
          route hides the bar and keeps the indicator. */
       (o.bare ? "" : '<div class="p-home"'+(p.kind==="android"?' data-kind="android"':'')+
@@ -1396,29 +1425,23 @@ function overviewBody() {
 }
 
 /**
- * At 951 the supporting column can also be the list you came from.
+ * The supporting column, and it is about this workspace.
  *
- * The overview is a reference panel; the inbox is somewhere you work. Four
- * agents waiting is four round trips on a phone and four taps here.
+ * `redesign-acceptance.md` criterion 31 settles it one surface over: *the
+ * right rail opens on this workspace's overview and team, not the inbox*.
+ * The conversation is about this work; the list of other workspaces is the
+ * thing you left to get here.
+ *
+ * An earlier draft of this document made the column a two-way switch with
+ * the inbox as its other setting, on the argument that four waiting agents
+ * is four round trips on a phone and four taps here. That is a real saving
+ * and it is overruled: it makes the one pose with room for two things spend
+ * half of it on somewhere else. The switch is gone, not merely re-ordered —
+ * a toggle whose second setting is ruled out is a control with one position.
  */
 function sideColumn(w) {
-  const inbox = S.side === "inbox";
   return '<div class="p-side" style="width:'+w+'px">'+
-    /* This workspace first. The conversation is about this work; the list of
-       other workspaces is the thing you left to get here, and ordering is
-       how a two-way switch says which is the default. */
-    '<div class="p-texttabs" style="padding:14px 20px 12px">'+
-      [["overview","This workspace"],["inbox","Inbox"]].map(([id,lab]) =>
-        '<button class="p-texttab" style="font-size:15px" role="tab" aria-selected="'+(S.side===id)+'" '+
-        'data-go="side:'+id+'">'+lab+'</button>').join("")+'</div>'+
-    '<div class="p-scroll">'+(inbox
-      ? PLACES.map(x => '<button class="p-quiet"'+(x.id==="w1"?' data-on="1" style="background:var(--p-raise)"':
-          (!working(x)&&!isBlocked(x)?' data-soft="1"':''))+' data-go="open:'+x.id+'">'+
-          (isBlocked(x) ? '<i class="p-dot"></i>' : "")+
-          '<span class="p-quietname" style="font-size:16px">'+esc(x.name)+'</span>'+
-          (working(x) ? '<span class="p-dots"><i></i><i></i><i></i></span>' : "")+
-          '<span class="p-grow"></span><span class="p-when">'+x.when+'</span></button>').join("")
-      : overviewBody())+'</div></div>';
+    '<div class="p-scroll">'+overviewBody()+'</div></div>';
 }
 
 /* ── The screen ───────────────────────────────────────────────────────────── */
@@ -1698,12 +1721,20 @@ function newScreen(p, st) {
     (bare ? "" : box);
 }
 
+/**
+ * Repositories, reached from You and from the composer's shelf.
+ *
+ * It was a tab, and the argument for that was precise: *the new-workspace
+ * form asks for a repository, and this client had no way to produce one*. The
+ * redesign spends that argument — the shelf's repository chip opens this same
+ * picker at the moment it is wanted. What is left is one list, which is a
+ * page rather than a quarter of the index.
+ */
 function configScreen() {
-  return '<div class="p-head" style="padding-bottom:2px">'+
-      '<div class="p-hgrow"><div class="p-lede" style="font-size:28px">Config</div></div></div>'+
-    '<div class="p-readtx p-dimtx" style="padding:2px 20px 26px">Northwind</div>'+
+  return pageHead('Repositories', '', 'goto:you')+
+    '<div class="p-readtx p-dimtx" style="padding:0 20px 24px">On Northwind. A workspace is cut '+
+      'from one of these.</div>'+
     '<div class="p-scroll"><div class="p-col">'+
-      '<div class="p-sechead"><span class="p-sec">Repositories</span></div>'+
       REPOS.map(r => '<button class="p-quiet" data-go="goto:repos">'+
         '<span class="p-quietname" style="font-family:var(--d-mono);font-size:16px;'+
           'letter-spacing:-.016em">'+esc(r.slug)+'</span>'+
@@ -1751,6 +1782,15 @@ function reposScreen(p, st) {
       '</button>').join("")+'</div>';
 }
 
+/**
+ * You: what this phone knows, and whose configuration is whose.
+ *
+ * The Firetowers list is **this phone's** and survives every server in it
+ * going away. The section under it is named for the current server, which is
+ * what the retired Config tab's subtitle was doing — it answers *whose
+ * configuration is this* in the heading rather than in a legend, and the
+ * answer changes when you switch above it.
+ */
 function youScreen() {
   const servers = [
     { org:"Northwind", url:"ft-e1.tail9c2b.ts.net", on:true, dark:false },
@@ -1774,11 +1814,17 @@ function youScreen() {
         '<span class="p-mono-sq" data-big="1" data-dark="1">'+ic("plus",17)+'</span>'+
         '<span style="font-size:17px">Connect a Firetower</span></button>'+
 
-      '<div class="p-sechead" style="padding-top:30px"><span class="p-sec">Account</span></div>'+
-      '<button class="p-quiet" data-go="goto:artifacts">'+
-        '<span class="p-quietname" style="flex:1">Artifacts</span>'+
+      /* Named for the server, because that is the answer to "whose is this"
+         and it changes the moment you pick another one above. */
+      '<div class="p-sechead" style="padding-top:30px"><span class="p-sec">Northwind</span></div>'+
+      '<button class="p-quiet" data-go="goto:config" style="min-height:58px">'+
+        '<span style="flex:1;min-width:0">'+
+          '<span class="p-quietname" style="display:block">Repositories</span>'+
+          '<span class="p-micro" style="display:block">What a workspace can be cut from</span></span>'+
         '<span class="p-when">3</span>'+
         '<span style="color:var(--p-mute);display:flex">'+ic("right",16)+'</span></button>'+
+
+      '<div class="p-sechead" style="padding-top:30px"><span class="p-sec">This phone</span></div>'+
       '<button class="p-quiet" data-go="noop" style="min-height:58px">'+
         '<span style="flex:1;min-width:0">'+
           '<span class="p-quietname" style="display:block">Notifications</span>'+
@@ -1790,37 +1836,20 @@ function youScreen() {
         '<span class="p-micro" style="display:block">Signed in on Northwind</span></span></div>'+
 
       '<div class="p-readtx p-mutetx" style="padding:30px 20px 0;font-size:15px">Who else is here, '+
-        'what they may do, and who may reach a workspace are set on the control plane’s own site. '+
+        'what they may do, and who may reach a workspace are set on the control plane\u2019s own site. '+
         'This phone reads and starts work.</div>'+
       '<div style="height:26px"></div></div></div>';
 }
 
-/**
- * The library.
- *
- * Every tile is a **poster**, never a live frame. An artifact is untrusted
- * HTML; a grid of six as frames would be six page loads, six runtimes and
- * six sets of timers behind a grid nobody is looking at. A poster is
- * rendered once per version and cacheable forever, because a version's bytes
- * cannot change.
- *
- * **No poster yet is an ordinary state**, not an error. A version is
- * published before anything has photographed it, and a fresh library hits
- * that on every tile at once — so the plate is drawn properly rather than
- * left to a broken-image glyph. The same plate covers a poster that 404s,
- * because the two are the same thing to look at.
- *
- * A grid is a considered exception to the house rule about cards: there is
- * no hierarchy here to flatten, one kind of object, and what identifies each
- * one is a picture. Two columns at 390; three once there is room, because a
- * grid reflows and a column does not.
- */
 function artifactsScreen(p, st) {
   const cw = contentW(p);
   const cols = cw >= 620 ? 3 : 2;
   const fresh = st && st.art === "fresh";
   const list = fresh ? ARTIFACTS.map(a => Object.assign({}, a, { poster:false })) : ARTIFACTS;
-  const head_ = pageHead('Artifacts', '', 'goto:you');
+  /* A destination, not a pushed route: no back arrow, and the tab bar is
+     under it. It is ⌘3 on the desk and it is the third slot here. */
+  const head_ = '<div class="p-head" style="padding:2px 8px 2px">'+
+    '<div class="p-hgrow"><div class="p-lede" style="font-size:28px">Artifacts</div></div></div>';
 
   if (st && st.art === "none") {
     return head_+'<div class="p-scroll"><div class="p-empty">'+
@@ -2100,20 +2129,20 @@ function homeScreen() {
    ═══════════════════════════════════════════════════════════════════════════ */
 const S = {
   tab:"poses", pose:"iphone", screen:"inbox", era:"next",
-  filter:"all", mode:"ok", comp:"rest", rail:null, side:"overview",
+  filter:"all", mode:"ok", comp:"rest", rail:null,
   repo:"diff", tasks:"ok", repos:"list", connect:"where",
   menu:null, peek:null, inset:true, theme:"light", duo:"innerp", morphing:false, scale:1,
   newstate:"blank", art:"library", scaleSet:false,
 };
 /* Which destination is lit while you are on a given screen. */
-const HOME_TAB = { inbox:"inbox", workspace:"inbox", overview:"inbox", repo:"inbox",
-  file:"inbox", artifacts:"you", artifact:"you", tasks:"tasks", config:"config",
-  repos:"config", you:"you" };
+const HOME_TAB = { inbox:"dash", workspace:"dash", overview:"dash", repo:"dash",
+  file:"dash", new:"dash", tasks:"tasks", artifacts:"art", artifact:"art",
+  you:"you", config:"you", repos:"you" };
 /* A pushed route covers the bottom bar. It does not cover the trailing rail,
    because the rail belongs to the system and the stack pushes inside it —
    which is why on the inner display the destinations stay reachable from
    inside a workspace, and on a phone they do not. */
-const PUSHED = new Set(["workspace","overview","repo","file","repos","artifacts","artifact"]);
+const PUSHED = new Set(["workspace","overview","repo","file","repos","artifact","config"]);
 const MODAL = new Set(["new","connect","lock","home"]);
 
 function renderScreen(name, p) {
@@ -2152,7 +2181,7 @@ function live(poseId, screen, extra) {
   }
   const bare = name === "lock" || name === "home";
   return plinth(p, renderScreen(name, p), Object.assign({
-    tab: HOME_TAB[name] || "inbox",
+    tab: HOME_TAB[name] || "dash",
     noTabs: MODAL.has(name) || bare,
     pushed: PUSHED.has(name),
     bare, over,
@@ -2186,7 +2215,6 @@ function act(go) {
     case "back": S.screen = S.screen === "file" ? "repo" : S.screen === "repo" ? "workspace" : "inbox"; break;
     case "filter": S.filter = arg; break;
     case "repo": S.repo = arg; break;
-    case "side": S.side = arg; break;
     case "comp": S.comp = arg; S.menu = null; break;
     case "menu": S.menu = arg || null; break;
     case "peek": S.peek = arg || null; break;
@@ -2250,7 +2278,7 @@ document.addEventListener("pointerdown", e => {
    ═══════════════════════════════════════════════════════════════════════════ */
 const DTABS = [
   ["poses","Poses"], ["index","Every screen"],
-  ["inbox","Inbox"], ["workspace","Workspace"], ["repo","Repository"],
+  ["inbox","Dashboard"], ["workspace","Workspace"], ["repo","Repository"],
   ["start","Starting work"], ["art","Artifacts"], ["connect","Connecting"], ["you","You"],
   ["duo","The Duo"], ["moving","Moving"],
   ["coverage","Coverage"], ["spec","Spec"], ["notes","Notes"],
@@ -2365,7 +2393,7 @@ function tabInbox() {
   const other = S.era === "next" ? "now" : "next";
   return '<div class="d-stage"><div class="d-row">'+
       plinth(p, inboxScreen(p, Object.assign({}, S, { era:other })),
-        { tab:"inbox", over:"", noBand:true,
+        { tab:"dash", over:"", noBand:true, shipped: other === "now",
           label: other === "now" ? "Now \u2014 a rebuild of what ships" : "Next",
           sub: other === "now" ? "app/(tabs)/index.tsx, redrawn here" : "" })+
       live(p.id, "inbox")+
@@ -2374,7 +2402,16 @@ function tabInbox() {
       '<span>The left phone is a rebuild of <code>app/(tabs)/index.tsx</code> as it stands, not a '+
       'screenshot of it.</span><span>'+p.w+' \u00d7 '+p.h+' pt</span></div>'+
 
-    '<div class="d-note"><h2>Count what is on each screen</h2>'+
+    '<div class="d-note"><h2>It is the Dashboard, on both</h2>'+
+      '<p>Same object, same word, same glyph as \u2318\u20091 on the desk. <b>Inbox is legacy.</b> The '+
+      'desktop redesign retired <code>Fleet.tsx</code> \u2014 which its own delta table calls <i>the '+
+      'unified inbox as a screen</i> \u2014 and the word survives there in exactly two places: an icon '+
+      'name, and the note recording the deletion. A phone still calling it the Inbox would be the '+
+      'only client naming a concept the product removed.</p>'+
+      '<p>The screen on the left is the shipped <b>Inbox</b> tab, rebuilt; the one on the right is '+
+      'the <b>Dashboard</b>. What follows is why they differ by more than a word.</p>'+
+
+      '<h2 style="margin-top:34px">Count what is on each screen</h2>'+
       '<p>The row on the left carries seven things: a four-quadrant glyph, a name, a timestamp, a '+
       'status word, a branch in monospace, an agent mark, and a chevron. The row on the right '+
       'carries two \u2014 a name and a timestamp \u2014 and the two that are stopped carry a third, '+
@@ -2736,7 +2773,7 @@ function tabRepo() {
 function tabStart() {
   const p = POSES[S.pose] || POSES.iphone;
   return '<div class="d-stage"><div class="d-row">'+
-      live(p.id, ["tasks","new","config","repos"].includes(S.screen) ? S.screen : "tasks")+
+      live(p.id, ["tasks","new"].includes(S.screen) ? S.screen : "new")+
       plinth(POSES.iphone, newScreen(POSES.iphone, Object.assign({}, S,
         { newstate: S.newstate === "task" ? "norepo" : "task" })),
         { noTabs:true, noBand:true,
@@ -2784,15 +2821,34 @@ function tabStart() {
 function tabYou() {
   const p = POSES[S.pose] || POSES.iphone;
   return '<div class="d-stage"><div class="d-row">'+
-      live(p.id, S.screen === "you" || S.screen === "artifacts" ? S.screen : "you")+
+      live(p.id, ["you","config","repos"].includes(S.screen) ? S.screen : "you")+
       plinth(POSES.iphone, lockScreen(),
         { bare:true, noTabs:true, noBand:true, label:"The notification", sub:"and the lock screen it lands on" })+
       plinth(POSES.iphone, homeScreen(),
         { bare:true, noTabs:true, noBand:true, label:"The badge", sub:"set from the payload, not from a poll" })+
     '</div></div>'+
-    '<div class="d-cap"><b>The three surfaces a window does not have.</b>'+
+    '<div class="d-cap"><b>You, and the three surfaces a window does not have.</b>'+
       '<span>The notification, the lock screen and the icon badge are where ember earns its keep.</span></div>'+
-    '<div class="d-note"><h2>Ember, off the screen</h2>'+
+    '<div class="d-note"><h2>You is the fourth slot, and Config is not a tab</h2>'+
+      '<p>The desk puts the person at the <i>foot</i> of the rail, under a rule, with two settings '+
+      'doors beside them \u2014 precisely so the places you work get the top of the index. A phone has '+
+      'no foot of a rail, so the person takes the fourth slot; and the configuration that used to '+
+      'take a slot of its own does not.</p>'+
+      '<div class="d-keep"><b>The Config tab mirrored a screen the redesign deleted.</b> The desk\u2019s '+
+      'Configuration page is gone \u2014 its panes moved into the destinations they belong to. A phone '+
+      'keeping a Config tab is the same failure as keeping the Inbox, one word over.</div>'+
+      '<p>Its argument was precise and it is now spent: <i>the new-workspace form asks for a '+
+      'repository, and this client had no way to produce one</i>. The composer\u2019s shelf produces '+
+      'one, at the moment it is wanted. What is left is a single list, and a page with one section '+
+      'would rather be a section somewhere else \u2014 which is what <code>config.tsx</code>\u2019s own '+
+      'docblock says about pages with one row, arguing the other way.</p>'+
+      '<p>So <b>You</b> carries three sections and the heading of each says whose it is: '+
+      '<i>Firetowers</i> is this phone\u2019s and survives every server in it going away; '+
+      '<i>Northwind</i> is the current server\u2019s and changes the moment you switch above it; '+
+      '<i>This phone</i> is the rest. That is the Config tab\u2019s subtitle doing its job as a '+
+      'heading, which is where it should have been.</p>'+
+
+      '<h2 style="margin-top:34px">Ember, off the screen</h2>'+
       '<p>A phone gives the one loud colour three surfaces a window cannot: the app icon badge, the '+
       'notification, and the inbox row. It gets those and nothing else. Not the tab bar, not the send '+
       'button, not a pull-to-refresh spinner.</p>'+
@@ -2865,7 +2921,12 @@ const COV = [
   ["Deep link from a notification, switching server on the way", "N", "<code>firetower://servers/…/sessions/…</code>"],
 ]],
 ["The shell", [
-  ["Four tabs — Inbox, Tasks, Config, You", "Y", "Config and You are two on purpose"],
+  ["Four destinations — Dashboard, Tasks, Artifacts, You", "Y", "the desk's ⌘1–⌘3, then the person"],
+  ["Dashboard, not Inbox", "Y", "the desk retired <code>Fleet.tsx</code>; the word went with it"],
+  ["Artifacts is a destination, not a row under You", "Y", "⌘3 on the desk; the third slot here"],
+  ["Config as a tab", "X", "the desk's Configuration screen is gone; its one phone-relevant pane is on You and in the shelf"],
+  ["Skills / Customize as a destination", "X", "authoring is desk work, and sharing is a write this surface must not have"],
+  ["Repositories and Machines as destinations", "X", "what a workspace is made of — chips in the shelf, at the moment they are wanted"],
   ["The tab bar takes no ember", "Y", "it is furniture"],
   ["The server monogram in the header", "Y", "a mark, never a colour"],
   ["The switcher sheet, with each server's reachability", "Y", ""],
@@ -2962,7 +3023,7 @@ const COV = [
   ["A line this session wrote is tinted and numbered sage", "Y", ""],
   ["Files — one directory at a time", "Y", "<code>list_files</code> answers for one path"],
   ["Touched files marked in the tree", "Y", ""],
-  ["File kinds, seven categories, each with a glyph", "P", "two kinds on screen; the set is in Spec"],
+  ["File kinds, nine categories, each with a glyph", "P", "two kinds on screen; the set is in Spec"],
   ["One file, with the tab strip", "Y", ""],
   ["Conversation pinned first and uncloseable", "Y", ""],
   ["A previewing tab is italic", "Y", "one tap previews, long-press keeps"],
@@ -3001,8 +3062,9 @@ const COV = [
   ["Reading GitHub…", "N", ""],
   ["Tapping one starts a workspace seeded from it", "Y", ""],
 ]],
-["Config and repositories", [
-  ["The organisation under the title", "Y", "whose configuration this is changes on the tab next door"],
+["Repositories", [
+  ["Reached from You, under a heading named for the server", "Y", "the Config tab's subtitle, doing its job as a heading"],
+  ["Reached from the composer's shelf", "Y", "the moment a repository is actually wanted"],
   ["The repository list", "Y", ""],
   ["A repository with no default branch yet", "Y", "a guessed <code>main</code> printed as fact is a small lie"],
   ["Connect a repository", "Y", ""],
@@ -3023,7 +3085,7 @@ const COV = [
   ["Notifications — on, and what leaves the device", "Y", "a delivery token and an encrypted blob"],
   ["Sign out", "N", ""],
   ["Artifacts", null, "", [
-    ["The row on You, with a count", "Y", ""],
+    ["A destination of its own", "Y", "no back arrow, and the tab bar under it"],
     ["The library — two tiles at 390, three at 669", "Y", "a grid reflows; a column does not"],
     ["All · Mine · Shared", "Y", "a partition, not three overlapping filters"],
     ["A tile with no poster yet", "Y", "an ordinary state, not an error"],
@@ -3052,8 +3114,8 @@ const COV = [
   ["Duo inner landscape 951 — two panes", "Y", ""],
   ["The system tab rail on the inner display", "Y", "and what it takes off every threshold"],
   ["At 951 the panel opens on arrival", "Y", "docked costs the conversation nothing it needs"],
-  ["It opens on <i>this workspace</i> — team, made, plan", "Y", "not the list you left to get here"],
-  ["The inbox as the second setting of the toggle", "Y", ""],
+  ["It opens on <i>this workspace</i> — team, made, plan", "Y", "<code>redesign-acceptance.md</code> criterion 31"],
+  ["The inbox as a second setting of that column", "X", "overruled one surface over; the column is about this work"],
   ["A floated panel does not open on arrival", "Y", "it would cost the conversation all of it"],
   ["Destinations stay reachable inside a workspace on the inner display", "Y", "the rail does not go away when a route pushes"],
   ["Transitions", null, "", [
@@ -3385,7 +3447,6 @@ function auditControls() {
         else if (verb === "open") { S.screen = "workspace"; S.comp = "ask"; }
         else if (verb === "filter") S.filter = arg;
         else if (verb === "repo") S.repo = arg;
-        else if (verb === "side") S.side = arg;
         else if (verb === "comp") S.comp = arg;
         else if (verb === "menu") S.menu = arg || null;
         else if (verb === "peek") S.peek = arg || null;
@@ -3769,6 +3830,92 @@ function tabNotes() {
       "different for no reason either of them can state, and it means the token work reaches "+
       "<code>mobile/src/design/</code> and is never used.")+
 
+  dec("Four destinations: Dashboard, Tasks, Artifacts, You",
+    "the first three are the desk\u2019s \u2318\u20091, \u2318\u20092 and \u2318\u20093 \u2014 same object, same "+
+      "word, same glyph. The fourth is the person. <b>Inbox</b> and <b>Config</b> both go.",
+    "a phone\u2019s index stops being a prefix of the desk\u2019s at the fourth slot, and anyone comparing "+
+      "the two has to be told why rather than left to infer it.",
+    "<b>Inbox</b> is legacy: the desk retired <code>Fleet.tsx</code>, which the delta table calls "+
+      "<i>the unified inbox as a screen</i>, and the word survives there only as an icon name and a "+
+      "note recording the deletion. <b>Config</b> is the same failure one word over \u2014 the desk\u2019s "+
+      "Configuration <i>screen</i> is gone, its panes moved into the destinations they belong to, "+
+      "and a phone keeping a tab for it mirrors something the redesign deleted. Its stated argument "+
+      "\u2014 <i>the new-workspace form asks for a repository and this client had no way to produce "+
+      "one</i> \u2014 is spent by the composer\u2019s shelf, which produces one where it is wanted.",
+    "four arrangements, below.")+
+
+  '<h4>What the four were weighed against</h4>'+
+  '<p>Two tests, and neither is mine. The desk\u2019s Grouping tab states its own: <i>the test for a '+
+  'destination is not \u201cis it important\u201d \u2014 everything is \u2014 but <b>do you open it, and '+
+  'does it have live state worth seeing without asking</b></i>. And <code>docs/mobile.md</code> '+
+  'adds the surface\u2019s: the phone answers <i>is something waiting on me</i> from anywhere, and '+
+  'enough of <i>can I deal with it</i> to unblock an agent \u2014 it is <b>explicitly not a small '+
+  'desktop and does not administer a fleet</b>.</p>'+
+  '<table class="d-tbl"><thead><tr><th>Candidate</th><th>Do you open it?</th>'+
+    '<th>Live state without asking?</th><th>On the thesis?</th></tr></thead><tbody>'+
+  ['<tr><td><b>Dashboard</b></td><td class="d-ok">constantly</td>'+
+    '<td class="d-ok">what is waiting</td><td class="d-ok">it <i>is</i> the thesis</td></tr>',
+   '<tr><td><b>Tasks</b></td><td class="d-ok">yes</td><td class="d-ok">what the tracker says</td>'+
+    '<td class="d-ok">starting work</td></tr>',
+   '<tr><td><b>Artifacts</b></td><td class="d-ok">yes</td>'+
+    '<td class="d-ok">what was just published</td>'+
+    '<td class="d-ok">the half a small screen is best at</td></tr>',
+   '<tr><td><b>You</b></td><td class="d-warn">rarely</td>'+
+    '<td class="d-ok">which Firetowers are reachable</td>'+
+    '<td class="d-ok">it has to work when the current one does not</td></tr>',
+   '<tr><td>Config / Repositories</td><td class="d-bad">once</td><td class="d-bad">none</td>'+
+    '<td class="d-bad">a prerequisite, not the work</td></tr>',
+   '<tr><td>Customize / Skills</td><td class="d-bad">occasionally</td><td class="d-bad">none</td>'+
+    '<td class="d-bad">authoring is desk work</td></tr>',
+   '<tr><td>Machines</td><td class="d-bad">rarely</td><td class="d-ok">which one is down</td>'+
+    '<td class="d-bad">nothing here can act on it</td></tr>',
+  ].join("")+'</tbody></table>'+
+  '<p><b>You is the one that does not pass cleanly</b>, and it is worth saying rather than '+
+  'smoothing over: you do not open it often. It earns its slot on the second column and on a '+
+  'phone-specific fact \u2014 a Firetower behind a VPN that is off is a daily event, and the place '+
+  'you go to switch to another one cannot be inside the one that is not answering.</p>'+
+  '<table class="d-tbl"><thead><tr><th>Slot</th><th>What it earns its place by</th></tr></thead><tbody>'+
+  '<tr><td><b>Dashboard</b> <span class="d-num">house</span></td><td>the whole first half of the '+
+    'thesis. If only one destination survived it would be this one.</td></tr>'+
+  '<tr><td><b>Tasks</b> <span class="d-num">list-todo</span></td><td>the second half\u2019s other end: '+
+    'starting work from something that already exists. One tap seeds a workspace, which is the only '+
+    'thing the screen is for.</td></tr>'+
+  '<tr><td><b>Artifacts</b> <span class="d-num">shapes</span></td><td>the one destination whose '+
+    'content exists <i>to be looked at</i> \u2014 which is what a small screen is best at, and what '+
+    'reviewing a diff is worst at. It also outlives the workspace that made it, so it cannot live '+
+    'inside one.</td></tr>'+
+  '<tr><td><b>You</b> <span class="d-num">user-round</span></td><td>which Firetowers this phone '+
+    'knows, who you are on each, and whether notifications are on. The desk puts this at the foot '+
+    'of the rail; a phone has no foot of a rail. It has to stay reachable when the current server '+
+    'is not.</td></tr>'+
+  '</tbody></table>'+
+
+  '<h4>Rejected</h4>'+
+  '<p><b>1. Inbox \u00b7 Tasks \u00b7 Config \u00b7 You</b> \u2014 what ships. Half the index is '+
+  'configuration, neither half is a desktop destination, and the first word names a concept the '+
+  'product removed.</p>'+
+  '<p><b>2. Dashboard \u00b7 Tasks \u00b7 Config \u00b7 You</b> \u2014 the smallest change that fixes the '+
+  'naming. It keeps the Config tab alive on an argument the shelf has already answered, and it '+
+  'leaves a phone with no route to the thing an agent just made for it.</p>'+
+  '<p><b>3. Dashboard \u00b7 Tasks \u00b7 Artifacts \u00b7 Customize</b> \u2014 literally the desk\u2019s '+
+  '\u2318\u20091\u2013\u20094, with You behind the header monogram. Tempting, and wrong twice. Customize '+
+  'is <i>authoring</i> \u2014 creating, versioning, bundling and sharing skills \u2014 which is desk work, '+
+  'and sharing is a write this surface must not have; the one part of it a phone needs, picking a '+
+  'profile and a model for this run, is already in the composer\u2019s footer. And putting You behind '+
+  'the monogram strands somebody whose current Firetower is unreachable, which on a phone is a '+
+  'daily event rather than an edge case.</p>'+
+  '<p><b>4. Five slots.</b> Both platforms start crowding at five with labels, and the Duo\u2019s '+
+  'trailing rail makes a fifth item worse rather than better. Four is also what ships, so the '+
+  'change is three words and no new shape to learn.</p>'+
+
+  '<div class="d-flag"><b>And the honest finding underneath.</b> A phone\u2019s index is <i>not</i> a '+
+  'prefix of a desk\u2019s, and pretending otherwise is how the first version ended up carrying a '+
+  'retired word. Three of the desk\u2019s six destinations \u2014 Customize, Repositories, Machines \u2014 '+
+  'are things a workspace is <i>made of</i>, touched once and then not again. On a desk they are '+
+  'doors; on a phone they are chips in the shelf at the moment of starting work, which is the only '+
+  'moment they are wanted. The two surfaces agree about what the product is for and disagree about '+
+  'how often you touch its prerequisites.</div>'+
+
   dec("The answer is the headline, and <i>Inbox</i> comes off the screen",
     "the top of the inbox is one sentence at display size — <i>Two agents are waiting on you.</i> — "+
       "and the word Inbox is deleted.",
@@ -4007,6 +4154,11 @@ function tabNotes() {
   '<tr><td><code>app/(tabs)/you.tsx:70</code> · <code>ServerChip.tsx</code></td><td>Both derive the '+
     'monogram as <code>org.slice(0,1)</code> — the same single-letter collision the handoff records '+
     'at <code>fleet.ts:49</code>, in two more places. Northwind and Nimbus both render “N”.</td></tr>'+
+  '<tr><td><code>app/(tabs)/_layout.tsx:81,90</code></td><td>The destination is '+
+    '<code>sf="tray" md="inbox"</code> labelled <b>Inbox</b>, and the comment at :90 says it is '+
+    '\u201cnamed and drawn the way the desk names it\u201d. The desk has no Inbox and no Configuration '+
+    'screen \u2014 both were retired by the redesign. The comment was true when it was written and is '+
+    'not now; whoever builds the phone should fix the words as well as the glyph.</td></tr>'+
   '<tr><td><code>app/(tabs)/index.tsx</code></td><td>The <code>RefreshControl</code> passes '+
     '<code>refreshing={false}</code> permanently, so pulling invalidates the query and the spinner '+
     'never appears. The gesture works and says nothing.</td></tr>'+
@@ -4157,8 +4309,8 @@ function tabNotes() {
    ═══════════════════════════════════════════════════════════════════════════ */
 const SHEET = [
   ["Answering", [
-    ["The inbox", "inbox", { tab:"inbox", era:"next" }, "the sentence, and what is asking"],
-    ["Today's inbox", "inbox", { tab:"inbox", era:"now" }, "a rebuild of what ships"],
+    ["The Dashboard", "inbox", { tab:"inbox", era:"next" }, "the sentence, and what is asking"],
+    ["Today's Inbox tab", "inbox", { tab:"inbox", era:"now" }, "a rebuild of what ships"],
     ["Nothing waiting", "inbox", { tab:"inbox", era:"next", mode:"empty" }, ""],
     ["Not answering", "inbox", { tab:"inbox", era:"next", mode:"error" }, ""],
     ["The peek", "inbox", { tab:"inbox", era:"next", peek:"w1" }, "hold a row"],
@@ -4203,9 +4355,9 @@ const SHEET = [
     ["Replace the password", "connect", { tab:"connect", screen:"connect", connect:"locked" }, ""],
   ]],
   ["The rest of it", [
-    ["Config", "config", { tab:"start", screen:"config" }, "one server's"],
-    ["Connect a repository", "repos", { tab:"start", screen:"repos", repos:"list" }, ""],
-    ["Not authorised", "repos", { tab:"start", screen:"repos", repos:"noauth" }, ""],
+    ["Repositories", "config", { tab:"you", screen:"config" }, "reached from You and the shelf"],
+    ["Connect a repository", "repos", { tab:"you", screen:"repos", repos:"list" }, ""],
+    ["Not authorised", "repos", { tab:"you", screen:"repos", repos:"noauth" }, ""],
     ["You", "you", { tab:"you", screen:"you" }, "this phone's"],
     ["Switching Firetower", "you", { tab:"you", screen:"you", menu:"servers" }, ""],
     ["The notification", "lock", { tab:"you" }, ""],
@@ -4228,7 +4380,8 @@ function tabIndex() {
     if (S.peek) over = peekOver(POSES.iphone, S.peek);
     const bare = screen === "lock" || screen === "home";
     const dev = device(POSES.iphone, html, {
-      tab: HOME_TAB[screen] || "inbox",
+      shipped: S.era === "now" && screen === "inbox",
+      tab: HOME_TAB[screen] || "dash",
       noTabs: MODAL.has(screen) || bare,
       pushed: PUSHED.has(screen), bare, over,
     });
@@ -4443,7 +4596,6 @@ function subsFor(id) {
       return chips("Pose", [["front","Front panel 466"],["innerp","Inner portrait 669"],
           ["innerl","Inner landscape 951"]], "duo", S.duo)+
         chips("System rail", [["true","Insets the content"],["false","Overlays it"]], "inset", String(S.inset))+
-        chips("Column", [["inbox","Inbox"],["overview","This workspace"]], "side", S.side)+
         gos("Panel", [["rail", (S.rail === null ? band(POSES[S.duo]) === "dock" : S.rail)
           ? "Hide it" : "Show it"]], "")+'<span class="d-spacer"></span>'+t;
     case "moving":
@@ -4454,15 +4606,16 @@ function subsFor(id) {
       return gos("Tab", [["repo:diff","Diff"],["repo:files","Files"],["repo:ship","Commit"]], S.repo)+
         chips("Pose", POSE_CHIPS, "pose", S.pose)+'<span class="d-spacer"></span>'+t;
     case "start":
-      return gos("Screen", [["goto:new","New workspace"],["goto:tasks","Tasks"],
-        ["goto:config","Config"],["goto:repos","Connect a repository"]], S.screen)+
+      return gos("Screen", [["goto:new","New workspace"],["goto:tasks","Tasks"]], S.screen)+
         chips("New workspace", [["blank","Empty"],["task","From a task"],["norepo","No repository"]],
           "newstate", S.newstate)+
         chips("Repositories", [["list","The picker"],["noauth","Not authorised"]], "repos", S.repos)+
         chips("Trackers", [["ok","Connected"],["none","None connected"]], "tasks", S.tasks)+
         '<span class="d-spacer"></span>'+t;
     case "you":
-      return gos("Screen", [["goto:you","You"],["menu:servers","Switching"]], S.screen)+
+      return gos("Screen", [["goto:you","You"],["goto:config","Repositories"],
+        ["goto:repos","Connect one"],["menu:servers","Switching"]], S.screen)+
+        chips("Repositories", [["list","The picker"],["noauth","Not authorised"]], "repos", S.repos)+
         chips("Pose", POSE_CHIPS, "pose", S.pose)+'<span class="d-spacer"></span>'+t;
     default:
       return '<span class="d-spacer"></span>'+t;
