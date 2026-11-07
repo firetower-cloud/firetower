@@ -32,7 +32,7 @@ import {
   Ticket,
   User,
 } from "lucide-react";
-import { GiteaMark, GitLabMark, GithubMark, Icon, Input, LinearMark, Select } from "~/components/ui";
+import { GitLabMark, GiteaMark, GithubMark, Icon, IconButton, Input, LinearMark, Select } from "~/components/ui";
 import { usePathname } from "~/shims/next-navigation";
 import { elapsed, minutesSince } from "~/api/view";
 import type { Backend } from "~/fleet";
@@ -213,14 +213,7 @@ export function TasksPage({ backend }: { backend: Backend }) {
                 className="h-7 max-w-[220px] text-meta"
               />
             )}
-            <button
-              onClick={refresh}
-              aria-label="Read the tracker again"
-              title="Read the tracker again"
-              className="gbtn"
-            >
-              <Icon of={RotateCw} size={14} />
-            </button>
+            <IconButton of={RotateCw} onClick={refresh} label="Read the tracker again" />
           </div>
         </div>
 

@@ -14,7 +14,7 @@
 import { useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Check, Unlink } from "lucide-react";
-import { HostMark, Icon, LinearMark } from "~/components/ui";
+import { HostMark, Icon, IconButton, LinearMark } from "~/components/ui";
 import type { TrackerStatus } from "~/api/generated/model";
 import {
   getListTrackersQueryKey,
@@ -111,7 +111,7 @@ function Tracker({ t, live }: { t: TrackerStatus; live: boolean }) {
               commit has to be attributable to a person, so the server hands
               back no handle for one and nothing is drawn here. */}
           {t.secret && <WhoCanAccess look="chip" kind="secret" id={t.secret} path={t.path} />}
-          {t.auth === "apiKey" && <button disabled={!live} title="Forget the key" onClick={() => disconnect.mutate({ id: t.id }, { onSuccess: refresh })} className="gbtn hov hover:text-brick"><Icon of={Unlink} size={14} /></button>}
+          {t.auth === "apiKey" && <IconButton of={Unlink} disabled={!live} label="Forget the key" onClick={() => disconnect.mutate({ id: t.id }, { onSuccess: refresh })} className="hov hover:text-brick" />}
         </>
       ) : t.auth === "gitProvider" ? (
         /* Not "above" any more — the hosts are their own pane, and a row that

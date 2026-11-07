@@ -51,7 +51,7 @@ const FILES = sources();
  * the list is shortened — so the debt can only go down, and it is counted
  * where somebody will read it rather than in a comment.
  */
-const UNUSED = ["Badge", "IconButton"];
+const UNUSED = ["Badge"];
 
 describe("every component is reachable from the product", () => {
   const components = readdirSync(join(ROOT, "components/ui"))
@@ -65,9 +65,9 @@ describe("every component is reachable from the product", () => {
       ).filter((f) => new RegExp(`\\b${name}\\b`).test(f.text));
       return users.length === 0;
     });
-    /* `Badge` and `IconButton` are the two left. Nine screens write `.gbtn`
-       by hand where `IconButton` exists, which is the Segmented story again
-       and the next pass. */
+    /* `Badge` is the one left. `IconButton` came off this list when the
+       thirteen hand-rolled `.gbtn` buttons across nine screens were
+       converted to it. */
     expect(orphans.sort()).toEqual(UNUSED);
   });
 });
@@ -82,21 +82,10 @@ describe("no screen re-implements a component that exists", () => {
     /* The one the user reported. Nothing writes `.seg` by hand any more. */
     ["seg", "components/ui/Segmented.tsx", []],
     ["face", "components/ui/Avatar.tsx", ["ui/Connect.tsx"]],
-    [
-      "gbtn",
-      "components/ui/IconButton.tsx",
-      [
-        "ui/Connect.tsx",
-        "ui/Inspector.tsx",
-        "ui/TasksPage.tsx",
-        "ui/Workbench.tsx",
-        "ui/config/Directories.tsx",
-        "ui/config/GitHosts.tsx",
-        "ui/config/Roles.tsx",
-        "ui/config/Secrets.tsx",
-        "ui/config/Trackers.tsx",
-      ],
-    ],
+    /* Was nine screens. `IconButton` gained a `hint` — a tooltip that differs
+       from the name — and an `onClick` that can see its event, which is most
+       of why they were hand-rolled. */
+    ["gbtn", "components/ui/IconButton.tsx", []],
   ];
 
   test.each(OWNED)("`.%s` is written outside %s in exactly the known places", (cls, owner, known) => {

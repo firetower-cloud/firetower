@@ -31,6 +31,7 @@ export function IconButton({
   of,
   onClick,
   label,
+  hint,
   variant = "ghost",
   size = "sm",
   round,
@@ -40,9 +41,19 @@ export function IconButton({
 }: {
   /** The icon. Omit it and pass `glyph` for the one control that is a shape. */
   of?: LucideIcon;
-  onClick?: () => void;
+  onClick?: (e: React.MouseEvent<HTMLButtonElement>) => void;
   /** Named for a screen reader and, as a title, for everyone else. */
   label: string;
+  /**
+   * When the tooltip differs from the name.
+   *
+   * Most of the time they are the same sentence and `label` is both. A few
+   * controls want a name that does not change — "Reveal" to a screen reader —
+   * beside a tooltip that says what pressing it costs, or a keystroke. Those
+   * were hand-rolled rather than use this, which is most of why nine screens
+   * wrote `.gbtn` themselves.
+   */
+  hint?: string;
   variant?: Variant;
   size?: keyof typeof SIZE;
   /** Send and stop. Everything else is the square. */
@@ -57,7 +68,7 @@ export function IconButton({
       onClick={onClick}
       disabled={disabled}
       aria-label={label}
-      title={label}
+      title={hint ?? label}
       className={`gbtn ${round ? "rounded-full" : ""} disabled:cursor-not-allowed ${SIZE[size]} ${VARIANT[variant]} ${className}`}
     >
       {of ? <Icon of={of} size={16} /> : glyph}

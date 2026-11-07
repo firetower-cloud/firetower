@@ -59,6 +59,7 @@ import { ScopePicker, type ScopeItem } from "~/ui/config/ScopePicker";
 import { machineLabel, machines } from "~/api/environments";
 import type { Agent, Control, ControlKind, Role, NewRole } from "~/api/generated/model";
 import { useConfirm } from "~/ui/Confirm";
+import { IconButton } from "~/components/ui";
 
 /**
  * Where a child runs.
@@ -275,14 +276,13 @@ function RoleRow({
           same fact said the way a person would say it. */}
       <span className="path">{role.mayWrite ? role.path : `${role.path} · shared with you`}</span>
       {role.mayWrite && (
-        <button
+        <IconButton
+          of={Trash2}
           onClick={onDelete}
-          aria-label={`Delete ${role.name}`}
-          title="Delete profile"
-          className="gbtn hov hover:text-brick"
-        >
-          <Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} />
-        </button>
+          label={`Delete ${role.name}`}
+          hint="Delete profile"
+          className="hov hover:text-brick"
+        />
       )}
     </div>
   );

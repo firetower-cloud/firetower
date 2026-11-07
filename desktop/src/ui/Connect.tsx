@@ -14,7 +14,7 @@
  */
 import { useEffect, useState } from "react";
 import { ArrowRight, CircleSlash2, Loader2, Lock, Server, UserRound, X } from "lucide-react";
-import { Icon } from "~/components/ui";
+import { Icon, IconButton } from "~/components/ui";
 import { markOf } from "~/fleet";
 import { Mark } from "~/ui/Mark";
 import { MIN_SERVER, packaged, reach, signIn, type Bootstrap } from "~/probe";
@@ -405,9 +405,7 @@ function Who({
             {url.replace(/^https?:\/\//, "")} · {boot.version}
           </s>
         </span>
-        <button onClick={onBack} aria-label="Use a different address" className="gbtn">
-          <X className="h-4 w-4" strokeWidth={1.75} />
-        </button>
+        <IconButton of={X} onClick={onBack} label="Use a different address" />
       </div>
 
       <h1 className="mt-6">Who are you here?</h1>

@@ -17,7 +17,7 @@
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronDown, ChevronRight, FolderOpen, Plus, X } from "lucide-react";
-import { Icon } from "~/components/ui";
+import { Icon, IconButton } from "~/components/ui";
 import {
   createDirectory,
   getListDirectoriesQueryKey,
@@ -256,7 +256,8 @@ function One({
                       )
                     }
                   />
-                  <button
+                  <IconButton
+                    of={X}
                     onClick={() =>
                       act(
                         revoke.mutateAsync({
@@ -266,11 +267,9 @@ function One({
                         }),
                       )
                     }
-                    aria-label={`Take ${g.subjectName} out of ${directory.name}`}
-                    className="gbtn hov h-7 w-7 hover:text-brick"
-                  >
-                    <Icon of={X} size={14} />
-                  </button>
+                    label={`Take ${g.subjectName} out of ${directory.name}`}
+                    className="hov hover:text-brick"
+                  />
                 </>
               ) : (
                 <span className="lvl">{said(g.level)}</span>

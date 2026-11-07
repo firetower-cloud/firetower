@@ -16,7 +16,7 @@ import { childrenOf, group, placeOf } from "~/api/workspaces";
 import type { Backend } from "~/fleet";
 import { useHostOf, useSession, useSessions } from "~/data";
 import { navigate } from "~/shims/next-navigation";
-import { HostMark } from "~/components/ui";
+import { HostMark, IconButton } from "~/components/ui";
 import { Chat } from "~/ui/Chat";
 import { FileTab } from "~/ui/FileTab";
 import { ImageTab } from "~/ui/ImageTab";
@@ -565,14 +565,7 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
                 server refuses it below writer. Drawn for a viewer it was a button
                 that opened a form and failed at the end of it. */}
             {mayAct && (
-              <button
-                onClick={() => setAdding(true)}
-                title="Another agent here"
-                aria-label="Another agent here"
-                className="gbtn"
-              >
-                <UserPlus className="h-4 w-4" strokeWidth={1.75} />
-              </button>
+              <IconButton of={UserPlus} onClick={() => setAdding(true)} label="Another agent here" />
             )}
             {/* Who can reach this. First in the group, because it is the only
                 one carrying a word rather than a glyph: the icons keep their
@@ -600,14 +593,13 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
                 people's, so it is asked of the path rather than of the grant —
                 and drawn only to somebody the server will take it from. */}
             {mayEndPlace && (
-              <button
+              <IconButton
+                of={Trash2}
                 onClick={() => void endWorkspace(place, childrenOf(place, group(sessions ?? []).groups.flatMap(([, ps]) => ps))).then(({ ended, trouble }) => (ended ? navigate("/") : trouble && void confirm({ title: "It did not end.", body: trouble, action: "OK" })))}
-                title="End workspace — every agent in it stops, and every agent it started"
-                aria-label="End workspace"
-                className="gbtn hover:text-brick"
-              >
-                <Trash2 className="h-4 w-4" strokeWidth={1.75} />
-              </button>
+                label="End workspace"
+                hint="End workspace — every agent in it stops, and every agent it started"
+                className="hover:text-brick"
+              />
             )}
             <div className="relative">
               <button
@@ -626,14 +618,7 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
                 them — rather than one toggle that is in the wrong place half
                 the time. */}
             {!open && (
-              <button
-                onClick={() => setOpen(true)}
-                title={`Show the rail  ${key("\\")}`}
-                aria-label="Show the rail"
-                className="gbtn"
-              >
-                <PanelRight className="h-4 w-4" strokeWidth={1.75} />
-              </button>
+              <IconButton of={PanelRight} onClick={() => setOpen(true)} label="Show the rail" hint={`Show the rail  ${key("\\")}`} />
             )}
           </div>
         </div>

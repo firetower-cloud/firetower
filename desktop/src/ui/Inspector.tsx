@@ -24,6 +24,7 @@ import { Ship } from "~/ui/Ship";
 import { FileGlyph } from "~/ui/FileGlyph";
 import { ContextMenu, useMenu } from "~/ui/ContextMenu";
 import { downloadArchive, downloadFile, type SavePhase } from "~/api/download";
+import { IconButton } from "~/components/ui";
 
 const TABS = [
   { id: "overview", label: "Overview", icon: OverviewIcon },
@@ -175,9 +176,7 @@ export function Inspector({
           </button>
         ))}
         <span className="right">
-          <button onClick={onClose} title="Hide the inspector" aria-label="Hide the inspector" className="gbtn">
-            <PanelRightClose className="h-4 w-4" strokeWidth={1.75} />
-          </button>
+          <IconButton of={PanelRightClose} onClick={onClose} label="Hide the inspector" />
         </span>
       </div>
 

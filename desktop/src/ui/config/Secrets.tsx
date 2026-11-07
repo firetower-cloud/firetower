@@ -19,7 +19,7 @@
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Eye, EyeOff, KeyRound, ScrollText, Trash2 } from "lucide-react";
-import { Icon } from "~/components/ui";
+import { Icon, IconButton } from "~/components/ui";
 import { getListSecretsQueryKey, useListSecrets, useRemoveSecret, useReplaceSecret, useRevealSecret } from "~/api/generated/secrets/secrets";
 import type { HeldSecret } from "~/api/generated/model";
 import { Group, Section, WhereTo } from "~/ui/config/bits";
@@ -120,9 +120,27 @@ function Row({ id, scope, name, mine, path, onGone }: { id: string; scope: strin
               somebody asked for it, and the line under it says so. */}
           {shown ? <code className="shown">{shown}</code> : <span className="masked">••••••••••••</span>}
           <span className="hov flex items-center gap-1">
-            <button onClick={() => (shown ? setShown(null) : reveal.mutate({ scope, name }, { onSuccess: (r) => setShown(r.value) }))} title={shown ? "Hide" : "Reveal — this is logged"} className="gbtn h-7 w-7">{shown ? <EyeOff className="h-3.5 w-3.5" strokeWidth={1.75} /> : <Eye className="h-3.5 w-3.5" strokeWidth={1.75} />}</button>
-            <button onClick={() => setEditing("")} className="gbtn w-auto px-2 text-meta">replace</button>
-            <button onClick={() => void confirm({ title: `Remove ${scope}/${name}?`, body: "Sessions that were given it keep what they have.", action: "Remove", tone: "danger" }).then((ok) => ok && remove.mutate({ scope, name }, { onSuccess: onGone }))} title="Remove" className="gbtn h-7 w-7 hover:text-brick"><Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} /></button>
+            {/* The name does not change with the state — a screen reader
+                hearing "Hide" where it heard "Reveal" has to re-read the row
+                to know what happened. The tooltip says what pressing it
+                costs. */}
+            <IconButton
+              of={shown ? EyeOff : Eye}
+              onClick={() => (shown ? setShown(null) : reveal.mutate({ scope, name }, { onSuccess: (r) => setShown(r.value) }))}
+              label={shown ? "Hide the value" : "Reveal the value"}
+              hint={shown ? "Hide" : "Reveal — this is logged"}
+            />
+            {/* **Not an icon button.** This one is a word, and it wore
+                `.gbtn w-auto px-2` to borrow the shape — which is how a
+                primitive ends up with a variant nobody designed. */}
+            <button onClick={() => setEditing("")} className="btn quiet h-7 px-2 text-meta">replace</button>
+            <IconButton
+              of={Trash2}
+              onClick={() => void confirm({ title: `Remove ${scope}/${name}?`, body: "Sessions that were given it keep what they have.", action: "Remove", tone: "danger" }).then((ok) => ok && remove.mutate({ scope, name }, { onSuccess: onGone }))}
+              label={`Remove ${scope}/${name}`}
+              hint="Remove"
+              className="hover:text-brick"
+            />
           </span>
         </>
       )}

@@ -29,7 +29,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Check, Link2, Loader2, MoreHorizontal, Plus, X } from "lucide-react";
-import { HostMark, Icon } from "~/components/ui";
+import { HostMark, Icon, IconButton } from "~/components/ui";
 import type { AuthMode, KindInfo, ProbedProvider, ProviderStatus } from "~/api/generated/model";
 import {
   getListProvidersQueryKey,
@@ -258,13 +258,12 @@ function Provider({
           )}
 
           <div>
-            <button
+            <IconButton
+              of={MoreHorizontal}
               onClick={(e) => setMenu(menu ? null : e.currentTarget)}
-              aria-label={`More for ${p.label}`}
-              className="gbtn hov"
-            >
-              <Icon of={MoreHorizontal} size={14} />
-            </button>
+              label={`More for ${p.label}`}
+              className="hov"
+            />
             {/* Into `document.body`, because `Section` wraps these rows in an
                 `overflow-hidden` card and a clipping ancestor clips whatever
                 its descendants' z-index say. The sharing sheet learned this
