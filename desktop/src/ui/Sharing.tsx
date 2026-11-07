@@ -139,12 +139,18 @@ export function WhoCanAccess({
   id,
   path,
   look,
+  label,
 }: {
   kind: FiledKind;
   id: string;
   /** Where it is now. */
   path?: string | null;
   look: "toolbar" | "chip";
+  /* **A glyph among glyphs, a word among words.** The dense toolbars put this
+     beside other icon buttons where a label would be noise; the skill header
+     is a row of labelled buttons in the drawing, and a bare glyph in the
+     middle of it is the odd one out. */
+  label?: string;
 }) {
   const [open, setOpen] = useState(false);
   const me = useMe();
@@ -183,9 +189,10 @@ export function WhoCanAccess({
         /* **`Users`, not `UserPlus`.** The toolbar next to it has "another
            agent here", which is the user-plus glyph — two identical marks
            side by side, one adding a person and one sharing with people. */
-        className={`gbtn w-auto gap-1.5 px-1.5 ${open ? "bg-overlay text-bone" : ""}`}
+        className={label ? `btn quiet ${open ? "bg-overlay text-bone" : ""}` : `gbtn w-auto gap-1.5 px-1.5 ${open ? "bg-overlay text-bone" : ""}`}
       >
         <UsersRound className="h-4 w-4 shrink-0" strokeWidth={1.75} />
+        {label}
         {/* The root on the button when it is shared, because "who can see my
             work" is not a question anybody should have to open a dialog to
             answer. Nothing in your own space, which is the quiet default, and

@@ -110,6 +110,11 @@ export const RULES = function collect() {
   let embers = 0;
   const emberAt = [];
   for (const el of all) {
+    /* **An agent's mark is not an ember.** Claude's glyph is orange because
+       Claude's glyph is orange; the budget is about ember used as a *signal*
+       — somebody is waiting on you — and counting brand marks against it
+       made a workspace with four agents in it permanently over budget. */
+    if (el.closest("[data-mark], .face, .agentmark, [data-agent]")) continue;
     const s = getComputedStyle(el);
     const hit = isEmber(s.color) || isEmber(s.backgroundColor) || isEmber(s.borderTopColor);
     /* Count the mark, not its ancestors: an inherited colour is one ember. */
@@ -144,9 +149,14 @@ export const RULES = function collect() {
       const p = getComputedStyle(n);
       if (p.display !== "flex" || p.flexDirection !== "column") continue;
       if (p.minHeight === "0px" || p.minHeight === "0") continue;
-      /* A column that is not itself a flex child cannot overflow this way. */
+      /* **The automatic minimum size is a main-axis rule.** `min-height:
+         auto` only refuses to shrink when height *is* the main axis — that
+         is, when the column is a flex item in a column-direction parent. A
+         column sitting in a row has height as its cross axis and stretches
+         rather than overflowing, so the whole chrome was being reported and
+         the eight real candidates were buried under three hundred. */
       const gp = n.parentElement && getComputedStyle(n.parentElement);
-      if (!gp || gp.display !== "flex") continue;
+      if (!gp || gp.display !== "flex" || gp.flexDirection !== "column") continue;
       say("min-h-0-above-a-scroller", n, "min-height: 0", p.minHeight);
     }
   }
@@ -156,6 +166,10 @@ export const RULES = function collect() {
     if (el.children.length > 0) continue;
     const txt = (el.textContent || "").trim();
     if (!txt) continue;
+    /* A separator is drawn, not read. The drawing sets `.ftid .sep` to
+       `--hair` on purpose, and measuring it as text reported the same false
+       finding on eighty-five screens. */
+    if (!/[\p{L}\p{N}]/u.test(txt)) continue;
     const s = getComputedStyle(el);
     const fg = rgb(s.color);
     if (!fg) continue;
@@ -163,11 +177,13 @@ export const RULES = function collect() {
     const r = ratio(over(fg, bg), bg);
     const px = parseFloat(s.fontSize);
     const big = px >= 24 || (px >= 18.66 && parseInt(s.fontWeight, 10) >= 600);
-    /* 3.2 rather than 4.5 for the small tier: `--mute` is a documented 2.4:1
-       timestamp colour and failing it on every screen would bury the real
-       finding. This catches text that has gone *invisible*, which is the
-       class the hover bug belongs to. */
-    const floor = big ? 2.4 : el.closest("[aria-disabled='true']") ? 1.6 : 2.0;
+    /* **The floor is the scale's own faintest step, not a WCAG number.**
+       `--color-mute` is a documented timestamp colour that measures about
+       1.95:1 over `--color-raise`; failing it would report every secondary
+       line in the app and bury the finding that matters. What this is for is
+       text that has gone *invisible* — the class the rail hover belonged to,
+       where a colour meant for one ground ended up on another. */
+    const floor = big ? 1.8 : el.closest("[aria-disabled='true'],[disabled]") ? 1.4 : 1.9;
     if (r < floor) say("contrast-floor", el, `≥ ${floor}:1`, `${r.toFixed(2)}:1`);
   }
 
@@ -178,18 +194,22 @@ export const RULES = function collect() {
       return s.display !== "none" && k.getClientRects().length > 0 && s.position !== "absolute" && s.position !== "fixed";
     });
     if (kids.length < 2) continue;
-    const insets = kids.map((k) => {
-      const s = getComputedStyle(k);
-      /* A child that spans the column on purpose says so by being full-bleed
-         in both directions; what this is looking for is the odd one out. */
-      return `${s.paddingLeft}/${s.marginLeft}`;
-    });
+    /* **Where the child's box starts, not what it pads inside itself.** A
+       `.whereto` note has 18px of its own padding and still begins at the
+       column's edge like everything else; measuring padding called that a
+       different inset on thirty screens. The `.sk-tabs` defect was the box
+       itself starting at the column edge while its siblings started 32px
+       in — which is a geometry fact, so measure geometry. */
+    const edge = col.getBoundingClientRect().left + parseFloat(getComputedStyle(col).paddingLeft);
+    const insets = kids.map((k) => String(Math.round(k.getBoundingClientRect().left - edge)));
     const tally = {};
     insets.forEach((v) => (tally[v] = (tally[v] ?? 0) + 1));
     const common = Object.entries(tally).sort((a, b) => b[1] - a[1])[0];
     if (common[1] < kids.length) {
       kids.forEach((k, i) => {
-        if (insets[i] !== common[0]) say("page-column-inset", k, `padding-left/margin-left ${common[0]}`, insets[i]);
+        /* Within a pixel is the same inset; sub-pixel layout is not a bug. */
+        if (Math.abs(Number(insets[i]) - Number(common[0])) > 1)
+          say("page-column-inset", k, `${common[0]}px from the column edge`, `${insets[i]}px`);
       });
     }
   }

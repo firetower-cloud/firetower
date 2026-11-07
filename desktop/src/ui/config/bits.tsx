@@ -340,12 +340,21 @@ export function Blank({
  * came to invite somebody is told where to go, rather than shown a control
  * that is greyed out.
  */
-export function WhereTo({ children }: { children: React.ReactNode }) {
+export function WhereTo({
+  children,
+  icon,
+  className,
+}: {
+  children: React.ReactNode;
+  /* The drawing varies the glyph by what it is pointing at — people for the
+     administration site, a key for the control plane. Info is the default
+     because most of these are just "it lives over there". */
+  icon?: React.ReactNode;
+  className?: string;
+}) {
   return (
-    <div className="whereto">
-      <span className="g">
-        <Icon of={Info} size={16} />
-      </span>
+    <div className={className ? `whereto ${className}` : "whereto"}>
+      <span className="g">{icon ?? <Icon of={Info} size={16} />}</span>
       <p>{children}</p>
     </div>
   );

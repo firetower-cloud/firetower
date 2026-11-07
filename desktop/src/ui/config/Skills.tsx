@@ -641,7 +641,7 @@ function Detail({
                 Drop a new version
               </button>
             )}
-            <WhoCanAccess look="toolbar" kind="skill" id={skill.id} path={skill.path} />
+            <WhoCanAccess look="toolbar" label="Who can use it" kind="skill" id={skill.id} path={skill.path} />
             {skill.mayShare && (
               <button className="btn quiet" onClick={remove}>
                 <Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} />

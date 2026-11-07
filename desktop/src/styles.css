@@ -2338,6 +2338,17 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
   .btn.harm:hover {
     filter: brightness(1.08);
   }
+  /* **The quiet destructive.** The drawing has two weights and the build had
+     one: `.harm` is filled and belongs to the primary action of a dialog that
+     exists to destroy something, and `.danger` is brick text among ordinary
+     controls — "Forget this Firetower" beside "Sign out". Filling that one
+     made the loudest thing on the screen the one you almost never want. */
+  .btn.danger {
+    color: var(--color-brick);
+  }
+  .btn.danger:hover {
+    background: var(--color-brick-tint);
+  }
   /* The full-width commit at the foot of a panel. */
   .btn.ship {
     width: 100%;
@@ -3881,5 +3892,65 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
   }
   [data-theme="light"] .chip2 {
     background: var(--color-raise);
+  }
+
+  /* ── The account, which is four shapes the build never had ─────
+     A monogram beside the name, a plain raised card instead of a bordered
+     one, the amber band that says "you can carry on, but not for long", and
+     the small grey aside beside a control. */
+  .face2 {
+    width: 52px;
+    height: 52px;
+    flex: none;
+    border-radius: 99px;
+    background: var(--color-overlay);
+    display: grid;
+    place-items: center;
+    font-size: 1.125rem; /* 18px */
+    font-weight: var(--font-weight-mid);
+    color: var(--color-dim);
+    letter-spacing: 0.02em;
+  }
+  [data-theme="light"] .face2 {
+    background: var(--color-raise);
+  }
+  /* **No border.** A card here is a change of ground, not a frame — the
+     bordered version drew a box around two buttons and made them look like
+     a form. */
+  .card1 {
+    margin-top: 11px;
+    background: var(--color-raise);
+    border-radius: 13px;
+    padding: 15px 16px;
+  }
+  .warnbar {
+    margin-top: 20px;
+    display: flex;
+    gap: 11px;
+    align-items: flex-start;
+    padding: 13px 15px;
+    border-radius: 13px;
+    background: var(--color-amber-tint);
+  }
+  .warnbar .g {
+    flex: none;
+    color: var(--color-amber);
+    display: grid;
+    place-items: center;
+    margin-top: 1px;
+  }
+  .warnbar p {
+    font-size: var(--text-body);
+    line-height: 1.55;
+    color: var(--color-text);
+  }
+  .warnbar b {
+    font-weight: var(--font-weight-mid);
+    color: var(--color-bone);
+  }
+  .aside1 {
+    font-size: 0.84375rem; /* 13.5px */
+    line-height: 1.5;
+    color: var(--color-dim);
   }
 }

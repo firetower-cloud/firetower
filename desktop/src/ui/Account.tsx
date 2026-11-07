@@ -13,7 +13,7 @@
  * asking the server anything — for the day it is no longer reachable.
  */
 import { useMutation } from "@tanstack/react-query";
-import { ExternalLink, KeyRound, LogOut, Trash2 } from "lucide-react";
+import { ExternalLink, KeyRound, LogOut, Trash2, UsersRound } from "lucide-react";
 import { useLogout, useMe } from "~/api/generated/auth/auth";
 import { useBackendKey, dropCache } from "~/backend";
 import { forget, servers } from "~/servers";
@@ -23,6 +23,7 @@ import type { Backend } from "~/fleet";
 
 import { why } from "~/data";
 import { useConfirm } from "~/ui/Confirm";
+import { WhereTo } from "~/ui/config/bits";
 
 export function Account({ backend, onForgot }: { backend: Backend; onForgot: () => void }) {
   const confirm = useConfirm();
@@ -51,14 +52,32 @@ export function Account({ backend, onForgot }: { backend: Backend; onForgot: () 
     /* keep it as stored; the button is still better than no way out */
   }
 
+  /** The one-letter monogram, from whatever name there is. */
+  const mark = (user?.username ?? backend.user ?? "?")
+    .split(/[\s._-]+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase() ?? "")
+    .join("");
+
   return (
     <div className="scroll-slim h-full overflow-y-auto">
-      <div className="mx-auto max-w-[40rem] px-6 py-6 pb-16">
-        <h1 className="text-display text-bone">{user?.username ?? backend.user}</h1>
-        <p className="mt-2 text-read text-dim">
-          {user?.role ?? "member"} at <span className="text-text">{org?.name ?? backend.org}</span>
-          {stored && <span className="text-mute"> · {stored.url.replace(/^https?:\/\//, "")}</span>}
-        </p>
+      <div className="pg" style={{ maxWidth: "640px" }}>
+        {/* **A face beside the name.** The drawing opens this screen with a
+            monogram, which is the one place in the app where the person
+            looking is the subject rather than the operator. */}
+        <div className="pg-head" style={{ alignItems: "flex-start" }}>
+          <div className="flex min-w-0 items-center gap-[14px]">
+            <span className="face2">{mark}</span>
+            <div className="min-w-0">
+              <h1 className="text-[1.75rem] leading-tight font-medium tracking-tight text-bone">{user?.username ?? backend.user}</h1>
+              <p className="mt-[3px] text-read text-dim">
+                {user?.role ?? "member"} at <span className="font-medium text-bone">{org?.name ?? backend.org}</span>
+                {stored && <span className="text-mute"> · {stored.url.replace(/^https?:\/\//, "")}</span>}
+              </p>
+            </div>
+          </div>
+        </div>
         {me.error ? <p className="mt-2 text-meta text-brick">{why(me.error)}</p> : null}
 
         {/* Amber, not ember. **Ember means an agent is waiting on you and
@@ -67,35 +86,67 @@ export function Account({ backend, onForgot }: { backend: Backend; onForgot: () 
             not for long". This read as ember for as long as there has been an
             Account screen. */}
         {user?.mustChangePassword && (
-          <p className="mt-4 rounded-xl border border-amber-deep bg-amber-tint px-4 py-3 text-ui text-bone">
-            This password has to be replaced before anything else here will work. Open the control plane below and choose your own.
-          </p>
+          <div className="warnbar">
+            <span className="g"><KeyRound className="h-4 w-4" strokeWidth={1.75} /></span>
+            <p>
+              <b>This password has to be replaced before anything else here will work.</b> Open the control
+              plane below and choose your own.
+            </p>
+          </div>
         )}
 
         {/* The address this Mac reached the server on, which is the one proven
             to work from here — not a value the server reports about itself. */}
-        <section className="mt-7">
-          <h2 className="flex items-center gap-2 text-title text-bone"><KeyRound className="h-4 w-4 text-dim" strokeWidth={1.75} />Password</h2>
-          <p className="mt-0.5 text-meta text-mute">To manage your account and password open the Firetower control plane</p>
-          <div className="mt-2.5 rounded-xl border border-line bg-panel p-4">
-            <button
-              onClick={() => void openExternal(origin)}
-              className="btn plain"
-            >
+        <section className="lsec">
+          <h2>Password</h2>
+          <p className="note">
+            Your account and your password are managed on the Firetower control plane — one address this app
+            already knows, and never a version behind the server.
+          </p>
+          <div className="card1">
+            <button onClick={() => void openExternal(origin)} className="btn plain">
               Open {origin.replace(/^https?:\/\//, "")}
               <ExternalLink className="h-3 w-3" strokeWidth={1.75} />
             </button>
           </div>
         </section>
 
-        <section className="mt-7">
-          <h2 className="text-title text-bone">This Mac</h2>
-          <div className="mt-2.5 flex flex-wrap items-center gap-2 rounded-xl border border-line bg-panel p-4">
+        <section className="lsec">
+          <h2>This Mac</h2>
+          <p className="note">
+            Both of these are about this Mac rather than about your account. Neither touches anything running
+            on the server.
+          </p>
+          <div className="card1 flex flex-wrap items-center gap-3">
             <button disabled={leave.isPending} onClick={() => leave.mutate(true)} className="btn plain"><LogOut className="h-3.5 w-3.5" strokeWidth={1.75} />Sign out</button>
-            <span className="text-meta text-mute">revokes this Mac's token on the server</span>
-            <button disabled={leave.isPending} onClick={() => void confirm({ title: `Forget ${backend.org} on this Mac?`, body: "The token is dropped here; the server is not told, and its sessions carry on.", action: "Forget this server", tone: "danger" }).then((ok) => ok && leave.mutate(false))} className="control ml-auto text-mute hover:text-brick"><Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} />Forget this server</button>
+            <span className="aside1">revokes this Mac&rsquo;s token on the server</span>
+            {/* **Brick, and it says Firetower.** It was dim and said "server",
+                which is the one control on this screen that cannot be undone
+                drawn as the quietest thing on it. */}
+            <button
+              disabled={leave.isPending}
+              onClick={() =>
+                void confirm({
+                  title: `Forget ${backend.org} on this Mac?`,
+                  body: "The token is dropped here; the server is not told, and its sessions carry on.",
+                  action: "Forget this Firetower",
+                  tone: "danger",
+                }).then((ok) => ok && leave.mutate(false))
+              }
+              className="btn danger ml-auto"
+            >
+              <Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} />Forget this Firetower
+            </button>
           </div>
         </section>
+
+        {/* Where the rest of it is. Everything an administrator does to an
+            account happens somewhere else, and a screen that does not say so
+            is a screen people hunt around in. */}
+        <WhereTo className="mt-[22px]" icon={<UsersRound className="h-4 w-4" strokeWidth={1.75} />}>
+          Everything else about an account — inviting somebody, changing a role, disabling or deleting —
+          belongs to the administration site and is never drawn here. See <b>Settings &rarr; People</b>.
+        </WhereTo>
       </div>
     </div>
   );
