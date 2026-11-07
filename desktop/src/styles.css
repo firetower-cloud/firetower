@@ -232,7 +232,7 @@
   .server-mark {
     font-family: var(--font-narrow, Archivo Narrow), ui-sans-serif, system-ui, sans-serif;
     font-size: var(--text-meta);
-    font-weight: 700;
+    font-weight: 530;
     letter-spacing: 0.04em;
     color: var(--color-dim);
     background: var(--color-raise);
@@ -276,24 +276,37 @@
     height: 42px;
     flex: none;
     border-radius: 13px;
-    color: var(--color-text);
+    /* **The glyph recedes.** It rested at `--text` and brightened on hover,
+       which is two signals for one fact — the icon thickening *and* a ground
+       appearing. The container carries the state now; the glyph sits at
+       `--dim`, which is 3.63:1 on the rail's ground and so past the 3:1
+       non-text floor without competing with the sheet. */
+    color: var(--color-dim);
     transition:
       background var(--dur-native) var(--ease-swift),
-      color var(--dur-native) var(--ease-swift),
-      box-shadow var(--dur-native) var(--ease-swift);
+      color var(--dur-native) var(--ease-swift);
   }
   .rbtn:hover {
-    background: color-mix(in srgb, var(--color-raise) 70%, transparent);
-    color: var(--color-bone);
+    background: rgb(255 255 255 / 0.06);
+    color: var(--color-text);
+  }
+  [data-theme="light"] .rbtn:hover {
+    background: rgb(21 22 26 / 0.05);
   }
   .rbtn[data-peek="true"] {
-    background: var(--color-raise);
-    color: var(--color-bone);
+    background: rgb(255 255 255 / 0.07);
+    color: var(--color-text);
   }
+  [data-theme="light"] .rbtn[data-peek="true"] {
+    background: rgb(21 22 26 / 0.07);
+  }
+  /* **Inverted, and the only thing in the chrome that is.** It was a white
+     pill with a lift — the same *direction* as hover, so on and hovered read
+     alike. The rail is the one place with no label, so it is the one place
+     that earns an inversion. */
   .rbtn[aria-current="page"] {
-    background: var(--color-panel);
-    color: var(--color-bone);
-    box-shadow: var(--shadow-raise);
+    background: var(--color-bone);
+    color: var(--color-panel);
   }
   /* Something changed over there. Deliberately not ember: ember means an
      agent is waiting on *you*, and a newer build is not that. */
@@ -344,10 +357,11 @@
   .mrow:hover {
     background: color-mix(in srgb, var(--color-raise) 70%, transparent);
   }
+  /* **No shadow.** White on the desk grey is already a ΔE 6.2 step; a lift on
+     top of it is the same signal said twice. */
   .prow[aria-current="true"] {
     background: var(--color-panel);
     color: var(--color-bone);
-    box-shadow: var(--shadow-raise);
   }
   /* A menu sits on `--color-raise` already, so its hover has to be the next
      step up rather than the same one. */
@@ -759,7 +773,7 @@
   .btn.primary {
     background: var(--color-bone);
     color: var(--color-panel);
-    font-weight: 480;
+    font-weight: 500;
   }
   .btn.primary:hover {
     opacity: 0.86;
@@ -937,7 +951,7 @@
     font-size: 1.125rem; /* 18px */
     line-height: 1.3;
     letter-spacing: -0.014em;
-    font-weight: 540;
+    font-weight: 530;
     color: var(--color-bone);
   }
   .sksec .n {
@@ -988,7 +1002,7 @@
     box-shadow: var(--shadow-raise);
     font-family: var(--font-narrow), ui-sans-serif, system-ui, sans-serif;
     font-size: var(--text-ui);
-    font-weight: 700;
+    font-weight: 530;
     letter-spacing: 0.02em;
     color: var(--color-dim);
   }
@@ -1021,7 +1035,7 @@
     box-shadow: var(--shadow-raise);
     font-family: var(--font-narrow), ui-sans-serif, system-ui, sans-serif;
     font-size: 1.375rem;
-    font-weight: 700;
+    font-weight: 530;
     letter-spacing: 0.02em;
     color: var(--color-text);
   }
@@ -1091,7 +1105,7 @@
   }
   .sk-tabs button[aria-selected="true"] {
     color: var(--color-bone);
-    font-weight: 520;
+    font-weight: 500;
   }
   .sk-tabs button[aria-selected="true"]::after {
     content: "";
@@ -1546,9 +1560,9 @@
        code only. */
     overflow-wrap: anywhere;
   }
-  .prose-desk .ft-md h1 { font-size: var(--text-lede); line-height: 1.4; color: var(--color-bone); font-weight: 600; margin: 1.25rem 0 0.5rem; }
-  .prose-desk .ft-md h2 { font-size: var(--text-read); color: var(--color-bone); font-weight: 600; margin: 1.1rem 0 0.4rem; }
-  .prose-desk .ft-md h3, .prose-desk .ft-md h4 { font-size: var(--text-ui); color: var(--color-bone); font-weight: 600; margin: 1rem 0 0.3rem; }
+  .prose-desk .ft-md h1 { font-size: var(--text-lede); line-height: 1.4; color: var(--color-bone); font-weight: 530; margin: 1.25rem 0 0.5rem; }
+  .prose-desk .ft-md h2 { font-size: var(--text-read); color: var(--color-bone); font-weight: 530; margin: 1.1rem 0 0.4rem; }
+  .prose-desk .ft-md h3, .prose-desk .ft-md h4 { font-size: var(--text-ui); color: var(--color-bone); font-weight: 530; margin: 1rem 0 0.3rem; }
   .prose-desk .ft-md pre {
     margin: 0.75rem 0;
     padding: 0.75rem 0.9rem;
@@ -1803,7 +1817,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
     font-size: 1.0625rem; /* 17px */
     line-height: 1.3;
     letter-spacing: -0.012em;
-    font-weight: 540;
+    font-weight: 530;
     color: var(--color-bone);
   }
   .lsec > h2 .n {
@@ -1863,7 +1877,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
   .r .tx b {
     display: block;
     font-size: 0.90625rem; /* 14.5px */
-    font-weight: 480;
+    font-weight: 500;
     letter-spacing: -0.005em;
     color: var(--color-bone);
     white-space: nowrap;
@@ -1911,7 +1925,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
   }
   .r.sub .tx b {
     font-size: 0.84375rem;
-    font-weight: 420;
+    font-weight: 400;
     color: var(--color-text);
   }
 
@@ -1926,7 +1940,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
     background: var(--color-raise);
     color: var(--color-dim);
     font-size: 0.6875rem;
-    font-weight: 600;
+    font-weight: 530;
     letter-spacing: 0.02em;
   }
   .r:hover .face {
@@ -2118,7 +2132,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
     color: var(--color-text);
   }
   .whereto p b {
-    font-weight: 520;
+    font-weight: 500;
     color: var(--color-bone);
   }
 
@@ -2197,7 +2211,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
   .btn.harm {
     background: var(--color-brick);
     color: #fff;
-    font-weight: 480;
+    font-weight: 500;
   }
   .btn.harm:hover {
     filter: brightness(1.08);
@@ -2210,7 +2224,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
     margin-top: 15px;
     background: var(--color-bone);
     color: var(--color-panel);
-    font-weight: 480;
+    font-weight: 500;
   }
   .btn.ship:hover {
     opacity: 0.88;
@@ -2405,7 +2419,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
   .first .found .tx b {
     display: block;
     font-size: 0.90625rem;
-    font-weight: 520;
+    font-weight: 500;
     color: var(--color-bone);
   }
   .first .found .tx s {
@@ -2431,7 +2445,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
   .first .bad b {
     display: block;
     margin-bottom: 2px;
-    font-weight: 520;
+    font-weight: 500;
     color: var(--color-bone);
   }
   /* How far in you are, as four rules rather than "step 2 of 4". */
@@ -2715,7 +2729,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
   .tm .tx b {
     display: block;
     font-size: 0.84375rem;
-    font-weight: 480;
+    font-weight: 500;
     letter-spacing: -0.004em;
     color: var(--color-bone);
     white-space: nowrap;
@@ -2852,7 +2866,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
   }
   .mi .tx b {
     display: block;
-    font-weight: 460;
+    font-weight: 500;
     color: var(--color-bone);
     white-space: nowrap;
     overflow: hidden;
@@ -3028,6 +3042,53 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
     color: var(--color-dim);
   }
 
+  /* A choice as a row of pills, not a dropdown. Three placements with a word
+     of explanation each is a thing you read once and then point at; a select
+     hides two of the three behind the one that happens to be set. */
+  .pickrow {
+    display: flex;
+    gap: 7px;
+    flex-wrap: wrap;
+  }
+  .pk {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex: none;
+    height: 38px;
+    padding: 0 13px;
+    border-radius: 11px;
+    background: var(--color-raise);
+    font-size: 0.875rem;
+    color: var(--color-text);
+    transition:
+      background var(--dur-native) var(--ease-swift),
+      color var(--dur-native) var(--ease-swift);
+  }
+  .pk:hover {
+    background: var(--color-overlay);
+    color: var(--color-bone);
+  }
+  .pk[aria-pressed="true"] {
+    background: var(--color-bone);
+    color: var(--color-panel);
+  }
+  .pk .ic {
+    display: grid;
+    place-items: center;
+    color: var(--color-dim);
+  }
+  .pk[aria-pressed="true"] .ic {
+    color: var(--color-panel);
+  }
+  .pk .sub {
+    font-size: 0.78125rem;
+    color: var(--color-mute);
+  }
+  .pk[aria-pressed="true"] .sub {
+    color: color-mix(in srgb, var(--color-panel) 70%, transparent);
+  }
+
   /* Read-only: say what the screen is instead of greying what it is not. */
   .ro-note {
     display: flex;
@@ -3052,7 +3113,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
     color: var(--color-text);
   }
   .ro-note p b {
-    font-weight: 520;
+    font-weight: 500;
     color: var(--color-bone);
   }
 
@@ -3138,7 +3199,7 @@ html:not([data-platform="macos"]) .island[data-perch="notch"] {
   .sh-row .tx b {
     display: block;
     font-size: 0.875rem;
-    font-weight: 460;
+    font-weight: 500;
     color: var(--color-bone);
     white-space: nowrap;
     overflow: hidden;

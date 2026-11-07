@@ -376,7 +376,12 @@ export function Ship({ session, branch, files }: { session: Session; branch?: st
             disabled={busy || !!ship.blocked || (ship.stage === "uncommitted" && keeping.length === 0)}
             onClick={() => void go()}
             title={ship.blocked ?? undefined}
-            className="control mt-3.5 w-full justify-center border border-sage-deep bg-sage-tint font-medium text-sage transition-colors hover:bg-sage-deep/40 disabled:border-line disabled:bg-raise disabled:text-mute"
+            /* **Not sage.** The one filled button on a screen is bone on the
+               sheet, and sage in this system means *done* — a green "Commit
+               and open a pull request" says the thing has already happened.
+               The drawing's is `.btn.ship`: full width, filled, and plainly
+               the thing you came to do. */
+            className="btn ship"
           >
             {busyAt === ALL && step ? (
               <><Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={2} />{step}</>

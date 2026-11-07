@@ -75,7 +75,7 @@ export function ProfileMenu({
         className="group relative grid h-10 w-10 shrink-0 place-items-center rounded-full"
       >
         <span
-          className={`grid h-[30px] w-[30px] place-items-center rounded-full text-meta font-bold tracking-wide transition-colors ${
+          className={`grid h-[30px] w-[30px] place-items-center rounded-full text-meta font-mid tracking-wide transition-colors ${
             anchor ? "bg-panel text-bone" : "bg-raise text-dim group-hover:text-bone"
           } shadow-(--shadow-raise)`}
         >

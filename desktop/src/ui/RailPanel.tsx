@@ -262,9 +262,15 @@ function Customize() {
       {skills.data.length > 0 && (
         <>
           <Label>Your skills</Label>
+          {/* **Not monospace, and no monogram tile.** A skill's name is read
+              as a word, never character by character — which is the test the
+              handoff now gives for the mono voice. The six tiles that used to
+              sit here decoded to nothing (`it` for incident-timeline); a 17px
+              spacer keeps the column aligned with the rows above. */}
           {skills.data.slice(0, 8).map((s) => (
             <button key={s.id} onClick={() => navigate("/configuration/skills")} className="prow">
-              <span className="min-w-0 flex-1 truncate font-mono text-meta">{s.name}</span>
+              <span className="w-[17px] shrink-0" />
+              <span className="lbl">{s.name}</span>
             </button>
           ))}
         </>
@@ -358,7 +364,7 @@ function Artifacts() {
 function Head({ name, onCollapse }: { name: string; onCollapse: () => void }) {
   return (
     <div className="flex h-[38px] shrink-0 items-center gap-0.5 pr-2 pl-3.5">
-      <span className="min-w-0 flex-1 truncate text-ui font-semibold text-bone">{name}</span>
+      <span className="min-w-0 flex-1 truncate text-ui font-mid text-bone">{name}</span>
       {/* **Find anything, from the panel.** The drawing puts it here beside
           the collapse, in every destination's panel — the palette was
           reachable only by the key, which is the one way an affordance can be

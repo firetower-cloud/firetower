@@ -167,7 +167,7 @@ export function Skills() {
         <span className="plate">{monogram(s.name)}</span>
         <span className="min-w-0 flex-1">
           <span className="flex min-w-0 flex-wrap items-baseline gap-x-2.5 gap-y-1">
-            <span className="min-w-0 truncate font-mono text-ui font-medium text-bone">{s.name}</span>
+            <span className="min-w-0 truncate text-ui font-medium text-bone">{s.name}</span>
             <span className="shrink-0 text-meta tabular-nums text-mute">
               {s.held ? "waiting for you" : s.builtin ? "from Firetower" : s.version > 0 ? `v${s.version}` : "pending review"}
             </span>
@@ -523,7 +523,7 @@ function Empty({
 function Mark({ name }: { name: string }) {
   const letters = name.split("-").slice(0, 2).map((w) => w[0] ?? "").join("").toUpperCase();
   return (
-    <span className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-md border border-line bg-raise font-narrow text-micro font-bold uppercase text-dim shadow-raise">
+    <span className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-md border border-line bg-raise font-narrow text-micro font-mid uppercase text-dim shadow-raise">
       {letters}
     </span>
   );
@@ -986,7 +986,7 @@ function Versions({ id }: { id: string }) {
       <div className="overflow-hidden rounded-lg border border-line">
         {q.data.map((v, i) => (
           <div key={v.id} className="grid grid-cols-[42px_1fr_auto] gap-3 border-b border-line-soft px-3 py-2 last:border-b-0">
-            <span className="tabular-nums text-meta font-semibold text-bone">v{v.version}</span>
+            <span className="tabular-nums text-meta font-mid text-bone">v{v.version}</span>
             <span className="min-w-0">
               <span className="block text-meta text-dim">{v.notes || "No note."}</span>
               <span className="mt-0.5 block text-micro text-mute">
@@ -1002,7 +1002,7 @@ function Versions({ id }: { id: string }) {
         ))}
       </div>
       <p className="max-w-prose border-l-2 border-slate-deep pl-3 text-meta leading-relaxed text-dim">
-        <b className="font-semibold text-bone">A new version is taken by whoever starts next.</b> A session
+        <b className="font-mid text-bone">A new version is taken by whoever starts next.</b> A session
         already running keeps the version it pinned, because changing the instructions underneath a live
         conversation is the thing this avoids.
       </p>

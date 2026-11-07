@@ -149,7 +149,7 @@ export function Palette({ open, onClose }: { open: boolean; onClose: () => void 
                 className="row w-full text-left"
                 style={{ gridTemplateColumns: "18px 1fr auto", height: "32px" }}
               >
-                <span className="text-micro font-bold text-mute" style={{ fontFamily: "var(--font-narrow)" }}>
+                <span className="text-micro font-mid text-mute" style={{ fontFamily: "var(--font-narrow)" }}>
                   {i.mark ?? "›"}
                 </span>
                 <span className="flex min-w-0 items-baseline gap-2">

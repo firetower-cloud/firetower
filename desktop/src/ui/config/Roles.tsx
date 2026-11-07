@@ -569,16 +569,25 @@ function Editor({
   };
 
   return (
-    <div className="px-1 pb-10">
+    <div className="pg">
       <button
         onClick={onClose}
-        className="flex items-center gap-1.5 px-2.5 py-2.5 text-ui text-dim transition-colors hover:text-bone"
+        className="flex items-center gap-1.5 py-1 text-ui text-dim transition-colors hover:text-bone"
       >
         <ChevronLeft className="h-3.5 w-3.5" strokeWidth={2} />
-        Profiles
+        All profiles
       </button>
 
-      <div className="space-y-4 px-2.5">
+      {/* **A heading.** The form opened straight onto "Name", so the screen
+          never said which profile you were reading or what a profile is. */}
+      <div className="pg-head mt-4">
+        <div>
+          <h1>{draft.name.trim() || "New profile"}</h1>
+          <p className="sub">What it is for, what it may do, and who it may hand work to.</p>
+        </div>
+      </div>
+
+      <div className="form">
         <Field label="Name" hint="What you start it as, and what a lead names to delegate to it — e.g. reviewer.">
           <input
             value={draft.name}
@@ -605,17 +614,26 @@ function Editor({
           label="Placement"
           hint="Where a child runs when a lead delegates to it. Every spawn runs the same way."
         >
-          <Select
-            ariaLabel="Placement"
-            value={draft.placement ?? "here"}
-            options={PLACEMENTS.map((p) => ({
-              value: p.value,
-              icon: <p.icon className="h-4 w-4" strokeWidth={1.75} />,
-              label: p.label,
-              note: p.note,
-            }))}
-            onChange={(v) => set("placement", v ?? "here")}
-          />
+          {/* **Pills, not a dropdown.** Three placements with a word of
+              explanation each is a thing you read once and then point at; a
+              select hides two of the three behind whichever is set. */}
+          <div className="pickrow">
+            {PLACEMENTS.map((p) => (
+              <button
+                key={p.value ?? "here"}
+                type="button"
+                aria-pressed={(draft.placement ?? "here") === p.value}
+                onClick={() => set("placement", p.value ?? "here")}
+                className="pk"
+              >
+                <span className="ic">
+                  <p.icon className="h-4 w-4" strokeWidth={1.75} />
+                </span>
+                {p.label}
+                {p.note && <span className="sub">{p.note}</span>}
+              </button>
+            ))}
+          </div>
         </Group>
 
         {draft.placement === "new" && (
@@ -624,12 +642,21 @@ function Editor({
             hint="Which machine its own workspace runs on."
           >
             {machineOptions.length > 0 ? (
-              <Select
-                ariaLabel="Machine"
-                value={draft.machine ?? null}
-                options={machineOptions}
-                onChange={(v) => set("machine", v)}
-              />
+              <div className="pickrow">
+                {machineOptions.map((m) => (
+                  <button
+                    key={m.value ?? "any"}
+                    type="button"
+                    aria-pressed={(draft.machine ?? null) === m.value}
+                    onClick={() => set("machine", m.value)}
+                    className="pk"
+                  >
+                    <span className="ic">{m.icon}</span>
+                    {m.label}
+                    {m.note && <span className="sub">{m.note}</span>}
+                  </button>
+                ))}
+              </div>
             ) : (
               <p className="rounded-md border border-line bg-ground px-3 py-2 text-meta text-mute">
                 No machine is connected. Add one under Machines, or use the same workspace.
@@ -845,6 +872,14 @@ function Editor({
   );
 }
 
+/**
+ * A labelled input, with its hint **above** the control.
+ *
+ * The hint sat underneath, which puts the explanation after the decision —
+ * and in a form of eight fields it reads as a footnote to the thing above
+ * rather than an introduction to the thing below. The drawing's `.fld` has
+ * label, hint, box, in that order.
+ */
 function Field({
   label,
   hint,
@@ -855,10 +890,10 @@ function Field({
   children: React.ReactNode;
 }) {
   return (
-    <label className="flex flex-col gap-1.5">
-      <span className="text-meta font-medium text-dim">{label}</span>
+    <label className="fld">
+      <span>{label}</span>
+      {hint && <span className="hint">{hint}</span>}
       {children}
-      {hint && <span className="text-micro text-mute">{hint}</span>}
     </label>
   );
 }
@@ -880,10 +915,10 @@ function Group({
   children: ReactNode;
 }) {
   return (
-    <div role="group" aria-label={label} className="flex flex-col gap-1.5">
-      <span className="text-meta font-medium text-dim">{label}</span>
+    <div role="group" aria-label={label} className="fld">
+      <span>{label}</span>
+      {hint && <span className="hint">{hint}</span>}
       {children}
-      {hint && <span className="text-micro text-mute">{hint}</span>}
     </div>
   );
 }
