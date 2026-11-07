@@ -22,14 +22,15 @@
  * dots in a row is the exact failure the redesign's first round was rejected
  * for.
  */
-import { useMemo } from "react";
-import { ChevronRight } from "lucide-react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { ChevronRight, ChevronUp } from "lucide-react";
 import { Icon } from "~/components/ui";
 import { ArtifactShot } from "~/components/ArtifactShot";
+import { BeatMark } from "~/components/BeatMark";
 import { useListArtifacts } from "~/api/generated/artifacts/artifacts";
 import type { Artifact } from "~/api/generated/model";
 import { elapsed, minutesSince, needsYou } from "~/api/view";
-import { flat, group, isChild, placeBeat } from "~/api/workspaces";
+import { flat, group, isChild, placeBeat, type Workspace } from "~/api/workspaces";
 import { useSessions } from "~/data";
 import { useFleet, waitingIn, type Backend } from "~/fleet";
 import { navigate } from "~/shims/next-navigation";
@@ -40,6 +41,20 @@ import { cameFrom } from "~/ui/ArtifactsPage";
 /** Small numbers read as words. A sentence does not count in digits. */
 const WORDS = ["no", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine"];
 const say = (n: number) => WORDS[n] ?? String(n);
+
+/**
+ * The three sections, in order, above *Recent artifacts*.
+ *
+ * They key off `BEAT` through `placeBeat`, the same rollup the rail's mark
+ * and the panel's dot use — one fact, one function. Each chip carries its own
+ * tone, which is what makes three sections legible rather than three
+ * identical grey rows.
+ */
+const BANDS = [
+  { beat: "blocked", title: "Waiting for you" },
+  { beat: "done", title: "Handed back" },
+  { beat: "working", title: "Working" },
+] as const;
 
 /** How many waiting chips carry a dot. See the ember budget above. */
 export const DOTTED = 2;
@@ -79,7 +94,7 @@ export function Home({ backend, onSwitch }: { backend: Backend; onSwitch: (serve
      renders of its own. */
   useNow();
 
-  const { asks, every } = useMemo(() => {
+  const { bands, asks, every } = useMemo(() => {
     const live = sessions.filter((s) => s.status !== "Ended");
     const places = flat(group(live));
     /* A child in its own workspace lives under its lead in the Overview tab,
@@ -89,8 +104,25 @@ export function Home({ backend, onSwitch }: { backend: Backend; onSwitch: (serve
        back and failed both want you — what changes is that each chip wears
        its own tone. The section says *these need you*; the dot says what
        kind of needing. */
+    const top = places.filter((p) => !isChild(p, places));
     return {
-      asks: places.filter((p) => !isChild(p, places)).filter((p) => p.runs.some(needsYou)),
+      /* **An empty section is not drawn at all.** Three headings with
+         nothing under two of them is worse than one heading, and a section
+         that is sometimes there reads more easily than a section that is
+         sometimes empty. So *nothing waiting* is not a state of this page —
+         it is the Waiting section not existing while the other two carry
+         on, and all three gone is first run. */
+      bands: BANDS.map((b) => ({
+        ...b,
+        list: top.filter((p) => {
+          const beat = placeBeat(p, places);
+          /* **`broken` has no section of its own.** It sits in *Waiting for
+             you* with its brick triangle, which is the status quo; giving it
+             a fourth section is a question the user has deferred. */
+          return beat === b.beat || (b.beat === "blocked" && beat === "broken");
+        }),
+      })).filter((b) => b.list.length > 0),
+      asks: top.filter((p) => p.runs.some(needsYou)),
       /* `placeBeat` reads one hop past what is drawn, so it needs them all. */
       every: places,
     };
@@ -108,54 +140,35 @@ export function Home({ backend, onSwitch }: { backend: Backend; onSwitch: (serve
      simply absent — no heading over three grey plates, and no sentence
      explaining what an artifact is. The composer is the only thing to do and
      the page says so by having nothing else on it. */
-  const bare = asks.length === 0 && recent.length === 0;
-  const over = asks.length - DOTTED;
+  const bare = bands.length === 0 && recent.length === 0;
+
+  /** Which section is open, if any. */
+  const [expanded, setExpanded] = useState<string | null>(null);
+
+  /**
+   * **What *View more* does — one function, by design.**
+   *
+   * Expanding in place is what was asked for and what the drawing defaults
+   * to. The alternative is opening the Workspaces panel at that band, which
+   * matters because expanding measured **5 ember at 36 workspaces against a
+   * budget of 3**, and the home has no exemption where the panel does.
+   *
+   * That decision is still with the user, so switching it is this body and
+   * not a refactor: replace the two lines with a navigate and a band.
+   */
+  const openBand = (beat: string) => setExpanded((held) => (held === beat ? null : beat));
 
   return (
     <StartComposer mid bare={bare} above={<h1>{greeting()}, what should we work on?</h1>}>
-      {asks.length > 0 && (
-        <section className="sect">
-          <div className="hd">
-            <h2>Agents waiting for you</h2>
-          </div>
-          <div className="chips">
-            {asks.slice(0, DOTTED).map((place) => {
-              const asking = place.runs.find(needsYou);
-              const note = asking?.note?.trim();
-              return (
-                <button
-                  key={place.id}
-                  onClick={() => navigate(`/sessions/${place.id}`)}
-                  title={note ? `${place.name} — ${note}` : place.name}
-                  className="sw"
-                >
-                  {/* **The same function the rail uses.** This was a bare
-                      ember dot on every chip, so a workspace that had handed
-                      back drew sage in the panel and ember here, and a
-                      failed one drew brick there and ember here. Two
-                      surfaces, one fact, two functions. */}
-                  <span className="dot" data-t={placeBeat(place, every)} />
-                  <b>{place.name}</b>
-                  <span className="age">
-                    {elapsed(minutesSince((asking ?? place.runs[0]).createdAt))}
-                  </span>
-                </button>
-              );
-            })}
-            {/* No dot. This is a count, not a third thing shouting. */}
-            {over > 0 && (
-              <button
-                onClick={() => navigate(`/sessions/${asks[DOTTED].id}`)}
-                data-over="true"
-                title={`${over} more waiting`}
-                className="sw"
-              >
-                <b>{say(over)} more</b>
-              </button>
-            )}
-          </div>
-        </section>
-      )}
+      {bands.map((band) => (
+        <Band
+          key={band.beat}
+          band={band}
+          every={every}
+          open={expanded === band.beat}
+          onMore={() => openBand(band.beat)}
+        />
+      ))}
 
       {recent.length > 0 ? (
         <section className="sect">
@@ -216,5 +229,96 @@ function Poster({ artifact }: { artifact: Artifact }) {
         </span>
       </span>
     </button>
+  );
+}
+
+/**
+ * One section: a heading, one line of chips, and *View more* when there is
+ * more than a line.
+ *
+ * **The clip is measured, not counted.** A fixed number of chips is wrong the
+ * moment a name is long, and a wrapped flex row moves a whole item down
+ * rather than slicing one — so clipping to the first chip's height hides
+ * chips entirely and never cuts through a name. *View more* appears only
+ * when something is actually on a second row, which is read off the layout
+ * rather than assumed.
+ *
+ * The chip caps at 306px and truncates, so one name can never fill the line
+ * alone; the column is capped at 748px, which makes how many fit a constant
+ * of the design rather than of the window.
+ */
+function Band({
+  band,
+  every,
+  open,
+  onMore,
+}: {
+  band: { beat: string; title: string; list: Workspace[] };
+  every: Workspace[];
+  open: boolean;
+  onMore: () => void;
+}) {
+  const row = useRef<HTMLDivElement>(null);
+  const [spills, setSpills] = useState(false);
+
+  /* After layout, because `offsetTop` before it is a guess. */
+  useLayoutEffect(() => {
+    const el = row.current;
+    if (!el) return;
+    const measure = () => {
+      const chips = [...el.children] as HTMLElement[];
+      el.style.maxHeight = "";
+      if (chips.length === 0) return setSpills(false);
+      const top = chips[0].offsetTop;
+      const over = chips.some((c) => c.offsetTop > top + 2);
+      setSpills(over);
+      if (over && !open) el.style.maxHeight = `${chips[0].offsetHeight}px`;
+    };
+    measure();
+    const watch = new ResizeObserver(measure);
+    watch.observe(el);
+    return () => watch.disconnect();
+  }, [band.list, open]);
+
+  return (
+    <section className="sect">
+      <div className="hd">
+        <h2>{band.title}</h2>
+        {/* **One function, so the target is a line to change.** What *View
+            more* does is still with the user: expanding in place measured 5
+            ember at 36 workspaces against a budget of 3, and the home has no
+            exemption — opening the Workspaces panel at this band measures 3.
+            It expands, because that is what was asked for; `onMore` is where
+            it switches. */}
+        <button hidden={!spills} onClick={onMore} className="all">
+          {open ? "View less" : "View more"}
+          <Icon of={open ? ChevronUp : ChevronRight} size={14} />
+        </button>
+      </div>
+      <div ref={row} className="chips" data-one={!open}>
+        {band.list.map((place) => {
+          const beat = placeBeat(place, every);
+          const asking = place.runs.find(needsYou);
+          const note = asking?.note?.trim();
+          return (
+            <button
+              key={place.id}
+              onClick={() => navigate(`/sessions/${place.id}`)}
+              title={note ? `${place.name} — ${note}` : place.name}
+              className="sw"
+            >
+              {/* **The same alphabet the team rail uses.** This was a plain
+                  `.dot` wearing the beat as a colour, so a failed workspace
+                  was a brick circle here beside ember circles — one shape
+                  told from another by hue, which is the one thing the guide
+                  forbids. `broken` is the warning triangle. */}
+              <BeatMark beat={beat} />
+              <b>{place.name}</b>
+              <span className="age">{elapsed(minutesSince((asking ?? place.runs[0]).createdAt))}</span>
+            </button>
+          );
+        })}
+      </div>
+    </section>
   );
 }

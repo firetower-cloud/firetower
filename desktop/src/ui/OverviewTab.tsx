@@ -15,6 +15,7 @@ import { useMemo } from "react";
 import { Check, ExternalLink, FileText, GitBranch, GitPullRequest, LayoutList, Link2, TriangleAlert } from "lucide-react";
 import { navigate } from "~/shims/next-navigation";
 import { AgentMark } from "~/components/AgentMark";
+import { StatusMark } from "~/components/BeatMark";
 import { BEAT_TONE, beatOf, elapsed, minutesSince } from "~/api/view";
 import { useConversation } from "~/api/conversation";
 import { relays } from "~/api/relay";
@@ -87,45 +88,10 @@ function Panel({
 /** How long since it last moved, in the rail's own shorthand. */
 const age = (at: string) => elapsed(minutesSince(at));
 
-/**
- * One mark per state, in the colour that state already has.
- *
- * **No new hue.** `BEAT_TONE` in `api/view.ts` is the one table that says
- * what a status means — working: slate, blocked: ember, done: sage, broken:
- * brick, over: mute — and it has shipped all along. This rail drew every one
- * of them in neutral ink, so three different facts looked like one grey
- * thing, told apart by an 11px shape. The Plan two inches below already drew
- * a finished step in sage while *handed back* up here was grey: one meaning,
- * one panel, two renderings.
- *
- * **Never hue alone.** `failed` used to be a round pip, two rows under a
- * round ember dot — one circle told from another by colour, which is the one
- * thing `STYLE.md` forbids and a dichromat cannot do. It is a warning glyph
- * now: a tick and a triangle read apart with the colour off.
- *
- * The ember budget is unmoved. This rail contributes exactly one mark —
- * *asked you a question* — and that was ember before.
- */
-function TeamMark({ status }: { status: SessionStatus }) {
-  const tone = BEAT_TONE[beatOf({ status })];
-  if (status === "NeedsYou") return <span className="dot" title="asked you a question" />;
-  if (status === "Working" || status === "Starting") {
-    return (
-      <span className={`typing ${tone}`} title="working">
-        <i />
-        <i />
-        <i />
-      </span>
-    );
-  }
-  if (status === "Failed") {
-    return <TriangleAlert className={`h-3.5 w-3.5 ${tone}`} strokeWidth={2} aria-label="failed" />;
-  }
-  if (status === "Ended") {
-    return <Check className={`h-3.5 w-3.5 ${tone}`} strokeWidth={2} aria-label="ended" />;
-  }
-  return <Check className={`h-3.5 w-3.5 ${tone}`} strokeWidth={2} aria-label="handed back" />;
-}
+/* `TeamMark` was here. It is `StatusMark` in `~/components/BeatMark` now,
+   because the home's chips were drawing the same alphabet a second way —
+   a plain `.dot` for every beat, so a failed workspace was a brick circle
+   there and a triangle here. */
 
 /** The manager at the top of the Team panel — the level above. The active card
  *  when it is this workspace, a link up when it is the parent of a child. */
@@ -142,7 +108,7 @@ function ManagerRow({ manager, active }: { manager: Session; active: boolean }) 
           title bar — but a row with no mark in a column of marks reads as
           missing, and the manager's state is a fact like any other. */}
       <span className="lead">
-        <TeamMark status={active ? manager.status : "Working"} />
+        <StatusMark status={active ? manager.status : "Working"} />
       </span>
       <span className="tx one">
         <b>{agentName(manager.name)}</b>
@@ -190,7 +156,7 @@ function MemberRow({ member, active, shared }: { member: Session; active: boolea
   const inner = (
     <>
       <span className="lead">
-        <TeamMark status={member.status} />
+        <StatusMark status={member.status} />
       </span>
       <span className="tx one">
         <b>{label}</b>

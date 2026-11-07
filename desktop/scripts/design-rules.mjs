@@ -50,9 +50,33 @@ export const RULES = function collect() {
     out.push({ rule, at, expected, actual });
   };
 
+  /**
+   * **A clipped child still has a bounding rect.** `overflow: hidden` on an
+   * ancestor does not zero it, so a chip on a hidden second row counted
+   * against the ember budget while the page showed nothing there — five
+   * reported where two were drawn.
+   *
+   * So "on screen" means inside every clipping ancestor, not merely laid
+   * out. Checked against the ancestor's *padding box*, which is what
+   * `overflow` clips to.
+   */
+  const onScreen = (el) => {
+    const box = el.getBoundingClientRect();
+    if (box.width === 0 || box.height === 0) return false;
+    for (let n = el.parentElement; n && n !== document.body; n = n.parentElement) {
+      const s = getComputedStyle(n);
+      if (s.overflow === "visible" && s.overflowX === "visible" && s.overflowY === "visible") continue;
+      const clip = n.getBoundingClientRect();
+      /* Wholly outside the clip in either axis means it cannot be seen. */
+      if (box.bottom <= clip.top + 1 || box.top >= clip.bottom - 1) return false;
+      if (box.right <= clip.left + 1 || box.left >= clip.right - 1) return false;
+    }
+    return true;
+  };
+
   const all = [...document.querySelectorAll("*")].filter((el) => {
     const s = getComputedStyle(el);
-    return s.display !== "none" && s.visibility !== "hidden" && el.getClientRects().length > 0;
+    return s.display !== "none" && s.visibility !== "hidden" && el.getClientRects().length > 0 && onScreen(el);
   });
 
   /* ── Colour, resolved ─────────────────────────────────────────────── */

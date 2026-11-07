@@ -3418,6 +3418,21 @@ html:not([data-platform="macos"]) {
     gap: 8px;
     margin-top: 12px;
   }
+  /* **One row, clipped to a measured height.** A wrapped flex row moves a
+     whole item down rather than slicing one, so clipping hides chips
+     entirely and never cuts through a name. The height is read off the
+     first chip after layout — a fixed count is wrong the moment a name is
+     long, and the column is capped at 748px so how many fit is a constant
+     of the design rather than of the window. */
+  .chips[data-one="true"] {
+    overflow: hidden;
+  }
+  .sect .all[hidden] {
+    display: none;
+  }
+  .sw .typing {
+    transform: scale(0.86);
+  }
   .chips .sw {
     display: inline-flex;
     align-items: center;
