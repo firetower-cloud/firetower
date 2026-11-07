@@ -39,8 +39,20 @@ of its own — but it is not "dark, plus light later".
 
 ## Phase 1 — the shell
 
-7. The rail is 62px, with six destinations and two settings doors below a rule.
-8. `⌘1`–`⌘6` reach the six destinations. `⌘,` reaches Settings.
+7. The rail is 62px, with six destinations and nothing under them but the
+   avatar. *(Corrected: this said "and two settings doors below a rule". The
+   **user changed the design** on 7 November 2026 after seeing Settings and
+   Updates drawn as rail icons *and* as rows in the profile menu — the menu is
+   the single home for both. This is not one of the criteria-written-off-the-
+   codebase below; the drawing has been updated to match the decision.)*
+8. `⌘1`–`⌘6` reach the six destinations. `⌘,` reaches Settings, from the
+   profile menu's row and from anywhere in the window. The palette offers
+   Settings and Updates by name, since neither has a rail icon.
+8a. **An available update marks the avatar**, visible without hover and without
+    opening the menu. It is the only thing that may set that mark; the ember
+    dot beside it means an agent is waiting on you somewhere you are not, and
+    nothing else may dot the avatar at all. The Updates row inside the menu
+    names the version that is ready.
 9. A destination's panel previews on hover **and on keyboard focus**; clicking
    pins it. Nothing in the rail is reachable only by pointer.
 10. `⌘\` collapses and restores the panel.
@@ -96,7 +108,11 @@ of its own — but it is not "dark, plus light later".
     this originally said "Sources holds Repositories, Git hosts, Machines and
     Trackers", which was read off the artifact's document-tab grouping rather
     than its rail. There is no Sources destination and never was.)*
-35. Settings holds People, Teams, Directories, Vault and This Firetower.
+35. Settings holds People, Teams, Directories, Vault and This Firetower, and
+    **carries its own navigation between them at the top of each pane** — the
+    same five, the same order, the same three group names the rail panel used
+    to draw. *(Amended with 7: Settings has no rail icon, so it has no rail
+    panel, and this is where its index went.)*
 36. People and Teams draw no invite, role, disable or delete control — and no
     disabled control either. Each says where that work is done.
 37. Connecting a git host supports GitHub, GitLab and Gitea, each with its own
@@ -193,6 +209,11 @@ picker the code argues for), and 43 (a skill's four old tabs). Each was written
 by reading the codebase, and each instructed the build to preserve the thing the
 redesign replaced. An engineer meeting them exactly produced the old screen and
 reported it as passing, which was accurate and useless.
+
+**7 and 35 are a different kind of correction and are not in that tally.** They
+were right about the drawing; the *user* changed the design under them. When
+that happens the drawing is brought up to date first and the criterion follows
+it — which is the same rule, read from the other end.
 
 So: this document is a convenience, not the authority.
 `docs/prototypes/redesign/desktop-redesign.html` is the authority. If a screen

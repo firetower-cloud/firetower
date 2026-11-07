@@ -273,16 +273,21 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
 .rbtn[aria-current="page"]{background:var(--ink);color:var(--sheet)}
 .rbtn[data-peek="true"]{background:rgb(22 22 23 / .07);color:var(--body)}
 :root[data-theme="dark"] .rbtn[data-peek="true"]{background:rgb(255 255 255 / .07)}
-.rbtn .news{position:absolute;top:5px;right:5px;width:5.5px;height:5.5px;border-radius:99px;
-  background:var(--body);box-shadow:0 0 0 2px var(--desk)}
 .rgrow{flex:1}
-.rail .sep{width:22px;height:1px;background:var(--sunk);margin:7px 0;flex:none}
 .avatar{position:relative;width:40px;height:40px;display:grid;place-items:center;border-radius:99px;flex:none}
 .avatar .face{width:30px;height:30px;border-radius:99px;display:grid;place-items:center;background:var(--raised);
   box-shadow:var(--lift-2);color:var(--quiet);font-size:12.5px;font-weight:530;letter-spacing:.02em;
   transition:color var(--quick) var(--swift)}
 .avatar:hover .face{color:var(--ink)}
 .avatar[aria-expanded="true"] .face{background:var(--sheet);color:var(--ink)}
+/* **Two marks, each meaning exactly one thing.** The ember dot sits top right
+   and means an agent is waiting on you somewhere you are not. `.news` sits
+   bottom right and means there is an update to take — and nothing else, ever.
+   It was `.rbtn .news`, on the rail's Updates icon; that icon has gone, so the
+   mark comes to the button the Updates row now hangs off. Never ember: ember
+   is reserved for an agent waiting on *you*, and a newer build is not that. */
+.avatar .news{position:absolute;bottom:2px;right:2px;width:5.5px;height:5.5px;border-radius:99px;
+  background:var(--body);box-shadow:0 0 0 2px var(--desk)}
 
 /* ── The panel beside it ─────────────────────────────────────── */
 .panel{width:252px;flex:none;display:flex;flex-direction:column;min-height:0;overflow:hidden}
@@ -1087,6 +1092,29 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
 .pg-head h1{font-size:32px;line-height:1.14;letter-spacing:-.026em;font-weight:530;color:var(--ink)}
 .pg-head .sub{margin-top:8px;font-size:16.5px;line-height:1.55;color:var(--quiet);max-width:52ch}
 .pg-head .acts{margin-left:auto;display:flex;align-items:center;gap:8px;flex:none;padding-top:5px}
+/* ── Settings' own index ──────────────────────────────────────────
+   Settings is a row in the profile menu and has no rail icon, so the five
+   panes it owns are navigated from inside the page. Plain text with an
+   underline — the inspector tabs' rule, for the same job: the index of a page
+   must not compete with the page.
+
+   Two lines, because the grouping is load-bearing. The group name sits over
+   its own cluster, so "Who can reach what" reads as a heading for the three
+   under it; a flat strip of five tabs would have to drop the names, and the
+   names are the part that says why Teams is beside Directories. A column of
+   grouped rows beside the page would keep them and cost 190px of width next
+   to a rail panel that is still open — the two-rails screen this redesign
+   exists to undo. */
+.snav{display:flex;align-items:flex-start;flex-wrap:wrap;gap:12px 30px;margin-bottom:30px}
+.sgroup{display:flex;flex-direction:column;gap:6px;min-width:0}
+.slabel{font-size:13.5px;line-height:1.45;letter-spacing:.004em;color:var(--hush)}
+.sitems{display:flex;align-items:center;gap:16px}
+.sitem{position:relative;flex:none;padding:1px 0;font-size:15px;line-height:1.4;color:var(--quiet);
+  transition:color var(--quick) var(--swift)}
+.sitem:hover{color:var(--body)}
+.sitem[aria-current="true"]{color:var(--ink);font-weight:530}
+.sitem[aria-current="true"]::after{content:"";position:absolute;left:0;right:0;bottom:-4px;height:2px;
+  border-radius:2px;background:var(--ink)}
 .out{display:inline-flex;align-items:center;gap:7px;height:36px;padding:0 14px;border-radius:99px;
   background:var(--raised);color:var(--body);font-size:14.5px;flex:none;
   transition:background var(--quick) var(--swift)}
@@ -2211,16 +2239,6 @@ const S={theme:"light",panel:"pinned",peek:null,menu:null,tower:"nw",
   home:"both",               // both | nowait | noart | neither
   when:null,                 // force a greeting: morning | afternoon | evening
   pvw:"desktop", pvpick:true, port:false};
-const DEST=[
- {id:"home",label:"Dashboard",icon:"house",key:"1"},
- {id:"tasks",label:"Tasks",icon:"list-todo",key:"2"},
- {id:"artifacts",label:"Artifacts",icon:"shapes",key:"3"},
- {id:"skills",label:"Skills",icon:"puzzle",key:"4"},
-];
-const FOOT=[
- {id:"config",label:"Configuration",icon:"settings"},
- {id:"updates",label:"Updates",icon:"download",news:true},
-];
 const tower=()=>TOWERS.find(t=>t.id===S.tower)||TOWERS[0];
 const elsewhere=()=>TOWERS.filter(t=>t.id!==S.tower&&t.reach==="live"&&t.waiting>0);
 /* The home's four states drive the whole window, so the rail's ember dot
@@ -2239,45 +2257,12 @@ function railIcon(name){
     stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
 }
 
-/* Which destination the rail should read as current. One definition, used by
-   both the rail and the preview rule, because they disagreed about it. */
+/* Which destination is current, for the hover-preview rule — a destination
+   you are already on and already looking at does not preview. `rail2` reads
+   `HOME_OF` for the same question, which is the table that also knows a pane
+   can belong to no destination at all. */
 function activeDest(){ return S.rt==="work" ? "home" : S.rt; }
 
-/* ── The rail ────────────────────────────────────────────────── */
-function rail(){
-  const el=elsewhere();
-  const btn=(d,on)=>`<button class="rbtn" data-act="peekgo" data-to="${d.id}" data-rail="${d.id}"
-    aria-current="${on?"page":"false"}" data-peek="${S.peek===d.id&&!on}"
-    title="${d.label}${d.key?`   ⌘${d.key}`:""}" aria-label="${d.label}">
-    ${railIcon(d.icon)}${d.news?`<span class="news" title="A newer build is out"></span>`:""}</button>`;
-  return `<nav class="rail" data-railzone aria-label="Destinations">
-    ${DEST.map(d=>btn(d,d.id===activeDest())).join("")}
-    <span class="sep"></span>
-    ${FOOT.map(d=>btn(d,false)).join("")}
-    <span class="rgrow"></span>
-    <button class="avatar" data-act="menu" data-menu="profile" aria-haspopup="menu"
-      aria-expanded="${S.menu==="profile"||S.menu==="switch"}"
-      title="Kevin Piacentini — ${tower().org}${el.length?" · someone is waiting elsewhere":""}">
-      <span class="face">KP</span>
-      ${el.length?`<span class="dot" style="position:absolute;top:4px;right:3px;box-shadow:0 0 0 2.5px var(--desk)"></span>`:""}
-    </button>
-  </nav>`;
-}
-
-/* ── The panel ───────────────────────────────────────────────── */
-/* Superseded by panelFor2, which draws every destination's panel. Kept only
-   because the hover-preview still routes through it for the two settings
-   doors. */
-function panelFor(r){
-  if(r==="home") return panel();
-  const label=[...DEST,...FOOT].find(d=>d.id===r)?.label||"";
-  return `<div class="phead"><span class="nm">${label}</span>
-      <button class="gbtn" data-act="panel" title="Hide this panel   ⌘\\">${ic("panel-left-close",15)}</button></div>
-    <div class="pscroll" data-navzone>
-      <p style="padding:12px 9px;font-size:14.5px;line-height:1.6;color:var(--quiet)">
-        Not in this pass. Every destination gets this panel and this behaviour — the shape is settled here, the contents are not.</p>
-    </div>`;
-}
 /* ── The workspaces panel ─────────────────────────────────────────
    Proposition C from docs/prototypes/redesign/workspaces-exploration.html,
    chosen by the user. Flat and status-ordered rather than status-grouped:
@@ -2603,9 +2588,14 @@ function popProfile(){
     </button>
     <div class="mline"></div>
     <button class="mi" data-act="account"><span class="ic">${ic("key-round",16)}</span><span class="tx">Account</span></button>
-    <button class="mi" data-act="go" data-to="repos"><span class="ic">${ic("settings-2",16)}</span><span class="tx">Configuration</span><span class="kbd">⌘,</span></button>
-    <button class="mi" data-act="go" data-to="updates"><span class="ic">${ic("circle-fading-arrow-up",16)}</span><span class="tx">Updates</span>
-      <span style="width:5px;height:5px;border-radius:99px;background:var(--quiet)"></span></button>
+    ${/* **The only Settings there is**, and the only place ⌘, is advertised. It
+          lands on People, Settings' first pane — there is no configuration
+          index screen left to land on. */""}
+    <button class="mi" data-act="go" data-to="people"><span class="ic">${ic("settings-2",16)}</span><span class="tx">Settings</span><span class="kbd">⌘,</span></button>
+    ${/* The row says which version; the mark on the avatar only says there is
+          one. The quiet pip that used to sit here said neither — it repeated
+          the rail icon's dot one row away from it. */""}
+    <button class="mi" data-act="go" data-to="updates"><span class="ic">${ic("circle-fading-arrow-up",16)}</span><span class="tx">${updatesLabel()}</span></button>
     <div class="mline"></div>
     <div class="mi" style="cursor:default">
       <span class="ic">${ic(S.theme==="light"?"sun":"moon",16)}</span><span class="tx">Appearance</span>
@@ -3207,15 +3197,26 @@ const HOME_OF={home:"home",work:"home",
   profile:"skills",mkskill:"skills",
   repos:"repos",hosts:"repos",
   machines:"machines",
-  tasks:"tasks",trackers:"tasks",
-  settings:"settings",people:"settings",teams:"settings",dirs:"settings",vault:"settings",server:"settings",
-  updates:"updates"};
+  tasks:"tasks",trackers:"tasks"};
+/* **Settings' five panes and Updates are deliberately not in there.** They
+   were, while Settings and Updates were doors in the rail; they are rows in
+   the profile menu now and nothing else, so the rail marks nothing while you
+   are on one — you are not in a work surface. Settings' own index is in the
+   page (`snav`, drawn by `pg`), which is what replaced the panel the door
+   used to open. */
 
 /* ═══════════════════════════════════════════════════════════════════
    THE RAIL, REGROUPED
-   Six destinations, then the two that are genuinely settings. Each
-   panel is a working surface — a few sub-destinations, then the live
-   things you actually have — rather than an index of panes.
+   Six destinations and the avatar. Each panel is a working surface —
+   a few sub-destinations, then the live things you actually have —
+   rather than an index of panes.
+
+   **The rule and the two doors under it are gone**, by the user, on
+   7 November 2026. Settings and Updates were drawn here *and* as rows
+   in the profile menu, and a thing in two places has no home. The menu
+   is the home: it already holds the account, the Firetower switcher and
+   the appearance control, which are the same category of thing. What
+   the rail keeps of Updates is the mark on the avatar.
    ═══════════════════════════════════════════════════════════════════ */
 const DEST2=[
   {id:"home",     label:"Dashboard",    icon:"house",         key:"1"},
@@ -3225,10 +3226,19 @@ const DEST2=[
   {id:"repos",    label:"Repositories", icon:"folder-git-2",  key:"5"},
   {id:"machines", label:"Machines",     icon:"server",        key:"6"},
 ];
-const FOOT2=[
-  {id:"settings", label:"Settings", icon:"settings"},
-  {id:"updates",  label:"Updates",  icon:"download", news:true},
-];
+/* **What the avatar's mark says, and what the menu row says instead.**
+   The mark is one bit: there is an update to take. The row carries the version,
+   because "Update available" with no number is a sentence you have to open a
+   screen to act on. In the build these are one function — `api/updates.ts`'s
+   `updatesRow`, which prefers the deployment's release over this app's own
+   build when both are behind.
+
+   The drawing shows the marked state on purpose. The Updates screen below
+   depicts a deployment that is level — only two machines are behind — so
+   nothing would mark the avatar, and a mark nobody can see is not drawn. */
+const NEWER="2.15.0";
+const updatesLabel=()=> NEWER ? `Update available — ${NEWER}` : "Updates";
+
 const MY_SKILLS=[{m:"fs",n:"firetower-surfaces"},{m:"ca",n:"claude-api"},{m:"dv",n:"dataviz"},
                  {m:"ps",n:"pr-screenshots"},{m:"sc",n:"skill-creator"},{m:"it",n:"incident-timeline"}];
 const MY_PROFILES=[{n:"Ada, the lead",a:"claude"},{n:"Reviewer",a:"codex"},{n:"QA",a:"cursor"}];
@@ -3249,7 +3259,11 @@ function panelFor2(r){
 
   /* A detail screen keeps its destination’s panel: you are still in Customize
      when you are reading one skill, and still in Artifacts when reading one. */
-  const at=r; r = HOME_OF[r] || r;
+  /* `|| "home"`, because a pane can belong to no destination now: Settings'
+     five and Updates are the profile menu's, so the rail marks nothing and
+     the panel keeps showing the work. That is what `showing = peek ?? here ??
+     "home"` resolves to in the build. */
+  const at=r; r = HOME_OF[r] || "home";
   if(r==="home") return panel();
 
   if(r==="skills") return head("Customize") + scroll(`
@@ -3297,19 +3311,12 @@ function panelFor2(r){
     ${lab("Where work comes from")}
     ${panelRow("Trackers","ticket",at==="trackers","go","trackers")}`);
 
-  if(r==="settings") return head("Settings") + scroll(`
-    ${lab("Who can reach what")}
-    ${panelRow("People","users-round",at==="people"||at==="settings","go","people")}
-    ${panelRow("Teams","users",at==="teams","go","teams")}
-    ${panelRow("Directories","folder",at==="dirs","go","dirs")}
-    ${lab("Secrets")}
-    ${panelRow("Vault","key",at==="vault","go","vault")}
-    ${lab("This deployment")}
-    ${panelRow("This Firetower","building",at==="server","go","server")}`);
-
-  if(r==="updates") return head("Updates") + scroll(`
-    ${panelRow("What is running","gauge",true)}
-    ${panelRow("Past runs","file-clock",false)}`);
+  /* **Settings' five panes and Updates' two rows were here.** They were the
+     panels of the two doors, and the doors have gone. Settings' index moved
+     into the page it indexes — `SETTINGS` and `snav` below — because a panel
+     with no icon to open it cannot be reached. Updates had no index to move:
+     its *What is running* was always current and its *Past runs* went to the
+     same address. */
 
   if(r==="artifacts"||r==="artifact") return head("Artifacts") + scroll(`
     ${lab("Recent")}
@@ -3320,28 +3327,29 @@ function panelFor2(r){
           src="data:image/svg+xml;charset=utf-8,${encodeURIComponent(poster(a.p))}" alt="">`:""}</span>
       <span class="lbl">${esc(a.t)}</span><span class="age">${a.age}</span></button>`).join("")}`);
 
-  const label=[...DEST2,...FOOT2].find(d=>d.id===r)?.label||"";
+  const label=DEST2.find(d=>d.id===r)?.label||"";
   return head(label)+scroll(`<p style="padding:12px 9px;font-size:14.5px;line-height:1.6;color:var(--quiet)">
     Not in this pass. The grouping is the thing to judge first; the panes inside it are their own round.</p>`);
 }
 
 function rail2(){
   const el=elsewhere();
-  const here=HOME_OF[S.rt]||S.rt;
+  /* `|| null`, not `|| S.rt`: a pane that belongs to no destination marks
+     nothing, rather than being asked to match an icon that is not there. */
+  const here=HOME_OF[S.rt]||null;
   const btn=(d,on)=>`<button class="rbtn" data-act="peekgo" data-to="${d.id}" data-rail="${d.id}"
     aria-current="${on?"page":"false"}" data-peek="${S.peek===d.id&&!on}"
-    title="${d.label}${d.key?`   ⌘${d.key}`:""}" aria-label="${d.label}">
-    ${railIcon(d.icon,on)}${d.news?`<span class="news" title="A newer build is out"></span>`:""}</button>`;
+    title="${d.label}   ⌘${d.key}" aria-label="${d.label}">
+    ${railIcon(d.icon,on)}</button>`;
   return `<nav class="rail" data-railzone aria-label="Destinations">
     ${DEST2.map(d=>btn(d,d.id===here)).join("")}
-    <span class="sep"></span>
-    ${FOOT2.map(d=>btn(d,d.id===here)).join("")}
     <span class="rgrow"></span>
     <button class="avatar" data-act="menu" data-menu="profile" aria-haspopup="menu"
       aria-expanded="${S.menu==="profile"||S.menu==="switch"}"
-      title="Kevin Piacentini — ${tower().org}${el.length?" · someone is waiting elsewhere":""}">
+      title="Kevin Piacentini — ${tower().org}${el.length?" · someone is waiting elsewhere":""}${NEWER?` · ${updatesLabel()}`:""}">
       <span class="face">KP</span>
       ${el.length?`<span class="dot" style="position:absolute;top:4px;right:3px;box-shadow:0 0 0 2.5px var(--desk)"></span>`:""}
+      ${NEWER?`<span class="news" title="${updatesLabel()}"></span>`:""}
     </button>
   </nav>`;
 }
@@ -3646,11 +3654,23 @@ const IA=[
   {icon:"server",n:"Machines",sub:"⌘6",why:"The compute half. Its own door because it is the only thing here with a health state you want without asking — which machine is down is a real at-a-glance question.",
    items:[["All machines","from Compute"],["Yours","live list, with reachability"]]},
 ];
-const IA_FOOT=[
-  {icon:"settings",n:"Settings",why:"Everything that is genuinely a setting: rarely opened, and half of it is a reader’s view of something the administration site owns.",
+/* **Not doors in the rail. Rows in the profile menu**, by the user, on
+   7 November 2026. They were drawn in both places at once, which is a thing
+   with no home — and a door drawn in the same square as a destination, with
+   the same selected pill, is read as a destination whatever the rule under it
+   says. The menu already holds the account, the Firetower switcher and the
+   appearance control: the same category of thing, which is *you and this
+   window* rather than where the work is.
+
+   Updates had the better of the two arguments for a door — it carried the one
+   ambient mark, and a mark needs somewhere to be seen. The mark is on the
+   avatar now, which is the button the menu hangs off, so it is still seen
+   without hover and without opening anything. */
+const IA_MENU=[
+  {icon:"settings-2",n:"Settings",sub:"⌘,",why:"Everything that is genuinely a setting: rarely opened, and half of it is a reader’s view of something the administration site owns. Its five panes index themselves inside the page, because there is no rail icon to leave one by.",
    items:[["People","from Access · read here, owned by the web"],["Teams","from Access · read here; granting is ours"],
           ["Directories","from Access"],["Vault","from Credentials"],["This Firetower","from Server"]]},
-  {icon:"download",n:"Updates",why:"Its own door because it carries the one ambient dot, and a dot needs somewhere to be seen.",
+  {icon:"circle-fading-arrow-up",n:"Updates",why:"A row rather than a door. The row names the version that is ready; the mark on the avatar above it says only that there is one — and nothing else may set that mark.",
    items:[["What is running",""],["Past runs",""]]},
 ];
 function grouping(){
@@ -3662,10 +3682,11 @@ function grouping(){
   </div>`;
   return `<div class="ia">
     <h2>What the rail would be</h2>
-    <p class="prose-lead">Six destinations and two settings doors, instead of three destinations and one door with twelve panes behind it. The test for a destination is not “is it important” — everything is — but <i>do you open it, and does it have live state worth seeing without asking.</i> Each panel is a working surface: a few sub-destinations, then the things you actually have.</p>
+    <p class="prose-lead">Six destinations, instead of three destinations and one door with twelve panes behind it. The test for a destination is not “is it important” — everything is — but <i>do you open it, and does it have live state worth seeing without asking.</i> Each panel is a working surface: a few sub-destinations, then the things you actually have.</p>
     <div class="ia-grid">${IA.map(d=>card(d)).join("")}</div>
-    <h3 style="margin-top:38px">And the two that are genuinely settings</h3>
-    <div class="ia-grid">${IA_FOOT.map(d=>card(d,true)).join("")}</div>
+    <h3 style="margin-top:38px">And the two that are not destinations at all</h3>
+    <p class="prose" style="margin:10px 0 16px;max-width:76ch">They were two doors under a rule in the rail <i>and</i> two rows in the profile menu. The menu is the only one of those now. A door drawn in a destination’s square, with a destination’s selected pill, is read as a destination whatever the rule above it says — and nobody goes to Settings to do their work.</p>
+    <div class="ia-grid">${IA_MENU.map(d=>card(d,true)).join("")}</div>
 
     <h2 style="margin-top:52px">Every pane, and where it went</h2>
     <table class="movetable">
@@ -3681,7 +3702,9 @@ function grouping(){
          ["Access › Teams","<b>Settings</b>","Read here; granting a team access to a resource stays ours and lives in the sharing sheet."],
          ["Access › Directories","<b>Settings</b>","Ours, but reached from the sharing sheet far more often than from a page."],
          ["Credentials › Vault","<b>Settings</b>","Rare, and sensitive enough to want a deliberate door."],
-         ["Server › This Firetower","<b>Settings</b>","Rare."]].map(([a,b,c])=>`<tr><td class="why">${a}</td><td>${b}</td><td>${c}</td></tr>`).join("")}
+         ["Server › This Firetower","<b>Settings</b>","Rare."],
+         ["—","<b>Settings itself</b>","Not a rail icon. A row in the profile menu, with ⌘,. Its five panes carry their own index at the top of the page — the same five, the same order, the same three group names the rail panel drew."],
+         ["—","<b>Updates itself</b>","Not a rail icon either. A row in the profile menu that names the version that is ready, under a mark on the avatar that says only that there is one."]].map(([a,b,c])=>`<tr><td class="why">${a}</td><td>${b}</td><td>${c}</td></tr>`).join("")}
     </table>
 
     <h2 style="margin-top:52px">What I did not undo</h2>
@@ -3745,6 +3768,28 @@ function blank(kind,which,action){
 }
 let WHICH=null, PRIMARY="";
 const pane=(w,p)=>{WHICH=w;PRIMARY=p||"";};
+
+/* ── Settings' index, in the page it indexes ──────────────────
+   The list the rail panel drew while Settings was a door, moved whole: the
+   same five panes, the same order, the same three group names. Taking the door
+   out of the rail took the only way between the five with it, and a pane you
+   can reach and then cannot leave is worse than the door was.
+
+   Drawn by `pg`, above the head and above anything the data states swap out —
+   a pane that cannot be read is the pane you most need to leave. It draws
+   nothing on the panes a destination owns, which still have a rail panel. */
+const SETTINGS=[
+  ["Who can reach what",[["people","People"],["teams","Teams"],["dirs","Directories"]]],
+  ["Secrets",[["vault","Vault"]]],
+  ["This deployment",[["server","This Firetower"]]],
+];
+const snav=()=> !SETTINGS.some(([,items])=>items.some(([at])=>at===S.rt)) ? ""
+  : `<nav class="snav" aria-label="Settings">${SETTINGS.map(([g,items])=>`<div class="sgroup">
+      <span class="slabel">${g}</span>
+      <span class="sitems">${items.map(([at,l])=>
+        `<button class="sitem" data-act="go" data-to="${at}" aria-current="${at===S.rt}">${l}</button>`).join("")}</span>
+    </div>`).join("")}</nav>`;
+
 function pg(title,sentence,acts,body){
   const which=WHICH, primary=PRIMARY;
   if(S.data!=="full" && which) body = S.data==="dark"
@@ -3753,6 +3798,7 @@ function pg(title,sentence,acts,body){
        <div class="stale2">${body}</div>`
     : blank(S.data,which,primary);
   return `<div class="pg">
+    ${snav()}
     <div class="pg-head">
       <div style="min-width:0"><h1>${title}</h1><p class="sub">${sentence}</p></div>
       ${acts?`<div class="acts">${acts}</div>`:""}
@@ -4499,7 +4545,7 @@ const SPEC_DELTA=[
   ["desktop/src/App.tsx","modified","The <code>firetower.scope</code> localStorage key and the <code>all || !here</code> branch go. The dock badge and <code>islandState(fleet)</code> are unchanged — they still span every Firetower, and that is what keeps the thesis."],
   ["desktop/src/ui/Rail.tsx","replaced","Becomes two components: a 62px icon rail and a per-destination panel."],
   ["desktop/src/ui/Titlebar.tsx","modified","Keeps <code>org / user</code> as text; loses the ember count (the dock and the island carry it)."],
-  ["desktop/src/ui/config/panes.ts","restructured","Twelve panes in seven groups become six destinations and two settings doors. See the Grouping tab."],
+  ["desktop/src/ui/config/panes.ts","restructured","Twelve panes in seven groups become six destinations; the five nobody owns become <code>SETTINGS</code>, which is the index the Settings page draws at the top of itself. See the Grouping tab."],
   ["desktop/src/ui/Configuration.tsx","deleted","There is no Configuration screen; its panes live in their destinations."],
   ["desktop/src/ui/NewPage.tsx","merged","The composer moves onto the home, in the middle of the page; <code>/new</code> goes."],
   ["desktop/src/ui/ArtifactsPage.tsx","modified","Grid of borderless posters; list keeps a 64px floor."],
@@ -4932,7 +4978,7 @@ test ratio_uses_the_hard_limit ... <span class="ok2">ok</span>
    ═══════════════════════════════════════════════════════════════════ */
 const COV=[
  ["Shell, session and the way in",[
-  ["Rail — six destinations, two settings doors","Y",""],
+  ["Rail — six destinations, and nothing under them but the avatar","Y",""],
   ["Right-click a workspace &mdash; rename, end","Y","<b>A regression this document did not catch.</b> It was in <code>Rail.tsx</code> and is not in <code>RailPanel.tsx</code>; nothing here asked whether it was still there. See <i>What this column does not check</i> below"],
   ["Home — <i>Recent agents</i>",null,"One section, ordered <code>broken &rarr; blocked &rarr; done &rarr; working</code>, with <i>View all</i> in the <i>Recent artifacts</i> treatment",[
     ["Clipped to a row count, cut between rows and never through a chip","Y","A wrapped flex row moves a whole item down, so clipping to the bottom of the last kept row hides chips entirely. <b>One line holds 2&ndash;3; two lines hold 4&ndash;5</b> — measured, and the same at 1280 and 1680 because the column caps at 748"],
@@ -4962,7 +5008,7 @@ const COV=[
     ["Ember on the avatar — waiting somewhere you are not","Y","One dot, never a count"],
     ["Two Firetowers whose names collide","N","<code>fleet.ts:49</code> slices one letter: Acme and Apex both render “A”. The fix is specified in the delta; the <i>screen</i> showing it is not drawn"],
   ]],
-  ["Profile menu — Account, Configuration, Updates, Appearance","Y","All four go somewhere"],
+  ["Profile menu — Account, Settings, Updates, Appearance","Y","All four go somewhere; Settings and Updates live only here"],
   ["Account screen",null,"",[
     ["Who you are, role, Firetower, address","Y",""],
     ["Password — out to the control plane","Y","No password form here, deliberately"],
