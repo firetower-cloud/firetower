@@ -54,7 +54,16 @@ export function AccountSwitcher({ session, working, children }: { session: Sessi
   const own = agents.data.find((a) => a.kind === session.agent);
   const label = (kind: string) => agents.data.find((a) => a.kind === kind)?.label ?? kind;
   const account = current.data?.account;
-  const blocked = current.data?.limits.find((l) => exhausted(l));
+  /* **Guarded on shape, not on presence.** `current.data?.limits` only
+     guards `data`; an answer that is *there* but is not this shape — the
+     mock's catch-all `[]`, a server one version out, a proxy returning
+     something else — makes `.limits` undefined and `.find` throws, which
+     takes the whole workspace down to the error boundary. Opening a child
+     agent from the team rail did exactly that. Nothing here needs to be
+     clever: the empty list is a correct answer for "no limits". */
+  const limits = Array.isArray(current.data?.limits) ? current.data.limits : [];
+  const switches = Array.isArray(current.data?.switches) ? current.data.switches : [];
+  const blocked = limits.find((l) => exhausted(l));
   /* Not a candidate until it is known which one is current: a list drawn
      before the answer arrives would offer the account already in use. */
   const candidates = useMemo(() => {
@@ -63,12 +72,12 @@ export function AccountSwitcher({ session, working, children }: { session: Sessi
     list.sort((a, b) => Number(b.kind === session.agent) - Number(a.kind === session.agent));
     return list;
   }, [accounts.data, account?.id, session.agent, current.data]);
-  const recommended = candidates.find((a) => a.kind === session.agent && a.mode === "Subscription" && !a.limits.some((l) => exhausted(l)));
+  const recommended = candidates.find((a) => a.kind === session.agent && a.mode === "Subscription" && !(a.limits ?? []).some((l) => exhausted(l)));
   const chosen = candidates.find((a) => a.id === selected);
   const changesAgent = !!chosen && chosen.kind !== session.agent;
   const installedHere = (a: Account) => !!agents.data.find((x) => x.kind === a.kind)?.hosts.some((h) => h.hostId === session.hostId && h.installed);
-  const inFlight = current.data?.switches.some((s) => s.state === "switching") ?? false;
-  const last = current.data?.switches.at(-1);
+  const inFlight = switches.some((s) => s.state === "switching");
+  const last = switches.at(-1);
 
   const switcher = useMutation({
     mutationFn: (accountId: string) => switchAccount(session.id, accountId, changesAgent && permissionChange),

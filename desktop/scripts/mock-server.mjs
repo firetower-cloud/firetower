@@ -779,6 +779,18 @@ const server = createServer(async (req, res) => {
     });
   }
 
+  /* **Every session, not just `s_1`.** The child agents in the team rail are
+     real sessions and the workspace opens them; only the manager's account
+     was served, so every child fell through to the catch-all `[]` — which is
+     truthy, so `data?.limits` passed the guard and `.find` threw. Opening a
+     child from the team rail took the screen down to the error boundary.
+     Found by `assert-connected.mjs` on its first run with the fifth
+     outcome. */
+  const account_of = /^\/api\/v1\/sessions\/([^/]+)\/account$/.exec(path);
+  if (account_of && account_of[1] !== "s_1") {
+    return json(res, { account: ACCOUNTS[0], limits: [], switches: [] });
+  }
+
   const review_of = /^\/api\/v1\/skills\/([^/]+)\/review$/.exec(path);
   if (review_of) {
     const held = SKILLS.find((k) => k.id === review_of[1]);

@@ -19,11 +19,18 @@
  * |---|---|
  * | `connected` | landed somewhere carrying that thing's id |
  * | `wrong-thing` | went somewhere else — usually the list instead of the item |
+ * | `opened-in-place` | the address did not move and the screen did: a popover, a disclosure, a tab inside the workspace |
+ * | `it-threw` | it arrived, and the screen there died |
  * | `inert` | nothing happened at all |
- * | `by-design` | a toggle, a tab, a filter, a disclosure. Marked, not counted. |
+ * | `by-design` | a tab, a filter, a switch. Marked, not counted. |
  *
- * **The fourth row is the point.** A check that cannot tell *inert by design*
- * from *broken* is the check that let this through in the first place.
+ * **The middle rows are the point.** The first run reported twenty-six
+ * controls as inert and not one of them was: the workspace's repository chip
+ * opens a popover, an artifact row in the Overview opens a tab beside the
+ * conversation, a Ship row expands in place. None of them navigates, and all
+ * of them answer. A check that cannot tell *answered without navigating*
+ * from *did nothing* is the check that let the original bug through — it
+ * would have called the broken rows and the working ones the same thing.
  */
 import { chromium } from "playwright-core";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -110,11 +117,20 @@ for (const s of SHOTS) {
     const page = await fresh("dark", { servers: s.servers ?? REGISTRY, scene: s.scene ?? "default", at: s.at ?? null });
     try {
       await s.go(page);
-      const before = await page.evaluate(() => location.hash);
+      const before = await page.evaluate(() => ({
+        hash: location.hash,
+        /* A cheap fingerprint of what is on screen. Enough to tell "the
+           screen answered" from "nothing at all happened", which is the
+           distinction that matters and the one a URL cannot make. */
+        shape: document.body.innerText.replace(/\s+/g, " ").length + ":" + document.querySelectorAll("*").length,
+      }));
       const hit = page.locator('button, a[href], [role="button"], [role="menuitem"], [role="option"]').nth(c.nth);
       await hit.click({ timeout: 4000 });
       await page.waitForTimeout(700);
-      const after = await page.evaluate(() => location.hash);
+      const after = await page.evaluate(() => ({
+        hash: location.hash,
+        shape: document.body.innerText.replace(/\s+/g, " ").length + ":" + document.querySelectorAll("*").length,
+      }));
       /* A sheet that opened carrying the name is a legitimate way to open a
          thing — not every opening is a navigation. */
       const inSheet = await page.evaluate(
@@ -124,9 +140,36 @@ for (const s of SHOTS) {
           ),
         c.entity.name,
       );
-      const outcome = after.includes(c.entity.id) || inSheet ? "connected" : after !== before ? "wrong-thing" : "inert";
+      /* **Arriving is not the same as arriving somewhere that works.** The
+         team rail's child rows navigated correctly and then the workspace
+         threw, so the address carried the right id and the screen was the
+         error boundary. A check that stops at the URL calls that connected. */
+      const threw = await page.evaluate(() =>
+        [...document.querySelectorAll("h1, h2, p")].some((n) => (n.textContent || "").includes("This screen stopped")),
+      );
+      const outcome = threw
+        ? "it-threw"
+        : after.hash.includes(c.entity.id) || inSheet
+          ? "connected"
+          : after.hash !== before.hash
+            ? "wrong-thing"
+            : after.shape !== before.shape
+              ? "opened-in-place"
+              : "inert";
       if (outcome !== "connected") {
-        findings.push({ state: s.id, label: c.label, names: `${c.entity.kind} ${c.entity.id}`, outcome, landed: after || "(nothing moved)" });
+        findings.push({
+          state: s.id,
+          label: c.label,
+          names: `${c.entity.kind} ${c.entity.id}`,
+          outcome,
+          landed: threw
+            ? `${after.hash} — and threw`
+            : after.hash !== before.hash
+              ? after.hash
+              : outcome === "opened-in-place"
+                ? "(the screen changed)"
+                : "(nothing moved)",
+        });
       }
       pressed++;
     } catch {
@@ -140,20 +183,34 @@ for (const s of SHOTS) {
 await browser.close();
 console.log("");
 
-const real = findings.filter((f) => f.outcome !== "by-design");
+/* `opened-in-place` is listed, not failed: it is a control that answered
+   without navigating, which most of them legitimately are. `inert` and
+   `wrong-thing` are the bugs. */
+const real = findings.filter((f) => f.outcome === "inert" || f.outcome === "wrong-thing" || f.outcome === "it-threw");
+const noted = findings.filter((f) => f.outcome === "opened-in-place");
 const lines = ["# Does pressing a named thing open that thing?", "",
-  `\`pnpm assert:connected\`. ${pressed} controls pressed; ${real.length} did not land on what they name.`,
-  "", "Generated — do not edit by hand.", "",
-  "| state | control | names | outcome | landed |", "| --- | --- | --- | --- | --- |"];
-for (const f of real) {
-  const c = (v) => String(v).replace(/\|/g, "\\|").slice(0, 80);
-  lines.push(`| ${f.state} | ${c(f.label)} | \`${f.names}\` | **${f.outcome}** | \`${c(f.landed)}\` |`);
-}
+  `\`pnpm assert:connected\`. ${pressed} controls pressed. **${real.length} broken** — inert, or landed on the wrong thing. ${noted.length} answered without navigating, which is listed below rather than failed.`,
+  "", "Generated — do not edit by hand.", ""];
+const table = (rows) => {
+  lines.push("| state | control | names | outcome | landed |", "| --- | --- | --- | --- | --- |");
+  for (const f of rows) {
+    const c = (v) => String(v).replace(/\|/g, "\\|").slice(0, 80);
+    lines.push(`| ${f.state} | ${c(f.label)} | \`${f.names}\` | **${f.outcome}** | \`${c(f.landed)}\` |`);
+  }
+  lines.push("");
+};
+lines.push("## Broken", "");
+if (real.length === 0) lines.push("_None._", "");
+else table(real);
+lines.push("## Answered without navigating", "",
+  "A popover, a disclosure, a tab beside the conversation. Listed so somebody can confirm each is meant to be one.", "");
+table(noted);
 writeFileSync(`${OUT}/connectedness.md`, lines.join("\n"));
 writeFileSync(`${OUT}/connectedness.json`, JSON.stringify(findings, null, 2));
 
 const tally = {};
 for (const f of findings) tally[f.outcome] = (tally[f.outcome] ?? 0) + 1;
+tally.connected = pressed - findings.filter((f) => f.outcome !== "by-design").length;
 for (const [k, n] of Object.entries(tally)) console.log(`  ${String(n).padStart(4)}  ${k}`);
 console.log(`\n  → ${OUT}/connectedness.md`);
 process.exit(real.length ? 1 : 0);
