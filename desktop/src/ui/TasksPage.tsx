@@ -32,7 +32,7 @@ import {
   Ticket,
   User,
 } from "lucide-react";
-import { GitLabMark, GiteaMark, GithubMark, Icon, IconButton, Input, LinearMark, Select } from "~/components/ui";
+import { Badge, GitLabMark, GiteaMark, GithubMark, Icon, IconButton, Input, LinearMark, Select } from "~/components/ui";
 import { usePathname } from "~/shims/next-navigation";
 import { elapsed, minutesSince } from "~/api/view";
 import type { Backend } from "~/fleet";
@@ -348,9 +348,7 @@ export function TasksPage({ backend }: { backend: Backend }) {
                     arriving on a screen that is allowed one accent, and at
                     11px a tinted chip reads as a warning whatever it says. */}
                 {t.labels.slice(0, 2).map((l) => (
-                  <span key={l.name} className="ttag">
-                    {l.name}
-                  </span>
+                  <Badge key={l.name}>{l.name}</Badge>
                 ))}
 
                 <button

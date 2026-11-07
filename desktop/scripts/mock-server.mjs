@@ -844,6 +844,16 @@ const server = createServer(async (req, res) => {
     return json(res, q ? every.filter((f) => f.toLowerCase().includes(q)) : every);
   }
 
+  /* **Any session, by id.** Only `s_1` was served, so every child in the
+     team rail fell through to the catch-all `[]` — and opening one took the
+     Overview down, because `[]` has no `name`. That is the third crash from
+     this one fixture gap, after the skill review and the account sheet. */
+  const session_of = /^\/api\/v1\/sessions\/([^/]+)$/.exec(path);
+  if (session_of && session_of[1] !== "s_1") {
+    const found = dashboard().find((x) => x.id === session_of[1]);
+    if (found) return json(res, found);
+  }
+
   const account_of = /^\/api\/v1\/sessions\/([^/]+)\/account$/.exec(path);
   if (account_of && account_of[1] !== "s_1") {
     return json(res, { account: ACCOUNTS[0], limits: [], switches: [] });

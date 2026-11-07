@@ -59,7 +59,7 @@ import { ScopePicker, type ScopeItem } from "~/ui/config/ScopePicker";
 import { machineLabel, machines } from "~/api/environments";
 import type { Agent, Control, ControlKind, Role, NewRole } from "~/api/generated/model";
 import { useConfirm } from "~/ui/Confirm";
-import { IconButton } from "~/components/ui";
+import { Badge, IconButton } from "~/components/ui";
 
 /**
  * Where a child runs.
@@ -271,7 +271,7 @@ function RoleRow({
           <s>{role.does}</s>
         </span>
       </button>
-      {role.canDelegate && <span className="ttag">can delegate</span>}
+      {role.canDelegate && <Badge>can delegate</Badge>}
       {role.isDefault && (
         <span className="said flex items-center gap-1">
           <Star className="h-3 w-3" strokeWidth={1.75} />

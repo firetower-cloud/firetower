@@ -398,7 +398,16 @@ function Who({
           the rail will use, the name, the address and the version, and a way
           back out of it. */}
       <div className="found">
-        <span className="face">{markOf(boot.organization ?? url)}</span>
+        {/* **A server's mark, not a person's.** `.face` is `Avatar`'s class
+            and `Avatar` draws a *monogram* — one letter for a one-word name,
+            because the row says the name in full beside it. A Firetower's
+            mark is `markOf`, two letters from a one-word organisation, so
+            that two whose names share a first letter stay apart. Same disc,
+            different rule, and the rail and the title bar already draw this
+            one as `.server-mark`. */}
+        <span className="server-mark grid h-9 w-9 shrink-0 place-items-center" data-reach="live">
+          {markOf(boot.organization ?? url)}
+        </span>
         <span className="tx">
           <b>{boot.organization ?? "A Firetower"}</b>
           <s>

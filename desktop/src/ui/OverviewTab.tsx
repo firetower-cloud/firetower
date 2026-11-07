@@ -41,7 +41,14 @@ const RANK: Record<string, number> = { Working: 0, Starting: 0, NeedsYou: 1, Rea
 
 /** A delegated child is named `"<lead> / <agent>"`; inside the lead's own rail
  *  the prefix is noise, so show just the agent part. */
-function agentName(name: string): string {
+function agentName(name: string | undefined): string {
+  /* **Guarded, because an answer that is not this shape should not take the
+     panel down.** `name` is required on the wire and a server that sends
+     something else — one version out, a proxy, a mock's catch-all — made
+     `lastIndexOf` throw and the whole Overview became the error boundary.
+     That is the third crash from exactly this, after the skill review and
+     the account sheet, so it is a habit rather than an incident. */
+  if (!name) return "Untitled";
   const at = name.lastIndexOf(" / ");
   return at >= 0 ? name.slice(at + 3) : name;
 }

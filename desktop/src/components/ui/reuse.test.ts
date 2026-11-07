@@ -51,7 +51,7 @@ const FILES = sources();
  * the list is shortened — so the debt can only go down, and it is counted
  * where somebody will read it rather than in a comment.
  */
-const UNUSED = ["Badge"];
+const UNUSED: string[] = [];
 
 describe("every component is reachable from the product", () => {
   const components = readdirSync(join(ROOT, "components/ui"))
@@ -65,9 +65,10 @@ describe("every component is reachable from the product", () => {
       ).filter((f) => new RegExp(`\\b${name}\\b`).test(f.text));
       return users.length === 0;
     });
-    /* `Badge` is the one left. `IconButton` came off this list when the
-       thirteen hand-rolled `.gbtn` buttons across nine screens were
-       converted to it. */
+    /* **Empty, and it took four passes to get here.** `Segmented`,
+       `IconButton` and `Badge` were each complete, exported and reached by
+       nothing while screens hand-rolled their classes; `Palette` had never
+       been on screen at all. The list is the record of that. */
     expect(orphans.sort()).toEqual(UNUSED);
   });
 });
@@ -81,11 +82,16 @@ describe("no screen re-implements a component that exists", () => {
   const OWNED: [string, string, string[]][] = [
     /* The one the user reported. Nothing writes `.seg` by hand any more. */
     ["seg", "components/ui/Segmented.tsx", []],
-    ["face", "components/ui/Avatar.tsx", ["ui/Connect.tsx"]],
+    /* Was `["ui/Connect.tsx"]`, which drew a *server's* mark with a
+       *person's* class. Same disc, different rule — `markOf` takes two
+       letters so two Firetowers sharing a first letter stay apart, and
+       `monogram` takes one because the row says the name beside it. */
+    ["face", "components/ui/Avatar.tsx", []],
     /* Was nine screens. `IconButton` gained a `hint` — a tooltip that differs
        from the name — and an `onClick` that can see its event, which is most
        of why they were hand-rolled. */
     ["gbtn", "components/ui/IconButton.tsx", []],
+    ["ttag", "components/ui/Badge.tsx", []],
   ];
 
   test.each(OWNED)("`.%s` is written outside %s in exactly the known places", (cls, owner, known) => {
