@@ -14,7 +14,6 @@ import { CircleDashed, CircleSlash2 } from "lucide-react";
 import { Signal } from "~/components/Signal";
 import { AgentMark } from "~/components/AgentMark";
 import { HostMark, Icon, PageHead } from "~/components/ui";
-import { useHostOf } from "~/data";
 import { doing, group, shortRepo, speaksFor, type Workspace } from "~/api/workspaces";
 import { elapsed, minutesSince, needsYou } from "~/api/view";
 import type { Backend } from "~/fleet";
@@ -23,7 +22,6 @@ import { navigate } from "~/shims/next-navigation";
 
 
 export function Fleet() {
-  const hostOf = useHostOf();
   const fleet = useFleet();
   const fleets = useMemo(
     () => fleet.map(({ backend, sessions }) => ({ backend, repos: group(sessions.filter((s) => s.status !== "Ended")) })),
@@ -70,7 +68,10 @@ export function Fleet() {
                     {repo === "no repository" ? (
                       <Icon of={CircleDashed} size={12} className="text-mute" />
                     ) : (
-                      <HostMark kind={hostOf(repo)?.kind} size={13} className="text-dim" />
+                      /* No kind: which host a repository lives on is a per-server
+                         query, and this screen sits outside every server's
+                         QueryClient — see `App`. The neutral mark, not a guess. */
+                      <HostMark size={13} className="text-dim" />
                     )}
                     <span className="truncate text-ui font-medium text-bone">{shortRepo(repo)}</span>
                     <span className="font-mono text-micro text-mute">{places.length}</span>
