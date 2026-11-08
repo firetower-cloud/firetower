@@ -213,7 +213,9 @@ async fn ask_linear<T: serde::de::DeserializeOwned>(
 
     let status = response.status();
     if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
-        bail!("Linear refused the key. It may have been revoked.");
+        return Err(
+            super::Refused("Linear refused the key. It may have been revoked.".into()).into(),
+        );
     }
 
     let answer: Answer<T> = response

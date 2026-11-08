@@ -364,7 +364,9 @@ async fn ask_trello<T: DeserializeOwned>(
 
     let status = response.status();
     if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
-        bail!("Trello refused the token. It may have been revoked.");
+        return Err(
+            super::Refused("Trello refused the token. It may have been revoked.".into()).into(),
+        );
     }
 
     response

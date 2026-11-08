@@ -105,6 +105,20 @@ pub(super) async fn whose(
         .unwrap_or_else(|| me.to_string()))
 }
 
+/// A tracker's failure, as the answer a person can act on.
+///
+/// A credential the tracker refused is "connect again" (409, the same code a
+/// key refused at connect time gets), carrying the sentence the tracker's
+/// module wrote. Anything else is Firetower's or the network's trouble.
+pub(super) fn provider_error(e: anyhow::Error) -> ApiError {
+    let code = if e.downcast_ref::<tasks::Refused>().is_some() {
+        ErrorCode::ProviderNotConnected
+    } else {
+        ErrorCode::Internal
+    };
+    ApiError::new(code, format!("{e:#}"))
+}
+
 /// This install's Trello app key, or the reason there is none.
 pub(super) fn trello_app_key() -> anyhow::Result<String> {
     trackers::trello_app_key()
@@ -277,7 +291,7 @@ pub(super) async fn list_tasks(
     list_from(&tracker, &credential, &query)
         .await
         .map(Json)
-        .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e:#}")))
+        .map_err(provider_error)
 }
 
 /// What to look up. A link, because a link is what gets stored and pasted.
@@ -329,5 +343,40 @@ pub(super) async fn get_task(
     one_from(&tracker, &credential, &ask.url)
         .await
         .map(Json)
-        .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e:#}")))
+        .map_err(provider_error)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_refused_credential_answers_409_with_the_sentence() {
+        let e = provider_error(
+            tasks::Refused("Trello refused the token. It may have been revoked.".into()).into(),
+        );
+        assert!(matches!(e.code, ErrorCode::ProviderNotConnected));
+        assert_eq!(
+            e.message,
+            "Trello refused the token. It may have been revoked."
+        );
+    }
+
+    #[test]
+    fn a_refusal_wrapped_in_context_is_still_a_refusal() {
+        let wrapped =
+            anyhow::Error::new(tasks::Refused("Linear refused the key.".into())).context("listing");
+        assert!(matches!(
+            provider_error(wrapped).code,
+            ErrorCode::ProviderNotConnected
+        ));
+    }
+
+    #[test]
+    fn any_other_failure_stays_a_server_error() {
+        assert!(matches!(
+            provider_error(anyhow::anyhow!("asking Trello")).code,
+            ErrorCode::Internal
+        ));
+    }
 }

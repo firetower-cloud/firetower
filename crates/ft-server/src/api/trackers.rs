@@ -355,7 +355,7 @@ pub(super) async fn list_tracker_scopes(
                             .collect(),
                     )
                 })
-                .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e:#}")))
+                .map_err(super::tasks::provider_error)
         }
         ScopeKind::Boards if tracker.id == "trello" => {
             let app_key =
@@ -381,7 +381,7 @@ pub(super) async fn list_tracker_scopes(
                             .collect(),
                     )
                 })
-                .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e:#}")))
+                .map_err(super::tasks::provider_error)
         }
         ScopeKind::Teams | ScopeKind::Boards => Err(ApiError::not_found("tracker")),
     }
@@ -451,7 +451,7 @@ pub(super) async fn list_tracker_columns(
                             .collect(),
                     )
                 })
-                .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e:#}")))
+                .map_err(super::tasks::provider_error)
         }
         _ => Err(ApiError::not_found("tracker")),
     }

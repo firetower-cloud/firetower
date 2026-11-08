@@ -49,6 +49,23 @@ pub use trello::{
     Column as TrelloColumn, Trello,
 };
 
+/// A tracker said no to the credential it was given: revoked, expired or
+/// never valid.
+///
+/// A type of its own so the API can answer it as "connect again" (409), which
+/// is what a person can act on, instead of as a server fault (500) that reads
+/// as Firetower's own breakage. It carries the sentence the person is shown.
+#[derive(Debug)]
+pub struct Refused(pub String);
+
+impl std::fmt::Display for Refused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for Refused {}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum TaskState {
