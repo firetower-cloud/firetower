@@ -2996,24 +2996,28 @@ function shot(a,cls){
 function artifacts(){
   const all=S.lib==="none"?ARTS.map(a=>({...a,p:null,pending:true})):ARTS;
   const shown=all.filter(a=>S.scope==="all"||(S.scope==="mine"?a.mine:!a.mine));
+  /* **Nothing in the head over a blank.** A find box has nothing to narrow,
+     and the filled *Ask for one* is the blank's own button a second time at
+     twice the weight. Both come back with the first artifact. */
+  const bare=S.lib==="empty";
   const head=`<div class="phead2">
       <div style="min-width:0">
         <h1>Artifacts</h1>
         <p class="sub">A page an agent published for you to look at. It outlives the workspace that made it.</p>
       </div>
-      <div class="acts">
+      ${bare?"":`<div class="acts">
         <label class="find">${ic("search",15)}<input placeholder="Find an artifact" spellcheck="false" aria-label="Find an artifact"></label>
         <button class="btn primary" data-act="noop">${ic("sparkles",15)}Ask for one</button>
-      </div>
+      </div>`}
     </div>
-    <div class="filters">
+    ${bare?"":`<div class="filters">
       ${[["all","All"],["mine","Yours"],["shared","Shared with you"]].map(([id,l])=>
         `<button class="fp" data-act="scope" data-scope="${id}" aria-pressed="${S.scope===id}">${l}</button>`).join("")}
       <span class="right">
         <button class="gbtn" data-act="look" data-look="grid" title="Grid" style="color:${S.look==="grid"?"var(--ink)":"var(--hush)"}">${ic("layout-grid",16)}</button>
         <button class="gbtn" data-act="look" data-look="list" title="List" style="color:${S.look==="list"?"var(--ink)":"var(--hush)"}">${ic("rows-3",16)}</button>
       </span>
-    </div>`;
+    </div>`}`;
 
   /* **The one blank whose button is plain and not filled.** This page fills
      up as a *consequence* of work, so empty here is ordinary, and the weight
