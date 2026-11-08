@@ -82,10 +82,42 @@ describe("the five poses", () => {
     expect(bandOf(POSES.innerl)).toBe("dock");
   });
 
-  it("gives 951 a 317pt column, and it is the only pose with one", () => {
+  it("gives 951 the only column of any pose", () => {
     expect(panelWidth(content(POSES.innerl))).toBe(317);
     for (const id of ["iphone", "android", "front", "innerp"] as const) {
       expect(panelWidth(content(POSES[id]))).toBe(0);
+    }
+  });
+
+  /**
+   * **That column has been estimated three times and measured none.**
+   *
+   * | rail at 951 | laid out | column |
+   * |---|---|---|
+   * | 0 — what a browser reports | 951 | 340 |
+   * | 74 — the documents' figure | 877 | 317 |
+   * | 84 — what the *front panel* reports | 867 | 307 |
+   *
+   * The arithmetic is pinned here for all three. Which one is *true* is a
+   * different question and still open: 84 was measured on the front panel,
+   * and the front panel is `regular:false` in the prototype, so it says
+   * nothing about what the inner display reserves. Nobody has read an inset
+   * off that display.
+   *
+   * The trap worth naming: **the band classification is the same under all
+   * three** — 951, 877 and 867 all dock — so a sweep run with a browser's own
+   * zero insets reports every band correctly and a column of 340, for
+   * something that is at most 317. A plausible number, arrived at honestly,
+   * and wrong. Supplying the insets (`?insets=0,84,34,0`, see `edges.ts`) is
+   * what makes the difference observable at a width no simulator here boots.
+   */
+  it("answers 340, 317 or 307 depending on a rail nobody has measured there", () => {
+    expect(panelWidth(951)).toBe(340);
+    expect(panelWidth(951 - 74)).toBe(317);
+    expect(panelWidth(951 - 84)).toBe(307);
+    // And every one of them docks, which is why the wrong one looks right.
+    for (const laid of [951, 951 - 74, 951 - 84]) {
+      expect(band(951, laid)).toBe("dock");
     }
   });
 

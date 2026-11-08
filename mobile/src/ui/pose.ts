@@ -34,7 +34,7 @@
  */
 import { useCallback, useState } from "react";
 import { useWindowDimensions, type LayoutChangeEvent } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useInsets } from "~/ui/edges";
 import { band, docks, floatWidth, panelWidth, type Band } from "~/ui/measure";
 
 export type Pose = {
@@ -63,7 +63,10 @@ function said(line: string) {
 
 export function usePose(): Pose {
   const { width: window, height: windowHeight } = useWindowDimensions();
-  const insets = useSafeAreaInsets();
+  /* Through `edges.ts` rather than the provider directly, so a dev web
+     build can supply the rail this hardware cannot show. Identical to the
+     real insets everywhere else. */
+  const insets = useInsets();
   const [measured, setMeasured] = useState<number | null>(null);
   const [tall, setTall] = useState<number | null>(null);
 
@@ -85,8 +88,11 @@ export function usePose(): Pose {
 
   /* The one log line coverage §8 asks for. Whether the system's trailing tab
      bar *insets* the content or *overlays* it decides whether the dock
-     threshold is a 914pt window or an 840pt one, and it cannot be answered
-     from a browser. Dev only, and it prints once per distinct pose. */
+     threshold is a 914pt window or an 840pt one. It could not be answered
+     from a browser until the insets could be supplied to one; with
+     `?insets=0,84,34,0` at a 951pt window this is the line that reports the
+     docked column, which is 307 and has been estimated three times.
+     Dev only, and it prints once per distinct pose. */
   if (__DEV__ && measured !== null) {
     said(
       `pose: window ${window}x${windowHeight}, laid out ${content}x${tall}` +

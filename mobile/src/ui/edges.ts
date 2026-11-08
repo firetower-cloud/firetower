@@ -136,10 +136,30 @@ export function screenEdges(insets: Insets, want: Edges = {}): ViewStyle {
  * takes {@link BLEED}, so the two never meet today.
  */
 export function useEdges(want: Edges = {}): ViewStyle {
+  return screenEdges(useInsets(), want);
+}
+
+/**
+ * What the hardware reserves — or, on a dev web build with `?insets=` set,
+ * what was asked for. See the note at the foot of this file.
+ *
+ * Two readers: {@link useEdges}, for a screen's padding, and `pose.ts`, which
+ * subtracts the **system** inset from a measured frame to get the band's
+ * laid-out width. Those are different questions and both of them want the
+ * supplied answer when there is one, because the pose that most needs
+ * measuring is the one no simulator here can boot.
+ *
+ * `951` with `right: 84` is the case: the window is 951, the laid-out box is
+ * **867**, and the docked column is `867 − 560 = ` **307**. That number has
+ * been revised three times already — the drawing's prose said 340, an assumed
+ * 74pt rail made it 317, the measured 84 makes it 307 — and a sweep with the
+ * browser's own zero insets would report **340** while every band
+ * classification still came out right, because 951 and 867 both dock. A
+ * plausible wrong number that passes every other check.
+ */
+export function useInsets(): Insets {
   const real = useSafeAreaInsets();
-  /* `supplied()` is `null` everywhere except a dev web bundle with the query
-     parameter set — see the note at the foot of this file. */
-  return screenEdges(supplied() ?? real, want);
+  return supplied() ?? real;
 }
 
 /**
@@ -197,6 +217,19 @@ export function useEdges(want: Edges = {}): ViewStyle {
  *
  * It is test scaffolding and must never become a way to configure the real
  * app: there is no persistence, no setting, and no code path that writes it.
+ *
+ * ### What it does not reach, which a sweep has to know
+ *
+ * Two readers go through {@link useInsets}: this file's screen padding and
+ * `pose.ts`'s band arithmetic. **`Sheet`, `Picker` and `Composer` still read
+ * the real insets** — they set margins and a keyboard offset on floating
+ * surfaces, which is a third question again.
+ *
+ * So with insets injected on web, a sheet will span the full width while the
+ * screen behind it holds a rail's worth of padding. That is the scaffolding
+ * being partial, **not** a layout bug, and it would read as one to anybody
+ * sweeping without knowing. Said here because an unexplained inconsistency in
+ * a test rig is how a false defect report starts.
  */
 const SUPPLIED = "insets";
 
