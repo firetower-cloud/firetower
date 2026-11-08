@@ -180,8 +180,28 @@ export default function Home() {
    * `api/pending.ts`. Without it the peek can preview but not answer, which
    * is coverage §5's **P4** and the whole reason the component exists.
    */
-  const blockedHere = !!peeked?.runs.some((r) => r.status === "NeedsYou");
-  const pending = usePending(peeked?.id ?? null, blockedHere);
+  /**
+   * **The session id, not the workspace id.**
+   *
+   * `Workspace.id` is `session.workspaceId ?? session.id` — so for anything
+   * that belongs to a workspace it is the *workspace's* id, and
+   * `getConversation` wants a *session's*. Passing `peeked.id` meant the fetch
+   * asked for a conversation that does not exist, `pending` never resolved,
+   * and the Allow/No buttons never rendered — while the ember dot showed,
+   * because `blocked` is read off the runs and was right all along.
+   *
+   * `lead()` is what picks the run whose transcript a person means, and it is
+   * what `[id].tsx` opens and answers against. The peek has to agree with the
+   * screen it is a preview of, or it answers a different session than the one
+   * it is showing.
+   */
+  const blockedRun = peeked?.runs.find((r) => r.status === "NeedsYou");
+  /* **The blocked run, not the lead.** `lead()` answers "whose transcript do
+     I open" and reports the *busy* run when a workspace has one running
+     beside one that is stopped — so it is the wrong target for a question.
+     The run that is asking is the run to read and the run to answer. */
+  const speakerId = peeked ? (blockedRun?.id ?? lead(peeked).id) : null;
+  const pending = usePending(speakerId, !!blockedRun);
   const answer = useAnswerRequest();
 
   const refresh = useCallback(
@@ -450,7 +470,10 @@ export default function Home() {
             place={peeked}
             onClose={() => setPeeking(null)}
             onOpen={() => router.push(`/workspace/${peeked.id}`)}
-            onChanges={() => router.push(`/workspace/repo?id=${peeked.id}`)}
+            /* `repo.tsx` reads its param with `useSession`, so this is the
+             session id — unlike `/workspace/{id}`, which resolves a workspace.
+             Two routes, two kinds of id, one field name. */
+          onChanges={() => router.push(`/workspace/repo?id=${speakerId}`)}
             onEnd={() => setPeeking(null)}
           />
         ) : null}
@@ -474,13 +497,16 @@ export default function Home() {
           place={peeked}
           onClose={() => setPeeking(null)}
           onOpen={() => router.push(`/workspace/${peeked.id}`)}
-          onChanges={() => router.push(`/workspace/repo?id=${peeked.id}`)}
+          /* `repo.tsx` reads its param with `useSession`, so this is the
+             session id — unlike `/workspace/{id}`, which resolves a workspace.
+             Two routes, two kinds of id, one field name. */
+          onChanges={() => router.push(`/workspace/repo?id=${speakerId}`)}
           pending={pending.asked}
           reading={pending.reading}
           onAnswer={(yes) => {
-            if (!pending.asked || !peeked) return;
+            if (!pending.asked || !speakerId) return;
             answer.mutate({
-              id: peeked.id,
+              id: speakerId,
               data: {
                 req: pending.asked.req,
                 decision: yes ? { decision: "Allow" } : { decision: "Deny", reason: null },

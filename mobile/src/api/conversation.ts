@@ -1147,6 +1147,43 @@ export function useConversation(sessionId: string) {
   );
 
   /**
+   * Put it back, because the answer never reached the server.
+   *
+   * `settle` is optimistic: the card goes the instant somebody presses, which
+   * is right — an approval that waits on a round trip feels broken. But an
+   * optimistic write with no way back means a failed answer **looks answered**.
+   * The agent is still stopped, holding the tool call open, and the one screen
+   * that would have told you has removed the evidence.
+   *
+   * Idempotent, like the fold's own handling of `RequestOpened`: the server
+   * re-sends that event whenever a watcher attaches, so a rollback racing a
+   * reconnect must not produce two cards for one question.
+   */
+  const unsettle = useCallback(
+    (asked: Asked) =>
+      change((c) =>
+        c.asked.some((a) => a.req === asked.req) ? c : { ...c, asked: [...c.asked, asked] },
+      ),
+    [change],
+  );
+
+  /**
+   * Take back a message that was shown before it was sent.
+   *
+   * `echo` is the same bargain as `settle` and carries the same risk: the
+   * bubble appears immediately, and without this a message the server never
+   * received sits in the transcript looking exactly like one it did.
+   */
+  const unecho = useCallback(
+    (text: string) =>
+      change((c) => {
+        const last = [...c.items].reverse().find((i) => i.kind === "UserMessage" && i.text === text);
+        return last ? { ...c, working: false, items: c.items.filter((i) => i !== last) } : c;
+      }),
+    [change],
+  );
+
+  /**
    * Read the whole thing again, from nothing.
    *
    * There was no way to ask for this and it needed one. `start` skips the
@@ -1179,5 +1216,5 @@ export function useConversation(sessionId: string) {
    */
   const older = useCallback(() => void earlier(key, sessionId), [key, sessionId]);
 
-  return { conversation: state, echo, settle, remember, stopping, reread, older };
+  return { conversation: state, echo, unecho, settle, unsettle, remember, stopping, reread, older };
 }

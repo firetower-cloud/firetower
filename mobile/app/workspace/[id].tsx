@@ -17,7 +17,7 @@ import Animated, { useAnimatedStyle } from "react-native-reanimated";
 import { useReanimatedKeyboardAnimation } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router, useLocalSearchParams } from "expo-router";
-import { ChevronLeft, Eye, MoreHorizontal, PanelRight } from "lucide-react-native";
+import { ChevronLeft, Eye, MoreHorizontal, PanelRight, TriangleAlert } from "lucide-react-native";
 import { delegating, interruptible, useConversation } from "~/api/conversation";
 import { useListEvents } from "~/api/generated/events/events";
 import { useListArtifacts } from "~/api/generated/artifacts/artifacts";
@@ -32,7 +32,7 @@ import {
   useSendTurn,
 } from "~/api/generated/sessions/sessions";
 import { elapsed, minutesSince, STATUS_LABEL } from "~/api/view";
-import { useDiff, useSession, useSessions } from "~/data";
+import { useDiff, useSession, useSessions, why } from "~/data";
 import { group, lead, type Workspace } from "~/api/workspaces";
 import { AgentMark } from "~/ui/AgentMark";
 import { Approval } from "~/ui/Approval";
@@ -195,8 +195,22 @@ function Conversation({ place }: { place: Workspace }) {
     [everyArtifact, family],
   );
 
-  const { conversation, echo, settle, remember, stopping, reread, older } = useConversation(speaker.id);
+  const { conversation, echo, unecho, settle, unsettle, remember, stopping, reread, older } =
+    useConversation(speaker.id);
   const [rereading, setRereading] = useState(false);
+  /**
+   * What the server refused or never heard, in words.
+   *
+   * Every mutation on this screen writes optimistically first — the message
+   * appears, the approval card goes, the composer says stopping — and until
+   * now **none of them had an `onError`**. A failed answer looked answered, a
+   * failed send looked sent, and a failed interrupt said stopping for ever.
+   * On a phone that is not an edge case: it is any dropped connection.
+   *
+   * So each one rolls its optimistic write back and says so here. One line,
+   * because the detail that matters is *which* action did not happen.
+   */
+  const [trouble, setTrouble] = useState<string | null>(null);
   /* The live one first — a todo list arrives on the turn stream and moves as
      the agent works. `session.plan` is the cross-engine fallback an agent set
      through `firetower:plan`, which rides on the session and lands a poll
@@ -222,14 +236,35 @@ function Conversation({ place }: { place: Workspace }) {
 
   const say = (text: string, images: Attached[] = []) => {
     echo(text, images);
-    send.mutate({ id: speaker.id, data: { text, images } });
+    setTrouble(null);
+    send.mutate(
+      { id: speaker.id, data: { text, images } },
+      {
+        onError: (e) => {
+          /* The bubble came back off, so the transcript does not claim a
+             message the agent never got. The text is gone from the composer
+             by now, so it is quoted here rather than silently lost. */
+          unecho(text);
+          setTrouble(`That message was not sent — ${why(e)}`);
+        },
+      },
+    );
     setTimeout(() => scroller.current?.scrollToEnd({ animated: true }), 60);
   };
 
   /* A file goes into the workspace rather than into the message: the agent
      has its own tools for reading one, and sending the bytes twice is waste. */
   const carry = async (name: string, data: string) => {
-    await attach.mutateAsync({ id: speaker.id, data: { name, data } });
+    setTrouble(null);
+    try {
+      await attach.mutateAsync({ id: speaker.id, data: { name, data } });
+    } catch (e) {
+      /* Nothing optimistic to roll back — the file was never shown as
+         attached — but silence here means somebody sends a message about a
+         file the workspace has not got. */
+      setTrouble(`${name} was not attached — ${why(e)}`);
+      throw e;
+    }
   };
 
   /* Named once: the docked column and the floated sheet draw the same thing
@@ -504,25 +539,68 @@ function Conversation({ place }: { place: Workspace }) {
         onAttach={carry}
         onInterrupt={() => {
           stopping(true);
-          interrupt.mutate({ id: speaker.id });
+          setTrouble(null);
+          interrupt.mutate(
+            { id: speaker.id },
+            {
+              onError: (e) => {
+                /* Otherwise the button stays "stopping" for ever over an agent
+                   that is still working. */
+                stopping(false);
+                setTrouble(`It is still working — ${why(e)}`);
+              },
+            },
+          );
         }}
         // Only to somebody who may act here. The composer is already gone for a
         // viewer, and these ride above it — an approval is the one control
         // where being drawn and refused is worst: the agent is stopped, asking
         // whether it may do something on the owner's machine.
-        above={conversation.asked.map((a) => (
+        above={[
+          /* Above the composer, with the approvals, because that is where the
+             action was taken. A rollback nobody sees is still silent. */
+          trouble ? (
+            <Pressable
+              key="trouble"
+              testID="trouble"
+              onPress={() => setTrouble(null)}
+              className="mx-3 mb-2 flex-row items-center gap-2.5 rounded-field border border-brick-deep bg-brick-tint px-4 py-3"
+            >
+              <TriangleAlert color={color.brick} size={16} />
+              <Text className="min-w-0 flex-1 font-sans text-meta text-text">{trouble}</Text>
+            </Pressable>
+          ) : null,
+          ...conversation.asked.map((a) => (
           <Approval
             key={a.req}
             asked={a}
             onAnswer={(yes) => {
+              /* Optimistic, deliberately — an approval that waits on a round
+                 trip feels broken. The rollback is what makes that safe. */
               settle(a.req);
-              answer.mutate({
-                id: speaker.id,
-                data: { req: a.req, decision: yes ? { decision: "Allow" } : { decision: "Deny", reason: null } },
-              });
+              setTrouble(null);
+              answer.mutate(
+                {
+                  id: speaker.id,
+                  data: {
+                    req: a.req,
+                    decision: yes ? { decision: "Allow" } : { decision: "Deny", reason: null },
+                  },
+                },
+                {
+                  onError: (e) => {
+                    /* The agent is still stopped and still holding the tool
+                       call open. Putting the card back is the only thing that
+                       says so. */
+                    unsettle(a);
+                    setTrouble(`That answer did not reach the agent — ${why(e)}`);
+                  },
+                },
+              );
             }}
           />
-        ))}
+          )),
+        ]}
       />
       )}
       </View>

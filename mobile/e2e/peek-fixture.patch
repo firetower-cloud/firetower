@@ -12,8 +12,14 @@
 # buttons correctly do not render.
 #
 # This patch adds a conversation for `s_6` and `s_7` carrying a real
-# `RequestOpened`, and an endpoint that accepts the answer and logs which
-# decision arrived.
+# `RequestOpened`, and an endpoint that accepts the answer and logs the
+# decision that arrived.
+#
+# The answer route is **`POST /api/v1/sessions/{id}/answer`** — what
+# `getAnswerRequestUrl` builds. An earlier version of this fixture guessed
+# `/requests/{req}`, which the client never calls: the app 404'd, the log line
+# never fired, and its absence read as a failed answer rather than a
+# mismatched mock. A fixture answering the wrong path is worse than none.
 #
 #   cd firetower
 #   git apply mobile/e2e/peek-fixture.patch
@@ -29,15 +35,14 @@
 
 --- a/desktop/scripts/mock-server.mjs
 +++ b/desktop/scripts/mock-server.mjs
-@@ -388,6 +388,26 @@
+@@ -388,6 +388,25 @@
  const CODEX_DONE = JSON.parse(
    readFileSync(new URL("./codex-events-done.json", import.meta.url), "utf8"),
  );
 +
-+/* PATCHED FOR VERIFICATION — not in the repo. A conversation for s_6 with a
-+   real `RequestOpened`, so the peek has an `Asked` to fold and a `req` to
-+   answer. The shipped mock serves a conversation only for s_1 and that one
-+   has no pending request, so P4 could not be exercised against it. */
++/* FIXTURE — see mobile/e2e/peek-fixture.patch. A conversation for the two
++   sessions that are `NeedsYou`, carrying a real `RequestOpened`, so the peek
++   has an `Asked` to fold and a `req` to answer. */
 +const blockedConversation = () => ({
 +  lastLine: 12,
 +  firstLine: 0,
@@ -56,22 +61,29 @@
  
  const conversation = () => ({
    lastLine: 42,
-@@ -520,6 +540,14 @@
-   }
+@@ -521,6 +540,21 @@
  
    if (req.method === "POST" && path === "/api/v1/updates/plan") return json(res, PLAN);
-+
-+  /* PATCHED: answering a request. Logged so the verification can see which
-+     decision actually arrived. */
-+  const answered = /^\/api\/v1\/sessions\/([^/]+)\/requests\/([^/]+)$/.exec(path);
-+  if (req.method === "POST" && answered) {
-+    console.log(`[mock] ANSWERED session=${answered[1]} req=${answered[2]}`);
-+    return json(res, { detail: "ok" });
-+  }
  
++  /* FIXTURE: answering. **`/answer`, not `/requests/{req}`** — this is the
++     route `getAnswerRequestUrl` builds, and an earlier version of this patch
++     guessed the wrong one. A fixture that answers a path the client never
++     calls is worse than no fixture: the app 404s, the log line never fires,
++     and its absence reads as a failed answer rather than a mismatched mock. */
++  const answered = /^\/api\/v1\/sessions\/([^/]+)\/answer$/.exec(path);
++  if (req.method === "POST" && answered) {
++    let body = "";
++    req.on("data", (c) => (body += c));
++    return req.on("end", () => {
++      console.log(`[mock] ANSWERED session=${answered[1]} ${body}`);
++      json(res, { detail: "ok" });
++    });
++  }
++
    /* Signing in, so the first-run flow can be walked end to end rather than
       stopping at the password field. `locked` hands back the temporary
-@@ -741,6 +769,8 @@
+      password case, which is the one `Gate` and `ReplacePassword` exist for. */
+@@ -741,6 +775,8 @@
      "/api/v1/sessions/s_1/turn": { sent: true },
      "/api/v1/artifacts": scene === "no-artifacts" || scene === "bare" ? [] : ARTIFACTS,
      "/api/v1/sessions/s_1/conversation": conversation(),
