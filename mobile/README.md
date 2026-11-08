@@ -166,6 +166,37 @@ stay small.
 emulator running is the wrong one. Pass `--device` with the simulator's UDID
 from `xcrun simctl list devices`.
 
+#### Supplying the safe-area insets, in a browser
+
+`react-native-web` reports `env(safe-area-inset-*)` as `0px`, which makes one
+whole class of bug **invisible there by construction**: a screen that writes
+`paddingLeft: insets.left` over its own gutter looks perfectly padded, because
+the inset it is writing is zero. That is how a gutter collapse reached a user
+on the connect screens.
+
+So on web, in a dev build only, the insets can be supplied instead:
+
+```
+http://localhost:8081/connect?insets=0,84,34,0
+```
+
+`top,right,bottom,left`, CSS shorthand order — and those four are the Duo
+front panel's own, as the system reports them. Absent, detection happens
+normally; malformed, it says so in the console rather than falling through
+quietly. Gated on `Platform.OS === "web" && __DEV__`, and it is deliberately not a
+setting: nothing persists it and nothing writes it.
+
+That the gate holds was **checked rather than asserted**. In a dev web bundle
+the branch is present and reachable; in `expo export --platform web` its
+console warning is absent from every chunk, so `__DEV__` resolved at build
+time and the branch was stripped. On native, `Platform.OS !== "web"` returns
+before anything else runs.
+
+It exists because the gutter rule is otherwise only provable at 466 — the one
+pose there is hardware for here. With it, 390, 412, 669 and 951 can each be
+swept twice, with the insets zero and with them non-zero. `src/ui/edges.ts`
+has the full note, including why `initialMetrics` is not the mechanism.
+
 **Maestro cannot target coordinates on an iPhone Duo.** Percentages, element
 ids and absolute points all resolve to the wrong place — a tap aimed at a chip
 at y≈193pt landed around y≈393pt, and an id-targeted tap opened an element

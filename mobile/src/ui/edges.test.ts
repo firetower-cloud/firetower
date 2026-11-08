@@ -10,7 +10,7 @@
  */
 import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { BLEED, GUTTER, LEDE_GUTTER, screenEdges, type Insets } from "~/ui/edges";
+import { BLEED, GUTTER, LEDE_GUTTER, parseInsets, screenEdges, type Insets } from "~/ui/edges";
 
 /** A plain phone: a status bar, a home indicator, nothing at the sides. */
 const phone: Insets = { top: 59, bottom: 34, left: 0, right: 0 };
@@ -123,5 +123,71 @@ describe("no screen replaces its gutter with an inset", () => {
     // Thirteen full-bleed screens and the two lede ones. If a screen is added
     // without it, this is the number that moves.
     expect(using.length).toBeGreaterThanOrEqual(15);
+  });
+});
+
+/**
+ * **The supplied insets, which exist so the browser can reproduce a bug it
+ * cannot otherwise have.**
+ *
+ * `env(safe-area-inset-*)` is `0px` in a browser, so the pre-fix code wrote 0
+ * over a gutter that was already resolving against 0 and the defect was
+ * invisible there by construction. Supplying the Duo's measured insets makes
+ * the rule checkable at every width instead of only the one pose there is
+ * hardware for.
+ *
+ * What is pinned here is the parsing, and specifically that it **refuses**
+ * what it cannot read. A debug hook that half-reads its input is worse than
+ * none: a sweep would report the gutter holding, or not holding, about an
+ * injection that never happened.
+ */
+describe("insets supplied from a query string", () => {
+  it("reads four numbers in CSS order", () => {
+    // The Duo's front panel, as the system reports it.
+    expect(parseInsets("?insets=0,84,34,0")).toEqual({ top: 0, right: 84, bottom: 34, left: 0 });
+  });
+
+  it("is absent unless asked for, which is every normal run", () => {
+    expect(parseInsets("")).toBeNull();
+    expect(parseInsets("?scene=team")).toBeNull();
+  });
+
+  it("tolerates spaces, because a URL typed by hand has them", () => {
+    expect(parseInsets("?insets=59, 0, 34, 0")).toEqual({ top: 59, right: 0, bottom: 34, left: 0 });
+  });
+
+  it("survives other parameters beside it", () => {
+    expect(parseInsets("?width=951&insets=0,84,34,0")).toEqual({
+      top: 0,
+      right: 84,
+      bottom: 34,
+      left: 0,
+    });
+  });
+
+  it("refuses the wrong number of fields rather than guessing which is missing", () => {
+    expect(parseInsets("?insets=0,84")).toBeNull();
+    expect(parseInsets("?insets=0,84,34,0,12")).toBeNull();
+  });
+
+  it("refuses an empty field, which is a typo and not a zero", () => {
+    // `Number("")` is 0, so this is the case a looser parse reads as valid.
+    expect(parseInsets("?insets=0,,34,0")).toBeNull();
+  });
+
+  it("refuses units, negatives and words", () => {
+    expect(parseInsets("?insets=0,84px,34,0")).toBeNull();
+    expect(parseInsets("?insets=0,-84,34,0")).toBeNull();
+    expect(parseInsets("?insets=top,right,bottom,left")).toBeNull();
+    expect(parseInsets("?insets=0,Infinity,34,0")).toBeNull();
+  });
+
+  it("feeds the same rule as a real inset — the gutter still holds", () => {
+    const duo = parseInsets("?insets=0,84,34,0")!;
+    const pad = screenEdges(duo, { gutter: LEDE_GUTTER, top: 24, bottom: 24 });
+    // What QA could not produce in a browser before: a non-zero inset on one
+    // side, and 26 surviving on the other.
+    expect(pad.paddingLeft).toBe(26);
+    expect(pad.paddingRight).toBe(84);
   });
 });

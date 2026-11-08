@@ -53,6 +53,7 @@
  * the shipped code was not any of them. It is `.p-springboard`'s, which draws
  * the *iOS home screen*, and `.d-stage`'s, which is the document's own chrome.
  */
+import { Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { ViewStyle } from "react-native";
 
@@ -135,5 +136,120 @@ export function screenEdges(insets: Insets, want: Edges = {}): ViewStyle {
  * takes {@link BLEED}, so the two never meet today.
  */
 export function useEdges(want: Edges = {}): ViewStyle {
-  return screenEdges(useSafeAreaInsets(), want);
+  const real = useSafeAreaInsets();
+  /* `supplied()` is `null` everywhere except a dev web bundle with the query
+     parameter set — see the note at the foot of this file. */
+  return screenEdges(supplied() ?? real, want);
+}
+
+/**
+ * ## Supplying the insets in a browser, for a sweep no simulator here can run
+ *
+ * **The bug this file fixes cannot be reproduced on `react-native-web`.**
+ * `env(safe-area-inset-*)` reports `0px` in a browser, so `insets.left` was 0,
+ * the gutter it was overwriting *also* resolved against 0, and the pre-fix
+ * connect screen measures a healthy 26/26 at every width. The defect only
+ * exists when an inset is **non-zero**, which on this hardware is one pose on
+ * one device.
+ *
+ * That is a fact about the browser, not about the app — so the insets can be
+ * supplied instead of detected, and then the rule is checkable at 390, 412,
+ * 669 and 951, which is every width the drawing has and four more than any
+ * simulator here can boot.
+ *
+ * ### Why not `initialMetrics`
+ *
+ * It was the obvious route and it does not work. `SafeAreaProvider` seeds
+ * `useState` from `initialMetrics.insets`, but `NativeSafeAreaProvider.web`
+ * appends a hidden `div` whose padding *is* `env(safe-area-inset-*)`, reads
+ * its computed padding, and calls `onInsetsChange` — **immediately on mount**,
+ * then on every resize and `ResizeObserver` tick. The provider's handler is
+ * `setInsets(pickInsets(cur, next))`, which takes the new value whenever it
+ * differs. So a seeded 84 is replaced by the browser's 0 on the first effect
+ * pass. Not "too late to be useful": overwritten by design, every time.
+ *
+ * Read in `node_modules/react-native-safe-area-context/lib/commonjs/`
+ * (`SafeAreaContext.js`, `NativeSafeAreaProvider.web.js`) at 5.11.1 rather
+ * than inferred from the docs.
+ *
+ * ### So it goes here instead
+ *
+ * This file is already the one place that reads the insets for a screen's
+ * padding, which makes it the one place an override has to exist. Nothing is
+ * patched, nothing is monkeyed, and the provider keeps doing exactly what it
+ * does.
+ *
+ * ```
+ * http://localhost:8081/connect?insets=0,84,34,0
+ * ```
+ *
+ * `top,right,bottom,left` — CSS shorthand order, because that is the order
+ * anybody typing four numbers into a URL will assume. Those four are the
+ * Duo front panel's own, as the system reported them: `top 0 · right 84 ·
+ * bottom 34 · left 0`. Zero on every edge is the browser's own answer, so
+ * sweeping a width twice means running it with and without the parameter.
+ *
+ * **Web and dev only.** `Platform.OS === "web" && __DEV__`. Checked both
+ * ways rather than asserted: the branch is present and reachable in a dev web
+ * bundle, and in `expo export --platform web` its console warning appears in
+ * no chunk — so `__DEV__` resolved at build time and the branch was stripped.
+ * On native, `Platform.OS !== "web"` returns before anything else runs.
+ *
+ * It is test scaffolding and must never become a way to configure the real
+ * app: there is no persistence, no setting, and no code path that writes it.
+ */
+const SUPPLIED = "insets";
+
+/**
+ * Parse `top,right,bottom,left` out of a query string. `null` for anything it
+ * cannot read, which the caller reports rather than swallows.
+ *
+ * Pure and exported for the tests, because the thing most worth pinning about
+ * a debug hook is that it **refuses** malformed input instead of half-reading
+ * it.
+ */
+export function parseInsets(search: string): Insets | null {
+  const raw = new URLSearchParams(search).get(SUPPLIED);
+  if (raw === null) return null;
+
+  const parts = raw.split(",").map((n) => n.trim());
+  if (parts.length !== 4) return null;
+
+  const numbers = parts.map(Number);
+  /* `Number("")` is 0 and `Number("12px")` is NaN, so both have to be caught:
+     an empty field is a typo rather than a zero somebody meant. */
+  if (parts.some((n) => n === "") || numbers.some((n) => !Number.isFinite(n) || n < 0)) {
+    return null;
+  }
+
+  const [top, right, bottom, left] = numbers as [number, number, number, number];
+  return { top, right, bottom, left };
+}
+
+/** Remembered per query string, so changing the URL is picked up and typing
+ *  a screen's worth of renders does not re-parse it each time. */
+let cached: { search: string; insets: Insets | null } | null = null;
+
+function supplied(): Insets | null {
+  if (Platform.OS !== "web" || !__DEV__) return null;
+  if (typeof window === "undefined") return null; // static rendering
+
+  const search = window.location.search;
+  if (cached?.search !== search) {
+    const insets = parseInsets(search);
+    /* **Loudly, when it cannot be read.** A mistyped parameter that silently
+       fell through to detection would make a sweep report the gutter holding —
+       or not holding — about an injection that never happened. Four separate
+       wrong conclusions in this review came from trusting a derived signal; a
+       debug hook that fails quietly is one more of them waiting to happen. */
+    if (insets === null && new URLSearchParams(search).has(SUPPLIED)) {
+      console.warn(
+        `[firetower] ?${SUPPLIED}= could not be read — wanted four non-negative ` +
+          `numbers as top,right,bottom,left, e.g. ?${SUPPLIED}=0,84,34,0. ` +
+          "Falling back to what the browser reports, which is zero on every edge.",
+      );
+    }
+    cached = { search, insets };
+  }
+  return cached.insets;
 }
