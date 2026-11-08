@@ -405,7 +405,19 @@ export function Composer({
             layout={LinearTransition.duration(200)}
             style={[
               {
-                backgroundColor: color.raise,
+                /* `--color-float`, not `--color-ground` and not `--color-raise`.
+                   A floating surface's fill is the thing that separates it
+                   from the page, and in dark it has to be: the shadow below
+                   is `rgb(0 0 0 / .7)` over a 0.337%-luminance page, which
+                   renders nothing. Filled with the page's own colour this
+                   measured ΔE 0.00 against it — the most-used control in the
+                   app, with an invisible edge. `float` is L* 11.42 against
+                   the page's 3.04, a 1.18x jump in light.
+
+                   In light it is the page's own white and the shadow does the
+                   work, which is what a shadow is for. One token, both
+                   answers. */
+                backgroundColor: color.float,
                 paddingHorizontal: 8,
                 /* Roomier at rest, tighter once you are writing in it. The
                    card grows and the padding gives way at the same time,

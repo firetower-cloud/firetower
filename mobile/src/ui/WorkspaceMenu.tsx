@@ -218,9 +218,13 @@ export function WorkspaceMenu({
 
   return (
     <Modal visible={open} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable className="flex-1 bg-black/60" onPress={onClose} />
+      {/* The sheet is the task and the conversation is not behind it, so this
+          is a scrim rather than a catcher — and it is `--color-scrim`, which is
+          its own token precisely because a surface at an alpha is a pale wash
+          on a pale ground. */}
+      <Pressable className="flex-1" style={{ backgroundColor: color.scrim }} onPress={onClose} />
       <View
-        className="rounded-t-2xl border-t border-line bg-panel"
+        className="rounded-t-2xl border-t border-line bg-float"
         style={{ paddingBottom: insets.bottom + 8, marginLeft: insets.left, marginRight: insets.right }}
       >
         <View className="items-center pb-1 pt-2.5">

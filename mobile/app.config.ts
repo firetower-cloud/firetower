@@ -5,11 +5,19 @@ import pkg from "./package.json";
 /**
  * The phone's shell.
  *
- * Two things here are not defaults and are load-bearing:
+ * Three things here are not defaults and are load-bearing:
  *
- * - **Dark, always.** `web/app/globals.css` sets `color-scheme: dark` and the
- *   token set has no light values to fall back to. A phone that respects the
- *   system theme would render half a design system.
+ * - **The system's theme, light or dark.** This was `"dark"`, with a comment
+ *   saying so, because `globals.css` had no light values to fall back to and a
+ *   phone that respected the system theme would have rendered half a design
+ *   system. PR #261 added the light branch; `src/design/phone.css` adds the
+ *   phone's own corrections to it. So the stated reason is spent, and the
+ *   comment goes with the code. The in-app control on **You** overrides this
+ *   per person; `"automatic"` is what makes System mean anything.
+ * - **Unlocked orientation.** This was `"portrait"`, which is one line that
+ *   made the whole brief unreachable: no window is ever 840 wide in portrait,
+ *   so the `dock` band could not be entered on any device. The Duo's inner
+ *   landscape pose at 951 is the pose the design is about.
  * - **Cleartext and local addresses are allowed on purpose.** A great many
  *   Firetower installs are `http://192.168.1.40:4400`, a `.local` name, or a
  *   Tailscale address. iOS blocks cleartext by default and additionally gates
@@ -23,13 +31,40 @@ const config: ExpoConfig = {
   slug: "firetower",
   /* release-please bumps package.json; the build number is EAS's. */
   version: pkg.version,
-  orientation: "portrait",
+  /* Unlocked rather than portrait. See the note above: portrait alone makes
+     the dock band unreachable, and the 951 landscape pose is the one the
+     design is for.
+
+     This is app-wide, so it also exposes a plain iPhone in landscape at
+     844 × 390 — a pose the drawing never drew. The band rule already answers
+     it rather than needing a new decision: nothing insets a compact phone, so
+     844 clears the 840 dock line and it docks with the conversation keeping
+     exactly its 560 measure. What is untested is the 390pt *height*. */
+  orientation: "default",
   scheme: "firetower",
-  userInterfaceStyle: "dark",
-  backgroundColor: "#0b0b0c",
+  userInterfaceStyle: "automatic",
+  /* Light's page — `--color-ground`, which on a phone is the page rather than
+     the chrome. This was `#0b0b0c`, so the first frame of a light launch was
+     black, which is the one frame a person reads as a crash.
+
+     **There is only one of these.** `ExpoConfig` has no dark counterpart at
+     the top level, so this is the light value and `_layout.tsx` sets the real
+     one from the resolved theme through `expo-system-ui` on every change. The
+     splash below does have a `dark` branch and takes it.
+
+     Written rather than imported: a dynamic config is evaluated by Expo's own
+     loader outside Metro, so it cannot resolve `~/design`. `pnpm test` asserts
+     these literals against the generated palette instead, which is what stops
+     them drifting. */
+  backgroundColor: "#ffffff",
   ios: {
     bundleIdentifier: "com.usefiretower.app",
-    supportsTablet: false,
+    /* **The other half of the build claim.** With this false the app runs in
+       compatibility mode on the Duo's inner display: it gets a phone-sized
+       window in the middle of a larger screen and *none* of the three poses
+       happens at all. A design that names 466, 669 and 951 is not shipped by
+       drawing them. */
+    supportsTablet: true,
     infoPlist: {
       NSAppTransportSecurity: {
         NSAllowsLocalNetworking: true,
@@ -80,7 +115,13 @@ const config: ExpoConfig = {
        resource link fails on a symbol nothing generated. */
     [
       "expo-splash-screen",
-      { image: "./assets/splash-icon.png", backgroundColor: "#0b0b0c", resizeMode: "contain", imageWidth: 160 },
+      {
+        image: "./assets/splash-icon.png",
+        backgroundColor: "#ffffff",
+        resizeMode: "contain",
+        imageWidth: 160,
+        dark: { backgroundColor: "#0b0b0c" },
+      },
     ],
     /* Release builds are shrunk. Without this a local `assembleRelease` is
        111 MB — every ABI, unminified — which is fine to sideload once and not

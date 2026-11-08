@@ -9,7 +9,7 @@
  * The repository is one tap away rather than beside: see `~/ui/Changes`.
  */
 import { useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, View, useWindowDimensions } from "react-native";
+import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 /* React Native 0.88 split the component type from the instance type: `ScrollView`
    now names the component, so a ref wants `ScrollViewInstance`. */
 import type { ScrollViewInstance } from "react-native";
@@ -45,6 +45,7 @@ import { ArtifactCard } from "~/ui/ArtifactCard";
 import { Overview } from "~/ui/Overview";
 import { ImagesFrom } from "~/ui/WorkspaceImage";
 import { Waiting } from "~/ui/Waiting";
+import { usePose } from "~/ui/pose";
 import { useTheme } from "~/design/theme";
 
 /**
@@ -142,40 +143,49 @@ function Conversation({ place }: { place: Workspace }) {
   const managerId = above?.id ?? speaker.id;
   const team = useMemo(() => sessions.filter((s: Session) => s.parentId === managerId), [sessions, managerId]);
 
-  /* Beside the conversation when the display is wide enough to hold both —
-     the Duo's inner panel is the first phone screen that is — and a pushed
-     route when it is not. One component, two placements. */
   /**
    * Where the overview goes, which is three answers and not two.
    *
    * The conversation is never squeezed — that is the whole rule, and the
    * widths decide which way of keeping it applies:
    *
-   * - **push**, under 600. There is no room for a rail at all; it is its own
+   * - **push**, under 600. There is no room for a panel at all; it is its own
    *   screen, one back-gesture away. The phone at 390 and the Duo's front
    *   panel at 466.
-   * - **float**, 600 to 820. Wide enough to want the rail, too narrow to
-   *   split: 669 minus a 340 rail leaves 329, which is less than the phone
-   *   this app was designed for. So it comes over the top and the
-   *   conversation keeps its full width underneath. The Duo's inner panel
-   *   in portrait, which an earlier single threshold of 700 missed entirely.
-   * - **dock**, 820 and over. Room for both, so the rail sits beside and the
-   *   conversation takes the majority — 611 of the Duo's 951 in landscape.
+   * - **float**, from 600. Wide enough to want the panel, too narrow to
+   *   split. It comes over the top and the conversation keeps its full width
+   *   underneath, and the scrim dismisses it. The Duo's inner display in
+   *   portrait: 669, which lays out in 595.
+   * - **dock**, from 840 of *laid-out* width. Room for both, so the panel
+   *   sits beside and the conversation still clears its measure. The Duo's
+   *   inner display in landscape: 951, laying out in 877, column 317.
    *
    * Collapsible in both of the last two, from one control, so rotating the
-   * device never changes what the button does — only where the rail lands.
+   * device never changes what the button does — only where the panel lands.
+   *
+   * **The arithmetic is in `measure.ts` and measured by `usePose`**, not
+   * written here. This read `width >= 820` against the *window*, which is the
+   * dock question answered about the wrong box and ~90pt early; and the panel
+   * was `Math.min(340, Math.max(280, width - 400))`, which is `panelWidth`
+   * with 400 standing in for `READING` and **no floor test** — so it returned
+   * 280 at widths where 280 does not fit.
    */
-  const { width } = useWindowDimensions();
-  const rail: "push" | "float" | "dock" = width >= 820 ? "dock" : width >= 600 ? "float" : "push";
+  const pose = usePose();
+  const rail = pose.band;
 
   /* Docked starts open because it costs the conversation nothing it needs;
-     floated starts closed because it costs the conversation all of it. */
-  const [railOpen, setRailOpen] = useState(rail === "dock");
+     floated starts closed because it costs the conversation all of it.
 
-  /* Only the docked rail yields — a floated one is over the top, so there is
-     nothing to take width from. */
-  const panel = rail === "dock" ? Math.min(340, Math.max(280, width - 400)) : 340;
-  const beside = rail === "dock" && railOpen;
+     `null` until somebody presses the control, and then it is their answer —
+     which is what carries across a fold. Arriving at a *width* changes
+     neither. */
+  const [railChoice, setRailChoice] = useState<boolean | null>(null);
+  const railOpen = railChoice ?? pose.docked;
+
+  /* A floated panel takes nothing from the conversation, so the two are
+     different numbers rather than one with a special case. */
+  const panel = pose.docked ? pose.panel : pose.floating;
+  const beside = pose.docked && railOpen;
   const floating = rail === "float" && railOpen;
 
   const { data: everyArtifact } = useListArtifacts();
@@ -236,7 +246,14 @@ function Conversation({ place }: { place: Workspace }) {
   ) : null;
 
   return (
-    <View className="flex-1 bg-ground" style={{ paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }}>
+    /* `onLayout` is how the band knows which box it is deciding about. On
+       the Duo the system rail insets this view, so its width is the laid-out
+       width the dock test wants — measured rather than assumed. */
+    <View
+      className="flex-1 bg-ground"
+      onLayout={pose.onLayout}
+      style={{ paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }}
+    >
       <View className="flex-row items-center gap-1 border-b border-line-soft px-1 pb-2.5 pt-1">
         <Pressable onPress={() => router.back()} className="h-10 w-10 items-center justify-center" hitSlop={8}>
           <ChevronLeft color={color.bone} size={22} />
@@ -271,7 +288,7 @@ function Conversation({ place }: { place: Workspace }) {
           onPress={() =>
             rail === "push"
               ? router.push({ pathname: "/workspace/overview", params: { id: place.id } })
-              : setRailOpen((open) => !open)
+              : setRailChoice(!railOpen)
           }
           className={`h-10 w-10 items-center justify-center rounded-md ${railOpen && rail !== "push" ? "bg-raise" : ""}`}
           hitSlop={8}
@@ -526,13 +543,24 @@ function Conversation({ place }: { place: Workspace }) {
         <>
           <Pressable
             testID="overview-scrim"
-            onPress={() => setRailOpen(false)}
+            onPress={() => setRailChoice(false)}
             className="absolute bottom-0 left-0 right-0 top-0"
             style={{ backgroundColor: "rgba(0,0,0,0.45)" }}
           />
           <View
-            className="absolute bottom-0 right-0 top-0 border-l border-line bg-panel"
-            style={{ width: panel, shadowColor: "#000", shadowOpacity: 0.5, shadowRadius: 18, shadowOffset: { width: -8, height: 0 } }}
+            className="absolute bottom-0 right-0 top-0 border-l border-line bg-float"
+            style={{
+              width: panel,
+              /* A shadow is a light-theme device: below ~1% luminance there
+                 is nothing under a surface to cast into. It is kept because
+                 where it overlaps something lighter it does register, but
+                 what draws the boundary in dark is the `float` fill and the
+                 hairline — not this. */
+              shadowColor: "#000",
+              shadowOpacity: 0.5,
+              shadowRadius: 18,
+              shadowOffset: { width: -8, height: 0 },
+            }}
           >
             <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}>{overview}</ScrollView>
           </View>

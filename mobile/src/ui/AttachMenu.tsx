@@ -105,9 +105,15 @@ export function AttachMenu({
           left: 0,
           right: 0,
           bottom: 0,
-          /* Far enough up to cover whatever conversation is on screen. */
+          /* Far enough up to catch a press anywhere on the conversation. */
           top: -900,
-          backgroundColor: "rgba(0,0,0,0.5)",
+          /* **A catcher, not a scrim**, and it was a scrim — a hand-written
+             `rgba(0,0,0,0.5)`, the one colour in `mobile/src` that came from
+             nowhere. The test that picks between the two is whether the thing
+             the overlay is *about* stays on screen behind it. Here it does:
+             you are mid-sentence and the composer behind this is the subject,
+             so dimming it is dimming what you are reading. A popover gets an
+             invisible dismiss target and nothing else. */
         }}
       />
 
@@ -115,7 +121,7 @@ export function AttachMenu({
         entering={open}
         exiting={shut}
         style={{ transformOrigin: "bottom left" }}
-        className="mb-2 ml-3 w-64 overflow-hidden rounded-3xl border border-line bg-raise py-2"
+        className="mb-2 ml-3 w-64 overflow-hidden rounded-3xl border border-line bg-float py-2"
       >
         {WAYS.map(({ id, label, hint, icon: Icon, run }) => (
           <Pressable

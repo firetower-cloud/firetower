@@ -305,6 +305,40 @@ const base = {
   "@media (prefers-color-scheme: dark)": { ":root": varsFor(dark.colors) },
 };
 
+/**
+ * Two emitted files may never share a basename, and this is why.
+ *
+ * They did. `tokens.generated.js` held the Tailwind config and
+ * `tokens.generated.ts` held the palette, and **every resolver that puts `.js`
+ * before `.ts` handed `import { color } from "~/design/tokens.generated"` the
+ * CommonJS Tailwind config** — which exports no `color`. So every imperative
+ * colour in the app resolved to `undefined`: an icon with no tint, a status
+ * bar with no style, a background with no value. Invisible against a
+ * near-black page, which is why it shipped.
+ *
+ * Metro's default `sourceExts` is `["js", "jsx", "json", "ts", "tsx"]` and
+ * Vite's `resolve.extensions` is `[".mjs", ".js", ".mts", ".ts", …]`. Both put
+ * the JavaScript first. A third generated file is the obvious way to
+ * re-introduce this, so the generator refuses rather than trusting the next
+ * person to remember.
+ */
+const EMITTED = ["tailwind.generated.js", "tokens.generated.ts"];
+{
+  const seen = new Map();
+  for (const f of EMITTED) {
+    const stem = f.replace(/\.[^.]+$/, "");
+    if (seen.has(stem)) {
+      console.error(
+        `  ${f} and ${seen.get(stem)} share the basename "${stem}".\n` +
+          `  Every resolver that puts .js before .ts will hand an import of\n` +
+          `  "~/design/${stem}" the wrong one, silently. Rename one.`,
+      );
+      process.exit(1);
+    }
+    seen.set(stem, f);
+  }
+}
+
 const banner = (comment) =>
   `/* Generated from the four sources in scripts/tokens.mjs — do not edit.\n   Run \`just gen\` (or \`pnpm tokens\`) after changing a token in any of them.\n${comment} */\n`;
 

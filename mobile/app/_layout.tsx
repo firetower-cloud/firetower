@@ -17,6 +17,7 @@ import "../global.css";
 import { useEffect, useState } from "react";
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
+import * as SystemUI from "expo-system-ui";
 import * as SplashScreen from "expo-splash-screen";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
@@ -72,6 +73,20 @@ export default function Root() {
  */
 function Shell() {
   const { color, scheme } = useTheme();
+
+  /**
+   * The window behind the React tree, which is not ours to set in the config.
+   *
+   * `app.config.ts` carries one `backgroundColor` and Expo has no dark
+   * counterpart for it, so the config holds light's and this holds the truth.
+   * What it shows through is the moment before the first screen paints and the
+   * overscroll at the end of a list — both of which are the page, and both of
+   * which were black in light until this existed.
+   */
+  useEffect(() => {
+    SystemUI.setBackgroundColorAsync(color.ground);
+  }, [color.ground]);
+
   return (
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: color.ground }}>
       <KeyboardProvider>
