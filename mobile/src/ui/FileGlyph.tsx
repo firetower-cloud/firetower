@@ -1,9 +1,9 @@
 /**
- * What a file *is*, as one of nine categories.
+ * What a file *is*, as one of seven categories.
  *
  * A separate namespace from the signals and deliberately below them in
  * saturation: a panel of four hundred rows must not be able to out-shout the
- * one thing on screen that means an agent is waiting on you. Nine categories,
+ * one thing on screen that means an agent is waiting on you. Seven categories,
  * not ninety formats.
  */
 import { color } from "~/design/tokens.generated";

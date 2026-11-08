@@ -114,7 +114,7 @@ export const Markdown = memo(function Markdown({ children }: { children: string 
             </a>
           ),
 
-          strong: ({ children }) => <strong className="font-semibold text-bone">{children}</strong>,
+          strong: ({ children }) => <strong className="font-mid text-bone">{children}</strong>,
           em: ({ children }) => <em className="italic">{children}</em>,
           del: ({ children }) => <del className="text-mute line-through">{children}</del>,
 
@@ -256,7 +256,7 @@ function Block({ children }: { children: React.ReactNode }) {
 function Heading({ level, children }: { level: 1 | 2 | 3; children: React.ReactNode }) {
   const size = level === 1 ? "text-title" : level === 2 ? "text-body" : "text-body";
   return (
-    <p className={`mt-5 mb-2 font-semibold text-bone first:mt-0 ${size} ${MEASURE}`}>
+    <p className={`mt-5 mb-2 font-mid text-bone first:mt-0 ${size} ${MEASURE}`}>
       {children}
     </p>
   );

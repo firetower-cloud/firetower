@@ -35,6 +35,7 @@ import {
   ChevronRight,
   CornerDownRight,
   UserPlus,
+  UsersRound,
   FolderOpen,
   Plus,
   UserRound,
@@ -138,12 +139,18 @@ export function WhoCanAccess({
   id,
   path,
   look,
+  label,
 }: {
   kind: FiledKind;
   id: string;
   /** Where it is now. */
   path?: string | null;
   look: "toolbar" | "chip";
+  /* **A glyph among glyphs, a word among words.** The dense toolbars put this
+     beside other icon buttons where a label would be noise; the skill header
+     is a row of labelled buttons in the drawing, and a bare glyph in the
+     middle of it is the odd one out. */
+  label?: string;
 }) {
   const [open, setOpen] = useState(false);
   const me = useMe();
@@ -178,9 +185,14 @@ export function WhoCanAccess({
       <button
         onClick={() => setOpen((v) => !v)}
         title={`Who can access it — ${path ?? "yours"}`}
-        className={`control gap-1.5 ${open ? "bg-overlay text-bone" : "text-mute hover:bg-raise hover:text-bone"}`}
+        aria-label="Who can access it"
+        /* **`Users`, not `UserPlus`.** The toolbar next to it has "another
+           agent here", which is the user-plus glyph — two identical marks
+           side by side, one adding a person and one sharing with people. */
+        className={label ? `btn quiet ${open ? "bg-overlay text-bone" : ""}` : `gbtn w-auto gap-1.5 px-1.5 ${open ? "bg-overlay text-bone" : ""}`}
       >
-        <UserPlus className="h-4 w-4 shrink-0" strokeWidth={1.75} />
+        <UsersRound className="h-4 w-4 shrink-0" strokeWidth={1.75} />
+        {label}
         {/* The root on the button when it is shared, because "who can see my
             work" is not a question anybody should have to open a dialog to
             answer. Nothing in your own space, which is the quiet default, and
@@ -422,7 +434,7 @@ export function Sharing({
     if (place.kind === "mine")
       return {
         name: "Only you",
-        note: `u/${me.data?.user.slug ?? ""}`,
+        note: `u/${me.data?.user?.slug ?? ""}`,
         count: "just you",
         personal: true,
         who: null,
@@ -467,14 +479,14 @@ export function Sharing({
 
   return (
     <div
-      className="fixed inset-0 z-[60] grid place-items-start justify-center bg-ground/40 pt-[12vh] backdrop-blur-[2px]"
+      className="fixed inset-0 z-[60] grid place-items-start justify-center bg-scrim pt-[12vh] backdrop-blur-[2px]"
       onMouseDown={onClose}
     >
       <div
         onMouseDown={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal
-        className="flex max-h-[76vh] w-[27rem] flex-col overflow-hidden rounded-xl border border-line bg-overlay shadow-(--shadow-float)"
+        className="flex max-h-[76vh] w-[27rem] flex-col overflow-hidden rounded-xl border border-line lift shadow-(--shadow-float)"
       >
         <div className="flex items-start gap-2 border-b border-line px-3.5 py-2.5">
           <span className="min-w-0 flex-1">
@@ -543,7 +555,7 @@ export function Sharing({
               people={newWith}
               onPeople={setNewWith}
               one={one}
-              meId={me.data?.user.id}
+              meId={me.data?.user?.id}
             />
           )}
 
@@ -697,7 +709,7 @@ export function ShareMany({ skills, onClose, onDone }: { skills: Skill[]; onClos
   const destination = (): Landing | null => {
     if (!moving || !place) return null;
     if (place.kind === "mine")
-      return { name: "Only you", note: `u/${me.data?.user.slug ?? ""}`, count: "just you", personal: true, who: null };
+      return { name: "Only you", note: `u/${me.data?.user?.slug ?? ""}`, count: "just you", personal: true, who: null };
     if (place.kind === "new") {
       const inside = [
         { subjectId: "you", subjectKind: "person", name: "You", level: "admin" as Level },
@@ -805,14 +817,14 @@ export function ShareMany({ skills, onClose, onDone }: { skills: Skill[]; onClos
 
   return (
     <div
-      className="fixed inset-0 z-[60] grid place-items-start justify-center bg-ground/40 pt-[12vh] backdrop-blur-[2px]"
+      className="fixed inset-0 z-[60] grid place-items-start justify-center bg-scrim pt-[12vh] backdrop-blur-[2px]"
       onMouseDown={onClose}
     >
       <div
         onMouseDown={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal
-        className="flex max-h-[76vh] w-[27rem] flex-col overflow-hidden rounded-xl border border-line bg-overlay shadow-(--shadow-float)"
+        className="flex max-h-[76vh] w-[27rem] flex-col overflow-hidden rounded-xl border border-line lift shadow-(--shadow-float)"
       >
         <div className="flex items-start gap-2 border-b border-line px-3.5 py-2.5">
           <span className="min-w-0 flex-1">
@@ -875,7 +887,7 @@ export function ShareMany({ skills, onClose, onDone }: { skills: Skill[]; onClos
               people={newWith}
               onPeople={setNewWith}
               one={n === 1 ? "skill" : "skills"}
-              meId={me.data?.user.id}
+              meId={me.data?.user?.id}
             />
           )}
 
@@ -993,7 +1005,7 @@ function Footer({ left, children }: { left: string; children: React.ReactNode })
 
 function Label({ children }: { children: React.ReactNode }) {
   return (
-    <div className="px-3.5 pt-2.5 pb-1 text-micro tracking-[0.08em] text-mute uppercase">
+    <div className="legend px-3.5 pt-2.5 pb-1">
       {children}
     </div>
   );

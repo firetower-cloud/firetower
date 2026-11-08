@@ -38,6 +38,12 @@ export function AgentMark({
     height: size,
     fill: "currentColor",
     "aria-hidden": true,
+    /* **A brand mark, not a signal.** Claude's glyph is orange because
+       Claude's glyph is orange, and `assert-design.mjs` was counting every
+       one of them against the ember budget — thirteen on a workspace with
+       four agents in it. One attribute is cheaper than a heuristic that
+       tries to tell a brand from a state by its hue. */
+    "data-mark": "agent",
     className,
   } as const;
 

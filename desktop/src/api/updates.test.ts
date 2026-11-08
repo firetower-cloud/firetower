@@ -14,7 +14,6 @@ import {
   needsAnAnswer,
   RUN_LABEL,
   runTone,
-  showsDot,
   stepGlyph,
   updatesRow,
   willWrite,
@@ -168,44 +167,55 @@ describe("history", () => {
   });
 });
 
-describe("the rail's dot", () => {
-  it("shows for an update or a run in progress, and not otherwise", () => {
-    expect(showsDot(status())).toBe(true);
-    expect(showsDot(status({ updateAvailable: false }))).toBe(false);
-    expect(showsDot(status({ updateAvailable: false, activeRun: "upg_1" }))).toBe(true);
-    expect(showsDot(undefined)).toBe(false);
-  });
-});
-
-describe("the rail's Updates row", () => {
+/* What was `showsDot` is folded in here. It answered "is there anything in
+   Updates worth a mark", which spanned an available update *and* a run already
+   going — and the mark it fed was the rail's Updates icon. The icon has gone,
+   the mark is the avatar's, and the avatar's mark means exactly one thing, so
+   the two answers had to come apart. The cases it covered are the cases
+   below. */
+describe("the profile menu's Updates row, and the avatar's mark", () => {
   const level = { updateAvailable: false } as const;
 
-  it("says it in words when the deployment is behind", () => {
-    expect(updatesRow(status(), false)).toEqual({ label: "Update available", loud: true, dot: false });
+  it("names the version when the deployment is behind", () => {
+    expect(updatesRow(status(), null)).toEqual({ label: "Update available — 0.31.0", dot: true });
   });
 
-  it("says it for this app's own build on a deployment that is level", () => {
-    expect(updatesRow(status(level), true)).toEqual({ label: "Update available", loud: true, dot: false });
+  it("names this app's own build on a deployment that is level", () => {
+    expect(updatesRow(status(level), "0.42.0")).toEqual({ label: "Update available — 0.42.0", dot: true });
   });
 
-  it("keeps the quiet dot for a run already going", () => {
-    expect(updatesRow(status({ ...level, activeRun: "upg_1" }), false)).toEqual({
-      label: "Updates",
-      loud: false,
-      dot: true,
-    });
+  /* The deployment's release wins. It is the thing the Updates screen acts
+     on; the app moves its own build without being asked. */
+  it("prefers the deployment's release when both trains are behind", () => {
+    expect(updatesRow(status(), "0.42.0")).toEqual({ label: "Update available — 0.31.0", dot: true });
   });
 
-  it("is loud rather than marked when both are true at once", () => {
-    expect(updatesRow(status({ activeRun: "upg_1" }), true)).toEqual({
-      label: "Update available",
-      loud: true,
+  /* Belt and braces: a deployment can say it is behind without naming what
+     it is behind, and "Update available" with no number still beats silence. */
+  it("still says it when nothing named a version", () => {
+    expect(updatesRow(status({ latest: null }), null)).toEqual({ label: "Update available", dot: true });
+  });
+
+  /* **A run already going takes no mark.** It is worth knowing about, there is
+     nothing in it to decide, and you are the one who started it — so it says
+     so in the row and leaves the avatar alone. The mark is for an available
+     update and for nothing else. */
+  it("says a run is going in words, and does not mark the avatar", () => {
+    expect(updatesRow(status({ ...level, activeRun: "upg_1" }), null)).toEqual({
+      label: "Upgrading…",
       dot: false,
     });
   });
 
+  it("marks the update rather than the run when both are true at once", () => {
+    expect(updatesRow(status({ activeRun: "upg_1" }), "0.42.0")).toEqual({
+      label: "Update available — 0.31.0",
+      dot: true,
+    });
+  });
+
   it("says nothing before the first answer", () => {
-    expect(updatesRow(undefined, false)).toEqual({ label: "Updates", loud: false, dot: false });
+    expect(updatesRow(undefined, null)).toEqual({ label: "Updates", dot: false });
   });
 });
 

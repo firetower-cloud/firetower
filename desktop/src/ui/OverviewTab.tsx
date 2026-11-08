@@ -12,52 +12,44 @@
  * (`consumption_events`) but not yet exposed per session, so it isn't drawn.
  */
 import { useMemo } from "react";
-import { Check, ExternalLink, FileText, GitBranch, GitPullRequest, LayoutList, Link2 } from "lucide-react";
+import { Check, ExternalLink, FileText, GitBranch, GitPullRequest, LayoutList, Link2, TriangleAlert } from "lucide-react";
 import { navigate } from "~/shims/next-navigation";
 import { AgentMark } from "~/components/AgentMark";
-import { Blocks } from "~/components/Blocks";
-import { beatOf } from "~/api/view";
+import { StatusMark } from "~/components/BeatMark";
+import { BEAT_TONE, beatOf, elapsed, minutesSince } from "~/api/view";
 import { useConversation } from "~/api/conversation";
 import { relays } from "~/api/relay";
-import { useTokenUsage } from "~/data";
+import { useHosts } from "~/data";
+import { whereItRuns } from "~/components/WhereItRuns";
 import type { Agent, Artifact, PlanStep, Session, SessionStatus } from "~/api/generated/model";
 
-/** `94100000` → `94.1M`. The context-meter way of saying a big number. */
-function fmtTokens(n: number): string {
-  if (n >= 1e9) return `${(n / 1e9).toFixed(1)}B`;
-  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
-  if (n >= 1e3) return `${(n / 1e3).toFixed(1)}K`;
-  return `${n}`;
-}
-/** Segment colours for the token bar. The design system's `series` palette —
- *  the one meant to carry a chart — not the semantic signals (sage = done,
- *  brick = broke), which made the bar read as a status it does not mean. */
-const SEGMENTS = ["bg-series-1", "bg-series-2", "bg-series-3", "bg-series-4"];
+/**
+ * There is no token bar here, and that is deliberate.
+ *
+ * This panel carried a four-colour stacked bar, `229.8M tokens total`, and a
+ * percentage beside every agent. It is out: four hues in one panel is four
+ * more than a screen is allowed, identity in this system is a *mark* and
+ * never a hue, and the rail got measurably louder for a number nobody opened
+ * the workspace to read.
+ *
+ * **The numbers were real.** `POST /api/v1/sessions/token-usage` answers a
+ * per-session figure and is in the generated client — this was not dropped
+ * because it could only have been invented. It is a feature that may come
+ * back somewhere it belongs, which is not the team rail.
+ */
 
-/** The word beside a child's mark. The mark itself — colour and motion — is
- *  the rail's own `Blocks`, so a child reads here exactly as it does there. */
-function labelOf(s: SessionStatus): string {
-  switch (s) {
-    case "Working":
-    case "Starting":
-      return "working";
-    case "NeedsYou":
-      return "needs you";
-    case "HandedBack":
-      return "handed back";
-    case "Ready":
-      return "ready";
-    case "Failed":
-      return "failed";
-    default:
-      return "ended";
-  }
-}
 const RANK: Record<string, number> = { Working: 0, Starting: 0, NeedsYou: 1, Ready: 2, HandedBack: 3, Failed: 4, Ended: 5 };
 
 /** A delegated child is named `"<lead> / <agent>"`; inside the lead's own rail
  *  the prefix is noise, so show just the agent part. */
-function agentName(name: string): string {
+function agentName(name: string | undefined): string {
+  /* **Guarded, because an answer that is not this shape should not take the
+     panel down.** `name` is required on the wire and a server that sends
+     something else — one version out, a proxy, a mock's catch-all — made
+     `lastIndexOf` throw and the whole Overview became the error boundary.
+     That is the third crash from exactly this, after the skill review and
+     the account sheet, so it is a habit rather than an incident. */
+  if (!name) return "Untitled";
   const at = name.lastIndexOf(" / ");
   return at >= 0 ? name.slice(at + 3) : name;
 }
@@ -81,51 +73,65 @@ function Panel({
       className="px-3 py-3"
       style={lit ? { background: "linear-gradient(180deg, rgb(63 134 207 / 0.06), transparent 60%)" } : undefined}
     >
+      {/* A section label is a sentence, not a map legend. Tracked-out capitals
+          read as shouting and are harder to scan than the words they replaced;
+          see `STYLE.md`. */}
       <div className="mb-2 flex items-center gap-2">
-        <h4 className={`text-micro font-semibold uppercase tracking-wide ${lit ? "text-slate" : "text-mute"}`}>{title}</h4>
-        {note && <span className="ml-auto font-mono text-micro text-mute">{note}</span>}
+        <h4 className={`text-ui font-mid ${lit ? "text-slate" : "text-dim"}`}>{title}</h4>
+        {note && <span className="ml-auto text-meta tabular-nums text-mute">{note}</span>}
       </div>
       {children}
     </section>
   );
 }
 
-/** The shared shell of a team row — compact: one line of name, one of note,
- *  the token share at the end. The active one (the agent you're reading) wears
- *  the slate highlight, so "you are here" needs no words. */
-const ROW = "flex w-full items-center gap-2 rounded-md border px-2 py-1 text-left";
-const tone = (active: boolean, link: boolean) =>
-  active ? "border-slate bg-slate-tint" : `border-line bg-raise${link ? " transition-colors hover:border-dim" : ""}`;
+/** How long since it last moved, in the rail's own shorthand. */
+const age = (at: string) => elapsed(minutesSince(at));
 
-function TokenShare({ tokens, total }: { tokens: number; total: number }) {
-  if (total <= 0) return null;
-  return (
-    <span className="shrink-0 text-right">
-      <span className="block font-mono text-micro text-text">{fmtTokens(tokens)}</span>
-      <span className="block text-micro text-mute">{Math.round((tokens / total) * 100)}%</span>
-    </span>
-  );
-}
+/* `TeamMark` was here. It is `StatusMark` in `~/components/BeatMark` now,
+   because the home's chips were drawing the same alphabet a second way —
+   a plain `.dot` for every beat, so a failed workspace was a brick circle
+   there and a triangle here. */
 
 /** The manager at the top of the Team panel — the level above. The active card
  *  when it is this workspace, a link up when it is the parent of a child. */
-function ManagerRow({ manager, active, color, tokens, total }: { manager: Session; active: boolean; color: string; tokens: number; total: number }) {
+function ManagerRow({ manager, active }: { manager: Session; active: boolean }) {
   const inner = (
     <>
-      {total > 0 && <span className={`h-5 w-0.5 shrink-0 rounded-full ${color}`} title="its slice of the bar" />}
-      <AgentMark agent={manager.agent as Agent} size={14} className="shrink-0 text-dim" />
-      <span className="flex min-w-0 flex-1 items-center gap-1.5">
-        <Blocks beat={beatOf(manager)} size={9} />
-        <span className="truncate text-meta text-bone">{agentName(manager.name)}</span>
-        <span className="shrink-0 rounded bg-sage-tint px-1 text-micro text-sage">manager</span>
+      {/* **The status leads, and every row has one.** It used to be the last
+          thing on the row, after the agent mark, the name and a second line
+          that began with the status *word* — so the thing you scan for was
+          the thing you reached last, and it was said twice.
+
+          The active row carries a mark too. It was left bare on the argument
+          that this is the workspace you are reading and its state is the
+          title bar — but a row with no mark in a column of marks reads as
+          missing, and the manager's state is a fact like any other. */}
+      <span className="lead">
+        <StatusMark status={active ? manager.status : "Working"} />
       </span>
-      <TokenShare tokens={tokens} total={total} />
+      <span className="tx one">
+        <b>{agentName(manager.name)}</b>
+        {/* **`here` says where you are, not how it is going.** Placement and
+            status are two different facts and both belong. On the name line
+            rather than the mark slot: at ~40px in a 16px slot it printed
+            `hereAda`. */}
+        {active && <span className="here-badge">here</span>}
+      </span>
+      <span className="rt">
+        <span className="ag">
+          <AgentMark agent={manager.agent as Agent} size={15} />
+        </span>
+        <span className="age">{age(manager.createdAt)}</span>
+      </span>
     </>
   );
   return active ? (
-    <div className={`${ROW} ${tone(true, false)}`}>{inner}</div>
+    <div data-here="true" className="tm">
+      {inner}
+    </div>
   ) : (
-    <button onClick={() => navigate(`/sessions/${manager.id}`)} className={`${ROW} ${tone(false, true)}`}>
+    <button onClick={() => navigate(`/sessions/${manager.id}`)} className="tm">
       {inner}
     </button>
   );
@@ -133,31 +139,43 @@ function ManagerRow({ manager, active, color, tokens, total }: { manager: Sessio
 
 /** One agent on the team. The active one — the session you're reading — is a
  *  plain highlighted row; the rest are links to open them. */
-function MemberRow({ member, active, shared, color, checkIn, tokens, total }: { member: Session; active: boolean; shared: boolean; color: string; checkIn?: string; tokens: number; total: number }) {
-  const sub = checkIn ?? member.pullRequest ?? member.branch ?? member.spawnReason ?? "";
+function MemberRow({ member, active, shared }: { member: Session; active: boolean; shared: boolean }) {
+  /* **One line, and the second one is gone entirely.**
+     It was the branch, then what the agent was doing, then the status word
+     in front of that. The branch said nothing — every child of one workspace
+     is on the same one. The status word was a fallback prefix, absent half
+     the time and duplicating the glyph the other half. And the check-in,
+     which was the last thing left, went too: asked for twice, after seeing
+     it both ways.
+
+     What a row is now: a status mark, a name, whose agent, and how long.
+     Four facts, one line, and every row in the rail the same shape. */
   // A same-workspace child's `name` is the shared workspace's; its own name is
   // its `title`. Everyone else reads off the workspace name.
   const label = agentName(shared ? member.title : member.name);
   const inner = (
     <>
-      {total > 0 && <span className={`h-5 w-0.5 shrink-0 rounded-full ${color}`} title="its slice of the bar" />}
-      <AgentMark agent={member.agent as Agent} size={14} className="shrink-0 text-dim" />
-      <span className="min-w-0 flex-1">
-        <span className="flex items-center gap-1.5">
-          <Blocks beat={beatOf(member)} size={9} />
-          <span className="truncate text-meta text-bone">{label}</span>
-        </span>
-        <span className="mt-px block truncate text-micro text-mute">
-          {checkIn ? <span className="text-slate">“{sub}”</span> : (<>{labelOf(member.status)}{sub ? ` · ${sub}` : ""}</>)}
-        </span>
+      <span className="lead">
+        <StatusMark status={member.status} />
       </span>
-      <TokenShare tokens={tokens} total={total} />
+      <span className="tx one">
+        <b>{label}</b>
+        {active && <span className="here-badge">here</span>}
+      </span>
+      <span className="rt">
+        <span className="ag">
+          <AgentMark agent={member.agent as Agent} size={15} />
+        </span>
+        <span className="age">{age(member.createdAt)}</span>
+      </span>
     </>
   );
   return active ? (
-    <div className={`${ROW} ${tone(true, false)}`}>{inner}</div>
+    <div data-here="true" className="tm">
+      {inner}
+    </div>
   ) : (
-    <button onClick={() => navigate(`/sessions/${member.id}`)} className={`${ROW} ${tone(false, true)}`}>
+    <button onClick={() => navigate(`/sessions/${member.id}`)} className="tm">
       {inner}
     </button>
   );
@@ -184,21 +202,6 @@ export function OverviewTab({
   // cross-engine path, which rides on the session and so lands a poll later.
   const live: PlanStep[] = conversation.plan;
   const plan: PlanStep[] = live.length > 0 ? live : (session.plan ?? []);
-  // The latest check-in each child has posted, read straight out of this
-  // workspace's own transcript — every update arrived here as a relay-marked
-  // turn, so nothing new is fetched. Items are chronological, so the last one
-  // per child wins.
-  const latestCheckIn = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const it of conversation.items) {
-      for (const r of relays(it.text)) {
-        if (r.kind === "update") {
-          m.set(r.id, r.body.split("\n").find((l) => l.trim())?.trim() ?? r.body);
-        }
-      }
-    }
-    return m;
-  }, [conversation.items]);
   // The top of this local view: the workspace itself when it leads a team, or
   // the manager that started it when this is a child — one level up.
   const manager = lead ?? session;
@@ -211,19 +214,6 @@ export function OverviewTab({
   const working = kids.filter((k) => k.status === "Working" || k.status === "Starting").length;
   const done = plan.filter((s) => String(s.status) === "Completed").length;
 
-  // Token spend for the manager and each member under it. The manager leads
-  // the panel — the level above — so its spend is the first segment.
-  const ids = useMemo(() => [manager.id, ...roster.map((r) => r.id)], [manager.id, roster]);
-  const usage = useTokenUsage(ids);
-  const managerTokens = usage.get(manager.id) ?? 0;
-  const total = managerTokens + roster.reduce((s, r) => s + (usage.get(r.id) ?? 0), 0);
-  const segments = total > 0 ? [managerTokens, ...roster.map((r) => usage.get(r.id) ?? 0)] : [];
-  // The agents the bar's segments stand for, in order, so each slice can name
-  // itself on hover. A shared child reads off its title, like its row does.
-  const barAgents = [manager, ...roster];
-  const nameOf = (a: Session) =>
-    agentName(a.id !== manager.id && !!manager.workspaceId && a.workspaceId === manager.workspaceId ? a.title : a.name);
-
   const links: { icon: typeof GitBranch; label: string; href?: string }[] = [];
   if (session.branch) links.push({ icon: GitBranch, label: session.branch });
   if (session.pullRequest) links.push({ icon: GitPullRequest, label: session.pullRequest, href: session.pullRequest });
@@ -232,10 +222,40 @@ export function OverviewTab({
   // There is a tree to show whenever this workspace leads a team or hangs off
   // a manager; otherwise it is solo and the panel is skipped.
   const hasTeam = !!lead || kids.length > 0;
-  const nothing = !hasTeam && artifacts.length === 0 && links.length === 0 && plan.length === 0;
+  const hosts = useHosts();
+  const where = whereItRuns(hosts.data.find((h) => h.id === session.hostId), hosts.data);
 
   return (
     <div className="divide-y divide-line-soft">
+      {/* ── Where this is ──
+          The facts that used to run along the bottom edge in one line of mono.
+          A strip of chrome that is always there is a strip nobody reads, and
+          these are not chrome — they are what the workspace *is*. As
+          sentences, at the top of the thing that describes it. */}
+      <section className="px-3 py-3">
+        <p className="text-ui text-text">
+          {session.repo ? (
+            <>
+              In <span className="text-bone">{session.repo}</span>
+              {session.branch && (
+                <>
+                  , on <span className="font-mono text-meta text-slate">{session.branch}</span>
+                </>
+              )}
+            </>
+          ) : (
+            "No repository — a bare agent."
+          )}
+        </p>
+        <p className="mt-1 text-ui text-dim">
+          {where ? where.name : "Waiting for a machine"}
+          {", "}
+          {elapsed(minutesSince(session.createdAt))} in
+          {where?.quiet && <span className="text-mute"> · not answering</span>}
+          {where?.draining && <span className="text-mute"> · draining</span>}
+        </p>
+      </section>
+
       {/* ── Team ── The local tree around this workspace: the manager at the
           top — this workspace when it leads, or the one that started it when
           this is a child — and the agents under it below. A solo workspace has
@@ -245,44 +265,21 @@ export function OverviewTab({
           title="Team"
           note={roster.length ? `${roster.length} agent${roster.length > 1 ? "s" : ""}${working ? ` · ${working} working` : ""}` : undefined}
         >
-          {total > 0 && (
-            <div className="mb-2.5">
-              <div className="flex h-1.5 overflow-hidden rounded-full bg-ground">
-                {segments.map((t, i) => (
-                  <div
-                    key={i}
-                    className={SEGMENTS[i % SEGMENTS.length]}
-                    style={{ width: `${(t / total) * 100}%` }}
-                    title={`${nameOf(barAgents[i])} — ${fmtTokens(t)} tokens · ${Math.round((t / total) * 100)}%`}
-                  />
-                ))}
-              </div>
-              <div className="mt-1 flex justify-between font-mono text-micro text-mute">
-                <span>{fmtTokens(total)} tokens total</span>
-                <span>share by agent</span>
-              </div>
-            </div>
-          )}
-          <div className="space-y-1.5">
-            <ManagerRow manager={manager} active={manager.id === session.id} color={SEGMENTS[0]} tokens={managerTokens} total={total} />
-            {/* Under the manager — the whole team. The one you are reading is
-                the active card; the rest are links to open them. */}
-            <div className="ml-2 space-y-1 border-l border-line-soft pl-2">
-              {roster.map((r, i) => (
+          <div>
+            <ManagerRow manager={manager} active={manager.id === session.id} />
+            {/* Under the manager — the whole team, indented under a hairline.
+                The one you are reading is the active card; the rest are links
+                to open them. */}
+            <div className="kids">
+              {roster.map((r) => (
                 <MemberRow
                   key={r.id}
                   member={r}
                   active={r.id === session.id}
-                  // Its slice of the bar — segment 0 is the manager, so a child
-                  // at roster index i is segment i + 1.
-                  color={SEGMENTS[(i + 1) % SEGMENTS.length]}
                   // A child in the manager's own workspace shares its name, so
                   // that name says nothing — use its session title, which the
                   // control plane sets to the child's own name.
                   shared={!!manager.workspaceId && r.workspaceId === manager.workspaceId}
-                  checkIn={latestCheckIn.get(r.id)}
-                  tokens={usage.get(r.id) ?? 0}
-                  total={total}
                 />
               ))}
             </div>
@@ -372,12 +369,14 @@ export function OverviewTab({
         </Panel>
       )}
 
-      {/* Before the agent has made a plan, cut a branch or delegated anything,
-          there is genuinely nothing — say so rather than draw empty panels. */}
-      {nothing && (
+      {/* Before the agent has made a plan or delegated anything there is
+          nothing *more* to show — say so rather than draw empty panels. The
+          two sentences at the top are always there, which is why this no
+          longer has to carry the branch. */}
+      {!hasTeam && artifacts.length === 0 && links.length === 0 && plan.length === 0 && (
         <p className="px-3 py-6 text-meta text-mute">
-          Nothing to show yet. The plan it's following, the branch it works on, any agents it delegates to and the
-          artifacts it produces all appear here.
+          Nothing else yet. The plan it&rsquo;s following, any agents it delegates to and the artifacts it produces
+          all appear here.
         </p>
       )}
     </div>

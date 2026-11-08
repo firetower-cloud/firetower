@@ -125,7 +125,7 @@ describe("what became of the pull request", () => {
   /** With nothing opened yet the old wording is still the right one. */
   it("still offers to open the first one", () => {
     const ship = shipping(session, [checkout({ uncommitted: 1 })]);
-    expect(ship.label).toContain("Commit & open PR");
+    expect(ship.label).toContain("Commit and open a pull request");
   });
 
   /** On a GitLab the short form follows the host's noun. */
@@ -308,7 +308,7 @@ describe("the word the host uses for a change", () => {
   it("abbreviates it the way GitLab does", () => {
     const ship = shipping(session, [checkout({ uncommitted: 3, pushed: false })], false, MR);
     expect(ship.stage).toBe("uncommitted");
-    expect(ship.label).toBe("Commit & open MR");
+    expect(ship.label).toBe("Commit and open a merge request");
   });
 
   it("pluralises it", () => {

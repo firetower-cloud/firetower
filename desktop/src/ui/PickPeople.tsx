@@ -103,7 +103,7 @@ export function PickPeople({
 
 function Heading({ children }: { children: React.ReactNode }) {
   return (
-    <div className="bg-raise px-2.5 py-1 text-micro tracking-[0.06em] text-mute uppercase">
+    <div className="legend bg-raise px-2.5 py-1">
       {children}
     </div>
   );

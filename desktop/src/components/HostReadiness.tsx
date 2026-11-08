@@ -167,6 +167,23 @@ export function Readout({
     );
   }
 
+  /**
+   * A report with nothing in it.
+   *
+   * `isReady` requires at least one check, so a server that answers with an
+   * empty list — an older one, or a host with nothing to measure — fell
+   * through to the branch below and drew a **brick band reading "0 things are
+   * missing"**. Nothing is missing. Saying so quietly is the whole of what
+   * this screen can honestly say.
+   */
+  if (checks.length === 0) {
+    return (
+      <Verdict tone="good">
+        <span role="status">Ready — nothing to do before you start.</span>
+      </Verdict>
+    );
+  }
+
   return (
     <>
       <Verdict tone="bad">
@@ -179,7 +196,7 @@ export function Readout({
         </span>
       </Verdict>
       <div className="border-t border-brick-deep bg-brick-tint px-3 py-2.5">
-        <p className="eyebrow mb-1.5 text-brick">Missing</p>
+        <p className="legend mb-1.5 text-brick">Missing</p>
         <ul className="space-y-1.5">
           {missing.map((check) => (
             <li key={check.name} className="flex items-start gap-2.5 text-meta">
@@ -342,7 +359,7 @@ function Do({ label, onClick, busy }: { label: string; onClick: () => void; busy
       type="button"
       disabled={busy}
       onClick={onClick}
-      className="shrink-0 rounded-sm border border-line bg-overlay px-2.5 py-1 text-micro text-bone transition-colors hover:border-dim disabled:opacity-50"
+      className="shrink-0 rounded-sm border border-line bg-raise px-2.5 py-1 text-micro text-bone transition-colors hover:border-dim disabled:opacity-50"
     >
       {busy ? "Working…" : label}
     </button>

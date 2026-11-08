@@ -11,7 +11,7 @@
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ChevronRight, FileCode2, FileDiff, FolderDown, FolderTree, Loader2, MessageSquarePlus, PanelRightClose, Ship as ShipIcon } from "lucide-react";
+import { ChevronRight, FileCode2, FileDiff, FolderDown, FolderTree, Loader2, MessageSquarePlus, PanelRightClose, Ship as ShipIcon, TriangleAlert } from "lucide-react";
 import { useListFiles } from "~/api/generated/sessions/sessions";
 import type { Artifact, FileEntry, Session } from "~/api/generated/model";
 import { OverviewTab, OverviewIcon } from "~/ui/OverviewTab";
@@ -24,12 +24,16 @@ import { Ship } from "~/ui/Ship";
 import { FileGlyph } from "~/ui/FileGlyph";
 import { ContextMenu, useMenu } from "~/ui/ContextMenu";
 import { downloadArchive, downloadFile, type SavePhase } from "~/api/download";
+import { IconButton } from "~/components/ui";
+import { Note } from "~/ui/config/bits";
 
 const TABS = [
   { id: "overview", label: "Overview", icon: OverviewIcon },
   { id: "diff", label: "Diff", icon: FileDiff },
   { id: "files", label: "Files", icon: FolderTree },
-  { id: "ship", label: "Commit", icon: ShipIcon },
+  /* **Ship**, which is what the drawing calls it and what the panel does:
+     commit, push, open a pull request. "Commit" names the first of three. */
+  { id: "ship", label: "Ship", icon: ShipIcon },
 ] as const;
 
 export type TabId = (typeof TABS)[number]["id"];
@@ -159,22 +163,22 @@ export function Inspector({
   const scroller = useRef<HTMLDivElement>(null);
 
   return (
-    <aside style={{ width: width ?? 368 }} className="flex shrink-0 flex-col border-l border-line bg-panel">
-      <div className="flex h-11 shrink-0 items-center gap-1 border-b border-line px-2">
-        <div className="track">
-          {tabs.map((t) => (
-            <button key={t.id} data-on={shown === t.id} onClick={() => onTab(t.id)}>
-              <span className="flex items-center gap-1.5">
-                <t.icon className="h-3.5 w-3.5" strokeWidth={1.75} />
-                {t.label}
-                {t.id === "diff" && files.length > 0 && <span className="font-mono text-micro opacity-60">{files.length}</span>}
-              </span>
-            </button>
-          ))}
-        </div>
-        <button onClick={onClose} title="Hide the inspector" className="ml-auto grid h-7 w-7 place-items-center rounded-md text-mute transition-colors hover:bg-raise hover:text-bone">
-          <PanelRightClose className="h-4 w-4" strokeWidth={1.75} />
-        </button>
+    /* A full-height column of its own, on the desk's colour — `min-h-0`
+       because `.insp → .iscroll` is one of the chains that needs it. */
+    <aside style={{ width: width ?? 344 }} className="flex min-h-0 shrink-0 flex-col bg-ground">
+      {/* **Plain text with an underline**, not four boxed chips with an icon
+          each. The index of a panel should not compete with the panel. */}
+      <div className="itabs" role="tablist">
+        {tabs.map((t) => (
+          <button key={t.id} role="tab" aria-selected={shown === t.id} onClick={() => onTab(t.id)} className="itab">
+            {t.label}
+            {t.id === "diff" && files.length > 0 && <span className="ml-1.5 text-meta text-mute tabular-nums">{files.length}</span>}
+            {shown === t.id && <span className="ul" />}
+          </button>
+        ))}
+        <span className="right">
+          <IconButton of={PanelRightClose} onClick={onClose} label="Hide the inspector" />
+        </span>
       </div>
 
       <div ref={scroller} className="scroll-slim min-h-0 flex-1 overflow-y-auto">
@@ -222,9 +226,13 @@ function DiffList({
     onSuccess: () => setNote(null),
   });
 
-  if (loading) return <Empty line="Reading the diff…" hint="" />;
-  if (error) return <Empty line={error} hint="" />;
-  if (files.length === 0) return <Empty line="Nothing changed yet." hint="Edits the agent makes will show up here." />;
+  /* **A `Note`, at panel width.** This was right about being small and had
+     one line too many: a line and a hint, where the hint said what the line
+     already implied. The glyph is the tab's own, so the note reads as
+     belonging to the diff rather than to the window. */
+  if (loading) return <Note icon={FileDiff}>Reading the diff…</Note>;
+  if (error) return <Note icon={TriangleAlert}>{error}</Note>;
+  if (files.length === 0) return <Note icon={FileDiff}>Nothing changed yet.</Note>;
 
   const first = open ?? files[0].path;
 
@@ -498,7 +506,8 @@ function Directory({ sessionId, path, depth, changed, marked, onOpenFile }: { se
   );
   if (isPending) return <p className="px-3 py-1 text-meta text-mute" style={{ paddingLeft: `${0.75 + depth * 0.85}rem` }}>…</p>;
   if (error) return <p className="px-3 py-1 text-meta text-brick">{why(error)}</p>;
-  if (entries.length === 0 && depth === 0) return <Empty line="An empty workspace." hint="Nothing is checked out here yet." />;
+  if (entries.length === 0 && depth === 0)
+    return <Note icon={FolderTree}>Nothing is checked out here yet.</Note>;
   return (
     <>
       {entries.map((e) => (
@@ -597,11 +606,3 @@ function Saving({ phase, size = 3 }: { phase: SavePhase; size?: 3 | 3.5 }) {
   );
 }
 
-function Empty({ line, hint }: { line: string; hint: string }) {
-  return (
-    <div className="px-6 py-10 text-center">
-      <p className="text-ui text-dim">{line}</p>
-      {hint && <p className="mt-1 text-meta text-mute">{hint}</p>}
-    </div>
-  );
-}

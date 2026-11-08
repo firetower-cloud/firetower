@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>Firetower — the interface, redesigned</title>
+<link rel="stylesheet" href="../skills/desk.css">
+<style>
+body{overflow:auto}
+.page{max-width:680px;margin:0 auto;padding:68px 28px 70px;display:flex;flex-direction:column;gap:30px}
+h1{font-size:var(--display);line-height:1.25;letter-spacing:-.02em;color:var(--bone);font-weight:600}
+.sub{font-size:var(--read);line-height:1.65;color:var(--dim);max-width:58ch}
+.links{display:flex;flex-direction:column}
+a.item{display:grid;grid-template-columns:26px 1fr auto;gap:13px;align-items:baseline;
+  padding:15px 10px;border-top:1px solid var(--line-soft);text-decoration:none;color:inherit;border-radius:var(--r-md)}
+a.item:last-child{border-bottom:1px solid var(--line-soft)}
+a.item:hover{background:color-mix(in srgb,var(--raise) 70%,transparent)}
+a.item .t{display:block;font-size:var(--ui);color:var(--bone);font-weight:600}
+a.item .d{display:block;font-size:var(--meta);color:var(--mute);line-height:1.55;margin-top:3px;max-width:54ch}
+a.item .go{color:#3a3a42;font-size:var(--ui)}
+.aside{font-size:var(--meta);line-height:1.6;color:var(--mute);max-width:56ch}
+</style></head><body>
+<div class="page">
+  <div>
+    <h1>The interface, redesigned</h1>
+    <p class="sub">Three artifacts and the document that explains them. The reasoning, the rejected
+    alternatives and the token derivations are in
+    <span class="mono" style="color:var(--syn-string)">docs/design-handoff.md</span>, which is the
+    thing to read first &mdash; these three are what it points at.</p>
+  </div>
+
+  <div class="links">
+    <a class="item" href="desktop-redesign.html"><span class="mark">01</span>
+      <span><span class="t">Firetower desktop &mdash; redesigned</span><span class="d">Every screen and
+      every state, as a specification you can click through. Fifteen tabs, and the one to open first is
+      <b>Every screen</b> &mdash; a contact sheet of all 113 states at a third scale, which is what makes
+      the other fourteen findable. The rest that are documents rather than mock-ups: <b>Coverage</b>
+      (which feature is drawn and which is not), <b>Spec</b> (measurements, tokens, keyboard, the code
+      delta) and <b>Grouping</b> (why six destinations).</span></span><span class="go">&rsaquo;</span></a>
+    <a class="item" href="mobile-redesign.html"><span class="mark">02</span>
+      <span><span class="t">Firetower mobile &mdash; redesigned</span><span class="d">The same recipe on a
+      phone, with every pose at its real width &mdash; iPhone 390, Android 412, and the Duo&rsquo;s three:
+      466 front panel, 669 inner portrait, 951 inner landscape. Carries its own <b>Every screen</b>
+      contact sheet, and <b>Coverage</b>, <b>Spec</b> and <b>Notes</b> as the desktop one
+      does.</span></span><span class="go">&rsaquo;</span></a>
+    <a class="item" href="components.html"><span class="mark">03</span>
+      <span><span class="t">Firetower desktop &mdash; components</span><span class="d">Forty components
+      and six patterns, rendered live on the real stylesheet rather than described. Usage counts are
+      measured by walking the desktop artifact &mdash; <span class="mono">measure.py</span> beside this
+      page regenerates them &mdash; so &ldquo;used on 50 screens&rdquo; is a fact rather than a claim.</span></span><span class="go">&rsaquo;</span></a>
+  </div>
+
+  <p class="aside"><b>Two caveats on the mobile artifact, which belong here rather than inside it.</b>
+  Everything in it was validated in an <b>emulated viewport</b> &mdash; no real device, no simulator, and
+  none of the six gestures it specifies has been run under touch. And
+  <span class="mono">mobile/app.config.ts:26</span> is <span class="mono">orientation: &quot;portrait&quot;</span>,
+  so no window is ever 820 wide and the <span class="mono">dock</span> branch at
+  <span class="mono">app/workspace/[id].tsx:168</span> cannot currently execute &mdash; the 951 landscape
+  pose the brief is mostly about is unreachable until that one line changes.</p>
+  <p class="aside">Unlike the other prototypes here, all three are <b>self-contained single files</b> &mdash;
+  they carry their own tokens and their own fonts, because they are also the artifacts the design was
+  reviewed from and had to survive being served on their own. They deliberately do not link
+  <span class="mono">desk.css</span>. This landing page does, so it looks like its neighbours.</p>
+  <p class="aside"><b>Four harnesses ship beside these pages</b> and both measure a render rather than the
+  source. <span class="mono">measure.py</span> derives the component usage counts by walking the desktop
+  artifact. <span class="mono">ember.py</span> counts ember marks on a screen and asserts the budget of
+  three &mdash; with <b>one scoped exemption</b>, the workspaces panel, which carries a status dot on every
+  row by decision and is annotated with the date and the reason. An assertion that fails on intended
+  behaviour is one the next person switches off wholesale; the exemption is what keeps it protecting
+  everything else. <span class="mono">peek.py</span> walks the four rows of the rail&rsquo;s
+  hover-preview rule and reports, for each, whether a panel shows, whether it floats and whose panel it is
+  &mdash; two of those four were unreachable until they were drawn, and a state nobody has drawn is a state
+  nobody has checked.</p>
+  <p class="aside"><span class="mono">chips.py</span> answers one question the home kept raising &mdash;
+  <b>how many chips is one line?</b> It measures the laid-out rows at a real 1280 and a real 1680 and
+  reports how many fall on the first line, which chip is widest, and whether <i>View more</i> is drawn.
+  The artifact renders a fixed 1280 window and <i>scales</i> it, so a wider browser measures the same
+  layout; the harness overrides the window&rsquo;s own width rather than the browser&rsquo;s, which is the
+  difference between asking the question and appearing to.</p>
+  <p class="aside">Every name, question and timestamp inside them is invented.</p>
+</div>
+</body></html>

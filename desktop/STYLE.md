@@ -5,6 +5,17 @@ Nothing here redefines it. This covers what the tokens cannot: density, native
 surfaces, and the two things a multi-server client has to express that a
 single-server web app never did.
 
+**`web/app/globals.css` is the source. `desktop/src/globals.css` is a copy of
+it and nothing else.** The desk compiles its own Tailwind and cannot import the
+web app's sheet without dragging the web app's source-scanning along with it,
+so the file is duplicated — and it had quietly drifted: the desk's copy was
+missing `--color-amber`, so `text-amber` in `config/Skills.tsx` compiled to
+nothing and the *needs review* tag shipped with no colour at all. `just
+check-style` now diffs the two and fails if they differ. **Edit the web app's
+and copy it over; never edit the desk's.** Anything the desk alone needs — the
+syntax palette, the chrome geometry, the vibrant surfaces — belongs in
+`desktop/src/styles.css`, which is where the rest of the native layer is.
+
 ## The rule everything else serves
 
 **Ember is the only loud thing on screen.** It answers one question — is something
@@ -18,7 +29,7 @@ Three namespaces already exist and there is no room for a fourth:
 | namespace | what it means | where |
 |---|---|---|
 | signals | ember, sage, brick, slate | state, anywhere |
-| file kinds | nine categories, deliberately desaturated | the tree, and nowhere else |
+| file kinds | seven categories, deliberately desaturated | the tree, and nowhere else |
 | ground | six surfaces, neutral by design | everything |
 
 So anything new is identified by **shape, weight, or position** — never by a new hue.
@@ -48,18 +59,30 @@ mouse-only and tighter:
 
 | | web | mac |
 |---|---|---|
-| list row | 44px | **34px** (`.row`) |
-| chrome row | 48px | **38px** (`--chrome-title`) |
-| tab / control | 36px | **28px** |
+| chrome row | 44px | **32px** (`--row-tight`, which `.row` uses) |
+| content row | 44px | **40px** (`--row`), 46px for a row you read |
+| title bar | 48px | **40px** (`--chrome-title`) |
+| rail | — | **62px** (`--rail`), 42px targets |
+| panel | — | **252px** (`--panel`) |
+| tab / control | 36px | **30px** (`--control`) |
 | status strip | — | **22px** |
 
-34px is the measurement the whole inbox is built on. Change it and re-check the
-tree, the palette and the tab strip together.
+**This table said 34px three times and no window row has ever been 34.**
+`styles.css` defines `--row: 40px` and `--row-tight: 32px`, `.row` uses
+`min-height: var(--row-tight)`, and the only literal 34 in `desktop/src` is an
+`h-[34px]` in `island/Island.tsx`, which is the menu-bar pill and not a list
+row at all. Anybody measuring against the old number was measuring against one
+that is not in the code.
+
+The pair that matters is **32 for chrome and 40–46 for what you read**: a rail
+row and a panel row are furniture and can be tight, a row carrying a sentence
+cannot. Change either and re-check the tree, the palette and the tab strip
+together.
 
 ## Native chrome
 
 - **Title bar spans the window.** Traffic lights need 78px (`--chrome-lights`) and
-  the server strip is 48px, so reserving the gutter inside the strip pushes the
+  the rail is 62px, so reserving the gutter inside the rail pushes the
   overlap one column right instead of solving it. One full-width bar, everything
   below it starts at a clean edge.
 - **Drag regions.** `.drag` on chrome, `.no-drag` on every control inside it. A
@@ -82,8 +105,23 @@ Archivo, Archivo Narrow, JetBrains Mono — unchanged. The system face would be 
 native and less Firetower, and the six-size scale is deliberate. Not relitigated
 here.
 
-`.eyebrow` is the instrument-panel voice: narrow, 10.5px, 0.18em, uppercase, mute.
-Use it for section labels and nothing else.
+**`.eyebrow` is retired on the desk.** Tracked-out capitals were used as section
+headings in eighteen places; they read as shouting and they are *harder* to scan
+than sentence case, which is the opposite of what a legend is for. A section
+label is a sentence now — `--text-meta` in `--color-dim`, in the words you would
+say out loud.
+
+The class itself stays in `web/app/globals.css`, because the web client has
+eighteen of its own and this document does not govern it. Four call sites are
+left in `desktop/src` and each goes with the screen that carries it: the column
+headers in `Dashboard.tsx` and `TasksPage.tsx`, the *Missing* label in
+`HostReadiness.tsx`, and `components/ui/Panel.tsx`'s `PageHead`, whose
+`eyebrow` **prop** is the shape that made them spread in the first place — a
+component that takes one asks every caller to supply one.
+
+The menu-bar island has one too. It is deliberately outside this design — its
+own window, no chrome, and rules that contradict this one on purpose — and it
+wants its own document rather than a line here.
 
 ## Where the rules live
 
@@ -102,17 +140,28 @@ Patterns and vocabulary, not layout.
 repositories and workspaces, `doing()` for what a place is up to, `Signal`,
 `AgentMark`, `elapsed()`, the `ui/` primitives, every token.
 
-**Not shared:** the screens. A window gets 34px rows, a title bar that is part
-of the app, ⌘-numbered tabs and no drawer.
+**Not shared:** the screens. A window gets 32px chrome rows, a title bar that is
+part of the app, ⌘-numbered destinations and no drawer.
 
 Two rules fall out of the shared half and are worth stating, because both were
 violated on the first pass:
 
 - **`Icon` takes 12, 14, 16 or 20.** Not 11, not 13. The scale is deliberate and
   the type enforces it.
-- **A workspace row is two lines:** name, ember dot and elapsed on the first;
-  branch in mono and the agent marks on the second. The branch is not optional
-  decoration — it is how you tell two workspaces on one repository apart.
+- **A workspace row is a name and one timestamp.** Nothing else at rest: no
+  branch, no repository, no machine, no state, no agent marks. It used to be
+  two lines with the branch in mono under the name, and that is what made every
+  row a paragraph and every list unscannable — and it is most of what made the
+  product read as a tool for people who already know what a worktree is.
+
+  **Telling two workspaces on one repository apart is a real need**, and it is
+  answered where it is asked rather than on four hundred rows that are not:
+  the workspace's own name is the first answer, the right rail carries the
+  branch as a sentence, and the workbench's header carries it where you are
+  actually looking at the code. Mono is for a path, a branch, a code, a key or
+  a diff — things where the individual characters carry meaning — **in the
+  place that is about them**, never as a subtitle on a row that is about
+  something else.
 
 
 ---
@@ -160,9 +209,16 @@ buttons that swap colour is a web tab bar wearing a different hat.
 ## 5. The window says what it can do
 
 `.keycap` renders a shortcut inline, next to the thing it operates: `⏎ send`,
-`⇧⏎ new line`, `⌘\` on the inspector, `⌘1`–`⌘3` on its tabs, `⌘J` on the
-terminal. Desk software tells you its shortcuts where you use them. A web app
-hides them in a help page.
+`⇧⏎ new line`, `⌘N` on *New workspace*, `⌘,` on Settings, `⌘J` on the terminal.
+Desk software tells you its shortcuts where you use them. A web app hides them
+in a help page.
+
+**⌘ is the window's; the other modifier is one pane's.** The rail's six
+destinations took `⌘1`–`⌘6` and `⌘\` toggles its panel, so the inspector's
+tabs — which held `⌘1`–`⌘3` — moved to `⌃1`–`⌃3`, and `⌘\` inside a workspace
+is still the inspector's because that is the width being argued over there. Off
+a Mac, Ctrl *is* ⌘, so the local modifier there is Alt: `platform.ts` has
+`localKey` and `isLocalMod` and nothing should work it out for itself.
 
 ## 6. Code scrolls; it never wraps
 
@@ -198,9 +254,10 @@ Nothing else may use ember. Not a badge, not a hover, not a chart.
 These are what make a generated interface look generated, and the first draft of
 this client did all three:
 
-- **An ALL-CAPS eyebrow above every heading.** `.eyebrow` is the map-legend
-  voice — column headers and section legends. It is not a decoration to put
-  above every title.
+- **An ALL-CAPS eyebrow, anywhere.** Not above a heading, not over a column, not
+  as a legend. Tracked-out capitals are a decoration that reads as shouting and
+  they are harder to scan than the sentence case they replaced. See *Type*: the
+  class is retired on the desk and a section label is a short sentence.
 - **Meta strings joined with middle dots** (`repo · branch · 4m`). Use real
   layout: separate spans, honest spacing, or a labelled row.
 - **A rounded card around everything.** One radius on every object flattens the

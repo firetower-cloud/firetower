@@ -1,10 +1,8 @@
 import { useEffect, useState } from "react";
-import { ServerStrip, type Scope } from "~/ui/ServerStrip";
 import { Titlebar } from "~/ui/Titlebar";
 import { Rail } from "~/ui/Rail";
 import { Routes } from "~/Routes";
 import { Posters } from "~/artifacts/posters";
-import { Fleet } from "~/ui/Fleet";
 import { useFleet, waitingIn, asBackend as liveBackend } from "~/fleet";
 import { lazy, Suspense } from "react";
 import type { Backend } from "~/fleet";
@@ -22,19 +20,39 @@ import { useConfirm } from "~/ui/Confirm";
 
 const StylePage = import.meta.env.DEV ? lazy(() => import("~/ui/StylePage").then((m) => ({ default: m.StylePage }))) : () => null;
 
+const WHICH = "firetower.current";
+/** What this used to be called, when it could also hold `"all"`. */
+const WAS = "firetower.scope";
+
 export function App() {
-  /* Remembered, so a reload lands where you were. */
-  const [scope, setScopeState] = useState<Scope>(() => {
+  /**
+   * Which Firetower the window is in. One at a time.
+   *
+   * There used to be an "all" scope and a `/fleet` screen behind it, and this
+   * key used to be `firetower.scope` because it could hold either. It holds a
+   * server id now and nothing else — the unified inbox is a menu under the
+   * avatar, and **the dock badge below is unchanged and still spans every
+   * connected Firetower**, which is what carries the product across them.
+   * `islandState` went with the island.
+   */
+  const [which, setWhichState] = useState<string | null>(() => {
     try {
-      return (window.localStorage.getItem("firetower.scope") as Scope) || servers()[0]?.serverId || "all";
+      /* Carried over once, so an upgrade does not land somebody on a
+         Firetower they were not in. `"all"` is the one value that no longer
+         means anything, and it falls through to the first connected one. */
+      const was = window.localStorage.getItem(WAS);
+      window.localStorage.removeItem(WAS);
+      const held = window.localStorage.getItem(WHICH) || (was && was !== "all" ? was : null);
+      return held || servers()[0]?.serverId || null;
     } catch {
-      return "all";
+      return servers()[0]?.serverId ?? null;
     }
   });
-  const setScope = (next: Scope) => {
-    setScopeState(next);
+  const setWhich = (next: string | null) => {
+    setWhichState(next);
     try {
-      window.localStorage.setItem("firetower.scope", next);
+      if (next) window.localStorage.setItem(WHICH, next);
+      else window.localStorage.removeItem(WHICH);
     } catch {
       /* private window; the choice just does not survive a reload */
     }
@@ -69,106 +87,121 @@ export function App() {
   const waiting = fleet.reduce((n, f) => n + waitingIn(f.sessions), 0);
   useEffect(() => bridge.setBadge(waiting || null), [waiting]);
 
-  const pick = (next: Scope) => {
-    setScope(next);
+  const pick = (next: string) => {
+    setWhich(next);
     // A session id from one server means nothing on another, so switching lands
     // on that server's dashboard rather than on wherever the last one was.
-    navigate(next === "all" ? "/fleet" : "/");
+    navigate("/");
   };
 
   /* The style guide is for developing the app: it is not in a production build. */
   const style = import.meta.env.DEV && path.startsWith("/style");
   const connecting = path.startsWith("/connect");
 
-  const asBackend = (id: string): Backend | null => {
-    const real = real$.find((s) => s.serverId === id);
+  const asBackend = (id: string | null): Backend | null => {
+    const real = id ? real$.find((s) => s.serverId === id) : undefined;
     return real ? liveBackend(real) : null;
   };
-  const all = scope === "all" || path.startsWith("/fleet");
-  const here = scope === "all" ? null : asBackend(scope);
-  /* A scope naming a server this Mac no longer has falls back to the next
-     one, or to everything; with no server at all there is only connecting. */
+  const here = asBackend(which);
+  /* A choice naming a server this Mac no longer has falls back to the next
+     one; with no server at all there is only connecting. */
   useEffect(() => {
-    if (scope !== "all" && !here) setScope(real$[0]?.serverId ?? "all");
-  }, [scope, here, real$]);
+    if (!here) setWhich(real$[0]?.serverId ?? null);
+  }, [which, here, real$]);
   const none = real$.length === 0;
   /* A server this Mac is still connected to whose token has stopped working:
      a password replaced in a browser ends every other session, and so does an
      administrator resetting one. The address is still right, so what is owed
      is a password field for *that* server, not the whole app drawn around a
      refusal repeated in every pane. */
-  const adrift = scope === "all" ? null : (real$.find((s) => s.serverId === scope && !s.token) ?? null);
+  const adrift = real$.find((s) => s.serverId === which && !s.token) ?? null;
 
   return (
-    <>
-      <div className="flex h-full w-full flex-col overflow-hidden bg-ground text-text">
-        <Titlebar scope={scope} waiting={waiting} />
+    <div className="flex h-full w-full flex-col overflow-hidden bg-ground text-text">
+      <Titlebar serverId={which} onSwitch={pick} />
 
-        <div className="flex min-h-0 flex-1">
-          <ServerStrip scope={scope} onScope={pick} />
-
-          {connecting || none ? (
-            <Connect
-              onDone={(serverId) => {
-                setScope(serverId as Scope);
-                navigate("/");
-              }}
-              onCancel={none ? undefined : () => navigate("/")}
-            />
-          ) : adrift ? (
-            /* No way to cancel: there is nothing behind this to go back to.
-               The strip is still on the left, so another server is one click
-               away — this is one server's door, not the app's. */
-            <Connect
-              at={adrift.url}
-              onDone={(serverId) => {
-                // The cache for this server is full of the refusals that
-                // arrived while the token was dead; keeping it would render
-                // them once more under a session that now works.
-                dropCache(serverId);
-                setScope(serverId as Scope);
-                navigate("/");
-              }}
-            />
-          ) : style ? (
-            <Suspense fallback={null}>
-              <StylePage />
-            </Suspense>
-          ) : all || !here ? (
-            <Fleet />
-          ) : (
-            <BackendProvider id={here.id} key={here.id}>
-              {/* Inside the provider, not around it: the new-workspace form
-                  reads this server's repositories, so it needs the same
-                  QueryClient as the screen that opened it. */}
-              <StartProvider>
-                <Rail backend={here} />
-                {/* Draws nothing: it keeps the artifact list warm and fills in
-                    the pictures the tiles use, on whichever screen is up. */}
-                <Posters />
-                {/* Keyed on the path so leaving a broken screen clears the
-                    error rather than sticking on it. */}
-                <Boundary key={path} onReset={() => navigate("/")}>
-                  <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-                    <Gate backend={here}>
-                      <Routes
-                        backend={here}
-                        onForgot={() => {
-                          const left = servers();
-                          setReal(left);
-                          setScope(left[0]?.serverId ?? "all");
-                          navigate(left.length ? "/" : "/connect");
-                        }}
-                      />
-                    </Gate>
-                  </div>
-                </Boundary>
-              </StartProvider>
-            </BackendProvider>
-          )}
-        </div>
-
+      <div className="relative flex min-h-0 flex-1">
+        {/* The style page first, and before the door. It is a dev build's
+            own screen and it needs no Firetower to draw — checked after
+            `none`, as it used to be, it was unreachable on exactly the
+            machine that has not connected to one yet. */}
+        {style ? (
+          <Suspense fallback={null}>
+            <StylePage />
+          </Suspense>
+        ) : connecting || none ? (
+          <Connect
+            onDone={(serverId) => {
+              setWhich(serverId);
+              navigate("/");
+            }}
+            onCancel={none ? undefined : () => navigate("/")}
+          />
+        ) : adrift ? (
+          /* No way to cancel: there is nothing behind this to go back to. The
+             switcher is still in the title bar, so another Firetower is one
+             click away — this is one server's door, not the app's. */
+          <Connect
+            at={adrift.url}
+            onDone={(serverId) => {
+              // The cache for this server is full of the refusals that
+              // arrived while the token was dead; keeping it would render
+              // them once more under a session that now works.
+              dropCache(serverId);
+              setWhich(serverId);
+              navigate("/");
+            }}
+          />
+        ) : !here ? null : (
+          <BackendProvider id={here.id} key={here.id}>
+            {/* Inside the provider, not around it: the new-workspace form
+                reads this server's repositories, so it needs the same
+                QueryClient as the screen that opened it. */}
+            <StartProvider>
+              {/* **The gate replaces the body**, rail and all. A password that
+                  must be replaced and a server mid-setup are both doors, not
+                  destinations: drawing a rail of six places beside them offers
+                  six ways to go nowhere. The title bar stays — switching
+                  Firetower is the one thing still worth doing from here. */}
+              <Gate backend={here}>
+              <Rail
+                backend={here}
+                onSwitch={pick}
+                onForgot={() => {
+                  const left = servers();
+                  setReal(left);
+                  setWhich(left[0]?.serverId ?? null);
+                  navigate(left.length ? "/" : "/connect");
+                }}
+              />
+              {/* Draws nothing: it keeps the artifact list warm and fills in
+                  the pictures the tiles use, on whichever screen is up. */}
+              <Posters />
+              {/* Keyed on the path so leaving a broken screen clears the
+                  error rather than sticking on it. */}
+              <Boundary key={path} onReset={() => navigate("/")}>
+                {/* The sheet. One radius on one object: rounded on the side
+                    that faces the chrome and flush to the window's own
+                    corners on the other, because an app does not draw a
+                    second set of corners inside the ones it has. */}
+                <div className="ml-2 flex min-w-0 flex-1 flex-col overflow-hidden rounded-l-sheet bg-panel shadow-(--shadow-raise)">
+                  <Routes
+                    backend={here}
+                    onSwitch={pick}
+                    onForgot={() => {
+                      const left = servers();
+                      setReal(left);
+                      setWhich(left[0]?.serverId ?? null);
+                      navigate(left.length ? "/" : "/connect");
+                    }}
+                  />
+                </div>
+              </Boundary>
+              </Gate>
+            </StartProvider>
+          </BackendProvider>
+        )}
       </div>
-    </>
+    </div>
   );
 }

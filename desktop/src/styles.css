@@ -44,12 +44,22 @@
   --color-strip: rgb(11 11 12 / 0.82);
 
   /* Chrome. The width is fixed by AppKit, not by taste: 78px is how much room
-     the traffic lights need before content may start.
-
-     38px is where the traffic lights sit comfortably. */
-  --chrome-title: 38px;
+     the traffic lights need before content may start. 40px is where the
+     traffic lights sit comfortably with `org / user` beside them. */
+  --chrome-title: 40px;
   --chrome-lights: 78px;
-  --chrome-strip: 48px;
+
+  /* The rail, and the panel beside it. 62px holds a 42px target with 10px of
+     air each side; 252px is a workspace name and a timestamp without either
+     of them truncating at the widths people actually use. Measured on the
+     artifact at 1280 × 824, where they leave the sheet 958px. */
+  --rail: 62px;
+  --panel: 252px;
+
+  /* One radius on one object. The sheet is rounded on the side that faces the
+     chrome and flush to the window's own corners on the other, because an app
+     does not draw a second set of corners inside the ones it has. */
+  --radius-sheet: 14px;
 
   /* Native motion is quicker than web motion. The same curve, less of it. */
   --dur-native: 140ms;
@@ -89,17 +99,176 @@
      suits prose, while the chrome around it stays small and quiet. Raising
      everything uniformly would just make a dense screen bigger; this widens
      the gap between what you read and what you operate. */
-  --text-read: 0.9375rem;          /* 15px - the conversation */
+  /* The one sentence the Dashboard exists to say. Bigger than `--text-display`
+     because it is not a heading over something — it *is* the content, and it
+     is the only thing on that screen anybody has to read. */
+  --text-hero: 2.5rem;             /* 40px - "Two agents are waiting on you." */
+  --text-hero--line-height: 1.08;
+  --text-hero--letter-spacing: -0.028em;
+
+  --text-read: 1rem;               /* 16px - the conversation */
   --text-read--line-height: 1.7;
-  --text-lede: 1.0625rem;          /* 17px - a first line worth slowing for */
+  --text-lede: 1.125rem;           /* 18px - a first line worth slowing for */
   --text-lede--line-height: 1.5;
+
+  /* ── One pixel on everything under 28 ──────────────────────────
+     The drawing's type pass, applied to the scale rather than to screens:
+     uniform, because it is the only step that cannot disturb the gaps
+     between tiers — and the gap between what you read and what you operate
+     is what makes a dense screen readable.
+
+     **Overridden here, not in `globals.css`.** That sheet is byte-shared
+     with the web client and criterion 6 holds web still until it opts in;
+     the desk's own layer is exactly where a desk-only scale belongs. Every
+     line-height is unitless and scales with the size, so none is touched.
+     32, 34 and 40 are unchanged: the rule is *below* 28. */
+  --text-display: 1.5625rem;       /* 24 → 25 */
+  --text-title: 1.0625rem;         /* 16 → 17 */
+  --text-body: 0.9375rem;          /* 14 → 15 */
+  /* 13 → 14.5, not 14: the floor for a control label. `--text-ui` was built
+     for a mouse-only dense desk, and that is the second deliberate departure
+     from `STYLE.md` on density. */
+  --text-ui: 0.90625rem;           /* 13 → 14.5 */
+  --text-meta: 0.78125rem;         /* 11.5 → 12.5 */
+  --text-micro: 0.71875rem;        /* 10.5 → 11.5 */
+  --text-code: 0.875rem;           /* 13 → 14 */
+
+  /* The weight the design is set in, between Tailwind's 500 and 600. Archivo
+     is variable, so 530 is a real weight rather than a synthesised one — and
+     it is what keeps a 40px sentence from reading as a banner. */
+  --font-weight-mid: 530;
 
   /* Desk density. Rows are taller than the web build's 34px because a mouse
      is precise and a window is not short of vertical space; what a tight row
      buys on a phone is nothing here. */
-  --row: 40px;
-  --row-tight: 32px;
-  --control: 30px;
+  --row: 42px;         /* 40 → 42: a name and a sub-line each gained a pixel */
+  --row-tight: 36px;   /* 34 → 36, which is what the panel row is drawn at */
+  --control: 30px;     /* unchanged — the drawing grew the label, not the box */
+}
+
+/* ── The native layer, in light ─────────────────────────────────────────
+   `globals.css` carries the shared light branch; these three are the desk's
+   own and have nowhere else to live.
+
+   Unlayered, for the same reason the shared block is: `@theme` compiles into
+   `@layer theme` and a declaration outside every layer beats a layered one.
+   Kept *above* `html:not([data-platform="macos"])` at the foot of this file,
+   which is more specific and so still wins — a window with no vibrancy behind
+   it gets a solid panel in either theme.
+
+   The syntax palette is the one set whose rule is **different from the file
+   kinds**: each colour matches *its own* dark ratio rather than a common
+   floor, because here the ratios *are* the design — comment is deliberately
+   the faintest thing on the page, "below everything; the thing you skip".
+   Chroma is additionally capped at C* 34, so the loudest syntax colour stays
+   under the quietest loud signal; dark's own margin is 40 against 42, which is
+   thinner. Measured on white, against the dark figure on #111113:
+   comment 3.55 (3.53) · string 8.61 (8.60) · keyword 6.23 (6.22) ·
+   type 6.13 (6.11) · number 8.47 (8.35) · fn 5.86 (5.84) · attr 5.59 (5.52),
+   with plain code text at 9.26 (11.32) above all seven in both themes.
+
+   **`number` travels worst**, and it is worth knowing before somebody reports
+   it: holding 8.35:1 on white drives a wheat yellow to a dark ochre, and the
+   chroma cap takes another six points off it. It is still unmistakably not a
+   string or a keyword; it no longer reads as "yellow". The alternative is to
+   let numbers sit at the kinds' floor (5.7:1) instead of their own. */
+/* ── Dark, derived rather than inherited ───────────────────────────
+   **The only part of this design that was taken verbatim**, as criterion 1
+   asks — and those values were made for an interface that was dark-only and
+   had no floating sheet on chrome. The structure changed under them and the
+   numbers never moved. The rails sat at L* 3.0, 0.34% luminance — a void,
+   not a frame — and the chrome-to-sheet edge was a **1.68x relative
+   luminance jump**, which is why a ΔE of 2.2 read as a hard edge at the
+   bottom of the range. The whole ladder is lifted: 1.37x now, and the steps
+   even out at 3.1 / 3.4 / 3.4 / 4.2 where they were 2.2 / 2.9 / 3.6 / 4.0.
+
+   **Here rather than in `globals.css`.** The cause is desktop-specific — the
+   desktop gained a floating sheet on chrome, mobile is full-bleed and web is
+   a page — so criterion 1 and criterion 6 both hold untouched. The type pass
+   set the precedent. The cost is a second source of truth for dark, and what
+   retires it is named: when web and mobile opt into light, the whole sheet is
+   re-derived and these move into `globals.css` as its dark branch.
+
+   `data-theme="dark"` is always written, so this is safe to scope. */
+[data-theme="dark"] {
+  --color-ground: #1d1d1e;
+  --color-panel: #232325;
+  --color-raise: #2a2a2d;
+  --color-overlay: #313135;
+  --color-line: #3a3a3f;
+  /* The soft line moves with the line it is a quieter version of. */
+  --color-line-soft: #2a2a2e;
+
+  /* Brought down from near-white, which is most of what read as cheap.
+     `--color-mute` is **held** at 2.94:1 — it is the tier nobody has ruled
+     on, so it was pinned rather than allowed to drift while the rest moved. */
+  --color-bone: #eaeaeb; /* 17.16 → 13.05:1 */
+  --color-text: #b9b9bf; /*  11.32 →  8.03:1 */
+  --color-dim: #8a8a92; /*    5.58 →  4.58:1 */
+  /* The drawing has `#6b6a74`, whose green is one point under its red —
+     which breaks the rule the palette states about itself and `assert-design`
+     caught on its first run after the change. `#6a6a74` holds R = G and
+     measures 2.933:1 against the new panel, inside 0.01 of the 2.94 being
+     held. Reported to the designer. */
+  --color-mute: #6a6a74; /*   2.94 →  2.93:1, held */
+
+  /* **A tint is not ratio-held.** Holding the ratio sent two of these
+     *darker* than the surface they sit on — a hole rather than a wash. A
+     tint is a lift above the panel and holds its ΔL*. */
+  --color-sage-tint: #24382c;
+  --color-brick-tint: #3e2626;
+  --color-amber-tint: #3d321c;
+
+  /* Everything gated against the panel, re-derived to hold **its own**
+     original ratio against the new one. Lifting the panel drops every ratio
+     by about 17%, so leaving these put five of seven file kinds and all four
+     chart series under their floors. */
+  --color-kind-source: #8aa2c7;
+  --color-kind-native: #c8926d;
+  --color-kind-data: #d3bb73;
+  --color-kind-style: #a99bd4;
+  --color-kind-media: #89c69d;
+  --color-kind-store: #cd88b0;
+  --color-kind-prose: #a9a9b4;
+
+  --color-series-1: #5194de;
+  --color-series-2: #34aa82;
+  --color-series-3: #9a88e8;
+  --color-series-4: #dc6a94;
+
+  --color-syn-comment: #777781;
+  --color-syn-string: #9fcaaa;
+  --color-syn-keyword: #a99bd4;
+  --color-syn-type: #8ca4bf;
+  --color-syn-number: #d3bb73;
+  --color-syn-fn: #c8926d;
+  --color-syn-attr: #9898a3;
+}
+
+[data-theme="light"] {
+  --color-panel-vibrant: rgb(255 255 255 / 0.72);
+  --color-strip: rgb(236 238 241 / 0.82);
+
+  /* **R = G, like the other nine.** The drawing's palette pass moved every
+     light neutral onto that rule — red and green equal, blue lifted by a
+     controlled amount — because a green a point or two above red is a
+     different hue rather than a cooler one, and it read as a blue-grey cast
+     beside a neutral product. `--color-line-soft` was missed because it is
+     the one neutral the drawing has no name for, so nothing compared it;
+     `assert-design.mjs` found it on its first run. #f3f5fb → #f4f4fb holds
+     L* to a fraction of a point and leaves the blue lift alone.
+
+     Here rather than in `globals.css`: that sheet is byte-shared with the
+     web client and criterion 6 holds web still until it opts in. */
+  --color-line-soft: #f4f4fb;
+
+  --color-syn-comment: #878792;
+  --color-syn-string: #2d5439;
+  --color-syn-keyword: #65598e;
+  --color-syn-type: #4c647d;
+  --color-syn-number: #5a4c14;
+  --color-syn-fn: #895a37;
+  --color-syn-attr: #676771;
 }
 
 @theme {
@@ -164,7 +333,7 @@
   .server-mark {
     font-family: var(--font-narrow, Archivo Narrow), ui-sans-serif, system-ui, sans-serif;
     font-size: var(--text-meta);
-    font-weight: 700;
+    font-weight: 530;
     letter-spacing: 0.04em;
     color: var(--color-dim);
     background: var(--color-raise);
@@ -192,6 +361,1180 @@
     border-color: var(--color-line-soft);
     box-shadow: none;
   }
+
+
+  /* ── The rail ──────────────────────────────────────────────────
+     Six destinations and the avatar; no rule and no doors under them, since
+     Settings and Updates became rows in the profile menu and nothing else.
+     Selection is a pill in the *sheet's* own colour, because the selected
+     destination is the sheet's handle — nothing else in here fills. Hover
+     and preview are the same gesture at two
+     strengths, drawn in the ink rather than in a hue: a rail that lights up is
+     a rail competing with the one thing on screen that is allowed to. */
+  .rbtn {
+    position: relative;
+    display: grid;
+    place-items: center;
+    /* 7px around a 20px glyph rather than 11 — a tight square, not a tile.
+       Hover and current share one box, so the rail never resizes under the
+       pointer. */
+    width: 34px;
+    height: 34px;
+    flex: none;
+    border-radius: 11px;
+    /* **The glyph recedes.** It rested at `--text` and brightened on hover,
+       which is two signals for one fact — the icon thickening *and* a ground
+       appearing. The container carries the state now; the glyph sits at
+       `--dim`, which is 3.63:1 on the rail's ground and so past the 3:1
+       non-text floor without competing with the sheet. */
+    color: var(--color-dim);
+    transition:
+      background var(--dur-native) var(--ease-swift),
+      color var(--dur-native) var(--ease-swift);
+  }
+  /* **Hover does not apply to the destination you are already on.**
+     `[data-theme="light"] .rbtn:hover` has three compound parts against
+     `.rbtn[aria-current="page"]`'s two, so in light it won the *background*
+     and lost the *colour* — the active rule kept setting `--color-panel`, and
+     a near-white glyph landed on a 5% grey box. Nobody designed that state;
+     it is two rules each winning half an argument.
+
+     Scoped out rather than out-specified, because the current destination has
+     nothing to indicate on hover — it is already the loudest thing in the
+     rail. Dark hid it: the unscoped hover ties the active rule on specificity
+     and loses on source order, which is why checking dark said nothing. */
+  .rbtn:not([aria-current="page"]):hover {
+    background: rgb(255 255 255 / 0.06);
+    color: var(--color-text);
+  }
+  [data-theme="light"] .rbtn:not([aria-current="page"]):hover {
+    background: rgb(22 22 23 / 0.05);
+  }
+  /* The same shape, and it would have bitten the moment somebody put the
+     keyboard on the destination they are already in. */
+  .rbtn:not([aria-current="page"])[data-peek="true"] {
+    background: rgb(255 255 255 / 0.07);
+    color: var(--color-text);
+  }
+  [data-theme="light"] .rbtn:not([aria-current="page"])[data-peek="true"] {
+    background: rgb(22 22 23 / 0.07);
+  }
+  /* **Inverted, and the only thing in the chrome that is.** It was a white
+     pill with a lift — the same *direction* as hover, so on and hovered read
+     alike. The rail is the one place with no label, so it is the one place
+     that earns an inversion. */
+  .rbtn[aria-current="page"] {
+    background: var(--color-bone);
+    color: var(--color-panel);
+  }
+  /* **There is an update to take.** Deliberately not ember: ember means an
+     agent is waiting on *you*, and a newer build is not that.
+
+     It was `.rbtn > .news` — the rail's Updates icon was the only thing that
+     drew it. That icon has gone and the mark is the avatar's now, so the
+     position comes off the class and goes to the one site that places it;
+     `ProfileMenu.tsx` carries the rule about what may and may not set it. The
+     ring stays `--color-ground`: the avatar sits on the desk, as the rail
+     button did. */
+  .news {
+    position: absolute;
+    width: 5.5px;
+    height: 5.5px;
+    border-radius: 99px;
+    background: var(--color-text);
+    box-shadow: 0 0 0 2px var(--color-ground);
+  }
+
+  /* ── A section label ───────────────────────────────────────────
+     What `.eyebrow` was for, said in the voice the rest of the design uses.
+     Tracked-out capitals were section labels in eighteen places; they read as
+     shouting and they are *harder* to scan than sentence case, which is the
+     opposite of what a legend is for. The class stays in the shared sheet
+     because the web client still has its own; the desk uses this. */
+  .legend {
+    font-size: var(--text-meta);
+    line-height: var(--text-meta--line-height);
+    letter-spacing: 0.004em;
+    color: var(--color-dim);
+  }
+
+  /* ── A row in the panel, and a row in a menu ───────────────────
+     The same shape at two widths. 34px is the chrome row — the pair `STYLE.md`
+     gets wrong three times is 32 for chrome and 40–46 for what you read, and
+     this is chrome. A name, and at most one thing after it. */
+  .prow,
+  .mrow {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    width: 100%;
+    min-height: 36px;
+    padding: 5px 9px;
+    border-radius: 9px;
+    color: var(--color-text);
+    text-align: left;
+    transition:
+      background var(--dur-native) var(--ease-swift),
+      color var(--dur-native) var(--ease-swift);
+  }
+  .prow:hover,
+  .mrow:hover {
+    background: color-mix(in srgb, var(--color-raise) 70%, transparent);
+  }
+  /* **No shadow.** White on the desk grey is already a ΔE 6.2 step; a lift on
+     top of it is the same signal said twice. */
+  .prow[aria-current="true"] {
+    background: var(--color-panel);
+    color: var(--color-bone);
+  }
+  /* A menu sits on `--color-raise` already, so its hover has to be the next
+     step up rather than the same one. */
+  .mrow {
+    gap: 11px;
+    padding-inline: 10px;
+  }
+  .mrow:hover {
+    background: var(--color-overlay);
+  }
+
+  /* The panel floating over the sheet rather than beside it: collapsed, and
+     previewing. It is the one translucent surface in the window that is not
+     the window's own vibrancy, so it is also the one that has to answer
+     `prefers-reduced-transparency` — see the foot of this file. */
+  .panel-float {
+    background: var(--color-panel-vibrant);
+    backdrop-filter: blur(28px) saturate(180%);
+    border-radius: var(--radius-sheet);
+    box-shadow: var(--shadow-float);
+    animation: panel-in 220ms var(--ease-swift);
+  }
+  @keyframes panel-in {
+    from {
+      opacity: 0;
+      transform: translateX(-14px) scale(0.985);
+    }
+  }
+
+  /* ── Waiting on you ────────────────────────────────────────────
+     Not a card, not a filled block. A name, a question, and one dot — on the
+     page itself, where a dot is the loudest thing there is. The old row was a
+     table cell with a branch, three agent marks and a state pill in it; what
+     somebody actually needs is the sentence the agent wrote. */
+  .ask {
+    position: relative;
+    display: block;
+    width: calc(100% + 32px);
+    margin-inline: -16px;
+    padding: 16px;
+    border-radius: 14px;
+    text-align: left;
+    transition: background 180ms var(--ease-swift);
+  }
+  .ask:hover {
+    background: var(--color-raise);
+  }
+  .ask + .ask {
+    margin-top: 4px;
+  }
+  .ask > .top > .dot {
+    position: absolute;
+    left: -3px;
+    top: 23px;
+  }
+
+  /* The dot. The only saturated thing on the screen, and it is 8px wide.
+     The halo is the pulse; `ember-pulse` in `globals.css` is the same idea at
+     the other end of the app and keeps its own timing. */
+  /* **One mark, one table.** The dot wears the beat its workspace is in,
+     because two surfaces drawing one fact with two functions is how the home
+     came to say *stuck* where the rail said *finished*. Ember without one,
+     which is the chip that has always been here: a question.
+
+     The rail panel used to take the same `data-t` on a `.wdot` of its own;
+     it draws `BeatMark` now, so there is one mark alphabet across the three
+     surfaces that have status and no separate dot to keep in step. */
+  .dot {
+    position: relative;
+    width: 8px;
+    height: 8px;
+    flex: none;
+    border-radius: 99px;
+    background: var(--color-ember);
+  }
+  .dot[data-t="working"] {
+    background: var(--color-slate);
+  }
+  .dot[data-t="done"] {
+    background: var(--color-sage);
+  }
+  .dot[data-t="broken"] {
+    background: var(--color-brick);
+  }
+  .dot[data-t="over"] {
+    background: var(--color-mute);
+  }
+  /* **The halo is the question's, not every state's.** It is the one thing
+     on the home that moves, and a finished workspace pulsing for attention
+     is the opposite of what it has to say. */
+  .dot:not([data-t]):after,
+  .dot[data-t="blocked"]::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 99px;
+    background: var(--color-ember);
+    animation: dot-halo 3.4s ease-in-out infinite;
+  }
+  @keyframes dot-halo {
+    0%,
+    100% {
+      opacity: 0.42;
+      transform: scale(1);
+    }
+    50% {
+      opacity: 0;
+      transform: scale(2.6);
+    }
+  }
+
+  /* ── Somewhere you are not ─────────────────────────────────────
+     The whole of what the "all servers" scope and the Fleet screen used to do,
+     in one line that is only here while it is true. */
+  .elsewhere {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    height: 36px;
+    padding: 0 6px 0 15px;
+    border-radius: 99px;
+    background: var(--color-raise);
+    color: var(--color-dim);
+    transition: background var(--dur-native) var(--ease-swift);
+  }
+  .elsewhere:hover {
+    background: var(--color-overlay);
+  }
+  .elsewhere b {
+    font-weight: 500;
+    color: var(--color-text);
+  }
+  .elsewhere .go {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    gap: 4px;
+    height: 26px;
+    padding: 0 10px;
+    border-radius: 99px;
+    background: var(--color-panel);
+    color: var(--color-bone);
+    box-shadow: var(--shadow-raise);
+  }
+
+  /* ── Also working ──────────────────────────────────────────────
+     A name and one timestamp. The branch, the agent and the machine are facts
+     *about* the row rather than things you read, so they arrive on hover — and
+     on focus, or the keyboard would be told less than the mouse.
+     `grid-template-rows: 0fr → 1fr` animates a height nobody had to measure. */
+  .wrow {
+    display: block;
+    width: calc(100% + 32px);
+    margin-inline: -16px;
+    padding: 11px 16px;
+    border-radius: 12px;
+    text-align: left;
+    transition: background 180ms var(--ease-swift);
+  }
+  .wrow:hover {
+    background: var(--color-raise);
+  }
+  .wrow .more {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows 200ms var(--ease-swift);
+  }
+  .wrow:hover .more,
+  .wrow:focus-visible .more {
+    grid-template-rows: 1fr;
+  }
+  .wrow .more > span {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 0;
+    overflow: hidden;
+    opacity: 0;
+    transition: opacity 160ms var(--ease-swift) 40ms;
+  }
+  .wrow:hover .more > span,
+  .wrow:focus-visible .more > span {
+    opacity: 1;
+    padding-top: 5px;
+  }
+
+  /* Someone is typing. The one thing that moves at rest, and it says what a
+     spinner says without any of a spinner's urgency. */
+  .typing {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    gap: 3px;
+    height: 8px;
+  }
+  /* `currentColor`, so the one table that says what a status means can say
+     it here too. These were `--color-mute` wherever they appeared, which is
+     why *working* in the team rail read as the same grey as *handed back*
+     and *ended* — three different facts told apart by an 11px shape. */
+  .typing i {
+    width: 4px;
+    height: 4px;
+    border-radius: 99px;
+    background: currentColor;
+    animation: typing 1.4s ease-in-out infinite;
+  }
+  /* Everywhere that is not saying a status keeps the colour it had. */
+  .typing:not([class*="text-"]) {
+    color: var(--color-mute);
+  }
+  .typing i:nth-child(2) {
+    animation-delay: 0.18s;
+  }
+  .typing i:nth-child(3) {
+    animation-delay: 0.36s;
+  }
+  @keyframes typing {
+    0%,
+    70%,
+    100% {
+      opacity: 0.3;
+      transform: translateY(0);
+    }
+    35% {
+      opacity: 1;
+      transform: translateY(-2px);
+    }
+  }
+
+  /* ── The composer ──────────────────────────────────────────────
+     The second-heaviest object on the screen, and the only card on it. It
+     floats over the scroll with the page fading out underneath rather than a
+     rule drawn across it — a rule says "below here is different", and below
+     here is the same page continuing. */
+  .dock {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 10;
+    padding: 0 34px 28px;
+    pointer-events: none;
+  }
+  .dock::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 252px;
+    background: linear-gradient(to top, var(--color-panel) 62%, transparent);
+    pointer-events: none;
+  }
+  /* Only the column takes the pointer. The scrim behind it is 252px of
+     fade over a list somebody still has to be able to click. */
+  .dock .wrap {
+    position: relative;
+    max-width: 704px;
+    margin: 0 auto;
+    pointer-events: auto;
+  }
+  /* The two things a workspace *is*, on their own plane above the input. They
+     are not preferences; they are what the thing will be. A workspace's own
+     composer has no shelf, because there they are already settled. */
+  .shelf {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    margin: 0 10px -12px;
+    padding: 5px 8px 17px;
+    border-radius: 16px 16px 0 0;
+    background: var(--color-overlay);
+  }
+  .composer {
+    position: relative;
+    z-index: 1;
+    padding: 16px 16px 12px;
+    border-radius: 22px;
+    background: var(--color-panel);
+    box-shadow: var(--shadow-float);
+    transition: box-shadow 220ms var(--ease-swift);
+  }
+  /* On a dark ground the one white card has to be the step *above* the page,
+     and the page is already `--color-panel`. */
+  :root[data-theme="dark"] .composer,
+  :root:not([data-theme]) .composer {
+    background: var(--color-raise);
+  }
+  /* **The same words before and after you press send.** 16.5px, which is
+     what the sent message reads back at — typing at 18 and reading it back
+     at 16.5 shrank the text the moment it was committed. 18 also put what
+     you type at the size of an agent's question, which is the loudest
+     reading tier there is, and above the prose you read at length. The type
+     pass stepped everything under 28px up a pixel, which was right, and this
+     is the one place that uniform step landed where the scale did not
+     intend. A composer is a control, not a headline.
+
+     One rule for both composers, because they were always the same size: the
+     home's restated 18 rather than setting it, and the workspace's was a
+     Tailwind utility at 16. */
+  .in {
+    width: 100%;
+    font-size: 1.03125rem; /* 16.5px */
+    line-height: 1.5;
+    letter-spacing: -0.004em;
+    color: var(--color-bone);
+    min-height: 26px;
+  }
+  .composer .bar {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    margin-top: 12px;
+  }
+  /* A chip in the composer's footer, and a chip on its shelf: the same object
+     at two jobs. Quiet until it has been set, because an unset default is not
+     news.
+
+     **Capped, because half of what a chip says is a name somebody else
+     chose.** The words in a picker's unset state are ours and they are short;
+     once set, the machine is called whatever its owner called it and
+     `machineLabel` appends ` · user@host` on top of that, which walked
+     straight out of the shelf. The cap lives on the chip rather than at the
+     call site because the chip is the thing with a width, and it is 306px —
+     the one the recent-agent chips already use, so a row of chips truncates
+     at one measure and not three. The cap is the chip's own ceiling; what it
+     does when the *row* runs out is set further down, where the rows are. */
+  .chip {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    gap: 7px;
+    height: 30px;
+    max-width: 306px;
+    padding: 0 10px;
+    border-radius: 99px;
+    color: var(--color-dim);
+    white-space: nowrap;
+    transition:
+      background var(--dur-native) var(--ease-swift),
+      color var(--dur-native) var(--ease-swift);
+  }
+  /* The name gives way; the controls do not. The icon, the chevron and the
+     readiness dot are each `flex: none` already, so the ellipsis lands in the
+     label and the chevron stays on the chip where you can still press it. */
+  .chip .lbl {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .chip:hover {
+    background: var(--color-raise);
+    color: var(--color-text);
+  }
+  .shelf .chip:hover {
+    background: var(--color-panel);
+  }
+  /* **Three chips on one band, and the band does not grow.** The cap above
+     bounds a chip; it does not bound the row — three chips at 306 are wider
+     than the shelf, and `flex: none` would put the last one outside it again,
+     which is the same bug one step further along. On the shelf they are
+     allowed to give.
+
+     **Which one gives is a judgement, not flexbox's default.** Left alone,
+     shrink is proportional to length and both chips crop at once — at an 880
+     window `acme/web` lost 36px of an 8-character name while the machine
+     still had 250px of address to spare. The end of a tailnet address is the
+     least load-bearing text on the shelf and a repository slug is the thing
+     you would misread, so the machine is weighted to give way first. 12,
+     measured: it returns the repository to within 4px of its full width,
+     where 4 left it 11px short and 24 bought only 2px more.
+
+     The task keeps `flex: none`: it is four characters, it is why you are
+     here, and there is nothing to win by shortening it. The footer's chips
+     are in the same rule for the same reason — a row that cannot shrink can
+     only grow. */
+  .shelf .chip,
+  .composer .bar .chip {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+  .shelf .chip[data-which="machine"] {
+    flex-shrink: 12;
+  }
+  .shelf .chip[data-given="true"] {
+    flex: none;
+  }
+  .chip[data-set="true"] {
+    color: var(--color-text);
+  }
+  .chip[disabled] {
+    opacity: 0.5;
+  }
+  /* **A chip that arrived with you, not one you pick.** The task's key, first
+     on the shelf, with a link-out glyph and no chevron. It stays at full
+     strength while disabled — there is no tracker URL to open, which is a
+     fact about the task and not a control being withheld. */
+  .chip[data-given="true"][disabled] {
+    opacity: 1;
+  }
+  .chip[data-given="true"][disabled]:hover {
+    background: transparent;
+    color: var(--color-text);
+  }
+  /* The branch this will be cut on, in the composer's footer before it is
+     cut. Mono because it is a machine name you will type into `git`, and
+     pushed to the right-hand end whether or not dictation exists here.
+
+     **`0 1 auto`, not `none`.** The name itself has truncated since it was
+     written — `b` below carries the ellipsis — but a chip that cannot shrink
+     never reaches the width where truncation would start, so the whole row
+     grew instead and pushed the send button 5.5px outside the composer's
+     content box at the default 1280, panel open. Branches are named after
+     the task, and `agent/5138-quota-meter-rounds-the-wrong-way` is an
+     ordinary one. */
+  .composer .bar .br {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex: 0 1 auto;
+    margin-left: auto;
+    min-width: 0;
+    padding-left: 8px;
+    font-family: var(--font-mono);
+    font-size: 0.78125rem; /* 12.5px */
+    letter-spacing: -0.01em;
+    color: var(--color-dim);
+  }
+  /* **Under 1024 it goes, rather than everything shrinking around it.**
+     Shrinking shares the squeeze, which is right until there is more squeeze
+     than there is slack: at the 880 minimum window the row is over-subscribed
+     by about 175px, and spread evenly that left the profile chip showing one
+     letter. So one thing gives way completely instead. It is the branch,
+     because it is the only item here that is *derived* — the agent, the
+     profile and the attachment are choices you are making, and the branch is
+     a preview of a name the launch will produce and then show you again.
+     1024 is where the profile chip would otherwise fall under 100px, which
+     is the width at which it stops being a word. */
+  @media (max-width: 1024px) {
+    .composer .bar .br {
+      display: none;
+    }
+  }
+
+  /* The name itself reads at full strength and the words around it do not —
+     the drawing's own split, and the reason is that the branch is the part
+     you will paste into `git`. */
+  .composer .bar .br b {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 400;
+    color: var(--color-bone);
+  }
+  /* Bone on ground, never a second saturated colour. White is this system's
+     accent, and a blue send button beside an ember dot costs the dot its
+     meaning. */
+  .send {
+    display: grid;
+    place-items: center;
+    flex: none;
+    margin-left: auto;
+    width: 34px;
+    height: 34px;
+    border-radius: 99px;
+    background: var(--color-bone);
+    color: var(--color-panel);
+    transition:
+      transform 110ms ease-out,
+      opacity var(--dur-native) var(--ease-swift);
+  }
+  .send:hover {
+    opacity: 0.86;
+  }
+  .send:active {
+    transform: scale(0.94);
+  }
+  .send:disabled {
+    background: var(--color-overlay);
+    color: var(--color-mute);
+  }
+
+  /* ── A pane, and the things every pane is made of ──────────────
+     The shape eleven configuration screens share. `config/bits.tsx` already
+     had two thirds of it in `Section` and `Rows`; this is the rest, and it is
+     here rather than in a component because the markup differs per screen and
+     only the measurements are common. */
+  .pcol {
+    width: 100%;
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: 52px 44px 60px;
+  }
+  .phead2 {
+    display: flex;
+    align-items: flex-start;
+    gap: 20px;
+    flex-wrap: wrap;
+  }
+  .phead2 h1 {
+    font-size: 2.125rem; /* 34px — the one heading on a pane */
+    line-height: 1.12;
+    letter-spacing: -0.026em;
+    font-weight: var(--font-weight-mid);
+    color: var(--color-bone);
+  }
+  .phead2 .sub {
+    max-width: 52ch;
+    margin-top: 7px;
+    font-size: 1.0625rem;
+    line-height: 1.5;
+    color: var(--color-dim);
+  }
+  .phead2 .acts {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: 9px;
+    margin-left: auto;
+    padding-top: 4px;
+  }
+
+  /* A field that is a field without being a box. */
+  .find {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 230px;
+    height: 36px;
+    padding: 0 13px;
+    border-radius: 99px;
+    background: var(--color-raise);
+    color: var(--color-mute);
+    transition: background var(--dur-native) var(--ease-swift);
+  }
+  .find:focus-within {
+    background: var(--color-overlay);
+  }
+  .find input {
+    flex: 1;
+    min-width: 0;
+    font-size: var(--text-ui);
+    color: var(--color-bone);
+  }
+
+  /* ── One primary action, and the quiet ones beside it ──────────
+     The filled button is the thing you came to do. A pane with three of them
+     has made the reader choose which one is real, which is work the design
+     should have done. */
+  .btn {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    gap: 7px;
+    height: 33px;
+    padding: 0 14px;
+    border-radius: 99px;
+    font-size: var(--text-ui);
+    white-space: nowrap;
+    transition:
+      background var(--dur-native) var(--ease-swift),
+      opacity var(--dur-native) var(--ease-swift),
+      transform 110ms ease-out;
+  }
+  .btn:active {
+    transform: scale(0.97);
+  }
+  .btn[disabled] {
+    opacity: 0.5;
+  }
+  .btn.primary {
+    background: var(--color-bone);
+    color: var(--color-panel);
+    font-weight: 500;
+  }
+  .btn.primary:hover {
+    opacity: 0.86;
+  }
+  .btn.plain {
+    background: var(--color-panel);
+    color: var(--color-text);
+    box-shadow: var(--shadow-raise);
+  }
+  :root[data-theme="dark"] .btn.plain,
+  :root:not([data-theme]) .btn.plain {
+    background: var(--color-overlay);
+    box-shadow: none;
+  }
+  .btn.plain:hover {
+    color: var(--color-bone);
+  }
+  .btn.quiet {
+    color: var(--color-dim);
+  }
+  .btn.quiet:hover {
+    background: var(--color-overlay);
+    color: var(--color-text);
+  }
+
+  /* A filter is a pill, not a tab. There is no "current page" here — these
+     narrow a list you are already on. */
+  .filters {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 30px;
+    flex-wrap: wrap;
+  }
+  .fp {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex: none;
+    height: 32px;
+    white-space: nowrap;
+    padding: 0 13px;
+    border-radius: 99px;
+    font-size: var(--text-ui);
+    color: var(--color-dim);
+    transition:
+      background var(--dur-native) var(--ease-swift),
+      color var(--dur-native) var(--ease-swift);
+  }
+  .fp:hover {
+    background: var(--color-raise);
+    color: var(--color-text);
+  }
+  .fp[aria-pressed="true"] {
+    background: var(--color-overlay);
+    color: var(--color-bone);
+  }
+  .filters .right {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: auto;
+  }
+
+  /* ── The library ───────────────────────────────────────────────
+     The poster *is* the card. The name sits on the paper underneath it — a
+     border around the bytes and nothing around the sentence, which is the
+     same call `WorkspaceImage` makes for a picture in a transcript. */
+  .gal {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(228px, 1fr));
+    gap: 30px 24px;
+    margin-top: 26px;
+  }
+  .art {
+    display: block;
+    width: 100%;
+    text-align: left;
+  }
+  /* **No fill here.** This had `background: var(--color-overlay)` and it has
+     never rendered: `ArtifactShot` always sets its own `bg-white` or
+     `bg-line`, and a utility beats a component-layer rule. A declaration that
+     cannot be seen is a declaration that will be trusted and is not true. */
+  .art .shot {
+    position: relative;
+    display: block;
+    width: 100%;
+    aspect-ratio: 16 / 10;
+    overflow: hidden;
+    border-radius: 12px;
+    box-shadow: var(--shadow-raise);
+    transition:
+      transform 220ms var(--ease-swift),
+      box-shadow 220ms var(--ease-swift);
+  }
+  .art:hover .shot {
+    transform: translateY(-3px);
+    box-shadow: var(--shadow-float);
+  }
+  .art .nm {
+    display: block;
+    margin-top: 11px;
+    font-size: 0.96875rem; /* 14.5px */
+    line-height: 1.4;
+    letter-spacing: -0.006em;
+    color: var(--color-bone);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .art .mt {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin-top: 3px;
+    font-size: var(--text-meta);
+    color: var(--color-dim);
+  }
+
+  /* The same objects as rows, for finding rather than browsing. The 64px
+     floor is the 84 × 52 poster plus its padding. */
+  .alist {
+    display: flex;
+    flex-direction: column;
+    margin-top: 14px;
+  }
+  .ar {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    width: 100%;
+    min-height: 64px;
+    margin-inline: -14px;
+    padding: 10px 14px;
+    border-radius: 12px;
+    text-align: left;
+    transition: background var(--dur-native) var(--ease-swift);
+  }
+  .ar:hover {
+    background: var(--color-raise);
+  }
+  .ar .ghost {
+    opacity: 0;
+    transition: opacity var(--dur-native) var(--ease-swift);
+  }
+  .ar:hover .ghost,
+  .ar:focus-visible .ghost {
+    opacity: 1;
+  }
+  .colhead {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    margin: 22px -14px 0;
+    padding: 0 14px;
+    font-size: var(--text-meta);
+    color: var(--color-mute);
+  }
+
+  /* ── A gallery of things you have ──────────────────────────────
+     Sections rather than one list, because the three groups are the three the
+     path already encodes — what Firetower ships, what is yours, and what
+     somebody filed into a directory you can reach — and a flat list of a
+     hundred makes you read every row to find out which is which. */
+  .sksec {
+    margin-top: 40px;
+  }
+  .sksec:first-of-type {
+    margin-top: 30px;
+  }
+  .sksec .hd {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .sksec h2 {
+    font-size: 1.1875rem; /* 18px */
+    line-height: 1.3;
+    letter-spacing: -0.014em;
+    font-weight: 530;
+    color: var(--color-bone);
+  }
+  .sksec .n {
+    font-size: var(--text-ui);
+    color: var(--color-mute);
+    font-variant-numeric: tabular-nums;
+  }
+  .sksec .note {
+    flex: 0 0 100%;
+    max-width: 68ch;
+    margin-top: 2px;
+    font-size: var(--text-ui);
+    line-height: 1.55;
+    color: var(--color-dim);
+  }
+  /* Two columns where there is room for two. A skill is a name and two lines
+     of description; one column of those down a 1000px pane is a column of
+     mostly nothing. */
+  .skgrid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(372px, 1fr));
+    gap: 2px 32px;
+    margin-top: 12px;
+  }
+  .sk {
+    display: flex;
+    align-items: flex-start;
+    gap: 13px;
+    width: auto;
+    margin-inline: -14px;
+    padding: 13px 14px;
+    border-radius: 13px;
+    text-align: left;
+    transition: background var(--dur-native) var(--ease-swift);
+  }
+  .sk:hover {
+    background: var(--color-raise);
+  }
+  .sk .plate {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 38px;
+    height: 38px;
+    margin-top: 1px;
+    border-radius: 11px;
+    background: var(--color-raise);
+    box-shadow: var(--shadow-raise);
+    font-family: var(--font-narrow), ui-sans-serif, system-ui, sans-serif;
+    font-size: var(--text-ui);
+    font-weight: 530;
+    letter-spacing: 0.02em;
+    color: var(--color-dim);
+  }
+  .sk:hover .plate {
+    background: var(--color-panel);
+  }
+  :root[data-theme="dark"] .sk:hover .plate,
+  :root:not([data-theme]) .sk:hover .plate {
+    background: var(--color-overlay);
+  }
+
+  /* A group of facts, as a card. The build's aside was bare text on the
+     sheet with a rule down its left edge, which is a gutter; these are
+     objects, and each carries its own ground. */
+  .facts-card {
+    padding: 16px 18px;
+    border-radius: 14px;
+    background: var(--color-raise);
+  }
+  .facts-card + .facts-card {
+    margin-top: 12px;
+  }
+  .facts-card h3 {
+    font-size: 0.875rem;
+    letter-spacing: 0.004em;
+    color: var(--color-dim);
+  }
+  .facts-card dl {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 7px 14px;
+    margin-top: 10px;
+  }
+  .facts-card dt {
+    font-size: 0.90625rem;
+    color: var(--color-dim);
+    white-space: nowrap;
+  }
+  .facts-card dd {
+    min-width: 0;
+    font-size: 0.90625rem;
+    color: var(--color-bone);
+    text-align: right;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .facts-card .line {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    margin-top: 9px;
+    font-size: 0.90625rem;
+    color: var(--color-text);
+  }
+  .facts-card .line i {
+    width: 6px;
+    height: 6px;
+    border-radius: 99px;
+    flex: none;
+  }
+  .facts-card .line.ok i {
+    background: var(--color-sage);
+  }
+  .facts-card .line.warn i {
+    background: var(--color-amber-soft);
+  }
+
+  /* The instructions, and a rail of facts cards beside them. */
+  .sk-body {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 268px;
+    gap: 40px;
+    align-items: start;
+    margin-top: 28px;
+  }
+  @media (max-width: 1100px) {
+    .sk-body {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+
+  /* A skill, opened. The plate is the gallery's at 62px, the name is the
+     folder's name so it is set in the mono voice, and the facts under it are
+     separated by space rather than by hairline rules — four vertical lines in
+     a row of five words is a fence around a sentence. */
+  .sk-head {
+    display: flex;
+    align-items: flex-start;
+    gap: 18px;
+    margin-top: 22px;
+  }
+  .sk-head .plate {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 62px;
+    height: 62px;
+    border-radius: 18px;
+    background: var(--color-raise);
+    box-shadow: var(--shadow-raise);
+    font-family: var(--font-narrow), ui-sans-serif, system-ui, sans-serif;
+    font-size: 1.4375rem;
+    font-weight: 530;
+    letter-spacing: 0.02em;
+    color: var(--color-text);
+  }
+  .sk-head .tx {
+    min-width: 0;
+    flex: 1;
+  }
+  .sk-head h1 {
+    font-family: var(--font-mono);
+    font-size: 1.75rem;
+    line-height: 1.15;
+    letter-spacing: -0.03em;
+    font-weight: var(--font-weight-mid);
+    color: var(--color-bone);
+  }
+  .sk-head .facts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 16px;
+    margin-top: 7px;
+    font-size: 0.90625rem;
+    color: var(--color-dim);
+  }
+  .sk-head .facts b {
+    font-weight: 500;
+    color: var(--color-text);
+  }
+  .sk-head .ds {
+    max-width: 66ch;
+    margin-top: 11px;
+    font-size: 1.03125rem;
+    line-height: 1.6;
+    color: var(--color-text);
+  }
+  .sk-head .acts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+    margin-top: 16px;
+  }
+
+  .sk .ds {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  /* A skill, opened: text tabs with a rule under the strip and a 2px mark on
+     the current one. It was a recessed track, which is the shape for two or
+     three exclusive filters, not for the index of a document. */
+  .sk-tabs {
+    display: flex;
+    gap: 18px;
+    margin-top: 30px;
+    border-bottom: 1px solid var(--color-line);
+  }
+  .sk-tabs button {
+    position: relative;
+    padding: 0 0 11px;
+    font-size: 0.9375rem;
+    color: var(--color-dim);
+    transition: color var(--dur-native) var(--ease-swift);
+  }
+  .sk-tabs button:hover {
+    color: var(--color-text);
+  }
+  .sk-tabs button[aria-selected="true"] {
+    color: var(--color-bone);
+    font-weight: 500;
+  }
+  .sk-tabs button[aria-selected="true"]::after {
+    content: "";
+    position: absolute;
+    inset-inline: 0;
+    bottom: -1px;
+    height: 2px;
+    border-radius: 2px;
+    background: var(--color-bone);
+  }
+
+  /* What a skill can do to your machine, as a line of small marks rather than
+     a row of filled badges. A badge per risk made four of them look like four
+     errors; the fact is "worth reading before you approve", not "broken". */
+  .risk {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: var(--text-meta);
+    color: var(--color-dim);
+  }
+  .risk i {
+    flex: none;
+    width: 5px;
+    height: 5px;
+    border-radius: 99px;
+    /* The mark use of amber, not the text-on-tint one. See `globals.css`. */
+    background: var(--color-amber-soft);
+  }
+
+  /* An agent wrote this one and it runs code. A 2px rule, not a filled panel
+     — it encodes "this one is different" and spends two pixels doing it. */
+  .review {
+    margin-top: 14px;
+    padding: 16px 18px;
+    border-radius: 14px;
+    border-left: 2px solid var(--color-amber-soft);
+    background: var(--color-raise);
+  }
+  .review h3 {
+    font-size: 1.0rem;
+    font-weight: var(--font-weight-mid);
+    letter-spacing: -0.006em;
+    color: var(--color-bone);
+  }
+  .review p {
+    max-width: 72ch;
+    margin-top: 4px;
+    font-size: var(--text-ui);
+    line-height: 1.6;
+    color: var(--color-text);
+  }
+
+  /* Dropping a folder on the page. */
+  .drop {
+    position: absolute;
+    inset: 12px;
+    z-index: 30;
+    display: grid;
+    place-items: center;
+    padding: 30px;
+    text-align: center;
+    border-radius: 18px;
+    border: 1.5px dashed var(--color-dim);
+    background: color-mix(in srgb, var(--color-raise) 88%, transparent);
+    backdrop-filter: blur(6px);
+  }
+
 
   /* ── The three blocks ──────────────────────────────────────────
      The status glyph (`src/components/Blocks.tsx`). Four quadrants, one of
@@ -289,9 +1632,14 @@
   .row:hover {
     background: color-mix(in srgb, var(--color-raise) 70%, transparent);
   }
+  /* **The recessed fill and no shadow**, which is what the drawing says:
+     `.ki[aria-selected="true"]{background:var(--sunk)}`. The shadow here was
+     ours — and a drop shadow on a row that is *dented into* its list is the
+     same contradiction a card wearing the recessed fill is, said the other
+     way round. Inside a white palette the fill has to be darker than the card
+     to be seen at all, so the fill was never the part that was wrong. */
   .row[data-on="true"] {
     background: var(--color-overlay);
-    box-shadow: var(--shadow-raise);
   }
 
   /* ── Controls ──────────────────────────────────────────────────
@@ -315,31 +1663,11 @@
 
   /* A segmented control, the way the platform draws one: a recessed track and
      a raised knob, rather than two flat buttons that change colour. */
-  .track {
-    display: inline-flex;
-    gap: 2px;
-    padding: 2px;
-    border-radius: var(--radius-md);
-    background: var(--color-ground);
-    box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.35);
-  }
-  .track > button {
-    padding: 0.25rem 0.625rem;
-    border-radius: 6px;
-    font-size: var(--text-ui);
-    color: var(--color-mute);
-    transition:
-      background var(--dur-native) var(--ease-swift),
-      color var(--dur-native) var(--ease-swift);
-  }
-  .track > button:hover {
-    color: var(--color-dim);
-  }
-  .track > button[data-on="true"] {
-    background: var(--color-overlay);
-    color: var(--color-bone);
-    box-shadow: var(--shadow-raise);
-  }
+  /* `.track` was here: a second segmented control, hand-rolled at three call
+     sites beside `Segmented`, which existed and was imported by none of them.
+     The component is the authority and `.seg` is its class. Removed rather
+     than left as a thing the next screen could reach for. */
+
 
   /* A keyboard hint, inline. Desk software tells you its shortcuts where you
      use them rather than hiding them in a menu. */
@@ -374,9 +1702,9 @@
        code only. */
     overflow-wrap: anywhere;
   }
-  .prose-desk .ft-md h1 { font-size: var(--text-lede); line-height: 1.4; color: var(--color-bone); font-weight: 600; margin: 1.25rem 0 0.5rem; }
-  .prose-desk .ft-md h2 { font-size: var(--text-read); color: var(--color-bone); font-weight: 600; margin: 1.1rem 0 0.4rem; }
-  .prose-desk .ft-md h3, .prose-desk .ft-md h4 { font-size: var(--text-ui); color: var(--color-bone); font-weight: 600; margin: 1rem 0 0.3rem; }
+  .prose-desk .ft-md h1 { font-size: var(--text-lede); line-height: 1.4; color: var(--color-bone); font-weight: 530; margin: 1.25rem 0 0.5rem; }
+  .prose-desk .ft-md h2 { font-size: var(--text-read); color: var(--color-bone); font-weight: 530; margin: 1.1rem 0 0.4rem; }
+  .prose-desk .ft-md h3, .prose-desk .ft-md h4 { font-size: var(--text-ui); color: var(--color-bone); font-weight: 530; margin: 1rem 0 0.3rem; }
   .prose-desk .ft-md pre {
     margin: 0.75rem 0;
     padding: 0.75rem 0.9rem;
@@ -484,5 +1812,2645 @@ html:not([data-platform="macos"]) {
 @media (prefers-reduced-motion: reduce) {
   .blocks[data-beat="working"] i:nth-child(4) {
     opacity: 0;
+  }
+}
+
+
+/* Reduced motion keeps the ember *visible*, not still-and-bare.
+   `globals.css` collapses every duration with `!important`, which is right —
+   but it would land the halo on frame zero and leave the dot a flat 8px mark.
+   Held open at full scale instead, which says the same thing without moving. */
+@media (prefers-reduced-motion: reduce) {
+  .dot::after {
+    opacity: 0.3;
+    transform: scale(2.2);
+  }
+  .typing i {
+    opacity: 0.55;
+  }
+}
+
+/* Asked for less transparency, which is a request and not a preference.
+   The floating panel is the only surface in the window that is translucent of
+   its own accord — everything else is the window's vibrancy, which AppKit
+   turns off for the same setting without being asked. */
+@media (prefers-reduced-transparency: reduce) {
+  .panel-float {
+    background: var(--color-panel);
+    backdrop-filter: none;
+  }
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════
+   THE SHARED SHAPES — the components eleven screens are made of
+   ═══════════════════════════════════════════════════════════════════
+
+   Restyling a screen does nothing if the components it is composed from are
+   untouched: Skills was rebuilt to its drawing and still drew a grey outline
+   where the page's one action should have been a black pill, because that
+   button belongs to `CreateMenu`, not to Skills. These are the shapes
+   `components.html` measured as the ones the design leans on — Button at 50
+   screens of 50, ListRow at 44, Badge, Field, Pop and Segmented at 42 — and
+   they are written once, here, so a fix lands everywhere at once.
+
+   Names are the artifact's own, so the two can be read side by side.
+   ═══════════════════════════════════════════════════════════════════ */
+@layer components {
+  /* ── A page: a title, one sentence, one action, then rows ─────────
+     Eleven configuration screens are this shape and each re-implemented it. */
+  .pg {
+    width: 100%;
+    max-width: 1000px;
+    margin: 0 auto;
+    padding: 52px 44px 64px;
+  }
+  .pg-head {
+    display: flex;
+    align-items: flex-start;
+    gap: 20px;
+    flex-wrap: wrap;
+  }
+  .pg-head > div:first-child {
+    flex: 1 1 400px;
+    min-width: 0;
+  }
+  .pg-head h1 {
+    font-size: 2rem; /* 32px */
+    line-height: 1.14;
+    letter-spacing: -0.026em;
+    font-weight: var(--font-weight-mid);
+    color: var(--color-bone);
+  }
+  .pg-head .sub {
+    margin-top: 8px;
+    max-width: 52ch;
+    font-size: 1.03125rem; /* 15.5px */
+    line-height: 1.55;
+    color: var(--color-dim);
+  }
+  .pg-head .acts {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: none;
+    padding-top: 5px;
+  }
+
+  /* ── Settings' own index ──────────────────────────────────────────
+     Settings has no rail icon, so the five panes it owns are navigated from
+     inside the page. Plain text with an underline — `.itab`'s rule, for the
+     same job: the index of a page should not compete with the page.
+
+     Two lines, because the grouping is load-bearing. The group name sits over
+     its own cluster rather than beside it, so "Who can reach what" reads as a
+     heading for the three under it; a flat strip of five would have to drop
+     the names, and the names are the part that says why Teams is next to
+     Directories. `SettingsIndex.tsx` has the rest of the argument. */
+  .snav {
+    display: flex;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 12px 30px;
+    margin-bottom: 30px;
+  }
+  .sgroup {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .slabel {
+    font-size: var(--text-meta);
+    line-height: var(--text-meta--line-height);
+    letter-spacing: 0.004em;
+    color: var(--color-mute);
+  }
+  .sitems {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  .sitem {
+    position: relative;
+    flex: none;
+    padding: 1px 0;
+    font-size: var(--text-ui);
+    line-height: 1.4;
+    color: var(--color-dim);
+    transition: color var(--dur-native) var(--ease-swift);
+  }
+  .sitem:hover {
+    color: var(--color-text);
+  }
+  .sitem[aria-current="page"] {
+    color: var(--color-bone);
+    font-weight: var(--font-weight-mid);
+  }
+  /* The inspector tabs' mark — 2px, bone, full width of the word — so there
+     is one underline in the product rather than two that nearly match. A
+     pixel lower than theirs, because these sit on 1px of padding where an
+     `.itab` sits on 4 and the optical gap has to come out the same. */
+  .sitem .ul {
+    position: absolute;
+    right: 0;
+    bottom: -4px;
+    left: 0;
+    height: 2px;
+    border-radius: 2px;
+    background: var(--color-bone);
+  }
+
+  /* A section of rows: a heading, its count, and a note under it. */
+  .lsec {
+    margin-top: 34px;
+  }
+  .lsec:first-of-type {
+    margin-top: 30px;
+  }
+  .lsec > h2 {
+    display: flex;
+    align-items: baseline;
+    gap: 9px;
+    font-size: 1.125rem; /* 17px */
+    line-height: 1.3;
+    letter-spacing: -0.012em;
+    font-weight: 530;
+    color: var(--color-bone);
+  }
+  .lsec > h2 .n {
+    font-size: 0.875rem;
+    font-weight: 400;
+    font-variant-numeric: tabular-nums;
+    color: var(--color-mute);
+  }
+  .lsec > .note {
+    margin-top: 3px;
+    max-width: 72ch;
+    font-size: 0.90625rem; /* 13.5px */
+    line-height: 1.55;
+    color: var(--color-dim);
+  }
+  .lrows {
+    margin-top: 10px;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ── One row shape for every pane ─────────────────────────────────
+     On the page, not in a card: the rows are the content, and a border
+     around them is a second frame inside the sheet's own. */
+  .r {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    width: calc(100% + 28px);
+    margin: 0 -14px;
+    padding: 11px 14px;
+    min-height: 58px;
+    border-radius: 12px;
+    text-align: left;
+    transition: background var(--dur-native) var(--ease-swift);
+  }
+  .r:hover {
+    background: var(--color-raise);
+  }
+  .r:hover .hov {
+    opacity: 1;
+  }
+  .r .hov {
+    opacity: 0;
+    transition: opacity var(--dur-native) var(--ease-swift);
+  }
+  .r .g {
+    display: grid;
+    place-items: center;
+    flex: none;
+    color: var(--color-dim);
+  }
+  .r .tx {
+    min-width: 0;
+    flex: 1;
+  }
+  .r .tx b {
+    display: block;
+    font-size: 0.96875rem; /* 14.5px */
+    font-weight: 500;
+    letter-spacing: -0.005em;
+    color: var(--color-bone);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .r .tx s {
+    display: block;
+    margin-top: 2px;
+    text-decoration: none;
+    font-size: 0.875rem;
+    line-height: 1.45;
+    color: var(--color-dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .r .path {
+    flex: none;
+    font-family: var(--font-mono);
+    font-size: 0.84375rem; /* 12.5px */
+    letter-spacing: -0.01em;
+    color: var(--color-dim);
+  }
+  .r .said {
+    flex: none;
+    font-size: 0.875rem;
+    color: var(--color-dim);
+  }
+  .r .chip3 {
+    flex: none;
+    padding: 3px 9px;
+    border-radius: 99px;
+    background: var(--color-raise);
+    font-size: 0.8125rem;
+    color: var(--color-dim);
+  }
+  .r:hover .chip3 {
+    background: var(--color-overlay);
+  }
+  /* A child of the row above it: indented, lighter, shorter. */
+  .r.sub {
+    padding-left: 48px;
+    min-height: var(--row);
+  }
+  .r.sub .tx b {
+    font-size: 0.90625rem;
+    font-weight: 400;
+    color: var(--color-text);
+  }
+
+  /* A face, for a person. Derived from the name, never stored. */
+  .face {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 24px;
+    height: 24px;
+    border-radius: 99px;
+    background: var(--color-raise);
+    color: var(--color-dim);
+    font-size: 0.75rem;
+    font-weight: 530;
+    letter-spacing: 0.02em;
+  }
+  .r:hover .face {
+    background: var(--color-overlay);
+  }
+
+  /* State, as a dot. Three meanings, and never ember — none of this is an
+     agent waiting on you. */
+  .st {
+    width: 7px;
+    height: 7px;
+    border-radius: 99px;
+    flex: none;
+  }
+  .st[data-s="ok"] {
+    background: var(--color-sage);
+  }
+  .st[data-s="warn"] {
+    background: var(--color-amber-soft);
+  }
+  .st[data-s="off"] {
+    background: var(--color-mute);
+  }
+  .st[data-s="bad"] {
+    background: var(--color-brick);
+  }
+
+  /* A level, as a menu. Viewer / Editor / Admin — the words people use, with
+     `writer` left on the wire. */
+  .lvl {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex: none;
+    height: 28px;
+    padding: 0 10px;
+    border-radius: 99px;
+    background: var(--color-raise);
+    font-size: 0.875rem;
+    color: var(--color-text);
+  }
+  .r:hover .lvl {
+    background: var(--color-overlay);
+  }
+  .lvl:hover {
+    color: var(--color-bone);
+  }
+
+  /* A tag that is a fact rather than a state: "can delegate", "built in". */
+  .ttag {
+    display: inline-flex;
+    align-items: center;
+    flex: none;
+    height: 21px;
+    padding: 0 8px;
+    border-radius: 99px;
+    background: var(--color-raise);
+    font-size: 0.78125rem;
+    color: var(--color-dim);
+  }
+  .r:hover .ttag {
+    background: var(--color-overlay);
+  }
+
+  /* A secret. The value is never shown at rest. */
+  .masked {
+    flex: none;
+    font-family: var(--font-mono);
+    font-size: 0.875rem;
+    letter-spacing: 0.14em;
+    color: var(--color-mute);
+  }
+  .shown {
+    flex: none;
+    max-width: 230px;
+    padding: 4px 10px;
+    border-radius: 8px;
+    background: var(--color-raise);
+    font-family: var(--font-mono);
+    font-size: 0.84375rem;
+    color: var(--color-bone);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .logged {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+    font-size: 0.84375rem;
+    color: var(--color-dim);
+  }
+
+  /* The facts pane: a deployment, an account, a machine — the things that are
+     read rather than changed. */
+  .fsheet {
+    margin-top: 26px;
+    padding: 4px 18px;
+    border-radius: 16px;
+    background: var(--color-raise);
+  }
+  .fsheet .row {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    padding: 13px 0;
+    border-bottom: 1px solid var(--color-line);
+  }
+  .fsheet .row:last-child {
+    border-bottom: 0;
+  }
+  .fsheet dt {
+    flex: none;
+    width: 180px;
+    font-size: 0.90625rem;
+    color: var(--color-dim);
+  }
+  .fsheet dd {
+    flex: 1;
+    min-width: 0;
+    font-size: 0.9375rem;
+    color: var(--color-bone);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .fsheet dd.mono {
+    font-family: var(--font-mono);
+    font-size: 0.875rem;
+    letter-spacing: -0.01em;
+  }
+
+  /* Two lists on one screen, as Repositories wants. */
+  .filterline {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-top: 26px;
+    flex-wrap: wrap;
+  }
+  .filterline .right {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  /* An inline form, for the one or two places that make something. */
+  .inline-form {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    margin-top: 12px;
+    padding: 11px 14px;
+    border-radius: 12px;
+    background: var(--color-raise);
+  }
+  .inline-form input {
+    flex: 1;
+    min-width: 0;
+    font-size: 0.96875rem;
+    color: var(--color-bone);
+  }
+
+  /* ── A quiet cross-link at the foot of a reader's screen ──────────
+     So it never reads as withholding: it says where the thing you came for
+     actually lives. People, Teams, Account and Repositories each end with one. */
+  .whereto {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 30px;
+    padding: 14px 18px;
+    border-radius: 14px;
+    background: var(--color-raise);
+  }
+  .whereto .g {
+    display: grid;
+    place-items: center;
+    flex: none;
+    color: var(--color-dim);
+  }
+  .whereto p {
+    flex: 1;
+    min-width: 0;
+    font-size: 0.90625rem;
+    line-height: 1.55;
+    color: var(--color-text);
+  }
+  .whereto p b {
+    font-weight: 500;
+    color: var(--color-bone);
+  }
+
+  /* Rows from a server that is not answering. Readable, obviously stale. */
+  .stale2 {
+    opacity: 0.45;
+    filter: saturate(0.4);
+    pointer-events: none;
+  }
+
+  /* A row that has not arrived. Breathing, not spinning: five rows the shape
+     of the rows that are coming say what is coming; a spinner says only that
+     something is happening. */
+  .settling {
+    border-radius: 5px;
+    background: var(--color-overlay);
+    animation: settling 1.6s ease-in-out infinite;
+  }
+  @keyframes settling {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.5;
+    }
+  }
+
+  /* ── What a list says when it has nothing to say ──────────────────
+     A fresh install hits empty, loading, error, denied and server-dark at
+     once, so none of them is an edge case.
+
+     **Two members, and nothing else in the client draws an empty list.**
+     `.blank` is for a page whose body has nothing in it; `.note2` is for a
+     page that has content, one part of which is empty. The difference is not
+     severity, it is what caused it: nothing exists yet is a blank, a control
+     the reader changed is a note. */
+  .blank {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    place-items: center;
+    /* The bottom is bigger on purpose. Optical centring: a block centred in
+       a tall column reads as floating. */
+    padding: 72px 34px 104px;
+  }
+  .blank .in {
+    max-width: 420px;
+    text-align: center;
+  }
+
+  /* The object: one of this list's own rows, raised, with nothing in it.
+     Not an icon in a square. `Settling` already says "rows the shape of the
+     rows that are coming"; this is the same sentence with the animation off
+     and the count at one. The page's glyph sits where the row's glyph sits,
+     which is what makes Machines differ from Skills without a second
+     design, and it answers *what is this page for* before a word is read. */
+  .blank .obj {
+    margin: 0 auto 20px;
+  }
+  .blank .obj.row {
+    display: flex;
+    align-items: center;
+    gap: 13px;
+    width: 252px;
+    padding: 12px 14px;
+    border-radius: 14px;
+    background: var(--color-raise);
+    box-shadow: var(--shadow-raise);
+  }
+  .blank .obj.row .d {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 30px;
+    height: 30px;
+    border-radius: 99px;
+    background: var(--color-overlay);
+    color: var(--color-mute);
+  }
+  .blank .obj.row .b {
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .blank .obj.row .b i,
+  .blank .obj.card .b i {
+    display: block;
+    height: 7px;
+    border-radius: 99px;
+    background: var(--color-line);
+  }
+  .blank .obj.row .b i:nth-child(2) {
+    width: 52%;
+  }
+
+  /* The gallery's own object, for the one page that is a grid: the poster is
+     the card and the name sits on the paper underneath it. `.gal`'s own rule
+     — the border goes round the thumbnail, never round the thumbnail and its
+     label together. */
+  /* `display: block`, because the object is a `<span>` and an inline box
+     ignores a width. The other two shapes set their own display and so were
+     never caught by it. */
+  .blank .obj.card {
+    display: block;
+    width: 150px;
+  }
+  .blank .obj.card .p {
+    display: grid;
+    place-items: center;
+    height: 104px;
+    border-radius: 12px;
+    background: var(--color-raise);
+    box-shadow: var(--shadow-raise);
+    color: var(--color-mute);
+  }
+  .blank .obj.card .b {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 11px;
+  }
+  .blank .obj.card .b i:nth-child(1) {
+    width: 72%;
+  }
+  .blank .obj.card .b i:nth-child(2) {
+    width: 44%;
+  }
+
+  /* The trouble states keep the plate, and that is the point: the shape that
+     says "nothing here" and the shape that says "something went wrong" must
+     not be the same shape. A shape of content behind *that did not load*
+     says the content is coming, which is the opposite of true. */
+  .blank .obj.plate {
+    display: grid;
+    place-items: center;
+    width: 52px;
+    height: 52px;
+    border-radius: 16px;
+    background: var(--color-raise);
+    box-shadow: var(--shadow-raise);
+    color: var(--color-mute);
+  }
+  .blank h2 {
+    font-size: 1.375rem; /* 22px — a blank inside a page, not a page */
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+    font-weight: var(--font-weight-mid);
+    color: var(--color-bone);
+  }
+  .blank p {
+    margin-top: 9px;
+    font-size: 1rem;
+    line-height: 1.6;
+    color: var(--color-dim);
+  }
+  .blank .acts {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 22px;
+  }
+
+  /* ── Note: one section, or one filter, is empty ────────────────────
+     Left-aligned on the row's own grid, because a note belongs to the list
+     rather than to the page. 46px tall, under a row's 58px, on purpose: no
+     plate, no radius, no hover — three things a row has — so it can never be
+     mistaken for one.
+
+     A grid rather than a row, so the one control wraps *under* the sentence
+     at panel width instead of squeezing it. The 16px column is the row's
+     glyph and the 13px gutter is the row's gap, so one rule covers 360px and
+     1030px. */
+  .note2 {
+    display: grid;
+    grid-template-columns: 16px 1fr;
+    gap: 0 13px;
+    margin-top: 10px;
+    padding: 13px 0;
+  }
+  .note2 .g {
+    display: grid;
+    place-items: center;
+    height: 21px;
+    color: var(--color-mute);
+  }
+  .note2 .say {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+  }
+  /* `--color-dim`, not `--color-mute`. Every one of the one-liners this
+     replaces was `text-mute`, which measures under 4.5:1 in both themes and
+     is spent on counts and placeholders. */
+  .note2 p {
+    min-width: 0;
+    font-size: var(--text-ui);
+    line-height: 1.45;
+    color: var(--color-dim);
+  }
+  .note2 .btn.quiet {
+    height: 28px;
+    padding-inline: 11px;
+    margin-left: -9px;
+  }
+  /* What the reader typed, character for character — `STYLE.md`'s rule. */
+  .note2 .q {
+    font-family: var(--font-mono);
+    font-size: 0.84375rem;
+    color: var(--color-text);
+  }
+
+  /* ── The two button shapes the design has, beside .btn ────────────── */
+  /* Destructive, and only ever one on a screen. */
+  .btn.harm {
+    background: var(--color-brick);
+    color: #fff;
+    font-weight: 500;
+  }
+  .btn.harm:hover {
+    filter: brightness(1.08);
+  }
+  /* **The quiet destructive.** The drawing has two weights and the build had
+     one: `.harm` is filled and belongs to the primary action of a dialog that
+     exists to destroy something, and `.danger` is brick text among ordinary
+     controls — "Forget this Firetower" beside "Sign out". Filling that one
+     made the loudest thing on the screen the one you almost never want. */
+  .btn.danger {
+    color: var(--color-brick);
+  }
+  .btn.danger:hover {
+    background: var(--color-brick-tint);
+  }
+  /* The full-width commit at the foot of a panel. */
+  .btn.ship {
+    width: 100%;
+    justify-content: center;
+    height: 36px;
+    margin-top: 15px;
+    background: var(--color-bone);
+    color: var(--color-panel);
+    font-weight: 500;
+  }
+  .btn.ship:hover {
+    opacity: 0.88;
+  }
+  .btn.ship:disabled {
+    background: var(--color-overlay);
+    color: var(--color-mute);
+    opacity: 1;
+    cursor: default;
+  }
+  /* A way out of the app, for what this screen does not do. */
+  .out {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    flex: none;
+    height: 36px;
+    padding: 0 14px;
+    border-radius: 99px;
+    background: var(--color-raise);
+    color: var(--color-text);
+    font-size: 0.90625rem;
+    transition: background var(--dur-native) var(--ease-swift);
+  }
+  .out:hover {
+    background: var(--color-overlay);
+    color: var(--color-bone);
+  }
+
+  /* ── A refusal, or a question that stops everything ──────────────
+     Centred, on the sheet, with its actions on the same ground as its words.
+     The build drew a bordered card with a tinted footer strip under the
+     buttons — two surfaces and a rule for a box with four lines in it. */
+  .dlg {
+    width: 27rem;
+    max-width: 100%;
+    padding: 22px 24px 18px;
+    border-radius: 18px;
+    background: var(--color-raise);
+    box-shadow: var(--shadow-float), 0 0 0 1px rgb(255 255 255 / 0.07);
+  }
+  [data-theme="light"] .dlg {
+    background: var(--color-panel);
+    box-shadow: var(--shadow-float), 0 0 0 1px rgb(22 22 23 / 0.07);
+  }
+  .dlg h2 {
+    font-size: 1.1875rem;
+    line-height: 1.3;
+    letter-spacing: -0.014em;
+    font-weight: var(--font-weight-mid);
+    color: var(--color-bone);
+  }
+  .dlg .say {
+    margin-top: 10px;
+    font-size: 0.96875rem;
+    line-height: 1.6;
+    color: var(--color-dim);
+  }
+  .dlg .say b {
+    font-weight: 500;
+    color: var(--color-text);
+  }
+  .dlg .say ul {
+    margin: 12px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .dlg .say li {
+    display: flex;
+    gap: 10px;
+  }
+  .dlg .say li::before {
+    content: "•";
+    color: var(--color-mute);
+  }
+  .dlgfoot {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 20px;
+  }
+
+  /* ── ⌘K, and its footer ──────────────────────────────────────────
+     The one fact about this list that is not obvious is that it spans every
+     connected Firetower, so the footer says it — beside the three keys, which
+     are the other thing a palette has to teach once. */
+  .klab {
+    padding: 10px 10px 4px;
+    font-size: 0.78125rem;
+    color: var(--color-mute);
+  }
+  .kfoot {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 9px 14px;
+    border-top: 1px solid var(--color-line);
+    font-size: 0.78125rem;
+    color: var(--color-mute);
+  }
+
+  /* ── Getting in ──────────────────────────────────────────────────
+     The first thing anybody sees. One question at a time, and never two at
+     once — and on the sheet, not on the bare desk: the window has a body and
+     this is it, so it takes the body's own corners. */
+  .first {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    place-items: center;
+    padding: 40px;
+    margin: 0 8px;
+    overflow-y: auto;
+    border-radius: var(--radius-sheet) var(--radius-sheet) 0 0;
+    background: var(--color-panel);
+  }
+  .first .card {
+    width: 420px;
+    max-width: 100%;
+  }
+  .first .mk {
+    display: grid;
+    place-items: center;
+    width: 46px;
+    height: 46px;
+    margin-bottom: 22px;
+    border-radius: 14px;
+    background: var(--color-bone);
+    color: var(--color-panel);
+  }
+  .first h1 {
+    font-size: 1.75rem;
+    line-height: 1.15;
+    letter-spacing: -0.024em;
+    font-weight: var(--font-weight-mid);
+    color: var(--color-bone);
+  }
+  .first p {
+    margin-top: 9px;
+    font-size: 1.03125rem;
+    line-height: 1.6;
+    color: var(--color-dim);
+  }
+  .first .in {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 48px;
+    margin-top: 22px;
+    padding: 0 16px;
+    border-radius: 14px;
+    background: var(--color-raise);
+    transition: box-shadow var(--dur-native) var(--ease-swift);
+  }
+  .first .in:focus-within {
+    box-shadow: inset 0 0 0 1.5px var(--color-bone);
+  }
+  .first .in input {
+    flex: 1;
+    min-width: 0;
+    font-size: 1.0625rem;
+    color: var(--color-bone);
+  }
+  .first .go {
+    width: 100%;
+    justify-content: center;
+    height: 44px;
+    margin-top: 12px;
+  }
+  .first .alt {
+    margin-top: 16px;
+    font-size: 0.90625rem;
+    color: var(--color-dim);
+    text-align: center;
+  }
+  /* What was found, before you say who you are. */
+  .first .found {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 22px;
+    padding: 14px 16px;
+    border-radius: 14px;
+    background: var(--color-raise);
+  }
+  .first .found .tx {
+    min-width: 0;
+    flex: 1;
+  }
+  .first .found .tx b {
+    display: block;
+    font-size: 0.96875rem;
+    font-weight: 500;
+    color: var(--color-bone);
+  }
+  .first .found .tx s {
+    display: block;
+    margin-top: 2px;
+    text-decoration: none;
+    font-size: 0.875rem;
+    color: var(--color-dim);
+  }
+  /* **A brick rule, not a brick box.** A refusal that fills a panel with
+     colour reads as the app having broken rather than the address being
+     wrong, and the address being wrong is the common case. */
+  .first .bad {
+    margin-top: 16px;
+    padding: 13px 15px;
+    border-radius: 12px;
+    background: var(--color-raise);
+    border-left: 2px solid var(--color-brick);
+    font-size: 0.90625rem;
+    line-height: 1.6;
+    color: var(--color-text);
+  }
+  .first .bad b {
+    display: block;
+    margin-bottom: 2px;
+    font-weight: 500;
+    color: var(--color-bone);
+  }
+  /* How far in you are, as four rules rather than "step 2 of 4". */
+  .first .steps {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 24px;
+  }
+  .first .steps i {
+    flex: 1;
+    height: 3px;
+    border-radius: 2px;
+    background: var(--color-overlay);
+  }
+  .first .steps i[data-on="true"] {
+    background: var(--color-bone);
+  }
+
+  /* ── The workspace's own chrome ──────────────────────────────────
+     A title row that says what this workspace is and who is in it, then the
+     editor strip under it. Two rows, not one: the build had the name, the
+     repository, the agents and the toolbar all in a 44px band, so the thing
+     the screen is *about* was the same size as the controls around it. */
+  .whead {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    flex: none;
+    height: 52px;
+    padding: 0 18px 0 24px;
+  }
+  .whead .nm {
+    min-width: 0;
+    font-size: 1.0625rem;
+    font-weight: var(--font-weight-mid);
+    letter-spacing: -0.008em;
+    color: var(--color-bone);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .whead .who {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex: none;
+    font-size: 0.875rem;
+    color: var(--color-dim);
+  }
+  .whead .right {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex: none;
+    margin-left: auto;
+  }
+
+  /* The editor strip. Marked along the **top** edge, which is where an editor
+     marks it and the one place a marker cannot be confused for the hairline
+     under the row. */
+  .tabs {
+    display: flex;
+    align-items: stretch;
+    gap: 1px;
+    flex: none;
+    height: 40px;
+    padding: 0 8px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .tabs::-webkit-scrollbar {
+    display: none;
+  }
+  .tab {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex: none;
+    height: 100%;
+    max-width: 190px;
+    padding: 0 12px;
+    font-size: var(--text-ui);
+    color: var(--color-dim);
+    transition:
+      background var(--dur-native) var(--ease-swift),
+      color var(--dur-native) var(--ease-swift);
+  }
+  .tab:hover {
+    background: var(--color-raise);
+    color: var(--color-text);
+  }
+  .tab[aria-selected="true"] {
+    background: var(--color-panel);
+    color: var(--color-bone);
+  }
+  .tab[aria-selected="true"]::before {
+    content: "";
+    position: absolute;
+    left: 8px;
+    right: 8px;
+    top: 0;
+    height: 2px;
+    border-radius: 0 0 2px 2px;
+    background: var(--color-bone);
+  }
+  .tab[data-preview="true"] .nm {
+    font-style: italic;
+  }
+  .tab .nm {
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .tab .x {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 18px;
+    height: 18px;
+    border-radius: 5px;
+    color: var(--color-mute);
+    opacity: 0;
+    transition: opacity var(--dur-native) var(--ease-swift);
+  }
+  .tab:hover .x,
+  .tab[aria-selected="true"] .x {
+    opacity: 1;
+  }
+  .tab .x:hover {
+    background: var(--color-overlay);
+    color: var(--color-bone);
+  }
+  .tab.pinned {
+    padding-right: 14px;
+  }
+
+  /* ── The right rail ──────────────────────────────────────────────
+     Plain text tabs with a 2px underline on the current one. They were boxed
+     chips with an icon each, which is four buttons competing with the panel
+     they are the index of. */
+  .itabs {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex: none;
+    height: 52px;
+    padding: 0 18px;
+  }
+  .itab {
+    position: relative;
+    padding: 4px 0;
+    font-size: var(--text-ui);
+    color: var(--color-dim);
+    transition: color var(--dur-native) var(--ease-swift);
+  }
+  .itab:hover {
+    color: var(--color-text);
+  }
+  .itab[aria-selected="true"] {
+    color: var(--color-bone);
+    font-weight: var(--font-weight-mid);
+  }
+  .itab .ul {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -3px;
+    height: 2px;
+    border-radius: 2px;
+    background: var(--color-bone);
+  }
+  .itabs .right {
+    margin-left: auto;
+    display: flex;
+    gap: 2px;
+  }
+  .iscroll {
+    min-height: 0;
+    flex: 1;
+    overflow-y: auto;
+    padding: 0 18px 22px;
+  }
+  .isec {
+    margin-top: 26px;
+  }
+  .isec:first-child {
+    margin-top: 4px;
+  }
+  .isec h3 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.875rem;
+    letter-spacing: 0.004em;
+    color: var(--color-dim);
+  }
+  .isec h3 .n {
+    margin-left: auto;
+    font-size: 0.8125rem;
+    color: var(--color-mute);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* How much of the window is gone, in the composer's bar. */
+  .meter {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    flex: none;
+    height: 30px;
+    padding: 0 4px 0 8px;
+  }
+  .meter .bar {
+    width: 46px;
+    height: 4px;
+    border-radius: 3px;
+    background: var(--color-overlay);
+    overflow: hidden;
+  }
+  .meter .bar i {
+    display: block;
+    height: 100%;
+    border-radius: 3px;
+    background: var(--color-dim);
+  }
+  .meter .bar[data-near="true"] i {
+    background: var(--color-bone);
+  }
+  .meter span {
+    font-size: 0.8125rem;
+    color: var(--color-mute);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ── The team rail, in the workspace's Overview ──────────────────
+     The manager as a card, sub-workspaces indented under a hairline, and each
+     row saying who, what it is doing in a few words, its state and how long.
+
+     **Three marks and no words**: an ember dot for *asked you a question*,
+     typing dots for *working*, a tick for *handed back*. There was a
+     four-colour stacked bar and a per-agent percentage here; it is out. The
+     numbers behind it are real — `POST /api/v1/sessions/token-usage` answers
+     them — but four hues in one panel is four more than a screen is allowed,
+     and the rail got noticeably louder for a figure nobody came for. */
+  .tm {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    width: 100%;
+    min-height: var(--row);
+    padding: 5px 9px;
+    border-radius: 10px;
+    text-align: left;
+    transition: background var(--dur-native) var(--ease-swift);
+  }
+  .tm:hover {
+    background: var(--color-raise);
+  }
+  .tm[data-here="true"] {
+    background: var(--color-raise);
+  }
+  [data-theme="light"] .tm:hover,
+  [data-theme="light"] .tm[data-here="true"] {
+    background: var(--color-panel);
+  }
+  [data-theme="light"] .tm[data-here="true"] {
+    box-shadow: var(--shadow-raise);
+  }
+  .tm .ag {
+    display: grid;
+    place-items: center;
+    flex: none;
+    color: var(--color-dim);
+  }
+  /* **The status leads the row.** The slot is held whether or not a mark is
+     in it — the active row has none — so the names line up down the rail. */
+  .tm .lead {
+    width: 16px;
+    flex: none;
+    display: grid;
+    place-items: center;
+  }
+  /* The agent's mark moves here, beside the age. */
+  .tm .rt .ag {
+    display: grid;
+    place-items: center;
+    color: var(--color-dim);
+    flex: none;
+  }
+  /* A wrapping row rather than the drawing's `b{display:inline}`: inline
+     drops `text-overflow`, and a workspace can be called anything. The name
+     and the `here` badge share line one, the second line is forced onto its
+     own by `flex-basis`, and the name still truncates. Same picture, and a
+     long name still ends in an ellipsis instead of pushing the badge out. */
+  .tm .tx {
+    min-width: 0;
+    flex: 1;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    column-gap: 7px;
+  }
+  .tm .tx b {
+    flex: 0 1 auto;
+    min-width: 0;
+    font-size: 0.90625rem;
+    font-weight: 500;
+    letter-spacing: -0.004em;
+    color: var(--color-bone);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .tm .tx .here-badge {
+    flex: none;
+  }
+  /* One line: there is no second row to stack against, so the name centres
+     on the marks beside it. */
+  .tm .tx.one {
+    flex-wrap: nowrap;
+    align-self: center;
+  }
+  .tm .tx s {
+    flex-basis: 100%;
+    text-decoration: none;
+    font-size: 0.84375rem;
+    color: var(--color-dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .tm .rt {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    flex: none;
+  }
+  .tm .age {
+    font-size: 0.8125rem;
+    color: var(--color-mute);
+    font-variant-numeric: tabular-nums;
+  }
+  .kids {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    margin-top: 1px;
+    margin-left: 17px;
+    padding-left: 13px;
+    border-left: 1px solid var(--color-line);
+  }
+  .here-badge {
+    flex: none;
+    padding: 1px 7px;
+    border-radius: 99px;
+    background: var(--color-overlay);
+    font-size: 0.78125rem;
+    color: var(--color-dim);
+  }
+
+  /* What the work produced. */
+  .made {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-top: 9px;
+  }
+  .made a,
+  .made button {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: var(--row);
+    padding: 6px 9px;
+    border-radius: 10px;
+    width: 100%;
+    text-align: left;
+    transition: background var(--dur-native) var(--ease-swift);
+  }
+  .made a:hover,
+  .made button:hover {
+    background: var(--color-raise);
+  }
+  [data-theme="light"] .made a:hover,
+  [data-theme="light"] .made button:hover {
+    background: var(--color-panel);
+  }
+  .made .tx {
+    min-width: 0;
+    flex: 1;
+    font-size: 0.90625rem;
+    color: var(--color-text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .made a:hover .tx,
+  .made button:hover .tx {
+    color: var(--color-bone);
+  }
+  .made .g {
+    display: grid;
+    place-items: center;
+    flex: none;
+    color: var(--color-mute);
+  }
+
+  /* ── A menu, anchored to what opened it ──────────────────────────
+     16px radius, 7px of padding, and rows that are a name over a sub-line —
+     not a list of links. The sheet is what it sits on, not a border. */
+  /* ── The surface a floating object takes ─────────────────────────
+     **One class, because writing it out per component is what caused this.**
+     `--color-overlay` is the *recessed* fill — a pressed chip, an inset
+     track, a sunk well. Painting a floating card with it was reported by the
+     user **three times**, and each pass fixed the one file it was pointed at:
+     the scrim pass corrected thirteen backdrops and left every card, and the
+     card fix landed on `Annotate` alone.
+
+     **Why it survived three passes:** the surface ladder runs ground → panel
+     → raise → overlay, which in dark is monotonically *lighter*
+     (#0b0b0c → #111113 → #17171a → #1e1e22), so an overlay card in dark
+     reads as a plausible step above the page. In light the ladder is not
+     monotonic — #f2f2f3 → #ffffff → #f6f6f9 → #e8e8ec — so the same card is
+     a grey slab on a white page. It looks fine in dark and wrong in light,
+     and it was being reviewed in dark.
+
+     The values are `.pop`'s, which the drawing states as `--sheet` in light
+     and `--raised` in dark. `.pop`, `.sheet2` and `.dlg` say the same thing
+     for their own fixed shapes; this is for everything that is a card of its
+     own size. `design-rules.mjs` asserts the rest: a recessed fill may not
+     cast a shadow. */
+  .lift {
+    background: var(--color-raise);
+  }
+  [data-theme="light"] .lift {
+    background: var(--color-panel);
+  }
+
+  .pop {
+    padding: 7px;
+    min-width: 244px;
+    border-radius: 16px;
+    background: var(--color-raise);
+    box-shadow: var(--shadow-float), 0 0 0 1px rgb(255 255 255 / 0.06);
+  }
+  [data-theme="light"] .pop {
+    background: var(--color-panel);
+    box-shadow: var(--shadow-float), 0 0 0 1px rgb(22 22 23 / 0.055);
+  }
+  .mi {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    width: 100%;
+    min-height: 36px;
+    padding: 6px 10px;
+    border-radius: 10px;
+    text-align: left;
+    font-size: 0.9375rem;
+    color: var(--color-text);
+    transition: background var(--dur-native) var(--ease-swift);
+  }
+  .mi:hover {
+    background: var(--color-overlay);
+  }
+  [data-theme="light"] .mi:hover {
+    background: var(--color-raise);
+  }
+  .mi .ic {
+    display: grid;
+    place-items: center;
+    flex: none;
+    color: var(--color-mute);
+  }
+  .mi .tx {
+    flex: 1;
+    min-width: 0;
+  }
+  .mi .tx b {
+    display: block;
+    font-weight: 500;
+    color: var(--color-bone);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .mi .tx s {
+    display: block;
+    text-decoration: none;
+    font-size: 0.84375rem;
+    color: var(--color-mute);
+  }
+  .mi[data-tone="danger"],
+  .mi[data-tone="danger"] .ic {
+    color: var(--color-brick);
+  }
+  .mline {
+    height: 1px;
+    margin: 6px 10px;
+    background: var(--color-line);
+  }
+  .mhead {
+    padding: 9px 10px 5px;
+  }
+  .mhead b {
+    display: block;
+    font-size: 0.9375rem;
+    font-weight: 500;
+    color: var(--color-bone);
+  }
+  .mhead s {
+    display: block;
+    text-decoration: none;
+    font-size: 0.84375rem;
+    color: var(--color-mute);
+  }
+
+  /* ── An action with no room for a word ───────────────────────────── */
+  .gbtn {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    color: var(--color-mute);
+    transition:
+      background var(--dur-native) var(--ease-swift),
+      color var(--dur-native) var(--ease-swift);
+  }
+  .gbtn:hover {
+    background: rgb(255 255 255 / 0.06);
+    color: var(--color-text);
+  }
+  .gbtn[disabled] {
+    opacity: 0.4;
+  }
+  [data-theme="light"] .gbtn:hover {
+    background: rgb(22 22 23 / 0.05);
+  }
+
+  /* ── Two or three exclusive choices, inline ──────────────────────── */
+  .seg {
+    display: inline-flex;
+    gap: 2px;
+    padding: 3px;
+    border-radius: 11px;
+    background: var(--color-overlay);
+  }
+  .seg button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 28px;
+    padding: 0 12px;
+    border-radius: 8px;
+    font-size: var(--text-ui);
+    color: var(--color-dim);
+    white-space: nowrap;
+    transition:
+      background var(--dur-native) var(--ease-swift),
+      color var(--dur-native) var(--ease-swift);
+  }
+  .seg button:hover {
+    color: var(--color-text);
+  }
+  .seg button[aria-pressed="true"] {
+    background: var(--color-raise);
+    color: var(--color-bone);
+  }
+  [data-theme="light"] .seg button[aria-pressed="true"] {
+    background: var(--color-panel);
+    box-shadow: var(--shadow-raise);
+  }
+
+  /* ── A labelled input, with its hint and its error ───────────────── */
+  .form {
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+    max-width: 640px;
+    margin-top: 28px;
+  }
+  .fld {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+  }
+  .fld > label {
+    font-size: 0.9375rem;
+    font-weight: 500;
+    letter-spacing: -0.005em;
+    color: var(--color-bone);
+  }
+  .fld .hint {
+    max-width: 62ch;
+    font-size: 0.875rem;
+    line-height: 1.55;
+    color: var(--color-dim);
+  }
+  .fld .box {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: var(--row);
+    padding: 9px 13px;
+    border-radius: 12px;
+    background: var(--color-raise);
+    transition: box-shadow var(--dur-native) var(--ease-swift);
+  }
+  .fld .box:focus-within {
+    box-shadow: inset 0 0 0 1.5px var(--color-bone);
+  }
+  .fld .box input,
+  .fld .box textarea {
+    flex: 1;
+    min-width: 0;
+    font-size: 0.96875rem;
+    line-height: 1.6;
+    color: var(--color-bone);
+  }
+  .fld .box textarea {
+    min-height: 96px;
+  }
+  .fld .box.mono textarea,
+  .fld .box.mono input {
+    font-family: var(--font-mono);
+    font-size: 0.875rem;
+    line-height: 1.7;
+  }
+  .fld .box[data-ro="true"] {
+    background: transparent;
+    padding-left: 0;
+    color: var(--color-text);
+  }
+  .fld .bad {
+    font-size: 0.875rem;
+    color: var(--color-brick);
+  }
+  .formfoot {
+    position: sticky;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    margin-top: 8px;
+    padding: 16px 0 0;
+    background: linear-gradient(to top, var(--color-panel) 70%, transparent);
+  }
+  .formfoot .msg {
+    flex: 1;
+    min-width: 0;
+    font-size: 0.875rem;
+    color: var(--color-dim);
+  }
+
+  /* A choice as a row of pills, not a dropdown. Three placements with a word
+     of explanation each is a thing you read once and then point at; a select
+     hides two of the three behind the one that happens to be set. */
+  .pickrow {
+    display: flex;
+    gap: 7px;
+    flex-wrap: wrap;
+  }
+  .pk {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex: none;
+    height: 38px;
+    padding: 0 13px;
+    border-radius: 11px;
+    background: var(--color-raise);
+    font-size: 0.9375rem;
+    color: var(--color-text);
+    transition:
+      background var(--dur-native) var(--ease-swift),
+      color var(--dur-native) var(--ease-swift);
+  }
+  .pk:hover {
+    background: var(--color-overlay);
+    color: var(--color-bone);
+  }
+  .pk[aria-pressed="true"] {
+    background: var(--color-bone);
+    color: var(--color-panel);
+  }
+  .pk .ic {
+    display: grid;
+    place-items: center;
+    color: var(--color-dim);
+  }
+  .pk[aria-pressed="true"] .ic {
+    color: var(--color-panel);
+  }
+  .pk .sub {
+    font-size: 0.84375rem;
+    color: var(--color-mute);
+  }
+  .pk[aria-pressed="true"] .sub {
+    color: color-mix(in srgb, var(--color-panel) 70%, transparent);
+  }
+
+  /* Read-only: say what the screen is instead of greying what it is not. */
+  .ro-note {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 22px;
+    padding: 14px 18px;
+    border-radius: 14px;
+    background: var(--color-raise);
+  }
+  .ro-note .g {
+    display: grid;
+    place-items: center;
+    flex: none;
+    color: var(--color-dim);
+  }
+  .ro-note p {
+    flex: 1;
+    min-width: 0;
+    font-size: 0.90625rem;
+    line-height: 1.55;
+    color: var(--color-text);
+  }
+  .ro-note p b {
+    font-weight: 500;
+    color: var(--color-bone);
+  }
+
+  /* ── A centred modal sheet, and the scrim that holds the screen ──── */
+  .veil {
+    position: absolute;
+    inset: 0;
+    z-index: 80;
+    display: grid;
+    place-items: center;
+    padding: 40px;
+    background: var(--color-scrim);
+    animation: veil 160ms ease-out;
+  }
+  .sheet2 {
+    display: flex;
+    flex-direction: column;
+    width: 470px;
+    max-height: 100%;
+    border-radius: 20px;
+    background: var(--color-raise);
+    box-shadow: var(--shadow-float), 0 0 0 1px rgb(255 255 255 / 0.08);
+    overflow: hidden;
+    animation: sheet2 200ms var(--ease-swift);
+  }
+  [data-theme="light"] .sheet2 {
+    background: var(--color-panel);
+    box-shadow: var(--shadow-float), 0 0 0 1px rgb(22 22 23 / 0.07);
+  }
+  .sh-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: none;
+    padding: 16px 16px 10px;
+  }
+  .sh-head h2 {
+    flex: 1;
+    min-width: 0;
+    font-size: 1.0625rem;
+    font-weight: var(--font-weight-mid);
+    letter-spacing: -0.01em;
+    color: var(--color-bone);
+  }
+  .sh-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 0 10px 6px;
+  }
+  .sh-note {
+    padding: 0 16px 10px;
+    font-size: 0.875rem;
+    line-height: 1.55;
+    color: var(--color-dim);
+  }
+  .sh-lab {
+    padding: 12px 6px 4px;
+    font-size: 0.84375rem;
+    color: var(--color-mute);
+  }
+  .sh-row {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    width: 100%;
+    min-height: 46px;
+    padding: 7px 10px;
+    border-radius: 11px;
+    text-align: left;
+    transition: background var(--dur-native) var(--ease-swift);
+  }
+  .sh-row:hover {
+    background: var(--color-overlay);
+  }
+  [data-theme="light"] .sh-row:hover {
+    background: var(--color-raise);
+  }
+  .sh-row .tx {
+    min-width: 0;
+    flex: 1;
+  }
+  .sh-row .tx b {
+    display: block;
+    font-size: 0.9375rem;
+    font-weight: 500;
+    color: var(--color-bone);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .sh-row .tx s {
+    display: block;
+    text-decoration: none;
+    font-size: 0.84375rem;
+    color: var(--color-dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .sh-row.inner {
+    padding-left: 44px;
+    min-height: 36px;
+  }
+  .sh-foot {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    flex: none;
+    padding: 12px 16px 14px;
+    border-top: 1px solid var(--color-line);
+  }
+  .sh-foot .where {
+    flex: 1;
+    min-width: 0;
+    font-size: 0.875rem;
+    color: var(--color-dim);
+  }
+  .sh-field {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 6px;
+    padding: 11px 13px;
+    border-radius: 12px;
+    background: var(--color-raise);
+  }
+  .sh-field input {
+    flex: 1;
+    min-width: 0;
+    font-size: 0.96875rem;
+    color: var(--color-bone);
+  }
+  @keyframes veil {
+    from {
+      opacity: 0;
+    }
+  }
+  @keyframes sheet2 {
+    from {
+      opacity: 0;
+      transform: translateY(10px) scale(0.985);
+    }
+  }
+}
+
+/* A sheet that arrives without moving, for anybody who asked for that. */
+@media (prefers-reduced-motion: reduce) {
+  .veil,
+  .sheet2 {
+    animation: none;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   THE HOME — a greeting, a composer, and two sections under it
+   ═══════════════════════════════════════════════════════════════════
+
+   Drawn in `docs/prototypes/redesign/home-alternative.html`, which
+   supersedes the Dashboard in `desktop-redesign.html` for this screen only.
+
+   **The headline is always a greeting, never a status.** The same sentence
+   whether four agents are waiting or none are. What is running goes into
+   *Recent agents* beneath the composer, as chips — two rows of them, which
+   is also where the ember budget is enforced: the rows are clipped, and
+   what is clipped away is not on screen to count. Five dots in a row is the
+   failure the whole redesign's first round was rejected for.
+   ═══════════════════════════════════════════════════════════════════ */
+@layer components {
+  .home {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+  }
+  .hcol {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    max-width: 748px;
+    min-height: 100%;
+    margin: 0 auto;
+    padding: 18px 34px 12px;
+  }
+  /* The air above the greeting. A taller window buys white above the
+     sentence rather than a taller gap between the sections below it. */
+  .air {
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    min-height: var(--air, 192px);
+    padding-bottom: 28px;
+  }
+  .air h1 {
+    font-size: 2.125rem;
+    line-height: 1.14;
+    letter-spacing: -0.026em;
+    font-weight: var(--font-weight-mid);
+    color: var(--color-bone);
+  }
+  /* The line under the headline, which only a task's arrival draws. It says
+     the one thing the rest of the page cannot: *edit anything below, then
+     send it* — or that there is no repository to check out. The greeting
+     never has one, because a greeting that needed explaining would be the
+     wrong greeting. */
+  .hsub {
+    margin-top: 7px;
+    font-size: 0.90625rem;
+    color: var(--color-dim);
+  }
+
+  /* Nothing waiting and nothing published: first run. It has to look
+     deliberate rather than broken, so the column centres and the air
+     collapses — one sentence and one composer, and no empty headings. */
+  .hcol[data-bare="true"] {
+    justify-content: center;
+    padding-bottom: 70px;
+  }
+  .hcol[data-bare="true"] .air {
+    min-height: 0;
+    padding-bottom: 26px;
+  }
+
+  /* The composer, in the middle of the page rather than docked to the foot. */
+  .mid {
+    position: relative;
+    z-index: 1;
+    flex: none;
+  }
+  .mid .shelf {
+    margin: 0 14px -14px;
+  }
+  .mid .composer {
+    box-shadow:
+      0 14px 36px -16px rgb(22 22 23 / 0.22),
+      0 2px 6px rgb(22 22 23 / 0.05);
+  }
+  [data-theme="dark"] .mid .composer,
+  :root:not([data-theme]) .mid .composer {
+    box-shadow: var(--shadow-float);
+  }
+  /* **Restated 18px, it did not set it** — which is exactly what the drawing
+     says of its own `.mid .composer .in`. The size belongs to the base rule
+     and both composers were always the same; only the height differs here. */
+  .mid .composer textarea {
+    min-height: 64px;
+  }
+  .mid .composer .bar {
+    margin-top: 14px;
+  }
+
+  /* ── A section under the composer ────────────────────────────────
+     The heading is quiet on purpose: it labels a shelf, it is not a
+     heading over a page. */
+  .sect {
+    flex: none;
+    margin-top: 20px;
+  }
+  .sect:first-of-type {
+    margin-top: 22px;
+  }
+  .sect .hd {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+  }
+  .sect h2 {
+    font-size: 0.9375rem;
+    font-weight: 400;
+    letter-spacing: 0.004em;
+    color: var(--color-dim);
+  }
+  .sect .all {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    flex: none;
+    margin-left: auto;
+    font-size: 0.90625rem;
+    color: var(--color-dim);
+    transition: color var(--dur-native) var(--ease-swift);
+  }
+  .sect .all:hover {
+    color: var(--color-bone);
+  }
+  .sect .none {
+    max-width: 56ch;
+    margin-top: 10px;
+    font-size: 0.90625rem;
+    line-height: 1.6;
+    color: var(--color-dim);
+  }
+
+  /* The chips of *Recent agents*, one section ordered broken → blocked →
+     done → working. No rule where the order turns: the marks are shapes and
+     they carry it. */
+  .chips {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    flex: none;
+    gap: 8px;
+    margin-top: 12px;
+  }
+  /* **Clipped to a row count, and the cut is between rows.** A wrapped flex
+     row moves a whole item down rather than slicing one, so clipping hides
+     chips entirely and never cuts through a name. The height is read off the
+     chips' own rows after layout — a fixed count is wrong the moment a name
+     is long, and the column is capped at 748px so how many fit is a constant
+     of the design rather than of the window. */
+  .chips[data-rows] {
+    overflow: hidden;
+  }
+  .sect .all[hidden] {
+    display: none;
+  }
+  .sw .typing {
+    transform: scale(0.86);
+  }
+  .chips .sw {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    flex: none;
+    height: 34px;
+    max-width: 306px;
+    padding: 0 14px;
+    border-radius: 99px;
+    background: var(--color-raise);
+    font-size: 0.90625rem;
+    color: var(--color-text);
+    transition:
+      background var(--dur-native) var(--ease-swift),
+      color var(--dur-native) var(--ease-swift);
+  }
+  .chips .sw:hover {
+    background: var(--color-overlay);
+    color: var(--color-bone);
+  }
+  .chips .sw b {
+    min-width: 0;
+    font-weight: 400;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .chips .sw .age {
+    flex: none;
+    color: var(--color-mute);
+    font-variant-numeric: tabular-nums;
+  }
+  .chips .sw[data-over="true"] {
+    color: var(--color-dim);
+  }
+
+  /* Three posters across. */
+  .three {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 22px;
+    margin-top: 14px;
+  }
+  .hcol .elsewhere {
+    align-self: flex-start;
+    margin-top: 10px;
+  }
+
+  /* ── Updates: reading is not upgrading ─────────────────────────
+     The whole screen was built before the drawing had one, so none of this
+     vocabulary existed here and the screen was a stack of bordered cards
+     against a page of rows on raised ground. Ported whole rather than
+     approximated, because the shape is the argument: what you *read* is a
+     sentence and two rows, and what you *operate* is a list of machines with
+     a checkbox each — and a bordered card around the first makes it look
+     like the second. */
+  .upd-hero {
+    margin-top: 6px;
+  }
+  .upd-hero h1 {
+    font-size: 2.125rem; /* 34px */
+    line-height: 1.12;
+    letter-spacing: -0.026em;
+    font-weight: var(--font-weight-mid);
+    color: var(--color-bone);
+  }
+  .upd-hero p {
+    margin-top: 9px;
+    font-size: var(--text-title);
+    line-height: 1.55;
+    color: var(--color-dim);
+    max-width: 56ch;
+  }
+
+  .upd-row {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 16px 18px;
+    border-radius: 14px;
+    background: var(--color-raise);
+    margin-top: 12px;
+  }
+  .upd-row .tx {
+    min-width: 0;
+    flex: 1;
+  }
+  .upd-row .tx b {
+    display: block;
+    font-size: var(--text-read);
+    font-weight: 500;
+    color: var(--color-bone);
+    letter-spacing: -0.006em;
+  }
+  /* `s` for the second line, as the drawing has it — struck through is not
+     meant and is turned off here rather than at every use. */
+  .upd-row .tx s {
+    display: block;
+    text-decoration: none;
+    margin-top: 2px;
+    font-size: var(--text-ui);
+    color: var(--color-dim);
+  }
+  .upd-row .ver {
+    font-family: var(--font-mono);
+    font-size: var(--text-body);
+    color: var(--color-bone);
+    flex: none;
+    background: var(--color-panel);
+    padding: 4px 10px;
+    border-radius: 8px;
+  }
+  [data-theme="dark"] .upd-row .ver {
+    background: var(--color-overlay);
+  }
+  .upd-row .acts {
+    display: flex;
+    gap: 7px;
+    flex: none;
+  }
+
+  .upd-sec {
+    margin-top: 36px;
+  }
+  .upd-sec h2 {
+    font-size: 1.1875rem; /* 19px */
+    line-height: 1.3;
+    letter-spacing: -0.014em;
+    font-weight: var(--font-weight-mid);
+    color: var(--color-bone);
+  }
+  .upd-sec .note {
+    margin-top: 3px;
+    font-size: var(--text-ui);
+    line-height: 1.55;
+    color: var(--color-dim);
+    max-width: 70ch;
+  }
+
+  .mach {
+    display: flex;
+    align-items: center;
+    gap: 13px;
+    padding: 13px 16px;
+    border-radius: 13px;
+    margin-top: 2px;
+    width: 100%;
+    text-align: left;
+    transition: background var(--dur-native) var(--ease-swift);
+  }
+  .mach:hover {
+    background: var(--color-raise);
+  }
+  .mach .g {
+    color: var(--color-dim);
+    display: grid;
+    place-items: center;
+    flex: none;
+  }
+  .mach .tx {
+    min-width: 0;
+    flex: 1;
+  }
+  .mach .tx b {
+    display: block;
+    font-size: 0.96875rem; /* 15.5px */
+    font-weight: 500;
+    color: var(--color-bone);
+  }
+  .mach .tx s {
+    display: block;
+    text-decoration: none;
+    margin-top: 1px;
+    font-size: var(--text-body);
+    color: var(--color-dim);
+  }
+  .mach .ver {
+    font-family: var(--font-mono);
+    font-size: 0.84375rem; /* 13.5px */
+    color: var(--color-dim);
+    flex: none;
+  }
+  .mach .box {
+    width: 17px;
+    height: 17px;
+    border-radius: 6px;
+    flex: none;
+    display: grid;
+    place-items: center;
+    border: 1.5px solid var(--color-line);
+    color: var(--color-panel);
+  }
+  .mach .box[data-on="true"] {
+    background: var(--color-bone);
+    border-color: var(--color-bone);
+  }
+  /* A machine somebody else administers: shown, because not being able to
+     move it is not a reason to hide that it is behind — but visibly not
+     yours to tick. */
+  .mach .box[data-off="true"] {
+    opacity: 0.35;
+  }
+
+  /* A run, as it goes — and the plan, before it does. */
+  .run {
+    margin-top: 14px;
+    border-radius: 16px;
+    background: var(--color-raise);
+    padding: 18px 20px;
+  }
+  .run .top {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+  }
+  .run .top b {
+    font-size: var(--text-read);
+    font-weight: 500;
+    color: var(--color-bone);
+    flex: 1;
+  }
+  .run .why {
+    margin-top: 6px;
+    font-size: var(--text-ui);
+    line-height: 1.6;
+    color: var(--color-dim);
+    max-width: 68ch;
+  }
+  .run .foot {
+    display: flex;
+    gap: 7px;
+    margin-top: 16px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .steps {
+    margin-top: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .stepr {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    font-size: var(--text-ui);
+    color: var(--color-dim);
+    padding: 4px 0;
+  }
+  .stepr .g {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 17px;
+  }
+  .stepr[data-s="now"] {
+    color: var(--color-bone);
+  }
+  .stepr .t {
+    flex: 1;
+    min-width: 0;
+  }
+  .stepr .el {
+    font-size: 0.84375rem; /* 13.5px */
+    color: var(--color-mute);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .plan-files {
+    margin-top: 12px;
+    border-radius: 12px;
+    background: var(--color-panel);
+    padding: 6px;
+  }
+  [data-theme="dark"] .plan-files {
+    background: var(--color-overlay);
+  }
+  .diffrow {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 7px 11px;
+    border-radius: 9px;
+    min-height: 36px;
+    transition: background var(--dur-native) var(--ease-swift);
+  }
+  .diffrow:hover {
+    background: var(--color-panel);
+  }
+  [data-theme="dark"] .diffrow:hover {
+    background: var(--color-raise);
+  }
+  .diffrow .k {
+    width: 52px;
+    flex: none;
+    font-size: 0.8125rem; /* 13px */
+    color: var(--color-dim);
+  }
+  .diffrow .p {
+    flex: 1;
+    min-width: 0;
+    font-family: var(--font-mono);
+    font-size: 0.84375rem; /* 13.5px */
+    letter-spacing: -0.01em;
+    color: var(--color-text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .diffrow .n {
+    flex: none;
+    font-size: 0.8125rem; /* 13px */
+    color: var(--color-mute);
+    font-variant-numeric: tabular-nums;
+  }
+  /* The one amber line among twenty-three neutral ones — the only colour on
+     this screen, and it is the only thing on it you have to decide. */
+  .diffrow .n.inway {
+    color: var(--color-amber-soft);
+  }
+
+  /* ── A picker says what the choice costs ───────────────────────
+     The drawing gives every picker a footer, and it is the argument for a
+     picker over a plain dropdown: a list of repositories tells you their
+     names, and this tells you that each one you tick is another copy of a
+     checkout. The machine picker already had its version — the readiness
+     readout — and the other two had nothing. */
+  .pkfoot {
+    margin: 6px 2px 2px;
+    padding: 11px 12px;
+    border-radius: 11px;
+    background: var(--color-raise);
+    font-size: 0.84375rem; /* 13.5px */
+    line-height: 1.55;
+    color: var(--color-dim);
+  }
+  .pkfoot b {
+    color: var(--color-bone);
+    font-weight: 500;
+  }
+
+  /* A note against an option — what it may do, on the recessed surface. It
+     was green on a green tint, which is a verdict colour: "manager" is not a
+     thing having gone well. */
+  .chip2 {
+    flex: none;
+    font-size: 0.78125rem; /* 12.5px */
+    color: var(--color-dim);
+    background: var(--color-overlay);
+    padding: 1px 8px;
+    border-radius: 99px;
+  }
+  [data-theme="light"] .chip2 {
+    background: var(--color-raise);
+  }
+
+  /* ── The account, which is four shapes the build never had ─────
+     A monogram beside the name, a plain raised card instead of a bordered
+     one, the amber band that says "you can carry on, but not for long", and
+     the small grey aside beside a control. */
+  .face2 {
+    width: 52px;
+    height: 52px;
+    flex: none;
+    border-radius: 99px;
+    background: var(--color-overlay);
+    display: grid;
+    place-items: center;
+    font-size: 1.125rem; /* 18px */
+    font-weight: var(--font-weight-mid);
+    color: var(--color-dim);
+    letter-spacing: 0.02em;
+  }
+  [data-theme="light"] .face2 {
+    background: var(--color-raise);
+  }
+  /* **No border.** A card here is a change of ground, not a frame — the
+     bordered version drew a box around two buttons and made them look like
+     a form. */
+  .card1 {
+    margin-top: 11px;
+    background: var(--color-raise);
+    border-radius: 13px;
+    padding: 15px 16px;
+  }
+  .warnbar {
+    margin-top: 20px;
+    display: flex;
+    gap: 11px;
+    align-items: flex-start;
+    padding: 13px 15px;
+    border-radius: 13px;
+    background: var(--color-amber-tint);
+  }
+  .warnbar .g {
+    flex: none;
+    color: var(--color-amber);
+    display: grid;
+    place-items: center;
+    margin-top: 1px;
+  }
+  .warnbar p {
+    font-size: var(--text-body);
+    line-height: 1.55;
+    color: var(--color-text);
+  }
+  .warnbar b {
+    font-weight: var(--font-weight-mid);
+    color: var(--color-bone);
+  }
+  .aside1 {
+    font-size: 0.84375rem; /* 13.5px */
+    line-height: 1.5;
+    color: var(--color-dim);
+  }
+
+  /* ── The workspaces panel — proposition C ──────────────────────
+     Flat and status-ordered rather than status-grouped: one hairline and a
+     word where the band turns, not a section. A grouped list reorders under
+     the pointer — the row you reached for jumps elsewhere the moment its
+     state changes — which is why the grouped proposition was not shipped.
+
+     **The switch gets a row of its own.** At 252px the header already
+     carries a name, a search and a collapse, and "Repository" is the longest
+     realistic label; a fourth thing on that line is what overlapped the
+     title. Measure at that label, not at "Status". */
+  .pswitch {
+    padding: 2px 8px 8px;
+    flex: none;
+  }
+  .seg2 {
+    display: inline-flex;
+    gap: 2px;
+    padding: 2px;
+    border-radius: 99px;
+    background: var(--color-raise);
+  }
+  .seg2 button {
+    padding: 4px 11px;
+    border-radius: 99px;
+    font-size: 0.8125rem; /* 13px */
+    color: var(--color-dim);
+    white-space: nowrap;
+    transition:
+      background var(--dur-native) var(--ease-swift),
+      color var(--dur-native) var(--ease-swift);
+  }
+  .seg2 button:hover {
+    color: var(--color-text);
+  }
+  .seg2 button[aria-pressed="true"] {
+    background: var(--color-panel);
+    color: var(--color-bone);
+    box-shadow: var(--shadow-raise);
+  }
+  [data-theme="dark"] .seg2 button[aria-pressed="true"] {
+    background: var(--color-overlay);
+  }
+
+  /* A section's job for a line's cost. At forty rows that is the difference
+     between seeing the working band and scrolling to it. */
+  .pband {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 13px 9px 4px;
+  }
+  .pband span {
+    font-size: 0.8125rem; /* 13px */
+    color: var(--color-mute);
+    flex: none;
+  }
+  .pband .n {
+    font-variant-numeric: tabular-nums;
+  }
+  .pband i {
+    flex: 1;
+    height: 1px;
+    background: var(--color-line);
+  }
+
+  .prepo {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 14px 9px 4px;
+    font-size: 0.84375rem; /* 13.5px */
+    color: var(--color-dim);
+  }
+  .prepo > span:first-of-type {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .prepo .n {
+    margin-left: auto;
+    flex: none;
+    font-size: 0.78125rem; /* 12.5px */
+    color: var(--color-mute);
+    font-variant-numeric: tabular-nums;
+  }
+  .prepo svg {
+    flex: none;
+    color: var(--color-mute);
+  }
+
+  /* The mark's column is held whether or not there is a mark in it, so a
+     capped row does not shift its name left of the rows above.
+
+     **16px, not 9.** It held an 8px dot; it holds `BeatMark` now, and the
+     widest of those is the typing mark — three 4px pips with two 3px gaps,
+     18px — with the glyphs at 14. Scaled to 0.8 from the left, 18 becomes
+     14.4 and the slot is 16. **Every label in the panel moves 7px right**
+     and two more truncate in 37 rows. That is the whole cost of the shapes,
+     and `.wdot` is gone with it: four tones of one circle told apart by hue,
+     which is the one thing the guide forbids. */
+  .prow .mk {
+    width: 16px;
+    flex: none;
+    display: grid;
+    justify-items: start;
+    align-items: center;
+  }
+  .prow .mk .typing {
+    transform: scale(0.8);
+    transform-origin: left center;
+  }
+  /* The dot and the glyphs are centred in the slot; only the typing mark,
+     which is twice as wide as either, starts at its left edge. */
+  .prow .mk > :not(.typing) {
+    margin-inline: auto;
+  }
+
+  .pnone {
+    padding: 14px 9px;
+    font-size: var(--text-ui);
+    line-height: 1.55;
+    color: var(--color-dim);
+  }
+
+  /* ── The catcher ───────────────────────────────────────────────
+     **A popover is anchored to the thing you are reading**, so it takes no
+     scrim: dimming the page would hide the code you selected, the row you
+     opened the menu on, the chip you are choosing for. What it needs is
+     something to catch the click that dismisses it, and nothing else.
+
+     Named, because it was six copies of `fixed inset-0 z-40` with no name —
+     which is unsearchable, so nothing could tell a popover that forgot its
+     catcher from one that never had a page behind it. The drawing calls it
+     `.catcher`; the stylesheet's `--color-scrim` is the opposite thing, and
+     the two reading alike is most of why a sheet's wash and a popover's
+     catcher kept being confused for one another. */
+  .catcher {
+    position: fixed;
+    inset: 0;
+    cursor: default;
+  }
+
+  /* ── The title is the rename control ───────────────────────────
+     So it has to say so standing still. A hover state cannot be the whole
+     affordance — you must already be pointing at a thing to learn it is a
+     control — and the tooltip it replaced was a thing nobody read. The
+     title takes `--raise` under the pointer. There was an always-drawn
+     pencil here, which is the stronger answer and the one the user did not
+     want; the hover is the whole affordance again.
+
+     **Read-only is the absence.** No disabled control, nothing greyed: a
+     `span` rather than a button, and the screen has said what it is. */
+  .whead .nm.rn {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    border-radius: 7px;
+    margin-left: -7px;
+    padding: 2px 7px;
+    color: var(--color-bone);
+  }
+  .whead .nm.rn:hover {
+    background: var(--color-raise);
+  }
+
+  /* ── A context menu ────────────────────────────────────────────
+     **A floating card takes a raised surface, not a recessed one.** Both of
+     these were `bg-overlay`, which is `--sunk` — the token the palette
+     reserves for a pressed chip and a recessed track. A card that hovers
+     above the page wearing the colour of a dent in it is the grey-lavender
+     cast that got reported twice: the scrim pass fixed what sits *behind*
+     these cards and nobody checked what the cards are *made of*.
+
+     `--sheet` in light and `--raised` in dark, which is what `.pop` already
+     says and what the drawing says for both. */
+  .ctx {
+    position: fixed;
+    z-index: 55;
+    width: 224px;
+    padding: 5px;
+    border-radius: 12px;
+    background: var(--color-panel);
+    box-shadow:
+      0 24px 60px -18px rgb(22 22 23 / 0.38),
+      0 0 0 1px var(--color-line);
+  }
+  [data-theme="dark"] .ctx {
+    background: var(--color-raise);
+  }
+  .ctx button {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    height: 30px;
+    padding: 0 9px;
+    border-radius: 8px;
+    font-size: var(--text-ui);
+    color: var(--color-bone);
+    text-align: left;
+  }
+  .ctx button > span:first-child {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .ctx button:hover,
+  .ctx button[data-on="true"] {
+    background: var(--color-overlay);
+  }
+  [data-theme="light"] .ctx button:hover,
+  [data-theme="light"] .ctx button[data-on="true"] {
+    background: var(--color-raise);
+  }
+  .ctx button[data-harm="true"] {
+    color: var(--color-brick);
+  }
+  .ctx button[data-harm="true"]:hover {
+    background: var(--color-brick-tint);
+  }
+  .ctx .sep {
+    display: block;
+    height: 1px;
+    margin: 4px 9px;
+    background: var(--color-line);
   }
 }

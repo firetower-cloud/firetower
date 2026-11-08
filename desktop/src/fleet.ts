@@ -1,8 +1,8 @@
 /**
  * Every server's sessions, for the screens that read across all of them.
  *
- * The fleet view, the palette, the strip's counts and the dock badge are the
- * only things that look at more than one server at once, and they are outside
+ * The switcher under the avatar, the palette and the dock badge are the only
+ * things that look at more than one server at once, and they are outside
  * any one server's provider — so they cannot use that server's cache. This is
  * the deliberate fan-out the design called for: each connected server is asked
  * directly with its own token, and the answers are merged here rather than in
@@ -29,7 +29,7 @@ export type Backend = {
   id: string;
   org: string;
   user: string;
-  /** The monogram in the strip. Identity is a shape here, never a hue. */
+  /** The monogram under the avatar. Identity is a shape here, never a hue. */
   mark: string;
   url: string;
   reach: Reach;
@@ -41,12 +41,58 @@ const known: Map<string, { sessions: Session[]; error: string | null }> = new Ma
 const watchers = new Set<() => void>();
 const changed = () => watchers.forEach((w) => w());
 
+/**
+ * The monogram: two letters, from the organisation's name and nothing else.
+ *
+ * Identity here is a shape, never a hue — there are not enough distinguishable
+ * hues, they collide with the signal palette, and a colour-coded server is
+ * unreadable to a dichromat. Which makes the *shape* load-bearing, and one
+ * letter is not enough of it: this used to be `org.slice(0, 1)`, so Acme and
+ * Apex were both "A". A mark two servers share is not a mark.
+ *
+ * **And it has to be stable, which is the harder half.** The first fix walked
+ * the fleet and gave the loser of a collision a different second letter. That
+ * is correct at any single moment and wrong over time: connecting a *Nova*
+ * silently re-lettered *Northwind*, and disconnecting one re-lettered the
+ * other. Somebody who has learned "Nw is production" would be wrong about it
+ * one day, and the whole reason this is a mark rather than a colour is that it
+ * can be learned.
+ *
+ * So the derivation consults nothing but the name. Two words give their two
+ * initials — *Ledger Ops* is "Lo" — and one word gives its first two letters.
+ * That separates Acme from Apex and Northwind from Nimbus without the fleet
+ * being involved at all.
+ *
+ * **Two names that still land on the same two letters keep the same mark**, and
+ * that is the honest answer rather than a bug. *Northwind* and *Nova* are both
+ * "No"; so are a staging and a production Firetower for one organisation, which
+ * genuinely have the same name. A per-fleet tie-break would make the mark
+ * unstable again whatever it broke the tie *on* — the instability is in being
+ * conditional on the fleet, not in the thing consulted — so the tie is left
+ * standing and the text beside the mark resolves it. Every surface that draws
+ * one draws `org` beside it: the title bar, the switcher, the style page.
+ */
+export function markOf(org: string): string {
+  /* Letters and digits only, split into words. A leading "@" or a stray
+     hyphen would otherwise become half the monogram. */
+  const words = org.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  const letters = [...(words.length > 1 ? words[0][0] + words[1][0] : (words[0] ?? ""))];
+  if (letters.length === 0) return "?";
+  return letters[0].toUpperCase() + (letters[1] ?? "").toLowerCase();
+}
+
+/** The same, for a list. Each is still derived on its own. */
+export function marksOf(orgs: string[]): string[] {
+  return orgs.map(markOf);
+}
+
+/** One server as the screens see it. */
 export function asBackend(s: Connected): Backend {
   return {
     id: s.serverId,
     org: s.org,
     user: s.user,
-    mark: s.org.slice(0, 1).toUpperCase(),
+    mark: markOf(s.org),
     url: s.url,
     reach: known.get(s.serverId)?.error ? "unreachable" : "live",
   };

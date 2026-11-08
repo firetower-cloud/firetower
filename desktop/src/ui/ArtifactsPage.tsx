@@ -22,7 +22,8 @@
  * `WorkspaceImage` already makes for a picture in the transcript.
  */
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, LayoutGrid, MoreHorizontal, Rows3, Search, Shapes } from "lucide-react";
+import { ArrowLeft, LayoutGrid, MoreHorizontal, Rows3, Search, Shapes, Sparkles } from "lucide-react";
+import { Blank, Note, Typed } from "~/ui/config/bits";
 import {
   useListArtifacts,
   deleteArtifact,
@@ -37,6 +38,8 @@ import type { Artifact } from "~/api/generated/model";
 import { elapsed, minutesSince } from "~/api/view";
 import { ArtifactTab } from "~/ui/ArtifactTab";
 import { why } from "~/data";
+import { useOpened } from "~/ui/opened";
+import { useStart } from "~/start";
 import { ArtifactShot } from "~/components/ArtifactShot";
 
 type Scope = "all" | "mine" | "shared";
@@ -45,7 +48,8 @@ type Look = "grid" | "list";
 
 const LOOK_KEY = "firetower.artifacts.look";
 
-export function ArtifactsPage() {
+export function ArtifactsPage({ open: asked = null }: { open?: string | null }) {
+  const start = useStart();
   /* No interval of its own — `Posters` polls for every screen. Two screens
      each naming a cadence is how the list came to be fetched on two timers. */
   const { data, isPending, error } = useListArtifacts();
@@ -54,7 +58,7 @@ export function ArtifactsPage() {
   const [scope, setScope] = useState<Scope>("all");
   const [sort, setSort] = useState<Sort>("recent");
   const [query, setQuery] = useState("");
-  const [open, setOpen] = useState<string | null>(null);
+  const [open, setOpen] = useOpened(asked);
   const [expanded, setExpanded] = useState(false);
   const [look, setLook] = useState<Look>(() => {
     try {
@@ -153,14 +157,37 @@ export function ArtifactsPage() {
     },
   ];
 
-  if (isPending) return <Empty title="Looking…">Reading what you have published.</Empty>;
-  if (error)
-    return <Empty title="That did not load.">{why(error) ?? "Could not read your artifacts."}</Empty>;
+  /* Loading and error wear the pane rather than replacing it. A screen that
+     swaps its whole self for one grey sentence reads as having navigated
+     somewhere, and the heading is the one thing that is true either way. */
+  if (isPending) return <Pane>{<p className="mt-8 text-read text-mute">Reading what you have published…</p>}</Pane>;
+  if (error) return <Pane>{<p className="mt-8 text-read text-brick">{why(error) ?? "Could not read your artifacts."}</p>}</Pane>;
+  /* **The one blank in the set whose button is plain and not filled.** This
+     page fills up as a *consequence* of work, so empty here is ordinary, and
+     the weight of the one button is where that is said. A filled primary over
+     an empty Artifacts reads as a chore nobody set. */
   if (everything.length === 0)
     return (
-      <Empty title="No artifacts yet">
-        Ask your agent to create an artifact and it will appear in this section.
-      </Empty>
+      <Pane>
+        <Blank
+          icon={Shapes}
+          /* The gallery's own object rather than a row: this page is a grid,
+             and the poster is the card with the name on the paper under it. */
+          shape="card"
+          title="Nothing published yet"
+          action={
+            <button
+              onClick={() => start({ prompt: "Make me an artifact that " })}
+              className="btn plain"
+            >
+              <Sparkles className="h-[15px] w-[15px]" strokeWidth={1.75} />
+              Ask for one
+            </button>
+          }
+        >
+          Ask an agent for a chart, a mock-up or a report.
+        </Blank>
+      </Pane>
     );
 
   /* Reading one takes the screen. The browse grid is for finding; once found,
@@ -169,15 +196,15 @@ export function ArtifactsPage() {
   if (reading) {
     return (
       <div className="flex min-h-0 flex-1 flex-col">
-        <div className="flex h-9 shrink-0 items-center gap-2 border-b border-line bg-panel px-2">
+        <div className="flex h-11 shrink-0 items-center gap-2 border-b border-line-soft px-3">
           <button
             onClick={() => {
               setOpen(null);
               setExpanded(false);
             }}
-            className="control plain text-dim hover:bg-raise hover:text-bone"
+            className="btn quiet"
           >
-            <ArrowLeft className="h-3.5 w-3.5" strokeWidth={1.75} />
+            <ArrowLeft className="h-[15px] w-[15px]" strokeWidth={1.75} />
             All artifacts
           </button>
         </div>
@@ -198,91 +225,131 @@ export function ArtifactsPage() {
   }
 
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col">
-      <div className="flex h-10 shrink-0 items-center gap-2 border-b border-line px-3">
-        <Shapes className="h-3.5 w-3.5 shrink-0 text-mute" strokeWidth={1.75} />
-        <span className="shrink-0 text-ui text-bone">Artifacts</span>
-        <span className="shrink-0 font-mono text-micro text-mute">{everything.length}</span>
-
-        {/* Offered only once there is a second list to go to. A "Shared" tab
-            that is always empty teaches people the feature does not work. */}
-        {shared > 0 && (
-          <div className="track ml-3 shrink-0">
-            {(
-              [
-                ["all", "All"],
-                ["mine", "Yours"],
-                ["shared", "Shared"],
-              ] as [Scope, string][]
-            ).map(([id, label]) => (
-              <button key={id} data-on={scope === id} onClick={() => setScope(id)}>
-                {label}
-              </button>
-            ))}
+    <div className="scroll-slim relative min-h-0 flex-1 overflow-y-auto">
+      <div className="pcol">
+        <div className="phead2">
+          <div className="min-w-0">
+            <h1>Artifacts</h1>
+            <p className="sub">
+              A page an agent published for you to look at. It outlives the workspace that made it.
+            </p>
           </div>
-        )}
-
-        {/* The app's own field idiom — `.search` lives in the prototype
-            stylesheet, not in this one, and would have rendered as nothing. */}
-        <div className="ml-auto flex w-[16rem] shrink-0 items-center gap-1.5 rounded-md border border-line bg-ground px-2 py-1 focus-within:border-mute">
-          <Search className="h-3.5 w-3.5 shrink-0 text-mute" strokeWidth={1.75} />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Find an artifact"
-            spellCheck={false}
-            className="min-w-0 flex-1 bg-transparent text-ui text-bone placeholder:text-mute focus:outline-none"
-          />
+          <div className="acts">
+            <label className="find">
+              <Search className="h-[15px] w-[15px] shrink-0" strokeWidth={1.75} />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Find an artifact"
+                spellCheck={false}
+                aria-label="Find an artifact"
+                className="placeholder:text-mute focus:outline-none"
+              />
+            </label>
+            {/* The one filled button on the screen. Everything else here is a
+                filter or a view, and a second filled button would make the
+                reader decide which was the real one. */}
+            <button onClick={() => start({ prompt: "Make me an artifact that " })} className="btn primary">
+              <Sparkles className="h-[15px] w-[15px]" strokeWidth={1.75} />
+              Ask for one
+            </button>
+          </div>
         </div>
 
-        <div className="track shrink-0">
-          <button data-on={sort === "recent"} onClick={() => setSort("recent")}>
-            Recent
-          </button>
-          <button data-on={sort === "name"} onClick={() => setSort("name")}>
-            Name
-          </button>
+        <div className="filters">
+          {(
+            [
+              ["all", "All"],
+              ["mine", "Yours"],
+              ["shared", "Shared with you"],
+            ] as [Scope, string][]
+          ).map(([id, label]) => (
+            <button key={id} className="fp" aria-pressed={scope === id} onClick={() => setScope(id)}>
+              {label}
+            </button>
+          ))}
+          <span className="right">
+            {/* Sorting has no home in the drawing and is a real thing people
+                do with three hundred of these, so it keeps the filter shape
+                rather than inventing a control. */}
+            <button className="fp" aria-pressed={sort === "recent"} onClick={() => setSort("recent")}>
+              Recent
+            </button>
+            <button className="fp" aria-pressed={sort === "name"} onClick={() => setSort("name")}>
+              Name
+            </button>
+            <span className="ml-2 flex items-center gap-1">
+              <button
+                onClick={() => setLook("grid")}
+                title="Grid"
+                aria-label="Grid"
+                className={`grid h-7 w-7 place-items-center rounded-md ${look === "grid" ? "text-bone" : "text-mute hover:text-text"}`}
+              >
+                <LayoutGrid className="h-4 w-4" strokeWidth={1.75} />
+              </button>
+              <button
+                onClick={() => setLook("list")}
+                title="List"
+                aria-label="List"
+                className={`grid h-7 w-7 place-items-center rounded-md ${look === "list" ? "text-bone" : "text-mute hover:text-text"}`}
+              >
+                <Rows3 className="h-4 w-4" strokeWidth={1.75} />
+              </button>
+            </span>
+          </span>
         </div>
 
-        <div className="track shrink-0">
-          <button data-on={look === "grid"} onClick={() => setLook("grid")} title="Grid">
-            <LayoutGrid className="h-3.5 w-3.5" strokeWidth={1.75} />
-          </button>
-          <button data-on={look === "list"} onClick={() => setLook("list")} title="List">
-            <Rows3 className="h-3.5 w-3.5" strokeWidth={1.75} />
-          </button>
-        </div>
-      </div>
+        {/* **A `Note`, and the real instance of the bug.** This drew the full
+            centred plate *and* the filled *Ask for one*, so searching for a
+            word you do not have read as an onboarding screen. The page is not
+            empty; one scope of it is, and the thing that emptied it is a
+            control the reader changed.
 
-      <div className="scroll-slim min-h-0 flex-1 overflow-y-auto">
+            `Clear` only where a *typed* string caused it. The pills announce
+            their own state and `All` is beside them, so a pill-caused note
+            carries no control. */}
         {showing.length === 0 ? (
-          <Empty
-            title={
-              query.trim()
-                ? "Nothing matches"
-                : scope === "shared"
-                  ? "Nothing shared yet"
-                  : "Nothing of your own"
+          <Note
+            icon={query.trim() ? Search : Shapes}
+            control={
+              query.trim() ? (
+                <button onClick={() => setQuery("")} className="btn quiet">
+                  Clear
+                </button>
+              ) : undefined
             }
           >
-            {query.trim()
-              ? `No artifact is called “${query.trim()}”.`
-              : scope === "shared"
-                ? "Move one into a directory with the share control and everybody there can reach it."
-                : "Everything here is filed in a directory rather than at your own root."}
-          </Empty>
+            {query.trim() ? (
+              <>
+                Nothing here is called <Typed>{query.trim()}</Typed>.
+              </>
+            ) : scope === "shared" ? (
+              "Nothing has been shared with you yet."
+            ) : (
+              "Everything you can see is filed in a directory."
+            )}
+          </Note>
         ) : look === "grid" ? (
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(14rem,1fr))] gap-4 p-4">
+          <div className="gal">
             {showing.map((a) => (
               <Tile key={a.id} artifact={a} onOpen={() => setOpen(a.id)} onMenu={menu.show} />
             ))}
           </div>
         ) : (
-          <div className="p-1.5">
-            {showing.map((a) => (
-              <Line key={a.id} artifact={a} onOpen={() => setOpen(a.id)} onMenu={menu.show} />
-            ))}
-          </div>
+          <>
+            <div className="colhead">
+              <span className="w-[84px] flex-none" />
+              <span className="flex-1">Artifact</span>
+              <span className="w-[200px] flex-none">From</span>
+              <span className="w-[52px] flex-none text-right">Updated</span>
+              <span className="w-6 flex-none" />
+            </div>
+            <div className="alist">
+              {showing.map((a) => (
+                <Line key={a.id} artifact={a} onOpen={() => setOpen(a.id)} onMenu={menu.show} />
+              ))}
+            </div>
+          </>
         )}
       </div>
 
@@ -290,7 +357,7 @@ export function ArtifactsPage() {
         <ContextMenu at={menu.open.at} items={itemsFor(menu.open.on)} onClose={menu.close} />
       )}
       {notice && (
-        <div className="pointer-events-none absolute bottom-4 left-1/2 z-30 -translate-x-1/2 rounded-full border border-line bg-overlay px-3.5 py-1.5 text-meta text-dim shadow-(--shadow-float)">
+        <div className="pointer-events-none fixed bottom-4 left-1/2 z-30 -translate-x-1/2 rounded-full bg-panel px-3.5 py-1.5 text-meta text-dim shadow-(--shadow-float)">
           {notice}
         </div>
       )}
@@ -298,6 +365,39 @@ export function ArtifactsPage() {
   );
 }
 
+/** The pane and its heading, which is true whatever the list is doing. */
+function Pane({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="scroll-slim min-h-0 flex-1 overflow-y-auto">
+      <div className="pcol">
+        <div className="phead2">
+          <div className="min-w-0">
+            <h1>Artifacts</h1>
+            <p className="sub">
+              A page an agent published for you to look at. It outlives the workspace that made it.
+            </p>
+          </div>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/** Where the artifact came from: the workspace, or the directory it is in. */
+export const cameFrom = (a: Artifact) =>
+  a.mine ? (a.fromWorkspaceName ?? "no workspace") : (a.path?.split("/")[1] ?? "shared");
+
+/**
+ * One artifact in the library.
+ *
+ * **The poster is the card, and the name sits on the paper underneath it.**
+ * It used to be a bordered card with the picture inside it and a 32px glyph
+ * beside the title — a border round the bytes *and* round the sentence, which
+ * is the habit `STYLE.md` names as what makes an interface look generated.
+ * There is one kind of object on this screen and what identifies each one is
+ * a picture; the picture can be the whole of it.
+ */
 function Tile({
   artifact,
   onOpen,
@@ -309,44 +409,24 @@ function Tile({
 }) {
   return (
     <div className="group/tile relative">
-      {/* One card around the picture and its name.
-          The house habit is a border round the bytes and nothing round the
-          sentence — which is right in a transcript, where a card would
-          compete with the conversation. A library is the other case: the
-          tile *is* the object, there is one kind of them, and the card is
-          what says where one ends and the next begins. */}
-      <button
-        onClick={onOpen}
-        onContextMenu={(e) => onMenu(e, artifact)}
-        className="block w-full overflow-hidden rounded-lg border border-line bg-panel text-left transition-colors hover:border-mute"
-      >
-        <ArtifactShot artifact={artifact} framed={false} />
-        <span className="flex items-center gap-2.5 border-t border-line-soft px-3 py-2.5">
-          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md border border-line bg-raise">
-            <Shapes className="h-4 w-4 text-mute" strokeWidth={1.75} />
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-ui text-bone">{artifact.title}</span>
-            <span className="mt-0.5 flex items-center gap-1.5 text-micro text-mute">
-              <span className="font-mono">v{artifact.version}</span>
-              <span>·</span>
-              <span className="truncate">
-                {artifact.mine
-                  ? (artifact.fromWorkspaceName ?? "no workspace")
-                  : (artifact.path?.split("/")[1] ?? "shared")}
-              </span>
-              <span className="ml-auto shrink-0">{elapsed(minutesSince(artifact.updatedAt))}</span>
-            </span>
+      <button onClick={onOpen} onContextMenu={(e) => onMenu(e, artifact)} className="art" title={artifact.title}>
+        <ArtifactShot artifact={artifact} framed={false} className="shot" />
+        <span className="nm">{artifact.title}</span>
+        <span className="mt">
+          <span className="min-w-0 truncate">{cameFrom(artifact)}</span>
+          <span className="ml-auto flex-none tabular-nums text-mute">
+            {elapsed(minutesSince(artifact.updatedAt))}
           </span>
         </span>
       </button>
-      {/* On the thumbnail, above the shield, and only once the pointer is
-          here — a control on every tile all the time is six controls
-          competing with the thing they are about. */}
+      {/* On the poster, and only once the pointer is here — a control on every
+          tile all the time is six controls competing with what they are
+          about. */}
       <button
         onClick={(e) => onMenu(e, artifact)}
         title="More"
-        className="absolute top-1.5 right-1.5 z-20 grid h-6 w-6 place-items-center rounded-md border border-line bg-overlay text-dim opacity-0 transition-opacity group-hover/tile:opacity-100 hover:text-bone focus-visible:opacity-100"
+        aria-label={`More for ${artifact.title}`}
+        className="absolute top-1.5 right-1.5 z-20 grid h-6 w-6 place-items-center rounded-md bg-panel text-dim opacity-0 shadow-(--shadow-raise) transition-opacity group-hover/tile:opacity-100 hover:text-bone focus-visible:opacity-100"
       >
         <MoreHorizontal className="h-3.5 w-3.5" strokeWidth={1.75} />
       </button>
@@ -364,25 +444,21 @@ function Line({
   onMenu: (e: React.MouseEvent, a: Artifact) => void;
 }) {
   return (
-    <button
-      onClick={onOpen}
-      onContextMenu={(e) => onMenu(e, artifact)}
-      className="group/line flex w-full items-center gap-3 rounded-md px-2 py-2 text-left transition-colors hover:bg-raise/60"
-    >
-      <span className="block w-[84px] shrink-0">
-        <ArtifactShot artifact={artifact} />
+    <button onClick={onOpen} onContextMenu={(e) => onMenu(e, artifact)} className="ar">
+      <span className="block w-[84px] flex-none">
+        <ArtifactShot artifact={artifact} className="shot rounded-lg" />
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-ui text-text">{artifact.title}</span>
-        <span className="mt-0.5 flex items-center gap-1.5 text-micro text-mute">
-          <span className="font-mono">v{artifact.version}</span>
-          <span>·</span>
-          <span className="truncate">
-            {artifact.mine ? (artifact.fromWorkspaceName ?? "no workspace") : (artifact.path?.split("/")[1] ?? "shared")}
-          </span>
+        <span className="block truncate text-read text-bone">{artifact.title}</span>
+        <span className="mt-0.5 block text-meta text-dim">
+          Version {artifact.version}
+          {!artifact.hasPoster && " · no picture yet"}
         </span>
       </span>
-      <span className="shrink-0 text-micro text-mute">{elapsed(minutesSince(artifact.updatedAt))}</span>
+      <span className="w-[200px] flex-none truncate text-ui text-dim">{cameFrom(artifact)}</span>
+      <span className="w-[52px] flex-none text-right text-ui tabular-nums text-dim">
+        {elapsed(minutesSince(artifact.updatedAt))}
+      </span>
       <span
         role="button"
         tabIndex={0}
@@ -391,35 +467,10 @@ function Line({
           onMenu(e, artifact);
         }}
         title="More"
-        className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-mute opacity-0 transition-opacity group-hover/line:opacity-100 hover:bg-raise hover:text-bone"
+        className="ghost grid h-6 w-6 flex-none place-items-center rounded-md text-mute hover:bg-overlay hover:text-bone"
       >
         <MoreHorizontal className="h-3.5 w-3.5" strokeWidth={1.75} />
       </span>
     </button>
-  );
-}
-
-/**
- * The first thing anybody sees here, and for a while the only thing.
- *
- * A sentence of grey text floating in the middle of a dark window reads as a
- * screen that failed to load. It gets the glyph the rail uses for this
- * section, a line that says what the screen is, and a line that says how to
- * make something appear — which is the only question somebody has while
- * looking at it.
- */
-function Empty({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="grid flex-1 place-items-center px-6 py-24">
-      <div className="flex flex-col items-center text-center">
-        {/* The same shape as the rail entry, at the size the mark uses when
-            it is the subject rather than a row's label. */}
-        <span className="grid h-14 w-14 place-items-center rounded-xl border border-line bg-raise shadow-(--shadow-raise)">
-          <Shapes className="h-6 w-6 text-dim" strokeWidth={1.5} />
-        </span>
-        <p className="mt-5 text-title font-medium text-bone">{title}</p>
-        <p className="mt-2 max-w-[42ch] text-ui leading-relaxed text-mute">{children}</p>
-      </div>
-    </div>
   );
 }

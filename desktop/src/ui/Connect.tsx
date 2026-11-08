@@ -13,7 +13,9 @@
  * architecture exists to avoid.
  */
 import { useEffect, useState } from "react";
-import { ArrowRight, CircleSlash2, Loader2, Lock } from "lucide-react";
+import { ArrowRight, CircleSlash2, Loader2, Lock, Server, UserRound, X } from "lucide-react";
+import { Icon, IconButton } from "~/components/ui";
+import { markOf } from "~/fleet";
 import { Mark } from "~/ui/Mark";
 import { MIN_SERVER, packaged, reach, signIn, type Bootstrap } from "~/probe";
 import { remember } from "~/servers";
@@ -72,17 +74,38 @@ export function Connect({
   }, [at]);
 
   return (
-    <div className="grid h-full min-w-0 flex-1 place-items-center bg-ground px-6">
-      <div className="w-full max-w-[26rem]">
+    /* On the sheet, with the window's own corners. It was centred on the bare
+       desk, so the first thing anybody sees was the one screen in the product
+       with no body under it. */
+    <div className="first">
+      <div className="card">
         {stage.at === "where" && (
           <Where typed={typed} onTyped={setTyped} onGo={() => find(typed)} onCancel={onCancel} />
         )}
 
         {stage.at === "reaching" && (
-          <Middle>
-            <Loader2 className="mx-auto h-5 w-5 animate-spin text-mute" strokeWidth={1.75} />
-            <p className="mt-4 text-read text-dim">Looking for a Firetower at {typed}…</p>
-          </Middle>
+          /* **Typing dots, not a spinner.** A spinner is the shape this
+             system uses for a page that has not arrived; this is a question
+             being asked of a machine, which is the same thing an agent at
+             work is doing, and it already has a mark. */
+          <>
+            <span className="mk">
+              <Mark size={24} />
+            </span>
+            <h1>Looking for it…</h1>
+            <p>Trying https, then http. Only the scheme that answers is kept.</p>
+            <div className="found">
+              <span className="typing shrink-0">
+                <i />
+                <i />
+                <i />
+              </span>
+              <span className="tx">
+                <b>{typed}</b>
+                <s>asking what is there</s>
+              </span>
+            </div>
+          </>
         )}
 
         {stage.at === "unreachable" && (
@@ -140,10 +163,6 @@ export function Connect({
   );
 }
 
-function Middle({ children }: { children: React.ReactNode }) {
-  return <div className="text-center">{children}</div>;
-}
-
 function Where({
   typed,
   onTyped,
@@ -157,41 +176,32 @@ function Where({
 }) {
   return (
     <>
-      <div className="mb-7 text-center">
-        <span className="mx-auto grid h-12 w-12 place-items-center rounded-xl border border-line bg-raise text-bone shadow-(--shadow-raise)">
-          <Mark size={26} />
-        </span>
-        <h1 className="mt-4 text-display text-bone">Connect to a Firetower</h1>
-        <p className="mt-2 text-read text-dim">
-          The address of the control plane your team runs. It is never on the public internet,
-          so this is usually a name on your mesh VPN.
-        </p>
-      </div>
+      <span className="mk">
+        <Mark size={24} />
+      </span>
+      <h1>Where is your Firetower?</h1>
+      <p>Enter the domain where your Firetower control plane has been installed.</p>
 
-      <input
-        autoFocus
-        value={typed}
-        onChange={(e) => onTyped(e.target.value)}
-        onKeyDown={(e) => e.key === "Enter" && typed.trim() && onGo()}
-        placeholder="ft-e1.tail9c2b.ts.net"
-        spellCheck={false}
-        autoCapitalize="off"
-        autoCorrect="off"
-        className="w-full rounded-xl border border-line bg-panel px-4 py-3 text-center font-mono text-ui text-bone placeholder:text-mute focus:border-slate-deep focus:outline-none"
-      />
+      <label className="in">
+        <Icon of={Server} size={16} className="shrink-0 text-mute" />
+        <input
+          autoFocus
+          value={typed}
+          onChange={(e) => onTyped(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && typed.trim() && onGo()}
+          placeholder="ft-e1.tail9c2b.ts.net"
+          aria-label="The address of your Firetower"
+          spellCheck={false}
+          autoCapitalize="off"
+          autoCorrect="off"
+          className="bg-transparent placeholder:text-mute focus:outline-none"
+        />
+      </label>
 
-      <button
-        disabled={!typed.trim()}
-        onClick={onGo}
-        className="control mt-3 w-full justify-center bg-bone font-medium text-ground transition-opacity hover:opacity-90 disabled:bg-raise disabled:text-mute"
-      >
-        Connect
+      <button disabled={!typed.trim()} onClick={onGo} className="btn primary go">
+        Continue
         <ArrowRight className="h-4 w-4" strokeWidth={2} />
       </button>
-
-      <p className="mt-4 text-center text-meta text-mute">
-        Nothing is sent until this reaches a server you named.
-      </p>
 
       {onCancel && (
         <button
@@ -222,34 +232,34 @@ function NoRoute({
 }) {
   return (
     <>
-      <div className="text-center">
-        <CircleSlash2 className="mx-auto h-6 w-6 text-mute" strokeWidth={1.5} />
-        <h1 className="mt-4 text-title text-bone">No route to {typed}</h1>
-        <p className="mt-2 text-read text-dim">
-          A Firetower is never on the public internet, so this Mac reaches one over your mesh
-          VPN.
-        </p>
+      <span className="mk">
+        <CircleSlash2 className="h-6 w-6" strokeWidth={1.5} />
+      </span>
+      <h1>Nothing answered there</h1>
+      <p>The address reached nothing on https or http.</p>
+
+      {/* **A brick rule, not a bordered box.** A refusal that fills a panel
+          with colour reads as the app having broken; the common case here is
+          that the address is wrong. The three questions stay — they are the
+          remedy, and the drawing's own panel is where a remedy goes. */}
+      <div className="bad">
+        <b>Could not reach {typed}</b>
+        <span className="block">
+          A Firetower is never on the public internet, so this Mac reaches one over your mesh VPN.
+        </span>
+        <ul className="mt-2 space-y-1">
+          <li>Is Tailscale running and signed in?</li>
+          <li>Has this machine been shared the node?</li>
+          <li>Is the address right — a name, not an IP behind a firewall?</li>
+        </ul>
+        <span className="mt-2 block font-mono text-micro text-mute">{detail}</span>
       </div>
 
-      <ul className="mt-5 space-y-2 rounded-xl border border-line bg-panel px-4 py-3.5 text-meta text-dim">
-        <li>Is Tailscale running and signed in?</li>
-        <li>Has this machine been shared the node?</li>
-        <li>Is the address right — a name, not an IP behind a firewall?</li>
-      </ul>
-
-      <p className="mt-2.5 text-center font-mono text-micro text-mute">{detail}</p>
-
       <div className="mt-5 flex gap-2">
-        <button
-          onClick={onBack}
-          className="control flex-1 justify-center border border-line bg-raise text-text hover:bg-overlay"
-        >
-          Change the address
+        <button onClick={onBack} className="btn plain flex-1 justify-center">
+          Try another address
         </button>
-        <button
-          onClick={onRetry}
-          className="control flex-1 justify-center bg-bone font-medium text-ground hover:opacity-90"
-        >
+        <button onClick={onRetry} className="btn primary flex-1 justify-center">
           Try again
         </button>
       </div>
@@ -284,39 +294,35 @@ function Refused({
 }) {
   return (
     <>
-      <div className="text-center">
-        <CircleSlash2 className="mx-auto h-6 w-6 text-mute" strokeWidth={1.5} />
-        <h1 className="mt-4 text-title text-bone">{typed} answered, but refused the app</h1>
+      <span className="mk">
+        <CircleSlash2 className="h-6 w-6" strokeWidth={1.5} />
+      </span>
+      <h1>That is not a Firetower</h1>
+      <div className="bad">
+        <b>{typed} answered, and refused the app</b>
         {packaged() ? (
-          <p className="mt-2 text-read text-dim">
+          <span className="block">
             It is running a Firetower older than {MIN_SERVER}, which only talks to its own web
             page. Upgrade it from its Updates screen, or with <span className="font-mono">firetower upgrade</span> on
             the machine, then try again.
-          </p>
+          </span>
         ) : (
-          <p className="mt-2 text-read text-dim">
+          <span className="block">
             This is a development build, and its pages come from{" "}
             <span className="font-mono">{globalThis.location?.origin}</span> — an address no
             control plane answers. Point it at a server you are running with{" "}
             <span className="font-mono">--dev</span>, or use an installed Firetower to reach
             this one.
-          </p>
+          </span>
         )}
+        <span className="mt-2 block font-mono text-micro text-mute">{detail}</span>
       </div>
 
-      <p className="mt-2.5 text-center font-mono text-micro text-mute">{detail}</p>
-
       <div className="mt-5 flex gap-2">
-        <button
-          onClick={onBack}
-          className="control flex-1 justify-center border border-line bg-raise text-text hover:bg-overlay"
-        >
-          Change the address
+        <button onClick={onBack} className="btn plain flex-1 justify-center">
+          Try another address
         </button>
-        <button
-          onClick={onRetry}
-          className="control flex-1 justify-center bg-bone font-medium text-ground hover:opacity-90"
-        >
+        <button onClick={onRetry} className="btn primary flex-1 justify-center">
           Try again
         </button>
       </div>
@@ -378,15 +384,32 @@ function Who({
 
   return (
     <>
-      <div className="mb-6 text-center">
-        <span className="mx-auto grid h-11 w-11 place-items-center rounded-xl border border-sage-deep bg-sage-tint text-sage">
-          <Lock className="h-5 w-5" strokeWidth={1.75} />
+      {/* **What was found, before you say who you are.** It was a sage-ringed
+          lock over the organisation's name — a signal colour on a screen where
+          nothing has gone right or wrong yet. This is the drawing's: the mark
+          the rail will use, the name, the address and the version, and a way
+          back out of it. */}
+      <div className="found">
+        {/* **A server's mark, not a person's.** `.face` is `Avatar`'s class
+            and `Avatar` draws a *monogram* — one letter for a one-word name,
+            because the row says the name in full beside it. A Firetower's
+            mark is `markOf`, two letters from a one-word organisation, so
+            that two whose names share a first letter stay apart. Same disc,
+            different rule, and the rail and the title bar already draw this
+            one as `.server-mark`. */}
+        <span className="server-mark grid h-9 w-9 shrink-0 place-items-center" data-reach="live">
+          {markOf(boot.organization ?? url)}
         </span>
-        <h1 className="mt-4 text-display text-bone">{boot.organization ?? "A Firetower"}</h1>
-        <p className="mt-1.5 font-mono text-meta text-mute">
-          {url.replace(/^https?:\/\//, "")} · Firetower {boot.version}
-        </p>
+        <span className="tx">
+          <b>{boot.organization ?? "A Firetower"}</b>
+          <s>
+            {url.replace(/^https?:\/\//, "")} · {boot.version}
+          </s>
+        </span>
+        <IconButton of={X} onClick={onBack} label="Use a different address" />
       </div>
+
+      <h1 className="mt-6">Who are you here?</h1>
 
       {proxyOnly ? (
         <div className="rounded-xl border border-line bg-panel px-4 py-4 text-center">
@@ -398,50 +421,51 @@ function Who({
         </div>
       ) : (
         <>
-          <input
-            autoFocus
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && password && go()}
-            placeholder="Username"
-            spellCheck={false}
-            autoCapitalize="off"
-            className="w-full rounded-xl border border-line bg-panel px-4 py-2.5 text-ui text-bone placeholder:text-mute focus:border-slate-deep focus:outline-none"
-          />
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && username && go()}
-            placeholder="Password"
-            className="mt-2 w-full rounded-xl border border-line bg-panel px-4 py-2.5 text-ui text-bone placeholder:text-mute focus:border-slate-deep focus:outline-none"
-          />
+          <label className="in">
+            <Icon of={UserRound} size={16} className="shrink-0 text-mute" />
+            <input
+              autoFocus
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && password && go()}
+              placeholder="Username"
+              spellCheck={false}
+              autoCapitalize="off"
+              className="bg-transparent placeholder:text-mute focus:outline-none"
+            />
+          </label>
+          <label className="in !mt-2.5">
+            <Icon of={Lock} size={16} className="shrink-0 text-mute" />
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && username && go()}
+              placeholder="Password"
+              className="bg-transparent placeholder:text-mute focus:outline-none"
+            />
+          </label>
 
           {wrong && <p className="mt-2.5 text-center text-meta text-brick">{wrong}</p>}
 
           <button
             disabled={busy || !username.trim() || !password}
             onClick={go}
-            className="control mt-3 w-full justify-center bg-bone font-medium text-ground transition-opacity hover:opacity-90 disabled:bg-raise disabled:text-mute"
+            className="btn primary go"
           >
             {busy ? (
               <Loader2 className="h-4 w-4 animate-spin" strokeWidth={2} />
             ) : (
-              <>
-                Sign in
-                <ArrowRight className="h-4 w-4" strokeWidth={2} />
-              </>
+              "Sign in"
             )}
           </button>
         </>
       )}
 
-      <button
-        onClick={onBack}
-        className="mx-auto mt-5 block text-meta text-mute transition-colors hover:text-dim"
-      >
-        Not this server
-      </button>
+      {/* The way out of this server is the × on the panel above; what belongs
+          here is the answer to the question somebody stuck on this screen is
+          actually asking. */}
+      <p className="alt">Forgotten it? Ask an administrator to reset it.</p>
     </>
   );
 }

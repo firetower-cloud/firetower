@@ -28,8 +28,8 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Check, Link2, Loader2, MoreHorizontal, Plus, X } from "lucide-react";
-import { HostMark, Icon } from "~/components/ui";
+import { ArrowLeft, Check, FolderGit2, Link2, Loader2, MoreHorizontal, Plus, X } from "lucide-react";
+import { HostMark, Icon, IconButton } from "~/components/ui";
 import type { AuthMode, KindInfo, ProbedProvider, ProviderStatus } from "~/api/generated/model";
 import {
   getListProvidersQueryKey,
@@ -47,7 +47,7 @@ import { getListTrackersQueryKey } from "~/api/generated/trackers/trackers";
 import { useProviders } from "~/data";
 import { why } from "~/data";
 import { openExternal } from "~/open";
-import { bold, Rows, Section } from "~/ui/config/bits";
+import { bold, Group, Rows, Section } from "~/ui/config/bits";
 import { useConnect } from "~/ui/config/connect";
 import { Pop } from "~/ui/Pop";
 import { useConfirm } from "~/ui/Confirm";
@@ -91,15 +91,20 @@ export function GitHosts({ live }: { live: boolean }) {
       <Section
         title="Git hosts"
         note="Signed in as you, because a commit has to be attributable to a person. Everybody here connects their own."
+        settling={providers.loading}
+        trouble={providers.trouble}
+        error={providers.error}
         action={
           live && mayAdd ? (
-            <button onClick={() => setAdding(true)} className="control border border-line bg-raise text-ui text-bone hover:bg-overlay">
-              <Icon of={Plus} size={12} />Add a host
+            <button onClick={() => setAdding(true)} className="btn primary">
+              <Icon of={Plus} size={14} />Add a host
             </button>
           ) : null
         }
       >
-        <Rows feed={providers} empty="Nothing to connect to on this server.">
+        <Group>
+        <Rows feed={providers} icon={FolderGit2} empty="No git host yet"
+          note="Add the address of a GitHub, GitLab or Gitea your company already uses.">
           {rows.map((p) => (
             <Provider
               key={p.id}
@@ -110,6 +115,7 @@ export function GitHosts({ live }: { live: boolean }) {
             />
           ))}
         </Rows>
+        </Group>
       </Section>
       {adding && <AddHost onClose={() => setAdding(false)} onAdded={setFresh} />}
     </>
@@ -205,24 +211,25 @@ function Provider({
 
   return (
     <div>
-      <div className="flex items-center gap-2.5 px-3.5 py-2">
+      <div className="r">
         {/* Tinted here, unlike the dense rows elsewhere. This is the list whose
             whole job is telling hosts apart, and at 13px a grey tanuki and a
             grey teacup are the same smudge. */}
-        <HostMark kind={p.kind} size={14} brand />
-
-        <span className="min-w-0 flex-1">
-          <span className="flex items-center gap-2">
-            <span className="truncate text-ui text-bone">{p.label}</span>
-            {p.connected ? (
-              <Chip tone="good">connected</Chip>
-            ) : !p.configured ? (
-              <Chip tone="warn">needs an application</Chip>
-            ) : null}
-            {p.sharedApplication && <Chip>shared app</Chip>}
-          </span>
-          <span className="block truncate font-mono text-micro text-mute">{under}</span>
+        <span className="g">
+          <HostMark kind={p.kind} size={18} brand />
         </span>
+
+        <span className="tx">
+          <b>{p.label}</b>
+          <s>{under}</s>
+        </span>
+        {p.sharedApplication && <Chip>shared app</Chip>}
+        {/* The state as a word, which is what the drawing says. A filled
+            green block for "connected" is a warning shape for good news. */}
+        <span className="said">
+          {p.connected ? "connected" : !p.configured ? "needs an application" : "not connected"}
+        </span>
+        <span className="st" data-s={p.connected ? "ok" : !p.configured ? "warn" : "off"} />
 
         {/* **One action column.** Before, a row was pencil + Connect and the
             next was pencil + Connect + bin, so the controls shifted sideways as
@@ -230,19 +237,19 @@ function Provider({
             ends in the same place. */}
         <div className="flex shrink-0 items-center gap-1.5">
           {primary === "identity" ? (
-            <button onClick={() => setIdentity(!identity)} className="control border border-line bg-raise text-ui text-text hover:bg-overlay">
+            <button onClick={() => setIdentity(!identity)} className="btn plain hov">
               Identity
             </button>
           ) : primary === "connect" ? (
             <button
               disabled={!live || connect.busy}
               onClick={connect.start}
-              className="control border border-line bg-raise text-ui text-text hover:bg-overlay disabled:opacity-50"
+              className="btn plain"
             >
               <Icon of={Link2} size={12} />Connect
             </button>
           ) : primary === "set-up" ? (
-            <button onClick={() => setEditing(true)} className="control border border-line bg-raise text-ui text-text hover:bg-overlay">
+            <button onClick={() => setEditing(true)} className="btn plain">
               Set it up
             </button>
           ) : (
@@ -251,13 +258,12 @@ function Provider({
           )}
 
           <div>
-            <button
+            <IconButton
+              of={MoreHorizontal}
               onClick={(e) => setMenu(menu ? null : e.currentTarget)}
-              aria-label={`More for ${p.label}`}
-              className="control text-mute hover:bg-raise hover:text-bone"
-            >
-              <Icon of={MoreHorizontal} size={14} />
-            </button>
+              label={`More for ${p.label}`}
+              className="hov"
+            />
             {/* Into `document.body`, because `Section` wraps these rows in an
                 `overflow-hidden` card and a clipping ancestor clips whatever
                 its descendants' z-index say. The sharing sheet learned this
@@ -406,7 +412,7 @@ export function AddHost({
   const [picked, setPicked] = useState<Choice | null>(null);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-ground/70 pt-[12vh] backdrop-blur-[3px]" onMouseDown={onClose}>
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-scrim pt-[12vh] backdrop-blur-[3px]" onMouseDown={onClose}>
       <div onMouseDown={(e) => e.stopPropagation()} className="w-[28rem] overflow-hidden rounded-2xl border border-line bg-panel shadow-(--shadow-float)">
         <div className="flex items-center gap-3 border-b border-line px-5 py-3.5">
           {picked && (
@@ -431,7 +437,7 @@ export function AddHost({
 }
 
 /** One row of the first step: a thing somebody has, and where it lives. */
-type Choice = {
+export type Choice = {
   kind: string;
   label: string;
   /** The address, for a hosted instance. Absent means they have to say. */
@@ -439,8 +445,15 @@ type Choice = {
   aside: string;
 };
 
-/** Every kind, as the hosted and the self-hosted things people actually run. */
-function choicesFrom(kinds: KindInfo[]): Choice[] {
+/**
+ * Every kind, as the hosted and the self-hosted things people actually run.
+ *
+ * Exported so `repos.test.tsx` can assert what the Repositories blank's one
+ * action reaches: the whole set this server supports, enumerated from
+ * `kindInfo`, rather than a list of brands written down somewhere. A sixth
+ * kind has to appear on its own.
+ */
+export function choicesFrom(kinds: KindInfo[]): Choice[] {
   const out: Choice[] = [];
   for (const k of kinds) {
     if (k.hostedBaseUrl) {
@@ -570,7 +583,7 @@ function Where({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const canBrowser = found?.authModes.includes("device") ?? false;
+  const canBrowser = found?.authModes?.includes("device") ?? false;
   /* Browser sign-in without an application is a host nobody can connect — the
      same half-added state the server's `default_auth` exists to avoid, so the
      button does not offer it either. */
@@ -850,7 +863,7 @@ function Settings({ p, onSaved, onClose }: { p: ProviderStatus; onSaved: () => v
         <button
           disabled={!changed || save.isPending}
           onClick={() => save.mutate({ id: p.id, data: { label: label.trim(), auth, clientId: clientId.trim() } }, { onSuccess: onSaved })}
-          className="control border border-line bg-raise text-bone hover:bg-overlay disabled:text-mute"
+          className="btn plain"
         >
           {save.isPending ? "Saving…" : changed ? "Save" : "Saved"}
         </button>
@@ -878,7 +891,7 @@ function Identity({ providerId }: { providerId: string }) {
       <div className="mt-2 flex items-center gap-2">
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name" className="min-w-0 flex-1 rounded-md border border-line bg-ground px-2 py-1 text-ui text-bone focus:outline-none" />
         <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email" className="min-w-0 flex-1 rounded-md border border-line bg-ground px-2 py-1 font-mono text-ui text-bone focus:outline-none" />
-        <button disabled={!name.trim() || !email.trim() || save.isPending} onClick={() => save.mutate({ id: providerId, data: { name: name.trim(), email: email.trim() } }, { onSuccess: () => identity.refetch() })} className="control border border-line bg-raise text-bone hover:bg-overlay disabled:text-mute">Save</button>
+        <button disabled={!name.trim() || !email.trim() || save.isPending} onClick={() => save.mutate({ id: providerId, data: { name: name.trim(), email: email.trim() } }, { onSuccess: () => identity.refetch() })} className="btn plain">Save</button>
         {held?.name && <button onClick={() => clear.mutate({ id: providerId }, { onSuccess: () => { setName(""); setEmail(""); identity.refetch(); } })} className="control text-mute hover:text-brick"><X className="h-3.5 w-3.5" strokeWidth={2} /></button>}
       </div>
     </div>

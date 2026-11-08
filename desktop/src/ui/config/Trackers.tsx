@@ -13,8 +13,8 @@
  */
 import { useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Check, Unlink } from "lucide-react";
-import { HostMark, Icon, LinearMark } from "~/components/ui";
+import { Check, Ticket, Unlink } from "lucide-react";
+import { HostMark, Icon, IconButton, LinearMark } from "~/components/ui";
 import type { TrackerStatus } from "~/api/generated/model";
 import {
   getListTrackersQueryKey,
@@ -23,7 +23,7 @@ import {
   useSetTrackerKey,
 } from "~/api/generated/trackers/trackers";
 import { useTrackers, why } from "~/data";
-import { Rows, Section } from "~/ui/config/bits";
+import { Group, Rows, Section } from "~/ui/config/bits";
 import { WhoCanAccess } from "~/ui/Sharing";
 
 export function Trackers({ live }: { live: boolean }) {
@@ -47,12 +47,18 @@ export function Trackers({ live }: { live: boolean }) {
     <Section
       title="Trackers"
       note="Where the tasks list reads from. Every git host is one. An API key can belong to a directory, so one key answers for a team."
+      settling={trackers.loading}
+      trouble={trackers.trouble}
+      error={trackers.error}
     >
-      <Rows feed={trackers} empty="No tracker is available on this server.">
+      <Group>
+      <Rows feed={trackers} icon={Ticket} empty="Nothing to read from"
+        note="Connect a git host and its issues and pull requests appear here.">
         {rows.map((t) => (
           <Tracker key={t.id} t={t} live={live} />
         ))}
       </Rows>
+      </Group>
     </Section>
   );
 }
@@ -83,43 +89,40 @@ function Tracker({ t, live }: { t: TrackerStatus; live: boolean }) {
   const named = (scopes.data ?? []) as { name?: string; id?: string }[];
 
   return (
-    <div className="flex flex-wrap items-center gap-2.5 px-3.5 py-2.5">
-      <span className="min-w-0 flex-1">
-        <span className="flex items-center gap-2 text-ui text-bone">
-          {t.kind === "linear" ? (
-            <LinearMark size={12} className="shrink-0 text-mute" />
-          ) : (
-            <HostMark kind={t.kind} size={12} className="shrink-0 text-mute" />
-          )}
-          {t.label}
-        </span>
-        <span className="block text-micro text-mute">
-          {says(t)}
+    <div className="r flex-wrap">
+      <span className="g">
+        {t.kind === "linear" ? <LinearMark size={16} /> : <HostMark kind={t.kind} size={16} />}
+      </span>
+      <span className="tx">
+        <b>{t.label}</b>
+        <s>
+          {t.host} · {says(t)}
           {t.connected && named.length > 0 && ` · ${named.length} ${t.scopeKind}`}
           {account && ` · as ${account}`}
-        </span>
+        </s>
       </span>
       {t.connected ? (
         <>
-          <span className="flex items-center gap-1.5 text-meta text-sage"><Icon of={Check} size={12} />connected</span>
+          <span className="said">connected</span>
+          <span className="st" data-s="ok" />
           {/* An API key is frequently the organisation's — one Linear workspace
               key a team shares, rather than five people pasting the same
               string. A git host's is not: its token pushes commits, and a
               commit has to be attributable to a person, so the server hands
               back no handle for one and nothing is drawn here. */}
           {t.secret && <WhoCanAccess look="chip" kind="secret" id={t.secret} path={t.path} />}
-          {t.auth === "apiKey" && <button disabled={!live} onClick={() => disconnect.mutate({ id: t.id }, { onSuccess: refresh })} className="control text-mute hover:text-brick"><Icon of={Unlink} size={12} /></button>}
+          {t.auth === "apiKey" && <IconButton of={Unlink} disabled={!live} label="Forget the key" onClick={() => disconnect.mutate({ id: t.id }, { onSuccess: refresh })} className="hov hover:text-brick" />}
         </>
       ) : t.auth === "gitProvider" ? (
         /* Not "above" any more — the hosts are their own pane, and a row that
            points at a place on this screen that is no longer here is worse
            than one that names where to go. */
-        <span className="text-meta text-mute">connects under Git hosts</span>
+        <span className="said">connects under Git hosts</span>
       ) : (
         <div className="flex items-center gap-1.5">
-          <input value={key} onChange={(e) => setKey(e.target.value)} type="password" placeholder="API key" className="w-44 rounded-md border border-line bg-ground px-2 py-1 font-mono text-micro text-bone focus:outline-none" />
+          <input value={key} onChange={(e) => setKey(e.target.value)} type="password" placeholder="API key" aria-label={`API key for ${t.label}`} className="w-44 rounded-lg bg-raise px-3 py-1.5 font-mono text-meta text-bone focus:outline-none" />
           {t.keyUrl && <a href={t.keyUrl} target="_blank" rel="noreferrer" className="text-micro text-mute underline">get one</a>}
-          <button disabled={!key.trim() || !live || set.isPending} onClick={() => set.mutate({ id: t.id, data: { key: key.trim() } }, { onSuccess: (c) => { setAccount(c.account); setKey(""); refresh(); } })} className="control border border-line bg-raise text-bone hover:bg-overlay disabled:text-mute">{set.isPending ? "Checking…" : "Connect"}</button>
+          <button disabled={!key.trim() || !live || set.isPending} onClick={() => set.mutate({ id: t.id, data: { key: key.trim() } }, { onSuccess: (c) => { setAccount(c.account); setKey(""); refresh(); } })} className="btn plain">{set.isPending ? "Checking…" : "Connect"}</button>
           {set.error && <span className="text-meta text-brick">{why(set.error)}</span>}
         </div>
       )}

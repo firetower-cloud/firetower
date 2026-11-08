@@ -21,8 +21,9 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, GitBranch, Loader2, Plus, Search } from "lucide-react";
+import { ArrowLeft, FolderGit2, GitBranch, Loader2, Plus, Search } from "lucide-react";
 import { HostMark } from "~/components/ui";
+import { Note, Typed } from "~/ui/config/bits";
 import type { Checkout, CheckoutWork, Session } from "~/api/generated/model";
 import {
   addRepo,
@@ -34,6 +35,7 @@ import {
 import { beginCheckout, howItIsDoing, markCheckout } from "~/api/checkouts";
 import { useHostOf, useRepos, why } from "~/data";
 import { openExternal } from "~/open";
+import { navigate } from "~/shims/next-navigation";
 
 export function Repositories({
   session,
@@ -146,7 +148,7 @@ export function Repositories({
          picks the window up and moves it. `src/drag.ts` lets controls through
          by looking for one under the pointer, which a paragraph is not. */
       onMouseDown={(e) => e.stopPropagation()}
-      className="absolute top-full left-0 z-40 mt-1.5 w-[24rem] overflow-hidden rounded-xl border border-line bg-overlay shadow-(--shadow-float)"
+      className="absolute top-full left-0 z-40 mt-1.5 w-[24rem] overflow-hidden rounded-xl border border-line lift shadow-(--shadow-float)"
     >
       <div className="flex items-center gap-2 px-3.5 pt-3 pb-2">
         {picking && checkouts.length > 0 && (
@@ -192,15 +194,45 @@ export function Repositories({
           </div>
 
           <ul className="scroll-slim max-h-64 overflow-y-auto py-1">
+            {/* **Three meanings, drawn as three notes.** They were one ternary
+                at `text-meta text-mute`, and the first of them named a place
+                — "Configuration → Repositories" — rather than going there. A
+                note's one control is the thing that undoes what caused it:
+                the way out when nothing is connected, `Clear` when a typed
+                string is, and nothing at all when the answer is simply that
+                everything is already here. */}
             {offered.length === 0 && (
-              <li className="px-3.5 py-3 text-meta text-mute">
-                {repos.loading
-                  ? "Reading your repositories…"
-                  : repos.data.length === 0
-                    ? "Nothing is connected yet. Configuration → Repositories."
-                    : needle
-                      ? "No repository matches."
-                      : "Everything connected is already in this workspace."}
+              <li className="px-3.5">
+                {repos.loading ? (
+                  <Note icon={FolderGit2}>Reading your repositories…</Note>
+                ) : repos.data.length === 0 ? (
+                  <Note
+                    icon={FolderGit2}
+                    control={
+                      <button
+                        onClick={() => navigate("/configuration/repositories")}
+                        className="btn quiet"
+                      >
+                        Open Repositories
+                      </button>
+                    }
+                  >
+                    No repository is connected yet.
+                  </Note>
+                ) : needle ? (
+                  <Note
+                    icon={Search}
+                    control={
+                      <button onClick={() => setWanted("")} className="btn quiet">
+                        Clear
+                      </button>
+                    }
+                  >
+                    No repository matches <Typed>{wanted.trim()}</Typed>.
+                  </Note>
+                ) : (
+                  <Note icon={FolderGit2}>Everything connected is already in this workspace.</Note>
+                )}
               </li>
             )}
             {offered.map((r) => {

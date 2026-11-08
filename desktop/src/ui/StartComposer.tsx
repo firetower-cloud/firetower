@@ -1,41 +1,54 @@
 /**
- * Starting work, as a page rather than a sheet.
+ * Starting work, docked at the foot of the Dashboard.
  *
- * The input is the hero: say what you want and start, the way a conversation
- * begins anywhere else. The four decisions a workspace is — who it is, what it
- * touches, what runs it, where — sit beneath it as quiet dropdowns, set only
- * when the default is not what you want.
+ * It was a page of its own at `/new`, with a "Good afternoon" over it and the
+ * workspace list somewhere else entirely — so starting something meant leaving
+ * the screen that told you whether you should. It is one screen now: this
+ * frames the Dashboard and carries the composer, and `/new` lands here.
  *
- * Unlike the old sheet, this one **does** send the prompt: what you type is the
- * first message, delivered once the workspace is set up. Leave it empty and the
- * agent comes up idle, as it always did — you just chat in the composer then.
+ * **The shelf is the two things a workspace *is*** — the repository and the
+ * machine — on their own plane above the input, because on this screen those
+ * choices are *unmade* and making them is the act of starting work. The footer
+ * carries who does it and how. Inside a workspace all of that is settled, so
+ * the composer there has no shelf; that is `Composer.tsx` and it stays as it
+ * is.
  *
- * The data hooks, the fields and the `NewSession` payload are shared with the
- * rest of the client; only the shape on screen is this page's own.
+ * **It takes the whole screen's drops.** The surface is this wrapper rather
+ * than the scroller inside it — the overlay is positioned against it, and an
+ * overlay inside a scroller slides off the top as soon as the page is
+ * scrolled. The Dashboard's own content is `children`, which is what lets one
+ * drop handler cover both.
+ *
+ * What you type **is** the first message, delivered once the workspace is set
+ * up. Leave it empty and the agent comes up idle. The data hooks, the fields
+ * and the `NewSession` payload are shared with the rest of the client; only
+ * the shape on screen is this one's own.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowUp,
   Check,
   ChevronDown,
+  CircleAlert,
   Diamond,
+  ExternalLink,
   FolderGit2,
+  GitBranch,
   Paperclip,
   Plus,
   Search,
   Server,
+  ServerOff,
   UserRound,
   X,
 } from "lucide-react";
 import { Icon } from "~/components/ui";
-import { FiretowerMark } from "~/components/ui/Brand";
 import { AgentMark } from "~/components/AgentMark";
 import { RunPicker } from "~/ui/RunPicker";
 import { Mic } from "~/ui/voice/Mic";
 import { VoiceDialog } from "~/ui/voice/Dialogs";
 import { useVoice } from "~/ui/voice/useVoice";
 import { useAgentControls } from "~/api/generated/agents/agents";
-import { useMe } from "~/api/generated/auth/auth";
 import { Pop } from "~/ui/Pop";
 import { Readout, isReady } from "~/components/HostReadiness";
 import { useHostReadiness } from "~/api/generated/hosts/hosts";
@@ -46,13 +59,14 @@ import { canRun, NoMachine, resolve, type Where } from "~/components/WhereItRuns
 import { usable } from "~/api/accounts";
 import { useAccounts, useAgents, useHosts, useRepos, useSkills } from "~/data";
 import { ConnectAccount } from "~/ui/config/ConnectAccount";
-import { navigate } from "~/shims/next-navigation";
+import { navigate, usePathname } from "~/shims/next-navigation";
 import { leaveDraft } from "~/workspace/draft";
 import { post, whichServer } from "~/workspace/outbox";
 import { base64, chipFor, Chips, Dropping, sift, type Chip } from "~/ui/attach";
 import { folderRefusals, useFileDrop } from "~/ui/drop";
+import { openExternal } from "~/open";
 import { isMac } from "~/platform";
-import { consumeSeed } from "~/start";
+import { dropSeed, seedWaiting, type Seed } from "~/start";
 import type { Agent, Control, ControlKind, Role } from "~/api/generated/model";
 
 type Checkout = { id: string; slug: string };
@@ -77,19 +91,122 @@ const recall = (key: string) => {
   }
 };
 
-const slug = (s: string) =>
-  s.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48);
+/* The whole of it, uncapped. The length cap belongs to `fewWords`, which is
+   the only thing that knows where a word ends — it used to be a `.slice(0, 48)`
+   here, and the two of them in sequence left the mid-word cut this was written
+   to remove. */
+const slug = (s: string) => s.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
-/** "Good morning/afternoon/evening", by the clock on this machine. */
-function timeOfDay(): string {
-  const h = new Date().getHours();
-  return h < 12 ? "morning" : h < 18 ? "afternoon" : "evening";
+/**
+ * A few words of a title, cut on a word boundary.
+ *
+ * *Quota meter goes amber too early on the free plan* becomes
+ * `quota-meter-goes-amber` — enough to recognise in `git branch` and not a
+ * sentence. Cut between words, never mid-word, because a branch ending in
+ * `…-ea` reads as a typo.
+ *
+ * And never left ending on an article or a preposition. *Quota meter rounds
+ * the wrong way* cut at twenty-four is `quota-meter-rounds-the`, which reads
+ * as a sentence that was interrupted; dropping a trailing word of three
+ * letters or fewer gives `quota-meter-rounds`, which reads as a name.
+ */
+const fewWords = (s: string, within = 24) => {
+  const full = slug(s);
+  if (full.length <= within) return full;
+  const cut = full.slice(0, within + 1);
+  const at = cut.lastIndexOf("-");
+  const kept = at > 0 ? cut.slice(0, at) : full.slice(0, within);
+  const parts = kept.split("-");
+  return parts.length > 1 && parts[parts.length - 1].length <= 3
+    ? parts.slice(0, -1).join("-")
+    : kept;
+};
+
+/**
+ * The branch a workspace will be cut on — shown in the composer's footer
+ * before you commit to it, rather than discovered afterwards.
+ *
+ * **With a task key, the key leads**: `agent/nw-4120-quota-meter-goes-amber`.
+ * It is stable, short, greppable and survives the title being edited; a few
+ * words of the title follow because a branch list of bare keys tells you
+ * nothing about what any of them was.
+ *
+ * Without one, this is what it has always been — the first line, slugged.
+ * A task with a URL and no key falls back to exactly that.
+ */
+export function branchFor(first: string, taskKey?: string | null): string {
+  const key = taskKey ? slug(taskKey) : "";
+  /* **The no-key branch keeps its length and gains the word boundary.**
+     `slug` caps at 48 with a bare `slice`, so a long title has always cut
+     mid-word — `…-on-the-free-pla`. That is the defect `fewWords` exists to
+     prevent, and it was live on every branch this build cuts. Same rule, one
+     function, and nothing gets shorter than it was. */
+  const stem = key ? [key, fewWords(first)].filter(Boolean).join("-") : fewWords(first, 48);
+  return `agent/${stem || "work"}`;
 }
 
-export function NewPage() {
-  const seed = useMemo(() => consumeSeed(), []);
-  const me = useMe().data?.user;
-  const who = me?.slug ? me.slug.charAt(0).toUpperCase() + me.slug.slice(1) : me?.username;
+/**
+ * What the composer opens with, from whatever the launch already knew.
+ *
+ * **A task prefills it.** This was the premise that needed correcting: the
+ * composer was never prefilled — `useState(seed?.prompt ?? "")`, and a task's
+ * Start sets `title`, `repo`, `issue`, `taskKey` and `taskUrl` and never
+ * `prompt`. The title and URL did reach the agent, as a draft handed over
+ * *after* the session started, so nobody saw them before pressing send and
+ * the page you landed on was blank — indistinguishable from *Start did
+ * nothing*.
+ *
+ * The URL is on its own line under the title because that is what the agent
+ * needs to go and read the thing, and because it is the one part nobody wants
+ * to retype.
+ */
+/**
+ * What the page says when you arrived carrying a task.
+ *
+ * The greeting is stateless by design, and arriving from a task makes the
+ * loudest thing on the screen contradict the arrival. This names the thing —
+ * and **deliberately does not repeat the title**, which is three inches below
+ * it in the composer.
+ *
+ * A URL with no key is the state no fixture has: a tracker that does not give
+ * its issues short names. *Start this task* is as specific as the launch can
+ * honestly be, and it is still about the thing you came here for.
+ */
+export function taskHeadline(seed?: Seed): string {
+  return seed?.taskKey ? `Start ${seed.taskKey}` : "Start this task";
+}
+
+export function seeded(seed?: Seed): string {
+  if (seed?.prompt) return seed.prompt;
+  if (!seed?.taskKey && !seed?.taskUrl) return "";
+  return [seed.title, seed.taskUrl].filter(Boolean).join("\n");
+}
+
+export function StartComposer({
+  mid,
+  above,
+  bare,
+  children,
+}: {
+  /**
+   * The composer sits **in the middle of the page** rather than docked to its
+   * foot — the home's arrangement, where a greeting is above it and what is
+   * waiting is below. Same composer either way; only the frame moves.
+   */
+  mid?: boolean;
+  /** What goes above it. On the home, the greeting. */
+  above?: React.ReactNode;
+  /** Nothing waiting and nothing published: first run, centred. */
+  bare?: boolean;
+  children: React.ReactNode;
+}) {
+  /* **Read without taking, and dropped when this goes away.** The read is
+     idempotent because it happens twice for one press — `StrictMode`
+     double-invokes the factory — and because a remount between the navigation
+     and the first paint would otherwise hand the seed to the instance that is
+     discarded. `start.tsx` has the measurement. */
+  const seed = useMemo(() => seedWaiting(), []);
+  useEffect(() => (seed ? () => dropSeed(seed) : undefined), [seed]);
 
   const { data: repos } = useRepos();
   const { data: allSkills } = useSkills();
@@ -99,7 +216,9 @@ export function NewPage() {
   const profiles = useListRoles().data ?? [];
   const create = useCreateSession();
 
-  const [prompt, setPrompt] = useState(seed?.prompt ?? "");
+  const [prompt, setPrompt] = useState(() => seeded(seed));
+  /** Arrived from a task's *Start*, carrying what it was. */
+  const task = !!(seed?.taskKey || seed?.taskUrl);
   const [checkouts, setCheckouts] = useState<Checkout[]>([]);
   const [where, setWhere] = useState<Where>(() => ({
     machine: "",
@@ -192,16 +311,29 @@ export function NewPage() {
   /** A picture still being read. The message is not complete without it. */
   const busy = chips.some((c) => c.pending);
 
-  // Arriving from "Create with AI", the composer is already half-written — put
-  // the cursor after it and grow the box, so the person just keeps typing.
+  /* Arriving from "Create with AI", the composer is already half-written — put
+     the cursor after it and grow the box, so the person just keeps typing.
+
+     And arriving by ⌘N, the box takes focus empty: the gesture means "I want
+     to say something", and landing on a screen with the cursor somewhere else
+     makes somebody click before they can type. Not on an ordinary visit to
+     the Dashboard, where the thing to read is the question an agent asked,
+     not the box.
+
+     **From a task, the cursor lands at the end of the first line** rather
+     than at the end of the text. The last line is the issue URL, which is the
+     one part nobody is going to edit; the title is the part you might. */
+  const asked = usePathname().startsWith("/new");
   useEffect(() => {
     const el = box.current;
-    if (!el || !seed?.prompt) return;
+    if (!el || (!seed?.prompt && !task && !asked)) return;
     el.focus();
-    el.setSelectionRange(el.value.length, el.value.length);
+    const at = task && !seed?.prompt ? el.value.indexOf("\n") : -1;
+    const caret = at < 0 ? el.value.length : at;
+    el.setSelectionRange(caret, caret);
     el.style.height = "auto";
     el.style.height = Math.min(el.scrollHeight, 240) + "px";
-  }, [seed?.prompt]);
+  }, [seed?.prompt, task, asked]);
 
   /* A task seeds the repository once the server has mapped its slug to an id. */
   useEffect(() => {
@@ -298,14 +430,19 @@ export function NewPage() {
     };
   }, []);
 
+  /* **What this will be, computed in render rather than in `go`.** The branch
+     is drawn in the footer before it is cut, and a branch shown on screen and
+     a branch sent to the server that are computed in two places are two
+     branches within a release. */
+  const first = prompt.split("\n")[0].trim();
+  const name = (seed?.title || first || checkouts[0]?.slug || "Workspace").slice(0, 80);
+  const branch = checkouts.length ? branchFor(first || name, seed?.taskKey) : undefined;
+
   const go = () => {
     if (!ready || !kind || !account) return;
     // What was actually used, so the next New page opens on it.
     remember(LAST_AGENT, kind);
     remember(LAST_ACCOUNT, account.id);
-    const first = prompt.split("\n")[0].trim();
-    const name = (seed?.title || first || checkouts[0]?.slug || "Workspace").slice(0, 80);
-    const branch = checkouts.length ? `agent/${slug(first || name) || "work"}` : undefined;
 
     /* With something attached the prompt cannot ride along with the launch.
        `NewSession` carries text and nothing else, and the message this has to
@@ -367,13 +504,16 @@ export function NewPage() {
            under a long setup script takes it. A sentence is exactly what that
            handoff is for; the pictures cannot go in it and do not. Written
            before `post`, which takes it out again as soon as the attempt is
-           over, whichever way it went. */
-        const handoff = [
-          attached ? prompt.trim() : "",
-          seed?.taskUrl ? `${seed.title ?? ""}\n${seed.taskUrl}`.trim() : "",
-        ]
-          .filter(Boolean)
-          .join("\n\n");
+           over, whichever way it went.
+
+           **The task's own line is not added here any more.** It used to be:
+           the composer was never prefilled, so the title and the URL were
+           handed over as a draft after the session started. They are in the
+           prompt now, which means adding them here would hand the agent the
+           same two lines twice — once as what was asked and once as a draft
+           underneath it. Seeding the composer and this line are the same fact
+           said in two places, and only one of them is visible before send. */
+        const handoff = attached ? prompt.trim() : "";
         if (handoff) leaveDraft(s.id, handoff);
         /* The session's id, not the workspace's: a turn and an attachment are
            both addressed to the agent running in it. The workspace's too,
@@ -404,186 +544,307 @@ export function NewPage() {
     /* The surface is this wrapper rather than the scroller inside it: the
        overlay is positioned against it, and an overlay inside a scroller
        slides off the top as soon as the page is scrolled. */
-    <div className="relative flex min-w-0 flex-1 flex-col" {...surface}>
+    <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden" {...surface}>
       {over && <Dropping />}
-      <div className="flex min-h-0 flex-1 flex-col overflow-auto">
-      <div className="m-auto w-full max-w-[680px] px-7 py-10">
-        <h1 className="mb-8 flex items-center justify-center gap-2.5 text-[1.6rem] font-normal leading-snug tracking-[-0.02em] text-bone/90">
-          <FiretowerMark size={28} className="text-bone" />
-          Good {timeOfDay()}{who ? `, ${who}` : ""}
-        </h1>
+      {!mid && children}
 
-        {/* What was not taken — too big, too many, a folder — on the line the
-            conversation's composer uses for the same sentences. */}
-        {refused && (
-          <div className="mb-2 flex items-center gap-2 text-meta text-brick">
-            <X className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />
-            {refused}
-          </div>
-        )}
+      <div className={mid ? "home" : "dock"}>
+        <div className={mid ? "hcol" : "wrap"} data-bare={mid && bare ? "true" : undefined}>
+          {/* **What the page says, when you arrived carrying something.** The
+              greeting is stateless by design, and arriving from a task makes
+              the loudest thing on the screen contradict the arrival. It names
+              the task instead, and deliberately does not repeat the title —
+              which is three inches below it, in the composer. */}
+          {mid && (
+            <div className="air">
+              {task ? (
+                <>
+                  <h1>{taskHeadline(seed)}</h1>
+                  <p className="hsub">
+                    {seed?.repo
+                      ? "Edit anything below, then send it."
+                      : "This task names no repository, so there is nothing to check out yet."}
+                  </p>
+                </>
+              ) : (
+                above
+              )}
+            </div>
+          )}
+          <div className={mid ? "mid" : "contents"}>
+          {/* What was not taken — too big, too many, a folder — in the words
+              the conversation's composer uses for the same refusals. */}
+          {refused && (
+            <p className="mx-2.5 mb-2 flex items-center gap-2 text-meta text-brick">
+              <X className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />
+              {refused}
+            </p>
+          )}
 
-        {/* composer */}
-        <div className="group rounded-2xl border border-line bg-raise/40 px-5 py-4 transition-colors focus-within:border-slate-deep/80 focus-within:bg-raise/60">
-          {/* The card pads itself here, so the row does not. */}
-          <Chips chips={chips} onDrop={unattach} className="pb-3" />
-          <textarea
-            ref={box}
-            value={prompt}
-            onChange={(e) => {
-              setPrompt(e.target.value);
-              voice.typed(e.target.value);
-              const el = e.target;
-              el.style.height = "auto";
-              el.style.height = Math.min(el.scrollHeight, 240) + "px";
-            }}
-            onKeyDown={(e) => {
-              if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
-              // Enter sends; a modifier makes a newline. Cmd/Ctrl+Enter is the
-              // one asked for; Shift+Enter keeps its native newline so it never
-              // sends by surprise.
-              if (e.shiftKey) return;
-              if (e.metaKey || e.ctrlKey) {
-                e.preventDefault();
-                const el = e.currentTarget;
-                const at = el.selectionStart ?? prompt.length;
-                const end = el.selectionEnd ?? at;
-                const next = prompt.slice(0, at) + "\n" + prompt.slice(end);
-                setPrompt(next);
-                voice.typed(next);
-                requestAnimationFrame(() => {
-                  el.selectionStart = el.selectionEnd = at + 1;
-                  el.style.height = "auto";
-                  el.style.height = Math.min(el.scrollHeight, 240) + "px";
-                });
-                return;
-              }
-              e.preventDefault();
-              go();
-            }}
-            onPaste={(e) => {
-              // A screenshot straight off the clipboard, as the conversation
-              // takes one. Text pastes are left entirely alone.
-              if (e.clipboardData.files.length) void take(e.clipboardData.files);
-            }}
-            placeholder="Describe the task, or start empty and say what you want in the conversation."
-            rows={2}
-            className="scroll-slim w-full resize-none bg-transparent text-read leading-relaxed text-bone placeholder:text-mute/80 focus:outline-none"
-          />
-          <div className="mt-2.5 flex items-center gap-1.5">
-            <label className="control shrink-0 cursor-pointer text-mute hover:bg-raise hover:text-bone" title="Attach a file or an image">
-              <Paperclip className="h-4 w-4" strokeWidth={1.75} />
-              <input type="file" multiple className="hidden" onChange={(e) => void take(e.target.files)} />
-            </label>
-            {voice.possible && <Mic state={voice.state} onStart={voice.start} onStop={voice.stop} />}
-            {allSkills.length > 0 && (
+          {/* Only a blocker that needs *you* surfaces here. Readiness lives in
+              the machine chip's menu, where the machine is.
+
+              **One notice at a time, and the machine comes first.** An agent
+              account cannot be checked without a machine to check it on —
+              `hostReady` depends on `host` — so drawing both would report a
+              fact nobody can yet know above the one thing that is actually
+              stopping you. */}
+          {all.length === 0 ? (
+            /* **Amber, not ember.** Ember means an agent is waiting on you,
+                and this is not that: it is a thing *you* have not done yet.
+                `--color-amber-soft` for a mark on the page is the token's own
+                stated job. The glyph is what makes it more than a hue. */
+            <div className="mx-2.5 mb-2 flex items-center gap-3 rounded-xl border border-amber-deep bg-amber-tint px-3 py-2">
+              <span className="grid shrink-0 place-items-center text-amber-soft">
+                <Icon of={ServerOff} size={14} />
+              </span>
+              <span className="min-w-0 flex-1 text-meta text-bone">No machine to run on yet.</span>
               <button
-                onClick={(e) => toggle("skills", e.currentTarget)}
-                title="Which skills this agent reads"
-                className="control shrink-0 gap-1.5 text-mute hover:bg-raise hover:text-bone"
+                onClick={() => navigate("/configuration/machines/add")}
+                className="control h-7 border border-line bg-panel text-meta text-bone hover:bg-raise"
               >
-                <Diamond className="h-3.5 w-3.5" strokeWidth={1.75} />
-                <span className="tabular-nums">{selectedSkills.length}</span>
-                <span>{selectedSkills.length === 1 ? "skill" : "skills"}</span>
+                <Icon of={Plus} size={12} />
+                Add a machine
+              </button>
+            </div>
+          ) : host && kind && mine.length === 0 ? (
+            <div className="mx-2.5 mb-2 flex items-center gap-3 rounded-xl border border-amber-deep bg-amber-tint px-3 py-2">
+              <span className="min-w-0 flex-1 text-meta text-bone">
+                No {agents.find((a) => a.kind === kind)?.label ?? kind} account connected.
+              </span>
+              <button
+                onClick={() => setConnecting(true)}
+                className="control h-7 border border-line bg-panel text-meta text-bone hover:bg-raise"
+              >
+                <Icon of={Plus} size={12} />
+                Connect an account
+              </button>
+            </div>
+          ) : null}
+          {create.isError && (
+            <p className="mx-2.5 mb-2 rounded-xl border border-brick-deep bg-brick-tint px-3 py-2 text-meta text-brick">
+              {(create.error as { code?: string })?.code === "NoCapacity"
+                ? "No host is available to take this."
+                : ((create.error as { message?: string })?.message ?? "Couldn't start it.")}
+            </p>
+          )}
+
+          {/* The shelf: what the workspace will be made of. */}
+          <div className="shelf">
+            {/* **Given, not chosen — and first, because it is why you are
+                here.** `taskKey` and `taskUrl` are parameters of the workspace
+                exactly as the repository and the machine are, and they travel
+                into `NewSession` beside them. It wears a link-out glyph and
+                **no chevron**: the other two are pickers, this one arrived
+                with you and cannot be changed here. The missing chevron is the
+                statement — the drawing makes the same point by dropping the
+                ring these chips carry there, which has no analogue here
+                because ours carry none. */}
+            {task && (
+              <button
+                onClick={() => seed?.taskUrl && void openExternal(seed.taskUrl)}
+                disabled={!seed?.taskUrl}
+                data-set="true"
+                data-given="true"
+                className="chip"
+                title={seed?.taskUrl ? `${seed.taskKey ?? "The task"} — opens the tracker` : (seed?.taskKey ?? "The task")}
+              >
+                <span className="grid place-items-center text-mute">
+                  <Icon of={CircleAlert} size={14} />
+                </span>
+                <span className="lbl">{seed?.taskKey ?? seed?.issue ?? "The task"}</span>
+                {seed?.taskUrl && <Icon of={ExternalLink} size={12} className="text-mute" />}
               </button>
             )}
-            {kind && (
-              <RunPicker
-                agent={kind}
-                agentLabel={agents.find((a) => a.kind === kind)?.label}
-                agents={agents.filter((a) => a.supported).map((a) => ({ kind: a.kind, label: a.label }))}
-                accounts={mine.map((a) => ({ id: a.id, name: a.name, isDefault: a.isDefault }))}
-                accountId={account?.id ?? ""}
-                agentLocked={!!pinned}
-                controls={controls}
-                valueOf={valueOf}
-                onPickAgent={(k) => setWhere({ ...where, agent: k })}
-                onPickAccount={(id) => setAccountId(id)}
-                onPickControl={(k, v) => setChosen((p) => ({ ...p, [k]: v }))}
-              />
-            )}
             <button
-              onClick={go}
-              disabled={!ready}
-              title={busy ? "Waiting for the images" : "Start the workspace"}
-              className="ml-auto grid h-8 w-8 place-items-center rounded-full bg-bone text-ground transition-opacity duration-150 hover:opacity-90 disabled:bg-overlay disabled:text-mute"
+              onClick={(e) => toggle("repo", e.currentTarget)}
+              data-set={checkouts.length > 0}
+              data-which="repo"
+              className="chip"
+              title="Which repositories this workspace checks out"
             >
-              <ArrowUp className="h-4 w-4" strokeWidth={2.5} />
+              <span className="grid place-items-center text-mute">
+                <Icon of={FolderGit2} size={14} />
+              </span>
+              <span className="lbl">
+                {checkouts.length === 0
+                  ? "Add a repository"
+                  : checkouts.length === 1
+                    ? checkouts[0].slug
+                    : `${checkouts.length} repositories`}
+              </span>
+              <Icon of={ChevronDown} size={12} className="text-mute" />
             </button>
-          </div>
-        </div>
-
-        {/* the four decisions */}
-        <div className="mt-3 flex items-center gap-0.5">
-          {/* Profile */}
-          <Pill
-            icon={
-              pinned ? (
-                <AgentMark agent={pinned} size={15} />
-              ) : profile ? (
-                <UserRound className="h-[15px] w-[15px]" strokeWidth={1.8} />
-              ) : (
-                <UserRound className="h-[15px] w-[15px]" strokeWidth={1.8} />
-              )
-            }
-            label={profile ? profile.name : "Just an agent"}
-            set={!!profile}
-            onClick={(e) => toggle("profile", e)}
-          />
-          {/* Repository */}
-          <Pill
-            icon={<FolderGit2 className="h-[15px] w-[15px]" strokeWidth={1.8} />}
-            label={
-              checkouts.length === 0
-                ? "Add a repository"
-                : checkouts.length === 1
-                  ? checkouts[0].slug
-                  : `${checkouts.length} repositories`
-            }
-            set={checkouts.length > 0}
-            onClick={(e) => toggle("repo", e)}
-          />
-          {/* Where it runs — pushed to the far right, apart from the rest */}
-          <span className="flex-1" />
-          <Pill
-            icon={<Server className="h-[15px] w-[15px]" strokeWidth={1.8} />}
-            label={machine ? machineLabel(machine) : "Where it runs"}
-            set={!!where.machine}
-            after={
-              host && kind ? (
+            <button
+              onClick={(e) => toggle("machine", e.currentTarget)}
+              data-set={!!where.machine}
+              data-which="machine"
+              className="chip"
+              title={machine ? "Where it runs" : "No machine to run on"}
+            >
+              {/* **No hue on the chip, and a different glyph instead.** One
+                  coloured object for one fact — the notice above — and the
+                  chip agrees with it by *shape*. That is "never hue alone"
+                  honoured in both directions at once. It read "Where it runs"
+                  in `--color-dim`, which is indistinguishable from "Add a
+                  repository" beside it. */}
+              <span className="grid place-items-center text-mute">
+                <Icon of={machine ? Server : ServerOff} size={14} />
+              </span>
+              {/* The whole name on the label, because the label is the part
+                  that gets cut — the button keeps saying what it *does*, so
+                  hovering the chevron still explains the control and hovering
+                  the name reads it back in full. */}
+              <span className="lbl" title={machine ? machineLabel(machine) : undefined}>
+                {machine ? machineLabel(machine) : "No machine"}
+              </span>
+              {host && kind && (
                 <span
-                  className={`h-1.5 w-1.5 rounded-full ${hostReady ? "bg-sage" : "bg-kind-data"}`}
+                  className={`h-[5px] w-[5px] shrink-0 rounded-full ${hostReady ? "bg-sage" : "bg-amber-soft"}`}
                   title={hostReady ? "Ready" : "Needs setup — open to see"}
                 />
-              ) : undefined
-            }
-            onClick={(e) => toggle("machine", e)}
-          />
-        </div>
-
-        {/* Readiness lives in the machine dropdown now; only a blocker that
-            needs you — no account to run on — surfaces here. */}
-        {host && kind && mine.length === 0 && (
-          <div className="mt-2 flex items-center gap-3 rounded-lg border border-line bg-panel px-3 py-2">
-            <span className="min-w-0 flex-1 text-meta text-kind-data">
-              No {agents.find((a) => a.kind === kind)?.label ?? kind} account connected.
-            </span>
-            <button
-              onClick={() => setConnecting(true)}
-              className="control h-7 border border-line bg-raise text-meta text-bone hover:bg-overlay"
-            >
-              <Icon of={Plus} size={12} />
-              Connect an account
+              )}
+              <Icon of={ChevronDown} size={12} className="text-mute" />
             </button>
           </div>
-        )}
-        {create.isError && (
-          <p className="mt-2 rounded-lg border border-brick-deep bg-brick-tint px-3 py-2 font-mono text-meta text-brick">
-            {(create.error as { code?: string })?.code === "NoCapacity"
-              ? "No host is available to take this."
-              : ((create.error as { message?: string })?.message ?? "Couldn't start it.")}
-          </p>
-        )}
-      </div>
+
+          <div className="composer">
+            <Chips chips={chips} onDrop={unattach} className="pb-3" />
+            <textarea
+              ref={box}
+              value={prompt}
+              onChange={(e) => {
+                setPrompt(e.target.value);
+                voice.typed(e.target.value);
+                const el = e.target;
+                el.style.height = "auto";
+                el.style.height = Math.min(el.scrollHeight, 240) + "px";
+              }}
+              onKeyDown={(e) => {
+                if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
+                // Enter sends; a modifier makes a newline. Cmd/Ctrl+Enter is the
+                // one asked for; Shift+Enter keeps its native newline so it never
+                // sends by surprise.
+                if (e.shiftKey) return;
+                if (e.metaKey || e.ctrlKey) {
+                  e.preventDefault();
+                  const el = e.currentTarget;
+                  const at = el.selectionStart ?? prompt.length;
+                  const end = el.selectionEnd ?? at;
+                  const next = prompt.slice(0, at) + "\n" + prompt.slice(end);
+                  setPrompt(next);
+                  voice.typed(next);
+                  requestAnimationFrame(() => {
+                    el.selectionStart = el.selectionEnd = at + 1;
+                    el.style.height = "auto";
+                    el.style.height = Math.min(el.scrollHeight, 240) + "px";
+                  });
+                  return;
+                }
+                e.preventDefault();
+                go();
+              }}
+              onPaste={(e) => {
+                // A screenshot straight off the clipboard, as the conversation
+                // takes one. Text pastes are left entirely alone.
+                if (e.clipboardData.files.length) void take(e.clipboardData.files);
+              }}
+              placeholder="Start something new…"
+              rows={1}
+              className="in scroll-slim resize-none bg-transparent placeholder:text-mute focus:outline-none"
+            />
+
+            {/* The footer: who does the work, and how. */}
+            <div className="bar">
+              <label className="chip cursor-pointer" title="Attach a file or an image">
+                <Paperclip className="h-4 w-4" strokeWidth={1.75} />
+                <input type="file" multiple className="hidden" onChange={(e) => void take(e.target.files)} />
+              </label>
+
+              {/* **No skills chip here.** The drawing has one in a workspace
+                  and not on the Dashboard, and the reason holds: starting
+                  something, the profile decides what it reads, and a count of
+                  skills is a number about a decision you have not made yet.
+                  Replying, you can see what it read and change it. */}
+              <button
+                onClick={(e) => toggle("profile", e.currentTarget)}
+                data-set={!!profile}
+                className="chip"
+                title="Which profile the agent wears"
+              >
+                <span className="grid place-items-center text-mute">
+                  {pinned ? <AgentMark agent={pinned} size={15} /> : <UserRound className="h-[15px] w-[15px]" strokeWidth={1.8} />}
+                </span>
+                <span className="lbl">{profile ? profile.name : "Just an agent"}</span>
+                <Icon of={ChevronDown} size={12} className="text-mute" />
+              </button>
+              {kind && (
+                <RunPicker
+                  agent={kind}
+                  agentLabel={agents.find((a) => a.kind === kind)?.label}
+                  agents={agents.filter((a) => a.supported).map((a) => ({ kind: a.kind, label: a.label }))}
+                  accounts={mine.map((a) => ({ id: a.id, name: a.name, isDefault: a.isDefault }))}
+                  accountId={account?.id ?? ""}
+                  agentLocked={!!pinned}
+                  controls={controls}
+                  valueOf={valueOf}
+                  onPickAgent={(k) => setWhere({ ...where, agent: k })}
+                  onPickAccount={(id) => setAccountId(id)}
+                  onPickControl={(k, v) => setChosen((p) => ({ ...p, [k]: v }))}
+                />
+              )}
+              {/* **The branch, before you commit to it rather than after.**
+                  Mono, quiet, and it tracks the first line as you type, so
+                  editing the title is visibly editing the branch. It is drawn
+                  only from a task, because that is the arrival where what is
+                  about to happen is not otherwise on the screen.
+
+                  `margin-left: auto` so it right-aligns whether or not
+                  dictation is available on this machine; the mic keeps its
+                  own, which does nothing once this has taken the slack. */}
+              {task && (
+                <span
+                  className="br"
+                  title={branch ? `The branch this will be cut on` : "Nothing is checked out, so there is no branch to cut"}
+                >
+                  <Icon of={GitBranch} size={12} />
+                  {branch ? <b>{branch}</b> : "no branch — nothing checked out"}
+                </span>
+              )}
+
+              {/* **At the right-hand end**, where the drawing puts it: the
+                  chips on the left are what this run will be, and dictation
+                  is a way of typing — it belongs beside the thing it types
+                  into, not in the middle of the settings. */}
+              {voice.possible && (
+                <span className="ml-auto">
+                  <Mic state={voice.state} onStart={voice.start} onStop={voice.stop} />
+                </span>
+              )}
+              {/* Already disabled, correctly, by `ready`. Its title said
+                  **Start it** either way, which is the one thing it cannot
+                  do. */}
+              <button
+                onClick={go}
+                disabled={!ready}
+                title={
+                  busy
+                    ? "Waiting for the images"
+                    : all.length === 0
+                      ? "Add a machine first"
+                      : "Start it   ⏎"
+                }
+                aria-label={all.length === 0 ? "Add a machine first" : "Start it"}
+                className="send"
+              >
+                <ArrowUp className="h-[17px] w-[17px]" strokeWidth={2.5} />
+              </button>
+            </div>
+          </div>
+          </div>
+          {/* The sections the home puts under the composer. */}
+          {mid && children}
+        </div>
       </div>
 
       {/* ---------- the pill menus ---------- */}
@@ -602,7 +863,7 @@ export function NewPage() {
 
       {open?.which === "repo" && (
         <Pop anchor={open.at} onClose={close} width={340}>
-          <RepoMenu repos={repos} checkouts={checkouts} onToggle={toggleRepo} />
+          <RepoMenu repos={repos} checkouts={checkouts} onToggle={toggleRepo} onClose={close} />
         </Pop>
       )}
 
@@ -772,10 +1033,12 @@ function RepoMenu({
   repos,
   checkouts,
   onToggle,
+  onClose,
 }: {
   repos: { id: string; slug: string; defaultBranch?: string | null }[];
   checkouts: Checkout[];
   onToggle: (r: { id: string; slug: string }) => void;
+  onClose: () => void;
 }) {
   const [q, setQ] = useState("");
   const shown = matching(repos, q);
@@ -805,8 +1068,28 @@ function RepoMenu({
         </div>
       )}
       <Menu>
+        {/* **The shape `NoMachine` uses, because it is the same moment.** A
+            line of grey saying "No repositories connected." states the
+            problem and withholds the remedy, and this is the menu you opened
+            looking for one. It names no host: which provider this install
+            uses is not ours to assume, so it sends you to the page where
+            every one of them is. */}
         {repos.length === 0 && (
-          <p className="px-3 py-2 text-meta text-mute">No repositories connected.</p>
+          <div className="px-3 py-3">
+            <p className="text-ui text-bone">No repository connected</p>
+            <p className="mt-1 max-w-[46ch] text-meta text-dim">
+              Workspaces are cut from a repository you connect. You can start without one.
+            </p>
+            <button
+              onClick={() => {
+                onClose();
+                navigate("/configuration/repositories");
+              }}
+              className="control mt-2.5 border border-line bg-panel text-ui text-bone hover:bg-overlay"
+            >
+              Connect a repository
+            </button>
+          </div>
         )}
         {shown.map((r) => (
           <Opt
@@ -825,6 +1108,24 @@ function RepoMenu({
           </div>
         )}
       </Menu>
+      {/* What ticking another one actually does. Outside the scroller, so it
+          stays put while the list moves under the pointer.
+
+          Not drawn when there is nothing to tick: the block above already
+          says there is no repository, and saying it twice in forty pixels
+          reads as two different facts until you have read both. */}
+      {repos.length > 0 && (
+      <div className="pkfoot">
+        {checkouts.length === 0 ? (
+          "No repository: a bare workspace with no code in it."
+        ) : (
+          <>
+            <b>{checkouts.length} checked out.</b> Each one gets its own copy of the code, cut from its
+            default branch.
+          </>
+        )}
+      </div>
+      )}
     </>
   );
 }
@@ -904,7 +1205,7 @@ function ProfileMenu({
             }
             title={p.name}
             sub={p.does}
-            chip={p.canDelegate ? "manager" : undefined}
+            chip={p.canDelegate ? "can delegate" : undefined}
           />
         ))}
         {query && shown.length === 0 && (
@@ -913,6 +1214,10 @@ function ProfileMenu({
           </div>
         )}
       </Menu>
+      <div className="pkfoot">
+        A profile is a saved way of working — what it is for, what it may do, and who it may hand work
+        to.
+      </div>
     </>
   );
 }
@@ -960,7 +1265,7 @@ function Opt({
         {sub && <span className="block truncate text-micro text-mute">{sub}</span>}
       </span>
       {chip && (
-        <span className="shrink-0 rounded bg-sage-tint px-1.5 py-0.5 text-micro text-sage">{chip}</span>
+        <span className="chip2">{chip}</span>
       )}
       <Check
         className={`h-4 w-4 shrink-0 ${on ? "text-slate" : "text-transparent"}`}

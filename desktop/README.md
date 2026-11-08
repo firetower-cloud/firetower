@@ -1,7 +1,7 @@
 # Firetower for macOS
 
-A native window onto one or more Firetowers. It connects to a control plane
-over the mesh VPN, keeps a token per server, and talks to every server
+A native window onto your Firetowers, one at a time. It connects to a control
+plane over the mesh VPN, keeps a token per server, and talks to every server
 through the same generated client the web application uses.
 
 ## Run it
@@ -12,8 +12,23 @@ pnpm app        # the Mac app (Tauri)
 pnpm dev        # or just the renderer, in a browser tab
 ```
 
-`⌘K` palette · `⌘P` go to a file · `⌘\` inspector · `⌘1`–`⌘3` its tabs ·
-`⌘J` shell · `⌘W` close a tab.
+Both want a control plane to talk to. Without one:
+
+```sh
+pnpm mock       # a stand-in control plane on :4401, in another terminal
+pnpm dev        # then connect the app to http://localhost:4401
+```
+
+The mock answers the handful of reads a workspace makes. It is for looking at
+the client, not for testing it.
+
+`⌘K` palette · `⌘P` go to a file · `⌘1`–`⌘6` the rail's destinations ·
+`⌘,` settings · `⌘\` the panel, or the inspector inside a workspace ·
+`⌃1`–`⌃3` the inspector's tabs · `⌘N` a new workspace · `⌘J` shell ·
+`⌘W` close a tab.
+
+The inspector's tabs are on **Control**, not Command: the rail's six
+destinations took the global number row, and two things cannot have it.
 
 The style guide is in the rail while developing.
 

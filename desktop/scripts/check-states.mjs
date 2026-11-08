@@ -1,0 +1,789 @@
+/**
+ * The states a screenshot cannot see.
+ *
+ * `shoot-app.mjs` photographs what a page looks like at rest. A pseudo-class
+ * is invisible to it — nothing in a static shot tells you what `:hover` does,
+ * and the rail's active destination shipped for two passes with a near-white
+ * glyph on a pale grey box because of that. The cause was a specificity
+ * split: `[data-theme="light"] .rbtn:hover` has three compound parts against
+ * `.rbtn[aria-current="page"]`'s two, so in light the hover won the
+ * *background* and the active rule kept the *colour*. Two rules each winning
+ * half an argument is a state nobody designed.
+ *
+ * So this drives the states rather than drawing them, and asserts the
+ * computed pair — which is the only form of this check that can fail.
+ *
+ *   pnpm mock &  pnpm dev &  pnpm check:states
+ */
+import { chromium } from "playwright-core";
+import { mkdirSync } from "node:fs";
+
+const APP = process.env.APP ?? "http://localhost:5273";
+const HERE = process.env.HERE ?? "http://localhost:4401";
+
+const REGISTRY = JSON.stringify([
+  { url: HERE, serverId: "o_1", org: "Acme", user: "kevin", token: "tok", addedAt: "2026-09-21T09:00:00Z" },
+]);
+
+const SHOTS = process.env.SHOTS ?? new URL("../../.firetower/reconcile/states", import.meta.url).pathname;
+mkdirSync(SHOTS, { recursive: true });
+
+const browser = await chromium.launch({ channel: "chrome" });
+let failed = 0;
+
+const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+
+/** Two colours are the same if their computed strings are. */
+const sameish = (a, b) => a.replace(/\s/g, "") === b.replace(/\s/g, "");
+
+for (const theme of ["light", "dark"]) {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 824 }, deviceScaleFactor: 2 });
+  await page.addInitScript(
+    ([registry, choice]) => {
+      window.localStorage.setItem("firetower.servers", registry);
+      window.localStorage.setItem("firetower.current", "o_1");
+      window.localStorage.setItem("firetower.theme", choice);
+    },
+    [REGISTRY, theme],
+  );
+  await page.goto(`${APP}/#/`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(1200);
+
+  /* What the rail is supposed to be, read off the tokens rather than
+     hardcoded — the values move and the relationship does not. */
+  const tok = await page.evaluate(() => {
+    const s = getComputedStyle(document.documentElement);
+    const of = (n) => s.getPropertyValue(n).trim();
+    return { bone: of("--color-bone"), panel: of("--color-panel"), dim: of("--color-dim"), text: of("--color-text") };
+  });
+  const asRgb = async (hex) =>
+    page.evaluate((h) => {
+      const d = document.createElement("div");
+      d.style.color = h;
+      document.body.append(d);
+      const v = getComputedStyle(d).color;
+      d.remove();
+      return v;
+    }, hex);
+
+  const read = async (name) => {
+    const el = page.getByRole("button", { name }).first();
+    const at = async () =>
+      el.evaluate((n) => {
+        const s = getComputedStyle(n);
+        return { color: s.color, background: s.backgroundColor };
+      });
+    const rest = await at();
+    await el.hover();
+    await page.waitForTimeout(220);
+    const hovered = await at();
+    /* And the crop, so the pair can be looked at as well as asserted — a
+       passing assertion about two colours still says nothing about whether
+       the result is any good. */
+    await page.locator("nav").first().screenshot({ path: `${SHOTS}/rail-${slug(name)}-hover-${theme}.png` });
+    /* Park the pointer somewhere harmless so the next read is clean. */
+    await page.mouse.move(640, 760);
+    await page.waitForTimeout(160);
+    return { rest, hovered };
+  };
+
+  const say = (ok, what, got) => {
+    if (!ok) failed++;
+    console.log(`  ${ok ? "ok    " : "FAILED"} ${theme}: ${what}${ok ? "" : ` — got ${JSON.stringify(got)}`}`);
+  };
+
+  /* **The destination you are already on.** Hover must change nothing: it is
+     already the loudest thing in the rail and has nothing to indicate. */
+  const current = await read("Dashboard");
+  const onBone = await asRgb(tok.bone);
+  const onPanel = await asRgb(tok.panel);
+  say(sameish(current.rest.background, onBone) && sameish(current.rest.color, onPanel),
+      "the current destination rests inverted", current.rest);
+  say(sameish(current.hovered.background, current.rest.background) &&
+      sameish(current.hovered.color, current.rest.color),
+      "hovering the current destination changes nothing", current.hovered);
+
+  /* And a destination you are not on: the container takes the state, and the
+     glyph goes from `--dim` to `--text`. Never the other way round. */
+  const other = await read("Machines");
+  const onDim = await asRgb(tok.dim);
+  const onText = await asRgb(tok.text);
+  say(sameish(other.rest.color, onDim), "another destination rests at --dim", other.rest);
+  say(sameish(other.hovered.color, onText) && other.hovered.background !== other.rest.background,
+      "hovering it lifts the glyph and brings a ground", other.hovered);
+
+  await page.close();
+}
+
+/* ── Collapsed means collapsed ────────────────────────────────────────
+   The panel's state was one answer per destination, so collapsing it and
+   clicking another icon read a different slot — and every slot defaulted to
+   open. A screenshot of either screen looks right; only the sequence is
+   wrong, which is why it took somebody using the app to find it. */
+{
+  const page = await browser.newPage({ viewport: { width: 1280, height: 824 }, deviceScaleFactor: 2 });
+  await page.addInitScript(
+    ([registry]) => {
+      window.localStorage.setItem("firetower.servers", registry);
+      window.localStorage.setItem("firetower.current", "o_1");
+      window.localStorage.setItem("firetower.theme", "dark");
+    },
+    [REGISTRY],
+  );
+  await page.goto(`${APP}/#/`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(1200);
+
+  const visible = async () =>
+    page.evaluate(() => {
+      const el = document.querySelector("[data-rail-panel]");
+      return !!el && el.getClientRects().length > 0 && el.getBoundingClientRect().width > 80;
+    });
+
+  const say = (ok, what) => {
+    if (!ok) failed++;
+    console.log(`  ${ok ? "ok    " : "FAILED"} rail: ${what}`);
+  };
+
+  say(await visible(), "the panel is open to begin with");
+
+  await page.getByRole("button", { name: /Hide the panel/i }).first().click();
+  await page.waitForTimeout(500);
+  say(!(await visible()), "the title bar's toggle collapses it");
+
+  /* **And it survives a reload** — the part of the earlier behaviour that
+     stands. `firetower.panel` is read at module load, before React renders,
+     so a collapsed panel does not flash open on launch. */
+  await page.reload({ waitUntil: "networkidle" });
+  await page.waitForTimeout(1200);
+  say(!(await visible()), "it is still collapsed after a reload");
+
+  /* **Pressing a destination navigates and nothing else.** This file has
+     asserted both answers on the same day; the user settled it. A collapsed
+     panel gives up seeing a destination's contents *without asking* — not
+     the ability to see them, which hovering gives back. */
+  await page.getByRole("button", { name: "Tasks" }).first().click();
+  await page.waitForTimeout(700);
+  say(!(await visible()), "pressing a destination leaves it collapsed");
+
+  await page.getByRole("button", { name: /Show the panel/i }).first().click();
+  await page.waitForTimeout(500);
+  say(await visible(), "and the toggle still opens it");
+
+  await page.close();
+}
+
+/* ── Hovering a destination ───────────────────────────────────────────
+   Three cases, and a preview is wanted unless the thing it would preview is
+   already on screen:
+
+     active + open       → no preview, it is right there
+     active + collapsed  → preview
+     not active          → preview, either way
+
+   It was "anything but the one you are on", which made the active
+   destination the one place a collapsed panel could never be glimpsed —
+   exactly where somebody with the panel shut spends most of their time.
+   Specified three different ways over one day, so it is driven rather than
+   reasoned about. */
+for (const theme of ["light", "dark"]) {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 824 }, deviceScaleFactor: 2 });
+  await page.addInitScript(
+    ([registry, choice]) => {
+      window.localStorage.setItem("firetower.servers", registry);
+      window.localStorage.setItem("firetower.current", "o_1");
+      window.localStorage.setItem("firetower.theme", choice);
+    },
+    [REGISTRY, theme],
+  );
+  await page.goto(`${APP}/#/`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(1200);
+
+  const panel = async () =>
+    page.evaluate(() => {
+      const el = document.querySelector("[data-rail-panel]");
+      if (!el || el.getClientRects().length === 0) return "none";
+      return getComputedStyle(el).position === "absolute" ? "floating" : "pinned";
+    });
+  const point = async (name) => {
+    await page.getByRole("button", { name }).first().hover();
+    await page.waitForTimeout(450);
+  };
+  const away = async () => {
+    await page.mouse.move(900, 700);
+    await page.waitForTimeout(450);
+  };
+  const say = (ok, what, got) => {
+    if (!ok) failed++;
+    console.log(`  ${ok ? "ok    " : "FAILED"} ${theme}: ${what}${ok ? "" : ` — got ${got}`}`);
+  };
+
+  /* Open: the active destination has nothing to preview. */
+  await point("Dashboard");
+  say((await panel()) === "pinned", "open · pointing at the active destination changes nothing", await panel());
+  /* Open: another destination swaps the contents in place rather than floating. */
+  await point("Tasks");
+  say((await panel()) === "pinned", "open · pointing elsewhere swaps it in place", await panel());
+  await away();
+
+  /* Collapsed. */
+  await page.getByRole("button", { name: /Hide the panel/i }).first().click();
+  await page.waitForTimeout(450);
+  say((await panel()) === "none", "collapsed · it is gone", await panel());
+
+  await point("Dashboard");
+  say((await panel()) === "floating", "collapsed · pointing at the **active** destination previews it", await panel());
+  await away();
+  say((await panel()) === "none", "collapsed · and leaving puts it away", await panel());
+
+  await point("Tasks");
+  say((await panel()) === "floating", "collapsed · pointing elsewhere previews it", await panel());
+  await away();
+
+  /* And pressing one navigates without re-opening. */
+  await page.getByRole("button", { name: "Artifacts" }).first().click();
+  await page.waitForTimeout(700);
+  say((await panel()) === "none", "pressing a destination does not re-open it", await panel());
+
+
+  await page.close();
+}
+
+/* ── The team rail's five marks ───────────────────────────────────────
+   `BEAT_TONE` in `api/view.ts` is the one table that says what a status
+   means, and this rail drew every one of them in neutral ink — so *working*,
+   *handed back* and *ended* were one grey thing told apart by an 11px shape.
+   These are visible in a screenshot and nobody read them, which is the same
+   failure the hover had: a hundred and ninety-eight pictures is not a thing
+   a person checks carefully.
+
+   **Never hue alone**, so the shapes are asserted too: `failed` is a warning
+   glyph rather than a second circle, because a brick circle two rows under
+   an ember circle is one shape told apart by colour, which a dichromat
+   cannot do. */
+for (const [scene, want] of [
+  ["team", [["asked you a question", "--color-ember", "dot"], ["working", "--color-slate", "typing"], ["handed back", "--color-sage", "svg"]]],
+  ["team-failed", [["failed", "--color-brick", "svg"], ["ended", "--color-mute", "svg"]]],
+]) {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 824 }, deviceScaleFactor: 2 });
+  await page.addInitScript(
+    ([registry]) => {
+      window.localStorage.setItem("firetower.servers", registry);
+      window.localStorage.setItem("firetower.current", "o_1");
+      window.localStorage.setItem("firetower.theme", "light");
+    },
+    [REGISTRY],
+  );
+  await page.request.post(`${HERE}/__reset?scene=${scene}`);
+  await page.goto(`${APP}/#/sessions/s_1`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(2200);
+
+  for (const [note, token, shape] of want) {
+    const got = await page.evaluate(
+      ([note, token]) => {
+        const d = document.createElement("div");
+        document.body.append(d);
+        d.style.color = `var(${token})`;
+        const wanted = getComputedStyle(d).color;
+        d.remove();
+        /* The row whose mark means this, found by its accessible name —
+           the second line says what the agent is *doing* now, not what its
+           status is, so it is no longer the thing to match on. */
+        const row = [...document.querySelectorAll(".tm")].find((r) =>
+          r.querySelector(".lead > *")?.getAttribute("aria-label") === note ||
+          r.querySelector(".lead > *")?.getAttribute("title") === note,
+        );
+        if (!row) return { missing: true };
+        /* The mark leads the row now — it was in `.rt` beside the age until
+           the status moved to the front and the agent's mark took its
+           place. */
+        const mark = row.querySelector(".lead > *");
+        if (!mark) return { noMark: true };
+        const s = getComputedStyle(mark);
+        return {
+          wanted,
+          /* A glyph carries its tone in `color`; the two that are solid
+             shapes carry it in `background`. */
+          got: mark.classList.contains("typing")
+            ? getComputedStyle(mark.querySelector("i")).backgroundColor
+            : mark.classList.contains("dot")
+              ? s.backgroundColor
+              : s.color,
+          shape: mark.classList.contains("dot") ? "dot" : mark.classList.contains("typing") ? "typing" : mark.tagName.toLowerCase(),
+        };
+      },
+      [note, token],
+    );
+    if (got.missing || got.noMark) {
+      failed++;
+      console.log(`  FAILED team: no mark for "${note}" in the ${scene} scene`);
+      continue;
+    }
+    const okColour = sameish(got.got, got.wanted);
+    const okShape = got.shape === shape;
+    if (!okColour || !okShape) failed++;
+    console.log(
+      `  ${okColour && okShape ? "ok    " : "FAILED"} team: "${note}" is ${token.replace("--color-", "")} as a ${shape}` +
+        (okColour && okShape ? "" : ` — got ${got.got} as a ${got.shape}, wanted ${got.wanted}`),
+    );
+  }
+  await page.close();
+}
+
+/* ── The retired machine is offered nowhere ───────────────────────────
+   `Compute::Local` named the control plane's own container and nothing runs
+   agents there — but the server still creates it, so `listHosts` returns it.
+   The client was written believing it would not, and said so in a comment:
+   "absent by construction, which is what keeps every picker correct without
+   an exclusion in it". There was no exclusion in any of them, so every
+   picker offered `localhost`.
+
+   Driven rather than unit-tested, because the bug was *a filter that was
+   never applied anywhere* — a test of the filter would have passed by not
+   existing. This asks the screens. */
+{
+  const page = await browser.newPage({ viewport: { width: 1280, height: 824 }, deviceScaleFactor: 2 });
+  await page.addInitScript(
+    ([registry]) => {
+      window.localStorage.setItem("firetower.servers", registry);
+      window.localStorage.setItem("firetower.current", "o_1");
+      window.localStorage.setItem("firetower.theme", "dark");
+    },
+    [REGISTRY],
+  );
+  const say = (ok, what, got) => {
+    if (!ok) failed++;
+    console.log(`  ${ok ? "ok    " : "FAILED"} retired: ${what}${ok ? "" : ` — ${got}`}`);
+  };
+
+  /* The fixture really contains one, or this proves nothing. */
+  const hosts = await page.request.get(`${HERE}/api/v1/hosts`).then((r) => r.json());
+  say(
+    hosts.some((h) => h.compute?.type !== "Server"),
+    "the fixture still contains a retired machine",
+    "none in `/hosts` — this check would pass by having nothing to find",
+  );
+
+  for (const [path, what] of [
+    ["/", "the home"],
+    ["/configuration/machines", "the Machines screen"],
+    ["/sessions/s_1", "the workspace"],
+  ]) {
+    await page.goto(`${APP}/#${path}`, { waitUntil: "networkidle" });
+    await page.waitForTimeout(1600);
+    const said = await page.evaluate(() => document.body.innerText);
+    say(!said.includes("localhost"), `${what} does not name it`, "it is on screen");
+  }
+
+  /* And the picker it defaulted to. */
+  await page.goto(`${APP}/#/`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(1600);
+  await page.locator('[title="Where it runs"]').first().click();
+  await page.waitForTimeout(700);
+  const offers = await page.evaluate(() => {
+    const el = [...document.querySelectorAll('[class*="pop"], [role="menu"]')].find((x) => x.getClientRects().length);
+    return el ? el.innerText : "";
+  });
+  say(!offers.includes("localhost"), "the machine picker does not offer it", "it is in the list");
+
+  await page.close();
+}
+
+/* ── *View all* on the home, and the clip it is drawn off ─────────────
+   Two states no screenshot can hold.
+
+   **The clip.** `Recent agents` shows `ROWS` rows of chips and hides the
+   rest, measured off the chips' own `offsetTop` after layout — a chip is as
+   wide as a workspace name, so no fixed count is right. A picture of a
+   clipped row and a picture of a short row are the same picture; what has to
+   be asserted is that the cut landed *between* rows and that the chips below
+   it are not reachable.
+
+   **That *View all* does something, in both panel states.** It expands in
+   place. The version that opened the workspaces panel instead was built and
+   withdrawn for exactly the reason this check is written the way it is: the
+   panel is usually already pinned open, so on the common path the press did
+   nothing, and nothing in a screenshot or in a single-state sweep would have
+   said so. So the press is driven **twice** — once with the panel open and
+   once collapsed — and both runs have to change the row. */
+{
+  const say = (ok, what, got) => {
+    if (!ok) failed++;
+    console.log(`  ${ok ? "ok    " : "FAILED"} recent agents: ${what}${ok ? "" : ` — ${got}`}`);
+  };
+
+  /** What the section is drawing, right now. */
+  const readRow = (page) =>
+    page.evaluate(() => {
+      const sect = [...document.querySelectorAll(".sect")].find((x) =>
+        x.querySelector("h2")?.textContent?.includes("Recent agents"),
+      );
+      if (!sect) return null;
+      const el = sect.querySelector(".chips");
+      const chips = [...el.children];
+      const clip = el.getBoundingClientRect();
+      const inside = (c) => {
+        const b = c.getBoundingClientRect();
+        return b.bottom <= clip.bottom + 1 && b.top >= clip.top - 1;
+      };
+      const mark = (c) => {
+        const m = c.firstElementChild;
+        if (m?.classList.contains("dot")) return "blocked";
+        if (m?.classList.contains("typing")) return "working";
+        return m?.getAttribute("aria-label") ?? "?";
+      };
+      const shown = chips.filter(inside);
+      return {
+        chips: chips.length,
+        rows: [...new Set(chips.map((c) => c.offsetTop))].length,
+        rowsShown: [...new Set(shown.map((c) => c.offsetTop))].length,
+        shown: shown.length,
+        sliced: chips.filter((c) => {
+          const b = c.getBoundingClientRect();
+          return b.top < clip.bottom - 1 && b.bottom > clip.bottom + 1;
+        }).length,
+        order: chips.map(mark),
+        control: sect.querySelector(".all")?.hidden === false ? sect.querySelector(".all").textContent.trim() : null,
+        /* A rule inside the section would be a break that moves every time a
+           name changed length. The drawing says there is none. */
+        hairlines: [...sect.querySelectorAll("*")].filter((e) => {
+          const st = getComputedStyle(e);
+          const b = e.getBoundingClientRect();
+          return b.height <= 1.5 && b.width > 20 && st.backgroundColor !== "rgba(0, 0, 0, 0)";
+        }).length,
+      };
+    });
+
+  /* **A page per run.** `addInitScript` accumulates and `goto` to an
+     identical hash URL is a same-document navigation, so re-using one page
+     silently kept the first run's answer — which is the same class of
+     false pass this check exists to close. */
+  for (const [panel, how] of [[true, "panel open"], [false, "panel collapsed"]]) {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 824 }, deviceScaleFactor: 2 });
+    await page.request.post(`${HERE}/__reset?scene=ws-many`);
+    await page.addInitScript(
+      ([registry, held]) => {
+        window.localStorage.setItem("firetower.servers", registry);
+        window.localStorage.setItem("firetower.current", "o_1");
+        window.localStorage.setItem("firetower.theme", "light");
+        window.localStorage.setItem("firetower.panel", held);
+      },
+      [REGISTRY, JSON.stringify({ chrome: panel })],
+    );
+    await page.goto(`${APP}/#/`, { waitUntil: "networkidle" });
+    await page.waitForTimeout(1700);
+
+    const shut = await readRow(page);
+    if (!shut) {
+      say(false, `${how}: the section is on the page`, "no Recent agents section");
+      await page.close();
+      continue;
+    }
+    say(
+      (await page.evaluate(() => !!document.querySelector("[data-rail-panel]"))) === panel,
+      `${how}: the panel really is ${panel ? "open" : "collapsed"}`,
+      "the fixture did not take",
+    );
+    say(shut.chips > 6, `${how}: the fixture is long enough to clip`, `${shut.chips} chips`);
+    say(shut.rows > shut.rowsShown, `${how}: more rows exist than are shown`, `${shut.rows} rows, ${shut.rowsShown} shown`);
+    say(shut.sliced === 0, `${how}: the cut is between rows, never through a chip`, `${shut.sliced} chip(s) cut`);
+    say(shut.hairlines === 0, `${how}: no rule where the order turns`, `${shut.hairlines} hairline(s)`);
+    say(shut.control === "View all", `${how}: the control reads *View all*`, `it reads ${shut.control}`);
+
+    /* broken → blocked → done → working, as a non-decreasing rank. */
+    const ORDER = ["failed", "blocked", "handed back", "working"];
+    const ranks = shut.order.map((m) => ORDER.indexOf(m));
+    say(
+      ranks.every((r) => r >= 0) && ranks.every((r, i) => i === 0 || r >= ranks[i - 1]),
+      `${how}: ordered broken → blocked → done → working`,
+      shut.order.join(", "),
+    );
+
+    await page.locator(".sect", { hasText: "Recent agents" }).locator(".all").click();
+    await page.waitForTimeout(500);
+    const wide = await readRow(page);
+    say(wide.shown > shut.shown, `${how}: pressing it shows more than it did`, `${shut.shown} before, ${wide.shown} after`);
+    say(wide.shown === wide.chips, `${how}: and shows all of them`, `${wide.shown} of ${wide.chips}`);
+    say(wide.control === "View less", `${how}: the control turns into *View less*`, `it reads ${wide.control}`);
+
+    await page.locator(".sect", { hasText: "Recent agents" }).locator(".all").click();
+    await page.waitForTimeout(500);
+    const back = await readRow(page);
+    say(back.shown === shut.shown, `${how}: and *View less* puts it back`, `${back.shown}, was ${shut.shown}`);
+
+    /* Put the mock back, so a long scene does not leak into whatever runs next. */
+    await page.request.post(`${HERE}/__reset`);
+    await page.close();
+  }
+}
+
+/* ── The seeded home ──────────────────────────────────────────────────
+   **The seed is read twice for one press**, counted: `["a seed",
+   "nothing"]`. React double-invokes a `useMemo` factory under `StrictMode`,
+   and the old `consumeSeed()` cleared the module variable as it read — so it
+   worked only because React keeps the result of the *first* invocation.
+   Nothing said so, and a real remount between the navigation and the first
+   paint has the same shape with a worse ending: the seed goes to the instance
+   that is discarded.
+
+   **The symptom is a blank composer on a plain home**, which is
+   indistinguishable from *Start did nothing* — so it is invisible to a
+   screenshot of the home and only exists after a press. Driven through the
+   task's own Start for that reason; a state that set the seed directly would
+   not have found it. The caret is the other thing no picture holds. */
+for (const [title, key, repo] of [
+  ["Quota meter rounds the wrong way at 99.5%", "#5138", "acme/web"],
+  ["Decide whether we keep the v1 embed", "#91", null],
+]) {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 824 }, deviceScaleFactor: 2 });
+  await page.request.post(`${HERE}/__reset`);
+  await page.addInitScript(
+    ([registry]) => {
+      window.localStorage.setItem("firetower.servers", registry);
+      window.localStorage.setItem("firetower.current", "o_1");
+      window.localStorage.setItem("firetower.theme", "light");
+    },
+    [REGISTRY],
+  );
+  const say = (ok, what, got) => {
+    if (!ok) failed++;
+    console.log(`  ${ok ? "ok    " : "FAILED"} seeded ${key}: ${what}${ok ? "" : ` — ${got}`}`);
+  };
+
+  await page.goto(`${APP}/#/tasks`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(1500);
+  await page.locator("div.r").filter({ hasText: title }).first().getByRole("button", { name: "Start" }).click();
+  await page.waitForTimeout(1600);
+
+  const seen = await page.evaluate(() => {
+    const box = document.querySelector(".composer textarea");
+    const chips = [...document.querySelectorAll(".shelf .chip")];
+    return {
+      headline: document.querySelector(".air h1")?.textContent ?? null,
+      sub: document.querySelector(".hsub")?.textContent ?? null,
+      prompt: box?.value ?? null,
+      caret: box ? box.selectionStart : null,
+      focused: document.activeElement === box,
+      first: chips[0] ? { says: chips[0].textContent.trim(), given: chips[0].dataset.given === "true", chevron: !!chips[0].querySelector("svg.lucide-chevron-down") } : null,
+      pickers: chips.slice(1).every((c) => !!c.querySelector("svg.lucide-chevron-down")),
+      branch: document.querySelector(".composer .bar .br")?.textContent?.trim() ?? null,
+    };
+  });
+
+  say(seen.prompt?.includes(title), "the composer holds the task, so the seed survived the press", `it reads ${JSON.stringify(seen.prompt)}`);
+  say((seen.prompt ?? "").split("\n").length === 2, "with the URL on a line of its own", JSON.stringify(seen.prompt));
+  say(seen.focused && seen.caret === title.length, "and the caret is at the end of the title, not of the URL", `at ${seen.caret} of ${title.length}, focused ${seen.focused}`);
+  say(seen.headline === `Start ${key}`, "the headline names the task and does not greet", `it reads ${seen.headline}`);
+  say(!seen.headline.includes(title), "and does not repeat the title that is three inches below it", seen.headline);
+  say(
+    seen.sub === (repo ? "Edit anything below, then send it." : "This task names no repository, so there is nothing to check out yet."),
+    `the line under it is the ${repo ? "ordinary" : "no-repository"} one`,
+    seen.sub,
+  );
+  say(seen.first?.says === key && seen.first.given, "the task chip is first on the shelf", `the first chip is ${seen.first?.says}`);
+  say(seen.first && !seen.first.chevron && seen.pickers, "it wears no chevron and the pickers do — the whole statement", `given chevron ${seen.first?.chevron}, pickers all chevroned ${seen.pickers}`);
+  say(
+    repo ? seen.branch?.startsWith("agent/") : seen.branch === "no branch — nothing checked out",
+    `the footer shows ${repo ? "the branch before it is cut" : "that there is no branch to cut"}`,
+    `it reads ${seen.branch}`,
+  );
+  if (repo) say(seen.branch?.includes(key.replace(/\W/g, "")), "and the key leads it, because the key is what survives an edit", seen.branch);
+
+  await page.close();
+}
+
+/* ── The rail panel's marks are shapes ────────────────────────────────
+   It drew `.wdot`: one circle in four tones, which is hue alone. Simulated,
+   three of the four states collapse — a protanope in light reads *needs you*
+   against *done* at 1.07:1 and against *broken* at 1.14:1; a deuteranope in
+   dark reads *working* against *done* at 1.00:1, the same mark.
+
+   **So the assertion is about shape, not colour.** A screenshot cannot make
+   it: four grey circles and four distinct marks photograph as four small
+   things in a column, and the pseudo-state that matters — the typing mark
+   under `prefers-reduced-motion`, where the animation is what makes it read
+   as three pips — never appears in one at all. */
+for (const [theme, motion] of [["light", false], ["dark", false], ["light", true]]) {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 824 }, deviceScaleFactor: 2 });
+  await page.request.post(`${HERE}/__reset?scene=ws-many`);
+  await page.emulateMedia({ reducedMotion: motion ? "reduce" : "no-preference" });
+  await page.addInitScript(
+    ([registry, choice]) => {
+      window.localStorage.setItem("firetower.servers", registry);
+      window.localStorage.setItem("firetower.current", "o_1");
+      window.localStorage.setItem("firetower.theme", choice);
+      window.localStorage.setItem("firetower.workspaces-by", "status");
+    },
+    [REGISTRY, theme],
+  );
+  const how = `${theme}${motion ? " · reduced motion" : ""}`;
+  const say = (ok, what, got) => {
+    if (!ok) failed++;
+    console.log(`  ${ok ? "ok    " : "FAILED"} panel marks ${how}: ${what}${ok ? "" : ` — ${got}`}`);
+  };
+
+  await page.goto(`${APP}/#/`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(1800);
+
+  const seen = await page.evaluate(() => {
+    const panel = document.querySelector("[data-rail-panel]");
+    if (!panel) return null;
+    const rows = [...panel.querySelectorAll(".prow")].filter((r) => r.querySelector(".mk"));
+    /* **The shape, named by what it is made of** — not by its colour, which
+       is the whole point. A dot is one element, a typing mark is three pips,
+       and the two glyphs are `svg` with their own labels. */
+    const shapeOf = (r) => {
+      const m = r.querySelector(".mk")?.firstElementChild;
+      if (!m) return "none";
+      if (m.classList.contains("dot")) return "dot";
+      if (m.classList.contains("typing")) return `pips:${m.children.length}`;
+      return m.getAttribute("aria-label") ?? m.tagName.toLowerCase();
+    };
+    const pip = panel.querySelector(".mk .typing i");
+    const slot = rows[0] && getComputedStyle(rows[0].querySelector(".mk"));
+    return {
+      rows: rows.length,
+      shapes: [...new Set(rows.map(shapeOf))].sort(),
+      wdots: panel.querySelectorAll(".wdot").length,
+      slotWidth: slot && parseFloat(slot.width),
+      /* The mark must sit inside its slot, or widening it bought nothing. */
+      spills: rows.some((r) => {
+        const mk = r.querySelector(".mk");
+        const m = mk.firstElementChild;
+        if (!m) return false;
+        return m.getBoundingClientRect().right > mk.getBoundingClientRect().right + 0.5;
+      }),
+      truncated: rows.filter((r) => {
+        const l = r.querySelector(".mk").nextElementSibling;
+        return l.scrollWidth > l.clientWidth + 1;
+      }).length,
+      width: Math.round(panel.getBoundingClientRect().width),
+      rowHeight: rows[0] && Math.round(rows[0].getBoundingClientRect().height),
+      bands: panel.querySelectorAll(".pband").length,
+      pip: pip && { opacity: parseFloat(getComputedStyle(pip).opacity), pips: pip.parentElement.children.length },
+    };
+  });
+
+  if (!seen) {
+    say(false, "the panel is on screen", "no [data-rail-panel]");
+    await page.close();
+    continue;
+  }
+  say(seen.rows > 20, "the fixture is long enough to carry every beat", `${seen.rows} rows`);
+  say(seen.wdots === 0, "nothing draws the old four-tone circle", `${seen.wdots} .wdot still on screen`);
+  say(
+    seen.shapes.length >= 4 && seen.shapes.includes("dot") && seen.shapes.some((x) => x.startsWith("pips:")),
+    "four beats, four shapes — told apart with the colour off",
+    seen.shapes.join(", "),
+  );
+  say(seen.slotWidth === 16, "the lead slot is 16px, which is what the shapes cost", `${seen.slotWidth}px`);
+  say(!seen.spills, "and every mark fits inside it", "a mark is wider than its slot");
+  say(seen.width === 252 && seen.rowHeight === 36 && seen.bands === 2, "nothing else moved — width, row height, bands", `${seen.width}px · ${seen.rowHeight}px · ${seen.bands} bands`);
+  /* Reported either way: the drawing predicted two more labels truncate at
+     37 rows and this fixture's names are shorter than the drawing's. */
+  console.log(`         ${seen.truncated} label(s) truncate at ${seen.rows} rows`);
+  if (motion) {
+    /* `globals.css` collapses every duration with `!important`, which would
+       land the pips on frame zero. They are held at .55 instead — static,
+       visible, and still three of them. */
+    say(seen.pip?.pips === 3, "the typing mark is still three pips with the motion off", `${seen.pip?.pips} pips`);
+    say(seen.pip && seen.pip.opacity >= 0.5, "held visible rather than on frame zero", `opacity ${seen.pip?.opacity}`);
+  }
+
+  await page.request.post(`${HERE}/__reset`);
+  await page.close();
+}
+
+/* ── The placement picker, and ⌘P ─────────────────────────────────────
+   **A pill that will not stay pressed.** The profile editor offered three
+   placements, reasoning from `Role.placement` — documented `lead | here |
+   new`. That is the *response* model: `CreateRoleBody.placement` says
+   *Required: "here" or "new"* and `roles.rs` enforces
+   `PLACEMENT: ["here", "new"]`. So `lead` is readable and not writable, and
+   an effect that coerces any unknown placement to `here` ran on every render
+   — pressing *Let the lead choose* snapped the selection straight back.
+
+   No screenshot holds that: a picture of the editor shows *Same workspace*
+   selected, which is what it shows after the snap and also what it shows when
+   everything is fine. The press has to be driven and the result read back.
+
+   **And ⌘P.** A key that is bound to nothing looks exactly like a key that is
+   bound, right up until you press it. */
+{
+  const page = await browser.newPage({ viewport: { width: 1280, height: 824 }, deviceScaleFactor: 2 });
+  await page.request.post(`${HERE}/__reset`);
+  await page.addInitScript(
+    ([registry]) => {
+      window.localStorage.setItem("firetower.servers", registry);
+      window.localStorage.setItem("firetower.current", "o_1");
+      window.localStorage.setItem("firetower.theme", "light");
+    },
+    [REGISTRY],
+  );
+  const say = (ok, what, got) => {
+    if (!ok) failed++;
+    console.log(`  ${ok ? "ok    " : "FAILED"} placement: ${what}${ok ? "" : ` — ${got}`}`);
+  };
+
+  /* A writable editor: a new profile, rather than one the mock marks read-only. */
+  await page.goto(`${APP}/#/configuration/roles`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(1400);
+  await page.getByRole("button", { name: /New profile/ }).first().click();
+  await page.waitForTimeout(400);
+  await page.getByText("Write it myself").click();
+  await page.waitForTimeout(900);
+
+  const pills = () =>
+    page.evaluate(() => {
+      const row = [...document.querySelectorAll(".pickrow")].find((r) =>
+        [...r.querySelectorAll("button")].some((b) => /workspace/i.test(b.textContent ?? "")),
+      );
+      if (!row) return null;
+      return [...row.querySelectorAll("button.pk")].map((b) => ({
+        says: (b.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 40),
+        on: b.getAttribute("aria-pressed") === "true",
+      }));
+    });
+
+  const before = await pills();
+  say(!!before, "the placement picker is on the page", "no .pickrow with a workspace option");
+  if (before) {
+    say(before.length === 2, "two placements, because the server takes two", `${before.length}: ${before.map((p) => p.says).join(" / ")}`);
+    /* The option by its name, not by the word *lead* — *Same workspace*'s own
+       note reads "Shares the lead's directory and branch", which is correct
+       copy and was failing this. */
+    say(
+      !before.some((p) => /let the lead choose/i.test(p.says)),
+      "and none of them is *Let the lead choose*, which the server refuses",
+      before.map((p) => p.says).join(" / "),
+    );
+    say(before.filter((p) => p.on).length === 1, "exactly one is selected", `${before.filter((p) => p.on).length} selected`);
+
+    /* **Every pill has to stay pressed.** This is the whole defect: it is not
+       that one option was wrong, it is that pressing it did nothing visible. */
+    for (let i = 0; i < before.length; i++) {
+      const row = page.locator(".pickrow", { hasText: /workspace/i }).first();
+      await row.locator("button.pk").nth(i).click();
+      await page.waitForTimeout(400);
+      const after = await pills();
+      say(after[i].on, `pressing *${after[i].says}* leaves it pressed`, "it snapped back");
+    }
+  }
+
+  /* ⌘P, in a workspace, where it used to open the finder. */
+  await page.goto(`${APP}/#/sessions/s_1`, { waitUntil: "networkidle" });
+  await page.waitForTimeout(1800);
+  const shape = () => page.evaluate(() => document.body.innerText.replace(/\s+/g, " ").length + ":" + document.querySelectorAll("*").length);
+  const was = await shape();
+  await page.keyboard.press(process.platform === "darwin" ? "Meta+p" : "Control+p");
+  await page.waitForTimeout(700);
+  say((await shape()) === was, "⌘P in a workspace does nothing at all, deliberately", "something opened");
+
+  await page.close();
+}
+
+await browser.close();
+if (failed) {
+  console.error(`\n  ${failed} state(s) are not what the design says.`);
+  process.exit(1);
+}
+console.log("\n  Every driven state is what the design says.");

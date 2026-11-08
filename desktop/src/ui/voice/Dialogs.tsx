@@ -84,14 +84,14 @@ function Card({ children, onClose }: { children: React.ReactNode; onClose: () =>
 
   return (
     <div
-      className="fixed inset-0 z-[60] grid place-items-start justify-center bg-ground/40 pt-[18vh] backdrop-blur-[2px]"
+      className="fixed inset-0 z-[60] grid place-items-start justify-center bg-scrim pt-[18vh] backdrop-blur-[2px]"
       onMouseDown={onClose}
     >
       <div
         onMouseDown={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal
-        className="w-[26rem] overflow-hidden rounded-xl border border-line bg-overlay shadow-(--shadow-float)"
+        className="w-[26rem] overflow-hidden rounded-xl border border-line lift shadow-(--shadow-float)"
       >
         {children}
       </div>

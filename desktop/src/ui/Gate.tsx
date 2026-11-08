@@ -33,6 +33,7 @@ export function Gate({ backend, children }: { backend: Backend; children: React.
       <ReplacePassword
         url={backend.url}
         username={backend.user}
+        held
         retryLabel="I've replaced it"
         // Everything, not the two keys this screen reads: being let in changes
         // the answer to every question the app has already asked and cached as

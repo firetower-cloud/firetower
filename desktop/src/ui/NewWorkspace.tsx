@@ -198,7 +198,7 @@ export function NewWorkspace({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-ground/70 py-[7vh] backdrop-blur-[3px]"
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-scrim py-[7vh] backdrop-blur-[3px]"
       onMouseDown={onClose}
     >
       <div
@@ -269,8 +269,8 @@ export function NewWorkspace({
 
                 {adding && listAt && (
                   <>
-                    <button className="fixed inset-0 z-[60] cursor-default" onClick={() => setAdding(false)} />
-                    <div style={listAt} className="fixed z-[70] w-[22rem] overflow-hidden rounded-lg border border-line bg-overlay shadow-(--shadow-float)">
+                    <button className="catcher z-[60]" onClick={() => setAdding(false)} />
+                    <div style={listAt} className="fixed z-[70] w-[22rem] overflow-hidden rounded-lg border border-line lift shadow-(--shadow-float)">
                       <div className="flex items-center gap-2 border-b border-line px-2.5">
                         <Search className="h-3.5 w-3.5 shrink-0 text-mute" strokeWidth={1.75} />
                         <input
@@ -509,9 +509,16 @@ export function NewWorkspace({
         </div>
 
         <div className="flex items-center gap-3 border-t border-line bg-ground/40 px-5 py-3">
-          <span className="flex items-center gap-1.5 text-meta text-mute">
+          <span className="flex min-w-0 items-center gap-1.5 text-meta text-mute">
             <Icon of={Cpu} size={12} />
-            {host ? machineLabel(all.find((m) => m.hosts.some((h) => h.id === host.id)) ?? all[0]) : backend.org}
+            {/* Truncating, for the same reason the composer's chip does: the
+                machine's name is its owner's and `machineLabel` adds
+                ` · user@host` to it. Here the row ends in Cancel and Create,
+                so an untruncated name pushes the buttons rather than
+                overflowing — the name is what gives way. */}
+            <span className="truncate">
+              {host ? machineLabel(all.find((m) => m.hosts.some((h) => h.id === host.id)) ?? all[0]) : backend.org}
+            </span>
           </span>
           <button onClick={onClose} className="control ml-auto text-mute hover:bg-raise hover:text-bone">
             Cancel

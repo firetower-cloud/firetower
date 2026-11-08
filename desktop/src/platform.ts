@@ -42,5 +42,38 @@ export const mod = isMac ? "⌘" : "Ctrl";
 /** A shortcut as text: `key("J")` → "⌘J" or "Ctrl+J". */
 export const key = (k: string) => (isMac ? `${mod}${k}` : `${mod}+${k}`);
 
+/**
+ * The *other* modifier: for something local to one pane, where ⌘ is the
+ * window's.
+ *
+ * The rail's six destinations took ⌘1–⌘6, which the workbench's inspector
+ * tabs used to hold. A destination is global so it takes the global modifier;
+ * a panel tab is local to one workspace, so it takes this. On a Mac that is
+ * ⌃, which is free. **Everywhere else Ctrl *is* the global modifier**, so the
+ * local one has to be Alt or the two collide — which is the kind of thing
+ * that is only found on the platform nobody is developing on.
+ */
+export const localMod = isMac ? "⌃" : "Alt";
+/** A local shortcut as text: `localKey("1")` → "⌃1" or "Alt+1". */
+export const localKey = (k: string) => (isMac ? `${localMod}${k}` : `${localMod}+${k}`);
+/**
+ * Whether a key event carries the global modifier, or the local one.
+ *
+ * **Mutually exclusive, which is the whole point of having both.** The
+ * window's handlers used to test `e.metaKey || e.ctrlKey` — convenient while
+ * nothing on a Mac used Ctrl alone, and wrong the moment the inspector's tabs
+ * moved onto it: ⌃2 reached the rail's handler first and navigated to Tasks
+ * instead of switching a tab. One keystroke, two meanings, and only the app
+ * running said so.
+ *
+ * So each asks for exactly its own modifier and refuses the other. Alt is
+ * excluded from both because on a Mac it composes characters and off one it
+ * *is* the local modifier.
+ */
+export const isGlobalMod = (e: { ctrlKey: boolean; altKey: boolean; metaKey: boolean }) =>
+  isMac ? e.metaKey && !e.ctrlKey && !e.altKey : e.ctrlKey && !e.metaKey && !e.altKey;
+export const isLocalMod = (e: { ctrlKey: boolean; altKey: boolean; metaKey: boolean }) =>
+  isMac ? e.ctrlKey && !e.metaKey && !e.altKey : e.altKey && !e.ctrlKey && !e.metaKey;
+
 /* Told to the stylesheet, so the chrome tokens can differ by platform. */
 if (typeof document !== "undefined") document.documentElement.dataset.platform = platform;

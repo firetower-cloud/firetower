@@ -77,11 +77,11 @@ function Dialog({ q, onSettle }: { q: Pending; onSettle: (answer: string | boole
   }, []);
 
   return (
-    <div className="fixed inset-0 z-[60] grid place-items-start justify-center bg-ground/40 pt-[18vh] backdrop-blur-[2px]" onMouseDown={() => onSettle(q.field ? null : false)}>
-      <div onMouseDown={(e) => e.stopPropagation()} role="dialog" aria-modal className="w-[26rem] overflow-hidden rounded-xl border border-line bg-overlay shadow-(--shadow-float)">
-        <div className="px-5 pt-4 pb-3">
-          <h2 className="text-lede text-bone">{q.title}</h2>
-          {q.body && <div className="mt-2 text-ui leading-relaxed text-dim">{q.body}</div>}
+    <div className="fixed inset-0 z-[60] grid place-items-start justify-center bg-scrim pt-[18vh] backdrop-blur-[2px]" onMouseDown={() => onSettle(q.field ? null : false)}>
+      <div onMouseDown={(e) => e.stopPropagation()} role="dialog" aria-modal className="dlg">
+        <div>
+          <h2>{q.title}</h2>
+          {q.body && <div className="say">{q.body}</div>}
           {q.field && (
             <input
               autoFocus
@@ -89,13 +89,15 @@ function Dialog({ q, onSettle }: { q: Pending; onSettle: (answer: string | boole
               onChange={(e) => setValue(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && yes()}
               placeholder={q.field.placeholder}
-              className="mt-3 w-full rounded-md border border-line bg-ground px-2.5 py-1.5 text-ui text-bone placeholder:text-mute focus:border-mute focus:outline-none"
+              className="mt-4 h-11 w-full rounded-xl bg-ground px-4 text-ui text-bone placeholder:text-mute focus:outline-none focus:ring-[1.5px] focus:ring-bone focus:ring-inset"
             />
           )}
         </div>
-        <div className="flex items-center justify-end gap-2 border-t border-line bg-panel/60 px-4 py-2.5">
-          <button onClick={() => onSettle(q.field ? null : false)} className="control text-dim hover:bg-raise hover:text-bone">{q.cancel ?? "Cancel"}</button>
-          <button ref={go} onClick={yes} disabled={!!q.field && !value.trim()} className={`control font-medium disabled:opacity-50 ${q.tone === "danger" ? "bg-brick text-ground hover:opacity-90" : "bg-bone text-ground hover:opacity-90"}`}>
+        {/* On the same ground as the words. A tinted strip under the buttons
+            is a second surface and a rule, for a box with four lines in it. */}
+        <div className="dlgfoot">
+          <button onClick={() => onSettle(q.field ? null : false)} className="btn quiet">{q.cancel ?? "Cancel"}</button>
+          <button ref={go} onClick={yes} disabled={!!q.field && !value.trim()} className={`btn ${q.tone === "danger" ? "harm" : "primary"} disabled:opacity-50`}>
             {q.action}
           </button>
         </div>

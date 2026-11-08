@@ -1,11 +1,10 @@
 /**
- * A list and the controls that decide what is in it, as one thing.
+ * A raised block of related things.
  *
- * The controls were a loose row of buttons floating above a bordered list,
- * which reads as two unrelated pieces of furniture — and the line saying what
- * was actually asked for sat between them belonging to neither. Inside one
- * card, with a hairline under the header, the question and the answer are
- * plainly the same object.
+ * **Not a frame around a list.** Rows belong on the sheet itself — see `.lsec`
+ * and `.r` in `styles.css`, which is the shape eleven configuration screens
+ * take. A card is for a block that is one object: a plan, a repository being
+ * shipped, a set of facts.
  */
 export function Card({
   children,
@@ -15,11 +14,7 @@ export function Card({
   className?: string;
 }) {
   return (
-    <div
-      className={`overflow-hidden rounded-lg border border-line bg-panel shadow-raise ${className}`}
-    >
-      {children}
-    </div>
+    <div className={`overflow-hidden rounded-2xl bg-raise ${className}`}>{children}</div>
   );
 }
 
@@ -35,7 +30,7 @@ export function CardHead({
   note?: React.ReactNode;
 }) {
   return (
-    <div className="border-b border-line px-4 py-3">
+    <div className="px-4 py-3">
       <div className="flex flex-wrap items-center gap-2">
         {children}
         {aside && <div className="ml-auto flex shrink-0 items-center">{aside}</div>}

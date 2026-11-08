@@ -12,7 +12,7 @@
  */
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronDown, Copy, Cpu, HardDrive, History, Key, Loader2, Plus, Trash2, X } from "lucide-react";
+import { Check, ChevronDown, Copy, Cpu, HardDrive, History, Key, Loader2, Plus, Server as ServerIcon, Trash2, X } from "lucide-react";
 import { Icon } from "~/components/ui";
 import type { Compute, Diagnosis, Host, RetiredMachine, Session } from "~/api/generated/model";
 import {
@@ -36,12 +36,13 @@ import { getListRolesQueryKey, useListRoles, useUpdateRole } from "~/api/generat
 import { STATUS_LABEL } from "~/api/view";
 import { toDraft } from "~/ui/config/Roles";
 import { navigate, usePathname } from "~/shims/next-navigation";
-import { Rows, Section } from "~/ui/config/bits";
+import { Group, Rows, Section, WhereTo } from "~/ui/config/bits";
 import { WhoCanAccess } from "~/ui/Sharing";
 import { useMe } from "~/api/generated/auth/auth";
 import { useConfirm } from "~/ui/Confirm";
+import { useOpened } from "~/ui/opened";
 
-export function Machines({ live }: { live: boolean }) {
+export function Machines({ live, open: asked = null }: { live: boolean; open?: string | null }) {
   const me = useMe();
   const hosts = useHosts();
   /* `/configuration/machines/add` opens straight into the dialog. The three
@@ -49,23 +50,60 @@ export function Machines({ live }: { live: boolean }) {
      screen that says "add one" with the form still shut is one press of
      nothing. */
   const [adding, setAdding] = useState(usePathname().endsWith("/add"));
-  const [open, setOpen] = useState<string | null>(null);
+  /* And `/configuration/machines/h_1` opens that machine — the rail's rows
+     name one, so the address has to be able to. */
+  const [open, setOpen] = useOpened(asked);
+
+  /* **Nothing added, and nothing wrong** — which is every fresh install, and
+     the one state where the page is its own empty state. Two things come off
+     the screen while it holds, and both are the general rule rather than a
+     Machines quirk: a page's **header action is not drawn over a `Blank`
+     whose action is the same action** — a 33px target in the top right corner
+     of a page whose only words are 500px away at the optical centre, where
+     the blank's button carries the same verb *and* the sentence explaining it
+     — and a **`WhereTo` is never drawn beside a `Blank`**. Both come back
+     with the first row, so neither is ever on screen beside its double. */
+  const blank = !hosts.loading && !hosts.trouble && !hosts.error && hosts.data.length === 0;
 
   return (
+    /* **Machines**, which is what the rail calls it and what the drawing says.
+       The page said "Compute" — a category word for the one screen that is
+       about a thing you can point at. */
     <>
     <Section
-      title="Compute"
-      note="One owner per host until sessions are isolated from each other."
-      action={live && <button onClick={() => setAdding(true)} className="control border border-line bg-raise text-ui text-bone hover:bg-overlay"><Icon of={Plus} size={12} />Add a machine</button>}
+      title="Machines"
+      note="Where agents run. One owner per machine, until sessions are isolated from each other."
+      settling={hosts.loading}
+      trouble={hosts.trouble}
+      error={hosts.error}
+      action={live && !blank && <button onClick={() => setAdding(true)} className="btn primary"><Icon of={Plus} size={14} />Add a machine</button>}
     >
-      <Rows feed={hosts} empty={<Start onAdd={() => setAdding(true)} />}>
+      <Rows
+        feed={hosts}
+        icon={ServerIcon}
+        empty="No machine yet"
+        note="Agents run on a machine you add over ssh. Firetower does not run them on itself."
+        action={live ? <button onClick={() => setAdding(true)} className="btn primary"><Icon of={Plus} size={14} />Add a machine</button> : undefined}
+      >
+      <Group>
         {hosts.data.map((h) => (
           <div key={h.id}>
-            <button onClick={() => setOpen(open === h.id ? null : h.id)} className="flex w-full items-center gap-3 px-3.5 py-3 text-left hover:bg-raise/60">
-              <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${h.state === "Online" ? "bg-sage" : h.state === "Draining" || reachedTheMachine(h) ? "bg-kind-data" : "bg-brick"}`} />
-              <span className="min-w-0 flex-1">
-                <span className="block text-ui text-bone">{h.name}</span>
-                <span className="block font-mono text-micro text-mute">{describe(h.compute)} · worker {h.workerVersion ?? "not installed"}</span>
+            <button onClick={() => setOpen(open === h.id ? null : h.id)} className="r">
+              <span className="st" data-s={h.state === "Online" ? "ok" : h.state === "Draining" || reachedTheMachine(h) ? "warn" : "bad"} />
+              <span className="g">
+                <Icon of={ServerIcon} size={16} />
+              </span>
+              <span className="tx">
+                <b>{h.name}</b>
+                <s>
+                  {[
+                    h.cpus != null ? `${h.cpus} vCPU` : null,
+                    h.memoryMb != null ? `${Math.round(h.memoryMb / 1024)} GB` : null,
+                    h.workerVersion ? `worker ${h.workerVersion}` : "worker not installed",
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </s>
               </span>
               {/* A machine is personal until it is shared, so whoever added it
                   shares it — the same as a workspace. Taking one back out of a
@@ -75,16 +113,26 @@ export function Machines({ live }: { live: boolean }) {
                   decided here, and `startsWith("u/")` read somebody else's own
                   space as this person's. */}
               <WhoCanAccess look="chip" kind="machine" id={h.id} path={h.path} />
-              {h.cpus != null && <span className="flex items-center gap-1.5 text-meta text-mute"><Icon of={Cpu} size={12} />{h.cpus}</span>}
-              {h.memoryMb != null && <span className="flex items-center gap-1.5 text-meta text-mute"><Icon of={HardDrive} size={12} />{Math.round(h.memoryMb / 1024)} GB</span>}
-              <span className="w-[76px] text-right text-meta text-mute">{stateLabel(h)}</span>
-              <ChevronDown className={`h-3.5 w-3.5 text-mute transition-transform ${open === h.id ? "rotate-180" : ""}`} strokeWidth={2} />
+              {/* Where it is, in the voice an address is written in. */}
+              <span className="path">{describe(h.compute)}</span>
+              <span className="said">{stateLabel(h)}</span>
+              <span className="g">
+                <ChevronDown className={`h-3.5 w-3.5 transition-transform ${open === h.id ? "rotate-180" : "-rotate-90"}`} strokeWidth={2} />
+              </span>
             </button>
             {open === h.id && live && <Detail host={h} onGone={() => setOpen(null)} />}
           </div>
         ))}
+      </Group>
       </Rows>
       {adding && <Add onClose={() => setAdding(false)} onAdded={(id) => { setAdding(false); setOpen(id); }} />}
+
+      {!blank && (
+        <WhereTo>
+          A machine that is <b>not answering keeps its workspaces</b> until it comes back.
+          Draining stops new work without ending what is running.
+        </WhereTo>
+      )}
     </Section>
     <Removed />
     </>
@@ -95,49 +143,6 @@ export function Machines({ live }: { live: boolean }) {
 function describe(c: Compute): string {
   if (c.type !== "Server") return "";
   return `${c.user ? `${c.user}@` : ""}${c.host}${c.port ? `:${c.port}` : ""}`;
-}
-
-/**
- * Landing here with nothing added, which is now every fresh install.
- *
- * `Repos.tsx`'s own `Start`, beat for beat — the same centred imperative, the
- * same clamped paragraph, the same 20rem column of actions, the same quiet
- * routes underneath. That screen already decided that arriving at an empty
- * list is a beginning rather than a failure, and this screen has exactly the
- * same problem now that Firetower does not register itself as a machine.
- */
-function Start({ onAdd }: { onAdd: () => void }) {
-  return (
-    <div className="px-6 py-9 text-center">
-      <p className="text-title text-bone">Add a machine to run agents on</p>
-      <p className="mx-auto mt-1.5 max-w-[46ch] text-ui text-dim">
-        An agent runs on the machine itself — its tools, its filesystem, its network — as the
-        account Firetower connects as. Firetower does not run agents on itself.
-      </p>
-
-      <div className="mx-auto mt-5 flex w-full max-w-[20rem] flex-col gap-2">
-        <button onClick={onAdd} className="control w-full justify-center bg-bone font-medium text-ground hover:opacity-90">
-          <Icon of={Plus} size={12} />Add a machine
-        </button>
-      </div>
-
-      <div className="mx-auto mt-5 flex max-w-[46ch] flex-col items-center gap-1.5 text-meta text-mute">
-        <span>
-          A VM, a build box, a Mac with Xcode on it. It needs ssh, git, tmux and a shell —
-          Firetower puts the worker in that account&rsquo;s home.
-        </span>
-        {/* The key is the step that happens before the form can be filled in,
-            and it is the one thing a machine can only get from a person. A
-            link into the dialog that already shows it, not a second copy. */}
-        <span>
-          You will need Firetower&rsquo;s public key on it.{" "}
-          <button onClick={onAdd} className="underline decoration-line underline-offset-2 hover:text-dim">
-            Show the key
-          </button>
-        </span>
-      </div>
-    </div>
-  );
 }
 
 /**
@@ -507,7 +512,7 @@ function Detail({ host, onGone }: { host: Host; onGone: () => void }) {
 
       {host.state === "Online" && offered.length > 0 && (
         <div>
-          <p className="text-micro uppercase tracking-wide text-mute">Agents</p>
+          <p className="legend">Agents</p>
           <div className="mt-1.5 space-y-1">
             {offered.map((a) => {
               const here = onThis(a);
@@ -538,16 +543,16 @@ function Detail({ host, onGone }: { host: Host; onGone: () => void }) {
       )}
 
       <div className="flex flex-wrap items-center gap-2">
-        <button disabled={connect.isPending} onClick={() => connect.mutate({ id: host.id }, { onSuccess: refresh })} className="control border border-line bg-raise text-bone hover:bg-overlay disabled:text-mute">{connect.isPending ? "Connecting…" : "Connect"}</button>
-        <button disabled={install.isPending || settling} onClick={() => install.mutate({ id: host.id }, { onSuccess: installed })} className="control border border-line bg-raise text-bone hover:bg-overlay disabled:text-mute">{install.isPending ? "Installing…" : settling ? "Reconnecting…" : host.workerVersion ? "Reinstall the worker" : "Install the worker"}</button>
+        <button disabled={connect.isPending} onClick={() => connect.mutate({ id: host.id }, { onSuccess: refresh })} className="btn plain">{connect.isPending ? "Connecting…" : "Connect"}</button>
+        <button disabled={install.isPending || settling} onClick={() => install.mutate({ id: host.id }, { onSuccess: installed })} className="btn plain">{install.isPending ? "Installing…" : settling ? "Reconnecting…" : host.workerVersion ? "Reinstall the worker" : "Install the worker"}</button>
         {install.isError && <span className="text-meta text-brick">{install.error.message}</span>}
-        <button disabled={drain.isPending} onClick={() => drain.mutate({ id: host.id, data: { drained: !host.drained } }, { onSuccess: refresh })} className="control border border-line bg-raise text-dim hover:bg-overlay disabled:text-mute">{host.drained ? "Take new work" : "Drain"}</button>
+        <button disabled={drain.isPending} onClick={() => drain.mutate({ id: host.id, data: { drained: !host.drained } }, { onSuccess: refresh })} className="btn plain">{host.drained ? "Take new work" : "Drain"}</button>
         <button onClick={() => void confirm({ title: `Remove ${host.name}?`, body: "Nothing on the machine is touched.", action: "Remove", tone: "danger" }).then((ok) => ok && remove.mutate({ id: host.id, params: undefined as never }, { onSuccess: () => { refresh(); onGone(); } }))} className="control ml-auto text-mute hover:text-brick"><Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} />Remove</button>
       </div>
 
       <div className="flex items-center gap-2">
         <input value={name} onChange={(e) => setName(e.target.value)} className="min-w-0 flex-1 rounded-md border border-line bg-ground px-2 py-1 text-ui text-bone focus:outline-none" />
-        <button disabled={!name.trim() || name === host.name || rename.isPending} onClick={() => rename.mutate({ id: host.id, data: { name: name.trim() } }, { onSuccess: refresh })} className="control border border-line bg-raise text-bone hover:bg-overlay disabled:text-mute">Rename</button>
+        <button disabled={!name.trim() || name === host.name || rename.isPending} onClick={() => rename.mutate({ id: host.id, data: { name: name.trim() } }, { onSuccess: refresh })} className="btn plain">Rename</button>
       </div>
     </div>
   );
@@ -643,7 +648,7 @@ function Add({ onClose, onAdded }: { onClose: () => void; onAdded: (id: string) 
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-ground/70 py-[8vh] backdrop-blur-[3px]" onMouseDown={onClose}>
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-scrim py-[8vh] backdrop-blur-[3px]" onMouseDown={onClose}>
       <div onMouseDown={(e) => e.stopPropagation()} className="w-[36rem] overflow-hidden rounded-2xl border border-line bg-panel shadow-(--shadow-float)">
         <div className="flex items-center gap-3 border-b border-line px-5 py-3.5">
           <h2 className="text-title text-bone">Add a machine</h2>
@@ -656,7 +661,7 @@ function Add({ onClose, onAdded }: { onClose: () => void; onAdded: (id: string) 
             <p className="text-meta text-mute">Which agents should this machine run? Each is fetched onto the machine as the standalone binary its publisher ships; nothing else is needed for it.</p>
             <div className="flex flex-wrap gap-2">
               {agents.data.filter((a) => a.enabled && a.supported).map((a) => (
-                <button key={a.kind} disabled={fetched[a.kind] === "fetching" || fetched[a.kind] === "done"} onClick={() => fetchAgent(a)} className="control border border-line bg-raise text-bone hover:bg-overlay disabled:text-mute">
+                <button key={a.kind} disabled={fetched[a.kind] === "fetching" || fetched[a.kind] === "done"} onClick={() => fetchAgent(a)} className="btn plain">
                   {fetched[a.kind] === "done" ? <Check className="h-3.5 w-3.5 text-sage" strokeWidth={2} /> : <Icon of={Plus} size={12} />}
                   {fetched[a.kind] === "fetching" ? `Fetching ${a.label}…` : fetched[a.kind] === "done" ? a.label : `Install ${a.label}`}
                 </button>
@@ -689,7 +694,7 @@ function Add({ onClose, onAdded }: { onClose: () => void; onAdded: (id: string) 
             {key.isPending ? <p className="mt-1.5 flex items-center gap-2 text-meta text-mute"><Loader2 className="h-3 w-3 animate-spin" />Reading the key…</p> : (
               <div className="mt-2 flex items-start gap-2">
                 <code className="scroll-slim min-w-0 flex-1 overflow-x-auto rounded-md bg-panel px-2.5 py-1.5 font-mono text-micro whitespace-nowrap text-dim">{pub ?? JSON.stringify(key.data)}</code>
-                <button onClick={copy} className="control border border-line bg-raise text-bone hover:bg-overlay">{copied ? <Check className="h-3.5 w-3.5 text-sage" strokeWidth={2} /> : <Copy className="h-3.5 w-3.5" strokeWidth={1.75} />}</button>
+                <button onClick={copy} className="btn plain">{copied ? <Check className="h-3.5 w-3.5 text-sage" strokeWidth={2} /> : <Copy className="h-3.5 w-3.5" strokeWidth={1.75} />}</button>
               </div>
             )}
             <p className="mt-2 text-meta text-mute">Give it to the machine the way that machine takes keys: <code className="font-mono">~/.ssh/authorized_keys</code> of the account above on a machine you own; the provider's console, instance metadata or OS Login on Google Cloud; the CA where there is one. It is public — safe anywhere.</p>

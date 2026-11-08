@@ -52,7 +52,22 @@ export function place(
   to: { top: number; bottom: number; right: number },
   card: { width: number; height: number },
   view: { width: number; height: number },
+  /**
+   * Beside the button rather than under it, for a menu dropped from something
+   * in a 62px rail. There is nothing below the rail's avatar and nothing to
+   * the left of it, so the two axes both change: the card opens to the right
+   * and its **bottom edge lines up with the button's**, which is what makes it
+   * read as belonging to that button rather than floating over the window.
+   */
+  beside = false,
 ): Spot {
+  if (beside) {
+    return {
+      left: Math.min(Math.max(EDGE, view.width - card.width - EDGE), to.right + GAP),
+      bottom: Math.max(EDGE, view.height - to.bottom),
+      room: Math.max(0, to.bottom - EDGE),
+    };
+  }
   const below = view.height - to.bottom - GAP - EDGE;
   const above = to.top - GAP - EDGE;
   // Below unless it does not fit and above is roomier — so a menu that fits
@@ -89,6 +104,7 @@ export function Pop({
   onClose,
   children,
   width,
+  beside = false,
 }: {
   anchor: HTMLElement;
   onClose: () => void;
@@ -96,6 +112,8 @@ export function Pop({
   /** A fixed width, for a menu that should match whatever it drops from — a
    *  field-wide select rather than a small row menu. Defaults to `w-44`. */
   width?: number;
+  /** Opens to the right of the button and bottom-aligned with it. See `place`. */
+  beside?: boolean;
 }) {
   const box = useRef<HTMLDivElement>(null);
   const [spot, setSpot] = useState<Spot | null>(null);
@@ -111,9 +129,10 @@ export function Pop({
         anchor.getBoundingClientRect(),
         { width: el.offsetWidth, height: el.offsetHeight },
         { width: window.innerWidth, height: window.innerHeight },
+        beside,
       ),
     );
-  }, [anchor]);
+  }, [anchor, beside]);
 
   useEffect(() => {
     const away = (e: MouseEvent) => {
@@ -168,7 +187,7 @@ export function Pop({
          has been clipped off the bottom of the card is exactly as unreachable
          as one that ran off the window. A menu whose list does scroll never
          reaches this, so its header still does not move. */
-      className={`scroll-slim z-[70] flex flex-col overflow-x-hidden overflow-y-auto rounded-lg border border-line bg-panel shadow-(--shadow-float) ${
+      className={`pop scroll-slim z-[70] flex flex-col overflow-x-hidden overflow-y-auto ${
         width == null ? "w-44" : ""
       } ${spot ? "" : "invisible"}`}
     >

@@ -24,13 +24,17 @@ import {
   Check,
   ChevronDown,
   CircleDot,
-  ExternalLink,
   GitPullRequest,
+  ListTodo,
+  Play,
   RotateCw,
+  Search,
   Ticket,
   User,
 } from "lucide-react";
-import { GiteaMark, GitLabMark, GithubMark, Icon, Input, LinearMark, Select } from "~/components/ui";
+import { Badge, GitLabMark, GiteaMark, GithubMark, Icon, IconButton, Input, LinearMark, Select } from "~/components/ui";
+import { Blank, Note, Typed } from "~/ui/config/bits";
+import { usePathname } from "~/shims/next-navigation";
 import { elapsed, minutesSince } from "~/api/view";
 import type { Backend } from "~/fleet";
 import { useTasks, useTrackers, useTrackerScopes } from "~/data";
@@ -64,6 +68,20 @@ const KIND_LABEL: Record<TaskKind, string> = {
   issue: "Issues",
   pullRequest: "PRs",
   ticket: "Tickets",
+};
+
+/**
+ * And what it is called inside a sentence.
+ *
+ * `KIND_LABEL` is a control's label — title case, abbreviated to fit a
+ * segment. "GitHub has no open PRs for you" is a control's word in a
+ * sentence's place, which is how an interface comes to sound like its own
+ * schema.
+ */
+const KIND_SAYS: Record<TaskKind, string> = {
+  issue: "issues",
+  pullRequest: "pull requests",
+  ticket: "tickets",
 };
 
 /** The mark for a tracker, by kind. Anything unrecognised keeps the page working. */
@@ -102,7 +120,11 @@ export function TasksPage({ backend }: { backend: Backend }) {
   const [picked, setPicked] = useState<string | null>(null);
   const [kind, setKind] = useState<TaskKind | null>(null);
   const [state, setState] = useState<TaskState>("open");
-  const [mine, setMine] = useState(false);
+  /* `/tasks/mine` is the rail's way in, and the pill is the page's. One piece
+     of state either way, so the two cannot disagree about what is on. */
+  const path = usePathname();
+  const [mine, setMine] = useState(() => path.startsWith("/tasks/mine"));
+  useEffect(() => setMine(path.startsWith("/tasks/mine")), [path]);
   const [typed, setTyped] = useState("");
   const [q, setQ] = useState("");
   const [scopes, setScopes] = useState<Record<string, string>>({});
@@ -158,17 +180,39 @@ export function TasksPage({ backend }: { backend: Backend }) {
 
   const refresh = () => cache.invalidateQueries({ queryKey: getListTasksQueryKey(ask) });
 
+  /* **The body is empty, and nothing is wrong** — no tracker, a tracker
+     nobody has signed into, or a tracker with nothing open. All three are a
+     `Blank`; a query that matched nothing is a `Note`, because the reader
+     changed a control and the rest of the page is still there. */
+  const nothing = !feed.loading && !feed.error && feed.data.length === 0;
+
+  /* The headline says what the screen is, which changes with what it found.
+     "0 to pick from." over an empty page is a count nobody asked for.
+
+     **And over an empty body it falls back to the page's name.** The blank
+     carries its own title, so a status sentence above it is two titles on one
+     screen — and the status it would have carried is the thing the blank
+     already says, better and beside the glyph that explains it. */
+  const headline = feed.loading
+    ? `Reading ${source?.label ?? "your trackers"}…`
+    : !connected || nothing
+      ? "Tasks"
+      : `${count} to pick from.`;
+
   return (
     <div className="scroll-slim h-full overflow-y-auto">
-      <div className="mx-auto max-w-[1000px] px-6 py-6">
-        <h1 className="text-display text-bone">{count} to pick from.</h1>
-        <p className="mt-1 text-body text-dim">
-          Read from your trackers as you look. Starting one opens a workspace.
-        </p>
-
-        <div className="mt-5 overflow-hidden rounded-lg border border-line bg-panel">
-          {/* Which tracker, and what to narrow it to. */}
-          <div className="flex items-center gap-2 border-b border-line px-2.5 py-2">
+      <div className="pg">
+        <div className="pg-head">
+          <div>
+            <h1>{headline}</h1>
+            <p className="sub">
+              Work the tracker already knows about. Starting one opens a workspace on its
+              repository with the task attached.
+            </p>
+          </div>
+          {/* Which tracker, and the one control here that acts rather than
+              narrows. Beside the heading, where a page's actions live. */}
+          <div className="acts">
             <Sources
               trackers={pickable(trackers)}
               value={source?.id}
@@ -192,23 +236,22 @@ export function TasksPage({ backend }: { backend: Backend }) {
                 className="h-7 max-w-[220px] text-meta"
               />
             )}
-            <span className="flex-1" />
-            <button
-              onClick={refresh}
-              aria-label="Read the tracker again"
-              title="Read the tracker again"
-              className="grid h-7 w-7 place-items-center rounded-md border border-line bg-ground text-mute hover:text-bone"
-            >
-              <Icon of={RotateCw} size={12} />
-            </button>
+            {/* **Not over a tracker nobody has connected.** `feed` is
+                disabled until one is, so this would re-read a list that was
+                never fetched: a control that cannot do anything, on the one
+                screen whose whole job is the one thing that can. */}
+            {connected && (
+              <IconButton of={RotateCw} onClick={refresh} label="Read the tracker again" />
+            )}
           </div>
+        </div>
 
           {/* What to ask it for. All of it is hidden until there is something
               to ask: filters over a tracker nobody has connected are controls
               that cannot do anything. */}
           {connected && (
             <>
-          <div className="flex flex-wrap items-center gap-2 border-b border-line px-2.5 py-2">
+          <div className="filterline">
             {kinds.length > 1 && (
               <Seg
                 value={showing as TaskKind}
@@ -224,78 +267,91 @@ export function TasksPage({ backend }: { backend: Backend }) {
                 ["closed", "Closed"],
               ]}
             />
-            <button
-              onClick={() => setMine(!mine)}
-              className={`flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-ui transition-colors ${
-                mine ? "border-line bg-overlay text-bone" : "border-line bg-ground text-mute hover:text-dim"
-              }`}
-            >
+            <button onClick={() => setMine(!mine)} aria-pressed={mine} className="fp">
               <Icon of={User} size={12} />
               Assigned to me
             </button>
-            <Input
+          </div>
+
+          {/* The query on its own line, where it governs the list beneath it
+              rather than competing with the filters beside it. */}
+          <label className="inline-form mt-2.5">
+            <Icon of={Search} size={14} className="shrink-0 text-mute" />
+            <input
               value={typed}
-              onChange={setTyped}
+              onChange={(e) => setTyped(e.target.value)}
+              spellCheck={false}
+              aria-label="Narrow the list"
               placeholder={
                 source?.id === "linear" ? "team:ENG label:bug" : "label:bug sort:updated-desc"
               }
-              mono
-              className="h-7 flex-1"
+              className="min-w-0 flex-1 bg-transparent font-mono text-meta text-bone placeholder:text-mute focus:outline-none"
             />
-          </div>
+          </label>
 
-          {/* What was actually sent, in the tracker's own dialect. */}
-          <div className="border-b border-line-soft px-3 py-1.5">
-            <span className="font-mono text-[9.5px] text-mute">{sent(ask)}</span>
-          </div>
-
-          <div className="flex items-center gap-3 border-b border-line-soft px-3 py-1.5">
-            <span className="eyebrow w-[150px] shrink-0">Id</span>
-            <span className="eyebrow flex-1">Title</span>
-            <span className="eyebrow w-[70px] shrink-0">Status</span>
-            <span className="eyebrow w-[56px] shrink-0">Updated</span>
-            <span className="w-[72px] shrink-0" />
-          </div>
+          {/* What was actually sent, in the tracker's own dialect. These are
+              the tracker's filters and not local ones, so the answer below is
+              its answer — which is worth being able to read. */}
+          <p className="mt-2 font-mono text-micro text-mute">sent as {sent(ask)}</p>
             </>
           )}
 
-          {!findingTrackers && source && !connected && (
-            <div className="px-3 py-8 text-center">
-              <p className="text-ui text-bone">{source.label} isn't connected yet.</p>
-              <p className="mx-auto mt-1 max-w-[380px] text-meta text-mute">
-                {source.auth === "apiKey"
-                  ? `It reads with a personal API key, kept in this server's vault.`
-                  : `It shares the git host's authorization.`}
-              </p>
-              <div className="mt-3 flex items-center justify-center gap-2">
-                <button
-                  onClick={() => navigate(paneFor(source))}
-                  className="control border border-line bg-raise px-3 text-text hover:bg-overlay hover:text-bone"
-                >
-                  Connect {source.label}
+          {/* **No tracker at all**, which is every fresh install: `source` is
+              undefined because nothing has been connected and nothing is
+              pending. The four kinds are named, because the question in the
+              reader's head is whether the one they use is among them. */}
+          {!findingTrackers && !source && (
+            <Blank
+              icon={ListTodo}
+              title="No tracker connected"
+              action={
+                <button onClick={() => navigate("/configuration/trackers")} className="btn primary">
+                  Connect your task tracker
                   <Icon of={ArrowRight} size={12} />
                 </button>
-                {/* **Only where a key is the thing to make.** `keyUrl` is set
-                    for every tracker — Linear's API key page, and a git host's
-                    personal-access-token page — so this drew "Make a key" next
-                    to GitHub, which is Linear's word for Linear's flow and the
-                    wrong instruction besides: a git host here is connected in
-                    a browser on the Git hosts screen, and a token is the
-                    fallback offered there with the scopes spelled out. Two
-                    buttons where the second contradicts the first. */}
-                {source.auth === "apiKey" && source.keyUrl && (
-                  <a
-                    href={source.keyUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="control border border-line bg-ground px-3 text-mute hover:text-bone"
-                  >
-                    Make a key
-                    <Icon of={ExternalLink} size={12} />
-                  </a>
-                )}
-              </div>
-            </div>
+              }
+            >
+              GitHub, GitLab, Gitea and Linear can all feed this list.
+            </Blank>
+          )}
+
+          {/* **One tracker picked, and not signed into.** The sentence changes
+              with how that tracker authorises, because that is what decides
+              where the button goes.
+
+              The second button, *Make a key*, is gone. `keyUrl` is set for
+              every tracker — Linear's API key page, and a git host's
+              personal-access-token page — so it drew "Make a key" beside
+              GitHub, which is Linear's word for Linear's flow and the wrong
+              instruction besides. Making a key is step one *inside* the
+              connect flow, where the scopes are spelled out. */}
+          {!findingTrackers && source && !connected && (
+            /* **It does not name the tracker it happens to have picked.**
+                This read `GitHub is not connected` with `Connect GitHub`
+                under it, which tells somebody whose work lives in Linear
+                that they are on the wrong screen. `source` is whichever
+                tracker the page defaulted to, not a choice the reader made,
+                so naming it turns a default into a recommendation. The
+                trackers page lists all of them. */
+            <Blank
+              icon={ListTodo}
+              title="No tracker connected"
+              action={
+                <button onClick={() => navigate("/configuration/trackers")} className="btn primary">
+                  Connect your task tracker
+                  <Icon of={ArrowRight} size={12} />
+                </button>
+              }
+            >
+              {/* The sentence still says how *this* tracker authorises. That
+                  was never the opinionated part: naming a default in the
+                  title and on the button was, because it reads as a
+                  recommendation. How a key or a sign-in works is a fact the
+                  reader needs once they are on their way. */}
+              {source.auth === "apiKey"
+                ? "It reads with an API key, kept in this Firetower’s vault."
+                : "Signing in once covers both its code and its issues."}
+            </Blank>
           )}
 
           {connected && feed.loading && (
@@ -304,10 +360,38 @@ export function TasksPage({ backend }: { backend: Backend }) {
           {connected && feed.error && (
             <p className="px-3 py-6 text-center text-ui text-brick">{feed.error}</p>
           )}
-          {connected && !feed.loading && !feed.error && feed.data.length === 0 && (
-            <p className="px-3 py-6 text-center text-ui text-mute">
-              Nothing {state} here.
-            </p>
+          {/* **Connected, and nothing open: no button.** Nothing is wrong
+              here, and the head already carries the two things that could
+              change the answer — which tracker, and refresh. A page that nags
+              you to go and open an issue has misread its own job. */}
+          {connected && nothing && !q && (
+            <Blank icon={ListTodo} title={`Nothing ${state} right now`}>
+              {source?.label} has no {state} {KIND_SAYS[showing as TaskKind] ?? "work"} for you.
+            </Blank>
+          )}
+          {/* **And a query that matched nothing is a `Note`.** The query goes
+              to the tracker in the tracker's own dialect, so this is the
+              tracker's answer and the `sent as` line above it stays. `Clear`
+              exists because a typed string does not announce itself as
+              removable; a pressed pill does, so a pill-caused note carries no
+              control. */}
+          {connected && nothing && q && (
+            <Note
+              icon={Search}
+              control={
+                <button
+                  onClick={() => {
+                    setTyped("");
+                    setQ("");
+                  }}
+                  className="btn quiet"
+                >
+                  Clear
+                </button>
+              }
+            >
+              No task matches <Typed>{q}</Typed>.
+            </Note>
           )}
 
           {feed.data.map((t) => {
@@ -315,46 +399,33 @@ export function TasksPage({ backend }: { backend: Backend }) {
             // The tail is what identifies it; the org prefix is noise at every row.
             const short = t.key.replace(/^[a-z]+:/, "").replace(/^.*\//, "");
             return (
-              <div
-                key={t.id}
-                className="group flex items-center gap-3 border-b border-line-soft px-3 py-2 last:border-0 hover:bg-raise/60"
-              >
-                <span className="flex w-[150px] shrink-0 items-center gap-1.5">
-                  <Icon of={Glyph} size={12} className="shrink-0 text-mute" />
-                  <span className="truncate font-mono text-micro text-dim" title={t.key}>
-                    {short}
-                  </span>
+              /* One row, as every other list in the app draws one: the kind,
+                 the title at reading size, and *where it is and when it moved*
+                 underneath. There was a four-column table with its own
+                 headers and a sage "open" pill per row — a status column on a
+                 list filtered to one status. */
+              <div key={t.id} className="r">
+                <span className="g">
+                  <Icon of={Glyph} size={16} />
                 </span>
 
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-ui text-bone">{t.title}</span>
-                  <span className="mt-0.5 flex items-center gap-1.5">
-                    {t.labels.map((l) => (
-                      <span
-                        key={l.name}
-                        className="rounded-sm px-1 text-[9.5px]"
-                        style={{ color: l.colour ?? undefined, background: `${l.colour}1a` }}
-                      >
-                        {l.name}
-                      </span>
-                    ))}
-                    {t.assignees.map((a) => (
-                      <span key={a.login} className="text-[9.5px] text-mute">
-                        @{a.login}
-                      </span>
-                    ))}
-                  </span>
+                <span className="tx">
+                  <b>{t.title}</b>
+                  <s>
+                    {[t.repo, short, elapsed(minutesSince(t.updatedAt)), ...t.assignees.map((a) => a.login)]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </s>
                 </span>
 
-                <span className="w-[70px] shrink-0">
-                  <span className="rounded-sm border border-sage-deep bg-sage-tint px-1.5 py-0.5 text-micro text-sage">
-                    {t.state}
-                  </span>
-                </span>
-
-                <span className="w-[56px] shrink-0 font-mono text-micro text-mute">
-                  {elapsed(minutesSince(t.updatedAt))}
-                </span>
+                {/* The tracker's own labels, in the tracker's own colours —
+                    the one place in the app where a hue comes from outside. */}
+                {/* Neutral. The tracker's own hue is somebody else's palette
+                    arriving on a screen that is allowed one accent, and at
+                    11px a tinted chip reads as a warning whatever it says. */}
+                {t.labels.slice(0, 2).map((l) => (
+                  <Badge key={l.name}>{l.name}</Badge>
+                ))}
 
                 <button
                   onClick={() =>
@@ -366,17 +437,17 @@ export function TasksPage({ backend }: { backend: Backend }) {
                       taskUrl: t.url,
                     })
                   }
-                  className="control w-[5rem] shrink-0 justify-center border border-line bg-raise text-text transition-colors hover:bg-overlay hover:text-bone"
+                  className="btn quiet"
                 >
+                  <Icon of={Play} size={12} />
                   Start
-                  <Icon of={ArrowRight} size={12} />
                 </button>
               </div>
             );
           })}
 
           {connected && (trail.length > 0 || feed.more) && (
-            <div className="flex items-center justify-between border-t border-line px-3 py-2">
+            <div className="mt-6 flex items-center justify-between">
               <Step
                 of={ArrowLeft}
                 label="Previous"
@@ -393,7 +464,6 @@ export function TasksPage({ backend }: { backend: Backend }) {
               />
             </div>
           )}
-        </div>
       </div>
     </div>
   );
@@ -436,7 +506,7 @@ function Sources({
       <button
         type="button"
         onClick={(e) => setOpen(open ? null : e.currentTarget)}
-        className="flex h-7 items-center gap-1.5 rounded-md border border-line bg-ground px-2.5 text-ui text-bone hover:bg-raise"
+        className="btn plain"
       >
         {Mark && <Mark size={14} />}
         <span className="max-w-[12rem] truncate">{on?.label ?? "Pick a tracker"}</span>
@@ -554,19 +624,19 @@ function Seg<T extends string>({
   onPick: (v: T) => void;
   options: [T, string][];
 }) {
+  /* **Pills on the line, not a recessed track.** These are not two views of
+     one thing — Issues and Open narrow different axes of the same list, and
+     the drawing runs all of them along one row with a hairline between the
+     groups. A track around each pair said they were alternatives to each
+     other and to nothing else. */
   return (
-    <div className="flex gap-0.5 rounded-md bg-ground p-0.5">
+    <>
       {options.map(([v, label]) => (
-        <button
-          key={v}
-          onClick={() => onPick(v)}
-          className={`rounded-sm px-2.5 py-1 text-ui transition-colors ${
-            value === v ? "bg-overlay text-bone" : "text-mute hover:text-dim"
-          }`}
-        >
+        <button key={v} onClick={() => onPick(v)} aria-pressed={value === v} className="fp">
           {label}
         </button>
       ))}
-    </div>
+      <span className="mx-1.5 h-4 w-px bg-line" />
+    </>
   );
 }

@@ -122,10 +122,14 @@ export function shipping(
 ): Ship {
   const held = work ?? [];
   const Noun = noun.charAt(0).toUpperCase() + noun.slice(1);
-  /* `PR` on GitHub, `MR` on GitLab. The short form is the button in the session
-     header, where there is no room for the long one. */
+  /* **The long form on the button that opens one.** `PR` and `MR` were short
+     because the control was in the session header and had no room; this one
+     runs the width of the panel, and the drawing says "Commit and open a
+     pull request". The short form stays for the labels that *amend* an
+     existing request, where the sentence is already long and the noun is a
+     reference rather than the thing being made. */
   const SHORT = noun === "merge request" ? "MR" : "PR";
-  const opens = `Commit & open ${SHORT}`;
+  const opens = `Commit and open a ${noun}`;
 
   if (session.checkouts?.length === 0 && !session.repo) {
     return {

@@ -24,6 +24,7 @@ import { anchorIn } from "~/preview/anchor";
 import { usePickerBridge, type Selection } from "~/preview/bridge";
 import { usePreviewNotes } from "~/preview/notes";
 import { AddAgent } from "~/ui/AddAgent";
+import { Segmented } from "~/components/ui";
 
 const WIDTHS = [
   { id: "full", label: "Full width", icon: Monitor, px: 0 },
@@ -164,13 +165,13 @@ export function PreviewTab({ session, port, path: initialPath = "/", onPath }: {
           />
         </div>
 
-        <div className="track ml-2 shrink-0">
-          {WIDTHS.map((w) => (
-            <button key={w.id} data-on={width === w.id} onClick={() => setWidth(w.id)} title={w.label}>
-              <w.icon className="h-3.5 w-3.5" strokeWidth={1.75} />
-            </button>
-          ))}
-        </div>
+        <Segmented
+          className="ml-2"
+          label="How wide to draw it"
+          value={width}
+          onChange={setWidth}
+          options={WIDTHS.map((w) => [w.id, <w.icon key={w.id} className="h-3.5 w-3.5" strokeWidth={1.75} />, w.label] as const)}
+        />
 
         <button
           disabled={!bridge.ready}
@@ -179,7 +180,7 @@ export function PreviewTab({ session, port, path: initialPath = "/", onPath }: {
           /* Heavier when on, never a hue — see the note in ArtifactTab. */
           className={`control ml-1 shrink-0 ${
             bridge.annotating
-              ? "bg-overlay font-medium text-bone shadow-(--shadow-raise)"
+              ? "lift font-medium text-bone shadow-(--shadow-raise)"
               : "border border-line bg-raise text-dim hover:bg-overlay hover:text-bone"
           } disabled:opacity-40`}
         >
@@ -252,7 +253,7 @@ export function PreviewTab({ session, port, path: initialPath = "/", onPath }: {
       )}
 
       {notice && (
-        <div className="pointer-events-none absolute bottom-4 left-1/2 z-30 -translate-x-1/2 rounded-full border border-line bg-overlay px-3.5 py-1.5 text-meta text-dim shadow-(--shadow-float)">{notice}</div>
+        <div className="pointer-events-none absolute bottom-4 left-1/2 z-30 -translate-x-1/2 rounded-full border border-line lift px-3.5 py-1.5 text-meta text-dim shadow-(--shadow-float)">{notice}</div>
       )}
 
       {drafting && (
@@ -279,7 +280,7 @@ function Note({ index, note, focused, onLocate, onEdit, onDrop }: { index: numbe
   return (
     <div id={`preview-note-${note.id}`} className={`group/note border-b border-line-soft px-3 py-2.5 ${focused ? "bg-raise/60" : ""}`}>
       <button onClick={onLocate} title={`${note.snapshot.path} · ${note.snapshot.selector}`} className="flex w-full items-center gap-2 text-left">
-        <span className={`grid h-4 w-4 shrink-0 place-items-center rounded-full font-mono text-[10px] leading-none ${sent ? "bg-sage-tint text-sage" : pending ? "bg-slate-tint text-slate" : "bg-ember-tint text-ember"}`}>{index}</span>
+        <span className={`grid h-4 w-4 shrink-0 place-items-center rounded-full font-mono text-micro leading-none ${sent ? "bg-sage-tint text-sage" : pending ? "bg-slate-tint text-slate" : "bg-ember-tint text-ember"}`}>{index}</span>
         <span className="min-w-0 flex-1 truncate font-mono text-micro text-mute">{nameOf(note.snapshot.label, note.snapshot.html)}</span>
       </button>
       {editing !== null ? (

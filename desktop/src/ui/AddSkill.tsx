@@ -221,7 +221,7 @@ export function AddSkill({
               Limits are 100 files, 2 MB a file and 25 MB a skill
             </span>
             <span className="mt-4 flex gap-2">
-              <button className="control border border-line bg-raise text-ui text-text hover:bg-overlay" onClick={() => picker.current?.click()}>
+              <button className="btn plain" onClick={() => picker.current?.click()}>
                 Choose a folder
               </button>
             </span>
@@ -288,7 +288,7 @@ export function AddSkill({
                 </span>
               ) : (
                 <>
-                  Importing <b className="font-semibold text-bone">{ready.length}</b>{" "}
+                  Importing <b className="font-mid text-bone">{ready.length}</b>{" "}
                   {ready.length === 1 ? "skill" : "skills"}
                   {ready.some((i) => asVersion(found[i]!))
                     ? ", some as new versions of skills you already have."
@@ -302,7 +302,7 @@ export function AddSkill({
             <button
               disabled={ready.length === 0 || clashes.length > 0 || step === "saving"}
               onClick={confirm}
-              className="control bg-overlay text-ui font-semibold text-bone shadow-raise disabled:bg-raise disabled:font-normal disabled:text-mute"
+              className="control lift text-ui font-mid text-bone shadow-raise disabled:bg-raise disabled:font-normal disabled:text-mute"
             >
               {step === "saving"
                 ? "Importing…"
@@ -351,7 +351,9 @@ function Entry({
         </button>
         <button onClick={onOpen} className="min-w-0 flex-1 text-left">
           <span className="flex flex-wrap items-baseline gap-2">
-            <span className={`font-mono text-ui font-semibold ${broken ? "text-dim" : skipped ? "text-mute" : "text-bone"}`}>
+            {/* A dropped folder's name is a name. Paths, branches, codes,
+                keys and diffs keep the mono voice; this is not one of them. */}
+            <span className={`text-ui font-medium ${broken ? "text-dim" : skipped ? "text-mute" : "text-bone"}`}>
               {found.name}
             </span>
             {skipped ? (

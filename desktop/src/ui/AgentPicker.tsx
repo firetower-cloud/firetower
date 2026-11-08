@@ -165,13 +165,13 @@ export function AgentPicker({
 
       {open && (
         <>
-          <button className="fixed inset-0 z-20 cursor-default" onClick={shut} />
+          <button className="catcher z-20" onClick={shut} />
           {/* Capped and scrolling, because the lists are the agent's and not
               ours: Codex reports a dozen models with a sentence each, which ran
               off the top of the window with the first few unreachable. `vh` as
               well as a fixed height — a short window is exactly where an
               uncapped list does the most damage. */}
-          <div className="scroll-slim absolute bottom-full left-0 z-30 mb-1.5 max-h-[min(26rem,60vh)] w-[17rem] overflow-y-auto overflow-x-hidden rounded-lg border border-line bg-overlay p-1 shadow-(--shadow-float)">
+          <div className="scroll-slim absolute bottom-full left-0 z-30 mb-1.5 max-h-[min(26rem,60vh)] w-[17rem] overflow-y-auto overflow-x-hidden rounded-lg border border-line lift p-1 shadow-(--shadow-float)">
             {pane === null ? (
               <>
                 {/* Whose settings these are. A heading and not a row: the agent

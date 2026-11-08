@@ -8,7 +8,7 @@
  */
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronDown, Download, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Check, ChevronDown, Download, Plus, Puzzle, RefreshCw, Trash2 } from "lucide-react";
 import { AgentMark } from "~/components/AgentMark";
 import { Icon } from "~/components/ui";
 import type { Account, AgentView, Updated } from "~/api/generated/model";
@@ -16,7 +16,7 @@ import { getListAgentsQueryKey, useCheckAgents, useConfigureAgent, useForgetAgen
 import { getListAccountsQueryKey, useUpdateAccount } from "~/api/generated/accounts/accounts";
 import { quota } from "~/api/accounts";
 import { useAccounts, useAgents, useHosts } from "~/data";
-import { Rows, Section } from "~/ui/config/bits";
+import { Group, Rows, Section, WhereTo } from "~/ui/config/bits";
 import { WhoCanAccess } from "~/ui/Sharing";
 import { useDirectories } from "~/data";
 import { ConnectAccount } from "~/ui/config/ConnectAccount";
@@ -36,24 +36,43 @@ export function Agents({ live }: { live: boolean }) {
       <Section
         title="Agents"
         note="What is installed where, and whether it is signed in."
-        action={live && <button disabled={check.isPending} onClick={() => check.mutate(undefined as never, { onSuccess: () => cache.invalidateQueries({ queryKey: getListAgentsQueryKey() }) })} className="control border border-line bg-raise text-ui text-dim hover:bg-overlay disabled:text-mute"><Icon of={RefreshCw} size={12} />{check.isPending ? "Checking…" : "Check all"}</button>}
+        settling={agents.loading}
+        trouble={agents.trouble}
+        error={agents.error}
+        action={live && <button disabled={check.isPending} onClick={() => check.mutate(undefined as never, { onSuccess: () => cache.invalidateQueries({ queryKey: getListAgentsQueryKey() }) })} className="btn plain"><Icon of={RefreshCw} size={12} />{check.isPending ? "Checking…" : "Check all"}</button>}
       >
-        <Rows feed={agents} empty="No agent is configured.">
+        <Group>
+        <Rows feed={agents} icon={Puzzle} empty="No agent configured"
+          note="An agent is installed on a machine and runs on somebody’s subscription.">
           {agents.data.map((a) => (
             <div key={a.kind}>
-              <button onClick={() => setOpen(open === a.kind ? null : a.kind)} className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left hover:bg-raise/60">
-                <AgentMark agent={a.kind} size={14} className="shrink-0 text-dim" />
-                <span className="min-w-0 flex-1">
-                  <span className="block text-ui text-bone">{a.label}</span>
-                  <span className="block text-micro text-mute">{a.hosts.filter((h) => h.installed).length} of {a.hosts.length} host{a.hosts.length === 1 ? "" : "s"} · {accounts.data.filter((x) => x.kind === a.kind).length} account{accounts.data.filter((x) => x.kind === a.kind).length === 1 ? "" : "s"}</span>
+              <button onClick={() => setOpen(open === a.kind ? null : a.kind)} className="r">
+                <span className="g">
+                  <AgentMark agent={a.kind} size={16} />
                 </span>
-                {a.credentialSet ? <span className="flex items-center gap-1.5 text-meta text-sage"><Icon of={Check} size={12} />signed in</span> : a.needsCredential ? <span className="text-meta text-kind-data">needs an account</span> : <span className="text-meta text-mute">no credential needed</span>}
-                <ChevronDown className={`h-3.5 w-3.5 text-mute transition-transform ${open === a.kind ? "rotate-180" : ""}`} strokeWidth={2} />
+                <span className="tx">
+                  <b>{a.label}</b>
+                  <s>{a.hosts.filter((h) => h.installed).length} of {a.hosts.length} machine{a.hosts.length === 1 ? "" : "s"} · {accounts.data.filter((x) => x.kind === a.kind).length} account{accounts.data.filter((x) => x.kind === a.kind).length === 1 ? "" : "s"}</s>
+                </span>
+                {/* The word, and a dot beside it. Never a filled block: this is
+                    a fact about the row, not a warning about it. */}
+                <span className="said">{a.credentialSet ? "signed in" : a.needsCredential ? "needs an account" : "no credential needed"}</span>
+                <span className="st" data-s={a.credentialSet ? "ok" : a.needsCredential ? "warn" : "off"} />
+                <span className="g">
+                  <ChevronDown className={`h-3.5 w-3.5 transition-transform ${open === a.kind ? "rotate-180" : "-rotate-90"}`} strokeWidth={2} />
+                </span>
               </button>
               {open === a.kind && live && <AgentDetail agent={a} accounts={accounts.data.filter((x) => x.kind === a.kind)} onConnect={(account) => setConnecting({ agent: a, account })} />}
             </div>
           ))}
         </Rows>
+        </Group>
+
+        <WhereTo>
+          When an account runs out, a workspace can be <b>handed to another one mid-conversation</b>
+          — the composer offers it, and says plainly if the hand-off changes what the agent is
+          allowed to do.
+        </WhereTo>
       </Section>
       {connecting && <ConnectAccount agent={connecting.agent} account={connecting.account} onClose={() => setConnecting(null)} />}
     </>

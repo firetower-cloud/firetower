@@ -12,8 +12,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CornerDownLeft, Search } from "lucide-react";
 import { useFleet } from "~/fleet";
+import { Fragment } from "react";
 import { group, shortRepo } from "~/api/workspaces";
 import { navigate } from "~/shims/next-navigation";
+import { key } from "~/platform";
+import { SETTINGS_HOME } from "~/ui/config/panes";
+import { DESTINATIONS } from "~/ui/destinations";
 
 type Item = {
   id: string;
@@ -55,11 +59,33 @@ export function Palette({ open, onClose }: { open: boolean; onClose: () => void 
       ),
     );
 
+    /* Every destination the rail has, so the palette is a second way to the
+       same places rather than a shorter list of its own — and the one way in
+       for somebody who has collapsed the panel and does not know the number
+       keys yet. "Everything, across servers" used to open `/fleet`; that
+       screen went with the "all" scope, and the fleet is a menu under the
+       avatar now.
+
+       **Settings and Updates are written out rather than mapped.** They were
+       in `EVERY` while they were doors in the rail, and taking them out of the
+       rail would have quietly taken them out of here too — which is the one
+       place that would hurt, because the palette is the second way to
+       everything and these two now have exactly one first way. They are not
+       destinations, so they get no number and no rail icon; they are still
+       addresses, so they stay typeable. */
     const commands: Item[] = [
+      ...DESTINATIONS.map((d) => ({
+        id: `c:${d.id}`,
+        label: d.label,
+        hint: key(d.key),
+        kind: "command" as const,
+        run: () => navigate(d.href),
+      })),
+      { id: "c:new", label: "New workspace", hint: key("N"), kind: "command", run: () => navigate("/new") },
+      { id: "c:settings", label: "Settings", hint: key(","), kind: "command", run: () => navigate(SETTINGS_HOME) },
+      { id: "c:updates", label: "Updates", kind: "command", run: () => navigate("/updates") },
+      { id: "c:account", label: "Account", kind: "command", run: () => navigate("/account") },
       { id: "c:connect", label: "Connect to a Firetower…", kind: "command", run: () => navigate("/connect") },
-      { id: "c:fleet", label: "Everything, across servers", kind: "command", run: () => navigate("/fleet") },
-      { id: "c:tasks", label: "Tasks", kind: "command", run: () => navigate("/tasks") },
-      { id: "c:config", label: "Configuration", kind: "command", run: () => navigate("/configuration") },
       ...(import.meta.env.DEV ? [{ id: "c:style", label: "Open the style guide", kind: "command" as const, run: () => navigate("/style") }] : []),
     ];
 
@@ -88,14 +114,14 @@ export function Palette({ open, onClose }: { open: boolean; onClose: () => void 
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-ground/60 pt-[14vh] backdrop-blur-[2px]"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-scrim pt-[14vh] backdrop-blur-[2px]"
       onMouseDown={onClose}
     >
       <div
-        className="w-[560px] overflow-hidden rounded-lg border border-line bg-overlay shadow-(--shadow-float)"
+        className="w-[560px] overflow-hidden rounded-2xl bg-panel shadow-(--shadow-float)"
         onMouseDown={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center gap-2 border-b border-line px-3">
+        <div className="flex items-center gap-2 border-b border-line-soft px-3.5">
           <Search className="h-3.5 w-3.5 shrink-0 text-mute" strokeWidth={2} />
           <input
             ref={input}
@@ -118,27 +144,48 @@ export function Palette({ open, onClose }: { open: boolean; onClose: () => void 
           />
         </div>
 
-        <div className="p-1.5">
+        <div className="scroll-slim max-h-[52vh] overflow-y-auto p-1.5">
           {items.length === 0 && <div className="px-2 py-3 text-ui text-mute">Nothing matches.</div>}
           {items.map((i, n) => (
-            <button
-              key={i.id}
-              onMouseEnter={() => setAt(n)}
-              onClick={() => choose(i)}
-              data-on={n === at}
-              className="row w-full text-left"
-              style={{ gridTemplateColumns: "18px 1fr auto", height: "32px" }}
-            >
-              <span className="text-micro font-bold text-mute" style={{ fontFamily: "var(--font-narrow)" }}>
-                {i.mark ?? "›"}
-              </span>
-              <span className="flex min-w-0 items-baseline gap-2">
-                <span className={`truncate text-ui ${n === at ? "text-bone" : "text-text"}`}>{i.label}</span>
-                {i.hint && <span className="truncate text-meta text-mute">{i.hint}</span>}
-              </span>
-              {n === at && <CornerDownLeft className="h-3 w-3 text-dim" strokeWidth={2} />}
-            </button>
+            <Fragment key={i.id}>
+              {/* **Grouped, not one flat list.** A workspace and a place to go
+                  are different kinds of answer, and a reader scanning for one
+                  should not have to read the other. The heading appears at the
+                  first item of its kind and nowhere else. */}
+              {i.kind !== items[n - 1]?.kind && <p className="klab">{i.kind === "session" ? "Workspaces" : "Go to"}</p>}
+              <button
+                onMouseEnter={() => setAt(n)}
+                onClick={() => choose(i)}
+                data-on={n === at}
+                className="row w-full text-left"
+                style={{ gridTemplateColumns: "18px 1fr auto", height: "32px" }}
+              >
+                <span className="text-micro font-mid text-mute" style={{ fontFamily: "var(--font-narrow)" }}>
+                  {i.mark ?? "›"}
+                </span>
+                <span className="flex min-w-0 items-baseline gap-2">
+                  <span className={`truncate text-ui ${n === at ? "text-bone" : "text-text"}`}>{i.label}</span>
+                  {i.hint && <span className="truncate text-meta text-mute">{i.hint}</span>}
+                </span>
+                {n === at && <CornerDownLeft className="h-3 w-3 text-dim" strokeWidth={2} />}
+              </button>
+            </Fragment>
           ))}
+        </div>
+
+        {/* The keys, and the one fact about this list that is not obvious:
+            it spans every connected Firetower, and the mark says whose. */}
+        <div className="kfoot">
+          <span className="flex items-center gap-1.5">
+            <span className="keycap">↑↓</span> move
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="keycap">⏎</span> open
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="keycap">Esc</span> close
+          </span>
+          <span className="ml-auto">Results from every Firetower. The mark says whose.</span>
         </div>
       </div>
     </div>

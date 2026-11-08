@@ -11,13 +11,14 @@ import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Repos } from "./Repos";
+import { choicesFrom } from "./GitHosts";
 import { getListReposQueryKey } from "~/api/generated/repos/repos";
 import {
   getListKindsQueryKey,
   getListProvidersQueryKey,
   getListProviderReposQueryKey,
 } from "~/api/generated/providers/providers";
-import type { ProviderStatus, RemoteRepo, Repo } from "~/api/generated/model";
+import type { KindInfo, ProviderStatus, RemoteRepo, Repo } from "~/api/generated/model";
 
 const host = (p: Partial<ProviderStatus> = {}): ProviderStatus => ({
   id: "github",
@@ -67,11 +68,17 @@ const offered = (slug: string, remote: string): RemoteRepo => ({
   pushedAt: null,
 });
 
-/** What the server ships. gitlab.com and github.com need nothing registered. */
-const KINDS = [
-  { id: "github", label: "GitHub", changeNoun: "pull request", authModes: ["device", "token"], hostedBaseUrl: "https://github.com", selfHosted: false },
-  { id: "gitlab", label: "GitLab", changeNoun: "merge request", authModes: ["device", "token"], hostedBaseUrl: "https://gitlab.com", selfHosted: false },
-  { id: "gitea", label: "Gitea", changeNoun: "pull request", authModes: ["token"], hostedBaseUrl: null, selfHosted: true },
+/**
+ * What the server ships. gitlab.com and github.com need nothing registered.
+ *
+ * `selfHostedLabel` is the field the kind picker is built from, so it is the
+ * one this fixture most has to carry: it is what tells somebody with an
+ * Enterprise install or a Forgejo that the product can talk to it.
+ */
+const KINDS: KindInfo[] = [
+  { id: "github", label: "GitHub", selfHostedLabel: "GitHub Enterprise Server", changeNoun: "pull request", authModes: ["device", "token"], hostedBaseUrl: "https://github.com", selfHosted: false, appPage: "/settings/applications/new", appSteps: [], tokenSteps: [] },
+  { id: "gitlab", label: "GitLab", selfHostedLabel: "GitLab self-managed", changeNoun: "merge request", authModes: ["device", "token"], hostedBaseUrl: "https://gitlab.com", selfHosted: false, appPage: "/-/profile/applications", appSteps: [], tokenSteps: [] },
+  { id: "gitea", label: "Gitea", selfHostedLabel: "Gitea or Forgejo", changeNoun: "pull request", authModes: ["token"], hostedBaseUrl: null, selfHosted: true, appPage: "/user/settings/applications", appSteps: [], tokenSteps: [] },
 ];
 
 function draw({
@@ -99,6 +106,17 @@ function draw({
   );
 }
 
+/**
+ * **One action, and it is the actual next step for the state the screen is
+ * in.** Three rungs, in order: a registered host waiting to be signed into, a
+ * registered host with no application yet, and nothing registered at all.
+ *
+ * The rung that matters most is the first, and it is the one the fold to a
+ * single action broke: `github.com` arrives `builtin: true` on every install,
+ * so "nothing is connected" almost never means "nothing is registered" — and
+ * a generic *Add a host* over a row that merely needs signing into is the
+ * wrong verb and a dead end, on the most common first run there is.
+ */
 describe("the empty state", () => {
   /**
    * A fresh install has both hosted rows — github.com and gitlab.com — because
@@ -107,29 +125,99 @@ describe("the empty state", () => {
    * and the copy must not greet the first person as though it had.
    */
   it("greets a fresh install without inventing colleagues", () => {
-    const html = draw({
-      hosts: [host({ connected: false }), gitlab({ id: "gitlab", label: "GitLab", builtin: true, gitHost: "gitlab.com", connected: false })],
-      repos: [],
-    });
-    expect(html).toContain("Pick a git host to start from");
-    expect(html).not.toContain("Your colleagues set these up");
-    expect(html).toContain("GitHub");
-    expect(html).toContain("GitLab");
+    const hosts = [
+      host({ connected: false }),
+      gitlab({ id: "gitlab", label: "GitLab", builtin: true, gitHost: "gitlab.com", connected: false }),
+    ];
+    const html = draw({ hosts, repos: [] });
+    expect(html).toContain("No repository yet");
+    expect(html).not.toContain("Your colleagues added these hosts");
+    /* **The next step is a sign-in, not an add.** Both rows are registered
+       already; what is missing is this person's own account on one of them. */
+    expect(html).toContain("Connect a provider");
+    expect(html).toContain("Sign in with your own account, then import what you want to work on.");
+    expect(html).not.toContain("Add a host");
   });
 
   /**
    * The case the first draft got wrong, and the common one on any install
-   * with more than one person: a colleague added the hosts, and this person
-   * needs *those* — a generic "GitLab" would send them to gitlab.com.
+   * with more than one person: a colleague registered the hosts, and this
+   * person needs an account on one of *those*.
+   *
+   * The button used to name that host. It does not any more — naming one
+   * provider on the only button on the screen reads as a recommendation, and
+   * which provider an install runs on is not ours to assume. What still has
+   * to be right is the sentence, which is the only thing telling a
+   * somebody-has-been-here install apart from a fresh one.
    */
-  it("names the hosts somebody already added rather than their kinds", () => {
+  it("tells an install a colleague set up from a fresh one", () => {
+    const hosts = [host({ connected: false }), gitlab({ connected: false })];
+    const html = draw({ hosts, repos: [] });
+    expect(html).toContain("Connect a provider");
+    expect(html).toContain("Your colleagues added these hosts. You sign in with your own account.");
+    expect(html).not.toContain("Sign in with your own account, then import");
+  });
+
+  /**
+   * **A sign-in that cannot succeed is not a next step.** A host somebody
+   * registered without an application of its own has to be set up first, and
+   * that is done on Git hosts — so the action goes there, and says so.
+   */
+  it("sends you to set up a host that has no application yet", () => {
     const html = draw({
-      hosts: [host({ connected: false }), gitlab({ connected: false })],
+      hosts: [gitlab({ connected: false, configured: false })],
       repos: [],
     });
-    expect(html).toContain("Connect a git host");
-    expect(html).toContain("Your colleagues set these up");
-    expect(html).toContain("GitLab (internal)");
+    expect(html).toContain("Set up GitLab (internal)");
+    expect(html).toContain("needs an application of its own before anybody can sign in");
+    expect(html).not.toContain("Connect a provider");
+  });
+
+  /** And where this reader may not set it up, the sentence stands alone. */
+  it("draws no control where the server would refuse it", () => {
+    const html = draw({
+      hosts: [gitlab({ connected: false, configured: false, maySetApplication: false })],
+      repos: [],
+    });
+    expect(html).toContain("An administrator of this Firetower sets that up");
+    expect(html).not.toContain("Set up GitLab");
+    expect(html).not.toContain("Connect");
+  });
+
+  /** Only with nothing registered at all is the next step adding one. */
+  it("opens the kind list when nothing is registered", () => {
+    const html = draw({ hosts: [], repos: [] });
+    expect(html).toContain("Connect a provider");
+    expect(html).toContain("Connect a provider and import what you want to work on.");
+  });
+
+  /**
+   * **The one press buys the whole set, not a narrower one.**
+   *
+   * Three brand buttons were doing a real job and folding them into one
+   * action costs a press — but only if what the press opens is *more* than
+   * they were. It opens `AddHost`'s first step, which enumerates every kind
+   * this server supports from `kindInfo`: the hosted and the self-hosted form
+   * of each, separately, because they are separate products to whoever is
+   * picking and they need different second steps. An empty box asking "where
+   * is it" tells somebody who has a Forgejo nothing at all.
+   *
+   * Asserted against `choicesFrom` rather than the markup, because the dialog
+   * is shut until the button is pressed — and against the *shape* rather than
+   * a list of names, so a sixth kind is a passing test rather than a failing
+   * one.
+   */
+  it("reaches every kind the server supports, hosted and self-hosted", () => {
+    const rows = choicesFrom(KINDS);
+    expect(rows.length).toBeGreaterThanOrEqual(5);
+    // Every kind contributes a self-hosted row; only some are also hosted.
+    expect(rows.filter((c) => c.baseUrl === null).length).toBe(KINDS.length);
+    expect(rows.some((c) => c.label === "Gitea or Forgejo")).toBe(true);
+    expect(rows.some((c) => c.label === "GitHub Enterprise Server")).toBe(true);
+    // Nothing is written down here: the labels are the server's own.
+    expect(rows.map((c) => c.label)).toEqual(
+      KINDS.flatMap((k) => (k.hostedBaseUrl ? [k.label, k.selfHostedLabel] : [k.selfHostedLabel])),
+    );
   });
 
   /**
@@ -151,14 +239,18 @@ describe("the empty state", () => {
     });
 
     // Not the "connect something" screen.
-    expect(html).not.toContain("Pick a git host to start from");
-    expect(html).not.toContain("Connect a git host");
+    expect(html).not.toContain("No repository yet");
+    expect(html).not.toContain("Connect a provider");
+    expect(html).not.toContain("Connect a provider");
 
     // The import list, for the host that is actually connected.
-    expect(html).toContain("Available to import on GitLab (internal)");
+    expect(html).toContain("Not imported yet on GitLab (internal)");
     expect(html).toContain("platform/infra/deploy");
-    // And the empty upper list says so plainly rather than vanishing.
-    expect(html).toContain("Nothing imported yet");
+    /* And the empty upper list says so in one line rather than vanishing, or
+       taking the whole page: the screen is not empty, one section of it is.
+       It keeps the heading the drawing gives it and its count. */
+    expect(html).toContain("Checked out");
+    expect(html).toContain("Nothing imported yet. Take one from the list below.");
   });
 
   /**
@@ -170,14 +262,18 @@ describe("the empty state", () => {
       hosts: [host({ connected: false }), gitlab({ connected: false })],
       repos: [],
     });
-    expect(html).toContain("Connect a git host");
+    expect(html).toContain("Connect a provider");
     expect(html).not.toContain("Available on");
+    /* **And nothing else.** One action, zero links, zero banners: the two
+       routes that were small print under the buttons are rows in the menu. */
+    expect(html).not.toContain("Add custom hosts");
+    expect(html).not.toContain("Self-hosted or enterprise");
   });
 
-  /** The dead end. Pasting stays available; it is no longer the only thing. */
+  /** The dead end. The blank is a way in, never a box to type a URL into. */
   it("is never only a paste box", () => {
     const html = draw({ hosts: [host({ connected: false })], repos: [] });
-    expect(html).toContain("paste a URL");
+    expect(html).toContain("Connect a provider");
     // The paste box itself is not drawn until somebody asks for it.
     expect(html).not.toContain("git@github.com:acme/web.git");
   });
@@ -201,11 +297,12 @@ describe("the two lists", () => {
       },
     });
 
-    expect(html).toContain("Imported");
-    expect(html).toContain("Available to import on GitHub");
+    expect(html).toContain("Checked out");
+    expect(html).toContain("Not imported yet on GitHub");
     expect(html).toContain("acme/api");
-    expect(html).toContain("1 not imported");
-    // `acme/web` is drawn once — in Imported — not twice.
+    // The count sits beside the heading rather than in a sentence of its own.
+    expect(html).toContain('Not imported yet on GitHub<span class="n">1</span>');
+    // `acme/web` is drawn once — in Checked out — not twice.
     expect(html.match(/acme\/web/g)?.length).toBe(1);
   });
 
@@ -224,7 +321,7 @@ describe("the two lists", () => {
     });
     // The GitLab one is still on offer despite sharing a slug with a connected
     // GitHub repository.
-    expect(html).toContain("1 not imported");
+    expect(html).toContain('Not imported yet on GitLab (internal)<span class="n">1</span>');
   });
 
   /** Not a big empty card — the screen is not empty, one section of it is. */
@@ -275,14 +372,26 @@ describe("the controls", () => {
    * The screen is a list of repositories; a paragraph explaining what a
    * repository is for sat above it on every visit forever.
    */
-  it("does not explain itself at length above the list", () => {
+  /**
+   * **Reversed by the drawing, deliberately.** This asserted the opposite —
+   * that the populated screen carries no lede — which was a reasonable call
+   * before there was a drawing to check it against. `desktop-redesign.html`
+   * puts one sentence under every page heading, populated or not: it is what
+   * makes eleven configuration panes read as one product rather than eleven
+   * lists. What it still must not do is explain itself *at length*, which is
+   * what this now says.
+   */
+  it("says what the screen is in one sentence, and no more", () => {
     const html = draw({
       hosts: [gitlab({ connected: true })],
       repos: [repo("acme/web", "https://git.acme.internal/acme/web.git")],
       available: { gitlab_01j: [] },
     });
-    expect(html).not.toContain("What Firetower cuts worktrees from");
+    expect(html).toContain("What Firetower cuts worktrees from");
+    // One sentence under the heading, not the old two-paragraph preamble.
     expect(html).not.toContain("a colleague&#x27;s looks different");
+    const sub = /<p class="sub">([^<]*)<\/p>/.exec(html)?.[1] ?? "";
+    expect(sub.length).toBeLessThan(130);
     // The heading stays.
     expect(html).toContain("Repositories");
   });
@@ -304,8 +413,13 @@ describe("the controls", () => {
     });
     expect(populated).not.toContain("Paste a remote");
 
+    /* And it is not on the blank either. The blank is one button and one
+       sentence; pasting a remote moved into the host picker, which is the
+       control that already owns that state and already has a word for being
+       in it. */
     const empty = draw({ hosts: [gitlab({ connected: false })], repos: [] });
-    expect(empty).toContain("paste a URL");
+    expect(empty).toContain("Connect a provider");
+    expect(empty).not.toContain("Paste a remote");
   });
 });
 
@@ -336,7 +450,7 @@ describe("across every host", () => {
     expect(html).toContain("acme/api");
     expect(html).toContain("platform/infra/deploy");
     // Counted across the set rather than per host.
-    expect(html).toContain("2 across 2 hosts");
+    expect(html).toContain('Not imported yet<span class="n">2</span>');
   });
 
   /**
@@ -376,6 +490,6 @@ describe("across every host", () => {
     });
     expect(html).toContain("acme/web");
     expect(html).toContain("platform/infra/deploy");
-    expect(html).toContain("Imported");
+    expect(html).toContain("Checked out");
   });
 });

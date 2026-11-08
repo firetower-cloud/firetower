@@ -6,7 +6,7 @@
  * the address having ended.
  */
 import { describe, expect, it } from "vitest";
-import { childrenElsewhere, childrenWorking, doing, group, isChild, placeBeat, placeOf, rowLabel, speaksFor } from "./workspaces";
+import { childrenElsewhere, childrenWorking, doing, flat, group, isChild, placeBeat, placeOf, rowLabel, speaksFor } from "./workspaces";
 import type { Session } from "~/api/generated/model";
 
 const run = (id: string, workspaceId: string, status = "Ready"): Session =>
@@ -142,6 +142,34 @@ describe("rowLabel", () => {
     const ps = places([run("s_9", "s_9"), kid]);
     const row = ps.find((p) => p.id === "s_2")!;
     expect(rowLabel(row, ps)).toBe("Main session / hello-fr");
+  });
+});
+
+describe("flat", () => {
+  /* The rail's panel is one list, not a list per repository. Inside a group
+     `group()` already puts what needs you first; across groups it does not,
+     so a repository with nothing waiting would otherwise push a question
+     below it. */
+  it("puts what needs you first, across repositories", () => {
+    const quiet = { ...run("s_1", "s_1"), repo: "acme/web", name: "quiet" } as Session;
+    const asking = { ...run("s_2", "s_2", "NeedsYou"), repo: "acme/zebra", name: "asking" } as Session;
+    expect(flat(group([quiet, asking])).map((p) => p.name)).toEqual(["asking", "quiet"]);
+  });
+
+  it("then most recent", () => {
+    const old = { ...run("s_1", "s_1"), repo: "acme/web", name: "old", createdAt: "2026-10-01T09:00:00Z" } as Session;
+    const fresh = { ...run("s_2", "s_2"), repo: "acme/zebra", name: "fresh", createdAt: "2026-10-02T09:00:00Z" } as Session;
+    expect(flat(group([old, fresh])).map((p) => p.name)).toEqual(["fresh", "old"]);
+  });
+
+  /* A lead and what it delegated is one piece of work wherever it is drawn,
+     so a child sorts with its lead rather than against it — even when the
+     child is newer and the lead is the one that is waiting. */
+  it("keeps a child straight after its lead", () => {
+    const lead = { ...run("s_1", "s_1"), name: "lead", createdAt: "2026-10-01T09:00:00Z" } as Session;
+    const child = { ...run("s_2", "s_2"), name: "lead / child", parentId: "s_1", createdAt: "2026-10-02T09:00:00Z" } as Session;
+    const other = { ...run("s_3", "s_3"), repo: "acme/zebra", name: "other", createdAt: "2026-10-01T10:00:00Z" } as Session;
+    expect(flat(group([lead, child, other])).map((p) => p.name)).toEqual(["other", "lead", "lead / child"]);
   });
 });
 

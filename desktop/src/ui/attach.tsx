@@ -257,7 +257,7 @@ export function Dropping() {
     <div className="pointer-events-none absolute inset-2 z-40 grid place-items-center rounded-2xl border border-slate bg-ground/45">
       {/* The limit, not the routing. Where a file ends up is shown for
           real a moment later — the chip names the path it landed at. */}
-      <span className="flex items-center gap-2.5 rounded-xl border border-line bg-overlay px-4 py-2.5 shadow-(--shadow-float)">
+      <span className="flex items-center gap-2.5 rounded-xl border border-line lift px-4 py-2.5 shadow-(--shadow-float)">
         <FileUp className="h-4 w-4 text-slate" strokeWidth={1.75} />
         <span>
           <span className="block text-ui text-bone">Drop to attach</span>

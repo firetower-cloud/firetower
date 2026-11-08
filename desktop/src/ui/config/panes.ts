@@ -64,6 +64,58 @@ export const PANES: { group: string; items: { at: string; label: string }[] }[] 
 ];
 
 /**
+ * Settings' own index — the five panes no destination owns.
+ *
+ * This is the list the rail panel drew while Settings was a door in the rail,
+ * moved **unchanged**: the same five panes, the same order, the same three
+ * group names. Taking the door out of the rail took the only way to move
+ * between them with it, so the index comes into the page — `SettingsIndex`
+ * draws it at the top of every one of these panes.
+ *
+ * **The group names are not `PANES`' group names, and that is deliberate.**
+ * `PANES` above groups by what a thing *is*, because it is the table that says
+ * what a valid pane is. These three say what the group is *for* — "Who can
+ * reach what" rather than "Access" — because they are read by somebody looking
+ * for a thing to change, and a category word does not help them. Two names for
+ * one group is a cost; a reader guessing which of nine panes holds the
+ * directory list is a bigger one.
+ *
+ * `destinations.test.ts` asserts these are exactly the panes missing from
+ * `PANE_HOME`, so a pane cannot quietly belong to neither table and become
+ * unreachable.
+ */
+export const SETTINGS: { group: string; items: { at: string; label: string }[] }[] = [
+  {
+    group: "Who can reach what",
+    items: [
+      { at: "people", label: "People" },
+      { at: "teams", label: "Teams" },
+      { at: "directories", label: "Directories" },
+    ],
+  },
+  { group: "Secrets", items: [{ at: "vault", label: "Vault" }] },
+  { group: "This deployment", items: [{ at: "server", label: "This Firetower" }] },
+];
+
+/** Every pane Settings owns, flat, in the order the index draws them. */
+export const SETTINGS_PANES = SETTINGS.flatMap((g) => g.items.map((i) => i.at));
+
+/**
+ * Where Settings opens.
+ *
+ * Its first pane, rather than a `/configuration` index — there is no index
+ * screen, and there has not been one since the panes got destinations. ⌘,, the
+ * profile menu's Settings row and the palette's Settings command all land here,
+ * so there is one answer to "what does Settings mean" rather than three.
+ */
+export const SETTINGS_HOME = `/configuration/${SETTINGS_PANES[0]}`;
+
+/** Whether a path is on one of Settings' own panes. */
+export function inSettings(path: string): boolean {
+  return path.startsWith("/configuration") && SETTINGS_PANES.includes(paneAt(path));
+}
+
+/**
  * What a path from before the split means now.
  *
  * `integrations` was one pane and is two. An address in somebody's history, or

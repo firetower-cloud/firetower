@@ -1,3 +1,4 @@
+import { RotateCw, TriangleAlert } from "lucide-react";
 /**
  * What to show when a screen throws.
  *
@@ -34,36 +35,57 @@ export class Boundary extends Component<Props, State> {
     if (!error) return this.props.children;
 
     return (
-      <div className="grid h-full min-w-0 flex-1 place-items-center bg-ground px-6">
-        <div className="w-full max-w-[30rem]">
-          <h1 className="text-title text-bone">This screen stopped</h1>
+      <div className="grid h-full min-w-0 flex-1 place-items-center bg-panel px-6">
+        <div className="w-full max-w-[32rem] text-center">
+          <span className="mx-auto grid h-11 w-11 place-items-center text-brick">
+            <TriangleAlert className="h-6 w-6" strokeWidth={1.5} />
+          </span>
+          <h1 className="mt-3 text-display font-mid text-bone">This screen stopped</h1>
           <p className="mt-2 text-read text-dim">
             Something in the interface threw. The server is fine and nothing was lost — this is
             the client.
           </p>
 
-          <pre className="scroll-slim mt-4 max-h-40 overflow-auto rounded-xl border border-brick-deep bg-brick-tint px-3.5 py-3 font-mono text-code whitespace-pre-wrap text-brick">
+          {/* **A quiet panel, not a red block.** The detail is for copying into
+              a report, and filling a box with brick says the app is broken when
+              what broke is one screen of it. */}
+          <pre className="scroll-slim mt-4 max-h-40 overflow-auto rounded-xl bg-raise px-3.5 py-3 text-left font-mono text-code whitespace-pre-wrap text-dim">
             {error.message}
             {where ? `\n${where}` : ""}
           </pre>
 
-          <div className="mt-4 flex gap-2">
+          <div className="mt-4 flex items-center justify-center gap-2">
             <button
               onClick={() => {
                 this.setState({ error: null, where: null });
                 this.props.onReset?.();
               }}
-              className="control flex-1 justify-center bg-bone font-medium text-ground hover:opacity-90"
+              className="btn primary"
             >
-              Back to the dashboard
+              Back to the Dashboard
+            </button>
+            {/* **Try again, not Reload.** Re-rendering the screen is what this
+                needs; reloading the window throws away every other screen's
+                state to fix one of them. */}
+            <button
+              onClick={() => this.setState({ error: null, where: null })}
+              className="btn plain"
+            >
+              <RotateCw className="h-3.5 w-3.5" strokeWidth={1.75} />
+              Try again
             </button>
             <button
-              onClick={() => window.location.reload()}
-              className="control flex-1 justify-center border border-line bg-raise text-text hover:bg-overlay"
+              onClick={() => void navigator.clipboard?.writeText(`${error.message}\n${where ?? ""}`)}
+              className="btn quiet"
             >
-              Reload
+              Copy the detail
             </button>
           </div>
+
+          <p className="mt-5 text-meta text-mute">
+            Only this screen stopped. The rail, the panel and anything running carry on — leaving
+            is one click, not a restart.
+          </p>
         </div>
       </div>
     );

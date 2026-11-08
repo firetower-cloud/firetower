@@ -583,7 +583,7 @@ export function Chat({
 
       {notes.length > 0 && !drafting && (
         <div className="pointer-events-none absolute right-5 bottom-4 z-30 flex justify-end">
-          <div className="pointer-events-auto flex items-center gap-2 rounded-full border border-line bg-overlay py-1.5 pr-1.5 pl-3.5 shadow-(--shadow-float)">
+          <div className="pointer-events-auto flex items-center gap-2 rounded-full border border-line lift py-1.5 pr-1.5 pl-3.5 shadow-(--shadow-float)">
             <span className="text-ui text-dim">{notes.length} note{notes.length > 1 ? "s" : ""}</span>
             <button onClick={clear} title="Discard them" className="grid h-6 w-6 place-items-center rounded-full text-mute transition-colors hover:bg-raise hover:text-bone"><X className="h-3.5 w-3.5" strokeWidth={2} /></button>
             <button onClick={() => setHanding(true)} title="Start another agent in this workspace, on these notes" className="control rounded-full text-dim hover:bg-raise hover:text-bone disabled:text-mute">
@@ -1501,7 +1501,7 @@ function Approval({ sessionId, asked, onAnswered }: { sessionId: string; asked: 
       <div className="px-5 pt-4">
         <div className="flex items-center gap-2.5">
           <span className="ember-pulse h-2 w-2 rounded-full bg-ember" />
-          <span className="text-meta font-semibold text-ember-soft">{ASKING[asked.kind]} {asked.detail}</span>
+          <span className="text-meta font-mid text-ember-ink">{ASKING[asked.kind]} {asked.detail}</span>
         </div>
         <pre className="scroll-slim mt-3 max-h-44 overflow-auto rounded-lg bg-ground/60 px-3.5 py-2.5 font-mono text-code whitespace-pre-wrap text-bone">{what(asked)}</pre>
       </div>
@@ -1574,7 +1574,7 @@ function Questions({ sessionId, asking, onAnswered }: { sessionId: string; askin
     <div className="mt-8 overflow-hidden rounded-xl border border-ember-deep bg-ember-tint shadow-(--shadow-float)">
       <div className="flex items-center gap-2.5 px-5 pt-4">
         <span className="ember-pulse h-2 w-2 rounded-full bg-ember" />
-        <span className="text-meta font-semibold text-ember-soft">{mayAct ? "Waiting on you" : "Waiting on whoever owns this work"}</span>
+        <span className="text-meta font-mid text-ember-ink">{mayAct ? "Waiting on you" : "Waiting on whoever owns this work"}</span>
       </div>
       <div className="space-y-5 px-5 pt-3 pb-4">
         {asking.questions.map((q) => (
@@ -1585,7 +1585,7 @@ function Questions({ sessionId, asking, onAnswered }: { sessionId: string; askin
                 const on = (chosen[q.question] ?? []).includes(o.label);
                 return (
                   <button key={o.label} disabled={!mayAct} onClick={() => pick(q.question, o.label, !!q.multiSelect)} className={`flex items-start gap-3 rounded-lg border px-3.5 py-3 text-left transition-colors duration-150 ${on ? "border-ember-deep bg-ground/80" : "border-ember-deep/50 bg-ground/50"} ${mayAct ? "hover:border-ember-deep hover:bg-ground/80" : "cursor-default"}`}>
-                    <span className={`mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-md border border-ember-deep text-micro font-semibold ${on ? "bg-ember text-ground" : "bg-ember-tint text-ember-soft"}`}>{on ? <Check className="h-3 w-3" strokeWidth={3} /> : o.label[0]}</span>
+                    <span className={`mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-md border border-ember-deep text-micro font-mid ${on ? "bg-ember text-ground" : "bg-ember-tint text-ember-ink"}`}>{on ? <Check className="h-3 w-3" strokeWidth={3} /> : o.label[0]}</span>
                     <span className="min-w-0"><span className="block text-ui font-medium text-bone">{o.label}</span>{o.description && <span className="mt-0.5 block text-meta text-dim">{o.description}</span>}</span>
                   </button>
                 );

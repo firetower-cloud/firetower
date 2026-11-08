@@ -67,7 +67,7 @@ export function Shell({
       const mono = paint("--font-jetbrains");
       const term = new Xterm({
         fontFamily: `${mono || "ui-monospace"}, ui-monospace, SFMono-Regular, Menlo, monospace`,
-        fontSize: 13,
+        fontSize: size("--text-code"),
         lineHeight: 1.35,
         cursorBlink: true,
         macOptionIsMeta: true,
@@ -233,4 +233,21 @@ export function Shell({
 /** A colour or a font from the design tokens, for the one consumer that paints into a canvas. */
 function paint(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+/**
+ * A type size from the scale, in the pixels a canvas needs.
+ *
+ * The terminal is drawn by xterm onto a canvas, so it is the one surface in
+ * the app that cannot be given a class — it has to be told a number. Read
+ * from the token rather than written down here, because a size written at the
+ * point of use is exactly what `just check-style` exists to stop: the file
+ * tree and the diff carried their own for months and a whole type scale went
+ * up around them.
+ */
+function size(name: string): number {
+  const held = paint(name);
+  const n = parseFloat(held);
+  if (!Number.isFinite(n)) return 13;
+  return held.endsWith("rem") ? n * parseFloat(getComputedStyle(document.documentElement).fontSize || "16") : n;
 }

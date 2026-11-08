@@ -36,7 +36,7 @@ import {
   UsersRound,
   type LucideIcon,
 } from "lucide-react";
-import { Rows, Section } from "~/ui/config/bits";
+import { Group as Rowset, Note, Rows, Section, Typed, WhereTo } from "~/ui/config/bits";
 import { WhoCanAccess } from "~/ui/Sharing";
 import { Pop } from "~/ui/Pop";
 import { CreateMenu } from "~/ui/config/CreateMenu";
@@ -58,8 +58,33 @@ import { ScopePicker, type ScopeItem } from "~/ui/config/ScopePicker";
 import { machineLabel, machines } from "~/api/environments";
 import type { Agent, Control, ControlKind, Role, NewRole } from "~/api/generated/model";
 import { useConfirm } from "~/ui/Confirm";
+import { Badge, IconButton } from "~/components/ui";
 
-/** Where a child runs — a profile pins one. No "let the lead choose". */
+/**
+ * Where a child runs. **Two, because the server takes two.**
+ *
+ * A third was added here — *Let the lead choose* — reasoning from
+ * `Role.placement`, documented as `lead | here | new`. **That is the response
+ * model.** `CreateRoleBody.placement` and `UpdateRoleBody.placement` both say
+ * *Required: "here" or "new"*, and `roles.rs` enforces it:
+ * `PLACEMENT: [&str; 2] = ["here", "new"]`, refusing anything else with
+ * *placement is "here" (the lead's workspace) or "new" (its own)*. So `lead`
+ * is **readable and not writable** — a value the server will hand you and
+ * will not take back.
+ *
+ * **A value in a response model is not an option in a request model.** That
+ * is the whole mistake, and the comment this replaces made it in writing.
+ *
+ * What the user saw was not a save-time refusal. The effect below — main's,
+ * which already called `lead` retired — coerces any unknown placement to
+ * `here` on every render, so pressing *Let the lead choose* snapped the
+ * selection straight back to *Same workspace*. A pill that cannot stay
+ * pressed is a button that does not work, which is exactly how it was
+ * reported.
+ *
+ * `lead` is still **read**: an older profile may carry it, and a profile you
+ * cannot open is worse than one with an option you cannot set.
+ */
 const PLACEMENTS: { value: string; icon: LucideIcon; label: string; note: string }[] = [
   { value: "here", icon: GitBranch, label: "Same workspace", note: "Shares the lead's directory and branch." },
   { value: "new", icon: GitBranchPlus, label: "Its own workspace", note: "A fresh branch, on the machine you pin below." },
@@ -125,32 +150,52 @@ export function Roles() {
   };
 
   if (editing) {
+    /* **Read-only says what the screen is, rather than disabling its
+       controls.** A profile somebody shared with you opened the full editor
+       with a Save button that the server would refuse — which is worse than a
+       greyed-out form, because it does not look withheld until after you have
+       written something. It opens as a reading of itself instead, and says
+       where it is changed. */
+    const role = editing.id ? rows.data.find((r) => r.id === editing.id) : undefined;
+    if (role && !role.mayWrite) return <Reading role={role} onClose={() => setEditing(null)} />;
     return <Editor state={editing} all={rows.data} onClose={() => setEditing(null)} />;
   }
 
+  /* **Nothing at all, and nothing wrong.** The header action and the
+     `WhereTo` come off the screen while it holds: the blank's own button is
+     the same action, and a note about how a profile is filed is about
+     operating profiles you do not have. A query that matched nothing is not
+     this state — there *are* profiles — and it gets a `Note` instead. */
+  const blank = !rows.loading && !rows.error && rows.data.length === 0;
+
+  /* The page's one primary action, written once and worn in two places. */
+  const newProfile = (
+    <CreateMenu
+      label="New profile"
+      choices={[
+        {
+          icon: Sparkles,
+          label: "Create with AI",
+          note: "Describe it; an agent writes it for you.",
+          onPick: () => start({ prompt: "Create a Firetower agent profile that " }),
+        },
+        {
+          icon: SquarePen,
+          label: "Write it myself",
+          note: "Fill in the form by hand.",
+          onPick: () => setEditing({ draft: { ...BLANK } }),
+        },
+      ]}
+    />
+  );
+
   return (
     <Section
-      title="Profiles"
-      note="A saved persona any agent can run — a lead, a developer, a reviewer, a QA. Each carries what it does, where it runs, its instructions, and whether it may hand work off."
-      action={
-        <CreateMenu
-          label="New profile"
-          choices={[
-            {
-              icon: Sparkles,
-              label: "Create with AI",
-              note: "Describe it; an agent writes it for you.",
-              onPick: () => start({ prompt: "Create a Firetower agent profile that " }),
-            },
-            {
-              icon: SquarePen,
-              label: "Write it myself",
-              note: "Fill in the form by hand.",
-              onPick: () => setEditing({ draft: { ...BLANK } }),
-            },
-          ]}
-        />
-      }
+      /* **Agent profiles**, which is what the rail calls it. "Profiles" alone
+         is the account's word on every other product somebody has used. */
+      title="Agent profiles"
+      note="A saved way of working. One with a team leads, one without is a worker."
+      action={blank ? undefined : newProfile}
       controls={
         rows.data.length > 0 ? (
           <div className="relative w-full max-w-xs">
@@ -168,17 +213,47 @@ export function Roles() {
     >
       <Rows
         feed={{ data: shown, loading: rows.loading, error: rows.error }}
-        empty={needle ? `No profiles match "${q.trim()}".` : "No profiles yet. Make one, and you can start a workspace as it or a lead can delegate to it."}
+        icon={UsersRound}
+        empty={
+          needle ? (
+            <Note
+              icon={Search}
+              control={
+                <button onClick={() => setQ("")} className="btn quiet">
+                  Clear
+                </button>
+              }
+            >
+              No profile matches <Typed>{q.trim()}</Typed>.
+            </Note>
+          ) : (
+            "No profiles yet"
+          )
+        }
+        /* **It says this is optional**, which is the one job the page's own
+           sentence cannot do: nobody should read an empty list here as a
+           thing they have failed to do. */
+        note="Every workspace can run without one. Make one to stop repeating yourself."
+        action={newProfile}
       >
-        {shown.map((role) => (
-          <RoleRow
-            key={role.id}
-            role={role}
-            onOpen={() => setEditing({ id: role.id, path: role.path, draft: toDraft(role) })}
-            onDelete={() => removeRole(role)}
-          />
-        ))}
+        <Rowset>
+          {shown.map((role) => (
+            <RoleRow
+              key={role.id}
+              role={role}
+              onOpen={() => setEditing({ id: role.id, path: role.path, draft: toDraft(role) })}
+              onDelete={() => removeRole(role)}
+            />
+          ))}
+        </Rowset>
       </Rows>
+
+      {!blank && (
+        <WhereTo>
+          A profile is filed like a skill or a machine, so sharing one uses the same sheet.{" "}
+          <b>The team is the only thing that makes one a manager</b>.
+        </WhereTo>
+      )}
     </Section>
   );
 }
@@ -217,58 +292,53 @@ function RoleRow({
   onOpen: () => void;
   onDelete: () => void;
 }) {
+  /* `lead` is readable and not writable, so a row may still carry it. Named
+     rather than lumped in with the unknown: labelling *anything* unrecognised
+     as "lead picks where" is the same mistake as offering it as a choice —
+     saying something definite about a value you do not know. */
   const place =
     role.placement === "here"
       ? "same workspace"
       : role.placement === "new"
         ? "new workspace"
-        : "lead picks where";
+        : role.placement === "lead"
+          ? "lead picks where"
+          : role.placement;
   const agent = role.agent as Agent | null;
 
   return (
-    <div className="group flex w-full items-start gap-3 border-b border-line-soft px-3.5 py-3 last:border-0 hover:bg-raise/50">
-      <button onClick={onOpen} className="flex min-w-0 flex-1 items-start gap-3 text-left">
-        <UsersRound className="mt-0.5 h-4 w-4 shrink-0 text-mute" strokeWidth={1.75} />
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span className="truncate text-ui text-bone">{role.name}</span>
-            {role.isDefault && (
-              <span className="inline-flex shrink-0 items-center gap-1 rounded bg-slate-tint px-1.5 py-0.5 text-micro text-slate">
-                <Star className="h-3 w-3" strokeWidth={1.75} />
-                default
-              </span>
-            )}
-            {!role.mayWrite && (
-              <span className="shrink-0 text-micro text-mute">shared with you</span>
-            )}
-          </div>
-          <p className="mt-0.5 truncate text-meta text-dim">{role.does}</p>
-          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-            {role.canDelegate && (
-              <span className="inline-flex items-center gap-1 rounded bg-sage-tint px-1.5 py-0.5 text-micro text-sage">
-                <Users className="h-3 w-3" strokeWidth={1.75} />
-                manager
-              </span>
-            )}
-            <Chip>{place}</Chip>
-            {agent && (
-              <Chip>
-                <AgentMark agent={agent} size={11} className="text-dim" />
-                {AGENT_LABEL[agent]}
-              </Chip>
-            )}
-          </div>
-        </div>
+    /* One row, as every other pane draws one: the mark, the name over what it
+       does, then the quiet facts on the right. The chips were three coloured
+       blocks per row on a list that is mostly read. */
+    <div className="r">
+      <button onClick={onOpen} className="flex min-w-0 flex-1 items-center gap-3.5 text-left">
+        <span className="g">
+          {agent ? <AgentMark agent={agent} size={16} /> : <UsersRound className="h-4 w-4" strokeWidth={1.75} />}
+        </span>
+        <span className="tx">
+          <b>{role.name}</b>
+          <s>{role.does}</s>
+        </span>
       </button>
+      {role.canDelegate && <Badge>can delegate</Badge>}
+      {role.isDefault && (
+        <span className="said flex items-center gap-1">
+          <Star className="h-3 w-3" strokeWidth={1.75} />
+          default
+        </span>
+      )}
+      <span className="said">{place}</span>
+      {/* Where it is filed, which is also who else has it. "Only you" is the
+          same fact said the way a person would say it. */}
+      <span className="path">{role.mayWrite ? role.path : `${role.path} · shared with you`}</span>
       {role.mayWrite && (
-        <button
+        <IconButton
+          of={Trash2}
           onClick={onDelete}
-          aria-label={`Delete ${role.name}`}
-          title="Delete profile"
-          className="shrink-0 rounded p-1.5 text-mute transition hover:bg-brick-tint hover:text-brick"
-        >
-          <Trash2 className="h-4 w-4" strokeWidth={1.75} />
-        </button>
+          label={`Delete ${role.name}`}
+          hint="Delete profile"
+          className="hov hover:text-brick"
+        />
       )}
     </div>
   );
@@ -280,6 +350,72 @@ function Chip({ children }: { children: ReactNode }) {
     <span className="inline-flex items-center gap-1 rounded bg-raise px-1.5 py-0.5 text-micro text-mute">
       {children}
     </span>
+  );
+}
+
+/**
+ * A profile you may read and not change.
+ *
+ * The same facts the editor holds, as text — no fields, no Save, and nothing
+ * greyed out. The line at the foot is the *where-this-lives note*: a boundary
+ * read as a boundary rather than as a refusal, which is the same move People
+ * and Teams make for the administration site.
+ */
+function Reading({ role, onClose }: { role: Role; onClose: () => void }) {
+  const place =
+    role.placement === "own" ? "its own workspace" : role.placement === "here" ? "the lead's workspace" : "wherever the lead decides";
+  const agent = role.agent as Agent | null;
+  const named = (ids: string[]) => ids.length;
+
+  return (
+    <Section
+      title={role.name}
+      note={role.does}
+      action={
+        <button onClick={onClose} className="btn plain">
+          All profiles
+        </button>
+      }
+    >
+      <div className="space-y-5 px-3.5 py-4">
+        <Reads label="Runs in">{place}</Reads>
+        <Reads label="Agent">
+          {agent ? (
+            <span className="inline-flex items-center gap-1.5">
+              <AgentMark agent={agent} size={13} className="text-dim" />
+              {AGENT_LABEL[agent]}
+            </span>
+          ) : (
+            "whichever the lead is running"
+          )}
+        </Reads>
+        <Reads label="Hands work off">
+          {role.canDelegate ? `yes — to ${named(role.delegateScope)} profile${named(role.delegateScope) === 1 ? "" : "s"}` : "no"}
+        </Reads>
+        <Reads label="Skills it may read">
+          {named(role.skillScope) === 0 ? "whatever the workspace has" : `${named(role.skillScope)} named`}
+        </Reads>
+        {role.instructions.trim() && (
+          <Reads label="Instructions">
+            <span className="block whitespace-pre-wrap text-text">{role.instructions.trim()}</span>
+          </Reads>
+        )}
+      </div>
+
+      <p className="border-t border-line-soft px-3.5 py-3 text-meta text-mute">
+        Shared with you. It is changed by whoever owns it, in the directory it is filed in — <span className="font-mono">{role.path}</span>.
+      </p>
+    </Section>
+  );
+}
+
+/** One fact and its name, in the shape the rest of the pane reads in. */
+function Reads({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-baseline gap-3">
+      <span className="w-[9.5rem] shrink-0 text-ui text-dim">{label}</span>
+      <span className="min-w-0 flex-1 text-ui text-bone">{children}</span>
+    </div>
   );
 }
 
@@ -433,8 +569,17 @@ function Editor({
     if (draft.placement === "new" && !draft.machine && firstMachine) set("machine", firstMachine);
   }, [draft.placement, draft.machine, firstMachine]);
 
-  // An older profile may hold the retired "lead" placement; coerce it to a
-  // concrete one so the draft matches what the picker shows and can be saved.
+  /* An older profile may hold the retired `lead` placement — the server will
+     hand it back and will not take it, so the draft has to become one of the
+     two it accepts. `here` for the same reason `BLANK` uses it: it is the one
+     that needs nothing else chosen, and it is the server's own fallback when
+     nothing says otherwise (`delegate.rs` defaults an open placement to
+     `here`).
+
+     **This is why the third pill did not work.** It ran on every render, so
+     setting `lead` was undone before the press finished. Main added it when it
+     retired the value; the pill was added here afterwards, against the read
+     model, and the two have been fighting since. */
   useEffect(() => {
     if (draft.placement !== "here" && draft.placement !== "new") set("placement", "here");
   }, [draft.placement]);
@@ -502,16 +647,32 @@ function Editor({
   };
 
   return (
-    <div className="px-1 pb-10">
+    <div className="pg">
       <button
         onClick={onClose}
-        className="flex items-center gap-1.5 px-2.5 py-2.5 text-ui text-dim transition-colors hover:text-bone"
+        className="flex items-center gap-1.5 py-1 text-ui text-dim transition-colors hover:text-bone"
       >
         <ChevronLeft className="h-3.5 w-3.5" strokeWidth={2} />
-        Profiles
+        All profiles
       </button>
 
-      <div className="space-y-4 px-2.5">
+      {/* **A heading.** The form opened straight onto "Name", so the screen
+          never said which profile you were reading or what a profile is. */}
+      <div className="pg-head mt-4">
+        <div>
+          <h1>{draft.name.trim() || "New profile"}</h1>
+          {/* A new one has to say what a profile *is*; an existing one is
+              already in front of you and says what it is for. The drawing
+              has two ledes and the build was using the second for both. */}
+          <p className="sub">
+            {existing
+              ? "What it is for, what it may do, and who it may hand work to."
+              : "A saved way of working. Name it, say what it is for, and decide whether it leads or works."}
+          </p>
+        </div>
+      </div>
+
+      <div className="form">
         <Field label="Name" hint="What you start it as, and what a lead names to delegate to it — e.g. reviewer.">
           <input
             value={draft.name}
@@ -538,17 +699,26 @@ function Editor({
           label="Placement"
           hint="Where a child runs when a lead delegates to it. Every spawn runs the same way."
         >
-          <Select
-            ariaLabel="Placement"
-            value={draft.placement ?? "here"}
-            options={PLACEMENTS.map((p) => ({
-              value: p.value,
-              icon: <p.icon className="h-4 w-4" strokeWidth={1.75} />,
-              label: p.label,
-              note: p.note,
-            }))}
-            onChange={(v) => set("placement", v ?? "here")}
-          />
+          {/* **Pills, not a dropdown.** Three placements with a word of
+              explanation each is a thing you read once and then point at; a
+              select hides two of the three behind whichever is set. */}
+          <div className="pickrow">
+            {PLACEMENTS.map((p) => (
+              <button
+                key={p.value ?? "here"}
+                type="button"
+                aria-pressed={(draft.placement ?? "here") === p.value}
+                onClick={() => set("placement", p.value ?? "here")}
+                className="pk"
+              >
+                <span className="ic">
+                  <p.icon className="h-4 w-4" strokeWidth={1.75} />
+                </span>
+                {p.label}
+                {p.note && <span className="sub">{p.note}</span>}
+              </button>
+            ))}
+          </div>
         </Group>
 
         {draft.placement === "new" && (
@@ -557,12 +727,21 @@ function Editor({
             hint="Which machine its own workspace runs on."
           >
             {machineOptions.length > 0 ? (
-              <Select
-                ariaLabel="Machine"
-                value={draft.machine ?? null}
-                options={machineOptions}
-                onChange={(v) => set("machine", v)}
-              />
+              <div className="pickrow">
+                {machineOptions.map((m) => (
+                  <button
+                    key={m.value ?? "any"}
+                    type="button"
+                    aria-pressed={(draft.machine ?? null) === m.value}
+                    onClick={() => set("machine", m.value)}
+                    className="pk"
+                  >
+                    <span className="ic">{m.icon}</span>
+                    {m.label}
+                    {m.note && <span className="sub">{m.note}</span>}
+                  </button>
+                ))}
+              </div>
             ) : (
               /* Not the pickers' "No machine to run on" block: a profile with
                  no machine is a state this screen already produces and handles
@@ -630,7 +809,7 @@ function Editor({
                 ];
                 return (
                   <div key={c.kind} className="flex flex-col gap-1.5">
-                    <span className="text-micro font-medium uppercase tracking-wide text-mute">{c.fallback}</span>
+                    <span className="text-micro font-medium text-mute">{c.fallback}</span>
                     <Select
                       ariaLabel={c.fallback}
                       value={draft.settings?.[c.kind] ?? null}
@@ -753,36 +932,44 @@ function Editor({
           </p>
         )}
 
-        <div className="flex items-center gap-2 pt-1">
-          <button
-            onClick={save}
-            disabled={!valid || busy}
-            className="control border border-sage-deep bg-sage-tint font-medium text-sage hover:bg-sage-deep/40 disabled:border-line disabled:bg-raise disabled:text-mute"
-          >
-            {existing ? "Save changes" : "Create profile"}
-          </button>
-          <button
-            onClick={onClose}
-            className="control border border-line bg-raise text-text hover:text-bone"
-          >
-            Cancel
-          </button>
+        {/* **`.formfoot`, and the message first.** It was a plain row with
+            the primary at the left and no sentence at all, so the one thing
+            worth knowing before you press — that nothing exists until you
+            do — was nowhere on the screen. The primary is the ordinary pill:
+            a sage-tinted button here said "this went well", which is a
+            verdict about something that has not happened yet. */}
+        <div className="formfoot">
+          <span className="msg">
+            {existing
+              ? "Saved when you press it. Running workspaces keep the profile they started with."
+              : "Nothing is created until you press this."}
+          </span>
           {existing && (
-            <button
-              onClick={remove}
-              disabled={busy}
-              className="control ml-auto border border-line bg-raise text-mute hover:border-brick-deep hover:text-brick"
-            >
+            <button onClick={remove} disabled={busy} className="btn danger">
               <Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} />
               Delete
             </button>
           )}
+          <button onClick={onClose} className="btn quiet">
+            Cancel
+          </button>
+          <button onClick={save} disabled={!valid || busy} className="btn primary">
+            {existing ? "Save changes" : "Create profile"}
+          </button>
         </div>
       </div>
     </div>
   );
 }
 
+/**
+ * A labelled input, with its hint **above** the control.
+ *
+ * The hint sat underneath, which puts the explanation after the decision —
+ * and in a form of eight fields it reads as a footnote to the thing above
+ * rather than an introduction to the thing below. The drawing's `.fld` has
+ * label, hint, box, in that order.
+ */
 function Field({
   label,
   hint,
@@ -793,10 +980,10 @@ function Field({
   children: React.ReactNode;
 }) {
   return (
-    <label className="flex flex-col gap-1.5">
-      <span className="text-meta font-medium text-dim">{label}</span>
+    <label className="fld">
+      <span>{label}</span>
+      {hint && <span className="hint">{hint}</span>}
       {children}
-      {hint && <span className="text-micro text-mute">{hint}</span>}
     </label>
   );
 }
@@ -818,10 +1005,10 @@ function Group({
   children: ReactNode;
 }) {
   return (
-    <div role="group" aria-label={label} className="flex flex-col gap-1.5">
-      <span className="text-meta font-medium text-dim">{label}</span>
+    <div role="group" aria-label={label} className="fld">
+      <span>{label}</span>
+      {hint && <span className="hint">{hint}</span>}
       {children}
-      {hint && <span className="text-micro text-mute">{hint}</span>}
     </div>
   );
 }

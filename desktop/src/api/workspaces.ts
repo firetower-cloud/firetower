@@ -232,6 +232,43 @@ function underTheirLeads(places: Workspace[]): Workspace[] {
   return top.flatMap((place) => [place, ...(under.get(place.id) ?? [])]);
 }
 
+/**
+ * The same workspaces, out of their repository groups and in one order.
+ *
+ * The rail's panel is a flat list — a name and one timestamp — because a row
+ * that carries a repository, a branch, a machine and a state is a paragraph,
+ * and a column of paragraphs is unscannable. `group()` is still what builds
+ * the places, because that is where a child knowing its lead lives; this only
+ * takes the grouping back off and restores the one order that matters:
+ * **what needs you first, then most recent.** Within a group that order is
+ * already true, but across groups it is not — a repository with nothing
+ * waiting would otherwise push a question below it.
+ *
+ * Children are kept, straight after their lead, exactly as the groups had
+ * them — a lead and what it delegated is one piece of work wherever it is
+ * drawn.
+ */
+export function flat(repos: Repositories): Workspace[] {
+  const places = repos.groups.flatMap(([, inside]) => inside);
+  const waiting = (place: Workspace) => place.runs.some(needsYou);
+  const started = (place: Workspace) => place.runs[0]?.createdAt ?? "";
+  /* Leads carry their children with them rather than sorting against them. */
+  const leadOf = new Map<string, Workspace>();
+  for (const place of places) for (const run of place.runs) leadOf.set(run.id, place);
+  const under = new Map<string, Workspace[]>();
+  const top: Workspace[] = [];
+  for (const place of places) {
+    const lead = place.leadOf ? leadOf.get(place.leadOf) : undefined;
+    if (lead && lead.id !== place.id) under.set(lead.id, [...(under.get(lead.id) ?? []), place]);
+    else top.push(place);
+  }
+  top.sort((a, b) => {
+    if (waiting(a) !== waiting(b)) return waiting(a) ? -1 : 1;
+    return started(b).localeCompare(started(a));
+  });
+  return top.flatMap((place) => [place, ...(under.get(place.id) ?? [])]);
+}
+
 /** The place whose session started this one, if it is on the list. */
 export function leadPlace(place: Workspace, places: Workspace[]): Workspace | undefined {
   if (!place.leadOf) return undefined;

@@ -2,6 +2,9 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
 import "./platform";
+/* Writes `data-theme` before the first frame. A frame of the wrong theme is
+   the thing everybody notices and nobody can un-see. */
+import "./theme";
 import { App } from "./App";
 import { Boundary } from "./ui/Boundary";
 import { ConfirmProvider } from "./ui/Confirm";

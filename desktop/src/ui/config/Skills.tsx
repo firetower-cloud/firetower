@@ -18,13 +18,14 @@
  * control beside a fact invites somebody to change what they have no say over.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronLeft, FolderDown, Plus, Search, ShieldAlert, Sparkles, Trash2, UserPlus } from "lucide-react";
-import { Rows, Section } from "~/ui/config/bits";
+import { Check, ChevronLeft, FolderDown, Loader2, Plus, Puzzle, Search, ShieldAlert, Sparkles, Trash2, TriangleAlert, UserPlus } from "lucide-react";
+import { Blank, Note, Rows, Section, Typed } from "~/ui/config/bits";
 import { ShareMany, WhoCanAccess } from "~/ui/Sharing";
 import { AddSkill } from "~/ui/AddSkill";
 import { CreateMenu } from "~/ui/config/CreateMenu";
 import { useStart } from "~/start";
 import { useSkills, useSkillDetail, useSkillVersions, why } from "~/data";
+import { elapsed, minutesSince } from "~/api/view";
 import { useRepos } from "~/data";
 import {
   deleteSkill,
@@ -39,11 +40,12 @@ import { getListSkillsQueryKey } from "~/api/generated/skills/skills";
 import type { Skill } from "~/api/generated/model";
 import { useConfirm } from "~/ui/Confirm";
 import { Markdown } from "~/components/Markdown";
-import { readDrop, readFiles, size, RISK_SAYS, type Found } from "~/skills";
+import { readDrop, size, RISK_SAYS, type Found } from "~/skills";
+import { useOpened } from "~/ui/opened";
 
-export function Skills() {
+export function Skills({ open: asked = null }: { open?: string | null }) {
   const [adding, setAdding] = useState(false);
-  const [open, setOpen] = useState<string | null>(null);
+  const [open, setOpen] = useOpened(asked);
   const [query, setQuery] = useState("");
   const [over, setOver] = useState(false);
   /* A folder dropped on the list goes straight into the review, so the way in
@@ -58,7 +60,7 @@ export function Skills() {
   const me = useMe();
   // An organisation admin may move anything filed in a directory, so the
   // first section holds more for them, and its note says why.
-  const orgAdmin = me.data?.user.role === "admin";
+  const orgAdmin = me.data?.user?.role === "admin";
   const refresh = () => cache.invalidateQueries({ queryKey: getListSkillsQueryKey() });
 
   /* Several at once. Only what this person may move can be ticked, so the
@@ -130,7 +132,7 @@ export function Skills() {
 
   const chosen = feed.data.find((s) => s.id === open);
   if (chosen)
-    return <Detail skill={chosen} onBack={() => setOpen(null)} onChanged={refresh} />;
+    return <Detail skill={chosen} onBack={() => setOpen(null)} onChanged={refresh} onNewVersion={() => add()} />;
 
   const q = query.trim().toLowerCase();
   const shown = q
@@ -151,46 +153,57 @@ export function Skills() {
   const builtIn = shown.filter((s) => s.builtin);
   const sharedWithMe = shown.filter((s) => !s.mayShare && !s.builtin);
 
+  /**
+   * One skill.
+   *
+   * A 38px plate carrying its monogram, the name and what state it is in, two
+   * lines of what it does, and **what it can do to your machine as a line of
+   * small amber marks** rather than a row of filled badges. Four badges read
+   * as four errors; the fact is "worth reading before you approve", which is
+   * what amber means and brick does not.
+   */
   const row = (s: Skill, manage: boolean) => (
-    <div
-      key={s.id}
-      className={`flex w-full items-start gap-3 px-3.5 py-3 transition-colors ${picked.has(s.id) ? "bg-raise/60" : "hover:bg-raise"}`}
-    >
+    <div key={s.id} className={`relative ${picked.has(s.id) ? "rounded-xl bg-raise" : ""}`}>
+      <button onClick={() => setOpen(s.id)} className="sk w-full" title={s.name}>
+        <span className="plate">{monogram(s.name)}</span>
+        <span className="min-w-0 flex-1">
+          <span className="flex min-w-0 flex-wrap items-baseline gap-x-2.5 gap-y-1">
+            <span className="min-w-0 truncate text-ui font-medium text-bone">{s.name}</span>
+            <span className="shrink-0 text-meta tabular-nums text-mute">
+              {s.held ? "waiting for you" : s.builtin ? "from Firetower" : s.version > 0 ? `v${s.version}` : "pending review"}
+            </span>
+            {s.alwaysOn && <span className="shrink-0 text-meta text-mute">on by default</span>}
+          </span>
+          {/* **No `block` here.** `line-clamp-2` sets `display: -webkit-box`
+              and `block` sets `display: block`; both are display utilities, so
+              whichever Tailwind emitted last won — and it was `block`. The
+              clamp was in the class list and doing nothing, so a one-line
+              description and a five-line one made two different row heights
+              and the list read as ragged. */}
+          <span className="ds mt-1 text-ui leading-snug text-dim">{s.description}</span>
+          {s.risk.length > 0 && (
+            <span className="mt-2 flex flex-wrap gap-x-3.5 gap-y-1">
+              {s.risk.map((r) => (
+                <span key={r} className="risk">
+                  <i />
+                  {r}
+                </span>
+              ))}
+            </span>
+          )}
+        </span>
+        <span className="mt-2 flex shrink-0 items-center gap-2.5">
+          <WhoCanAccess look="chip" kind="skill" id={s.id} path={s.path} />
+        </span>
+      </button>
+      {/* Selecting several to share or delete them together. On the plate's
+          corner and only once you are here, so a hundred rows are a hundred
+          skills rather than a hundred checkboxes. */}
       {manage && (
-        <span className="mt-3">
+        <span className={`absolute top-3.5 left-0 ${picked.has(s.id) ? "" : "opacity-0 focus-within:opacity-100 hover:opacity-100"} transition-opacity`}>
           <Tick on={picked.has(s.id)} label={`Select ${s.name}`} onFlip={() => toggle(s.id)} />
         </span>
       )}
-      <button onClick={() => setOpen(s.id)} className="flex min-w-0 flex-1 items-start gap-3 text-left">
-        <Mark name={s.name} />
-        <span className="min-w-0 flex-1">
-          <span className="flex items-baseline gap-2">
-            <span className="truncate font-mono text-ui text-bone">{s.name}</span>
-            {s.version > 0 && (
-              <span className="shrink-0 text-micro tabular-nums text-mute">v{s.version}</span>
-            )}
-          </span>
-          <span className="mt-0.5 line-clamp-2 block text-meta text-mute">{s.description}</span>
-          <span className="mt-1.5 flex flex-wrap items-center gap-2">
-            {s.held && <Tag tone="amber">needs review</Tag>}
-            {s.author && <Tag>{s.author}</Tag>}
-            <Tag>{s.tokens} tokens</Tag>
-            {s.defaultIn.map((r) => (
-              <Tag key={r}>{r}</Tag>
-            ))}
-            {s.alwaysOn && <Tag>always on</Tag>}
-            {!manage && <Tag>{s.mayWrite ? "editor" : "viewer"}</Tag>}
-            {s.risk.map((r) => (
-              <Tag key={r} tone="brick">
-                {r}
-              </Tag>
-            ))}
-          </span>
-        </span>
-      </button>
-      <span className="shrink-0">
-        <WhoCanAccess look="chip" kind="skill" id={s.id} path={s.path} />
-      </span>
     </div>
   );
 
@@ -209,139 +222,265 @@ export function Skills() {
     },
   };
 
-  if (!feed.loading && !feed.error && feed.data.length === 0)
-    return (
-      <section {...surface}>
-        <Empty
-          over={over}
-          onAdd={add}
-          onCreateWithAI={() => start({ prompt: "Create a Firetower skill that " })}
-        />
-      </section>
-    );
+  /* **Nothing at all, which is near unreachable.** `ft-server` seeds the
+     built-in skills on start, so a fresh install has rows in *From Firetower*
+     within a second and this is only reached mid-seed or with the built-ins
+     absent. The state a person actually meets is *Yours, 0* on a populated
+     page, which is the `Note` below. Both are drawn. */
+  const bare = !feed.loading && !feed.error && feed.data.length === 0;
+
+  const held = shown.filter((s) => s.held);
+  const mine = tickable.filter((s) => !s.held);
+
+  /* The page's one primary action, written once: the head wears it when there
+     is a list, and the blank wears it when there is not. The same string
+     either way, so the vocabulary is one vocabulary. */
+  const addSkill = (
+    <CreateMenu
+      label="Add a skill"
+      choices={[
+        {
+          icon: Sparkles,
+          label: "Create with AI",
+          note: "Describe it; an agent writes it for you.",
+          onPick: () => start({ prompt: "Create a Firetower skill that " }),
+        },
+        {
+          icon: FolderDown,
+          label: "Upload a folder",
+          note: "A skill you already have, dropped in.",
+          onPick: () => add(),
+        },
+      ]}
+    />
+  );
 
   return (
-    <div {...surface} className={over ? "rounded-xl ring-1 ring-slate" : undefined}>
-    <Section
-      title="Skills you manage"
-      note={
-        orgAdmin
-          ? "Yours, or in any directory, since you're an organisation admin. Select several to share or delete them together."
-          : "Yours, or in a directory you administer. Select several to share or delete them together."
-      }
-      action={
-        <CreateMenu
-          label="Add a skill"
-          choices={[
-            {
-              icon: Sparkles,
-              label: "Create with AI",
-              note: "Describe it; an agent writes it for you.",
-              onPick: () => start({ prompt: "Create a Firetower skill that " }),
-            },
-            {
-              icon: FolderDown,
-              label: "Upload a folder",
-              note: "A skill you already have, dropped in.",
-              onPick: () => add(),
-            },
-          ]}
-        />
-      }
-    >
-      {(feed.data.length > 6 || tickable.length > 0) && (
-        <div className="flex items-center gap-3 px-3.5 py-2">
-          {tickable.length > 0 && (
-            <Tick
-              on={allOn}
-              partly={!allOn && tickable.some((s) => picked.has(s.id))}
-              label="Select all"
-              onFlip={() => setPicked(allOn ? new Set() : new Set(tickable.map((s) => s.id)))}
-            />
-          )}
-          {feed.data.length > 6 ? (
-            <>
-              <Search className="h-3.5 w-3.5 shrink-0 text-mute" strokeWidth={2} />
+    /* `data-wide` tells `Configuration.tsx` to drop its 48rem column: this
+       pane brings its own `.pcol`, and two centred columns inside each other
+       is a 770px page inside a 1120px one. */
+    <div {...surface} data-wide className="pcol relative">
+      {over && <Dropping />}
+
+      <div className="phead2">
+        <div className="min-w-0">
+          <h1>Skills</h1>
+          <p className="sub">
+            A folder of instructions an agent reads when it decides it is relevant. Share one, and everybody
+            in that directory gets it.
+          </p>
+        </div>
+        {/* **Neither is drawn over the blank.** A find box over a blank has
+            nothing to narrow, and the blank's own button is this same action
+            with the sentence that explains it. */}
+        {!bare && (
+          <div className="acts">
+            <label className="find">
+              <Search className="h-[15px] w-[15px] shrink-0" strokeWidth={1.75} />
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search by name, description or author"
-                className="min-w-0 flex-1 bg-transparent text-ui text-bone outline-none placeholder:text-mute"
+                placeholder="Search by name or description"
+                spellCheck={false}
+                aria-label="Search skills"
+                className="placeholder:text-mute focus:outline-none"
               />
-              <span className="shrink-0 text-micro tabular-nums text-mute">
-                {shown.length} of {feed.data.length}
-              </span>
-            </>
-          ) : (
-            <span className="text-meta text-mute">Select all</span>
+            </label>
+            {addSkill}
+          </div>
+        )}
+      </div>
+
+      {bare ? (
+        /* The surface is still a drop target and still draws the `.drop`
+           overlay above; the sentence is what says so, and the button's menu
+           offers the same two routes the dashed box's two buttons did. */
+        <Blank icon={Puzzle} title="No skills yet" action={addSkill}>
+          Ask an agent to write one, or drop in a folder you already have.
+        </Blank>
+      ) : (
+        <>
+        {/* An agent wrote one and it is waiting. First, because it is the only
+            thing on this screen that wants a decision. */}
+        {held.length > 0 && (
+          <section className="sksec">
+            <div className="hd">
+              <h2>Waiting for you</h2>
+              <span className="n">{held.length}</span>
+            </div>
+            <div className="review">
+              <h3>An agent wrote {held.length === 1 ? "this one" : "these"}, and {held.length === 1 ? "it runs" : "they run"} code</h3>
+              <p>
+                Read every file before you approve {held.length === 1 ? "it" : "them"}. A held skill can ship
+                executable scripts and register hooks for the whole session, so it runs on every turn rather
+                than only when it is invoked.
+              </p>
+            </div>
+            <div className="skgrid mt-1">{held.map((s) => row(s, true))}</div>
+          </section>
+        )}
+
+        {/* **A query that matched nothing anywhere collapses the three sections
+            to one line.** Three headings each reading 0 with a line under each
+            is three lies about one fact. Where it matches in some and not
+            others, the sections it missed are not drawn at all — which is what
+            the two `length > 0` guards below already did. */}
+        {q && shown.length === 0 ? (
+          <div className="mt-4">
+            <Note
+              icon={Search}
+              control={
+                <button onClick={() => setQuery("")} className="btn quiet">
+                  Clear
+                </button>
+              }
+            >
+              No skill matches <Typed>{query.trim()}</Typed>.
+            </Note>
+          </div>
+        ) : (
+          <>
+          <Group
+            title="Yours"
+            count={mine.length}
+            note={
+              orgAdmin
+                ? "Yours, or in any directory, since you're an organisation admin. Select several to share or delete them together."
+                : "Yours, or in a directory you administer. Select several to share or delete them together."
+            }
+            /* **The one a person actually meets.** The built-ins are seeded on the
+               server's own start, so the page-level blank above is close to
+               unreachable and this is the Skills empty state: the screen is not
+               empty, one section of it is. */
+            empty={<Note icon={Puzzle}>Nothing of your own yet.</Note>}
+          >
+            {mine.map((s) => row(s, true))}
+          </Group>
+
+          {builtIn.length > 0 && (
+            <Group
+              title="From Firetower"
+              count={builtIn.length}
+              note="Shipped with the product and on by default. They cannot be deleted. Turn one off for a single session in the composer."
+            >
+              {builtIn.map((s) => row(s, false))}
+            </Group>
           )}
+
+          {sharedWithMe.length > 0 && (
+            <Group
+              title="Shared with you"
+              count={sharedWithMe.length}
+              note="You can turn these on in your sessions. Their directory's admins decide who else gets them."
+            >
+              {sharedWithMe.map((s) => row(s, false))}
+            </Group>
+          )}
+
+          <p className="mt-9 flex items-center gap-2.5 text-ui text-dim">
+            <FolderDown className="h-[15px] w-[15px]" strokeWidth={1.75} />
+            Or drop a folder anywhere on this page.
+          </p>
+          </>
+        )}
+        </>
+      )}
+
+      {selected.length > 0 && (
+        <div className="pointer-events-none sticky bottom-4 z-20 mt-3 flex justify-center">
+          <div className="pointer-events-auto flex items-center gap-2 rounded-2xl bg-panel py-1.5 pr-1.5 pl-3.5 shadow-(--shadow-float)">
+            <span className="text-ui tabular-nums text-bone">{selected.length} selected</span>
+            {trouble && <span className="max-w-[16rem] truncate text-meta text-brick">{trouble}</span>}
+            <button onClick={clear} className="btn quiet">
+              Clear
+            </button>
+            <button disabled={deleting} onClick={() => void removeAll()} className="btn plain text-brick">
+              <Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} />
+              {deleting ? "Deleting…" : "Delete"}
+            </button>
+            <button onClick={() => setSharing(true)} className="btn primary">
+              <UserPlus className="h-3.5 w-3.5" strokeWidth={1.75} />
+              {selected.length === 1 ? "Share skill" : `Share ${selected.length} skills`}
+            </button>
+          </div>
         </div>
       )}
-      <Rows
-        feed={{ ...feed, data: tickable }}
-        empty={query ? `No skill you manage matches “${query}”.` : "None yet. Add one to get started."}
-      >
-        {tickable.map((s) => row(s, true))}
-      </Rows>
-    </Section>
 
-    {builtIn.length > 0 && (
-      <Section
-        title="From Firetower"
-        note="Shipped with the product and on by default. They cannot be deleted — turn one off for a session in the composer's skill picker."
-      >
-        {builtIn.map((s) => row(s, false))}
-      </Section>
-    )}
-
-    {sharedWithMe.length > 0 && (
-      <Section
-        title="Shared with you"
-        note="You can turn these on in your sessions. Their directory's admins decide who else gets them."
-      >
-        {sharedWithMe.map((s) => row(s, false))}
-      </Section>
-    )}
-
-    {selected.length > 0 && (
-      <div className="pointer-events-none sticky bottom-4 z-20 mt-3 flex justify-center">
-        <div className="pointer-events-auto flex items-center gap-2 rounded-xl border border-line bg-overlay py-1.5 pl-3.5 pr-1.5 shadow-float">
-          <span className="text-ui text-bone tabular-nums">{selected.length} selected</span>
-          {trouble && <span className="max-w-[16rem] truncate text-meta text-brick">{trouble}</span>}
-          <button onClick={clear} className="control text-ui text-mute hover:text-bone">
-            Clear
-          </button>
-          <button
-            disabled={deleting}
-            onClick={() => void removeAll()}
-            className="control border border-brick-deep text-ui text-brick hover:bg-brick-tint disabled:opacity-50"
-          >
-            <Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} />
-            {deleting ? "Deleting…" : "Delete"}
-          </button>
-          <button
-            onClick={() => setSharing(true)}
-            className="control bg-bone text-ui font-medium text-ground hover:opacity-90"
-          >
-            <UserPlus className="h-3.5 w-3.5" strokeWidth={1.75} />
-            {selected.length === 1 ? "Share skill" : `Share ${selected.length} skills`}
-          </button>
-        </div>
-      </div>
-    )}
-
-    {sharing && (
-      <ShareMany
-        skills={selected}
-        onClose={() => setSharing(false)}
-        onDone={() => {
-          setSharing(false);
-          clear();
-        }}
-      />
-    )}
+      {sharing && (
+        <ShareMany
+          skills={selected}
+          onClose={() => setSharing(false)}
+          onDone={() => {
+            setSharing(false);
+            clear();
+          }}
+        />
+      )}
     </div>
   );
+}
+
+/** A section of the gallery: a heading, a count, a sentence, and its rows. */
+function Group({
+  title,
+  count,
+  note,
+  empty,
+  children,
+}: {
+  title: string;
+  count: number;
+  note: string;
+  /** What the section says instead of rows: a `Note`, never a `Blank`. */
+  empty?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  const bare = count === 0 && !!empty;
+  return (
+    <section className="sksec">
+      <div className="hd">
+        <h2>{title}</h2>
+        <span className="n">{count}</span>
+        {/* **Not when the section is empty.** The note is about operating the
+            rows — select several, share them — and a paragraph of that above
+            a line saying there are none is two lines where one is the whole
+            answer. */}
+        {!bare && <p className="note">{note}</p>}
+      </div>
+      {bare ? empty : <div className="skgrid">{children}</div>}
+    </section>
+  );
+}
+
+/** The whole page as a drop target, said while something is over it. */
+function Dropping() {
+  return (
+    <div className="drop">
+      <div>
+        <span className="mx-auto grid h-14 w-14 place-items-center text-dim">
+          <FolderDown className="h-7 w-7" strokeWidth={1.5} />
+        </span>
+        <b className="mt-2 block text-lede font-mid text-bone">Drop the folder</b>
+        <p className="mt-1 max-w-[46ch] text-ui text-dim">
+          One skill, a folder of them, or a .zip of either. Nothing is written until you have looked
+          at what was found.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Two letters from the name: identity by shape, never a hue.
+ *
+ * The initials of the first two words where there are two — `pr-screenshots`
+ * is "ps" — and the first two letters where there is one, so `dataviz` is
+ * "dv" rather than a lonely "d".
+ */
+function monogram(name: string): string {
+  const words = name.split(/[^a-z0-9]+/i).filter(Boolean);
+  const letters = words.length > 1 ? words[0][0] + words[1][0] : (words[0] ?? "?").slice(0, 2);
+  return letters.toLowerCase();
 }
 
 /** A checkbox, drawn the way the import review draws one. */
@@ -366,8 +505,11 @@ function Tick({
       title={label}
       disabled={disabled}
       onClick={onFlip}
-      className={`grid h-4 w-4 shrink-0 place-items-center rounded ${
-        on || partly ? "bg-raise shadow-[inset_0_0_0_1px_#4a4a54]" : "shadow-[inset_0_0_0_1px_#3a3a42]"
+      /* The ring was two hardcoded greys, which is a dark-only decision and
+         invisible on a white page. `--color-line` is the hairline in either
+         theme and `--color-dim` is the step up from it. */
+      className={`grid h-4 w-4 shrink-0 place-items-center rounded bg-panel ring-1 ${
+        on || partly ? "bg-raise ring-dim" : "ring-line"
       } ${disabled ? "cursor-not-allowed opacity-35" : ""}`}
     >
       {on && <span className="block h-1.5 w-2.5 -translate-y-px rotate-[-45deg] border-b-2 border-l-2 border-bone" />}
@@ -376,70 +518,13 @@ function Tick({
   );
 }
 
-/**
- * Nothing here yet.
- *
- * An empty screen is an invitation to act: one button to choose a folder, and
- * the pane itself takes a drop.
- */
-function Empty({
-  over,
-  onAdd,
-  onCreateWithAI,
-}: {
-  over: boolean;
-  onAdd: (d?: ReturnType<typeof readDrop>) => void;
-  onCreateWithAI: () => void;
-}) {
-  const picker = useRef<HTMLInputElement>(null);
-  return (
-    <div
-      className={`grid place-items-center rounded-xl border border-dashed px-6 py-16 text-center transition-colors ${
-        over ? "border-slate bg-slate-tint" : "border-line bg-panel/60"
-      }`}
-    >
-      <span className={`grid h-11 w-11 place-items-center rounded-lg bg-raise shadow-raise ${over ? "text-slate" : "text-mute"}`}>
-        <FolderDown className="h-5 w-5" strokeWidth={1.75} />
-      </span>
-      <h2 className="mt-3.5 text-lede text-bone">No skills yet</h2>
-      <p className="mt-1.5 max-w-sm text-meta leading-relaxed text-mute">
-        Ask an agent to write one for you, or drop in a skill folder you already have.
-      </p>
-      <div className="mt-5 flex items-center gap-2">
-        <button
-          onClick={onCreateWithAI}
-          className="control bg-overlay text-ui font-semibold text-bone shadow-raise hover:bg-[#26262c]"
-        >
-          <Sparkles className="h-3.5 w-3.5" strokeWidth={1.75} />
-          Create with AI
-        </button>
-        <button
-          onClick={() => picker.current?.click()}
-          className="control border border-line bg-raise text-ui text-dim hover:bg-overlay hover:text-bone"
-        >
-          Choose a folder
-        </button>
-      </div>
-      <p className="mt-4 text-micro text-mute">Or drop one here</p>
-      <input
-        ref={picker}
-        type="file"
-        multiple
-        // @ts-expect-error — webkitdirectory is not in the DOM types
-        webkitdirectory=""
-        directory=""
-        className="hidden"
-        onChange={(e) => onAdd(readFiles(e.target.files))}
-      />
-    </div>
-  );
-}
+
 
 /** Identity by shape, never a hue — the same reasoning as a server's mark. */
 function Mark({ name }: { name: string }) {
   const letters = name.split("-").slice(0, 2).map((w) => w[0] ?? "").join("").toUpperCase();
   return (
-    <span className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-md border border-line bg-raise font-narrow text-micro font-bold uppercase text-dim shadow-raise">
+    <span className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-md border border-line bg-raise font-narrow text-micro font-mid uppercase text-dim shadow-raise">
       {letters}
     </span>
   );
@@ -461,11 +546,20 @@ function Tag({ children, tone }: { children: React.ReactNode; tone?: "brick" | "
   );
 }
 
+/**
+ * Three, which is what `desktop-redesign.html:2893` draws.
+ *
+ * It was four — Details, Bundle, Versions, **Defaults** — because criterion 43
+ * named the old app's four and the criterion was written by reading the
+ * codebase rather than the drawing. The drawing wins; the criterion was the
+ * bug. `Defaults` was not dropped with its tab: the drawing keeps "On by
+ * default" as a card in the aside, which is where the fact belongs, so the
+ * control lives there now instead of behind a tab of its own.
+ */
 const TABS = [
-  { at: "details", label: "Details" },
-  { at: "bundle", label: "Bundle" },
+  { at: "details", label: "Instructions" },
+  { at: "bundle", label: "Files" },
   { at: "versions", label: "Versions" },
-  { at: "defaults", label: "Defaults" },
 ] as const;
 
 /**
@@ -477,10 +571,13 @@ function Detail({
   skill,
   onBack,
   onChanged,
+  onNewVersion,
 }: {
   skill: Skill;
   onBack: () => void;
   onChanged: () => void;
+  /** The gallery's upload sheet, reached from the one skill it would replace. */
+  onNewVersion?: () => void;
 }) {
   const [tab, setTab] = useState<(typeof TABS)[number]["at"]>("details");
   const [saving, setSaving] = useState<string | null>(null);
@@ -507,32 +604,47 @@ function Detail({
   const where = root === "d" ? `d/${place}` : "Only you";
 
   return (
-    <section data-wide className="flex min-w-0 flex-1 flex-col">
-      <div className="px-8 pt-6">
+    /* **One padded column**, which is what `openSkill()` is in the drawing:
+       a `.pcol` with everything inside it. The build inset seven children
+       individually instead, and the one that was forgotten — the tab strip —
+       went flush to the window edge with its rule running off it. A page
+       whose padding is a property of the page cannot have that happen. */
+    <section data-wide className="pcol">
+      <div>
       <button onClick={onBack} className="flex items-center gap-1 text-meta text-mute hover:text-bone">
         <ChevronLeft className="h-3.5 w-3.5" strokeWidth={2} />
         All skills
       </button>
 
       {/* Who it is and what can be done to it, all at the top. */}
-      <header className="mt-4 flex items-start gap-5">
-        <span className="grid h-16 w-16 shrink-0 place-items-center rounded-xl border border-line bg-raise font-narrow text-display font-bold uppercase text-bone shadow-raise">
-          {skill.name.split("-").slice(0, 2).map((w) => w[0] ?? "").join("")}
-        </span>
-        <div className="min-w-0 flex-1">
-          <h1 className="truncate font-mono text-display text-bone">{skill.name}</h1>
-          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-meta text-dim">
-            <span>{skill.builtin ? "Firetower" : (skill.author ?? "somebody who has left")}</span>
-            <span className="h-3 w-px bg-line" />
+      <header className="sk-head">
+        {/* The gallery's plate at the detail's size, so the thing you clicked
+            and the thing you are reading are plainly the same object. */}
+        <span className="plate">{monogram(skill.name)}</span>
+        <div className="tx">
+          <h1>{skill.name}</h1>
+          <div className="facts">
+            <span>by {skill.builtin ? "Firetower" : (skill.author ?? "somebody who has left")}</span>
             <span className="tabular-nums">{skill.version > 0 ? `v${skill.version}` : "pending review"}</span>
-            <span className="h-3 w-px bg-line" />
-            <span className="font-mono">{where}</span>
+            <span>updated {elapsed(minutesSince(skill.updatedAt))} ago</span>
+            <span>
+              {where === "Only you" ? "only you" : <>shared in <b>{where}</b></>}
+            </span>
           </div>
-          <p className="mt-2 line-clamp-2 max-w-[80ch] text-ui leading-relaxed text-text">{skill.description}</p>
-          <div className="mt-3.5 flex flex-wrap items-center gap-2">
-            <WhoCanAccess look="toolbar" kind="skill" id={skill.id} path={skill.path} />
+          {/* The whole description. It is one sentence and the reason somebody
+              opened this; clamping it here was the gallery's rule applied to
+              the page the gallery leads to. */}
+          <p className="ds">{skill.description}</p>
+          <div className="acts">
+            {skill.mayWrite && onNewVersion && (
+              <button onClick={onNewVersion} className="btn plain">
+                <FolderDown className="h-3.5 w-3.5" strokeWidth={1.75} />
+                Drop a new version
+              </button>
+            )}
+            <WhoCanAccess look="toolbar" label="Who can use it" kind="skill" id={skill.id} path={skill.path} />
             {skill.mayShare && (
-              <button className="control border border-brick-deep text-ui text-brick hover:bg-brick-tint" onClick={remove}>
+              <button className="btn quiet" onClick={remove}>
                 <Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} />
                 Delete
               </button>
@@ -548,32 +660,33 @@ function Detail({
       )}
 
       {!skill.held && (<>
-      <div className="mt-6 border-b border-line-soft px-8 pb-2">
-        <div className="track w-fit">
-          {TABS.map((t) => (
-            <button key={t.at} data-on={tab === t.at} onClick={() => setTab(t.at)}>
-              {t.label}
-            </button>
-          ))}
-        </div>
+      <div className="sk-tabs">
+        {TABS.map((t) => (
+          <button key={t.at} aria-selected={tab === t.at} onClick={() => setTab(t.at)}>
+            {t.label}
+          </button>
+        ))}
       </div>
 
-      {saving && <p className="px-8 pt-3 text-meta text-brick">{saving}</p>}
+      {saving && <p className="pt-3 text-meta text-brick">{saving}</p>}
 
       {tab === "details" && (
-        <div className="grid flex-1 lg:grid-cols-[minmax(0,1fr)_19rem]">
-          <div className="min-w-0 px-8 py-6">
+        /* The drawing's two columns: the instructions, and a 268px rail of
+           facts cards beside them. The build's aside was a bordered gutter;
+           the drawing's cards carry their own ground and need no rule. */
+        <div className="sk-body">
+          <div className="min-w-0">
             <Instructions id={skill.id} />
           </div>
 
-          <aside className="flex flex-col gap-5 border-t border-line-soft px-6 py-6 text-meta lg:border-t-0 lg:border-l">
+          <aside className="flex flex-col gap-3 text-meta">
             <Facts
               title="About"
               rows={[
                 ["Version", `v${skill.version}`],
-                ["Updated", new Date(skill.updatedAt).toLocaleDateString()],
+                ["Updated", `${elapsed(minutesSince(skill.updatedAt))} ago`],
                 ["Author", skill.builtin ? "Firetower" : (skill.author ?? "somebody who has left")],
-                ["Size", `${size(skill.bytes)}, ${skill.files} files`],
+                ["Size", skill.files ? `${size(skill.bytes)}, ${skill.files} files` : size(skill.bytes)],
                 ["Context", `${skill.tokens} tokens a turn`],
               ]}
             />
@@ -584,43 +697,37 @@ function Detail({
                 ["You can", skill.mayShare ? "manage" : skill.mayWrite ? "edit" : "view"],
               ]}
             />
-            <div>
-              <h3 className="text-ui text-bone">What it does</h3>
-              <div className="mt-2 flex flex-col gap-1.5">
-                {skill.risk.length === 0 ? (
-                  <span className="flex items-center gap-2 text-dim">
-                    <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-sage" />
-                    Reads and instructs only
+            <div className="facts-card">
+              <h3>What it does to a session</h3>
+              {skill.risk.length === 0 ? (
+                <span className="line ok">
+                  <i />
+                  Reads and instructs only
+                </span>
+              ) : (
+                /* **Amber, not brick.** "Worth reading before you approve" is
+                   what amber means; brick says it is broken. */
+                skill.risk.map((r) => (
+                  <span key={r} className="line warn">
+                    <i />
+                    {RISK_SAYS[r] ?? r}
                   </span>
-                ) : (
-                  skill.risk.map((r) => (
-                    <span key={r} className="flex items-center gap-2 text-dim">
-                      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-brick" />
-                      {RISK_SAYS[r] ?? r}
-                    </span>
-                  ))
-                )}
-              </div>
+                ))
+              )}
             </div>
-            {(skill.alwaysOn || skill.defaultIn.length > 0) && (
-              <div>
-                <h3 className="text-ui text-bone">On by default</h3>
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  {skill.alwaysOn && <Tag>everywhere</Tag>}
-                  {skill.defaultIn.map((r) => (
-                    <Tag key={r}>{r}</Tag>
-                  ))}
-                </div>
-              </div>
-            )}
+            {/* Where the drawing puts this fact — and, since it is a fact
+                somebody may change, where the control for it goes too. */}
+            <div className="facts-card">
+              <h3>On by default</h3>
+              <Defaults skill={skill} onChanged={onChanged} />
+            </div>
           </aside>
         </div>
       )}
 
-      <div className="max-w-[56rem] px-8 pb-16">
+      <div className="max-w-[56rem]">
         {tab === "bundle" && <Bundle id={skill.id} />}
         {tab === "versions" && <Versions id={skill.id} />}
-        {tab === "defaults" && <Defaults skill={skill} onChanged={onChanged} />}
       </div>
       </>)}
     </section>
@@ -679,9 +786,42 @@ function Review({
     }
   };
 
+  /**
+   * **Guarded.** This read `q.data` straight into `review.files.map(...)`, so
+   * a review that had not arrived — or a request that failed — took the whole
+   * screen down with `Cannot read properties of undefined`. A held skill is
+   * exactly the row somebody clicks first, and `Boundary` catching it is not
+   * the same as the screen working.
+   */
+  if (q.isPending) {
+    return (
+      <div className="max-w-[56rem] py-6">
+        <p className="flex items-center gap-2 text-ui text-mute">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={2} />
+          Reading what the agent wrote…
+        </p>
+      </div>
+    );
+  }
+  /* **Shape, not presence.** The thing that actually crashed was a server
+     answering `[]` — truthy, so a `!q.data` guard passes it straight through
+     to `review.files.map` and the screen goes down. The generated client does
+     not validate at runtime, so the one field this screen cannot do without
+     is checked here. */
+  if (q.error || !Array.isArray((q.data as { files?: unknown } | undefined)?.files)) {
+    return (
+      <div className="max-w-[56rem] py-6">
+        <Blank icon={TriangleAlert} title="That did not load" shape="plate">
+          {q.error ? `${why(q.error)} ` : ""}The skill is still held. Nothing has been approved and
+          nothing has been discarded.
+        </Blank>
+      </div>
+    );
+  }
+
   const review = q.data;
   return (
-    <div className="max-w-[56rem] px-8 py-6">
+    <div className="max-w-[56rem] py-6">
       <div className="rounded-xl border border-amber-deep bg-amber-tint/40 px-5 py-4">
         <div className="flex items-start gap-3">
           <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-amber" strokeWidth={1.75} />
@@ -696,10 +836,9 @@ function Review({
         </div>
       </div>
 
-      {q.isPending && <p className="mt-5 text-meta text-mute">Reading what's pending…</p>}
-      {q.error && <p className="mt-5 text-meta text-brick">{why(q.error)}</p>}
-
-      {review && (
+      {/* The three states are handled above, so this is the one that has
+          something to draw. */}
+      {(
         <div className="mt-5 space-y-4">
           <Facts
             title="What it says it is"
@@ -796,13 +935,13 @@ function Switch({ on, busy, onFlip }: { on: boolean; busy: boolean; onFlip: () =
 /** A small table of facts, for the sidebar. */
 function Facts({ title, rows }: { title: string; rows: [string, string][] }) {
   return (
-    <div>
-      <h3 className="text-ui text-bone">{title}</h3>
-      <dl className="mt-2 grid grid-cols-[5.5rem_1fr] gap-x-3 gap-y-1.5">
+    <div className="facts-card">
+      <h3>{title}</h3>
+      <dl>
         {rows.map(([k, v]) => (
           <div key={k} className="contents">
-            <dt className="text-mute">{k}</dt>
-            <dd className="min-w-0 truncate text-text">{v}</dd>
+            <dt>{k}</dt>
+            <dd>{v}</dd>
           </div>
         ))}
       </dl>
@@ -856,7 +995,7 @@ function Versions({ id }: { id: string }) {
       <div className="overflow-hidden rounded-lg border border-line">
         {q.data.map((v, i) => (
           <div key={v.id} className="grid grid-cols-[42px_1fr_auto] gap-3 border-b border-line-soft px-3 py-2 last:border-b-0">
-            <span className="tabular-nums text-meta font-semibold text-bone">v{v.version}</span>
+            <span className="tabular-nums text-meta font-mid text-bone">v{v.version}</span>
             <span className="min-w-0">
               <span className="block text-meta text-dim">{v.notes || "No note."}</span>
               <span className="mt-0.5 block text-micro text-mute">
@@ -872,7 +1011,7 @@ function Versions({ id }: { id: string }) {
         ))}
       </div>
       <p className="max-w-prose border-l-2 border-slate-deep pl-3 text-meta leading-relaxed text-dim">
-        <b className="font-semibold text-bone">A new version is taken by whoever starts next.</b> A session
+        <b className="font-mid text-bone">A new version is taken by whoever starts next.</b> A session
         already running keeps the version it pinned, because changing the instructions underneath a live
         conversation is the thing this avoids.
       </p>

@@ -34,6 +34,7 @@ import { useQueries, useQueryClient } from "@tanstack/react-query";
 import {
   Check,
   ChevronDown,
+  FolderGit2,
   Link2,
   Loader2,
   Lock,
@@ -59,12 +60,12 @@ import {
   getListProviderReposQueryOptions,
 } from "~/api/generated/providers/providers";
 import { useHostOf, useProviders, useRepos, why } from "~/data";
+import { Blank, Group, Note, Rows, Section, Typed } from "~/ui/config/bits";
 import { navigate } from "~/shims/next-navigation";
-import { Section } from "~/ui/config/bits";
-import { useConnect } from "~/ui/config/connect";
-import { AddHost } from "~/ui/config/GitHosts";
+import { actionsFor, AddHost } from "~/ui/config/GitHosts";
 import { Pop } from "~/ui/Pop";
 import { useConfirm } from "~/ui/Confirm";
+import { useOpened } from "~/ui/opened";
 
 /** `paste` is not a host — it is the way in for a remote no host can list. */
 const PASTE = "paste";
@@ -77,8 +78,9 @@ const PASTE = "paste";
  */
 const ALL = "all";
 
-export function Repos({ live }: { live: boolean }) {
+export function Repos({ live, open: asked = null }: { live: boolean; open?: string | null }) {
   const repos = useRepos();
+  const cache = useQueryClient();
   const providers = useProviders();
   const hostOf = useHostOf();
 
@@ -99,7 +101,7 @@ export function Repos({ live }: { live: boolean }) {
   );
 
   const [q, setQ] = useState("");
-  const [open, setOpen] = useState<string | null>(null);
+  const [open, setOpen] = useOpened(asked);
   const [adding, setAdding] = useState(false);
 
   const needle = q.trim().toLowerCase();
@@ -132,20 +134,37 @@ export function Repos({ live }: { live: boolean }) {
      While the hosts are still arriving, `Start` is the right place to be: it
      has a loading state of its own, and the alternative is a two-list view
      flashing "Nothing connected yet" before we know whether that is so. */
+  /* **And nothing is in trouble.** A server that is not answering makes both
+     lists empty, which is indistinguishable from a fresh install if you only
+     count rows — so a dead Firetower drew "Pick a git host to start from",
+     which is advice, confidently given, about a state nobody is in. An
+     onboarding screen is for an install with nothing in it, not for an
+     install we cannot see. */
   const bare =
     !pasting &&
     !repos.loading &&
+    !repos.trouble &&
+    !providers.trouble &&
     repos.data.length === 0 &&
     (providers.loading || connectedHosts.length === 0);
 
   return (
     <Section
       title="Repositories"
+      note="What Firetower cuts worktrees from. Every workspace is a branch of one of these, in a copy of its own."
+      settling={repos.loading}
+      trouble={repos.trouble ?? providers.trouble}
+      error={repos.error ?? providers.error}
+      onRetry={() => void cache.invalidateQueries({ queryKey: getListReposQueryKey() })}
+      /* **Not over the blank.** Adding a host is one of the rows inside the
+         blank's own menu while nothing is connected, and the same verb twice
+         on a screen with one sentence on it is one too many. It comes back
+         the moment there is a list to add to. */
       action={
-        live ? (
+        live && !bare ? (
           <button
             onClick={() => setAdding(true)}
-            className="control border border-line bg-raise text-ui text-bone hover:bg-overlay"
+            className="btn plain"
           >
             <Plus className="h-3.5 w-3.5 text-mute" strokeWidth={2} />
             Add a host
@@ -161,13 +180,14 @@ export function Repos({ live }: { live: boolean }) {
               pasting={pasting}
               onPick={setFrom}
             />
-            <label className="flex items-center gap-1.5 rounded-md border border-line bg-raise px-2 py-1">
+            <label className="find right">
               <Search className="h-3.5 w-3.5 shrink-0 text-mute" strokeWidth={1.75} />
               <input
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
-                placeholder="Search"
-                className="w-32 bg-transparent text-ui text-bone placeholder:text-mute focus:outline-none"
+                placeholder="Find a repository"
+                aria-label="Find a repository"
+                className="min-w-0 flex-1 bg-transparent placeholder:text-mute focus:outline-none"
               />
             </label>
           </>
@@ -176,44 +196,100 @@ export function Repos({ live }: { live: boolean }) {
     >
       {adding && <AddHost onClose={() => setAdding(false)} />}
       {bare ? (
-        <Start hosts={providers.data} loading={providers.loading} onPaste={() => setFrom(PASTE)} />
+        <Start
+          hosts={providers.data}
+          loading={providers.loading}
+          onAddHost={() => setAdding(true)}
+        />
       ) : (
-        <div className="px-3.5 py-3">
+        <div>
           {pasting ? (
             <Paste onDone={() => setFrom(ALL)} onCancel={() => setFrom(ALL)} />
           ) : (
             <>
-              <Eyebrow label="Imported" count={`${mine.length}`} />
-              <div className="overflow-hidden rounded-lg border border-line">
-                {repos.loading && <Quiet>Reading your repositories…</Quiet>}
-                {!repos.loading && mine.length === 0 && (
-                  <Quiet>
-                    {needle
-                      ? "Nothing imported matches that."
-                      : chosen
-                        ? `Nothing imported from ${chosen.label} yet.`
-                        : "Nothing imported yet."}
-                  </Quiet>
-                )}
-                {mine.map((r) => (
-                  <div key={r.id} className="border-b border-line-soft last:border-b-0">
-                    <button
-                      onClick={() => setOpen(open === r.id ? null : r.id)}
-                      className="flex w-full items-center gap-2.5 px-3 py-2 text-left hover:bg-raise/60"
+              {/* **Through `Rows`.** This read `repos.data` straight and never
+                  looked at `repos.error`, so a server answering 503 drew
+                  "Nothing imported yet" — a refusal rendered as an empty
+                  list, which is the worst of the five possible lies. */}
+              <Rows
+                /* **The filtered list, not the raw one.** `empty` is what
+                   `Rows` draws when its feed has no rows, and the feed was
+                   `repos` — so with seven repositories and a query matching
+                   none of them the branch below was unreachable and the
+                   section drew its heading, its 0, and nothing else. The
+                   trouble and the loading are still the request's. */
+                feed={{ data: mine, loading: repos.loading, error: repos.error, trouble: repos.trouble }}
+                /* **A `Note`, never a `Blank`.** The screen is not empty; one
+                   section of it is, and a centred plate here would say the
+                   page had failed. Which note is which cause: a typed query,
+                   a host the reader narrowed to, or a connected host nothing
+                   has been taken from yet.
+
+                   **And with a query, the heading goes with it.** Three
+                   headings each reading 0 with a line under them are three
+                   lies about one fact, so the count collapses into the one
+                   line that names the cause — `Available` below does the same
+                   and draws nothing at all. */
+                empty={
+                  needle ? (
+                    /* **The heading goes with it.** Three headings each
+                       reading 0 with a line under them are three lies about
+                       one fact, so the count collapses into the one line that
+                       names the cause — and `Available` below draws nothing
+                       at all for the same reason. */
+                    <Note
+                      icon={Search}
+                      control={
+                        <button onClick={() => setQ("")} className="btn quiet">
+                          Clear
+                        </button>
+                      }
                     >
-                      <HostMark kind={hostOf(r.slug)?.kind} size={13} className="shrink-0 text-mute" />
-                      <span className="min-w-0 flex-1 truncate font-mono text-ui text-text">{r.slug}</span>
-                      <span className="font-mono text-micro text-mute">{r.defaultBranch ?? "main"}</span>
-                      {r.setup && <span className="text-micro text-mute">setup</span>}
-                      <ChevronDown
-                        className={`h-3.5 w-3.5 shrink-0 text-mute transition-transform ${open === r.id ? "rotate-180" : ""}`}
-                        strokeWidth={2}
-                      />
+                      No repository matches <Typed>{needle}</Typed>.
+                    </Note>
+                  ) : (
+                    <Group
+                      title="Checked out"
+                      count={0}
+                      empty={
+                        <Note icon={FolderGit2}>
+                          {chosen
+                            ? `Nothing imported from ${chosen.label} yet.`
+                            : "Nothing imported yet. Take one from the list below."}
+                        </Note>
+                      }
+                    />
+                  )
+                }
+                onRetry={() => void cache.invalidateQueries({ queryKey: getListReposQueryKey() })}
+              >
+              <Group title="Checked out" count={mine.length}>
+                {mine.map((r) => (
+                  <div key={r.id}>
+                    <button onClick={() => setOpen(open === r.id ? null : r.id)} className="r">
+                      <span className="g">
+                        <HostMark kind={hostOf(r.slug)?.kind} size={16} />
+                      </span>
+                      {/* The slug reads at reading size, not in monospace. It
+                          is a name, and the mono voice is for what a machine
+                          said — see `STYLE.md`'s rule about a branch at rest. */}
+                      <span className="tx">
+                        <b>{r.slug}</b>
+                        {r.setup ? <s>has a setup command</s> : null}
+                      </span>
+                      <span className="said">{r.defaultBranch ?? "main"}</span>
+                      <span className="g">
+                        <ChevronDown
+                          className={`h-3.5 w-3.5 transition-transform ${open === r.id ? "rotate-180" : "-rotate-90"}`}
+                          strokeWidth={2}
+                        />
+                      </span>
                     </button>
                     {open === r.id && live && <Settings repo={r} onGone={() => setOpen(null)} />}
                   </div>
                 ))}
-              </div>
+              </Group>
+              </Rows>
 
               {showing.length > 0 && (
                 <Available
@@ -230,19 +306,6 @@ export function Repos({ live }: { live: boolean }) {
       )}
     </Section>
   );
-}
-
-function Eyebrow({ label, count }: { label: string; count?: string }) {
-  return (
-    <div className="mt-3 mb-1.5 flex items-center gap-2 first:mt-0">
-      <span className="text-micro tracking-[0.07em] text-mute uppercase">{label}</span>
-      {count && <span className="ml-auto text-meta text-mute">{count}</span>}
-    </div>
-  );
-}
-
-function Quiet({ children }: { children: React.ReactNode }) {
-  return <p className="px-3 py-3 text-ui text-mute">{children}</p>;
 }
 
 /* ── What this host can see that you have not taken ────────────────────── */
@@ -340,19 +403,20 @@ function Available({
 
   const where = hosts.length === 1 ? ` on ${hosts[0].label}` : "";
 
+  /* **A query that matched nothing here draws nothing here.** The upper list
+     already carries the one line naming the cause; a second heading reading 0
+     under it is the same fact said twice, and the second time with a count. A
+     host that would not answer still gets its row, because "GitLab did not
+     reply" and "nothing matched" are different answers. */
+  if (needle && !pending && broken.length === 0 && shown.length === 0) return null;
+
   return (
     <>
-      <Eyebrow
-        label={`Available to import${where}`}
-        count={
-          pending
-            ? undefined
-            : named
-              ? `${all.length} across ${hosts.length} hosts`
-              : `${all.length} not imported`
-        }
-      />
-      <div className="overflow-hidden rounded-lg border border-line">
+      <Group
+        title={`Not imported yet${where}`}
+        count={pending ? undefined : all.length}
+        note="Importing one makes it available to start a workspace on. Nothing is cloned until a workspace needs it."
+      >
         {pending && (
           <p className="flex items-center gap-2 px-3 py-3 text-ui text-mute">
             <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={2} />
@@ -365,30 +429,27 @@ function Available({
           </p>
         ))}
         {!pending && broken.length === 0 && shown.length === 0 && (
-          <Quiet>
-            {needle
-              ? `Nothing available${where} matches that.`
-              : `Everything${where} is imported.`}
-          </Quiet>
+          <Note icon={FolderGit2}>Everything{where} is imported.</Note>
         )}
         {shown.slice(0, 80).map(({ repo: r, host }) => (
-          <div key={`${host.id}:${r.remote}`} className="border-b border-line-soft last:border-b-0">
-            <div className="flex items-center gap-2.5 px-3 py-2">
-              <HostMark kind={host.kind} size={13} className="shrink-0 text-mute" />
-              <span className="min-w-0 flex-1 truncate font-mono text-ui text-text">{r.slug}</span>
-              {/* **Which host, across several.** Two hosts can both hold an
-                  `acme/web`, and without this the two rows are identical. */}
-              {named && (
-                <span className="hidden shrink-0 truncate font-mono text-micro text-mute sm:block">
-                  {host.gitHost}
-                </span>
-              )}
+          <div key={`${host.id}:${r.remote}`}>
+            <div className="r">
+              <span className="g">
+                <HostMark kind={host.kind} size={16} />
+              </span>
+              <span className="tx">
+                <b>{r.slug}</b>
+                {/* **Which host, across several.** Two hosts can both hold an
+                    `acme/web`, and without this the two rows are identical. */}
+                {/* Joined rather than concatenated: with no push date the old
+                    form left a trailing separator on the row. */}
+                <s>{[named ? host.gitHost : null, r.private ? "private" : null, ago(r.pushedAt) || null].filter(Boolean).join(" · ")}</s>
+              </span>
               {r.private && <Lock className="h-3 w-3 shrink-0 text-mute" strokeWidth={2} />}
-              <span className="font-mono text-micro text-mute">{ago(r.pushedAt)}</span>
               <button
                 disabled={!live || taking !== null}
                 onClick={() => void take(r, host)}
-                className="control shrink-0 border border-line bg-raise text-bone hover:bg-overlay disabled:text-mute"
+                className="btn plain hov"
               >
                 {taking === `${host.id}:${r.slug}` ? "Importing…" : "Import"}
               </button>
@@ -399,11 +460,11 @@ function Available({
           </div>
         ))}
         {shown.length > 80 && (
-          <p className="px-3 py-2 text-meta text-mute">
-            {shown.length - 80} more — narrow it with the search box.
+          <p className="py-2 text-ui text-mute">
+            {shown.length - 80} more. Narrow it with the find box.
           </p>
         )}
-      </div>
+      </Group>
     </>
   );
 }
@@ -457,7 +518,7 @@ function HostPicker({
     <div>
       <button
         onClick={(e) => setOpen(open ? null : e.currentTarget)}
-        className="control border border-line bg-raise text-ui text-bone hover:bg-overlay"
+        className="btn plain"
       >
         {pasting ? (
           <>Paste a remote</>
@@ -504,6 +565,23 @@ function HostPicker({
                 )}
               </button>
             ))}
+            {/* **A remote no host can list**, and this is where it lives now.
+                It was a link in small print under the empty state's buttons,
+                and the empty state is one button and one sentence — so it
+                moved to the control that already owns the state it sets and
+                already has a word for being in it. It is not a host to filter
+                to, which is why it sits under the rule. */}
+            <button
+              onClick={() => { onPick(PASTE); setOpen(null); }}
+              className="flex w-full items-center gap-2.5 border-t border-line px-3 py-2 text-left hover:bg-raise/60"
+            >
+              <Link2 className="h-3.5 w-3.5 shrink-0 text-mute" strokeWidth={1.75} />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-ui text-bone">Paste a remote</span>
+                <span className="block truncate text-micro text-mute">Anything git can clone.</span>
+              </span>
+              {pasting && <Check className="h-3.5 w-3.5 shrink-0 text-sage" strokeWidth={2} />}
+            </button>
           </div>
         </Pop>
       )}
@@ -559,7 +637,7 @@ function Settings({ repo, onGone }: { repo: Repo; onGone: () => void }) {
           <div className="flex items-center gap-2">
             <input value={name} onChange={(e) => setName(e.target.value.toUpperCase())} placeholder="NAME" className="w-40 rounded-md border border-line bg-ground px-2 py-1 font-mono text-ui text-bone focus:outline-none" />
             <input value={value} onChange={(e) => setValue(e.target.value)} placeholder="value" type="password" className="min-w-0 flex-1 rounded-md border border-line bg-ground px-2 py-1 font-mono text-ui text-bone focus:outline-none" />
-            <button disabled={!name || !value || put.isPending} onClick={() => put.mutate({ id: repo.id, data: { variables: [{ name, value }] } }, { onSuccess: () => { setName(""); setValue(""); env.refetch(); } })} className="control border border-line bg-raise text-bone hover:bg-overlay disabled:text-mute">Add</button>
+            <button disabled={!name || !value || put.isPending} onClick={() => put.mutate({ id: repo.id, data: { variables: [{ name, value }] } }, { onSuccess: () => { setName(""); setValue(""); env.refetch(); } })} className="btn plain">Add</button>
           </div>
         </div>
       </div>
@@ -571,31 +649,62 @@ function Settings({ repo, onGone }: { repo: Repo; onGone: () => void }) {
 /* ── Nothing connected yet ─────────────────────────────────────────────── */
 
 /**
- * Three empty states, not one.
+ * The page body with nothing in it, and **one action that is the actual next
+ * step for the state the screen is in**.
  *
- * Which you get depends on what the installation already has, and only the
- * first is a fresh solo install:
+ * One action in every case, but not always the same one. The three host
+ * buttons it replaced were doing a real job — the mark is the thing people
+ * scan for, and three buttons are the fastest possible first run — so folding
+ * them into one is only worth it if the one is *right*. A generic *Add a host*
+ * over an install whose `github.com` is already registered and merely needs
+ * signing into is both the wrong verb and a dead end, and that is the most
+ * common first run there is: the built-in row arrives with every install.
  *
- *   * **nothing added** — the kinds, so a first run has somewhere to press;
- *   * **hosts added, none of them yours** — those hosts *by name*, because a
- *     colleague set them up and a generic "GitLab" button would send somebody
- *     to gitlab.com rather than to the GitLab they actually work on;
- *   * **connected but empty** — not here at all; that is a sentence inside the
- *     lower list, because the screen is not empty, one section of it is.
+ * So the ladder, in order, and `actionsFor` is the thing that decides each
+ * rung — the same function the Git hosts rows are drawn from, so the two
+ * screens cannot disagree about what a host needs next:
  *
- * The host's own mark, in the host's own colour. It is the thing people scan
- * for, and this is the one screen where a logo is doing that work rather than
- * sitting in a dense row beside a slug.
+ *   1. **a registered host merely waiting to be signed into** — the action
+ *      connects *that one*, by name. It does not open "What are you
+ *      connecting?", because the answer to that question is already known;
+ *   2. **a registered host with no application yet** — the action goes where
+ *      that is resolved rather than to a sign-in that cannot succeed. And
+ *      where this reader may not resolve it, there is no action at all: a
+ *      control the server would refuse is worse than the sentence;
+ *   3. **nothing registered** — the action opens `AddHost`, whose first step
+ *      is the vertical list of *kinds*: GitHub, GitHub Enterprise Server,
+ *      GitLab, GitLab self-managed, Gitea or Forgejo, built from `kindInfo`
+ *      so a sixth appears on its own. `GitHosts.tsx` argues that list and it
+ *      is the argument this screen rests on — the kinds are the only place
+ *      the product says what it can talk to, and somebody who has a Forgejo
+ *      learns nothing from a row of three brands. Nothing here re-implements
+ *      it; a second copy is a second place for it to fall behind the server.
+ *
+ * The sentence agrees with whichever action is showing. "Add" above a button
+ * that says "connect" is the screen contradicting itself in two lines.
  */
 function Start({
   hosts,
   loading,
-  onPaste,
+  onAddHost,
 }: {
   hosts: ProviderStatus[];
   loading: boolean;
-  onPaste: () => void;
+  onAddHost: () => void;
 }) {
+  /* **A host somebody here added, before the one that ships.** Every install
+     has the built-in GitHub whether anybody chose it or not, so where a
+     colleague has registered their own GitLab that is what this install is
+     actually for — and it is the one worth naming on the button. It is also
+     the test for whether anybody has been here before: "a host exists" is not,
+     and using it would greet the very first person as though somebody had. */
+  const waiting = [...hosts.filter((h) => !h.connected)].sort(
+    (a, b) => Number(!!a.builtin) - Number(!!b.builtin),
+  );
+  const signIn = waiting.find((h) => actionsFor(h).primary === "connect");
+  const unready = waiting.find((h) => !h.configured);
+  const theirs = waiting.some((h) => !h.builtin);
+
   if (loading) {
     return (
       <p className="flex items-center gap-2 px-3.5 py-6 text-ui text-mute">
@@ -605,72 +714,75 @@ function Start({
     );
   }
 
-  const waiting = hosts.filter((h) => !h.connected);
+  /* 1. Registered, configured, and waiting for you. */
+  if (signIn) return <SignIn theirs={theirs} />;
 
-  /* **A host somebody here added, versus the one that ships.** Every install
-     has the built-in GitHub whether anybody chose it or not, so "a host
-     exists" cannot be the test for "a colleague set this up" — that would
-     greet the very first person on a fresh install as though somebody had
-     been here before them. */
-  const theirs = waiting.some((h) => !h.builtin);
+  /* 2. Registered, and not something anybody can sign into yet. */
+  if (unready) {
+    return (
+      <Blank
+        icon={FolderGit2}
+        title="No repository yet"
+        action={
+          actionsFor(unready).primary === "set-up" ? (
+            <button
+              onClick={() => navigate("/configuration/git-hosts")}
+              className="btn primary"
+            >
+              Set up {unready.label}
+            </button>
+          ) : undefined
+        }
+      >
+        {actionsFor(unready).primary === "set-up"
+          ? `${unready.label} needs an application of its own before anybody can sign in.`
+          : `${unready.label} needs an application. An administrator of this Firetower sets that up.`}
+      </Blank>
+    );
+  }
 
+  /* 3. Nothing registered at all. */
   return (
-    <div className="px-6 py-9 text-center">
-      <p className="text-title text-bone">
-        {theirs ? "Connect a git host" : "Pick a git host to start from"}
-      </p>
-      <p className="mx-auto mt-1.5 max-w-[46ch] text-ui text-dim">
-        {theirs
-          ? "Your colleagues set these up. Firetower clones with your own account, so yours is a separate sign-in."
-          : "Firetower clones with your own account, so you choose from what it says you can see."}
-      </p>
-
-      <div className="mx-auto mt-5 flex w-full max-w-[20rem] flex-col gap-2">
-        {waiting.map((h) => (
-          <StartHost key={h.id} host={h} />
-        ))}
-      </div>
-
-      <div className="mt-5 flex flex-col items-center gap-1.5 text-meta text-mute">
-        {/* A link, not a sentence naming a place. This said "add it under Git
-            hosts" and was plain text — so the one screen a new person lands on
-            pointed at somewhere else and left them to find it. */}
-        <span>
-          Self-hosted or enterprise versions?{" "}
-          <button
-            onClick={() => navigate("/configuration/git-hosts")}
-            className="text-dim underline decoration-line underline-offset-2 hover:text-bone"
-          >
-            Add custom hosts
-          </button>
-          .
-        </span>
-        <button onClick={onPaste} className="underline decoration-line underline-offset-2 hover:text-dim">
-          Or paste a URL
+    <Blank
+      icon={FolderGit2}
+      title="No repository yet"
+      action={
+        <button onClick={onAddHost} className="btn primary">
+          <Icon of={Plus} size={14} />
+          Connect a provider
         </button>
-      </div>
-    </div>
+      }
+    >
+      Connect a provider and import what you want to work on.
+    </Blank>
   );
 }
 
-/** One host, as a button with its own mark in its own colour. */
-function StartHost({ host }: { host: ProviderStatus }) {
-  const connect = useConnect(host);
-
-  /* The address on the right, because once there are two of a kind it is the
-     only thing telling them apart — `github.com` beside `ghe.acme.com`. */
+/**
+ * The blank, where the next step is signing into a host that is already here.
+ *
+ * Its own component because the sentence it carries turns on whether anybody
+ * else has been here, and the three rungs above it are a choice made before
+ * there is a host to give it. It names no provider: it sends you to the page
+ * that lists every one of them, because which provider this install runs on
+ * is not something this screen gets to assume.
+ */
+function SignIn({ theirs }: { theirs: boolean }) {
   return (
-    <div className="overflow-hidden rounded-lg border border-line bg-raise text-left">
-      <button
-        onClick={connect.start}
-        className="flex w-full items-center gap-2.5 px-3.5 py-2.5 hover:bg-overlay"
-      >
-        <HostMark kind={host.kind} size={16} brand />
-        <span className="text-ui font-medium text-bone">{host.label}</span>
-        <span className="ml-auto truncate font-mono text-micro text-mute">{host.gitHost}</span>
-      </button>
-      {connect.node}
-    </div>
+    <Blank
+      icon={FolderGit2}
+      title="No repository yet"
+      action={
+        <button onClick={() => navigate("/configuration/git-hosts")} className="btn primary">
+          <Icon of={Link2} size={14} />
+          Connect a provider
+        </button>
+      }
+    >
+      {theirs
+        ? "Your colleagues added these hosts. You sign in with your own account."
+        : "Sign in with your own account, then import what you want to work on."}
+    </Blank>
   );
 }
 
