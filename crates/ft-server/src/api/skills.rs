@@ -305,10 +305,15 @@ pub(super) async fn add_version(
         ));
     }
 
+    // `add_version` asks the Writer question itself now, so this is the same
+    // refusal as the one eighteen lines up rather than a second rule. Answered
+    // rather than ignored: a `None` turned into a 201 would report a version
+    // that was never written.
     state
         .skills
         .add_version(&id, me.id.as_str(), &new, false)
-        .await?;
+        .await?
+        .ok_or_else(|| ApiError::not_found("skill"))?;
     let made = state
         .skills
         .one(me.id.as_str(), &id, Level::Viewer)
