@@ -37,12 +37,14 @@ import { Blank, Note, Typed } from "~/ui/config/bits";
 import { usePathname } from "~/shims/next-navigation";
 import { elapsed, minutesSince } from "~/api/view";
 import type { Backend } from "~/fleet";
-import { useTasks, useTrackers, useTrackerScopes } from "~/data";
+import { useTasks, useTrackerColumns, useTrackers, useTrackerScopes } from "~/data";
+import { ListOrBoard, shortKey, TasksBoard, type Layout } from "~/ui/TasksBoard";
 import { useStart } from "~/start";
 import { navigate } from "~/shims/next-navigation";
 import { Pop } from "~/ui/Pop";
 import { getListTasksQueryKey } from "~/api/generated/tasks/tasks";
-import type { ListTasksParams, TaskKind, TaskState, TrackerStatus } from "~/api/generated/model";
+import { getListTrackerColumnsQueryKey } from "~/api/generated/trackers/trackers";
+import type { ListTasksParams, Task, TaskKind, TaskState, TrackerStatus } from "~/api/generated/model";
 
 /**
  * Where somebody goes to connect this tracker.
@@ -132,7 +134,14 @@ export function pickable(trackers: TrackerStatus[]): TrackerStatus[] {
   return trackers.filter((t) => t.connected);
 }
 
-export function TasksPage({ backend }: { backend: Backend }) {
+export function TasksPage({
+  backend,
+  remembered,
+}: {
+  backend: Backend;
+  /** The scope and layout picked earlier, per tracker. Only a test sets it. */
+  remembered?: { scopes?: Record<string, string>; layouts?: Record<string, Layout> };
+}) {
   const start = useStart();
   const cache = useQueryClient();
 
@@ -148,7 +157,11 @@ export function TasksPage({ backend }: { backend: Backend }) {
   useEffect(() => setMine(path.startsWith("/tasks/mine")), [path]);
   const [typed, setTyped] = useState("");
   const [q, setQ] = useState("");
-  const [scopes, setScopes] = useState<Record<string, string>>({});
+  const [scopes, setScopes] = useState<Record<string, string>>(remembered?.scopes ?? {});
+  /* List or Board, per tracker, beside the scope and for the same reason:
+     going to look at GitHub and coming back should find the board as it was
+     left. */
+  const [layouts, setLayouts] = useState<Record<string, Layout>>(remembered?.layouts ?? {});
   /* The cursors spent getting here, one per page. Its length is the depth, so
      a source that pages by number reads the same state as one that pages by
      cursor and Previous is a pop either way. */
@@ -175,21 +188,42 @@ export function TasksPage({ backend }: { backend: Backend }) {
     return () => clearTimeout(timer);
   }, [typed]);
 
-  const ask: ListTasksParams = useMemo(() => {
-    const at = trail.at(-1);
-    return {
+  /* The question, before any paging. The board asks it once per column and
+     pages each column on its own, so it takes this rather than `ask`. */
+  const asked: ListTasksParams = useMemo(
+    () => ({
       source: source?.id,
       kind: showing,
       state,
       ...(mine ? { mine: true } : {}),
       ...(q ? { q } : {}),
       ...scoped(source?.scopeKind, scope),
+    }),
+    [source?.id, source?.scopeKind, showing, state, mine, q, scope],
+  );
+
+  const ask: ListTasksParams = useMemo(() => {
+    const at = trail.at(-1);
+    return {
+      ...asked,
       ...(at ? { cursor: at } : {}),
       ...(trail.length > 0 ? { page: trail.length + 1 } : {}),
     };
-  }, [source?.id, source?.scopeKind, showing, state, mine, q, scope, trail]);
+  }, [asked, trail]);
 
-  const feed = useTasks(ask, connected && !!source);
+  /* **The board only once the board has columns.** Picked and not answered
+     (a 404, a failure, "All boards") is the list, whatever was remembered,
+     so a remembered Board never leaves the page with nothing on it. */
+  const columns = useTrackerColumns(source?.id ?? "", asked.team, connected);
+  const board = !!source && connected && columns.data.length > 0 && layouts[source.id] === "board";
+  /* A remembered Board whose columns are still on their way holds the body:
+     drawing the list for a moment and swapping it for the board is a flash of
+     the wrong page, and a request nobody wants. */
+  const waiting = !!source && connected && layouts[source.id] === "board" && columns.loading;
+
+  /* The list is not asked while the board is up: every column is already
+     asking its own part of the same question. */
+  const feed = useTasks(ask, connected && !!source && !board && !waiting);
 
   /* A different question is a different first page. Without this, narrowing to
      a team while three pages deep asks for page four of a list that has one. */
@@ -199,13 +233,36 @@ export function TasksPage({ backend }: { backend: Backend }) {
   const tracker = useTrackerScopes(source?.id ?? "", connected);
   const count = feed.total ?? feed.data.length;
 
-  const refresh = () => cache.invalidateQueries({ queryKey: getListTasksQueryKey(ask) });
+  /* On the board every column is its own query, so refresh reads them all
+     again: the key without parameters is the prefix of every task list. */
+  const [round, setRound] = useState(0);
+  const refresh = () => {
+    cache.invalidateQueries({ queryKey: board ? getListTasksQueryKey() : getListTasksQueryKey(ask) });
+    if (board && source) {
+      /* The columns too, since a list may have been added or moved. Each
+         column keeps the pages it loaded, which a fresh first page would
+         repeat, so the round restarts them. */
+      cache.invalidateQueries({ queryKey: getListTrackerColumnsQueryKey(source.id) });
+      setRound((n) => n + 1);
+    }
+  };
+
+  /* One Start, for a row and a card alike. Starting from the board is
+     starting from the list, so what a task becomes is decided here once. */
+  const begin = (t: Task) =>
+    start({
+      title: t.title,
+      repo: t.repo ?? undefined,
+      issue: shortKey(t.key),
+      taskKey: t.key,
+      taskUrl: t.url,
+    });
 
   /* **The body is empty, and nothing is wrong** — no tracker, a tracker
      nobody has signed into, or a tracker with nothing open. All three are a
      `Blank`; a query that matched nothing is a `Note`, because the reader
      changed a control and the rest of the page is still there. */
-  const nothing = !feed.loading && !feed.error && feed.data.length === 0;
+  const nothing = !board && !waiting && !feed.loading && !feed.error && feed.data.length === 0;
 
   /* The headline says what the screen is, which changes with what it found.
      "0 to pick from." over an empty page is a count nobody asked for.
@@ -214,11 +271,13 @@ export function TasksPage({ backend }: { backend: Backend }) {
      carries its own title, so a status sentence above it is two titles on one
      screen — and the status it would have carried is the thing the blank
      already says, better and beside the glyph that explains it. */
-  const headline = feed.loading
-    ? `Reading ${source?.label ?? "your trackers"}…`
-    : !connected || nothing
-      ? "Tasks"
-      : `${count} to pick from.`;
+  const headline = board
+    ? (tracker.data.find((s) => s.key === scope)?.label ?? "Tasks")
+    : feed.loading || waiting
+      ? `Reading ${source?.label ?? "your trackers"}…`
+      : !connected || nothing
+        ? "Tasks"
+        : `${count} to pick from.`;
 
   return (
     <div className="scroll-slim h-full overflow-y-auto">
@@ -292,6 +351,18 @@ export function TasksPage({ backend }: { backend: Backend }) {
               <Icon of={User} size={12} />
               Assigned to me
             </button>
+            {/* At the end of the line, apart from the filters: they narrow
+                what is asked, and this only changes how it is drawn. */}
+            {source && (
+              <div className="right">
+                <ListOrBoard
+                  source={source}
+                  team={asked.team}
+                  value={board ? "board" : "list"}
+                  onPick={(v) => setLayouts({ ...layouts, [source.id]: v })}
+                />
+              </div>
+            )}
           </div>
 
           {/* The query on its own line, where it governs the list beneath it
@@ -379,10 +450,12 @@ export function TasksPage({ backend }: { backend: Backend }) {
             </Blank>
           )}
 
-          {connected && feed.loading && (
+          {board && source && <TasksBoard source={source} ask={asked} round={round} onStart={begin} />}
+
+          {connected && (feed.loading || waiting) && (
             <p className="px-3 py-6 text-center text-ui text-mute">Reading {source?.label}…</p>
           )}
-          {connected && feed.error && (
+          {connected && !board && feed.error && (
             <p className="px-3 py-6 text-center text-ui text-brick">{feed.error}</p>
           )}
           {/* **Connected, and nothing open: no button.** Nothing is wrong
@@ -422,7 +495,7 @@ export function TasksPage({ backend }: { backend: Backend }) {
           {feed.data.map((t) => {
             const Glyph = KIND[t.kind] ?? CircleDot;
             // The tail is what identifies it; the org prefix is noise at every row.
-            const short = t.key.replace(/^[a-z]+:/, "").replace(/^.*\//, "");
+            const short = shortKey(t.key);
             return (
               /* One row, as every other list in the app draws one: the kind,
                  the title at reading size, and *where it is and when it moved*
@@ -452,18 +525,7 @@ export function TasksPage({ backend }: { backend: Backend }) {
                   <Badge key={`${i}|${l.name}`}>{l.name}</Badge>
                 ))}
 
-                <button
-                  onClick={() =>
-                    start({
-                      title: t.title,
-                      repo: t.repo ?? undefined,
-                      issue: short,
-                      taskKey: t.key,
-                      taskUrl: t.url,
-                    })
-                  }
-                  className="btn quiet"
-                >
+                <button onClick={() => begin(t)} className="btn quiet">
                   <Icon of={Play} size={12} />
                   Start
                 </button>
@@ -471,7 +533,7 @@ export function TasksPage({ backend }: { backend: Backend }) {
             );
           })}
 
-          {connected && (trail.length > 0 || feed.more) && (
+          {connected && !board && (trail.length > 0 || feed.more) && (
             <div className="mt-6 flex items-center justify-between">
               <Step
                 of={ArrowLeft}

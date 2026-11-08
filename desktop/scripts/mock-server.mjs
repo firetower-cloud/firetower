@@ -775,6 +775,9 @@ const server = createServer(async (req, res) => {
       { key: "5f1b2c3d4e5f6a7b8c9d0e1f", label: "Roadmap" },
       { key: "60a1b2c3d4e5f6a7b8c9d0e1", label: "Support inbox" },
     ],
+    /* The lists of the picked board, left to right. Done is there and empty,
+       because a real board has columns nothing recent sits in. */
+    "/api/v1/trackers/trello/columns": TRELLO_COLUMNS,
     "/api/v1/trackers/gh_1/scopes": [
       { id: "acme/web", label: "acme/web" },
       { id: "acme/api", label: "acme/api" },
@@ -823,7 +826,7 @@ const server = createServer(async (req, res) => {
     "/api/v1/tasks": scene === "no-tasks"
       ? { more: false, next: null, tasks: [] }
       : url.searchParams.get("source") === "trello"
-        ? { more: false, next: null, tasks: TRELLO_CARDS }
+        ? trelloPage(url.searchParams)
         : TASKS,
     "/api/v1/colleagues": scene === "no-people" ? [] : COLLEAGUES,
     "/api/v1/teams": scene === "no-people" ? [] : TEAMS,
@@ -1379,12 +1382,41 @@ const DONE_RUN = {
 /**
  * Three Trello cards, one per list, so the status in the row has three
  * different things to say. A card has no repository; its key is the short link.
+ *
+ * **And a backlog of forty more in To do**, so a column holds more than one
+ * page and the board's Load more can be reached and pressed.
  */
 const TRELLO_CARDS = [
   { id: "trello:aB3dE9fG", key: "aB3dE9fG", kind: "ticket", source: "trello", state: "open", status: "To do", title: "Draft the launch checklist", repo: null, url: "https://trello.com/c/aB3dE9fG", updatedAt: minutesAgo(50), body: null, labels: [{ name: "launch", colour: null }], assignees: [] },
   { id: "trello:hJ5kL2mN", key: "hJ5kL2mN", kind: "ticket", source: "trello", state: "open", status: "Doing", title: "Import the old support macros", repo: null, url: "https://trello.com/c/hJ5kL2mN", updatedAt: minutesAgo(180), body: "Two hundred macros, most of them duplicates.", labels: [{ name: "bug", colour: "red" }], assignees: [{ login: "ana", avatar: null }] },
   { id: "trello:pQ8rS3tU", key: "pQ8rS3tU", kind: "ticket", source: "trello", state: "open", status: "Review", title: "Check the export against the new schema", repo: null, url: "https://trello.com/c/pQ8rS3tU", updatedAt: minutesAgo(900), body: null, labels: [], assignees: [] },
+  ...Array.from({ length: 40 }, (_, i) => {
+    const key = `bk${String(i + 1).padStart(2, "0")}Xy7z`;
+    return { id: `trello:${key}`, key, kind: "ticket", source: "trello", state: "open", status: "To do", title: `Backlog item ${i + 1}`, repo: null, url: `https://trello.com/c/${key}`, updatedAt: minutesAgo(1000 + i * 60), body: null, labels: i % 3 === 0 ? [{ name: "later", colour: null }] : [], assignees: [] };
+  }),
 ];
+
+const TRELLO_COLUMNS = [
+  { key: "5f1a0001", label: "To do" },
+  { key: "5f1a0002", label: "Doing" },
+  { key: "5f1a0003", label: "Review" },
+  { key: "5f1a0004", label: "Done" },
+];
+
+/**
+ * One page of Trello cards, as the server pages a search: thirty at a time,
+ * `more` when a full page came back, no total and no cursor. `status` asks for
+ * one column by its key, the list's id, which is what each column of the board
+ * sends.
+ */
+function trelloPage(params) {
+  const status = params.get("status");
+  const name = TRELLO_COLUMNS.find((c) => c.key === status)?.label;
+  const all = status ? TRELLO_CARDS.filter((c) => c.status === name) : TRELLO_CARDS;
+  const at = (Math.max(1, Number(params.get("page")) || 1) - 1) * 30;
+  const tasks = all.slice(at, at + 30);
+  return { more: tasks.length === 30, next: null, total: null, tasks };
+}
 
 const TASKS = {
   more: false,
