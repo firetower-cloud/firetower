@@ -91,13 +91,13 @@ module.exports = {
       }
     ],
     "meta": [
-      "13px",
+      "14px",
       {
         "lineHeight": "1.45"
       }
     ],
     "micro": [
-      "12px",
+      "12.5px",
       {
         "lineHeight": "1.4"
       }
@@ -130,6 +130,7 @@ module.exports = {
     "card": "14px",
     "field": "14px",
     "action": "15px",
+    "seg": "9px",
     "plate": "18px",
     "said": "18px"
   },

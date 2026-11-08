@@ -128,8 +128,8 @@ export const size = {
   "title": 18,
   "body": 16,
   "ui": 15,
-  "meta": 13,
-  "micro": 12,
+  "meta": 14,
+  "micro": 12.5,
   "code": 15,
   "read": 17
 } as const;
@@ -149,6 +149,7 @@ export const radius = {
   "card": 14,
   "field": 14,
   "action": 15,
+  "seg": 9,
   "plate": 18,
   "said": 18
 } as const;

@@ -59,7 +59,7 @@ function Row({ place, onPeek }: { place: Workspace; onPeek: () => void }) {
         <Text
           numberOfLines={1}
           className={`min-w-0 flex-1 font-sans ${soft ? "text-dim" : "text-bone"}`}
-          style={{ fontSize: 19, letterSpacing: -0.23 }}
+          style={{ fontSize: size.title, letterSpacing: size.title * -0.012 }}
         >
           {place.name}
         </Text>
@@ -112,7 +112,7 @@ export default function Workspaces() {
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ ...COLUMN, paddingBottom: 30 }}>
         <View className="px-5 pb-2 pt-1.5">
-          <Text className="font-medium text-dim" style={{ fontSize: 14.5 }}>
+          <Text className="font-medium text-dim" style={{ fontSize: size.meta }}>
             {waiting
               ? `${waiting} waiting on you · ${places.length} in all`
               : `${places.length} in all, none waiting`}

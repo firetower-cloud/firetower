@@ -232,9 +232,16 @@ function Where({
           <Mark size={30} />
         </View>
         <Text className="mt-5 font-semibold text-display text-bone">Connect to a Firetower</Text>
+        {/* **v54's copy.** It was "the address of the control plane your team
+            runs"; the revision the user validated says where you *get* it and
+            rules out the thing people reach for instead. A join code would
+            have to be resolved by somebody, and that somebody would be a
+            service holding every install's whereabouts — which is the one
+            thing a self-hosted product cannot have. */}
         <Text className="mt-2 text-center font-sans text-read text-dim">
-          The address of the control plane your team runs. It is never on the public internet, so
-          this is usually a name on your mesh VPN.
+          The address somebody at your company gave you. Not a code — a code carries no address,
+          and there is nowhere to look one up that would not be a service holding every install’s
+          whereabouts.
         </Text>
       </View>
 
@@ -425,6 +432,14 @@ function Who({
             <Text className="font-sans text-meta text-mute">Not encrypted</Text>
           </View>
         ) : null}
+
+        {/* **v54's copy.** The one thing people get wrong here is thinking
+            this is an account with us. It is not: a Firetower is somebody
+            else's server and the credential is theirs to issue and reset. */}
+        <Text className="mt-3 text-center font-sans text-read text-dim">
+          An account on this Firetower. It exists on this server only — it is not an account with
+          us.
+        </Text>
       </View>
 
       {proxyOnly ? (
@@ -465,6 +480,16 @@ function Who({
           ) : null}
 
           <Primary label="Sign in" onPress={go} disabled={!ready} busy={busy} />
+
+          {/* **v54's copy.** It said only "ask an administrator". The
+              revision names the command too, because on a self-hosted install
+              the person holding the phone is very often the administrator,
+              and telling them to ask themselves is the kind of dead end that
+              ends a first run. */}
+          <Text className="mt-4 text-center font-sans text-micro text-mute">
+            Forgotten it? An administrator resets it, or{" "}
+            <Text className="font-mono text-micro text-dim">firetower passwd</Text> on the server.
+          </Text>
         </>
       )}
 

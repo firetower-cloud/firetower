@@ -169,8 +169,13 @@ const phoneText = {
   title: "18px", // a row title
   body: "16px", // what somebody reads
   ui: "15px", // controls and labels
-  meta: "13px", // captions, counts, paths
-  micro: "12px", // eyebrows, column headers, a line-number gutter
+  /* 14 and 12.5, not 13 and 12. The drawing's own type table is this scale
+     with **every size below 28 one pixel larger** — the same uniform step the
+     desk took, and uniform because adding the same number to everything is
+     the only move that cannot disturb the gaps between tiers. Only these two
+     had not already taken it. */
+  meta: "14px", // captions, counts, paths
+  micro: "12.5px", // eyebrows, column headers, a line-number gutter
   /* Mono stays where it was put. The sans came down a point against
      ChatGPT side by side; the file tree and the diff were the two screens
      that had been left behind and they are the two nobody has complained
@@ -214,6 +219,8 @@ const phoneRadius = {
   field: "14px",
   /* A primary action, full width. */
   action: "15px",
+  /* One cell of a segmented control, inside a `field`-radius track. */
+  seg: "9px",
   /* A plate — the glyph on an empty state, and a poster's own corner. */
   plate: "18px",
   /* What somebody said, which is a bubble. */

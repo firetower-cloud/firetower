@@ -112,7 +112,7 @@ function Heading({ text, all }: { text: string; all?: () => void }) {
   const { color } = useTheme();
   return (
     <View className="flex-row items-baseline gap-2.5 px-5 pb-2.5 pt-5">
-      <Text className="font-medium text-dim" style={{ fontSize: 14.5 }}>
+      <Text className="font-medium text-dim" style={{ fontSize: size.meta }}>
         {text}
       </Text>
       {all ? (
@@ -209,7 +209,7 @@ export default function Home() {
       >
         {header}
         <View className="flex-1 items-center justify-center gap-2.5 px-9">
-          <Text className="text-center font-medium text-bone" style={{ fontSize: 24, lineHeight: 29 }}>
+          <Text className="text-center font-medium text-bone" style={{ fontSize: size.display, lineHeight: size.display * 1.18 }}>
             {here?.org ?? "That server"} is not answering.
           </Text>
           <Text
@@ -254,7 +254,10 @@ export default function Home() {
       className="px-5 pb-5"
       style={{ minHeight: bare ? 0 : 44, paddingTop: bare ? 28 : 16, justifyContent: "flex-end" }}
     >
-      <Text className="font-medium text-bone" style={{ fontSize: 28, lineHeight: 32.5, letterSpacing: -0.67 }}>
+      <Text
+        className="font-medium text-bone"
+        style={{ fontSize: size.display, lineHeight: size.display * 1.16, letterSpacing: size.display * -0.024 }}
+      >
         {greeting}
       </Text>
     </View>
