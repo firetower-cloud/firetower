@@ -308,7 +308,7 @@ async function bundle(root: string, raw: Raw[]): Promise<Found> {
 
   const skillMd = raw.find((f) => f.path.endsWith("SKILL.md"));
   const text = skillMd ? new TextDecoder().decode(skillMd.bytes) : "";
-  const { frontmatter, body, framed } = split(text);
+  const { frontmatter, body, framed, unread, undecoded } = split(text);
 
   /* The *file's* name, not a guess at one. Claude Code falls back to the
      folder when this is missing; the standard says required, and so does
@@ -325,6 +325,27 @@ async function bundle(root: string, raw: Raw[]): Promise<Found> {
 
   if (!framed)
     errors.push("No frontmatter. A SKILL.md opens with a --- line, the fields, and another ---.");
+  /* A line nothing here can read is a field the agent gets and no check saw —
+     including `riskOf` below, which is the badge somebody reads before they
+     approve this. Refused rather than skipped, as on the server. */
+  else if (unread.length)
+    errors.push(
+      `The frontmatter has a line nothing reads: \`${brief(unread[0]!)}\`. ` +
+        "A line is blank, a comment, `key: value` at the left margin, a `- list item`, " +
+        "an indented `key: value` under one, or part of a block scalar. A full YAML reader " +
+        "takes more than that — `description : x` with a space before the colon, or a quoted " +
+        "key — so a line this one cannot read is a field nothing on this screen has checked.",
+    );
+  /* And the same of a value. A scalar kept as the characters that spell it is
+     a scalar whose meaning no rule here saw — the `<`/`>` check below is asked
+     about `\u003c` while a real YAML reader hands the agent a `<`. */
+  else if (undecoded.length)
+    errors.push(
+      `The frontmatter has a value nothing here decodes: \`${brief(undecoded[0]!)}\`. ` +
+        "A flow mapping, a tag, an anchor, an alias, a flow list holding one of those, or a " +
+        "quote that never closes is decoded by a real YAML reader and kept verbatim here. " +
+        "Write it as an indented `key: value` map, a `- list`, or a plain or quoted scalar.",
+    );
   else if (!declared) {
     const typo = Object.keys(frontmatter).find((k) => nearly(k) === "name");
     errors.push(
@@ -404,6 +425,21 @@ async function bundle(root: string, raw: Raw[]): Promise<Found> {
   };
 }
 
+/**
+ * As much of a line as belongs in a message about it.
+ *
+ * The same reasoning as the server's `briefly`: a line being quoted back is
+ * attacker-controlled, and this message is read by a person. Angle brackets
+ * and backticks go, because the quote sits inside a code span and the one
+ * thing a frontmatter refusal must not do is carry a forged frame out with it.
+ */
+function brief(line: string): string {
+  const safe = [...line.slice(0, 24)]
+    .map((c) => (c === " " || (c > " " && c < "\u007f" && c !== "<" && c !== ">" && c !== "`") ? c : "."))
+    .join("");
+  return line.length > 24 ? `${safe}…` : safe;
+}
+
 /** What this bundle will do to a session, read from the bundle itself. */
 export function riskOf(frontmatter: Record<string, unknown>, body: string, paths: string[]): string[] {
   const out: string[] = [];
@@ -442,17 +478,32 @@ export const RISK_SAYS: Record<string, string> = {
  * `present` is what the file *said*, which is a different question from what
  * the skill is called. A file whose key is misspelled has no `name`, and that
  * has to be a refusal rather than a fallback to the folder — see `bundle`.
+ *
+ * **And `unread` is what it could not read**, which is the half that makes
+ * the rest of this honest. The regex above wants `[A-Za-z0-9_-]` before the
+ * colon, so `allowed-tools : Bash(curl:*)` — one space — used to be dropped
+ * silently: invisible to this parser, read perfectly well by Claude Code, and
+ * so **absent from `riskOf`**. The review screen then showed a badge saying
+ * "no tools, no hooks" about a bundle carrying both, which is worse than
+ * showing nothing. A line this reader cannot read is reported, and `bundle`
+ * makes it an error — the same answer the server gives.
  */
 export function split(text: string): {
   frontmatter: Record<string, unknown>;
   body: string;
   /** Whether a `---` block was there at all. */
   framed: boolean;
+  /** Lines inside the frame this reader dropped. */
+  unread: string[];
+  /** Lines whose value this reader kept as text rather than decoding. */
+  undecoded: string[];
 } {
   const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(text);
-  if (!m) return { frontmatter: {}, body: text.trim(), framed: false };
+  if (!m) return { frontmatter: {}, body: text.trim(), framed: false, unread: [], undecoded: [] };
 
   const out: Record<string, unknown> = {};
+  const unread: string[] = [];
+  const undecoded: string[] = [];
   const lines = m[1]!.split(/\r?\n/);
   let key: string | null = null;
   let map: Record<string, string> | null = null;
@@ -469,18 +520,24 @@ export function split(text: string): {
         list = [];
         out[key] = list;
       }
+      if (!decoded(item[1]!)) undecoded.push(line);
       list.push(unquote(item[1]!));
       continue;
     }
     // `  key: value` under a key with nothing after its colon.
     const nested = /^\s{2,}([A-Za-z0-9_-]+):\s*(.*)$/.exec(line);
     if (nested && map) {
+      if (!decoded(nested[2]!)) undecoded.push(line);
       map[nested[1]!] = unquote(nested[2]!);
       continue;
     }
 
     const top = /^([A-Za-z0-9_-]+):\s*(.*)$/.exec(line);
-    if (!top) continue;
+    // The one place a line can be dropped, and it is counted here.
+    if (!top) {
+      unread.push(line);
+      continue;
+    }
     key = top[1]!;
     map = null;
     list = null;
@@ -523,6 +580,7 @@ export function split(text: string): {
       continue;
     }
 
+    if (value !== "" && !decoded(value)) undecoded.push(line);
     if (value === "") {
       // A list or a map — decided by the first indented line after it.
       map = {};
@@ -537,7 +595,27 @@ export function split(text: string): {
       out[key] = unquote(value);
     }
   }
-  return { frontmatter: out, body: text.slice(m[0].length).trim(), framed: true };
+  return { frontmatter: out, body: text.slice(m[0].length).trim(), framed: true, unread, undecoded };
+}
+
+/**
+ * Whether this reader **decoded** a scalar rather than keeping the characters
+ * that spell it.
+ *
+ * `unquote` decodes one complete quoted scalar and keeps anything else
+ * verbatim, which is right for a plain and for a block scalar — YAML
+ * processes no escapes in either, so `\u003c` is six characters to every
+ * reader. It is not right for a flow mapping, a tag/anchor/alias, a flow list
+ * holding one of those, or a quote that does not close on its line: libyaml
+ * decodes all four, so the `<`/`>` rule is asked about the escape while the
+ * agent is handed the character. Mirrors the server's `decoded`.
+ */
+function decoded(value: string): boolean {
+  const v = value.trim();
+  if (/^[{!&*]/.test(v)) return false;
+  if (v.startsWith("[") && v.endsWith("]")) return !/[{}[\]]/.test(v.slice(1, -1));
+  for (const q of ['"', "'"]) if (v.startsWith(q) && !(v.length >= 2 && v.endsWith(q))) return false;
+  return true;
 }
 
 /**

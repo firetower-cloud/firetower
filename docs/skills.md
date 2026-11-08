@@ -35,6 +35,17 @@ agent — Claude Code has a dozen more (`when_to_use`, `arguments`, `model`,
 `type: flow`. Cursor adds none of its own, and reads four other agents'
 directories besides its own — see the table below.
 
+A refusal never repeats the bundle verbatim. Everything quoted back — a
+fence, a frontmatter line, a path — goes through one sanitiser that keeps 24
+characters of printable ASCII and turns the two angle brackets, the backtick
+and everything else into a dot. The frontmatter rule deliberately runs
+*before* the forged-tag rule, so a refusal about a fence is often the first
+thing to touch a file holding a forged tag, and the refusal is read by a
+person and by an agent on the MCP routes. The backtick is in the set because
+every one of those messages quotes inside a code span, and 24 characters
+cannot forge a tag but are plenty to close the span and write markdown of
+their own.
+
 **Firetower stores the folder verbatim and interprets six fields.** Anything
 agent-specific is preserved byte for byte and labelled in the interface as
 belonging to one agent. A skill that silently loses its `hooks` on the way to
@@ -80,15 +91,65 @@ Errors:
   on the code-span case; the server does not refuse it.
 - **One frontmatter, whoever opens the file.** `SKILL.md` opens with a line of
   exactly `---`, the first line after that which starts with `---` is exactly
-  `---`, and nothing inside that frame is a character one reader ends a line
-  on and another calls text. Refused when any of the three cannot be
-  established, rather than skipped — see §2, which is where the measurements
-  are. This is the one rule that **must** fail closed: it is asked about where
-  the frontmatter ends, so a parse of it is not evidence about it.
+  `---`, nothing inside that frame is a character one reader ends a line on
+  and another calls text, and **every line inside the frame is one Firetower
+  can read.** Refused when any of the four cannot be established, rather than
+  skipped — see §2, which is where the measurements are. This is the one rule
+  that **must** fail closed: it is asked about where the frontmatter ends and
+  what is in it, so a parse of it is not evidence about it.
+
+  The fourth clause is the same principle as the first three, one level down,
+  and it was a live injection route for one round longer than they were. The
+  reader's key is `[A-Za-z0-9_-]+` before a colon at the left margin, and a
+  line that did not match was **dropped** — so `description : x`, with one
+  space, was a key Firetower never saw and YAML reads fine. The bracket rule
+  then had nothing to inspect, the risk scan nothing to find, and a forged
+  `<system-reminder>` reached a system prompt through bytes that were
+  accepted. Measured against Claude Code 2.1.273, reading the pair it renders
+  rather than only whether it parsed: `description : X`, `"description": X`,
+  `'description': X`, the explicit-key `? description` form and a whole
+  mapping indented two spaces are all read by it; a **tab** before the key is
+  the one inert member, and gives the same answer as a description that is
+  simply absent. The frame was perfectly canonical in all six.
+
+  So a line in a frontmatter is blank, a comment, `key: value` at the left
+  margin, a `- list item`, an indented `key: value` under one, or part of a
+  block scalar already open — and anything else is refused. The cost was
+  measured the same way the frame rule's was: **0 of 53** published and
+  library `SKILL.md` hold a line this reader drops.
+
+  **And a value this reader keeps as text rather than decoding is refused for
+  the same reason.** A line it cannot read is a key the agent has and
+  Firetower does not; a value it did not decode is a *character* the agent has
+  and Firetower does not, which is the same hole for the bracket rule below.
+  The reader decodes one complete quoted scalar and keeps anything else
+  verbatim, so `license: {a: "\u003csystem-reminder\u003e"}` was accepted —
+  the bracket rule asked about six characters while libyaml hands the agent a
+  `<`. Four shapes: a flow mapping, a tag or anchor or alias, a flow list
+  holding one of those, and a double-quoted scalar that does not close on its
+  line. Measured against libyaml — pyyaml's `CSafeLoader` and Ruby's Psych,
+  both over libyaml — with the controls that matter: a **plain** scalar and a
+  **single-quoted** scalar process no escapes in YAML either, so the escape is
+  six characters to both readers there and nothing is refused. 0 of 53 hold
+  any of the four.
+
+  And the rule that the file has to **declare** a name and a description is
+  asked of the bytes for the same reason. It used to read the `frontmatter`
+  the client sent, so `name : probe-skill` was accepted with the file's own
+  frontmatter holding no `name` at all — the exact outcome the rule exists to
+  prevent, reachable through the rule's own blind spot. A bundle whose bytes
+  omit the key while the JSON beside them supplies one is the other half of
+  that, and only asking the bytes closes both.
 - A path inside the bundle is at most 256 bytes and each name in it at most
   96. A longer one is a row in a bundle that is not a file any worker can
   create, which is the same defect as a path that has to be a file for one row
   and a folder for another.
+- **No `<` or `>` in a path.** The forged-tag rule above reads file
+  *contents*, and a path is read too: it is written onto the worker and the
+  agent sees it whenever it lists the skill's folder. So
+  `references/<system-reminder>…</system-reminder>.md` was accepted outright.
+  Refusing the two characters is one rule rather than a second tag list, and
+  no name in the published corpus holds either.
 - No `claude` or `anthropic` in the name — reserved.
 
 All of these are asked of the bytes in the bundle, not of the `frontmatter`
@@ -427,6 +488,15 @@ Four mitigations, in order of what they buy:
 
 1. **Show what it does.** Badges earned by parsing, on the row: *runs shell
    commands*, *pre-approves tools*, *registers hooks*, *ships scripts*.
+
+   **A badge earned by parsing is only as good as the parse.** The badge is
+   the human gate, so a badge that is *wrong* is worse than one that is
+   absent — and `allowed-tools : Bash(curl:*)`, one space, was a key neither
+   Firetower's reader nor the client's saw and Claude Code honours, so the
+   review screen read "no tools, no hooks" about a bundle carrying both. That
+   is why §1's fourth clause refuses a line it cannot read instead of
+   skipping it, on the server and in the client's own reader: the badge can
+   only describe what somebody read.
 2. **Strip by policy.** Refuse `hooks` and `` !`cmd` `` in skills not filed in
    your own space. One installation setting, default on.
 3. **Pin the version** so a shared skill cannot change under a running session.
