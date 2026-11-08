@@ -10,7 +10,8 @@
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { useSocket } from "./socket";
-import { currentBackend } from "~/client/http";
+import { belongsTo, conversationKey, currentIdentity } from "./identity";
+import { ApiError } from "~/client/http";
 import { getConversation } from "./generated/sessions/sessions";
 import type {
   Attached,
@@ -666,6 +667,20 @@ const nextFrame: (fn: () => void) => number =
 const dropFrame: (id: number) => void =
   typeof cancelAnimationFrame === "function" ? cancelAnimationFrame : clearTimeout;
 
+/**
+ * Did the server say no, as opposed to failing to answer?
+ *
+ * The distinction is the whole of the fix below: a transport failure may keep
+ * what is held, a refusal may not. Status is checked as well as code because
+ * a proxy in front of a Firetower can refuse with no body for `ApiError.from`
+ * to read a code out of.
+ */
+export function refused(e: unknown): boolean {
+  if (!(e instanceof ApiError)) return false;
+  if (e.status === 401 || e.status === 403) return true;
+  return e.code === "Unauthorized" || e.code === "Forbidden";
+}
+
 function entry(key: string): Held {
   let it = held.get(key);
   if (!it) {
@@ -768,13 +783,17 @@ function sweep() {
 /**
  * Drop everything belonging to one server.
  *
- * Called when a Firetower is disconnected, beside its QueryClient: a transcript
- * is the most private thing this window holds, and leaving it warm for a server
- * somebody has signed out of is not a cache, it is a copy.
+ * Called when an identity is disconnected, beside its QueryClient: a
+ * transcript is the most private thing this window holds, and leaving it warm
+ * for an account somebody has signed out of is not a cache, it is a copy.
+ *
+ * **Takes an identity, not a `serverId`.** Signing one account out of a
+ * Firetower must not evict another account's transcripts on that same server,
+ * and a `serverId` prefix cannot tell those apart.
  */
-export function forgetConversations(backend: string) {
+export function forgetConversations(who: string) {
   for (const [key, it] of held) {
-    if (key.startsWith(`${backend}:`)) drop(key, it);
+    if (belongsTo(key, who)) drop(key, it);
   }
 }
 
@@ -880,18 +899,42 @@ function start(key: string, sessionId: string, follow: ReturnType<typeof useSock
         });
       })
       .catch((e) => {
+        if (dropped) return;
+
+        /**
+         * **A refusal is not a network blip, and it must not fall through.**
+         *
+         * Every failure used to land here together: warn, keep whatever was
+         * already held, mark it `arrived` and let the subscription carry on.
+         * That is right for a dropped connection — the cursor is untouched and
+         * the stream resumes. It is badly wrong for a 401 or a 403, because
+         * "keep whatever was already held" means *keep the previous reader's
+         * transcript* and then declare it arrived. A refusal is the one answer
+         * that must empty the screen rather than leave it.
+         *
+         * The keying above is what stops a second account reaching a first
+         * one's cache at all. This is the second lock on the same door: a
+         * correct key with a silent failure path is one refactor away from
+         * the same class of bug, so the server's "no" is now load-bearing on
+         * its own.
+         */
+        if (refused(e)) {
+          console.warn("[firetower] the server refused this conversation", e);
+          put(key, { ...nothing, arrived: true, delivered: { events: 0, lastLine: 0, failed: true } });
+          return;
+        }
+
         // Not fatal: the subscription below resumes from the cursor, which is
         // untouched by a failure here.
         console.warn("[firetower] could not read the conversation, streaming it instead", e);
         // Streaming from nothing is still a conversation arriving, and a
         // screen left waiting on a promise that already rejected waits for
         // ever.
-        if (!dropped)
-          put(key, {
-            ...read(key),
-            arrived: true,
-            delivered: { events: 0, lastLine: 0, failed: true },
-          });
+        put(key, {
+          ...read(key),
+          arrived: true,
+          delivered: { events: 0, lastLine: 0, failed: true },
+        });
       })
       .finally(listen);
   }
@@ -993,9 +1036,16 @@ async function earlier(key: string, sessionId: string) {
  */
 export function useConversation(sessionId: string) {
   const { follow } = useSocket();
-  // Read rather than subscribed to, as every generated request reads it: the
-  // provider is keyed on the server, so changing one remounts this anyway.
-  const key = `${currentBackend() ?? ""}:${sessionId}`;
+  /**
+   * Keyed on the **identity**, not the server.
+   *
+   * This read `currentBackend()`, which is a `serverId` — so two accounts on
+   * one Firetower produced the same key and the second was handed the first's
+   * transcript. `currentIdentity()` carries the account as well, and the
+   * provider is keyed on it, so changing either remounts this.
+   */
+  const who = currentIdentity();
+  const key = conversationKey(who, sessionId);
 
   /* Bumping this re-runs the effect below, which is how a re-read restarts
      the subscription as well as clearing what was held. */

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { apply, foldAll, interruptible, nothing, prepend } from "./conversation";
+import { apply, foldAll, interruptible, nothing, prepend, refused } from "./conversation";
+import { ApiError } from "~/client/http";
 import type { ConversationEvent } from "./generated/model";
 
 const event = (lineNo: number, type: string, extra: Record<string, unknown> = {}) =>
@@ -355,5 +356,39 @@ describe("what the stop button can reach", () => {
     let state = apply(nothing, event(1, "TurnStarted", { turn: "turn-1" }));
     const ended = apply(state, event(2, "TurnCompleted", { turn: "turn-1", status: "Completed" }));
     expect(interruptible(ended)).toBe(false);
+  });
+});
+
+/**
+ * The second lock on the same door.
+ *
+ * Keying the cache on the account is what stops one person reaching another's
+ * transcripts. This is what stops a *refusal* being served as data: the
+ * `.catch` around the opening read used to treat every failure alike — warn,
+ * keep whatever was held, mark it arrived — which is right for a dropped
+ * connection and catastrophic for a 403, because "keep whatever was held" is
+ * the previous reader's conversation.
+ *
+ * A correct key with a silent failure path is one refactor away from the same
+ * bug, so the predicate is pinned on its own.
+ */
+describe("refused", () => {
+  it("knows a refusal by status, whatever the body said", () => {
+    expect(refused(new ApiError("Internal", "no", 401))).toBe(true);
+    expect(refused(new ApiError("Internal", "no", 403))).toBe(true);
+  });
+
+  it("knows a refusal by code, for a proxy that sends no status we read", () => {
+    expect(refused(new ApiError("Unauthorized", "no", 0))).toBe(true);
+    expect(refused(new ApiError("Forbidden", "no", 0))).toBe(true);
+  });
+
+  it("does not mistake a transport failure for a refusal", () => {
+    // These may keep what is held and resume from the cursor. A refusal may not.
+    expect(refused(new ApiError("Internal", "boom", 500))).toBe(false);
+    expect(refused(new ApiError("NoServer", "no Firetower is selected", 0))).toBe(false);
+    expect(refused(new TypeError("Network request failed"))).toBe(false);
+    expect(refused(undefined)).toBe(false);
+    expect(refused(null)).toBe(false);
   });
 });

@@ -26,6 +26,7 @@ import { useFonts, Archivo_400Regular, Archivo_500Medium, Archivo_600SemiBold } 
 import { ArchivoNarrow_500Medium } from "@expo-google-fonts/archivo-narrow";
 import { JetBrainsMono_400Regular, JetBrainsMono_500Medium } from "@expo-google-fonts/jetbrains-mono";
 import { BackendProvider } from "~/api/backend";
+import { identity } from "~/api/identity";
 import { hydrate } from "~/native/servers";
 import { useServer } from "~/native/current";
 import { ThemeProvider, useTheme } from "~/design/theme";
@@ -112,12 +113,18 @@ const screens = (ground: string) =>
   }) as const;
 
 /**
- * Everything below here belongs to one server.
+ * Everything below here belongs to one **identity** — a server and the
+ * account signed into it.
  *
  * Keyed on it, so switching throws away the tree rather than letting a screen
- * render one server's ids against another's cache — which is the bug the
- * per-server `QueryClient` exists to make impossible, and this is the other
+ * render one identity's ids against another's cache — which is the bug the
+ * per-identity `QueryClient` exists to make impossible, and this is the other
  * half of it.
+ *
+ * **This was keyed on `serverId`.** That covered switching *servers* and not
+ * changing *accounts on one server*, where the id is identical — so the tree
+ * was reused across a sign-out and the next person inherited the last one's
+ * warm screens. Both halves take `identity()` now; see `api/identity.ts`.
  *
  * With no server at all there is no provider: there is nothing to be a client
  * of, and the only route that means anything is connecting.
@@ -138,7 +145,7 @@ function Fleet() {
   if (!here) return stack;
 
   return (
-    <BackendProvider id={here.serverId} key={here.serverId}>
+    <BackendProvider server={here} key={identity(here)}>
       {stack}
     </BackendProvider>
   );
