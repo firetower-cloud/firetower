@@ -228,9 +228,18 @@ export default function Repos() {
             detail="Firetower clones with your own account, and yours has not been authorized here yet. That is done once, in the web console or the desktop app — then your repositories show up on this screen."
           />
         ) : offered.error ? (
-          <Empty title={`${host.label} did not answer`} detail={offered.error} />
+          /* **The headline says the outcome; the detail says why.** These
+             read "did not answer", which is a claim about the *cause* that
+             the screen cannot actually make: `Feed.error` is a message
+             string — `why()` flattens the `ApiError` and the code goes with
+             it — so a permission refusal arrived here wearing a headline
+             saying the server had been silent, directly above its own detail
+             text saying it had answered and refused. A headline that
+             contradicts the body teaches somebody to stop reading one of
+             them. */
+          <Empty title={`Could not read ${host.label}`} detail={offered.error} />
         ) : connected.error ? (
-          <Empty title="This Firetower did not answer" detail={connected.error} />
+          <Empty title="Could not read this Firetower’s repositories" detail={connected.error} />
         ) : offered.data.length === 0 ? (
           /* Nothing came back at all, which is a different sentence from
              "you already have them". An account with no repositories says

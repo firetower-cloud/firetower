@@ -64,7 +64,27 @@ export function usePeekGesture(onPeek: () => void) {
          directness, and this is the only confirmation the gesture gives. */
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       onPeek();
-    });
+    })
+    /**
+     * **On the JS thread, and this crashed the app without it.**
+     *
+     * In gesture-handler 3 a gesture callback is a *worklet* on the UI thread
+     * by default. This one calls a native module and a React `setState`, and
+     * doing either from a worklet with no marshalling throws inside the
+     * worklet runtime — which escapes as an uncaught C++ exception rather
+     * than a red screen. `EXC_CRASH / SIGABRT`, every time, on the press.
+     *
+     * Nothing here belongs on the UI thread: there is no shared value to
+     * animate, only a haptic and a state change, so the whole callback goes
+     * to JS. That is what `Composer`'s drag-down already does. Where a
+     * callback *does* drive a shared value — `Picker`'s sheet — the worklet
+     * stays and only the JS call is wrapped in `runOnJS`. Two patterns, and
+     * which one applies is decided by whether the callback animates anything.
+     *
+     * A type checker cannot see this. `onStart(() => …)` is perfectly
+     * well-typed; the defect is which thread it runs on.
+     */
+    .runOnJS(true);
 }
 
 type Answer = { label: string; run: () => void; tone?: "loud" | "quiet" };

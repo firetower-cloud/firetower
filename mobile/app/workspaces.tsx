@@ -27,7 +27,7 @@ import { router } from "expo-router";
 import { ChevronLeft } from "lucide-react-native";
 import type { Session } from "~/api/generated/model";
 import { group, lead, type Workspace } from "~/api/workspaces";
-import { BEAT, BEAT_TOKEN, elapsed, minutesSince } from "~/api/view";
+import { BEAT, BEAT_TOKEN, elapsed, minutesSince, type Beat } from "~/api/view";
 import { useSessions } from "~/data";
 import { Peek, usePeekGesture } from "~/ui/Peek";
 import { Waiting } from "~/ui/Waiting";
@@ -35,8 +35,14 @@ import { COLUMN } from "~/ui/measure";
 import { useTheme } from "~/design/theme";
 import { size } from "~/design/tokens.generated";
 
-/** The order a list of them reads in. Not sections — an order. */
-const RANK: Record<string, number> = { blocked: 0, broken: 1, working: 2, done: 3, over: 4 };
+/**
+ * The order a list of them reads in. Not sections — an order.
+ *
+ * `Record<Beat, …>` rather than `Record<string, …>`, so adding a beat is a
+ * build error here instead of a silent `undefined` in the comparator that
+ * sorts the new one to an arbitrary place.
+ */
+const RANK: Record<Beat, number> = { blocked: 0, broken: 1, working: 2, done: 3, over: 4 };
 
 function Row({ place, onPeek }: { place: Workspace; onPeek: () => void }) {
   const { color } = useTheme();
