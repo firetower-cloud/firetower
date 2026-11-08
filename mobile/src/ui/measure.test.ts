@@ -20,7 +20,15 @@ import {
   READING_MAX,
 } from "~/ui/measure";
 
-/** The system's trailing tab rail on the inner display. */
+/**
+ * What the system reserves at the trailing edge, as the *documents* give it.
+ *
+ * Kept at 74 here because these tests are about the band arithmetic, which is
+ * a pure function of two widths and does not care where the second one came
+ * from. **The device says 84** — measured on the Duo's front panel, where the
+ * system reports `right: 84` — so 74 is the documented figure rather than an
+ * observed one, and `usePose` subtracts the real insets instead of this.
+ */
 const RAIL = 74;
 
 /** The five poses, at their real widths. */

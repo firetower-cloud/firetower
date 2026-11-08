@@ -15,12 +15,26 @@
  * device turns out to overlay, the column becomes 340 rather than 317 with no
  * code change, because 340 is what `panelWidth` returns from a wider box.
  *
- * Spread `onLayout` on the screen's own root view. Until the first layout the
- * window is used, which is correct on every surface without a rail and one
- * frame early on the two that have one.
+ * ## Where `onLayout` goes, and why the insets are subtracted
+ *
+ * On the screen's own **root** view — the one that applies
+ * `paddingLeft/Right: insets.left/right`. That view measures the *window*,
+ * because a view's `onLayout` reports its own frame and not its content box,
+ * so the horizontal insets have to come off afterwards. Getting this wrong is
+ * not theoretical: it shipped, and it reported the Duo's front panel as 466
+ * laid out in 466 — "the rail overlays, nothing inset" — when the system was
+ * reporting `right: 84` the whole time and every child was 382.
+ *
+ * **The measured inset is 84, not the 74 the documents call `RAIL`.** Which
+ * is the other half of the argument for measuring: a constant would have been
+ * ten points wrong even after somebody checked it on a device.
+ *
+ * Until the first layout the window is used, which is correct on every
+ * surface the system does not inset and one frame early on the ones it does.
  */
 import { useCallback, useState } from "react";
 import { useWindowDimensions, type LayoutChangeEvent } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { band, docks, floatWidth, panelWidth, type Band } from "~/ui/measure";
 
 export type Pose = {
@@ -49,6 +63,7 @@ function said(line: string) {
 
 export function usePose(): Pose {
   const { width: window, height: windowHeight } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const [measured, setMeasured] = useState<number | null>(null);
   const [tall, setTall] = useState<number | null>(null);
 
@@ -62,18 +77,21 @@ export function usePose(): Pose {
     setTall((was) => (was === h ? was : h));
   }, []);
 
-  const content = measured ?? window;
+  /* The box the screen is laid out in: the measured frame less what the
+     system reserves at the sides. `Math.max` because a transient zero-width
+     layout would otherwise make the band briefly negative. */
+  const sides = insets.left + insets.right;
+  const content = Math.max(0, (measured ?? window) - sides);
 
   /* The one log line coverage §8 asks for. Whether the system's trailing tab
      bar *insets* the content or *overlays* it decides whether the dock
      threshold is a 914pt window or an 840pt one, and it cannot be answered
      from a browser. Dev only, and it prints once per distinct pose. */
   if (__DEV__ && measured !== null) {
-    const inset = window - measured;
     said(
-      `pose: window ${window}x${windowHeight}, laid out ${measured}x${tall} — ` +
-        (inset > 0 ? `the rail insets by ${inset}` : "the rail overlays, nothing inset") +
-        ` — band ${band(window, measured)}, panel ${panelWidth(measured)}`,
+      `pose: window ${window}x${windowHeight}, laid out ${content}x${tall}` +
+        (sides > 0 ? ` — the system insets ${sides} at the sides` : " — nothing inset at the sides") +
+        ` — band ${band(window, content)}, panel ${panelWidth(content)}`,
     );
   }
 

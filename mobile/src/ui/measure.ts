@@ -58,7 +58,9 @@ export type Band = "push" | "float" | "dock";
  *
  * **Whether a panel may dock** is a question about *the box the conversation
  * is laid out in*, which is not the window: on the inner display the system
- * lays its tab bar down the trailing edge and insets the content by 74 pt. A
+ * reserves room for its tab bar at the trailing edge and insets the content.
+ * **Measured at 84 pt on the Duo's front panel** — `right: 84`, as the system
+ * itself reports it — against the 74 the documents call `RAIL`. A
  * panel may dock only if the conversation keeps `READING_MAX` and the column
  * still clears `DOCK_MIN` — **840 of laid-out width**, which is a **914 pt
  * window** on the inner display once the rail is taken off it.
@@ -67,12 +69,15 @@ export type Band = "push" | "float" | "dock";
  *
  * **914, not 820.** The `820` in the older documents is this question
  * answered against the window instead of the box, and it is ~90 pt early.
+ * And 914 itself is 840 plus an *assumed* 74; the system reported 84 on the
+ * one pose that could be measured, which is the whole argument for deriving
+ * the window figure from a measurement rather than writing it down.
  * Docking at an 820 window leaves the conversation 466 — the front panel's
  * width, on the inner display. Nothing ships between 820 and 914 today, so it
  * is wrong rather than harmful; it is also the number somebody will reach for.
  *
  * And **914 is the Duo's figure, not a universal one.** It is 840 plus that
- * display's 74 pt rail. A surface nothing insets docks at 840 — which is why
+ * display's rail. A surface nothing insets docks at 840 — which is why
  * a plain iPhone in landscape, at 844, docks. Reading 914 as a window
  * threshold everywhere puts that pose in the wrong band.
  *
