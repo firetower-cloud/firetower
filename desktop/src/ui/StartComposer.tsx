@@ -63,6 +63,8 @@ import { navigate, usePathname } from "~/shims/next-navigation";
 import { leaveDraft } from "~/workspace/draft";
 import { post, whichServer } from "~/workspace/outbox";
 import { base64, chipFor, Chips, Dropping, sift, type Chip } from "~/ui/attach";
+import { chipForAttachment, download, fromCard, holdsAttachments, withLinks } from "~/ui/card-attachments";
+import { getTask } from "~/api/generated/tasks/tasks";
 import { folderRefusals, useFileDrop } from "~/ui/drop";
 import { openExternal } from "~/open";
 import { isMac } from "~/platform";
@@ -300,6 +302,64 @@ export function StartComposer({
     setChips((all) => all.filter((x) => x.id !== c.id));
     held.current = Math.max(0, held.current - 1);
   };
+
+  /* **A card's attachments come along.** Arriving from a task, its own
+     attachments are asked for and handled as if they had been dropped here:
+     the same caps decide (`fromCard`, then `sift` on what arrives), the chips
+     are the same chips, and removing one is removing a drop. Links go under
+     the seeded body instead, since there is nothing to download.
+
+     Nothing about it can stop a start. A card that cannot be read starts
+     without its attachments, and a file that does not arrive says so on its
+     own chip, which sends nothing. Asked once per arrival: the ref outlives
+     `StrictMode`'s second run of this effect, and a flag cleared by cleanup
+     would have thrown the first answer away. */
+  const brought = useRef(false);
+  useEffect(() => {
+    const card = seed?.taskUrl;
+    if (brought.current || !card || seed?.prompt || !holdsAttachments(seed?.taskSource)) return;
+    brought.current = true;
+    void getTask({ url: card })
+      .then(async (t) => {
+        const plan = fromCard(t.attachments ?? [], held.current);
+        if (plan.links.length) setPrompt((p) => withLinks(p, plan.links));
+        if (plan.refusals.length) setRefused((was) => [was, ...plan.refusals].filter(Boolean).join(" "));
+        const made = plan.files.map((a) => ({ a, chip: chipForAttachment(nextId.current++, a) }));
+        if (made.length === 0) return;
+        held.current += made.length;
+        setChips((all) => [...all, ...made.map((m) => m.chip)]);
+
+        const settle = (id: number, change: Partial<Chip>) =>
+          setChips((all) => all.map((c) => (c.id === id ? { ...c, ...change, pending: false } : c)));
+        /* All at once, each settling its own chip: one slow file does not
+           hold up the screenshot behind it, and one that fails does not
+           stop the rest. */
+        await Promise.allSettled(
+          made.map(async ({ a, chip }) => {
+            try {
+              const file = await download(card, a);
+              // Its slot is already held; only its size is still to decide.
+              const sifted = sift(0, [file]);
+              if (sifted.taken.length === 0) throw new Error(sifted.refusals.join(" "));
+              if (chip.kind === "image") {
+                const data = await base64(file);
+                settle(chip.id, { image: { mediaType: file.type, data }, url: URL.createObjectURL(file) });
+              } else {
+                settle(chip.id, { file });
+              }
+            } catch (e) {
+              settle(chip.id, {
+                failed: e instanceof Error && e.message ? e.message : `${a.name} could not be brought from the card.`,
+              });
+            }
+          }),
+        );
+      })
+      .catch(() => {
+        /* The card could not be read. Its title and link are already in the
+           box, which is what starting needs. */
+      });
+  }, [seed]);
 
   /* The whole page, not the box. The composer is a strip in the middle of a
      tall empty page and the page is where a hand goes — the same reasoning,

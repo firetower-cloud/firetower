@@ -256,6 +256,7 @@ export function TasksPage({
       issue: shortKey(t.key),
       taskKey: t.key,
       taskUrl: t.url,
+      taskSource: t.source,
     });
 
   /* **The body is empty, and nothing is wrong** — no tracker, a tracker

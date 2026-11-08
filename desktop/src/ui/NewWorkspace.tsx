@@ -42,6 +42,9 @@ export type Seed = {
   issue?: string;
   taskKey?: string;
   taskUrl?: string;
+  /** Which tracker the task came from (a task's `source`), which decides
+   *  whether its attachments are worth asking for. */
+  taskSource?: string;
   /** The composer, pre-filled — how "Create with AI" arrives from a config
    *  screen, with a line like "I want to create a skill that " already typed. */
   prompt?: string;

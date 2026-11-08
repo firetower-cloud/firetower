@@ -16,7 +16,7 @@
  * in the workspace by `~/workspace/outbox` once there is one.
  */
 import { useState } from "react";
-import { FileText, FileUp, ImageOff, Loader2, X } from "lucide-react";
+import { CircleAlert, FileText, FileUp, ImageOff, Loader2, X } from "lucide-react";
 import type { Artifact, Attached } from "~/api/generated/model";
 import { ArtifactShot } from "~/components/ArtifactShot";
 
@@ -52,6 +52,14 @@ export type Chip = {
    * conversation has a `path` instead, because there was somewhere to put it.
    */
   file?: File;
+  /**
+   * Why it never arrived, said on the chip itself.
+   *
+   * Only for a card's attachment, which is fetched rather than dropped and
+   * can fail on the way. A failed chip carries neither `image` nor `file`, so
+   * nothing is sent for it and starting is never held up by it.
+   */
+  failed?: string;
 };
 
 /**
@@ -219,6 +227,8 @@ export function Chips({
             )}
             {c.pending ? (
               <Loader2 className="absolute h-3.5 w-3.5 animate-spin text-bone" strokeWidth={2.5} />
+            ) : c.failed ? (
+              <CircleAlert aria-label={c.failed} className="h-3.5 w-3.5 text-brick" strokeWidth={1.75} />
             ) : unreadable.has(c.id) ? (
               /* Says which of the two went wrong: the picture, not the app. */
               <ImageOff className="h-3.5 w-3.5 text-brick" strokeWidth={1.75} />
@@ -231,12 +241,16 @@ export function Chips({
               eight identical chips — and the path is spelled out in the
               message itself the moment this is sent. */}
           <span
-            title={c.path ?? c.name}
-            className={`max-w-[11rem] truncate text-meta ${c.kind === "artifact" ? "" : "font-mono"} ${c.pending ? "text-mute" : "text-text"}`}
+            title={c.failed ?? c.path ?? c.name}
+            className={`max-w-[11rem] truncate text-meta ${c.kind === "artifact" ? "" : "font-mono"} ${c.pending || c.failed ? "text-mute" : "text-text"}`}
           >
             {c.name}
           </span>
-          <span className={`text-micro text-mute ${c.kind === "artifact" ? "font-mono" : ""}`}>{c.size}</span>
+          {c.failed ? (
+            <span className="text-micro text-brick">Not brought</span>
+          ) : (
+            <span className={`text-micro text-mute ${c.kind === "artifact" ? "font-mono" : ""}`}>{c.size}</span>
+          )}
           <button onClick={() => onDrop(c)} aria-label={`Remove ${c.name}`} className="grid h-5 w-5 place-items-center rounded text-mute hover:bg-overlay hover:text-bone">
             <X className="h-3 w-3" strokeWidth={2} />
           </button>

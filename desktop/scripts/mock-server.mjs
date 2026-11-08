@@ -892,6 +892,28 @@ const server = createServer(async (req, res) => {
   };
 
   if (path in routes) return json(res, routes[path]);
+  /* One task, with what is attached to it. Only `hJ5kL2mN` has anything:
+     a screenshot, a PDF and a Figma link, so starting from it shows a
+     picture chip, a file chip and a line under the body. */
+  if (path === "/api/v1/tasks/one") {
+    const wanted = url.searchParams.get("url") ?? "";
+    const found = [...TRELLO_CARDS, ...TASKS.tasks].find((t) => t.url === wanted);
+    if (!found) return json(res, { code: "NotFound", message: "no such task" }, 404);
+    return json(res, { ...found, attachments: TRELLO_ATTACHMENTS[found.key] ?? [] });
+  }
+  /* The bytes, by card and id, as the server serves them: only an id on that
+     card's list, and nothing for a link. */
+  if (path === "/api/v1/tasks/attachment") {
+    const key = /trello\.com\/c\/([A-Za-z0-9]+)/.exec(url.searchParams.get("url") ?? "")?.[1];
+    const found = (TRELLO_ATTACHMENTS[key] ?? []).find((a) => a.id === url.searchParams.get("id"));
+    if (!found || !found.upload) return json(res, { code: "NotFound", message: "no such attachment" }, 404);
+    res.writeHead(200, {
+      "content-type": found.mime,
+      "content-disposition": `attachment; filename="${found.name}"`,
+      "access-control-allow-origin": "*",
+    });
+    return res.end(Buffer.from(ATTACHMENT_BYTES[found.id], "base64"));
+  }
   /* The file itself. `useFileText` reads the body as bytes and decides for
      itself whether it is text, a picture or too big — so this answers with
      the text and nothing around it. */
@@ -1395,6 +1417,22 @@ const TRELLO_CARDS = [
     return { id: `trello:${key}`, key, kind: "ticket", source: "trello", state: "open", status: "To do", title: `Backlog item ${i + 1}`, repo: null, url: `https://trello.com/c/${key}`, updatedAt: minutesAgo(1000 + i * 60), body: null, labels: i % 3 === 0 ? [{ name: "later", colour: null }] : [], assignees: [] };
   }),
 ];
+
+/** What is attached to a card, by its short link, as `/tasks/one` lists it. */
+const TRELLO_ATTACHMENTS = {
+  hJ5kL2mN: [
+    { id: "5f1b2c3d4e5f60718293a4b5", name: "Macro editor.png", mime: "image/png", bytes: 151, url: "https://trello.com/1/cards/5f1b2c3d4e5f60718293a4b0/attachments/5f1b2c3d4e5f60718293a4b5/download/Macro_editor.png", upload: true },
+    { id: "5f1b2c3d4e5f60718293a4b6", name: "Macro export.pdf", mime: "application/pdf", bytes: 67, url: "https://trello.com/1/cards/5f1b2c3d4e5f60718293a4b0/attachments/5f1b2c3d4e5f60718293a4b6/download/Macro_export.pdf", upload: true },
+    { id: "5f1b2c3d4e5f60718293a4b7", name: "Support macros board", mime: null, bytes: null, url: "https://www.figma.com/file/abc/Support-macros", upload: false },
+  ],
+};
+
+/** The bytes behind those files: a real picture and a minimal PDF. */
+const ATTACHMENT_BYTES = {
+  "5f1b2c3d4e5f60718293a4b5":
+    "iVBORw0KGgoAAAANSUhEUgAAAGQAAABGCAYAAAAZpBqjAAAAXklEQVR4nO3QMQEAAAjAoNm/9Eq4AZIjcKtzdGBqAzsBOwE7ATsBOwE7ATsBOwE7ATsBOwE7ATsBOwE7ATsBOwE7ATsBOwE7ATsBOwE7ATsBOwE7ATsBOwE7AbsPUZEAgXCYVwkAAAAASUVORK5CYII=",
+  "5f1b2c3d4e5f60718293a4b6": Buffer.from("%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n").toString("base64"),
+};
 
 const TRELLO_COLUMNS = [
   { key: "5f1a0001", label: "To do" },
