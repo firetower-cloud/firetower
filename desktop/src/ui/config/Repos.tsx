@@ -216,7 +216,13 @@ export function Repos({ live, open: asked = null }: { live: boolean; open?: stri
                   "Nothing imported yet" — a refusal rendered as an empty
                   list, which is the worst of the five possible lies. */}
               <Rows
-                feed={repos}
+                /* **The filtered list, not the raw one.** `empty` is what
+                   `Rows` draws when its feed has no rows, and the feed was
+                   `repos` — so with seven repositories and a query matching
+                   none of them the branch below was unreachable and the
+                   section drew its heading, its 0, and nothing else. The
+                   trouble and the loading are still the request's. */
+                feed={{ data: mine, loading: repos.loading, error: repos.error, trouble: repos.trouble }}
                 /* **A `Note`, never a `Blank`.** The screen is not empty; one
                    section of it is, and a centred plate here would say the
                    page had failed. Which note is which cause: a typed query,

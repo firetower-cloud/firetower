@@ -2394,7 +2394,11 @@ html:not([data-platform="macos"]) {
      the card and the name sits on the paper underneath it. `.gal`'s own rule
      — the border goes round the thumbnail, never round the thumbnail and its
      label together. */
+  /* `display: block`, because the object is a `<span>` and an inline box
+     ignores a width. The other two shapes set their own display and so were
+     never caught by it. */
   .blank .obj.card {
+    display: block;
     width: 150px;
   }
   .blank .obj.card .p {

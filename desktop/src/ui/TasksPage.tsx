@@ -236,7 +236,13 @@ export function TasksPage({ backend }: { backend: Backend }) {
                 className="h-7 max-w-[220px] text-meta"
               />
             )}
-            <IconButton of={RotateCw} onClick={refresh} label="Read the tracker again" />
+            {/* **Not over a tracker nobody has connected.** `feed` is
+                disabled until one is, so this would re-read a list that was
+                never fetched: a control that cannot do anything, on the one
+                screen whose whole job is the one thing that can. */}
+            {connected && (
+              <IconButton of={RotateCw} onClick={refresh} label="Read the tracker again" />
+            )}
           </div>
         </div>
 
