@@ -120,7 +120,18 @@ module.exports = {
     "sm": "6px",
     "md": "8px",
     "lg": "12px",
-    "DEFAULT": "8px"
+    "DEFAULT": "8px",
+    "pill": "26px",
+    "box": "22px",
+    "sheet": "22px",
+    "peek": "22px",
+    "pop": "20px",
+    "ask": "20px",
+    "card": "14px",
+    "field": "14px",
+    "action": "15px",
+    "plate": "18px",
+    "said": "18px"
   },
   "fonts": {
     "sans": [

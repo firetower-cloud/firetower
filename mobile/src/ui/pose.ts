@@ -39,6 +39,14 @@ export type Pose = {
   onLayout: (e: LayoutChangeEvent) => void;
 };
 
+/** Once per distinct message, so a re-render does not fill the log. */
+const saidAlready = new Set<string>();
+function said(line: string) {
+  if (saidAlready.has(line)) return;
+  saidAlready.add(line);
+  console.log(`[firetower] ${line}`);
+}
+
 export function usePose(): Pose {
   const { width: window } = useWindowDimensions();
   const [measured, setMeasured] = useState<number | null>(null);
@@ -52,6 +60,16 @@ export function usePose(): Pose {
   }, []);
 
   const content = measured ?? window;
+
+  /* The one log line coverage §8 asks for. Whether the system's trailing tab
+     bar *insets* the content or *overlays* it decides whether the dock
+     threshold is a 914pt window or an 840pt one, and it cannot be answered
+     from a browser. Dev only, and it prints once per distinct pose. */
+  if (__DEV__ && measured !== null && measured !== window) {
+    said(`pose: window ${window}, laid out ${measured} — the rail insets by ${window - measured}`);
+  } else if (__DEV__ && measured !== null) {
+    said(`pose: window ${window}, laid out ${measured} — the rail overlays, nothing inset`);
+  }
 
   return {
     window,

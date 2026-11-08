@@ -179,6 +179,48 @@ const phoneText = {
 };
 
 /**
+ * The radii, which are the phone's own and were not on any scale.
+ *
+ * `globals.css` carries 4, 6, 8 and 12 — a window's radii, where the largest
+ * object with a corner is a dialog. The phone's drawing uses 14 to 26, because
+ * its objects are a composer you type into, a sheet that comes up from the
+ * edge and a card holding a picture, and a 12pt corner on a 26pt-inset pill
+ * reads as a rectangle.
+ *
+ * Named by **role** rather than by size, for the reason the type scale is:
+ * `rounded-peek` says what it is for and survives somebody deciding a peek
+ * should be 20. `rounded-[22px]` in a component says neither, and
+ * `just check-style` rejects it — correctly, and that rejection is what sent
+ * these here instead.
+ *
+ * These are additions, not overrides: the four shared radii keep their names
+ * and their values, so nothing that already reads `rounded-lg` moves.
+ */
+const phoneRadius = {
+  /* The composer, which is two shapes. 26 at rest and 22 open — it squares
+     off as it steps toward you, and both ride one shared value. */
+  pill: "26px",
+  box: "22px",
+  /* A sheet's top corners, and the peek, which is the same object arriving
+     from a different place. */
+  sheet: "22px",
+  peek: "22px",
+  /* A popover grows out of the control that opened it. */
+  pop: "20px",
+  /* The one loud surface. */
+  ask: "20px",
+  /* A card holding a poster, and a field you type into. */
+  card: "14px",
+  field: "14px",
+  /* A primary action, full width. */
+  action: "15px",
+  /* A plate — the glyph on an empty state, and a poster's own corner. */
+  plate: "18px",
+  /* What somebody said, which is a bubble. */
+  said: "18px",
+};
+
+/**
  * Reading, which gets its own size even within that.
  *
  * The thing people do here longest is read a conversation, and that column is
@@ -354,7 +396,7 @@ writeFileSync(
   banner("") +
     "module.exports = " +
     JSON.stringify(
-      { colors: tailwindColors, fontSize, radius: dark.radius, fonts: family, spacing: phoneSpacing, base },
+      { colors: tailwindColors, fontSize, radius: { ...dark.radius, ...phoneRadius }, fonts: family, spacing: phoneSpacing, base },
       null,
       2,
     ) +
@@ -363,7 +405,9 @@ writeFileSync(
 
 const px = (v) => parseFloat(v) * (String(v).endsWith("rem") ? 16 : 1);
 const sizes = Object.fromEntries(Object.entries(fontSize).map(([k, v]) => [k, px(v[0])]));
-const radii = Object.fromEntries(Object.entries(dark.radius).map(([k, v]) => [k, parseFloat(v)]));
+const radii = Object.fromEntries(
+  Object.entries({ ...dark.radius, ...phoneRadius }).map(([k, v]) => [k, parseFloat(v)]),
+);
 const palette = (p) => Object.fromEntries(names.map((n) => [n, p[n]]));
 
 writeFileSync(

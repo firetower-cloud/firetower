@@ -139,7 +139,18 @@ export const radius = {
   "sm": 6,
   "md": 8,
   "lg": 12,
-  "DEFAULT": 8
+  "DEFAULT": 8,
+  "pill": 26,
+  "box": 22,
+  "sheet": 22,
+  "peek": 22,
+  "pop": 20,
+  "ask": 20,
+  "card": 14,
+  "field": 14,
+  "action": 15,
+  "plate": 18,
+  "said": 18
 } as const;
 
 export const shadow = { light: {

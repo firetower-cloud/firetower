@@ -1,17 +1,34 @@
 /**
  * Four tabs and a stack. No drawer.
  *
- * The desk splits this between a rail and a dashboard because it has room for
- * both. A phone has room for one, so the inbox *is* the workspace list with the
- * dashboard's own filter on it.
+ * **Dashboard, Tasks, Artifacts, You** — and three of the four are the desk's
+ * own words for the same objects: `Dashboard`, `Tasks` and `Artifacts` are its
+ * ⌘1, ⌘2 and ⌘3, same object, same word, same glyph. A phone does not get a
+ * different name for a thing the desk already named.
  *
- * **Config and You are two tabs on purpose.** They were one for an afternoon,
- * and a server's repositories sitting under the list of servers reads as a
- * thing and the things inside it at the same level. `You` is this phone's —
- * which Firetowers it knows, which is current, who you are on it. `Config` is
- * one server's, it is the same for everybody signed into that server, and it
- * changes the moment you switch on the tab next door. A section legend is not
- * enough to say which is which; a tab is.
+ * Two of those are changes, and both are the redesign catching up with what
+ * the desk deleted:
+ *
+ * - **Not `Inbox`.** The desk retired `Fleet.tsx`, which its own delta table
+ *   calls *the unified inbox as a screen*. A phone still calling it the Inbox
+ *   would be the only client naming a concept the product removed.
+ * - **Not `Config`.** The desk's Configuration *screen* is gone too — its
+ *   panes moved into the destinations they belong to. A Config tab mirrors a
+ *   screen the redesign deleted, which is the same failure one word over. Its
+ *   single phone-relevant pane, Repositories, is now reachable from the two
+ *   places it is actually wanted: the composer's shelf on the home, and a
+ *   section of **You** named for the current server.
+ *
+ * That last one reverses an argument this file used to make — that Config and
+ * You must be two tabs, because a server's repositories under the list of
+ * servers reads as a thing and the things inside it at the same level. The
+ * observation was right and the fix was wrong: what says which is which is the
+ * *heading*, and the heading is now the server's own name, which changes the
+ * moment you switch above it. `mobile/STYLE.md` still describes the old four
+ * and is stale on this; see the note there.
+ *
+ * The fourth slot is the person, because a phone has no foot of a rail to put
+ * them at.
  *
  * The tab bar gets no ember. It is furniture, and ember answers one question.
  */
@@ -79,8 +96,8 @@ function Signed() {
       labelStyle={{ default: { color: color.mute }, selected: { color: color.bone } }}
     >
       <NativeTabs.Trigger name="index">
-        <NativeTabs.Trigger.Icon sf="tray" md="inbox" />
-        <NativeTabs.Trigger.Label>Inbox</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon sf="house" md="home" />
+        <NativeTabs.Trigger.Label>Dashboard</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
 
       <NativeTabs.Trigger name="tasks">
@@ -88,10 +105,13 @@ function Signed() {
         <NativeTabs.Trigger.Label>Tasks</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
 
-      {/* Named and drawn the way the desk names it — Configuration, one word. */}
-      <NativeTabs.Trigger name="config">
-        <NativeTabs.Trigger.Icon sf="slider.horizontal.3" md="tune" />
-        <NativeTabs.Trigger.Label>Config</NativeTabs.Trigger.Label>
+      {/* ⌘3 on the desk, the third slot here. A destination rather than a
+          pushed route: artifacts outlive the workspace that made them —
+          `artifacts` has foreign keys to `users` and `organizations` and to
+          nothing else — so the library is yours, not a workspace's. */}
+      <NativeTabs.Trigger name="artifacts">
+        <NativeTabs.Trigger.Icon sf="square.on.circle" md="category" />
+        <NativeTabs.Trigger.Label>Artifacts</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
 
       <NativeTabs.Trigger name="you">
