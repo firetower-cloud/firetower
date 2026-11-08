@@ -14,7 +14,7 @@ export const light = {
   "brick": "#b83a30",
   "brick-deep": "#f7a9a0",
   "brick-tint": "#fff3f2",
-  "dim": "#7b7b83",
+  "dim": "#6f6f77",
   "ember": "#ff5e1a",
   "ember-deep": "#eaa078",
   "ember-ink": "#bf4714",

@@ -545,7 +545,13 @@ function Conversation({ place }: { place: Workspace }) {
             testID="overview-scrim"
             onPress={() => setRailChoice(false)}
             className="absolute bottom-0 left-0 right-0 top-0"
-            style={{ backgroundColor: "rgba(0,0,0,0.45)" }}
+            /* `--color-scrim`, like the four other scrims in the app. This was
+               `rgba(0,0,0,0.45)` — dark's value, frozen into light, where the
+               token is `rgb(22 22 23 / 0.34)`. A scrim is its own token
+               precisely because it is not a surface at an alpha: over a pale
+               page a dark wash is still what the page recedes into, and that
+               is the half a surface colour cannot express. */
+            style={{ backgroundColor: color.scrim }}
           />
           <View
             className="absolute bottom-0 right-0 top-0 border-l border-line bg-float"

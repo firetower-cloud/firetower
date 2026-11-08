@@ -41,4 +41,7 @@ appId: com.usefiretower.app
     commands:
       - tapOn: "Not Now"
 
-- assertVisible: "Inbox"
+# The home. It no longer announces itself — the page a tab opens does not
+# repeat the tab's own name — so the landmark is the destination in the tab
+# bar. `Inbox` was the old page heading and the old tab label at once.
+- assertVisible: "Dashboard"

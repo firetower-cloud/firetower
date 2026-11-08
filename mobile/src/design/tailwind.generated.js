@@ -170,7 +170,7 @@ module.exports = {
       "--ft-brick": "184 58 48",
       "--ft-brick-deep": "247 169 160",
       "--ft-brick-tint": "255 243 242",
-      "--ft-dim": "123 123 131",
+      "--ft-dim": "111 111 119",
       "--ft-ember": "255 94 26",
       "--ft-ember-deep": "234 160 120",
       "--ft-ember-ink": "191 71 20",

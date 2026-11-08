@@ -106,9 +106,10 @@
      needs none of it, because in dark the page is `--color-ground` on both
      surfaces and the two roles happen to coincide.
 
-     The ink ramp on this page: bone 18.08:1, text 9.23:1, dim 4.20:1,
-     mute 2.42:1 — the same four real gaps, and `mute` is under the floor in
-     both branches exactly as `globals.css` already documents. */
+     The ink ramp on this page: bone 18.08:1, text 9.23:1, dim 4.98:1 (see
+     the correction below), mute 2.42:1 — the same four real gaps, and `mute`
+     is under the floor in both branches exactly as `globals.css` documents
+     and takes an explicit exception for. */
   --color-ground: #ffffff;
   --color-panel: #fafafb;
 
@@ -135,6 +136,28 @@
      this to `globals.css` rather than a reason to leave it. */
   --color-line-soft: #efeff2;
   --color-settling: #cbcbd1;
+
+  /* CORRECTION · AA is a floor, not a preference.
+     `--color-dim` is **4.20:1 on the page** in the shared sheet, under the
+     4.5 AA floor for normal text, across 56 `text-dim` instances on this
+     phone — none at a size that qualifies for AA-large.
+
+     `globals.css` documents an exception for `--color-mute` and gives its
+     figures (2.94 dark / 2.40 light) as the published cost of keeping the
+     faintest tier faint. **`dim` has no such exception**, which means it was
+     meant to clear and does not. So this is a defect in the sheet rather than
+     a judgement call, and the phone corrects it.
+
+     L* moved and a*/b* held, which is the handoff's own method: L* 51.85 →
+     49.3, a* 1.65 and b* −4.35 untouched, so the hue and its cool direction
+     survive. **4.98:1 on the page and 4.62:1 on `--color-raise`** — both
+     clear, which is what picks this over the value that only just clears the
+     page at 4.50/4.18, because a chip is a `raise` and `dim` lands on one.
+     `--color-overlay` reaches 4.08 and still does not clear; that is the
+     tier `globals.css` already flags as the tight one, and closing it would
+     start eating the gap to `--color-text` (9.23) that keeps the ramp
+     readable. R = G holds. Dark is untouched — it measures 5.82:1 there. */
+  --color-dim: #6f6f77;
 
   /* CORRECTION · a signal is gated against its own tint, never the page.
      A badge is composed the same way in both themes — the colour on its tint,

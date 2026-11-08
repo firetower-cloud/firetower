@@ -18,9 +18,14 @@ appId: com.usefiretower.app
     commands:
       - tapOn: "Not Now"
 
-- assertVisible: "Inbox"
+- assertVisible: "Dashboard"
+
+# A waiting agent is a chip on the home now, not a row in a list — the inbox
+# that held those rows is gone and `Workspaces` (behind *N more*) is where a
+# full list lives. This flow wants the quickest path to a transcript, which is
+# the chip.
 - tapOn:
-    id: "workspace-row"
+    id: "waiting-chip"
     index: 0
 
 # The transcript, whatever it says, and the composer at rest.
