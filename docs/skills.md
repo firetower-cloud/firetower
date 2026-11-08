@@ -78,13 +78,32 @@ Errors:
   wrong trade. A line whose backticks do not pair up is read as prose, so a
   single stray backtick is not a hiding place. The client additionally *warns*
   on the code-span case; the server does not refuse it.
+- **One frontmatter, whoever opens the file.** `SKILL.md` opens with a line of
+  exactly `---`, the first line after that which starts with `---` is exactly
+  `---`, and nothing inside that frame is a character one reader ends a line
+  on and another calls text. Refused when any of the three cannot be
+  established, rather than skipped — see §2, which is where the measurements
+  are. This is the one rule that **must** fail closed: it is asked about where
+  the frontmatter ends, so a parse of it is not evidence about it.
+- A path inside the bundle is at most 256 bytes and each name in it at most
+  96. A longer one is a row in a bundle that is not a file any worker can
+  create, which is the same defect as a path that has to be a file for one row
+  and a folder for another.
 - No `claude` or `anthropic` in the name — reserved.
 
-Both rules are asked of the bytes in the bundle, not of the `frontmatter` and
-`body` the client sends alongside them. Those are a parse the client did and
-could have done generously; the bytes are what is written onto a worker and
-read by the agent. `PATCH /skills/{id}` is held to the same bracket rule as
-import, since it writes the description the listing renders.
+All of these are asked of the bytes in the bundle, not of the `frontmatter`
+and `body` the client sends alongside them. Those are a parse the client did
+and could have done generously; the bytes are what is written onto a worker
+and read by the agent. `PATCH /skills/{id}` is held to the same bracket rule
+as import, since it writes the description the listing renders.
+
+**And asked of a parse of those bytes is not the same as asked of the bytes.**
+The first attempt at the frame rule above ran inside `if let Some(region) =
+frame(said)` with no `else` — a rule about where the frontmatter ends, gated
+on this reader finding where it ends. Three opening fences make `frame`
+decline and Claude Code 2.1.273 reads a frontmatter behind all three, so the
+rule was skipped exactly when it was needed. A check that can be turned off by
+the thing it is checking is not a check.
 
 Reading the file is `read_frontmatter` in `crates/ft-server/src/skills.rs`,
 mirrored by `split` in `desktop/src/skills.ts`. Neither is a YAML library, but
@@ -143,23 +162,87 @@ the second field can be `allowed-tools` or `hooks`, which §8 is about.
 
 | Reader | Ends a line on | Verified |
 | --- | --- | --- |
-| Firetower `read_frontmatter` | LF, CR | Yes. `split_inclusive('\n')`, and the tests. |
+| Firetower `read_frontmatter` | **LF only** | Yes. `split('\n')`, then `trim_end_matches('\r')` on each line — so a CRLF file works because the CR is trimmed off an ending, never because it is one. A **lone CR** is ordinary text here. |
 | Claude Code 2.1.273 | LF, CR | Yes. Probed with a payload valid only if split: U+0085, U+2028 and U+2029 all left the frontmatter a single field. |
 | libyaml / `unsafe-libyaml` | LF, CR, U+0085, U+2028, U+2029 | Yes. pyyaml's `CSafeLoader` and `serde_yaml` both read an injected `allowed-tools` from one line. |
 | Codex 0.156.1 | — | **No.** Its binary links `serde_yaml` and `unsafe-libyaml`, so a libyaml reading is the inference; that those are what it parses a skill's frontmatter *with* was not observed. |
 | Kimi Code 2.1.1, Cursor Agent | — | **No.** Not probed at all. |
 
+That is a **four**-character difference, not three, and the fourth is the
+dangerous one. The row above once read *"LF, CR"* for Firetower while citing a
+split on LF; the disputed set was worked out from that row and came out one
+character short. **A lone CR is the one of the four that is a line break to
+Claude Code** — U+0085, U+2028 and U+2029 are ordinary text to it, so they
+reach only a libyaml-family reader, where they *break* a skill. The CR
+*injects*, into the agent this control plane mostly writes for. So the rule
+and the rows are no longer written out side by side: `FIRETOWER_BREAKS`,
+`CLAUDE_CODE_BREAKS` and `YAML_1_1_BREAKS` are one statement each, this table
+transcribes those three, and `DISPUTED_BREAKS` is computed from them.
+
+The rule is **a CR not followed by LF**, never a CR: CRLF is a line ending
+every reader here puts in the same place, and a blanket ban would refuse every
+CRLF-authored `SKILL.md`.
+
+### Where the frontmatter ends
+
+The characters are only half of it. **The other half is the frame**, and it
+was the live route: a rule asked of the region *Firetower's* parser delimits
+is gated on the very parse that is in dispute, so anyone who could make that
+parser decline got the rule skipped while the agent read the frontmatter
+perfectly well.
+
 Probing Claude Code needs no account: skills load before the auth check, so
 `claude -p --debug --debug-file <path>` in a directory with a planted bundle
 logs `Failed to parse YAML frontmatter` for a frontmatter it rejected and
-nothing for one it accepted. That one bit is enough to tell a break from text,
-given a payload that is valid only one way round. Reading the parser out of the
-binary is not — it is one packed Mach-O and every YAML signature greps to zero.
+nothing for one it accepted. That one bit is enough, given a payload valid
+only one way round. Reading the parser out of the binary is not — it is one
+packed Mach-O and every YAML signature greps to zero.
 
-So the control plane refuses the three disputed characters rather than
-betting on the reader: `skills::check_one_reading`. A description has no use
-for a line separator, and the agent on the other end is whichever one the
-session picked.
+Measured that way, in both polarities, because a table of fences that all
+error proves nothing about whether the fence or the contents caused it:
+
+| Opening fence | A valid frontmatter behind it | Invalid YAML behind it | |
+| --- | --- | --- | --- |
+| `---LF` | loads, `project: 1` | **parse error** | read — and `frame` accepts |
+| `---CRLF` | loads, `project: 1` | **parse error** | read — and `frame` accepts |
+| `"--- "LF` | loads, `project: 1` | **parse error** | read, and `frame` **declines** |
+| `"---TAB"LF` | loads, `project: 1` | **parse error** | read, and `frame` **declines** |
+| `BOM`+`---LF` | loads, `project: 1` | **parse error** | read, and `frame` **declines** |
+| `"--"LF` | loads, `project: 1` | loads, `project: 1` | not read — the control |
+| no fence at all | loads, `project: 1` | loads, `project: 1` | not read — the control |
+
+An error that tracks the region's *contents* and disappears when those
+contents are valid can only arise if the region is being parsed; the last two
+rows are what says so, because they are the same invalid payload not being
+parsed. So three fences Firetower cannot read are three fences Claude Code
+reads a frontmatter behind.
+
+So `skills::check_one_frontmatter` is asked of **the bytes**, and **fails
+closed**: the file opens with exactly `---` and a line ending, the first line
+after it that starts with `---` is exactly `---`, and nothing in that frame
+reads as a line break to one reader and as text to another. A file whose
+frame cannot be read is refused, not skipped.
+
+The closing half of that is precaution rather than a hole: Claude Code 2.1.273
+closes the frontmatter where `read_frontmatter` does, on `--- ` and `----` and
+`---notakey: y` alike. But `read_frontmatter`'s close is the loosest rule of
+the three and so gives the *smallest* region, and a rule asked of the smallest
+region says nothing about what a reader with a stricter close reads as
+frontmatter. Making the two the same line takes that whole dimension out of
+the dispute instead of waiting to measure the next reader.
+
+**It costs nothing real.** Of the 25 skills Anthropic and OpenAI publish, 25
+open with exactly `---LF` and 25 close with a line of exactly `---`; so do all
+12 bundles on the machine this was measured on. None use CRLF, and `---CRLF`
+is accepted anyway, because Claude Code and `frame` agree about it.
+
+And the rule is asked again when stored bytes are **published again** —
+`approve`, and `merge_into` when it adds a version. Those turn bytes checked
+under whatever `check()` existed on the day they arrived into bytes a worker
+writes, which is a gap no amount of checking on the way in closes. Only that
+one rule, not the whole of `check()`: re-running the path and collision rules
+there would refuse a legacy skill for the shape of a filename it has had all
+along, at a moment nobody was asking about filenames.
 
 **Not project scope.** One workspace holds several sessions with different
 agents and different selections; project scope is shared by all of them. Kimi

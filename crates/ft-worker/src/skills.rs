@@ -97,9 +97,19 @@ pub async fn apply(
         if present.iter().any(|p| p == &bundle.name) {
             continue;
         }
-        write_bundle(&at, bundle)
-            .await
-            .with_context(|| format!("writing the {} skill", bundle.name))?;
+        // One bundle, not the set. **This used to be a `?`**, and the whole
+        // selection went with whichever bundle could not be written — so a
+        // skill shaped in a way the filesystem refuses took a colleague's
+        // *other* skills off their session, and the removal pass below never
+        // ran either. The control plane refuses the shapes that are known to
+        // do it, and that list is a list: it cannot be complete against every
+        // filesystem a worker might run on. The set a session asked for is
+        // worth more than the one bundle nobody can write, so the bundle is
+        // skipped and said out loud, the same answer an unusable name gets
+        // just above.
+        if let Err(e) = write_bundle(&at, bundle).await {
+            tracing::warn!(skill = %bundle.name, "could not write it; skipped: {e:#}");
+        }
     }
 
     for gone in present
@@ -137,8 +147,21 @@ fn usable(name: &str) -> bool {
 /// `references/` is a skill that fails the first time it is used.
 async fn write_bundle(at: &Path, bundle: &SkillBundle) -> Result<()> {
     let staging = at.with_file_name(format!(".{}.writing", bundle.name));
-    tokio::fs::remove_dir_all(&staging).await.ok();
-    tokio::fs::create_dir_all(&staging).await?;
+    let out = fill(&staging, at, bundle).await;
+    if out.is_err() {
+        // Half a bundle is not left lying beside the whole ones. It would be
+        // swept up by the removal pass on the next `apply` anyway — nothing
+        // is named after it — but a session reading this directory now should
+        // not have to step over it.
+        tokio::fs::remove_dir_all(&staging).await.ok();
+    }
+    out.with_context(|| format!("writing the {} skill", bundle.name))
+}
+
+/// Everything [`write_bundle`] does, so that it can clean up after a failure.
+async fn fill(staging: &Path, at: &Path, bundle: &SkillBundle) -> Result<()> {
+    tokio::fs::remove_dir_all(staging).await.ok();
+    tokio::fs::create_dir_all(staging).await?;
 
     for file in &bundle.files {
         let relative = Path::new(&file.path);
@@ -174,7 +197,7 @@ async fn write_bundle(at: &Path, bundle: &SkillBundle) -> Result<()> {
     }
 
     tokio::fs::remove_dir_all(at).await.ok();
-    tokio::fs::rename(&staging, at)
+    tokio::fs::rename(staging, at)
         .await
         .with_context(|| format!("moving into {}", at.display()))?;
     Ok(())
@@ -290,6 +313,52 @@ mod tests {
         .await
         .unwrap();
         assert!(!dir.path().join("escape").exists());
+    }
+
+    /// **One bundle nobody can write does not take the set with it.**
+    ///
+    /// Established rather than assumed, because the two answers are very
+    /// different severities: this used to be a `?`, so `apply` returned the
+    /// first write error and every bundle ordered after the bad one was never
+    /// written — one malicious skill took a colleague's *other* skills off
+    /// their session, and the removal pass below it never ran either.
+    ///
+    /// The bad bundle here is the confirmed shape: a path that has to be a
+    /// file for one row and a folder for another, which fails with `Not a
+    /// directory`. The control plane refuses that shape now, and this is the
+    /// other half — the list of shapes a filesystem refuses cannot be
+    /// complete, so the set is worth more than the one bundle.
+    #[tokio::test]
+    async fn one_bundle_that_cannot_be_written_does_not_take_the_set() {
+        let dir = tempfile::tempdir().unwrap();
+        let id = SessionId::from_stored("s_partial");
+        let root = root(dir.path(), &id, Agent::ClaudeCode).unwrap();
+
+        apply(
+            dir.path(),
+            &id,
+            Agent::ClaudeCode,
+            &[
+                bundle("good-one", &[("SKILL.md", "x", false)]),
+                bundle(
+                    "ship-it",
+                    &[
+                        ("SKILL.md", "x", false),
+                        ("scripts", "a file", false),
+                        ("scripts/run.sh", "#!/bin/sh\n", false),
+                    ],
+                ),
+                bundle("after-it", &[("SKILL.md", "x", false)]),
+            ],
+        )
+        .await
+        .expect("the set is applied, not abandoned");
+
+        assert!(root.join("good-one/SKILL.md").exists(), "ordered before it");
+        assert!(root.join("after-it/SKILL.md").exists(), "ordered after it");
+        assert!(!root.join("ship-it").exists(), "and the bad one is absent");
+        // Not left half-written beside the whole ones either.
+        assert!(!root.join(".ship-it.writing").exists());
     }
 
     #[tokio::test]

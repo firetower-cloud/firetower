@@ -28,6 +28,20 @@ fn refused(e: crate::skills::Refused) -> ApiError {
     ApiError::new(ErrorCode::InvalidRequest, e.to_string())
 }
 
+/// A refusal raised inside the store, said as one rather than as a 500.
+///
+/// `approve` and `merge_into` republish bytes somebody stored earlier, and
+/// ask them the frontmatter rule again on the way — see
+/// `Skills::republishable`. That refusal reaches here inside an
+/// `anyhow::Error`, whose blanket conversion is an `Internal`; a sentence
+/// somebody can act on is not a server fault.
+fn maybe_refused(e: anyhow::Error) -> ApiError {
+    match e.downcast::<crate::skills::Refused>() {
+        Ok(r) => refused(r),
+        Err(other) => other.into(),
+    }
+}
+
 #[utoipa::path(
     get, path = "/api/v1/skills", tag = "skills",
     responses((status = 200, body = Vec<Skill>), (status = 401, body = ApiError)),
@@ -356,7 +370,15 @@ pub(super) async fn approve_skill(
     Path(id): Path<String>,
 ) -> ApiResult<Json<Skill>> {
     let me = whoever(&principal)?;
-    if !state.skills.approve(me.id.as_str(), &id).await? {
+    // `approve` asks the held bytes the frontmatter rule again before it
+    // makes them current, so a refusal is one of the two answers this can
+    // get and is said as a refusal rather than as a 500.
+    if !state
+        .skills
+        .approve(me.id.as_str(), &id)
+        .await
+        .map_err(maybe_refused)?
+    {
         return Err(ApiError::not_found("held skill"));
     }
     state
@@ -795,6 +817,9 @@ pub(super) async fn share_skills(
             }
             Some(c) => match one.resolve {
                 Some(Resolve::Keep) | None => {}
+                // `merge_into` asks the republished bundle the frontmatter
+                // rule again when `AddVersion` moves its bytes, so this can
+                // be refused and is said as a refusal.
                 Some(r) => touched.extend(
                     state
                         .skills
@@ -804,7 +829,8 @@ pub(super) async fn share_skills(
                             me.id.as_str(),
                             r == Resolve::AddVersion,
                         )
-                        .await?,
+                        .await
+                        .map_err(maybe_refused)?,
                 ),
             },
         }
