@@ -890,7 +890,10 @@ mod tests {
             .await
             .unwrap();
         let repo_id = repo.id.as_str().to_string();
-        skills.set_default(&ana, &everywhere, None, true).await.unwrap();
+        skills
+            .set_default(&ana, &everywhere, None, true)
+            .await
+            .unwrap();
         skills
             .set_default(&ana, &in_repo, Some(&repo_id), true)
             .await
@@ -919,8 +922,9 @@ mod tests {
 
         // All three sources, counted once each — and the admin's skill absent,
         // though it is named, because Ana cannot reach it.
-        let resolved =
-            skills_at_spawn(&skills, &profile, &ana, &[repo_id.clone()]).await.unwrap();
+        let resolved = skills_at_spawn(&skills, &profile, &ana, std::slice::from_ref(&repo_id))
+            .await
+            .unwrap();
         assert_eq!(
             resolved,
             vec![everywhere.clone(), in_repo.clone(), named.clone()],
@@ -959,11 +963,15 @@ mod tests {
         // The chokepoint, on its own. Handed the admin's skill directly — as a
         // caller that skipped the resolver would — it pins nothing.
         skills
-            .set_for_session(session.as_str(), &ana, &[theirs.clone()])
+            .set_for_session(session.as_str(), &ana, std::slice::from_ref(&theirs))
             .await
             .unwrap();
         assert!(
-            skills.of_session(session.as_str()).await.unwrap().is_empty(),
+            skills
+                .of_session(session.as_str())
+                .await
+                .unwrap()
+                .is_empty(),
             "a skill the session's owner cannot see is never pinned",
         );
         // And the admin, who can see it, is not blocked by the same predicate.
@@ -986,12 +994,16 @@ mod tests {
         .await
         .unwrap();
         skills
-            .set_for_session(theirs_session.as_str(), &admin, &[theirs.clone()])
+            .set_for_session(
+                theirs_session.as_str(),
+                &admin,
+                std::slice::from_ref(&theirs),
+            )
             .await
             .unwrap();
         assert_eq!(
             skills.of_session(theirs_session.as_str()).await.unwrap(),
-            vec![theirs],
+            vec![theirs.clone()],
             "the check narrows to what each person may see, not to nothing",
         );
 
@@ -1007,7 +1019,9 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(
-            skills_at_spawn(&skills, &off, &ana, &[repo_id]).await.unwrap(),
+            skills_at_spawn(&skills, &off, &ana, &[repo_id])
+                .await
+                .unwrap(),
             vec![named],
             "turning both off leaves only what the profile names",
         );

@@ -4071,10 +4071,7 @@ mod tests {
 
         // And a plain second agent still takes the always-on set, which is what
         // this function did for everybody before.
-        assert!(matches!(
-            skills_source(None, None),
-            SkillsSource::AlwaysOn
-        ));
+        assert!(matches!(skills_source(None, None), SkillsSource::AlwaysOn));
 
         // An empty set is a decision, not an absence: a profile with both
         // switches off and nothing named resolves to none, and that has to
