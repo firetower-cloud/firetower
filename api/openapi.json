@@ -7162,6 +7162,71 @@
         }
       }
     },
+    "/api/v1/tasks/attachment": {
+      "get": {
+        "tags": [
+          "tasks"
+        ],
+        "summary": "A file attached to a task, through Firetower.",
+        "description": "Trello asks for the credential even to download an attachment, so the\nperson's machine cannot fetch it itself. This takes the card and the\nattachment's id, never an address: the card's own list is read again and\nonly an id on it is downloaded, so nothing here can be pointed elsewhere.",
+        "operationId": "get_task_attachment",
+        "parameters": [
+          {
+            "name": "url",
+            "in": "query",
+            "description": "The card, as /tasks/one was asked for it",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "query",
+            "description": "The attachment's id, as /tasks/one listed it",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The file's bytes, under its own type and name"
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/tasks/one": {
       "get": {
         "tags": [
@@ -15419,6 +15484,13 @@
               "$ref": "#/components/schemas/Person"
             }
           },
+          "attachments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskAttachment"
+            },
+            "description": "What is attached to it: the screenshot in the bug report, the PDF of\nthe spec, the Figma link.\n\nOnly [`Source::one`] fills it, because only starting work wants it and\na page of thirty would otherwise cost thirty more requests. Empty for\nthe git hosts and Linear, which do not answer it yet."
+          },
           "body": {
             "type": [
               "string",
@@ -15473,6 +15545,50 @@
           "url": {
             "type": "string",
             "description": "Always somewhere to go and read it."
+          }
+        }
+      },
+      "TaskAttachment": {
+        "type": "object",
+        "description": "One thing attached to a task, as the tracker lists it.\n\nA file and a link both arrive here because trackers list them together,\nand the two go different places when work starts: a file is brought into\nthe workspace, a link is written into the description. `upload` is what\ntells them apart.",
+        "required": [
+          "id",
+          "name",
+          "url",
+          "upload"
+        ],
+        "properties": {
+          "bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Its size, when the tracker knows, so one that is too big is refused\nbefore anything is downloaded.",
+            "minimum": 0
+          },
+          "id": {
+            "type": "string",
+            "description": "The tracker's own id for it, which is how its bytes are asked for."
+          },
+          "mime": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`image/png`, when the tracker knows. Decides whether it rides in the\nfirst message as a picture or lands in the workspace as a file."
+          },
+          "name": {
+            "type": "string",
+            "description": "What it is called, which is also what it is saved as."
+          },
+          "upload": {
+            "type": "boolean",
+            "description": "A file somebody uploaded. `false` is a link (a Google Doc, a Figma\nframe), which has no bytes to bring along."
+          },
+          "url": {
+            "type": "string",
+            "description": "Where a person would open it. For a file this needs the tracker's\ncredential, so the bytes come through Firetower instead."
           }
         }
       },

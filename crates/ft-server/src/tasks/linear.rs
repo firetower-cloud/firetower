@@ -512,6 +512,7 @@ impl From<Issue> for Task {
             // form asks.
             repo: None,
             status,
+            attachments: Vec::new(),
         }
     }
 }

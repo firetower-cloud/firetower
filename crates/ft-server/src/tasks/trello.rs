@@ -34,7 +34,7 @@
 use anyhow::{bail, Context, Result};
 use serde::{de::DeserializeOwned, Deserialize};
 
-use super::{Label, Page, Person, Query, Source, Task, TaskKind, TaskState};
+use super::{Label, Page, Person, Query, Source, Task, TaskAttachment, TaskKind, TaskState};
 use crate::trackers::Tracker;
 
 /// Trello as a [`Source`].
@@ -85,27 +85,28 @@ impl Source for Trello<'_> {
 
         // A column is a list, named by its id. Checked before anything is sent.
         let column = column_of(ask)?;
-        let list_name = match column {
-            Some(id) => Some(self.list_name(token, id).await?),
-            None => None,
-        };
 
-        if let (Some(id), Some(name), Way::WholeList) = (column, &list_name, way_of(ask)) {
-            let cards: Vec<Card> = ask_trello(
-                self.tracker.api_base,
-                &self.app_key,
-                token,
-                &format!("/lists/{id}/cards"),
-                &list_params(ask),
-            )
-            .await?;
+        // The list's name and its cards do not wait on each other, so they
+        // are asked at once: a board of six columns is six of these.
+        if let (Some(id), Way::WholeList) = (column, way_of(ask)) {
+            let path = format!("/lists/{id}/cards");
+            let params = list_params(ask);
+            let (name, cards): (String, Vec<Card>) = tokio::try_join!(
+                self.list_name(token, id),
+                ask_trello(self.tracker.api_base, &self.app_key, token, &path, &params),
+            )?;
             return Ok(Page {
-                tasks: in_column(cards, name),
+                tasks: in_column(cards, &name),
                 total: None,
                 more: false,
                 next: None,
             });
         }
+
+        let list_name = match column {
+            Some(id) => Some(self.list_name(token, id).await?),
+            None => None,
+        };
 
         #[derive(Deserialize)]
         struct Found {
@@ -159,8 +160,214 @@ impl Source for Trello<'_> {
             ],
         )
         .await?;
+        // Without its attachments: session bring-up reads a card through
+        // here and never wants them, and a second request that fails would
+        // take the title and the body down with it. `card_attachments` is
+        // asked separately, by the one caller that shows them.
         Ok(card.into())
     }
+}
+
+/// A card's attachments, by its link. Asked apart from [`Trello::one`] so
+/// that failing to read them never costs the card itself.
+pub async fn card_attachments(
+    api_base: &str,
+    app_key: &str,
+    token: &str,
+    url: &str,
+) -> Result<Vec<TaskAttachment>> {
+    attachments_of(api_base, app_key, token, card_in(url)?).await
+}
+
+/// The shortLink of a card link, or [`Unserved::NotACard`]: a board link,
+/// another host, or anything that cannot go into a path.
+fn card_in(url: &str) -> Result<&str, Unserved> {
+    card_of(url)
+        .filter(|link| is_short_link(link))
+        .ok_or(Unserved::NotACard)
+}
+
+/// What `/cards/{shortLink}/attachments` is asked for: exactly what a
+/// [`TaskAttachment`] holds.
+const ATTACHMENT_FIELDS: &str = "id,name,mimeType,bytes,url,isUpload";
+
+/// A card's attachments, files and links together, in Trello's order.
+async fn attachments_of(
+    api_base: &str,
+    app_key: &str,
+    token: &str,
+    short_link: &str,
+) -> Result<Vec<TaskAttachment>> {
+    let raw: Vec<RawAttachment> = ask_trello(
+        api_base,
+        app_key,
+        token,
+        &format!("/cards/{short_link}/attachments"),
+        &[("fields", ATTACHMENT_FIELDS.to_string())],
+    )
+    .await?;
+    Ok(raw.into_iter().map(Into::into).collect())
+}
+
+/// The most one attachment may weigh on its way through.
+///
+/// The desktop's largest attach cap (`BIGGEST_FILE` in `ui/attach.tsx`), so a
+/// file the composer would refuse is refused here before it is downloaded,
+/// rather than carried across the network to be refused there.
+pub const BIGGEST_ATTACHMENT: u64 = 25 * 1024 * 1024;
+
+/// Why an attachment's bytes are not served.
+///
+/// A type of its own so the API can answer each as what it is (not there, or
+/// too big) instead of as a server fault.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Unserved {
+    /// The link is not a Trello card: a board, or not Trello at all.
+    NotACard,
+    /// The id is not on this card's list. Also what any other id gets, so
+    /// nothing can be asked for that the card does not hold.
+    NotOnCard,
+    /// It is a link, which has no bytes Firetower could bring along.
+    NotAFile,
+    /// Heavier than [`BIGGEST_ATTACHMENT`].
+    TooBig,
+}
+
+impl std::fmt::Display for Unserved {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Unserved::NotACard => "That link is not a Trello card.",
+            Unserved::NotOnCard => "That attachment is not on this card.",
+            Unserved::NotAFile => "That attachment is a link, not a file.",
+            Unserved::TooBig => "That attachment is over 25 MB.",
+        })
+    }
+}
+
+impl std::error::Error for Unserved {}
+
+/// The attachment this id names, if the card holds it and it may be served.
+///
+/// The one place that decides. The id is matched against the list Trello has
+/// just given for the card, never against anything the caller sent, which is
+/// what keeps this from fetching an address somebody chose.
+fn served<'a>(list: &'a [TaskAttachment], id: &str) -> Result<&'a TaskAttachment, Unserved> {
+    let found = list
+        .iter()
+        .find(|a| a.id == id)
+        .ok_or(Unserved::NotOnCard)?;
+    if !found.upload {
+        return Err(Unserved::NotAFile);
+    }
+    if found.bytes.is_some_and(|n| !fits(n)) {
+        return Err(Unserved::TooBig);
+    }
+    Ok(found)
+}
+
+/// Whether this many bytes may be served. Asked of the size Trello states and
+/// again of what has actually arrived, which is what counts.
+fn fits(bytes: u64) -> bool {
+    bytes <= BIGGEST_ATTACHMENT
+}
+
+/// An attachment id has the same shape as a board id, and is checked for the
+/// same reason before it goes into a path.
+pub fn is_attachment_id(id: &str) -> bool {
+    is_board_id(id)
+}
+
+/// A file name as the last segment of the download path.
+///
+/// Trello ignores that segment (any name downloads the same bytes), but it
+/// still goes into a URL, so only letters, digits, `.`, `-` and `_` stay and
+/// nothing may start with a dot.
+fn file_segment(name: &str) -> String {
+    let mut out = String::new();
+    for c in name.chars() {
+        if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_') {
+            out.push(c);
+        } else if !out.ends_with('_') {
+            out.push('_');
+        }
+    }
+    let out = out
+        .trim_start_matches(['.', '_'])
+        .trim_end_matches('_')
+        .to_string();
+    if out.trim_matches('.').is_empty() {
+        "file".to_string()
+    } else {
+        out
+    }
+}
+
+/// One attachment's bytes, by the card it is on and its id.
+///
+/// Trello wants the credential even to download, so a person's machine
+/// cannot fetch the file itself and Firetower does it for them. The card's
+/// list is read again first, and only an id on it is downloaded: the request
+/// is built from the card and that id, never from a URL.
+pub async fn attachment(
+    api_base: &str,
+    app_key: &str,
+    token: &str,
+    url: &str,
+    id: &str,
+) -> Result<(TaskAttachment, Vec<u8>)> {
+    let short_link = card_in(url)?;
+    if !is_attachment_id(id) {
+        return Err(Unserved::NotOnCard.into());
+    }
+
+    let list = attachments_of(api_base, app_key, token, short_link).await?;
+    let found = served(&list, id)?.clone();
+
+    let path = format!(
+        "/cards/{short_link}/attachments/{id}/download/{}",
+        file_segment(&found.name)
+    );
+    let response = send_trello(api_base, app_key, token, &path, &[]).await?;
+    let declared = response.content_length();
+    let chunks = futures::stream::unfold(response, |mut response| async move {
+        match response.chunk().await {
+            Ok(Some(chunk)) => Some((Ok(chunk), response)),
+            Ok(None) => None,
+            Err(e) => Some((
+                Err(anyhow::Error::new(e).context("reading what Trello sent")),
+                response,
+            )),
+        }
+    });
+    let bytes = read_capped(declared, BIGGEST_ATTACHMENT, chunks).await?;
+    Ok((found, bytes))
+}
+
+/// A download read to the end, refused as [`Unserved::TooBig`] the moment it
+/// is heavier than `cap`.
+///
+/// Twice over: by the size it declares, before a byte is read, and by what
+/// has actually arrived, because a declared length is only a claim. Takes the
+/// chunks as a stream so the decision can be tested without a network.
+async fn read_capped<B, S>(declared: Option<u64>, cap: u64, chunks: S) -> Result<Vec<u8>>
+where
+    B: AsRef<[u8]>,
+    S: futures::Stream<Item = Result<B>>,
+{
+    use futures::StreamExt;
+
+    if declared.is_some_and(|n| n > cap) {
+        return Err(Unserved::TooBig.into());
+    }
+    let mut chunks = std::pin::pin!(chunks);
+    let mut bytes = Vec::new();
+    while let Some(chunk) = chunks.next().await {
+        bytes.extend_from_slice(chunk?.as_ref());
+        if bytes.len() as u64 > cap {
+            return Err(Unserved::TooBig.into());
+        }
+    }
+    Ok(bytes)
 }
 
 /// A shortLink is letters and digits. Checked before one is put in a path, so
@@ -340,6 +547,22 @@ async fn ask_trello<T: DeserializeOwned>(
     path: &str,
     params: &[(&str, String)],
 ) -> Result<T> {
+    send_trello(api_base, app_key, token, path, params)
+        .await?
+        .json()
+        .await
+        .context("reading what Trello sent")
+}
+
+/// The request [`ask_trello`] makes, answered as it came rather than read as
+/// JSON, which is what a download needs. Same header, same refusal.
+async fn send_trello(
+    api_base: &str,
+    app_key: &str,
+    token: &str,
+    path: &str,
+    params: &[(&str, String)],
+) -> Result<reqwest::Response> {
     let mut authorization = reqwest::header::HeaderValue::from_str(&format!(
         r#"OAuth oauth_consumer_key="{app_key}", oauth_token="{token}""#
     ))
@@ -371,10 +594,7 @@ async fn ask_trello<T: DeserializeOwned>(
 
     response
         .error_for_status()
-        .context("Trello refused the request")?
-        .json()
-        .await
-        .context("reading what Trello sent")
+        .context("Trello refused the request")
 }
 
 /// `https://trello.com/c/aB3dE9fG/42-fix-export` → `aB3dE9fG`.
@@ -686,6 +906,44 @@ pub struct Card {
     id_list: Option<String>,
 }
 
+/// An attachment as `/cards/{shortLink}/attachments` answers it.
+///
+/// Every field but the id may be missing or empty: a link has no type and no
+/// size, and Trello leaves out what it was not asked for.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawAttachment {
+    id: String,
+    #[serde(default)]
+    name: String,
+    /// `""` for a link, rather than absent.
+    mime_type: Option<String>,
+    bytes: Option<u64>,
+    #[serde(default)]
+    url: String,
+    #[serde(default)]
+    is_upload: bool,
+}
+
+impl From<RawAttachment> for TaskAttachment {
+    fn from(raw: RawAttachment) -> Self {
+        TaskAttachment {
+            // A link pasted without a title is called by its address, which
+            // is what Trello itself shows for it.
+            name: if raw.name.trim().is_empty() {
+                raw.url.clone()
+            } else {
+                raw.name
+            },
+            id: raw.id,
+            mime: raw.mime_type.filter(|m| !m.trim().is_empty()),
+            bytes: raw.bytes,
+            url: raw.url,
+            upload: raw.is_upload,
+        }
+    }
+}
+
 /// A label as search answers it.
 #[derive(Deserialize)]
 struct Tag {
@@ -755,6 +1013,8 @@ impl From<Card> for Task {
             // form asks.
             repo: None,
             status: card.list.map(|l| l.name),
+            // Asked for separately, and only by `one`.
+            attachments: Vec::new(),
         }
     }
 }
@@ -1222,5 +1482,158 @@ mod tests {
             }
         }
         assert_eq!(colour_of("chartreuse_neon"), None);
+    }
+
+    fn attachments_fixture() -> Vec<RawAttachment> {
+        serde_json::from_value(json!([
+            {
+                "id": "5f1b2c3d4e5f60718293a4b5",
+                "name": "screenshot.png",
+                "mimeType": "image/png",
+                "bytes": 150_000,
+                "url": "https://trello.com/1/cards/5f1b2c3d4e5f60718293a4b0/attachments/5f1b2c3d4e5f60718293a4b5/download/screenshot.png",
+                "isUpload": true
+            },
+            {
+                "id": "5f1b2c3d4e5f60718293a4b6",
+                "name": "spec.pdf",
+                "url": "https://trello.com/1/cards/5f1b2c3d4e5f60718293a4b0/attachments/5f1b2c3d4e5f60718293a4b6/download/spec.pdf",
+                "isUpload": true
+            },
+            {
+                "id": "5f1b2c3d4e5f60718293a4b7",
+                "name": "",
+                "mimeType": "",
+                "bytes": null,
+                "url": "https://www.figma.com/file/abc/Checkout",
+                "isUpload": false
+            }
+        ]))
+        .unwrap()
+    }
+
+    #[test]
+    fn a_cards_attachments_say_which_are_files_and_which_are_links() {
+        let list: Vec<TaskAttachment> = attachments_fixture().into_iter().map(Into::into).collect();
+
+        assert_eq!(list[0].name, "screenshot.png");
+        assert_eq!(list[0].mime.as_deref(), Some("image/png"));
+        assert_eq!(list[0].bytes, Some(150_000));
+        assert!(list[0].upload);
+
+        // Trello left the type and the size off: unknown, not zero.
+        assert_eq!(list[1].mime, None);
+        assert_eq!(list[1].bytes, None);
+        assert!(list[1].upload);
+
+        // A link with no name is called by its address, and an empty type is
+        // no type.
+        assert!(!list[2].upload);
+        assert_eq!(list[2].mime, None);
+        assert_eq!(list[2].name, "https://www.figma.com/file/abc/Checkout");
+    }
+
+    #[test]
+    fn only_an_attachment_on_this_card_is_served() {
+        let list: Vec<TaskAttachment> = attachments_fixture().into_iter().map(Into::into).collect();
+        assert_eq!(
+            served(&list, "5f1b2c3d4e5f60718293a4b5").map(|a| a.name.as_str()),
+            Ok("screenshot.png")
+        );
+        assert_eq!(
+            served(&list, "000000000000000000000000").err(),
+            Some(Unserved::NotOnCard)
+        );
+    }
+
+    #[test]
+    fn a_link_has_no_bytes_to_serve() {
+        let list: Vec<TaskAttachment> = attachments_fixture().into_iter().map(Into::into).collect();
+        assert_eq!(
+            served(&list, "5f1b2c3d4e5f60718293a4b7").err(),
+            Some(Unserved::NotAFile)
+        );
+    }
+
+    #[test]
+    fn a_file_over_the_cap_is_refused_before_it_is_downloaded() {
+        let mut list: Vec<TaskAttachment> =
+            attachments_fixture().into_iter().map(Into::into).collect();
+        list[0].bytes = Some(BIGGEST_ATTACHMENT + 1);
+        assert_eq!(
+            served(&list, "5f1b2c3d4e5f60718293a4b5").err(),
+            Some(Unserved::TooBig)
+        );
+        list[0].bytes = Some(BIGGEST_ATTACHMENT);
+        assert!(served(&list, "5f1b2c3d4e5f60718293a4b5").is_ok());
+        // An unknown size is decided while reading, against the same cap.
+        assert!(served(&list, "5f1b2c3d4e5f60718293a4b6").is_ok());
+        assert!(fits(BIGGEST_ATTACHMENT));
+        assert!(!fits(BIGGEST_ATTACHMENT + 1));
+    }
+
+    #[test]
+    fn the_cap_is_the_desktops_biggest_file() {
+        assert_eq!(BIGGEST_ATTACHMENT, 25 * 1024 * 1024);
+    }
+
+    #[test]
+    fn only_an_attachment_id_may_go_into_a_request_path() {
+        assert!(is_attachment_id("5f1b2c3d4e5f60718293a4b5"));
+        assert!(!is_attachment_id("../../members/me"));
+        assert!(!is_attachment_id("6ace083d5588abbdfabc955"));
+        assert!(!is_attachment_id(""));
+    }
+
+    #[test]
+    fn a_files_name_is_made_safe_for_the_download_path() {
+        assert_eq!(file_segment("my screen shot.png"), "my_screen_shot.png");
+        assert_eq!(file_segment("../../etc/passwd"), "etc_passwd");
+        assert_eq!(file_segment("a?b#c/d"), "a_b_c_d");
+        assert_eq!(file_segment(""), "file");
+        assert_eq!(file_segment("..."), "file");
+    }
+
+    #[test]
+    fn a_board_link_is_not_a_card_to_bring_attachments_from() {
+        assert_eq!(
+            card_in("https://trello.com/b/aB3dE9fG/roadmap"),
+            Err(Unserved::NotACard)
+        );
+        assert_eq!(
+            card_in("https://trello.com/c/../x"),
+            Err(Unserved::NotACard)
+        );
+        assert_eq!(
+            card_in("https://trello.com/c/aB3dE9fG/42-fix"),
+            Ok("aB3dE9fG")
+        );
+    }
+
+    /// Chunks as a download would hand them over, one at a time.
+    fn chunks(sizes: &[usize]) -> impl futures::Stream<Item = Result<Vec<u8>>> {
+        let all: Vec<Result<Vec<u8>>> = sizes.iter().map(|n| Ok(vec![7u8; *n])).collect();
+        futures::stream::iter(all)
+    }
+
+    fn too_big(r: Result<Vec<u8>>) -> bool {
+        r.err().and_then(|e| e.downcast_ref::<Unserved>().copied()) == Some(Unserved::TooBig)
+    }
+
+    #[tokio::test]
+    async fn a_download_declared_over_the_cap_is_refused_before_a_byte_is_read() {
+        assert!(too_big(read_capped(Some(11), 10, chunks(&[1])).await));
+    }
+
+    #[tokio::test]
+    async fn a_download_that_runs_past_the_cap_is_cut_off_whatever_it_declared() {
+        assert!(too_big(read_capped(None, 10, chunks(&[6, 6])).await));
+        assert!(too_big(read_capped(Some(4), 10, chunks(&[6, 6])).await));
+    }
+
+    #[tokio::test]
+    async fn a_download_exactly_at_the_cap_arrives_whole() {
+        let got = read_capped(Some(10), 10, chunks(&[5, 5])).await.unwrap();
+        assert_eq!(got.len(), 10);
     }
 }

@@ -7,6 +7,7 @@
  */
 import type { Label } from './label';
 import type { Person } from './person';
+import type { TaskAttachment } from './taskAttachment';
 import type { TaskKind } from './taskKind';
 import type { TaskState } from './taskState';
 
@@ -18,6 +19,15 @@ import type { TaskState } from './taskState';
  */
 export interface Task {
   assignees: Person[];
+  /**
+     * What is attached to it: the screenshot in the bug report, the PDF of
+     * the spec, the Figma link.
+     *
+     * Only [`Source::one`] fills it, because only starting work wants it and
+     * a page of thirty would otherwise cost thirty more requests. Empty for
+     * the git hosts and Linear, which do not answer it yet.
+     */
+  attachments?: TaskAttachment[];
   /**
      * Seeds the first prompt, so nobody types the problem out twice.
      * @nullable

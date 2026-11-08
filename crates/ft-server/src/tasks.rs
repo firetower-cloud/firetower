@@ -43,10 +43,11 @@ pub use linear::{
     viewer as linear_viewer, Linear, Team as LinearTeam,
 };
 pub use trello::{
-    boards as trello_boards, card_of as trello_card, columns as trello_columns,
+    attachment as trello_attachment, boards as trello_boards,
+    card_attachments as trello_card_attachments, card_of as trello_card, columns as trello_columns,
     is_board_id as trello_board_id, search_params as trello_search_params,
     token_in as trello_token, viewer as trello_viewer, Board as TrelloBoard, Card as TrelloCard,
-    Column as TrelloColumn, Trello,
+    Column as TrelloColumn, Trello, Unserved as TrelloUnserved,
 };
 
 /// A tracker said no to the credential it was given: revoked, expired or
@@ -128,6 +129,41 @@ pub struct Task {
     /// The column or workflow state it sits in, by the tracker's own name: a
     /// Trello list, a Linear state. Git hosts have none.
     pub status: Option<String>,
+    /// What is attached to it: the screenshot in the bug report, the PDF of
+    /// the spec, the Figma link.
+    ///
+    /// Only [`Source::one`] fills it, because only starting work wants it and
+    /// a page of thirty would otherwise cost thirty more requests. Empty for
+    /// the git hosts and Linear, which do not answer it yet.
+    #[serde(default)]
+    pub attachments: Vec<TaskAttachment>,
+}
+
+/// One thing attached to a task, as the tracker lists it.
+///
+/// A file and a link both arrive here because trackers list them together,
+/// and the two go different places when work starts: a file is brought into
+/// the workspace, a link is written into the description. `upload` is what
+/// tells them apart.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskAttachment {
+    /// The tracker's own id for it, which is how its bytes are asked for.
+    pub id: String,
+    /// What it is called, which is also what it is saved as.
+    pub name: String,
+    /// `image/png`, when the tracker knows. Decides whether it rides in the
+    /// first message as a picture or lands in the workspace as a file.
+    pub mime: Option<String>,
+    /// Its size, when the tracker knows, so one that is too big is refused
+    /// before anything is downloaded.
+    pub bytes: Option<u64>,
+    /// Where a person would open it. For a file this needs the tracker's
+    /// credential, so the bytes come through Firetower instead.
+    pub url: String,
+    /// A file somebody uploaded. `false` is a link (a Google Doc, a Figma
+    /// frame), which has no bytes to bring along.
+    pub upload: bool,
 }
 
 /// What to ask a source for.
@@ -459,6 +495,7 @@ fn task_from(item: Item, source: &str) -> Task {
         updated_at: item.updated_at,
         repo,
         status: None,
+        attachments: Vec::new(),
     }
 }
 
