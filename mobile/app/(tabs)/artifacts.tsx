@@ -75,7 +75,7 @@ export default function Artifacts() {
       <TextTabs options={SCOPES} value={scope} onChange={setScope} />
 
       <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 24, flexGrow: 1 }}>
-        <View className="flex-row flex-wrap gap-x-3 gap-y-1 px-4">
+        <View className="flex-row flex-wrap gap-x-3 gap-y-1 px-5">
           {shown.map((a) => (
             /* Two at a phone's width, three from 620 — a grid reflows and a
                column does not. Measured rather than fixed at 47%, which was

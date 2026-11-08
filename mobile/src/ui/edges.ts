@@ -62,6 +62,14 @@ import type { ViewStyle } from "react-native";
  * `.p-grid`, `.p-tree`, `.p-sechead`, `.p-quiet`, `.p-all-row`, `.p-chipwrap`,
  * `.p-facts`, `.p-texttabs`, `.p-planstep`, `.p-member` and `.p-difffile` all
  * take 20. Nothing in the app takes 24.
+ *
+ * **`px-5` is this number in Tailwind's spelling.** A row written `px-4` is 16
+ * and four points short, which is how *Tasks*, *Artifacts*, *You* and
+ * *Repositories* came to measure 15/16 on both device and browser while the
+ * home measured 19–20. The two class names differ by one character and the
+ * shortfall is invisible until something is measured beside something else —
+ * on *You* the rows were already 20 (`px-2` outside, `rounded-lg px-3`
+ * inside) and only the section heads above them were 16.
  */
 export const GUTTER = 20;
 

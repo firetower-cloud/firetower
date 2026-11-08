@@ -41,9 +41,9 @@ export default function You() {
       className="flex-1 bg-ground"
       contentContainerStyle={edges}
     >
-      <Text className="px-4 font-semibold text-display text-bone">You</Text>
+      <Text className="px-5 font-semibold text-display text-bone">You</Text>
 
-      <Text className="mb-2 mt-6 px-4 font-narrow text-micro uppercase tracking-[0.18em] text-mute">
+      <Text className="mb-2 mt-6 px-5 font-narrow text-micro uppercase tracking-[0.18em] text-mute">
         Firetowers
       </Text>
 
@@ -99,7 +99,7 @@ export default function You() {
           configuration is this" and it changes the moment you switch above.
           This is what the retired Config tab's subtitle was doing — said in
           the heading rather than in a legend. */}
-      <Text className="mb-2 mt-8 px-4 font-narrow text-micro uppercase tracking-[0.18em] text-mute">
+      <Text className="mb-2 mt-8 px-5 font-narrow text-micro uppercase tracking-[0.18em] text-mute">
         {org ?? "This server"}
       </Text>
       <View className="px-2">
@@ -122,7 +122,7 @@ export default function You() {
 
       {/* **This phone's**, and it survives every server in the list going
           away. The theme is here for exactly that reason. */}
-      <Text className="mb-2 mt-8 px-4 font-narrow text-micro uppercase tracking-[0.18em] text-mute">
+      <Text className="mb-2 mt-8 px-5 font-narrow text-micro uppercase tracking-[0.18em] text-mute">
         This phone
       </Text>
       <ThemeControl />
