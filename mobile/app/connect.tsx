@@ -194,7 +194,7 @@ function Primary({
     <Pressable
       onPress={onPress}
       disabled={disabled || busy}
-      className={`mt-3 h-13 flex-row items-center justify-center gap-2 rounded-xl ${
+      className={`mt-3 h-13 flex-row items-center justify-center gap-2 rounded-action ${
         disabled ? "bg-raise" : "bg-bone"
       }`}
       style={{ height: 52 }}
@@ -213,6 +213,37 @@ function Primary({
   );
 }
 
+/**
+ * Two questions, asked in order and never at the same time.
+ *
+ * **Where it is**, then **who you are there** — and only the first has an
+ * answer that is the same for everybody at a company. Knowing it is what lets
+ * the app name *whose* Firetower you are about to hand a password to, because
+ * `/bootstrap` is unauthenticated and answers with the organisation before
+ * anybody types.
+ *
+ * Said once at the top rather than numbered on every screen: the content
+ * already says which one you are on, and a step counter repeated six times is
+ * chrome pretending to be progress.
+ */
+function Steps({ on }: { on: 0 | 1 }) {
+  const { color } = useTheme();
+  return (
+    <View className="mb-7 flex-row items-center gap-1.5">
+      {[0, 1].map((n) => (
+        <View
+          key={n}
+          className="h-[3px] w-[22px] rounded-sm"
+          style={{ backgroundColor: n <= on ? color.settling : color.line }}
+        />
+      ))}
+      <Text className="ml-1 font-sans text-meta text-mute">
+        {on ? "Who you are" : "Where it is"}
+      </Text>
+    </View>
+  );
+}
+
 function Where({
   typed,
   onTyped,
@@ -227,8 +258,9 @@ function Where({
 
   return (
     <View>
+      <Steps on={0} />
       <View className="mb-8 items-center">
-        <View className="h-14 w-14 items-center justify-center rounded-2xl border border-line bg-raise">
+        <View className="h-14 w-14 items-center justify-center rounded-plate border border-line bg-raise">
           <Mark size={30} />
         </View>
         <Text className="mt-5 font-semibold text-display text-bone">Connect to a Firetower</Text>
@@ -410,6 +442,7 @@ function Who({
 
   return (
     <View>
+      <Steps on={1} />
       <View className="mb-7 items-center">
         <View className="h-12 w-12 items-center justify-center rounded-2xl border border-sage-deep bg-sage-tint">
           <Lock color={color.sage} size={21} />

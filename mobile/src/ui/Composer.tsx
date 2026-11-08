@@ -71,7 +71,7 @@ import { AttachMenu } from "~/ui/AttachMenu";
 import { Waveform } from "~/ui/Waveform";
 import { useDictation } from "~/ui/useDictation";
 import { takeDraft } from "~/workspace/draft";
-import { size } from "~/design/tokens.generated";
+import { radius, size } from "~/design/tokens.generated";
 import { useTheme } from "~/design/theme";
 
 /**
@@ -90,8 +90,13 @@ const PAD = Platform.OS === "ios" ? 14 : 18;
 /** `--ease-swift`, and the web build's duration — in-content motion. */
 const SWIFT = { duration: 200, easing: Easing.bezier(0.16, 1, 0.3, 1) };
 
-const PILL = 28;
-const CARD = 26;
+/* 26 at rest and 22 open, which is `--radius-pill` and `--radius-box`. These
+   were 28 and 26 — a point and four points off the drawing, and off the only
+   other composer in the app, because they were written here before the phone
+   had a radius vocabulary to name them with. Read from the tokens rather than
+   restated, so the two boxes cannot drift apart again. */
+const PILL = radius.pill;
+const CARD = radius.box;
 
 /**
  * How far it sits from the edges, at rest and open.

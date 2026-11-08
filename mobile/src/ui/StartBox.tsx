@@ -24,14 +24,16 @@
  * send. That rule is `Composer`'s and this keeps it, because a person moving
  * between the two boxes should not have to learn a second one.
  */
-import { useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from "react-native";
-import { ArrowUp, ChevronDown, FolderGit2, Mic, Monitor, Paperclip } from "lucide-react-native";
+import { ArrowUp, ChevronDown, FolderGit2, Mic, Monitor, Paperclip, Sparkles, UserRound } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { useTheme } from "~/design/theme";
 import { size } from "~/design/tokens.generated";
 
 /** One unmade decision. `want` draws it as an invitation rather than a value. */
+/** One still-open choice about what will run. */
+export type Pick_ = { id: "agent" | "model"; label: string; onPress: () => void };
+
 export type Chip = {
   id: string;
   label: string;
@@ -85,6 +87,7 @@ export function StartBox({
   onStart,
   starting,
   chips,
+  picks,
   onDictate,
   onAttach,
 }: {
@@ -93,11 +96,12 @@ export function StartBox({
   onStart: () => void;
   starting?: boolean;
   chips: Chip[];
+  /** What the session will run, while that is still unsettled. */
+  picks: Pick_[];
   onDictate?: () => void;
   onAttach?: () => void;
 }) {
   const { color } = useTheme();
-  const [focused, setFocused] = useState(false);
   const ready = value.trim().length > 0;
 
   return (
@@ -120,7 +124,15 @@ export function StartBox({
       <Shelf chips={chips} />
 
       <View
-        className="mx-5 flex-row items-center gap-2 rounded-pill bg-float py-1.5 pl-5 pr-1.5"
+        /**
+         * **The home's box is the card, always.** The workspace composer is a
+         * pill at rest and a card to write in, because there a conversation is
+         * the screen and the box is furniture until you reach for it. Here the
+         * box *is* the screen's purpose — the drawing has it open at every one
+         * of the seven home states — so it does not morph and there is nothing
+         * to morph from.
+         */
+        className="mx-3 gap-3 rounded-box bg-float px-3 pb-2.5 pt-4"
         style={{
           /* Lit from above. React Native has no inset shadow, so per-side
              border colours say the same thing in one hairline — the box reads
@@ -144,18 +156,16 @@ export function StartBox({
           testID="start-text"
           value={value}
           onChangeText={onChange}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
           placeholder="Start something new…"
           placeholderTextColor={color.mute}
           /* `⏎` is a newline and the button sends. Inverting that on a phone
              loses half the messages people write. */
           multiline
-          className="min-w-0 flex-1 font-sans text-bone"
-          style={{ fontSize: size.read, maxHeight: size.read * 1.6 * 5, paddingTop: 6, paddingBottom: 6 }}
+          className="px-1.5 font-sans text-bone"
+          style={{ fontSize: size.read, maxHeight: size.read * 1.6 * 6, paddingTop: 0, paddingBottom: 0 }}
         />
 
-        {onAttach && focused ? (
+        <View className="flex-row items-center gap-1.5">
           <Pressable
             testID="start-attach"
             onPress={onAttach}
@@ -164,34 +174,67 @@ export function StartBox({
           >
             <Paperclip color={color.mute} size={19} />
           </Pressable>
-        ) : null}
 
-        {starting ? (
-          <View className="h-10 w-10 items-center justify-center">
-            <ActivityIndicator color={color.mute} />
-          </View>
-        ) : ready ? (
-          <Pressable
-            testID="start-send"
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-              onStart();
-            }}
-            className="h-10 w-10 items-center justify-center rounded-full bg-bone"
-            hitSlop={6}
+          {/* The decisions that are still open, and **the row scrolls**: two
+              pickers do not fit beside a paperclip and a send button at 390,
+              and which pickers exist is not ours to fix at two. They open the
+              form that collects them, the same way the shelf above does —
+              drawn as what they are rather than as a control that does
+              nothing, which is what these were on the desk for a while. */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            className="min-w-0 flex-1"
+            contentContainerStyle={{ gap: 2, alignItems: "center" }}
           >
-            <ArrowUp color={color.ground} size={20} />
-          </Pressable>
-        ) : (
-          <Pressable
-            testID="start-dictate"
-            onPress={onDictate}
-            className="h-[38px] w-[38px] items-center justify-center rounded-full"
-            hitSlop={6}
-          >
-            <Mic color={color.mute} size={19} />
-          </Pressable>
-        )}
+            {picks.map((pick) => (
+              <Pressable
+                key={pick.id}
+                testID={`start-pick-${pick.id}`}
+                onPress={pick.onPress}
+                className="h-[34px] flex-row items-center gap-1.5 px-1.5"
+              >
+                {pick.id === "agent" ? (
+                  <UserRound color={color.mute} size={14} />
+                ) : (
+                  <Sparkles color={color.mute} size={14} />
+                )}
+                <Text numberOfLines={1} className="font-sans text-dim" style={{ fontSize: size.ui }}>
+                  {pick.label}
+                </Text>
+                <ChevronDown color={color.mute} size={13} />
+              </Pressable>
+            ))}
+          </ScrollView>
+
+          {starting ? (
+            <View className="h-10 w-10 items-center justify-center">
+              <ActivityIndicator color={color.mute} />
+            </View>
+          ) : ready ? (
+            <Pressable
+              testID="start-send"
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                onStart();
+              }}
+              className="h-10 w-10 items-center justify-center rounded-full bg-bone"
+              hitSlop={6}
+            >
+              <ArrowUp color={color.ground} size={20} />
+            </Pressable>
+          ) : (
+            <Pressable
+              testID="start-dictate"
+              onPress={onDictate}
+              className="h-10 w-10 items-center justify-center rounded-full"
+              hitSlop={6}
+            >
+              <Mic color={color.mute} size={19} />
+            </Pressable>
+          )}
+        </View>
       </View>
     </View>
   );

@@ -60,7 +60,7 @@ export function Approval({ asked, onAnswer }: { asked: Asked; onAnswer: (yes: bo
   };
 
   return (
-    <View className="mx-3 mb-2 overflow-hidden rounded-lg border border-ember-deep bg-ember-tint">
+    <View className="mx-3 mb-2 overflow-hidden rounded-ask border border-ember-deep bg-ember-tint">
       <View className="gap-3 px-4 pb-4 pt-3.5">
         <Text className="font-narrow text-micro uppercase tracking-[0.18em] text-ember-soft">
           {WHAT[asked.kind]}
@@ -76,13 +76,13 @@ export function Approval({ asked, onAnswer }: { asked: Asked; onAnswer: (yes: bo
         <View className="mt-1 flex-row gap-3">
           <Pressable
             onPress={() => press(false)}
-            className="h-12 flex-1 items-center justify-center rounded-md border border-line bg-ground"
+            className="h-12 flex-1 items-center justify-center rounded-field border border-line bg-ground"
           >
             <Text className="font-medium text-ui text-text">No</Text>
           </Pressable>
           <Pressable
             onPress={() => press(true)}
-            className="h-12 flex-1 items-center justify-center rounded-md bg-ember"
+            className="h-12 flex-1 items-center justify-center rounded-field bg-ember"
           >
             <Text className="font-semibold text-ui text-ground">Allow</Text>
           </Pressable>

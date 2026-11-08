@@ -186,22 +186,9 @@ export function Overview({
         </View>
       ) : null}
 
-      {/* The live thing, above the record of what came out. Slate rather than
-          mute, because it is the panel that moves while you watch it. */}
-      {plan.length > 0 ? (
-        <View className="border-b border-line-soft bg-panel pb-3">
-          <Legend lit note={`${done} / ${plan.length} · live`}>
-            Plan
-          </Legend>
-          {plan.map((s, i) => (
-            <Step key={`${i}-${s.step}`} step={s} />
-          ))}
-        </View>
-      ) : null}
-
       {artifacts.length > 0 || links.length > 0 ? (
         <View className="pb-4">
-          <Legend>Artifacts &amp; links</Legend>
+          <Legend>Made</Legend>
           {artifacts.map((a) => (
             <Pressable
               key={a.id}
@@ -228,6 +215,23 @@ export function Overview({
           ))}
         </View>
       ) : null}
+      {/* Last, and the drawing puts it there on purpose: **Team, Made, Plan**.
+          The record of what came out sits above the thing still being worked
+          on, because *what has this produced* is the question somebody opens
+          this panel to answer and the plan is already narrated in the
+          transcript beside it. Slate rather than mute, because it is the one
+          panel that moves while you watch it. */}
+      {plan.length > 0 ? (
+        <View className="border-b border-line-soft bg-panel pb-3">
+          <Legend lit note={`${done} / ${plan.length} · live`}>
+            Plan
+          </Legend>
+          {plan.map((s, i) => (
+            <Step key={`${i}-${s.step}`} step={s} />
+          ))}
+        </View>
+      ) : null}
+
     </View>
   );
 }

@@ -125,7 +125,7 @@ export function AttachMenu({
         entering={open}
         exiting={shut}
         style={{ transformOrigin: "bottom left", zIndex: 46 }}
-        className="mb-2 ml-3 w-64 overflow-hidden rounded-3xl border border-line bg-float py-2"
+        className="mb-2 ml-3 w-64 overflow-hidden rounded-pop border border-line bg-float py-2"
       >
         {WAYS.map(({ id, label, hint, icon: Icon, run }) => (
           <Pressable

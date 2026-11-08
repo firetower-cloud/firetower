@@ -124,7 +124,7 @@ function Said({ item }: { item: Item }) {
      the column reads as the agent's, which is the one thing this has to avoid. */
   return (
     <View className="my-2 items-end">
-      <View className="max-w-[86%] rounded-lg bg-raise px-3.5 py-2.5">
+      <View className="max-w-[86%] rounded-said bg-raise px-3.5 py-2.5">
         {/* The fold has carried these since the beginning and nothing drew
             them: a screenshot sent from this app appeared on the desk and
             nowhere in the app that sent it. `base64` straight into `Image`,

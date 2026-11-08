@@ -46,13 +46,13 @@ import { useListArtifacts } from "~/api/generated/artifacts/artifacts";
 import type { Session } from "~/api/generated/model";
 import { group, lead, type Workspace } from "~/api/workspaces";
 import { elapsed, minutesSince, needsYou } from "~/api/view";
-import { useRepos, useSessions } from "~/data";
+import { useAgents, useRepos, useSessions } from "~/data";
 import { useServer } from "~/native/current";
 import { ServerChip } from "~/ui/ServerChip";
 import { ArtifactCard } from "~/ui/ArtifactCard";
 import { Peek, usePeekGesture } from "~/ui/Peek";
 import { Servers } from "~/ui/Servers";
-import { StartBox, type Chip } from "~/ui/StartBox";
+import { StartBox, type Chip, type Pick_ } from "~/ui/StartBox";
 import { Waiting } from "~/ui/Waiting";
 import { COLUMN, dottedChips, posterColumns } from "~/ui/measure";
 import { usePose } from "~/ui/pose";
@@ -137,6 +137,7 @@ export default function Home() {
 
   const { data: sessions, loading, error } = useSessions();
   const { data: repos } = useRepos();
+  const { data: agents } = useAgents();
   const { data: artifacts = [] } = useListArtifacts();
 
   const [draft, setDraft] = useState("");
@@ -353,9 +354,19 @@ export default function Home() {
     </>
   );
 
+  /* What will run, while it is still unsettled. The drawing puts these in the
+     composer's control row rather than on the shelf: the shelf carries *where*
+     the work happens — a repository and a machine — and these carry *what does
+     it*. They open the form that collects them, same as the shelf chips. */
+  const picks: Pick_[] = [
+    { id: "agent", label: "Just an agent", onPress: () => router.push("/new") },
+    { id: "model", label: agents[0]?.label ?? "Choose an agent", onPress: () => router.push("/new") },
+  ];
+
   const box = (
     <StartBox
       value={draft}
+      picks={picks}
       onChange={setDraft}
       /* The shelf cannot carry a task's key and URL, so starting still goes
          through the form — seeded with what has been typed. */

@@ -38,7 +38,7 @@ export function ArtifactCard({ artifact, onOpen }: { artifact: Artifact; onOpen:
 
   return (
     <Pressable testID="artifact-card" onPress={onOpen} className="mt-4" android_ripple={{ color: color.overlay }}>
-      <View className="w-full overflow-hidden rounded-md border border-line bg-float" style={{ aspectRatio: RATIO }}>
+      <View className="w-full overflow-hidden rounded-card border border-line bg-float" style={{ aspectRatio: RATIO }}>
         {showing ? (
           <Image
             /* The bytes are fetched by `Image` rather than carried through
