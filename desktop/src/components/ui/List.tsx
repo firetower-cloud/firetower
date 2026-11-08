@@ -1,6 +1,4 @@
 import Link from "~/shims/next-link";
-import type { LucideIcon } from "lucide-react";
-import { Icon } from "./Icon";
 
 /**
  * A list of things, all at the same rhythm.
@@ -79,23 +77,13 @@ export function Row({
   );
 }
 
-/** Nothing here yet, or nothing matched: an icon, one line, one way forward. */
-export function Empty({
-  icon,
-  children,
-  action,
-}: {
-  icon: LucideIcon;
-  children: React.ReactNode;
-  action?: React.ReactNode;
-}) {
-  return (
-    <div className="flex flex-col items-center rounded-lg border border-dashed border-line px-5 py-12 text-center">
-      <span className="text-mute">
-        <Icon of={icon} size={20} />
-      </span>
-      <p className="mt-3 text-ui text-dim">{children}</p>
-      {action && <div className="mt-4">{action}</div>}
-    </div>
-  );
-}
+/* ── What a list says when it has nothing to say ───────────────────────
+   **`Empty` is gone, and it was the dashed box.** A dashed border round
+   nothing says *drop something here* or *this failed to load*, and it was the
+   only border on the page, which made the void the loudest object on it. No
+   screen in `desktop/src` ever pointed at it. There are two shapes for an
+   empty list now and both live in `ui/config/bits.tsx`: `Blank` for a page
+   whose body has nothing in it, and `Note` for a page that has content, one
+   part of which is empty.
+
+   `web/components/ui/List.tsx` keeps its twin until the web client is done. */

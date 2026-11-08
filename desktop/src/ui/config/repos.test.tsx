@@ -10,7 +10,7 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Repos } from "./Repos";
+import { connectChoices, Repos } from "./Repos";
 import { getListReposQueryKey } from "~/api/generated/repos/repos";
 import {
   getListKindsQueryKey,
@@ -107,14 +107,23 @@ describe("the empty state", () => {
    * and the copy must not greet the first person as though it had.
    */
   it("greets a fresh install without inventing colleagues", () => {
-    const html = draw({
-      hosts: [host({ connected: false }), gitlab({ id: "gitlab", label: "GitLab", builtin: true, gitHost: "gitlab.com", connected: false })],
-      repos: [],
-    });
-    expect(html).toContain("Pick a git host to start from");
-    expect(html).not.toContain("Your colleagues set these up");
-    expect(html).toContain("GitHub");
-    expect(html).toContain("GitLab");
+    const hosts = [
+      host({ connected: false }),
+      gitlab({ id: "gitlab", label: "GitLab", builtin: true, gitHost: "gitlab.com", connected: false }),
+    ];
+    const html = draw({ hosts, repos: [] });
+    expect(html).toContain("No repository yet");
+    expect(html).toContain("Connect a git host and import what you want to work on.");
+    expect(html).not.toContain("Your colleagues added these hosts");
+    /* Both still on offer. They are rows in the blank's one menu now rather
+       than three brand buttons, so the assertion is about what the menu
+       holds — a closed menu renders nothing. */
+    expect(connectChoices(hosts).map((c) => c.label)).toEqual([
+      "GitHub",
+      "GitLab",
+      "Paste a URL",
+      "Add a host",
+    ]);
   });
 
   /**
@@ -123,13 +132,15 @@ describe("the empty state", () => {
    * needs *those* — a generic "GitLab" would send them to gitlab.com.
    */
   it("names the hosts somebody already added rather than their kinds", () => {
-    const html = draw({
-      hosts: [host({ connected: false }), gitlab({ connected: false })],
-      repos: [],
-    });
+    const hosts = [host({ connected: false }), gitlab({ connected: false })];
+    const html = draw({ hosts, repos: [] });
     expect(html).toContain("Connect a git host");
-    expect(html).toContain("Your colleagues set these up");
-    expect(html).toContain("GitLab (internal)");
+    expect(html).toContain("Your colleagues added these hosts. You sign in with your own account.");
+    /* The name a colleague gave it, and the address beneath — not "GitLab",
+       which would send somebody to gitlab.com. */
+    expect(connectChoices(hosts)).toContainEqual(
+      expect.objectContaining({ label: "GitLab (internal)", note: "git.acme.internal" }),
+    );
   });
 
   /**
@@ -151,18 +162,17 @@ describe("the empty state", () => {
     });
 
     // Not the "connect something" screen.
-    expect(html).not.toContain("Pick a git host to start from");
+    expect(html).not.toContain("No repository yet");
     expect(html).not.toContain("Connect a git host");
 
     // The import list, for the host that is actually connected.
     expect(html).toContain("Not imported yet on GitLab (internal)");
     expect(html).toContain("platform/infra/deploy");
-    /* And the empty upper list says so plainly rather than vanishing — with
-       the heading the drawing gives it, and a sentence that fits *this*
-       state: a host is connected, so "connect a git host" would be advice for
-       a problem this reader does not have. */
-    expect(html).toContain("No repository yet");
-    expect(html).toContain("Import one below");
+    /* And the empty upper list says so in one line rather than vanishing, or
+       taking the whole page: the screen is not empty, one section of it is.
+       It keeps the heading the drawing gives it and its count. */
+    expect(html).toContain("Checked out");
+    expect(html).toContain("Nothing imported yet. Take one from the list below.");
   });
 
   /**
@@ -176,12 +186,19 @@ describe("the empty state", () => {
     });
     expect(html).toContain("Connect a git host");
     expect(html).not.toContain("Available on");
+    /* **And nothing else.** One action, zero links, zero banners: the two
+       routes that were small print under the buttons are rows in the menu. */
+    expect(html).not.toContain("Add custom hosts");
+    expect(html).not.toContain("Self-hosted or enterprise");
   });
 
   /** The dead end. Pasting stays available; it is no longer the only thing. */
   it("is never only a paste box", () => {
-    const html = draw({ hosts: [host({ connected: false })], repos: [] });
-    expect(html).toContain("paste a URL");
+    const hosts = [host({ connected: false })];
+    const html = draw({ hosts, repos: [] });
+    expect(connectChoices(hosts).map((c) => c.label)).toContain("Paste a URL");
+    // The host it can actually sign into comes first, and pasting is not it.
+    expect(connectChoices(hosts)[0].label).toBe("GitHub");
     // The paste box itself is not drawn until somebody asks for it.
     expect(html).not.toContain("git@github.com:acme/web.git");
   });
@@ -321,8 +338,9 @@ describe("the controls", () => {
     });
     expect(populated).not.toContain("Paste a remote");
 
-    const empty = draw({ hosts: [gitlab({ connected: false })], repos: [] });
-    expect(empty).toContain("paste a URL");
+    const waiting = [gitlab({ connected: false })];
+    expect(draw({ hosts: waiting, repos: [] })).toContain("Connect a git host");
+    expect(connectChoices(waiting).map((c) => c.label)).toContain("Paste a URL");
   });
 });
 

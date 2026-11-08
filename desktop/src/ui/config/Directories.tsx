@@ -75,6 +75,23 @@ export function Directories() {
     }
   };
 
+  const blank = !loading && !feed.trouble && !error && data.length === 0;
+
+  /* The page's one primary action, written once: the head wears it when
+     there is a list, and the blank wears it when there is not. */
+  const blankAction = (
+    <button
+      onClick={() => {
+        setAdding((v) => !v);
+        setTrouble(null);
+      }}
+      className="btn primary"
+    >
+      <Icon of={Plus} size={14} />
+      New directory
+    </button>
+  );
+
   return (
     <Section
       title="Directories"
@@ -82,18 +99,9 @@ export function Directories() {
       settling={loading}
       trouble={feed.trouble}
       error={error}
-      action={
-        <button
-          onClick={() => {
-            setAdding((v) => !v);
-            setTrouble(null);
-          }}
-          className="btn primary"
-        >
-          <Icon of={Plus} size={14} />
-          New directory
-        </button>
-      }
+      /* **Not over the blank**, whose own button is the same action with the
+         sentence that explains it. */
+      action={blank ? undefined : blankAction}
     >
       {adding && (
         <div className="inline-form flex-col items-stretch gap-2">
@@ -125,8 +133,9 @@ export function Directories() {
       )}
 
       <Group>
-      <Rows feed={{ data, loading, error }} empty="No directories yet"
-        note="Make one and file things into it. Whoever makes a directory administers it.">
+      <Rows feed={{ data, loading, error }} icon={FolderOpen} empty="No directories yet"
+        note="Make one and file things into it. Whoever makes a directory administers it."
+        action={blankAction}>
         {data.map((d) => (
           <One
             key={d.id}
@@ -139,11 +148,16 @@ export function Directories() {
       </Rows>
       </Group>
 
-      <WhereTo>
-        <b>A grant is not an exception.</b> Letting one person into one workspace is the sharing
-        sheet&rsquo;s job, and the two are kept apart on purpose — they were one flat list once and
-        read as equivalents, which they are not. An exception can never be <i>Admin</i>.
-      </WhereTo>
+      {/* Never beside a blank: the difference between a grant and an
+          exception is about operating directories this reader does not have
+          yet, and the blank has one sentence and one button. */}
+      {!blank && (
+        <WhereTo>
+          <b>A grant is not an exception.</b> Letting one person into one workspace is the sharing
+          sheet&rsquo;s job, and the two are kept apart on purpose — they were one flat list once
+          and read as equivalents, which they are not. An exception can never be <i>Admin</i>.
+        </WhereTo>
+      )}
     </Section>
   );
 }

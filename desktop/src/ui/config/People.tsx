@@ -13,12 +13,12 @@
  * the seat; changing is not.
  */
 import { useState } from "react";
-import { Search } from "lucide-react";
+import { Search, UserRound } from "lucide-react";
 import { useListColleagues } from "~/api/generated/access/access";
 import { useMe } from "~/api/generated/auth/auth";
 import type { Backend } from "~/fleet";
 import { Avatar } from "~/components/ui";
-import { Group, ManageOnTheWeb, Rows, Section, WhereTo } from "~/ui/config/bits";
+import { Group, ManageOnTheWeb, Note, Rows, Section, Typed, WhereTo } from "~/ui/config/bits";
 import { trouble, why } from "~/data";
 
 export function People({ backend }: { backend: Backend }) {
@@ -26,6 +26,9 @@ export function People({ backend }: { backend: Backend }) {
   const me = useMe();
   const [find, setFind] = useState("");
   const shown = (q.data ?? []).filter((p) => p.username.toLowerCase().includes(find.trim().toLowerCase()));
+  /* Nothing there, and nothing wrong. Narrowed to nothing is not this state —
+     there *are* people — and it gets a `Note` instead. */
+  const blank = !q.isPending && !q.error && (q.data ?? []).length === 0;
 
   return (
     <Section
@@ -36,7 +39,10 @@ export function People({ backend }: { backend: Backend }) {
       error={q.error ? why(q.error) : null}
       action={
         <>
-          <Find value={find} onChange={setFind} />
+          {/* **Not over the blank.** There is nothing to narrow, and the one
+              way out stays: the blank's own sentence names where an account
+              is made. */}
+          {!blank && <Find value={find} onChange={setFind} />}
           <ManageOnTheWeb url={backend.url} may={me.data?.user?.role === "admin"} />
         </>
       }
@@ -44,8 +50,24 @@ export function People({ backend }: { backend: Backend }) {
       <Group>
         <Rows
           feed={{ data: shown, loading: q.isPending, error: q.error ? why(q.error) : null }}
-          empty={find ? "Nobody by that name" : "Nobody else yet"}
-          note={find ? undefined : "Accounts are made on the administration site."}
+          icon={UserRound}
+          empty={
+            find ? (
+              <Note
+                icon={Search}
+                control={
+                  <button onClick={() => setFind("")} className="btn quiet">
+                    Clear
+                  </button>
+                }
+              >
+                Nobody here is called <Typed>{find.trim()}</Typed>.
+              </Note>
+            ) : (
+              "Nobody else yet"
+            )
+          }
+          note="Accounts are made on the administration site."
         >
           {shown.map((p) => (
             <div key={p.id} className="r">
@@ -62,12 +84,18 @@ export function People({ backend }: { backend: Backend }) {
 
       {/* The line that keeps a reader's screen from reading as withheld. The
           roles and the invite control are not drawn and not greyed; this says
-          where they are. */}
-      <WhereTo>
-        This is the list the sharing sheet reads from. To <b>invite somebody, change a role, or
-        disable an account</b>, use the administration site — those outlive every piece of work, so
-        they are the organisation&rsquo;s rather than this seat&rsquo;s.
-      </WhereTo>
+          where they are.
+
+          **Never beside a blank**, though: a paragraph about changing roles
+          and disabling accounts is about operating a list this reader does not
+          have, and the blank's own sentence already names the place. */}
+      {!blank && (
+        <WhereTo>
+          This is the list the sharing sheet reads from. To <b>invite somebody, change a role, or
+          disable an account</b>, use the administration site — those outlive every piece of work,
+          so they are the organisation&rsquo;s rather than this seat&rsquo;s.
+        </WhereTo>
+      )}
     </Section>
   );
 }

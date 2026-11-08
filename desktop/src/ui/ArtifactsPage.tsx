@@ -23,6 +23,7 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, LayoutGrid, MoreHorizontal, Rows3, Search, Shapes, Sparkles } from "lucide-react";
+import { Blank, Note, Typed } from "~/ui/config/bits";
 import {
   useListArtifacts,
   deleteArtifact,
@@ -161,12 +162,31 @@ export function ArtifactsPage({ open: asked = null }: { open?: string | null }) 
      somewhere, and the heading is the one thing that is true either way. */
   if (isPending) return <Pane>{<p className="mt-8 text-read text-mute">Reading what you have published…</p>}</Pane>;
   if (error) return <Pane>{<p className="mt-8 text-read text-brick">{why(error) ?? "Could not read your artifacts."}</p>}</Pane>;
+  /* **The one blank in the set whose button is plain and not filled.** This
+     page fills up as a *consequence* of work, so empty here is ordinary, and
+     the weight of the one button is where that is said. A filled primary over
+     an empty Artifacts reads as a chore nobody set. */
   if (everything.length === 0)
     return (
       <Pane>
-        <Nothing title="Nothing published yet" onAsk={() => start({ prompt: "Make me an artifact that " })}>
-          Ask an agent for a chart, a mock-up or a report and it appears here.
-        </Nothing>
+        <Blank
+          icon={Shapes}
+          /* The gallery's own object rather than a row: this page is a grid,
+             and the poster is the card with the name on the paper under it. */
+          shape="card"
+          title="Nothing published yet"
+          action={
+            <button
+              onClick={() => start({ prompt: "Make me an artifact that " })}
+              className="btn plain"
+            >
+              <Sparkles className="h-[15px] w-[15px]" strokeWidth={1.75} />
+              Ask for one
+            </button>
+          }
+        >
+          Ask an agent for a chart, a mock-up or a report.
+        </Blank>
       </Pane>
     );
 
@@ -279,17 +299,36 @@ export function ArtifactsPage({ open: asked = null }: { open?: string | null }) 
           </span>
         </div>
 
+        {/* **A `Note`, and the real instance of the bug.** This drew the full
+            centred plate *and* the filled *Ask for one*, so searching for a
+            word you do not have read as an onboarding screen. The page is not
+            empty; one scope of it is, and the thing that emptied it is a
+            control the reader changed.
+
+            `Clear` only where a *typed* string caused it. The pills announce
+            their own state and `All` is beside them, so a pill-caused note
+            carries no control. */}
         {showing.length === 0 ? (
-          <Nothing
-            title={query.trim() ? "Nothing matches" : scope === "shared" ? "Nothing shared yet" : "Nothing of your own"}
-            onAsk={() => start({ prompt: "Make me an artifact that " })}
+          <Note
+            icon={query.trim() ? Search : Shapes}
+            control={
+              query.trim() ? (
+                <button onClick={() => setQuery("")} className="btn quiet">
+                  Clear
+                </button>
+              ) : undefined
+            }
           >
-            {query.trim()
-              ? `No artifact is called “${query.trim()}”.`
-              : scope === "shared"
-                ? "Move one into a directory with the share control and everybody there can reach it."
-                : "Everything here is filed in a directory rather than at your own root."}
-          </Nothing>
+            {query.trim() ? (
+              <>
+                Nothing here is called <Typed>{query.trim()}</Typed>.
+              </>
+            ) : scope === "shared" ? (
+              "Nothing has been shared with you yet."
+            ) : (
+              "Everything you can see is filed in a directory."
+            )}
+          </Note>
         ) : look === "grid" ? (
           <div className="gal">
             {showing.map((a) => (
@@ -433,31 +472,5 @@ function Line({
         <MoreHorizontal className="h-3.5 w-3.5" strokeWidth={1.75} />
       </span>
     </button>
-  );
-}
-
-/**
- * The first thing anybody sees here, and for a while the only thing.
- *
- * A sentence of grey text floating in the middle of a window reads as a screen
- * that failed to load. It gets the section's own glyph, a line saying what the
- * screen is, a line saying how to make something appear — and the same primary
- * action the full screen has, because that is the only thing to do here.
- */
-function Nothing({ title, children, onAsk }: { title: string; children: React.ReactNode; onAsk: () => void }) {
-  return (
-    <div className="grid place-items-center px-0 pt-[110px] pb-20 text-center">
-      <div className="max-w-[40ch]">
-        <span className="mx-auto grid h-[54px] w-[54px] place-items-center rounded-2xl bg-raise text-mute">
-          <Shapes className="h-6 w-6" strokeWidth={1.5} />
-        </span>
-        <h2 className="mt-5 text-display font-mid text-bone">{title}</h2>
-        <p className="mt-2 text-read leading-relaxed text-dim">{children}</p>
-        <button onClick={onAsk} className="btn primary mt-5">
-          <Sparkles className="h-[15px] w-[15px]" strokeWidth={1.75} />
-          Ask for one
-        </button>
-      </div>
-    </div>
   );
 }

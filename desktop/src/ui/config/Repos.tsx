@@ -29,11 +29,13 @@
  * install, which is the price of the default being the true answer rather
  * than whichever host happened to sort first.
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueries, useQueryClient } from "@tanstack/react-query";
 import {
+  ArrowUpRight,
   Check,
   ChevronDown,
+  FolderGit2,
   Link2,
   Loader2,
   Lock,
@@ -60,7 +62,8 @@ import {
 } from "~/api/generated/providers/providers";
 import { useHostOf, useProviders, useRepos, why } from "~/data";
 import { navigate } from "~/shims/next-navigation";
-import { Group, Rows, Section } from "~/ui/config/bits";
+import { Blank, Group, Note, Rows, Section, Typed } from "~/ui/config/bits";
+import { CreateMenu } from "~/ui/config/CreateMenu";
 import { useConnect } from "~/ui/config/connect";
 import { AddHost } from "~/ui/config/GitHosts";
 import { Pop } from "~/ui/Pop";
@@ -156,8 +159,12 @@ export function Repos({ live, open: asked = null }: { live: boolean; open?: stri
       trouble={repos.trouble ?? providers.trouble}
       error={repos.error ?? providers.error}
       onRetry={() => void cache.invalidateQueries({ queryKey: getListReposQueryKey() })}
+      /* **Not over the blank.** Adding a host is one of the rows inside the
+         blank's own menu while nothing is connected, and the same verb twice
+         on a screen with one sentence on it is one too many. It comes back
+         the moment there is a list to add to. */
       action={
-        live ? (
+        live && !bare ? (
           <button
             onClick={() => setAdding(true)}
             className="btn plain"
@@ -192,41 +199,69 @@ export function Repos({ live, open: asked = null }: { live: boolean; open?: stri
     >
       {adding && <AddHost onClose={() => setAdding(false)} />}
       {bare ? (
-        <Start hosts={providers.data} loading={providers.loading} onPaste={() => setFrom(PASTE)} />
+        <Start
+          hosts={providers.data}
+          loading={providers.loading}
+          onPaste={() => setFrom(PASTE)}
+          onAddHost={() => setAdding(true)}
+        />
       ) : (
         <div>
           {pasting ? (
             <Paste onDone={() => setFrom(ALL)} onCancel={() => setFrom(ALL)} />
           ) : (
             <>
+              {/* **Through `Rows`.** This read `repos.data` straight and never
+                  looked at `repos.error`, so a server answering 503 drew
+                  "Nothing imported yet" — a refusal rendered as an empty
+                  list, which is the worst of the five possible lies. */}
+              <Rows
+                feed={repos}
+                /* **A `Note`, never a `Blank`.** The screen is not empty; one
+                   section of it is, and a centred plate here would say the
+                   page had failed. Which note is which cause: a typed query,
+                   a host the reader narrowed to, or a connected host nothing
+                   has been taken from yet.
+
+                   **And with a query, the heading goes with it.** Three
+                   headings each reading 0 with a line under them are three
+                   lies about one fact, so the count collapses into the one
+                   line that names the cause — `Available` below does the same
+                   and draws nothing at all. */
+                empty={
+                  needle ? (
+                    /* **The heading goes with it.** Three headings each
+                       reading 0 with a line under them are three lies about
+                       one fact, so the count collapses into the one line that
+                       names the cause — and `Available` below draws nothing
+                       at all for the same reason. */
+                    <Note
+                      icon={Search}
+                      control={
+                        <button onClick={() => setQ("")} className="btn quiet">
+                          Clear
+                        </button>
+                      }
+                    >
+                      No repository matches <Typed>{needle}</Typed>.
+                    </Note>
+                  ) : (
+                    <Group
+                      title="Checked out"
+                      count={0}
+                      empty={
+                        <Note icon={FolderGit2}>
+                          {chosen
+                            ? `Nothing imported from ${chosen.label} yet.`
+                            : "Nothing imported yet. Take one from the list below."}
+                        </Note>
+                      }
+                    />
+                  )
+                }
+                onRetry={() => void cache.invalidateQueries({ queryKey: getListReposQueryKey() })}
+              >
               <Group title="Checked out" count={mine.length}>
-                {/* **Through `Rows`.** This read `repos.data` straight and
-                    never looked at `repos.error`, so a server answering 503
-                    drew "Nothing imported yet" — a refusal rendered as an
-                    empty list, which is the worst of the five possible
-                    lies. */}
-                <Rows
-                  feed={repos}
-                  empty={
-                    needle
-                      ? "Nothing matches that"
-                      : chosen
-                        ? `Nothing imported from ${chosen.label} yet`
-                        : "No repository yet"
-                  }
-                  /* The drawing's copy assumes no host is connected, which is
-                     the state it draws. With one connected, "connect a git
-                     host" is advice for a problem this reader does not have —
-                     the offers are already on the screen below. */
-                  note={
-                    needle || chosen
-                      ? undefined
-                      : connectedHosts.length > 0
-                        ? "Import one below and it becomes something a workspace can be cut from."
-                        : "Connect a git host and import one. This screen can connect a host on its own."
-                  }
-                  onRetry={() => void cache.invalidateQueries({ queryKey: getListReposQueryKey() })}
-                >
                 {mine.map((r) => (
                   <div key={r.id}>
                     <button onClick={() => setOpen(open === r.id ? null : r.id)} className="r">
@@ -251,8 +286,8 @@ export function Repos({ live, open: asked = null }: { live: boolean; open?: stri
                     {open === r.id && live && <Settings repo={r} onGone={() => setOpen(null)} />}
                   </div>
                 ))}
-                </Rows>
               </Group>
+              </Rows>
 
               {showing.length > 0 && (
                 <Available
@@ -269,10 +304,6 @@ export function Repos({ live, open: asked = null }: { live: boolean; open?: stri
       )}
     </Section>
   );
-}
-
-function Quiet({ children }: { children: React.ReactNode }) {
-  return <p className="py-3 text-ui text-mute">{children}</p>;
 }
 
 /* ── What this host can see that you have not taken ────────────────────── */
@@ -370,6 +401,13 @@ function Available({
 
   const where = hosts.length === 1 ? ` on ${hosts[0].label}` : "";
 
+  /* **A query that matched nothing here draws nothing here.** The upper list
+     already carries the one line naming the cause; a second heading reading 0
+     under it is the same fact said twice, and the second time with a count. A
+     host that would not answer still gets its row, because "GitLab did not
+     reply" and "nothing matched" are different answers. */
+  if (needle && !pending && broken.length === 0 && shown.length === 0) return null;
+
   return (
     <>
       <Group
@@ -389,11 +427,7 @@ function Available({
           </p>
         ))}
         {!pending && broken.length === 0 && shown.length === 0 && (
-          <Quiet>
-            {needle
-              ? `Nothing available${where} matches that.`
-              : `Everything${where} is imported.`}
-          </Quiet>
+          <Note icon={FolderGit2}>Everything{where} is imported.</Note>
         )}
         {shown.slice(0, 80).map(({ repo: r, host }) => (
           <div key={`${host.id}:${r.remote}`}>
@@ -425,7 +459,7 @@ function Available({
         ))}
         {shown.length > 80 && (
           <p className="py-2 text-ui text-mute">
-            {shown.length - 80} more — narrow it with the find box.
+            {shown.length - 80} more. Narrow it with the find box.
           </p>
         )}
       </Group>
@@ -596,31 +630,69 @@ function Settings({ repo, onGone }: { repo: Repo; onGone: () => void }) {
 /* ── Nothing connected yet ─────────────────────────────────────────────── */
 
 /**
- * Three empty states, not one.
+ * The page body with nothing in it, and it is still three states rather than
+ * one.
  *
  * Which you get depends on what the installation already has, and only the
  * first is a fresh solo install:
  *
- *   * **nothing added** — the kinds, so a first run has somewhere to press;
- *   * **hosts added, none of them yours** — those hosts *by name*, because a
- *     colleague set them up and a generic "GitLab" button would send somebody
- *     to gitlab.com rather than to the GitLab they actually work on;
- *   * **connected but empty** — not here at all; that is a sentence inside the
- *     lower list, because the screen is not empty, one section of it is.
+ *   * **nothing added** — the sentence says what connecting a host is for;
+ *   * **hosts added, none of them yours** — those hosts are named *in the
+ *     menu*, because a colleague set them up and a generic "GitLab" would
+ *     send somebody to gitlab.com rather than to the GitLab they work on;
+ *   * **connected but empty** — not here at all; that is a `Note` inside the
+ *     upper list, because the screen is not empty, one section of it is.
  *
- * The host's own mark, in the host's own colour. It is the thing people scan
- * for, and this is the one screen where a logo is doing that work rather than
- * sitting in a dense row beside a slug.
+ * **The N brand buttons are one action now, and that costs a press.** They
+ * were doing a real job: the mark is the thing people scan for and three
+ * buttons are the fastest possible first run. But three saturated brand
+ * buttons are also the loudest object in the product, on a screen somebody
+ * sees once, and the rule is one clear call to action. The provider is a
+ * choice *inside* the action, and the two routes that were links under the
+ * button — paste a URL, register a self-hosted host — are rows in the same
+ * menu rather than small print.
  */
+/**
+ * What the blank's one action offers, in order.
+ *
+ * Exported because this is the thing three host buttons used to say out loud
+ * and a closed menu cannot: *these* hosts, by the name a colleague gave them,
+ * with the address that tells two of a kind apart. `repos.test.tsx` reads it,
+ * because a menu that has not been opened renders nothing to assert against
+ * and the fact is worth a test either way.
+ */
+export function connectChoices(
+  hosts: ProviderStatus[],
+): { label: string; note: string; of: ProviderStatus | "paste" | "host" }[] {
+  return [
+    /* The address on the second line, because once there are two of a kind it
+       is the only thing telling them apart — `github.com` beside
+       `ghe.acme.com`. */
+    ...hosts.filter((h) => !h.connected).map((h) => ({ label: h.label, note: h.gitHost, of: h })),
+    /* The two routes that were links in small print under the buttons. A
+       reader with a URL in hand, and a reader whose company runs its own
+       GitLab, are both doing the same thing as the rows above. */
+    { label: "Paste a URL", note: "Anything git can clone.", of: "paste" as const },
+    { label: "Add a host", note: "A self-hosted or enterprise one.", of: "host" as const },
+  ];
+}
+
 function Start({
   hosts,
   loading,
   onPaste,
+  onAddHost,
 }: {
   hosts: ProviderStatus[];
   loading: boolean;
   onPaste: () => void;
+  onAddHost: () => void;
 }) {
+  /* Which host the menu chose, if one has been chosen. `useConnect` is a hook
+     per host, so the flow is a child mounted on the pick rather than a hook
+     whose subject changes underneath it. */
+  const [connecting, setConnecting] = useState<ProviderStatus | null>(null);
+
   if (loading) {
     return (
       <p className="flex items-center gap-2 px-3.5 py-6 text-ui text-mute">
@@ -630,73 +702,61 @@ function Start({
     );
   }
 
-  const waiting = hosts.filter((h) => !h.connected);
-
   /* **A host somebody here added, versus the one that ships.** Every install
      has the built-in GitHub whether anybody chose it or not, so "a host
      exists" cannot be the test for "a colleague set this up" — that would
      greet the very first person on a fresh install as though somebody had
      been here before them. */
-  const theirs = waiting.some((h) => !h.builtin);
+  const theirs = hosts.some((h) => !h.connected && !h.builtin);
 
   return (
-    <div className="px-6 py-9 text-center">
-      <p className="text-title text-bone">
-        {theirs ? "Connect a git host" : "Pick a git host to start from"}
-      </p>
-      <p className="mx-auto mt-1.5 max-w-[46ch] text-ui text-dim">
+    <>
+      <Blank
+        icon={FolderGit2}
+        title="No repository yet"
+        action={
+          <CreateMenu
+            label="Connect a git host"
+            choices={connectChoices(hosts).map(({ label, note, of }) => ({
+              icon: of === "paste" ? Link2 : of === "host" ? Plus : ArrowUpRight,
+              label,
+              note,
+              onPick:
+                of === "paste" ? onPaste : of === "host" ? onAddHost : () => setConnecting(of),
+            }))}
+          />
+        }
+      >
         {theirs
-          ? "Your colleagues set these up. Firetower clones with your own account, so yours is a separate sign-in."
-          : "Firetower clones with your own account, so you choose from what it says you can see."}
-      </p>
-
-      <div className="mx-auto mt-5 flex w-full max-w-[20rem] flex-col gap-2">
-        {waiting.map((h) => (
-          <StartHost key={h.id} host={h} />
-        ))}
-      </div>
-
-      <div className="mt-5 flex flex-col items-center gap-1.5 text-meta text-mute">
-        {/* A link, not a sentence naming a place. This said "add it under Git
-            hosts" and was plain text — so the one screen a new person lands on
-            pointed at somewhere else and left them to find it. */}
-        <span>
-          Self-hosted or enterprise versions?{" "}
-          <button
-            onClick={() => navigate("/configuration/git-hosts")}
-            className="text-dim underline decoration-line underline-offset-2 hover:text-bone"
-          >
-            Add custom hosts
-          </button>
-          .
-        </span>
-        <button onClick={onPaste} className="underline decoration-line underline-offset-2 hover:text-dim">
-          Or paste a URL
-        </button>
-      </div>
-    </div>
+          ? "Your colleagues added these hosts. You sign in with your own account."
+          : "Connect a git host and import what you want to work on."}
+      </Blank>
+      {connecting && <Connecting key={connecting.id} host={connecting} />}
+    </>
   );
 }
 
-/** One host, as a button with its own mark in its own colour. */
-function StartHost({ host }: { host: ProviderStatus }) {
+/**
+ * The host the menu chose, signing in.
+ *
+ * Mounted on the pick and keyed by the host, so the flow starts once and a
+ * second pick is a second flow rather than the first one with its subject
+ * swapped. What it draws is `useConnect`'s own node: a device code over the
+ * screen, or the token field inline.
+ */
+function Connecting({ host }: { host: ProviderStatus }) {
   const connect = useConnect(host);
-
-  /* The address on the right, because once there are two of a kind it is the
-     only thing telling them apart — `github.com` beside `ghe.acme.com`. */
-  return (
-    <div className="overflow-hidden rounded-lg border border-line bg-raise text-left">
-      <button
-        onClick={connect.start}
-        className="flex w-full items-center gap-2.5 px-3.5 py-2.5 hover:bg-overlay"
-      >
-        <HostMark kind={host.kind} size={16} brand />
-        <span className="text-ui font-medium text-bone">{host.label}</span>
-        <span className="ml-auto truncate font-mono text-micro text-mute">{host.gitHost}</span>
-      </button>
-      {connect.node}
-    </div>
-  );
+  const started = useRef(false);
+  useEffect(() => {
+    if (started.current) return;
+    started.current = true;
+    connect.start();
+    /* On mount and never again. `start` is rebuilt every render, so listing it
+       would re-authorize on each one — the ref is the guard either way, and
+       naming the dependency would only make the guard do more work. */
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return <>{connect.node}</>;
 }
 
 /* ── A remote no host can list ─────────────────────────────────────────── */

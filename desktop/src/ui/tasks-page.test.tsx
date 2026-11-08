@@ -112,7 +112,7 @@ describe("a tracker that stops answering for you", () => {
     const revoked = draw([linear(false)], [opening("linear", "ticket"), page(tickets)]);
     expect(revoked).not.toContain("Get familiar with Linear");
     expect(revoked).not.toContain("WES-1");
-    expect(revoked).toContain("isn&#x27;t connected yet");
+    expect(revoked).toContain("Linear is not connected");
   });
 });
 
@@ -166,19 +166,37 @@ describe("which tracker the page asks", () => {
 describe("a tracker with no credential", () => {
   it("offers to connect it instead of reporting an error", () => {
     const html = draw([github(false), linear(false)]);
-    expect(html).toContain("isn&#x27;t connected yet");
+    expect(html).toContain("GitHub is not connected");
     expect(html).toContain("Connect GitHub");
+    // A git host shares the sign-in that pushes commits, and says so.
+    expect(html).toContain("Signing in once covers both its code and its issues.");
     // Nothing was read, so nothing claims to be reading.
     expect(html).not.toContain("Reading ");
     // And nothing offers to narrow a list that was never fetched.
     expect(html).not.toContain("Assigned to me");
     expect(html).not.toContain("Closed");
+    /* **And the headline is the page's name.** It is a status sentence when
+       there are rows, which is two titles on one screen when the body is a
+       blank carrying its own. */
+    expect(html).toContain("<h1>Tasks</h1>");
   });
 
-  it("points at where a key is made, when that is how it connects", () => {
+  /**
+   * **One button, and it is not *Make a key*.**
+   *
+   * `keyUrl` is set for every tracker — Linear's API key page, and a git
+   * host's personal-access-token page — so a second button here drew "Make a
+   * key" beside GitHub, which is Linear's word for Linear's flow and the
+   * wrong instruction besides. Making one is step one *inside* the connect
+   * flow, with the scopes spelled out, and that is where it stays.
+   */
+  it("says how the tracker authorises, and offers one way through", () => {
     const html = draw([linear(false)]);
-    expect(html).toContain("https://linear.app/settings/api");
+    expect(html).toContain("Linear is not connected");
+    expect(html).toContain("It reads with an API key, kept in this Firetower’s vault.");
     expect(html).toContain("Connect Linear");
+    expect(html).not.toContain("https://linear.app/settings/api");
+    expect(html).not.toContain("Make a key");
   });
 
   /**
@@ -204,8 +222,20 @@ describe("a tracker with no credential", () => {
    */
   it("still offers a way in when nothing is connected at all", () => {
     const html = draw([github(false), linear(false)]);
-    expect(html).toContain("isn&#x27;t connected yet");
+    expect(html).toContain("GitHub is not connected");
     expect(html).toContain("Connect GitHub");
+  });
+
+  /**
+   * And with no tracker of any kind — a fresh install, where `source` is
+   * undefined because the list itself is empty. This drew nothing at all: a
+   * heading, a sentence, and a blank page under them.
+   */
+  it("names the four kinds when there is no tracker at all", () => {
+    const html = draw([]);
+    expect(html).toContain("No tracker connected");
+    expect(html).toContain("GitHub, GitLab, Gitea and Linear can all feed this list.");
+    expect(html).toContain("Connect a tracker");
   });
 });
 
@@ -237,9 +267,28 @@ describe("paging", () => {
   it("uses the total when there is one", () => {
     const html = draw(
       [github(true)],
-      [opening("github", "issue"), page([], { total: 214 })],
+      [
+        opening("github", "issue"),
+        page([{ ...ticket("ACME-1", "Promo codes expire a day early"), source: "github", kind: "issue" }], { total: 214 }),
+      ],
     );
     expect(html).toContain("214 to pick from.");
+  });
+
+  /**
+   * **And no count at all when the list is empty.** The headline is a status
+   * sentence over rows and the page's own name over a blank, because the
+   * blank carries a title of its own and says the same thing better.
+   */
+  it("falls back to the page's name when the tracker has nothing open", () => {
+    const html = draw([github(true)], [opening("github", "issue"), page([])]);
+    expect(html).toContain("<h1>Tasks</h1>");
+    expect(html).not.toContain("to pick from.");
+    expect(html).toContain("Nothing open right now");
+    expect(html).toContain("GitHub has no open issues for you.");
+    /* No button. Nothing is wrong, and the head already carries the two
+       things that could change the answer: which tracker, and refresh. */
+    expect(html).not.toContain("Connect");
   });
 
   it("offers Next only when there is another page", () => {
@@ -331,12 +380,19 @@ describe("the way to connect a tracker that is not connected", () => {
 });
 
 /**
+ * **One button, whatever the tracker is.**
+ *
  * `keyUrl` is set for every tracker — Linear's API key page, and a git host's
  * personal-access-token page — so a button hung off it alone said "Make a key"
  * beside GitHub. That is Linear's word for Linear's flow, and the wrong
  * instruction besides: a git host is connected in a browser from Git hosts,
  * and a pasted token is the fallback offered *there*, with its scopes spelled
  * out. Two buttons, the second contradicting the first.
+ *
+ * So the second button is gone for *both* of them rather than for one. Making
+ * a key is step one inside the connect flow, which is where the scopes are
+ * named and where somebody who needs one is going anyway; what differs
+ * between the two trackers is the *sentence*, which says how each authorises.
  */
 describe("the prompt for a tracker that is not connected", () => {
   it("does not tell a git host to make a key", () => {
@@ -345,9 +401,12 @@ describe("the prompt for a tracker that is not connected", () => {
     expect(html).not.toContain("Make a key");
   });
 
-  it("still does for one that genuinely reads with a key", () => {
+  it("does not tell one that reads with a key either", () => {
     const html = draw([linear(false)]);
-    expect(html).toContain("Make a key");
-    expect(html).toContain("https://linear.app/settings/api");
+    expect(html).toContain("Connect Linear");
+    expect(html).not.toContain("Make a key");
+    expect(html).not.toContain("https://linear.app/settings/api");
+    // The sentence is where the difference is said.
+    expect(html).toContain("It reads with an API key");
   });
 });

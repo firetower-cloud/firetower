@@ -36,7 +36,7 @@ import {
   UsersRound,
   type LucideIcon,
 } from "lucide-react";
-import { Group as Rowset, Rows, Section, WhereTo } from "~/ui/config/bits";
+import { Group as Rowset, Note, Rows, Section, Typed, WhereTo } from "~/ui/config/bits";
 import { WhoCanAccess } from "~/ui/Sharing";
 import { Pop } from "~/ui/Pop";
 import { CreateMenu } from "~/ui/config/CreateMenu";
@@ -161,31 +161,41 @@ export function Roles() {
     return <Editor state={editing} all={rows.data} onClose={() => setEditing(null)} />;
   }
 
+  /* **Nothing at all, and nothing wrong.** The header action and the
+     `WhereTo` come off the screen while it holds: the blank's own button is
+     the same action, and a note about how a profile is filed is about
+     operating profiles you do not have. A query that matched nothing is not
+     this state — there *are* profiles — and it gets a `Note` instead. */
+  const blank = !rows.loading && !rows.error && rows.data.length === 0;
+
+  /* The page's one primary action, written once and worn in two places. */
+  const newProfile = (
+    <CreateMenu
+      label="New profile"
+      choices={[
+        {
+          icon: Sparkles,
+          label: "Create with AI",
+          note: "Describe it; an agent writes it for you.",
+          onPick: () => start({ prompt: "Create a Firetower agent profile that " }),
+        },
+        {
+          icon: SquarePen,
+          label: "Write it myself",
+          note: "Fill in the form by hand.",
+          onPick: () => setEditing({ draft: { ...BLANK } }),
+        },
+      ]}
+    />
+  );
+
   return (
     <Section
       /* **Agent profiles**, which is what the rail calls it. "Profiles" alone
          is the account's word on every other product somebody has used. */
       title="Agent profiles"
-      note="A saved way of working — what it is for, what it may do, and who it may hand work to. A profile with a team leads; one without is a worker."
-      action={
-        <CreateMenu
-          label="New profile"
-          choices={[
-            {
-              icon: Sparkles,
-              label: "Create with AI",
-              note: "Describe it; an agent writes it for you.",
-              onPick: () => start({ prompt: "Create a Firetower agent profile that " }),
-            },
-            {
-              icon: SquarePen,
-              label: "Write it myself",
-              note: "Fill in the form by hand.",
-              onPick: () => setEditing({ draft: { ...BLANK } }),
-            },
-          ]}
-        />
-      }
+      note="A saved way of working. One with a team leads, one without is a worker."
+      action={blank ? undefined : newProfile}
       controls={
         rows.data.length > 0 ? (
           <div className="relative w-full max-w-xs">
@@ -201,27 +211,49 @@ export function Roles() {
         ) : undefined
       }
     >
-      <Rowset>
       <Rows
         feed={{ data: shown, loading: rows.loading, error: rows.error }}
-        empty={needle ? `No profiles match "${q.trim()}".` : "No profiles yet. Make one, and you can start a workspace as it or a lead can delegate to it."}
+        icon={UsersRound}
+        empty={
+          needle ? (
+            <Note
+              icon={Search}
+              control={
+                <button onClick={() => setQ("")} className="btn quiet">
+                  Clear
+                </button>
+              }
+            >
+              No profile matches <Typed>{q.trim()}</Typed>.
+            </Note>
+          ) : (
+            "No profiles yet"
+          )
+        }
+        /* **It says this is optional**, which is the one job the page's own
+           sentence cannot do: nobody should read an empty list here as a
+           thing they have failed to do. */
+        note="Every workspace can run without one. Make one to stop repeating yourself."
+        action={newProfile}
       >
-        {shown.map((role) => (
-          <RoleRow
-            key={role.id}
-            role={role}
-            onOpen={() => setEditing({ id: role.id, path: role.path, draft: toDraft(role) })}
-            onDelete={() => removeRole(role)}
-          />
-        ))}
+        <Rowset>
+          {shown.map((role) => (
+            <RoleRow
+              key={role.id}
+              role={role}
+              onOpen={() => setEditing({ id: role.id, path: role.path, draft: toDraft(role) })}
+              onDelete={() => removeRole(role)}
+            />
+          ))}
+        </Rowset>
       </Rows>
-      </Rowset>
 
-      <WhereTo>
-        A profile is filed like a skill or a machine, so sharing one is the same sheet everything
-        else uses. <b>The team is the only thing that makes one a manager</b> — same object either
-        way.
-      </WhereTo>
+      {!blank && (
+        <WhereTo>
+          A profile is filed like a skill or a machine, so sharing one uses the same sheet.{" "}
+          <b>The team is the only thing that makes one a manager</b>.
+        </WhereTo>
+      )}
     </Section>
   );
 }

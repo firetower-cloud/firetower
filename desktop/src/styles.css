@@ -2322,30 +2322,119 @@ html:not([data-platform="macos"]) {
 
   /* ── What a list says when it has nothing to say ──────────────────
      A fresh install hits empty, loading, error, denied and server-dark at
-     once, so none of them is an edge case. */
+     once, so none of them is an edge case.
+
+     **Two members, and nothing else in the client draws an empty list.**
+     `.blank` is for a page whose body has nothing in it; `.note2` is for a
+     page that has content, one part of which is empty. The difference is not
+     severity, it is what caused it: nothing exists yet is a blank, a control
+     the reader changed is a note. */
   .blank {
     flex: 1;
     min-height: 0;
     display: grid;
     place-items: center;
-    padding: 56px 34px;
+    /* The bottom is bigger on purpose. Optical centring: a block centred in
+       a tall column reads as floating. */
+    padding: 72px 34px 104px;
   }
   .blank .in {
-    max-width: 430px;
+    max-width: 420px;
     text-align: center;
   }
-  .blank .glyph {
+
+  /* The object: one of this list's own rows, raised, with nothing in it.
+     Not an icon in a square. `Settling` already says "rows the shape of the
+     rows that are coming"; this is the same sentence with the animation off
+     and the count at one. The page's glyph sits where the row's glyph sits,
+     which is what makes Machines differ from Skills without a second
+     design, and it answers *what is this page for* before a word is read. */
+  .blank .obj {
+    margin: 0 auto 20px;
+  }
+  .blank .obj.row {
+    display: flex;
+    align-items: center;
+    gap: 13px;
+    width: 252px;
+    padding: 12px 14px;
+    border-radius: 14px;
+    background: var(--color-raise);
+    box-shadow: var(--shadow-raise);
+  }
+  .blank .obj.row .d {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 30px;
+    height: 30px;
+    border-radius: 99px;
+    background: var(--color-overlay);
+    color: var(--color-mute);
+  }
+  .blank .obj.row .b {
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .blank .obj.row .b i,
+  .blank .obj.card .b i {
+    display: block;
+    height: 7px;
+    border-radius: 99px;
+    background: var(--color-line);
+  }
+  .blank .obj.row .b i:nth-child(2) {
+    width: 52%;
+  }
+
+  /* The gallery's own object, for the one page that is a grid: the poster is
+     the card and the name sits on the paper underneath it. `.gal`'s own rule
+     — the border goes round the thumbnail, never round the thumbnail and its
+     label together. */
+  .blank .obj.card {
+    width: 150px;
+  }
+  .blank .obj.card .p {
+    display: grid;
+    place-items: center;
+    height: 104px;
+    border-radius: 12px;
+    background: var(--color-raise);
+    box-shadow: var(--shadow-raise);
+    color: var(--color-mute);
+  }
+  .blank .obj.card .b {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 11px;
+  }
+  .blank .obj.card .b i:nth-child(1) {
+    width: 72%;
+  }
+  .blank .obj.card .b i:nth-child(2) {
+    width: 44%;
+  }
+
+  /* The trouble states keep the plate, and that is the point: the shape that
+     says "nothing here" and the shape that says "something went wrong" must
+     not be the same shape. A shape of content behind *that did not load*
+     says the content is coming, which is the opposite of true. */
+  .blank .obj.plate {
     display: grid;
     place-items: center;
     width: 52px;
     height: 52px;
-    margin: 0 auto 22px;
     border-radius: 16px;
     background: var(--color-raise);
+    box-shadow: var(--shadow-raise);
     color: var(--color-mute);
   }
   .blank h2 {
-    font-size: 1.375rem; /* 21px — a blank inside a page, not a page */
+    font-size: 1.375rem; /* 22px — a blank inside a page, not a page */
     line-height: 1.2;
     letter-spacing: -0.02em;
     font-weight: var(--font-weight-mid);
@@ -2353,7 +2442,7 @@ html:not([data-platform="macos"]) {
   }
   .blank p {
     margin-top: 9px;
-    font-size: 0.96875rem;
+    font-size: 1rem;
     line-height: 1.6;
     color: var(--color-dim);
   }
@@ -2362,7 +2451,57 @@ html:not([data-platform="macos"]) {
     align-items: center;
     justify-content: center;
     gap: 8px;
-    margin-top: 18px;
+    margin-top: 22px;
+  }
+
+  /* ── Note: one section, or one filter, is empty ────────────────────
+     Left-aligned on the row's own grid, because a note belongs to the list
+     rather than to the page. 46px tall, under a row's 58px, on purpose: no
+     plate, no radius, no hover — three things a row has — so it can never be
+     mistaken for one.
+
+     A grid rather than a row, so the one control wraps *under* the sentence
+     at panel width instead of squeezing it. The 16px column is the row's
+     glyph and the 13px gutter is the row's gap, so one rule covers 360px and
+     1030px. */
+  .note2 {
+    display: grid;
+    grid-template-columns: 16px 1fr;
+    gap: 0 13px;
+    margin-top: 10px;
+    padding: 13px 0;
+  }
+  .note2 .g {
+    display: grid;
+    place-items: center;
+    height: 21px;
+    color: var(--color-mute);
+  }
+  .note2 .say {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+  }
+  /* `--color-dim`, not `--color-mute`. Every one of the one-liners this
+     replaces was `text-mute`, which measures under 4.5:1 in both themes and
+     is spent on counts and placeholders. */
+  .note2 p {
+    min-width: 0;
+    font-size: var(--text-ui);
+    line-height: 1.45;
+    color: var(--color-dim);
+  }
+  .note2 .btn.quiet {
+    height: 28px;
+    padding-inline: 11px;
+    margin-left: -9px;
+  }
+  /* What the reader typed, character for character — `STYLE.md`'s rule. */
+  .note2 .q {
+    font-family: var(--font-mono);
+    font-size: 0.84375rem;
+    color: var(--color-text);
   }
 
   /* ── The two button shapes the design has, beside .btn ────────────── */

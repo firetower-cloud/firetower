@@ -13,7 +13,7 @@
  */
 import { useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Check, Unlink } from "lucide-react";
+import { Check, Ticket, Unlink } from "lucide-react";
 import { HostMark, Icon, IconButton, LinearMark } from "~/components/ui";
 import type { TrackerStatus } from "~/api/generated/model";
 import {
@@ -52,7 +52,7 @@ export function Trackers({ live }: { live: boolean }) {
       error={trackers.error}
     >
       <Group>
-      <Rows feed={trackers} empty="Nothing to read from"
+      <Rows feed={trackers} icon={Ticket} empty="Nothing to read from"
         note="Connect a git host and its issues and pull requests appear here.">
         {rows.map((t) => (
           <Tracker key={t.id} t={t} live={live} />

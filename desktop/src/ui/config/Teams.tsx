@@ -27,6 +27,7 @@ import { trouble, why } from "~/data";
 export function Teams({ backend }: { backend: Backend }) {
   const q = useListTeams();
   const me = useMe();
+  const blank = !q.isPending && !q.error && (q.data ?? []).length === 0;
 
   return (
     <Section
@@ -40,6 +41,7 @@ export function Teams({ backend }: { backend: Backend }) {
       <Group>
         <Rows
           feed={{ data: q.data ?? [], loading: q.isPending, error: q.error ? why(q.error) : null }}
+          icon={UsersRound}
           empty="No teams yet"
           note="A team is made on the administration site, beside the accounts it names."
         >
@@ -49,11 +51,16 @@ export function Teams({ backend }: { backend: Backend }) {
         </Rows>
       </Group>
 
-      <WhereTo>
-        Who is in a team is decided on the administration site, beside the accounts it names — a
-        team <b>outlives every resource it was ever granted on</b>. Granting one access to a
-        directory is the opposite, and stays here.
-      </WhereTo>
+      {/* Never beside a blank: granting a team access to a directory is
+          about operating teams this reader does not have, and the blank's own
+          sentence already names where one is made. */}
+      {!blank && (
+        <WhereTo>
+          Who is in a team is decided on the administration site, beside the accounts it names — a
+          team <b>outlives every resource it was ever granted on</b>. Granting one access to a
+          directory is the opposite, and stays here.
+        </WhereTo>
+      )}
     </Section>
   );
 }

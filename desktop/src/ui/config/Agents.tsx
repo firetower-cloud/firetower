@@ -8,7 +8,7 @@
  */
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronDown, Download, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Check, ChevronDown, Download, Plus, Puzzle, RefreshCw, Trash2 } from "lucide-react";
 import { AgentMark } from "~/components/AgentMark";
 import { Icon } from "~/components/ui";
 import type { Account, AgentView, Updated } from "~/api/generated/model";
@@ -42,7 +42,7 @@ export function Agents({ live }: { live: boolean }) {
         action={live && <button disabled={check.isPending} onClick={() => check.mutate(undefined as never, { onSuccess: () => cache.invalidateQueries({ queryKey: getListAgentsQueryKey() }) })} className="btn plain"><Icon of={RefreshCw} size={12} />{check.isPending ? "Checking…" : "Check all"}</button>}
       >
         <Group>
-        <Rows feed={agents} empty="No agent configured"
+        <Rows feed={agents} icon={Puzzle} empty="No agent configured"
           note="An agent is installed on a machine and runs on somebody’s subscription.">
           {agents.data.map((a) => (
             <div key={a.kind}>

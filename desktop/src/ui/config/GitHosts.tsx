@@ -28,7 +28,7 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Check, Link2, Loader2, MoreHorizontal, Plus, X } from "lucide-react";
+import { ArrowLeft, Check, FolderGit2, Link2, Loader2, MoreHorizontal, Plus, X } from "lucide-react";
 import { HostMark, Icon, IconButton } from "~/components/ui";
 import type { AuthMode, KindInfo, ProbedProvider, ProviderStatus } from "~/api/generated/model";
 import {
@@ -103,7 +103,7 @@ export function GitHosts({ live }: { live: boolean }) {
         }
       >
         <Group>
-        <Rows feed={providers} empty="No git host yet"
+        <Rows feed={providers} icon={FolderGit2} empty="No git host yet"
           note="Add the address of a GitHub, GitLab or Gitea your company already uses.">
           {rows.map((p) => (
             <Provider

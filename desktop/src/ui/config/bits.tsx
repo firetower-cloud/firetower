@@ -38,6 +38,7 @@ const BLANK = {
 
 export function Rows<T>({
   feed,
+  icon = Shapes,
   empty,
   note,
   action,
@@ -45,6 +46,16 @@ export function Rows<T>({
   children,
 }: {
   feed: { data: T[]; loading: boolean; error: string | null; trouble?: TroubleKind | null };
+  /**
+   * The glyph the empty row wears: **this list's own**.
+   *
+   * The row's glyph where the rows have one, the rail destination's where
+   * they wear a brand mark or a monogram instead, and nowhere one invented
+   * for the empty state — which is what makes the object read as a thing
+   * rather than as decoration. `Shapes` is the default only because it is
+   * what this drew before any caller named one.
+   */
+  icon?: LucideIcon;
   /**
    * The heading when there is simply nothing yet — **or a whole block**.
    *
@@ -71,8 +82,8 @@ export function Rows<T>({
     return (
       <>
         <WhereTo>
-          <b>Can’t reach this Firetower.</b> Showing what was last known. Rows from a server that is
-          not answering stay visible — a list that empties itself reads as work being lost.
+          <b>Can’t reach this Firetower.</b> Showing what was last known. Rows from a server that
+          is not answering stay visible.
         </WhereTo>
         {feed.data.length > 0 && <div className="stale2">{children}</div>}
       </>
@@ -85,6 +96,7 @@ export function Rows<T>({
       <Blank
         icon={icon}
         title={title}
+        shape="plate"
         action={
           feed.trouble === "denied" ? undefined : onRetry ? (
             <button onClick={onRetry} className="btn plain">
@@ -95,8 +107,8 @@ export function Rows<T>({
         }
       >
         {feed.trouble === "denied"
-          ? "Ask an administrator of this Firetower. Nothing is hidden from you by this window — the server decides, and it said no."
-          : `${feed.error} Nothing has been lost — this list is on the server, not in this window.`}
+          ? "Ask an administrator of this Firetower. Nothing is hidden by this window. The server decides, and it said no."
+          : `${feed.error} Nothing has been lost. This list is on the server, not in this window.`}
       </Blank>
     );
   }
@@ -104,7 +116,7 @@ export function Rows<T>({
   if (feed.data.length === 0) {
     if (typeof empty !== "string") return <>{empty}</>;
     return (
-      <Blank icon={Shapes} title={empty} action={action}>
+      <Blank icon={icon} title={empty} action={action}>
         {note}
       </Blank>
     );
@@ -218,15 +230,15 @@ export function Trouble({
     return (
       <WhereTo>
         <b>Can’t reach this Firetower.</b> Showing what was last known. Rows from a server that is
-        not answering stay visible — a list that empties itself reads as work being lost.
+        not answering stay visible.
       </WhereTo>
     );
   }
   if (kind === "denied") {
     return (
-      <Blank icon={Lock} title="You cannot see this">
-        Ask an administrator of this Firetower. Nothing is hidden from you by this window — the
-        server decides, and it said no.
+      <Blank icon={Lock} title="You cannot see this" shape="plate">
+        Ask an administrator of this Firetower. Nothing is hidden by this window. The server
+        decides, and it said no.
       </Blank>
     );
   }
@@ -234,6 +246,7 @@ export function Trouble({
     <Blank
       icon={TriangleAlert}
       title="That did not load"
+      shape="plate"
       action={
         onRetry ? (
           <button onClick={onRetry} className="btn plain">
@@ -243,7 +256,7 @@ export function Trouble({
         ) : undefined
       }
     >
-      {error ? `${error} ` : ""}Nothing has been lost — this list is on the server, not in this
+      {error ? `${error} ` : ""}Nothing has been lost. This list is on the server, not in this
       window.
     </Blank>
   );
@@ -259,12 +272,23 @@ export function Group({
   title,
   count,
   note,
+  empty,
   children,
 }: {
   title?: string;
   count?: number;
   note?: string;
-  children: React.ReactNode;
+  /**
+   * What the section says instead of rows: a `Note`, never a `Blank`.
+   *
+   * It takes the place of `.lrows` rather than sitting inside it, which is
+   * how the one line lands at a row's own left edge and at a row's own
+   * distance below the heading. **The heading and its count stay** — a
+   * section that is empty for a reason is still a section, and `0` beside the
+   * name is part of the answer.
+   */
+  empty?: React.ReactNode;
+  children?: React.ReactNode;
 }) {
   return (
     <section className="lsec">
@@ -275,7 +299,7 @@ export function Group({
         </h2>
       )}
       {note && <p className="note">{note}</p>}
-      <div className="lrows">{children}</div>
+      {empty ?? <div className="lrows">{children}</div>}
     </section>
   );
 }
@@ -321,23 +345,89 @@ export function Row({
   );
 }
 
-/** Nothing here yet, or nothing matched: a glyph, one line, one way forward. */
+/**
+ * The page's body has nothing in it: one object, one title, one sentence, one
+ * action at most.
+ *
+ * **One of the two shapes an empty list is allowed to be**, the other being
+ * `Note` below. Which you want is decided by *what caused it*: a list that is
+ * empty because nothing exists yet is a `Blank`; a list that is empty because
+ * of a control the reader changed is a `Note`. If the list would still be
+ * empty with the page's default controls, it is a `Blank`.
+ *
+ * **The button's weight is the register, and nothing else about the block
+ * moves.** Filled where the emptiness is a job to do — Machines, Skills,
+ * Repositories, profiles — and plain or absent where it is only a fact.
+ * Artifacts and Tasks fill up as a *consequence* of work, so empty there is
+ * ordinary and a page that nags somebody to go and open an issue has misread
+ * its own job.
+ *
+ * **Two rules that live with the caller**, because they are about the page
+ * rather than about this block: a page's header action is not drawn when the
+ * body is a `Blank` whose action is the same action, and a `WhereTo` is never
+ * drawn beside a `Blank` — a note about operating things you do not have is a
+ * paragraph nobody can use.
+ */
 export function Blank({
   icon,
   title,
   children,
   action,
+  shape = "row",
 }: {
   icon: LucideIcon;
   title: string;
   children?: React.ReactNode;
   action?: React.ReactNode;
+  /**
+   * What the object above the title is.
+   *
+   * `row` — one of this list's own rows, raised, with nothing in it. It is
+   * the same sentence `Settling` says, with the animation off and the count
+   * at one, so empty and loading read as one family. A 52px square of grey
+   * says nothing about what the page holds; an empty row says it before a
+   * word is read.
+   *
+   * `card` — the gallery's own poster, for the one page that is a grid.
+   *
+   * `plate` — the 52px tile, and **only the trouble states take it**. The
+   * shape that says "nothing here" and the shape that says "something went
+   * wrong" must not be the same shape: a shape of content behind *that did
+   * not load* says the content is coming, which is the opposite of true.
+   */
+  shape?: "row" | "card" | "plate";
 }) {
   return (
     <div className="blank">
       <div className="in">
-        <span className="glyph">
-          <Icon of={icon} size={20} />
+        <span className={`obj ${shape}`} aria-hidden>
+          {shape === "card" ? (
+            <>
+              <span className="p">
+                <Icon of={icon} size={20} />
+              </span>
+              <span className="b">
+                <i />
+                <i />
+              </span>
+            </>
+          ) : shape === "plate" ? (
+            /* 20, not the drawing's 22: `Icon` has a closed set of sizes and
+               widening it for two pixels costs more than the two pixels. It
+               is also what the plate drew before, so the trouble states are
+               untouched to the pixel. */
+            <Icon of={icon} size={20} />
+          ) : (
+            <>
+              <span className="d">
+                <Icon of={icon} size={16} />
+              </span>
+              <span className="b">
+                <i />
+                <i />
+              </span>
+            </>
+          )}
         </span>
         <h2>{title}</h2>
         {children && <p>{children}</p>}
@@ -345,6 +435,51 @@ export function Blank({
       </div>
     </div>
   );
+}
+
+/**
+ * One section of a page, or one filter over it, is empty.
+ *
+ * The second of the two members. It sits left on the row's own grid, one line
+ * tall, because it belongs to the list rather than to the page — a centred
+ * plate here would say the whole page had failed, which is the defect it was
+ * written to remove. **Never a primary**: the only control it may carry is
+ * the one that undoes what caused it.
+ *
+ * `search` is the glyph when a *typed* query caused it, and the page's own
+ * glyph otherwise. The quoted string is mono, because it is what the reader
+ * typed character for character.
+ */
+export function Note({
+  icon,
+  children,
+  control,
+}: {
+  icon: LucideIcon;
+  children: React.ReactNode;
+  /**
+   * The one way to undo it, and **only where a typed string caused it**. A
+   * pressed pill shows its own state a few inches away and `All` is beside
+   * it; a typed string does not announce itself as removable.
+   */
+  control?: React.ReactNode;
+}) {
+  return (
+    <div className="note2">
+      <span className="g" aria-hidden>
+        <Icon of={icon} size={16} />
+      </span>
+      <span className="say">
+        <p>{children}</p>
+        {control}
+      </span>
+    </div>
+  );
+}
+
+/** What the reader typed, quoted back at them in the machine's voice. */
+export function Typed({ children }: { children: React.ReactNode }) {
+  return <span className="q">{`“${children}”`}</span>;
 }
 
 /**

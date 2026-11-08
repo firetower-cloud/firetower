@@ -24,8 +24,8 @@ import {
   Check,
   ChevronDown,
   CircleDot,
-  ExternalLink,
   GitPullRequest,
+  ListTodo,
   Play,
   RotateCw,
   Search,
@@ -33,6 +33,7 @@ import {
   User,
 } from "lucide-react";
 import { Badge, GitLabMark, GiteaMark, GithubMark, Icon, IconButton, Input, LinearMark, Select } from "~/components/ui";
+import { Blank, Note, Typed } from "~/ui/config/bits";
 import { usePathname } from "~/shims/next-navigation";
 import { elapsed, minutesSince } from "~/api/view";
 import type { Backend } from "~/fleet";
@@ -67,6 +68,20 @@ const KIND_LABEL: Record<TaskKind, string> = {
   issue: "Issues",
   pullRequest: "PRs",
   ticket: "Tickets",
+};
+
+/**
+ * And what it is called inside a sentence.
+ *
+ * `KIND_LABEL` is a control's label — title case, abbreviated to fit a
+ * segment. "GitHub has no open PRs for you" is a control's word in a
+ * sentence's place, which is how an interface comes to sound like its own
+ * schema.
+ */
+const KIND_SAYS: Record<TaskKind, string> = {
+  issue: "issues",
+  pullRequest: "pull requests",
+  ticket: "tickets",
 };
 
 /** The mark for a tracker, by kind. Anything unrecognised keeps the page working. */
@@ -165,16 +180,24 @@ export function TasksPage({ backend }: { backend: Backend }) {
 
   const refresh = () => cache.invalidateQueries({ queryKey: getListTasksQueryKey(ask) });
 
+  /* **The body is empty, and nothing is wrong** — no tracker, a tracker
+     nobody has signed into, or a tracker with nothing open. All three are a
+     `Blank`; a query that matched nothing is a `Note`, because the reader
+     changed a control and the rest of the page is still there. */
+  const nothing = !feed.loading && !feed.error && feed.data.length === 0;
+
   /* The headline says what the screen is, which changes with what it found.
-     "0 to pick from." over an empty page is a count nobody asked for. */
-  const headline =
-    !connected && source
-      ? "Nothing to pick from yet"
-      : feed.loading
-        ? `Reading ${source?.label ?? "your trackers"}…`
-        : count === 0
-          ? `Nothing ${state} here.`
-          : `${count} to pick from.`;
+     "0 to pick from." over an empty page is a count nobody asked for.
+
+     **And over an empty body it falls back to the page's name.** The blank
+     carries its own title, so a status sentence above it is two titles on one
+     screen — and the status it would have carried is the thing the blank
+     already says, better and beside the glyph that explains it. */
+  const headline = feed.loading
+    ? `Reading ${source?.label ?? "your trackers"}…`
+    : !connected || nothing
+      ? "Tasks"
+      : `${count} to pick from.`;
 
   return (
     <div className="scroll-slim h-full overflow-y-auto">
@@ -267,43 +290,50 @@ export function TasksPage({ backend }: { backend: Backend }) {
             </>
           )}
 
+          {/* **No tracker at all**, which is every fresh install: `source` is
+              undefined because nothing has been connected and nothing is
+              pending. The four kinds are named, because the question in the
+              reader's head is whether the one they use is among them. */}
+          {!findingTrackers && !source && (
+            <Blank
+              icon={ListTodo}
+              title="No tracker connected"
+              action={
+                <button onClick={() => navigate("/configuration/trackers")} className="btn primary">
+                  Connect a tracker
+                  <Icon of={ArrowRight} size={12} />
+                </button>
+              }
+            >
+              GitHub, GitLab, Gitea and Linear can all feed this list.
+            </Blank>
+          )}
+
+          {/* **One tracker picked, and not signed into.** The sentence changes
+              with how that tracker authorises, because that is what decides
+              where the button goes.
+
+              The second button, *Make a key*, is gone. `keyUrl` is set for
+              every tracker — Linear's API key page, and a git host's
+              personal-access-token page — so it drew "Make a key" beside
+              GitHub, which is Linear's word for Linear's flow and the wrong
+              instruction besides. Making a key is step one *inside* the
+              connect flow, where the scopes are spelled out. */}
           {!findingTrackers && source && !connected && (
-            <div className="px-3 py-8 text-center">
-              <p className="text-ui text-bone">{source.label} isn't connected yet.</p>
-              <p className="mx-auto mt-1 max-w-[380px] text-meta text-mute">
-                {source.auth === "apiKey"
-                  ? `It reads with a personal API key, kept in this server's vault.`
-                  : `It shares the git host's authorization.`}
-              </p>
-              <div className="mt-3 flex items-center justify-center gap-2">
-                <button
-                  onClick={() => navigate(paneFor(source))}
-                  className="btn plain"
-                >
+            <Blank
+              icon={ListTodo}
+              title={`${source.label} is not connected`}
+              action={
+                <button onClick={() => navigate(paneFor(source))} className="btn primary">
                   Connect {source.label}
                   <Icon of={ArrowRight} size={12} />
                 </button>
-                {/* **Only where a key is the thing to make.** `keyUrl` is set
-                    for every tracker — Linear's API key page, and a git host's
-                    personal-access-token page — so this drew "Make a key" next
-                    to GitHub, which is Linear's word for Linear's flow and the
-                    wrong instruction besides: a git host here is connected in
-                    a browser on the Git hosts screen, and a token is the
-                    fallback offered there with the scopes spelled out. Two
-                    buttons where the second contradicts the first. */}
-                {source.auth === "apiKey" && source.keyUrl && (
-                  <a
-                    href={source.keyUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="control border border-line bg-ground px-3 text-mute hover:text-bone"
-                  >
-                    Make a key
-                    <Icon of={ExternalLink} size={12} />
-                  </a>
-                )}
-              </div>
-            </div>
+              }
+            >
+              {source.auth === "apiKey"
+                ? "It reads with an API key, kept in this Firetower’s vault."
+                : "Signing in once covers both its code and its issues."}
+            </Blank>
           )}
 
           {connected && feed.loading && (
@@ -312,10 +342,38 @@ export function TasksPage({ backend }: { backend: Backend }) {
           {connected && feed.error && (
             <p className="px-3 py-6 text-center text-ui text-brick">{feed.error}</p>
           )}
-          {connected && !feed.loading && !feed.error && feed.data.length === 0 && (
-            <p className="px-3 py-6 text-center text-ui text-mute">
-              Nothing {state} here.
-            </p>
+          {/* **Connected, and nothing open: no button.** Nothing is wrong
+              here, and the head already carries the two things that could
+              change the answer — which tracker, and refresh. A page that nags
+              you to go and open an issue has misread its own job. */}
+          {connected && nothing && !q && (
+            <Blank icon={ListTodo} title={`Nothing ${state} right now`}>
+              {source?.label} has no {state} {KIND_SAYS[showing as TaskKind] ?? "work"} for you.
+            </Blank>
+          )}
+          {/* **And a query that matched nothing is a `Note`.** The query goes
+              to the tracker in the tracker's own dialect, so this is the
+              tracker's answer and the `sent as` line above it stays. `Clear`
+              exists because a typed string does not announce itself as
+              removable; a pressed pill does, so a pill-caused note carries no
+              control. */}
+          {connected && nothing && q && (
+            <Note
+              icon={Search}
+              control={
+                <button
+                  onClick={() => {
+                    setTyped("");
+                    setQ("");
+                  }}
+                  className="btn quiet"
+                >
+                  Clear
+                </button>
+              }
+            >
+              No task matches <Typed>{q}</Typed>.
+            </Note>
           )}
 
           {feed.data.map((t) => {

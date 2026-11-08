@@ -18,8 +18,8 @@
  * control beside a fact invites somebody to change what they have no say over.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronLeft, FolderDown, Loader2, Plus, Search, ShieldAlert, Sparkles, Trash2, TriangleAlert, UserPlus } from "lucide-react";
-import { Blank, Rows, Section } from "~/ui/config/bits";
+import { Check, ChevronLeft, FolderDown, Loader2, Plus, Puzzle, Search, ShieldAlert, Sparkles, Trash2, TriangleAlert, UserPlus } from "lucide-react";
+import { Blank, Note, Rows, Section, Typed } from "~/ui/config/bits";
 import { ShareMany, WhoCanAccess } from "~/ui/Sharing";
 import { AddSkill } from "~/ui/AddSkill";
 import { CreateMenu } from "~/ui/config/CreateMenu";
@@ -40,7 +40,7 @@ import { getListSkillsQueryKey } from "~/api/generated/skills/skills";
 import type { Skill } from "~/api/generated/model";
 import { useConfirm } from "~/ui/Confirm";
 import { Markdown } from "~/components/Markdown";
-import { readDrop, readFiles, size, RISK_SAYS, type Found } from "~/skills";
+import { readDrop, size, RISK_SAYS, type Found } from "~/skills";
 import { useOpened } from "~/ui/opened";
 
 export function Skills({ open: asked = null }: { open?: string | null }) {
@@ -222,39 +222,45 @@ export function Skills({ open: asked = null }: { open?: string | null }) {
     },
   };
 
-  if (!feed.loading && !feed.error && feed.data.length === 0)
-    return (
-      <section {...surface}>
-        <Empty
-          over={over}
-          onAdd={add}
-          onCreateWithAI={() => start({ prompt: "Create a Firetower skill that " })}
-        />
-      </section>
-    );
+  /* **Nothing at all, which is near unreachable.** `ft-server` seeds the
+     built-in skills on start, so a fresh install has rows in *From Firetower*
+     within a second and this is only reached mid-seed or with the built-ins
+     absent. The state a person actually meets is *Yours, 0* on a populated
+     page, which is the `Note` below. Both are drawn. */
+  const bare = !feed.loading && !feed.error && feed.data.length === 0;
 
   const held = shown.filter((s) => s.held);
   const mine = tickable.filter((s) => !s.held);
+
+  /* The page's one primary action, written once: the head wears it when there
+     is a list, and the blank wears it when there is not. The same string
+     either way, so the vocabulary is one vocabulary. */
+  const addSkill = (
+    <CreateMenu
+      label="Add a skill"
+      choices={[
+        {
+          icon: Sparkles,
+          label: "Create with AI",
+          note: "Describe it; an agent writes it for you.",
+          onPick: () => start({ prompt: "Create a Firetower skill that " }),
+        },
+        {
+          icon: FolderDown,
+          label: "Upload a folder",
+          note: "A skill you already have, dropped in.",
+          onPick: () => add(),
+        },
+      ]}
+    />
+  );
 
   return (
     /* `data-wide` tells `Configuration.tsx` to drop its 48rem column: this
        pane brings its own `.pcol`, and two centred columns inside each other
        is a 770px page inside a 1120px one. */
     <div {...surface} data-wide className="pcol relative">
-      {over && (
-        <div className="drop">
-          <div>
-            <span className="mx-auto grid h-14 w-14 place-items-center text-dim">
-              <FolderDown className="h-7 w-7" strokeWidth={1.5} />
-            </span>
-            <b className="mt-2 block text-lede font-mid text-bone">Drop the folder</b>
-            <p className="mt-1 max-w-[46ch] text-ui text-dim">
-              One skill, a folder of them, or a .zip of either. Nothing is written until you have looked at
-              what was found.
-            </p>
-          </div>
-        </div>
-      )}
+      {over && <Dropping />}
 
       <div className="phead2">
         <div className="min-w-0">
@@ -264,95 +270,121 @@ export function Skills({ open: asked = null }: { open?: string | null }) {
             in that directory gets it.
           </p>
         </div>
-        <div className="acts">
-          <label className="find">
-            <Search className="h-[15px] w-[15px] shrink-0" strokeWidth={1.75} />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search by name or description"
-              spellCheck={false}
-              aria-label="Search skills"
-              className="placeholder:text-mute focus:outline-none"
-            />
-          </label>
-          <CreateMenu
-            label="Add a skill"
-            choices={[
-              {
-                icon: Sparkles,
-                label: "Create with AI",
-                note: "Describe it; an agent writes it for you.",
-                onPick: () => start({ prompt: "Create a Firetower skill that " }),
-              },
-              {
-                icon: FolderDown,
-                label: "Upload a folder",
-                note: "A skill you already have, dropped in.",
-                onPick: () => add(),
-              },
-            ]}
-          />
-        </div>
+        {/* **Neither is drawn over the blank.** A find box over a blank has
+            nothing to narrow, and the blank's own button is this same action
+            with the sentence that explains it. */}
+        {!bare && (
+          <div className="acts">
+            <label className="find">
+              <Search className="h-[15px] w-[15px] shrink-0" strokeWidth={1.75} />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search by name or description"
+                spellCheck={false}
+                aria-label="Search skills"
+                className="placeholder:text-mute focus:outline-none"
+              />
+            </label>
+            {addSkill}
+          </div>
+        )}
       </div>
 
-      {/* An agent wrote one and it is waiting. First, because it is the only
-          thing on this screen that wants a decision. */}
-      {held.length > 0 && (
-        <section className="sksec">
-          <div className="hd">
-            <h2>Waiting for you</h2>
-            <span className="n">{held.length}</span>
+      {bare ? (
+        /* The surface is still a drop target and still draws the `.drop`
+           overlay above; the sentence is what says so, and the button's menu
+           offers the same two routes the dashed box's two buttons did. */
+        <Blank icon={Puzzle} title="No skills yet" action={addSkill}>
+          Ask an agent to write one, or drop in a folder you already have.
+        </Blank>
+      ) : (
+        <>
+        {/* An agent wrote one and it is waiting. First, because it is the only
+            thing on this screen that wants a decision. */}
+        {held.length > 0 && (
+          <section className="sksec">
+            <div className="hd">
+              <h2>Waiting for you</h2>
+              <span className="n">{held.length}</span>
+            </div>
+            <div className="review">
+              <h3>An agent wrote {held.length === 1 ? "this one" : "these"}, and {held.length === 1 ? "it runs" : "they run"} code</h3>
+              <p>
+                Read every file before you approve {held.length === 1 ? "it" : "them"}. A held skill can ship
+                executable scripts and register hooks for the whole session, so it runs on every turn rather
+                than only when it is invoked.
+              </p>
+            </div>
+            <div className="skgrid mt-1">{held.map((s) => row(s, true))}</div>
+          </section>
+        )}
+
+        {/* **A query that matched nothing anywhere collapses the three sections
+            to one line.** Three headings each reading 0 with a line under each
+            is three lies about one fact. Where it matches in some and not
+            others, the sections it missed are not drawn at all — which is what
+            the two `length > 0` guards below already did. */}
+        {q && shown.length === 0 ? (
+          <div className="mt-4">
+            <Note
+              icon={Search}
+              control={
+                <button onClick={() => setQuery("")} className="btn quiet">
+                  Clear
+                </button>
+              }
+            >
+              No skill matches <Typed>{query.trim()}</Typed>.
+            </Note>
           </div>
-          <div className="review">
-            <h3>An agent wrote {held.length === 1 ? "this one" : "these"}, and {held.length === 1 ? "it runs" : "they run"} code</h3>
-            <p>
-              Read every file before you approve {held.length === 1 ? "it" : "them"}. A held skill can ship
-              executable scripts and register hooks for the whole session, so it runs on every turn rather
-              than only when it is invoked.
-            </p>
-          </div>
-          <div className="skgrid mt-1">{held.map((s) => row(s, true))}</div>
-        </section>
+        ) : (
+          <>
+          <Group
+            title="Yours"
+            count={mine.length}
+            note={
+              orgAdmin
+                ? "Yours, or in any directory, since you're an organisation admin. Select several to share or delete them together."
+                : "Yours, or in a directory you administer. Select several to share or delete them together."
+            }
+            /* **The one a person actually meets.** The built-ins are seeded on the
+               server's own start, so the page-level blank above is close to
+               unreachable and this is the Skills empty state: the screen is not
+               empty, one section of it is. */
+            empty={<Note icon={Puzzle}>Nothing of your own yet.</Note>}
+          >
+            {mine.map((s) => row(s, true))}
+          </Group>
+
+          {builtIn.length > 0 && (
+            <Group
+              title="From Firetower"
+              count={builtIn.length}
+              note="Shipped with the product and on by default. They cannot be deleted. Turn one off for a single session in the composer."
+            >
+              {builtIn.map((s) => row(s, false))}
+            </Group>
+          )}
+
+          {sharedWithMe.length > 0 && (
+            <Group
+              title="Shared with you"
+              count={sharedWithMe.length}
+              note="You can turn these on in your sessions. Their directory's admins decide who else gets them."
+            >
+              {sharedWithMe.map((s) => row(s, false))}
+            </Group>
+          )}
+
+          <p className="mt-9 flex items-center gap-2.5 text-ui text-dim">
+            <FolderDown className="h-[15px] w-[15px]" strokeWidth={1.75} />
+            Or drop a folder anywhere on this page.
+          </p>
+          </>
+        )}
+        </>
       )}
-
-      <Group
-        title="Yours"
-        count={mine.length}
-        note={
-          orgAdmin
-            ? "Yours, or in any directory, since you're an organisation admin. Select several to share or delete them together."
-            : "Yours, or in a directory you administer. Select several to share or delete them together."
-        }
-        empty={query ? `No skill you manage matches “${query}”.` : "None yet. Add one to get started."}
-      >
-        {mine.map((s) => row(s, true))}
-      </Group>
-
-      {builtIn.length > 0 && (
-        <Group
-          title="From Firetower"
-          count={builtIn.length}
-          note="Shipped with the product and on by default. They cannot be deleted — turn one off for a single session in the composer."
-        >
-          {builtIn.map((s) => row(s, false))}
-        </Group>
-      )}
-
-      {sharedWithMe.length > 0 && (
-        <Group
-          title="Shared with you"
-          count={sharedWithMe.length}
-          note="You can turn these on in your sessions. Their directory's admins decide who else gets them."
-        >
-          {sharedWithMe.map((s) => row(s, false))}
-        </Group>
-      )}
-
-      <p className="mt-9 flex items-center gap-2.5 text-ui text-dim">
-        <FolderDown className="h-[15px] w-[15px]" strokeWidth={1.75} />
-        Or drop a folder anywhere on this page.
-      </p>
 
       {selected.length > 0 && (
         <div className="pointer-events-none sticky bottom-4 z-20 mt-3 flex justify-center">
@@ -399,22 +431,42 @@ function Group({
   title: string;
   count: number;
   note: string;
-  empty?: string;
+  /** What the section says instead of rows: a `Note`, never a `Blank`. */
+  empty?: React.ReactNode;
   children: React.ReactNode;
 }) {
+  const bare = count === 0 && !!empty;
   return (
     <section className="sksec">
       <div className="hd">
         <h2>{title}</h2>
         <span className="n">{count}</span>
-        <p className="note">{note}</p>
+        {/* **Not when the section is empty.** The note is about operating the
+            rows — select several, share them — and a paragraph of that above
+            a line saying there are none is two lines where one is the whole
+            answer. */}
+        {!bare && <p className="note">{note}</p>}
       </div>
-      {count === 0 && empty ? (
-        <p className="mt-3 text-ui text-mute">{empty}</p>
-      ) : (
-        <div className="skgrid">{children}</div>
-      )}
+      {bare ? empty : <div className="skgrid">{children}</div>}
     </section>
+  );
+}
+
+/** The whole page as a drop target, said while something is over it. */
+function Dropping() {
+  return (
+    <div className="drop">
+      <div>
+        <span className="mx-auto grid h-14 w-14 place-items-center text-dim">
+          <FolderDown className="h-7 w-7" strokeWidth={1.5} />
+        </span>
+        <b className="mt-2 block text-lede font-mid text-bone">Drop the folder</b>
+        <p className="mt-1 max-w-[46ch] text-ui text-dim">
+          One skill, a folder of them, or a .zip of either. Nothing is written until you have looked
+          at what was found.
+        </p>
+      </div>
+    </div>
   );
 }
 
@@ -466,58 +518,6 @@ function Tick({
   );
 }
 
-function Empty({
-  over,
-  onAdd,
-  onCreateWithAI,
-}: {
-  over: boolean;
-  onAdd: (d?: ReturnType<typeof readDrop>) => void;
-  onCreateWithAI: () => void;
-}) {
-  const picker = useRef<HTMLInputElement>(null);
-  return (
-    <div
-      className={`grid place-items-center rounded-xl border border-dashed px-6 py-16 text-center transition-colors ${
-        over ? "border-slate bg-slate-tint" : "border-line bg-panel/60"
-      }`}
-    >
-      <span className={`grid h-11 w-11 place-items-center rounded-lg bg-raise shadow-raise ${over ? "text-slate" : "text-mute"}`}>
-        <FolderDown className="h-5 w-5" strokeWidth={1.75} />
-      </span>
-      <h2 className="mt-3.5 text-display font-mid text-bone">No skills yet</h2>
-      <p className="mt-2 max-w-sm text-read leading-relaxed text-dim">
-        Ask an agent to write one for you, or drop in a skill folder you already have.
-      </p>
-      <div className="mt-5 flex items-center gap-2">
-        <button
-          onClick={onCreateWithAI}
-          className="btn primary"
-        >
-          <Sparkles className="h-3.5 w-3.5" strokeWidth={1.75} />
-          Create with AI
-        </button>
-        <button
-          onClick={() => picker.current?.click()}
-          className="btn plain"
-        >
-          Choose a folder
-        </button>
-      </div>
-      <p className="mt-4 text-micro text-mute">Or drop one here</p>
-      <input
-        ref={picker}
-        type="file"
-        multiple
-        // @ts-expect-error — webkitdirectory is not in the DOM types
-        webkitdirectory=""
-        directory=""
-        className="hidden"
-        onChange={(e) => onAdd(readFiles(e.target.files))}
-      />
-    </div>
-  );
-}
 
 
 /** Identity by shape, never a hue — the same reasoning as a server's mark. */
@@ -811,8 +811,8 @@ function Review({
   if (q.error || !Array.isArray((q.data as { files?: unknown } | undefined)?.files)) {
     return (
       <div className="max-w-[56rem] py-6">
-        <Blank icon={TriangleAlert} title="That did not load">
-          {q.error ? `${why(q.error)} ` : ""}The skill is still held — nothing has been approved and
+        <Blank icon={TriangleAlert} title="That did not load" shape="plate">
+          {q.error ? `${why(q.error)} ` : ""}The skill is still held. Nothing has been approved and
           nothing has been discarded.
         </Blank>
       </div>

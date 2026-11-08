@@ -54,6 +54,17 @@ export function Machines({ live, open: asked = null }: { live: boolean; open?: s
      name one, so the address has to be able to. */
   const [open, setOpen] = useOpened(asked);
 
+  /* **Nothing added, and nothing wrong** — which is every fresh install, and
+     the one state where the page is its own empty state. Two things come off
+     the screen while it holds, and both are the general rule rather than a
+     Machines quirk: a page's **header action is not drawn over a `Blank`
+     whose action is the same action** — a 33px target in the top right corner
+     of a page whose only words are 500px away at the optical centre, where
+     the blank's button carries the same verb *and* the sentence explaining it
+     — and a **`WhereTo` is never drawn beside a `Blank`**. Both come back
+     with the first row, so neither is ever on screen beside its double. */
+  const blank = !hosts.loading && !hosts.trouble && !hosts.error && hosts.data.length === 0;
+
   return (
     /* **Machines**, which is what the rail calls it and what the drawing says.
        The page said "Compute" — a category word for the one screen that is
@@ -65,10 +76,16 @@ export function Machines({ live, open: asked = null }: { live: boolean; open?: s
       settling={hosts.loading}
       trouble={hosts.trouble}
       error={hosts.error}
-      action={live && <button onClick={() => setAdding(true)} className="btn primary"><Icon of={Plus} size={14} />Add a machine</button>}
+      action={live && !blank && <button onClick={() => setAdding(true)} className="btn primary"><Icon of={Plus} size={14} />Add a machine</button>}
     >
+      <Rows
+        feed={hosts}
+        icon={ServerIcon}
+        empty="No machine yet"
+        note="Agents run on a machine you add over ssh. Firetower does not run them on itself."
+        action={live ? <button onClick={() => setAdding(true)} className="btn primary"><Icon of={Plus} size={14} />Add a machine</button> : undefined}
+      >
       <Group>
-      <Rows feed={hosts} empty={<Start onAdd={() => setAdding(true)} />}>
         {hosts.data.map((h) => (
           <div key={h.id}>
             <button onClick={() => setOpen(open === h.id ? null : h.id)} className="r">
@@ -106,15 +123,16 @@ export function Machines({ live, open: asked = null }: { live: boolean; open?: s
             {open === h.id && live && <Detail host={h} onGone={() => setOpen(null)} />}
           </div>
         ))}
-      </Rows>
       </Group>
+      </Rows>
       {adding && <Add onClose={() => setAdding(false)} onAdded={(id) => { setAdding(false); setOpen(id); }} />}
 
-      <WhereTo>
-        A machine that is <b>not answering keeps its workspaces</b> until it comes back — a list
-        that empties itself when the VPN drops reads as work being lost. Draining stops new work
-        without ending what is running.
-      </WhereTo>
+      {!blank && (
+        <WhereTo>
+          A machine that is <b>not answering keeps its workspaces</b> until it comes back.
+          Draining stops new work without ending what is running.
+        </WhereTo>
+      )}
     </Section>
     <Removed />
     </>
@@ -125,49 +143,6 @@ export function Machines({ live, open: asked = null }: { live: boolean; open?: s
 function describe(c: Compute): string {
   if (c.type !== "Server") return "";
   return `${c.user ? `${c.user}@` : ""}${c.host}${c.port ? `:${c.port}` : ""}`;
-}
-
-/**
- * Landing here with nothing added, which is now every fresh install.
- *
- * `Repos.tsx`'s own `Start`, beat for beat — the same centred imperative, the
- * same clamped paragraph, the same 20rem column of actions, the same quiet
- * routes underneath. That screen already decided that arriving at an empty
- * list is a beginning rather than a failure, and this screen has exactly the
- * same problem now that Firetower does not register itself as a machine.
- */
-function Start({ onAdd }: { onAdd: () => void }) {
-  return (
-    <div className="px-6 py-9 text-center">
-      <p className="text-title text-bone">Add a machine to run agents on</p>
-      <p className="mx-auto mt-1.5 max-w-[46ch] text-ui text-dim">
-        An agent runs on the machine itself — its tools, its filesystem, its network — as the
-        account Firetower connects as. Firetower does not run agents on itself.
-      </p>
-
-      <div className="mx-auto mt-5 flex w-full max-w-[20rem] flex-col gap-2">
-        <button onClick={onAdd} className="control w-full justify-center bg-bone font-medium text-ground hover:opacity-90">
-          <Icon of={Plus} size={12} />Add a machine
-        </button>
-      </div>
-
-      <div className="mx-auto mt-5 flex max-w-[46ch] flex-col items-center gap-1.5 text-meta text-mute">
-        <span>
-          A VM, a build box, a Mac with Xcode on it. It needs ssh, git, tmux and a shell —
-          Firetower puts the worker in that account&rsquo;s home.
-        </span>
-        {/* The key is the step that happens before the form can be filled in,
-            and it is the one thing a machine can only get from a person. A
-            link into the dialog that already shows it, not a second copy. */}
-        <span>
-          You will need Firetower&rsquo;s public key on it.{" "}
-          <button onClick={onAdd} className="underline decoration-line underline-offset-2 hover:text-dim">
-            Show the key
-          </button>
-        </span>
-      </div>
-    </div>
-  );
 }
 
 /**

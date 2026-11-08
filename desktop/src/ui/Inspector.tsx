@@ -11,7 +11,7 @@
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ChevronRight, FileCode2, FileDiff, FolderDown, FolderTree, Loader2, MessageSquarePlus, PanelRightClose, Ship as ShipIcon } from "lucide-react";
+import { ChevronRight, FileCode2, FileDiff, FolderDown, FolderTree, Loader2, MessageSquarePlus, PanelRightClose, Ship as ShipIcon, TriangleAlert } from "lucide-react";
 import { useListFiles } from "~/api/generated/sessions/sessions";
 import type { Artifact, FileEntry, Session } from "~/api/generated/model";
 import { OverviewTab, OverviewIcon } from "~/ui/OverviewTab";
@@ -25,6 +25,7 @@ import { FileGlyph } from "~/ui/FileGlyph";
 import { ContextMenu, useMenu } from "~/ui/ContextMenu";
 import { downloadArchive, downloadFile, type SavePhase } from "~/api/download";
 import { IconButton } from "~/components/ui";
+import { Note } from "~/ui/config/bits";
 
 const TABS = [
   { id: "overview", label: "Overview", icon: OverviewIcon },
@@ -225,9 +226,13 @@ function DiffList({
     onSuccess: () => setNote(null),
   });
 
-  if (loading) return <Empty line="Reading the diff…" hint="" />;
-  if (error) return <Empty line={error} hint="" />;
-  if (files.length === 0) return <Empty line="Nothing changed yet." hint="Edits the agent makes will show up here." />;
+  /* **A `Note`, at panel width.** This was right about being small and had
+     one line too many: a line and a hint, where the hint said what the line
+     already implied. The glyph is the tab's own, so the note reads as
+     belonging to the diff rather than to the window. */
+  if (loading) return <Note icon={FileDiff}>Reading the diff…</Note>;
+  if (error) return <Note icon={TriangleAlert}>{error}</Note>;
+  if (files.length === 0) return <Note icon={FileDiff}>Nothing changed yet.</Note>;
 
   const first = open ?? files[0].path;
 
@@ -501,7 +506,8 @@ function Directory({ sessionId, path, depth, changed, marked, onOpenFile }: { se
   );
   if (isPending) return <p className="px-3 py-1 text-meta text-mute" style={{ paddingLeft: `${0.75 + depth * 0.85}rem` }}>…</p>;
   if (error) return <p className="px-3 py-1 text-meta text-brick">{why(error)}</p>;
-  if (entries.length === 0 && depth === 0) return <Empty line="An empty workspace." hint="Nothing is checked out here yet." />;
+  if (entries.length === 0 && depth === 0)
+    return <Note icon={FolderTree}>Nothing is checked out here yet.</Note>;
   return (
     <>
       {entries.map((e) => (
@@ -600,11 +606,3 @@ function Saving({ phase, size = 3 }: { phase: SavePhase; size?: 3 | 3.5 }) {
   );
 }
 
-function Empty({ line, hint }: { line: string; hint: string }) {
-  return (
-    <div className="px-6 py-10 text-center">
-      <p className="text-ui text-dim">{line}</p>
-      {hint && <p className="mt-1 text-meta text-mute">{hint}</p>}
-    </div>
-  );
-}
