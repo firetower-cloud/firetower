@@ -43,6 +43,10 @@ type Webish = {
   style?: { flex: number; backgroundColor: string };
   startInLoadingState?: boolean;
   renderLoading?: () => React.ReactElement;
+  /** The server answered, with a status that is not a page. */
+  onHttpError?: (e: { nativeEvent: { statusCode: number } }) => void;
+  /** It could not be reached at all. */
+  onError?: () => void;
 };
 const WebView = Untyped as unknown as React.ComponentType<Webish>;
 
@@ -51,6 +55,8 @@ export default function ArtifactScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const insets = useSafeAreaInsets();
   const [menu, setMenu] = useState(false);
+  /* The bytes failed, as opposed to the row being gone. */
+  const [broken, setBroken] = useState<number | null>(null);
   const { data: artifacts, isPending } = useListArtifacts();
 
   const artifact = useMemo(() => (artifacts ?? []).find((a) => a.id === id) ?? null, [artifacts, id]);
@@ -108,6 +114,38 @@ export default function ArtifactScreen() {
         <View className="flex-1 items-center justify-center px-8">
           <Text className="text-center font-sans text-ui text-mute">That artifact is not here any more.</Text>
         </View>
+      ) : broken !== null ? (
+        /**
+         * **The page could not be loaded, said as a sentence.**
+         *
+         * Without this the `WebView` renders whatever came back — so a refusal
+         * or a 404 painted its own JSON body as unstyled text across the
+         * screen: `{"code":"NotFound","message":"…"}`. That is the app's
+         * fault even when the status is not: a response body is not a page,
+         * and showing one raw is the viewer declining to have an opinion
+         * about failure.
+         *
+         * The status is named because it separates the two things somebody
+         * can do about it — a 404 means the version's bytes are gone and the
+         * row is stale, a 401 or 403 means this account may not read it, and
+         * anything else is worth retrying.
+         */
+        <View className="flex-1 items-center justify-center gap-2 px-8">
+          <Text className="text-center font-medium text-title text-bone">
+            {broken === 404
+              ? "These bytes are gone."
+              : broken === 401 || broken === 403
+                ? "You cannot read this artifact."
+                : "That artifact would not load."}
+          </Text>
+          <Text className="text-center font-sans text-meta text-mute">
+            {broken === 404
+              ? "The version is still listed, but what it pointed at has been deleted."
+              : broken === 401 || broken === 403
+                ? "The server refused it for this account."
+                : `The server answered ${broken}.`}
+          </Text>
+        </View>
       ) : (
         <WebView
           source={source}
@@ -116,6 +154,9 @@ export default function ArtifactScreen() {
           javaScriptEnabled
           originWhitelist={["*"]}
           style={{ flex: 1, backgroundColor: color.ground }}
+          onHttpError={(e) => setBroken(e.nativeEvent.statusCode)}
+          /* Unreachable rather than refused — no status to name. */
+          onError={() => setBroken(0)}
           startInLoadingState
           renderLoading={() => (
             <View className="flex-1 items-center justify-center bg-ground">

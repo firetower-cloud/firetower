@@ -36,6 +36,7 @@ import Animated, { FadeIn, FadeOut, ZoomIn } from "react-native-reanimated";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import * as Haptics from "expo-haptics";
 import { useWindowDimensions } from "react-native";
+import type { Asked } from "~/api/conversation";
 import type { Workspace } from "~/api/workspaces";
 import { lead } from "~/api/workspaces";
 import { elapsed, minutesSince } from "~/api/view";
@@ -94,6 +95,8 @@ export function Peek({
   onClose,
   onOpen,
   onChanges,
+  pending,
+  reading,
   onAnswer,
   onEnd,
 }: {
@@ -101,7 +104,16 @@ export function Peek({
   onClose: () => void;
   onOpen: () => void;
   onChanges: () => void;
-  /** Present only when something is genuinely blocked on an answer. */
+  /**
+   * What it is blocked on, read without opening the workspace.
+   *
+   * `undefined` while the one request is in flight, `null` when there is
+   * nothing pending or it could not be read. The buttons appear only on a
+   * real `Asked`, because that is the only state in which pressing one does
+   * anything — see `api/pending.ts`.
+   */
+  pending?: Asked | null;
+  reading?: boolean;
   onAnswer?: (yes: boolean) => void;
   onEnd: () => void;
 }) {
@@ -111,10 +123,15 @@ export function Peek({
 
   /* Blocked is a narrower question than "wants a human": `needsYou` also
      covers finished and broken, and neither of those has an answer to give.
-     Only a genuine block gets the two buttons. */
-  const asked = place.runs.find((r) => r.status === "NeedsYou");
-  const blocked = Boolean(asked);
-  const said = asked?.note ?? place.runs.find((r) => r.note)?.note;
+     Only a genuine block gets the two buttons — and only once the request it
+     is blocked on has actually been read, because answering needs its `req`. */
+  const run = place.runs.find((r) => r.status === "NeedsYou");
+  const blocked = Boolean(run);
+  /* The agent's own note is better than anything derivable, and it is what
+     the row already shows. The request's detail is the fallback once it has
+     been read. */
+  const said = run?.note ?? pending?.detail ?? place.runs.find((r) => r.note)?.note;
+  const answerable = blocked && !!pending && !!onAnswer;
 
   const close = useCallback(() => onClose(), [onClose]);
 
@@ -175,13 +192,13 @@ export function Peek({
             </Text>
           ) : null}
 
-          {blocked && onAnswer ? (
+          {answerable ? (
             <View className="mt-0.5 flex-row gap-3">
               <Pressable
                 testID="peek-no"
                 onPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  onAnswer(false);
+                  onAnswer?.(false);
                   close();
                 }}
                 className="h-12 flex-1 items-center justify-center rounded-field bg-ground"
@@ -194,7 +211,7 @@ export function Peek({
                 testID="peek-yes"
                 onPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                  onAnswer(true);
+                  onAnswer?.(true);
                   close();
                 }}
                 className="h-12 flex-1 items-center justify-center rounded-field bg-bone"

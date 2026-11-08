@@ -16,41 +16,22 @@
  * notifications answer better — so the counts for the others are whatever was
  * last known, and the sheet says so rather than implying they are live.
  */
-import { Modal, Pressable, Text, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Pressable, Text, View } from "react-native";
 import { router } from "expo-router";
 import { Check, Plus } from "lucide-react-native";
 import { choose, useServer } from "~/native/current";
 import { servers } from "~/native/servers";
+import { Sheet } from "~/ui/Sheet";
 import { useTheme } from "~/design/theme";
 import { size } from "~/design/tokens.generated";
 
 export function Servers({ onClose }: { onClose: () => void }) {
   const { color } = useTheme();
-  const insets = useSafeAreaInsets();
   const here = useServer();
   const all = servers();
 
   return (
-    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
-      {/* A sheet is the task and the home is not what it is about, so this is
-          a scrim rather than a catcher. */}
-      <Pressable
-        accessibilityLabel="Dismiss"
-        className="flex-1"
-        style={{ backgroundColor: color.scrim }}
-        onPress={onClose}
-      />
-      <View
-        className="rounded-t-sheet bg-float"
-        style={{ paddingBottom: insets.bottom + 14, marginLeft: insets.left, marginRight: insets.right }}
-      >
-        {/* **A grabber is a promise.** Drawn because the sheet follows the
-            finger down, not only because it looks like a sheet. */}
-        <View className="items-center pb-0.5 pt-2.5">
-          <View className="h-[5px] w-[38px] rounded-full bg-settling" />
-        </View>
-
+    <Sheet open onClose={onClose}>
         <View className="px-5 pb-3.5 pt-3">
           <Text className="font-medium text-title text-bone">Firetowers</Text>
           <Text className="mt-0.5 font-sans text-meta text-dim">
@@ -100,7 +81,6 @@ export function Servers({ onClose }: { onClose: () => void }) {
             Connect a Firetower
           </Text>
         </Pressable>
-      </View>
-    </Modal>
+    </Sheet>
   );
 }

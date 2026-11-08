@@ -158,7 +158,20 @@
      `--color-overlay` reaches 4.08 and still does not clear; that is the
      tier `globals.css` already flags as the tight one, and closing it would
      start eating the gap to `--color-text` (9.23) that keeps the ramp
-     readable. R = G holds. Dark is untouched — it measures 5.82:1 there. */
+     readable.
+
+     **And the adjacency does not exist.** Every `bg-overlay` surface in the
+     app was checked: in `Segmented`, in the tracker chips and the *Mine*
+     filter in `tasks.tsx`, and in `you.tsx`, `repos.tsx`, `Composer` and
+     `AttachMenu`. In all of them the overlay fill is the *selected* state
+     and it is paired with `text-bone`; `text-dim` is on the other branch of
+     the same ternary, over `raise`, `ground` or nothing. So dim text never
+     lands on an overlay, and 4.08 is a figure about a combination this app
+     does not draw. Left alone deliberately rather than overlooked — if some
+     screen later puts dim text on an overlay, that pairing is the defect,
+     not this value.
+
+     R = G holds. Dark is untouched — it measures 5.82:1 there. */
   --color-dim: #6f6f77;
 
   /* CORRECTION · a signal is gated against its own tint, never the page.

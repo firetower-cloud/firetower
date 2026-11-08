@@ -12,7 +12,6 @@
  */
 import { useState } from "react";
 import { Alert, Modal, Pressable, Text, TextInput, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQueryClient } from "@tanstack/react-query";
 import * as Haptics from "expo-haptics";
 import * as Linking from "expo-linking";
@@ -29,6 +28,7 @@ import {
 import { answerable } from "~/api/view";
 import { why } from "~/data";
 import { size } from "~/design/tokens.generated";
+import { Sheet } from "~/ui/Sheet";
 import { useTheme } from "~/design/theme";
 
 type Row = {
@@ -60,7 +60,6 @@ export function WorkspaceMenu({
   onEnded: () => void;
 }) {
   const { color } = useTheme();
-  const insets = useSafeAreaInsets();
   const cache = useQueryClient();
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(session.name);
@@ -217,20 +216,7 @@ export function WorkspaceMenu({
   ];
 
   return (
-    <Modal visible={open} transparent animationType="slide" onRequestClose={onClose}>
-      {/* The sheet is the task and the conversation is not behind it, so this
-          is a scrim rather than a catcher — and it is `--color-scrim`, which is
-          its own token precisely because a surface at an alpha is a pale wash
-          on a pale ground. */}
-      <Pressable className="flex-1" style={{ backgroundColor: color.scrim }} onPress={onClose} />
-      <View
-        className="rounded-t-2xl border-t border-line bg-float"
-        style={{ paddingBottom: insets.bottom + 8, marginLeft: insets.left, marginRight: insets.right }}
-      >
-        <View className="items-center pb-1 pt-2.5">
-          <View className="h-1 w-9 rounded-full bg-mute" />
-        </View>
-
+    <Sheet open={open} onClose={onClose}>
         {renaming ? (
           <View className="gap-3 px-5 pb-4 pt-2">
             <Text className="font-narrow text-micro uppercase tracking-[0.18em] text-mute">
@@ -298,7 +284,6 @@ export function WorkspaceMenu({
             })}
           </View>
         )}
-      </View>
-    </Modal>
+    </Sheet>
   );
 }

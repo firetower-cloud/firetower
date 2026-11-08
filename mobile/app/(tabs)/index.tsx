@@ -50,6 +50,8 @@ import { useAgents, useRepos, useSessions } from "~/data";
 import { useServer } from "~/native/current";
 import { ServerChip } from "~/ui/ServerChip";
 import { ArtifactCard } from "~/ui/ArtifactCard";
+import { usePending } from "~/api/pending";
+import { useAnswerRequest } from "~/api/generated/sessions/sessions";
 import { Peek, usePeekGesture } from "~/ui/Peek";
 import { Servers } from "~/ui/Servers";
 import { StartBox, type Chip, type Pick_ } from "~/ui/StartBox";
@@ -170,6 +172,17 @@ export default function Home() {
 
   const noRepo = repos.length === 0;
   const peeked = places.find((p) => p.id === peeking) ?? null;
+
+  /**
+   * What the peeked workspace is blocked on, read without opening it.
+   *
+   * One bounded request on long-press and nothing ongoing — see
+   * `api/pending.ts`. Without it the peek can preview but not answer, which
+   * is coverage §5's **P4** and the whole reason the component exists.
+   */
+  const blockedHere = !!peeked?.runs.some((r) => r.status === "NeedsYou");
+  const pending = usePending(peeked?.id ?? null, blockedHere);
+  const answer = useAnswerRequest();
 
   const refresh = useCallback(
     () => cache.invalidateQueries({ queryKey: getListSessionsQueryKey() }),
@@ -462,6 +475,18 @@ export default function Home() {
           onClose={() => setPeeking(null)}
           onOpen={() => router.push(`/workspace/${peeked.id}`)}
           onChanges={() => router.push(`/workspace/repo?id=${peeked.id}`)}
+          pending={pending.asked}
+          reading={pending.reading}
+          onAnswer={(yes) => {
+            if (!pending.asked || !peeked) return;
+            answer.mutate({
+              id: peeked.id,
+              data: {
+                req: pending.asked.req,
+                decision: yes ? { decision: "Allow" } : { decision: "Deny", reason: null },
+              },
+            });
+          }}
           onEnd={() => setPeeking(null)}
         />
       ) : null}

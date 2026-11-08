@@ -15,10 +15,10 @@
  * disabled control is the clearest possible way to tell somebody they are
  * being withheld from; a sentence tells them where to go.
  */
-import { Modal, Pressable, Text, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Pressable, Text, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { History, Link2, SquareArrowOutUpRight } from "lucide-react-native";
+import { Sheet } from "~/ui/Sheet";
 import { useTheme } from "~/design/theme";
 import { size } from "~/design/tokens.generated";
 
@@ -39,7 +39,6 @@ export function ArtifactMenu({
   onWorkspace?: () => void;
 }) {
   const { color } = useTheme();
-  const insets = useSafeAreaInsets();
 
   const items = [
     {
@@ -60,21 +59,7 @@ export function ArtifactMenu({
   ].filter(Boolean) as { id: string; label: string; icon: typeof Link2; run?: () => void }[];
 
   return (
-    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable
-        accessibilityLabel="Dismiss"
-        className="flex-1"
-        style={{ backgroundColor: color.scrim }}
-        onPress={onClose}
-      />
-      <View
-        className="rounded-t-sheet bg-float"
-        style={{ paddingBottom: insets.bottom + 14, marginLeft: insets.left, marginRight: insets.right }}
-      >
-        <View className="items-center pb-0.5 pt-2.5">
-          <View className="h-[5px] w-[38px] rounded-full bg-settling" />
-        </View>
-
+    <Sheet open onClose={onClose}>
         <View className="px-5 pb-3.5 pt-3">
           <Text numberOfLines={1} className="font-medium text-title text-bone">
             {title}
@@ -110,7 +95,6 @@ export function ArtifactMenu({
           Who else can reach this, and the directory it is filed in, are set from the desktop app. A
           phone reads artifacts; it grants nothing.
         </Text>
-      </View>
-    </Modal>
+    </Sheet>
   );
 }
