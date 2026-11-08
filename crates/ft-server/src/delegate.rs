@@ -611,8 +611,11 @@ fn new_role_from(input: &Value) -> Result<crate::roles::NewRole> {
         // it. The two switches default on instead, so a profile an agent
         // writes loads the owner's usual set rather than nothing at all.
         skill_scope: vec![],
-        include_always_on: true,
-        include_repo_defaults: true,
+        // Not settable from here either, for the same reason, and said as
+        // `None` rather than `Some(true)`: "the agent has no opinion about
+        // these" is the fact, and `create` resolves it to the column default.
+        include_always_on: None,
+        include_repo_defaults: None,
         settings: Default::default(),
         // Resolved and filed separately below: the agent names a directory, not
         // an id, so the service's `directory` field is left out here.
@@ -777,8 +780,12 @@ async fn update_profile(state: &AppState, request: &AgentRequest) -> Result<Stri
         // profile must not be able to widen what its children load, nor to
         // quietly switch off a source somebody chose on the Profiles screen.
         skill_scope: existing.skill_scope.clone(),
-        include_always_on: existing.include_always_on,
-        include_repo_defaults: existing.include_repo_defaults,
+        // `None` leaves them exactly as they are, which is what "carried, not
+        // settable" means — and unlike reading them off `existing` and writing
+        // them back, it cannot lose a change somebody made on the Profiles
+        // screen between the read above and this write.
+        include_always_on: None,
+        include_repo_defaults: None,
         settings: existing.settings.clone(),
         directory: None,
     };

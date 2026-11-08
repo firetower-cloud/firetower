@@ -12344,12 +12344,18 @@
             "type": "string"
           },
           "includeAlwaysOn": {
-            "type": "boolean",
-            "description": "Include the owner's always-on skills. **Absent means on**, not off.\n\n`#[serde(default)]` would give `false` here, so a client that predates\nthese two fields would turn inheritance off on every profile it saved —\nand it saves the whole object, so opening a profile and pressing Save\nwould silently empty it. `default = \"inherits\"` is what makes the\nmigration's column default survive a round trip through an old client."
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Include the owner's always-on skills. **Absent means leave it as it\nis** — on an update, whatever is stored; on a create, on.\n\n`Option` rather than `bool` because the rest of this struct is a\nwhole-object write and a client can leave a field out. A `bool` has to\nread that omission as something, and both readings edit a profile\nnobody asked to edit: `false` switches inheritance off on every profile\nan older client saves, and `true` — which this was — turns a switch\nsomebody deliberately off back on. Keeping no opinion is the only\nanswer that leaves a profile alone."
           },
           "includeRepoDefaults": {
-            "type": "boolean",
-            "description": "Include the owner's defaults for the repositories the child checks out.\n**Absent means on** — see above."
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Include the owner's defaults for the repositories the child checks out.\n**Absent means leave it as it is** — see above."
           },
           "instructions": {
             "type": "string"

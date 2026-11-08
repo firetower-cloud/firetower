@@ -130,19 +130,22 @@ pub struct NewRole {
     /// The subagents it may delegate to, by id. Empty = any the owner can see.
     #[serde(default)]
     pub delegate_scope: Vec<String>,
-    /// Include the owner's always-on skills. **Absent means on**, not off.
+    /// Include the owner's always-on skills. **Absent means leave it as it
+    /// is** — on an update, whatever is stored; on a create, on.
     ///
-    /// `#[serde(default)]` would give `false` here, so a client that predates
-    /// these two fields would turn inheritance off on every profile it saved —
-    /// and it saves the whole object, so opening a profile and pressing Save
-    /// would silently empty it. `default = "inherits"` is what makes the
-    /// migration's column default survive a round trip through an old client.
-    #[serde(default = "inherits")]
-    pub include_always_on: bool,
+    /// `Option` rather than `bool` because the rest of this struct is a
+    /// whole-object write and a client can leave a field out. A `bool` has to
+    /// read that omission as something, and both readings edit a profile
+    /// nobody asked to edit: `false` switches inheritance off on every profile
+    /// an older client saves, and `true` — which this was — turns a switch
+    /// somebody deliberately off back on. Keeping no opinion is the only
+    /// answer that leaves a profile alone.
+    #[serde(default)]
+    pub include_always_on: Option<bool>,
     /// Include the owner's defaults for the repositories the child checks out.
-    /// **Absent means on** — see above.
-    #[serde(default = "inherits")]
-    pub include_repo_defaults: bool,
+    /// **Absent means leave it as it is** — see above.
+    #[serde(default)]
+    pub include_repo_defaults: Option<bool>,
     /// The skills it loads on top of those two, by id. Empty = just those two.
     #[serde(default)]
     pub skill_scope: Vec<String>,
@@ -152,14 +155,14 @@ pub struct NewRole {
     pub directory: Option<String>,
 }
 
-/// What an absent inheritance switch means: on.
+/// What an inheritance switch is when a *new* profile does not state one: on.
 ///
-/// A function because serde's `default` takes one, and named rather than
-/// `|| true` because this is the whole of the compatibility guarantee the
-/// `profile_skill_sources` migration relies on.
-fn inherits() -> bool {
-    true
-}
+/// Named rather than written `true` at the bind, because it has to agree with
+/// `include_always_on boolean not null default true` in the
+/// `profile_skill_sources` migration — a new profile loading the owner's usual
+/// set rather than nothing is the whole of that migration's compatibility
+/// story, and this is the one place the server repeats it.
+const INHERITS: bool = true;
 
 /// Why a role was refused, in a sentence somebody can act on.
 #[derive(Debug)]
@@ -512,8 +515,10 @@ impl Roles {
         .bind(new.can_delegate)
         .bind(&new.delegate_scope)
         .bind(&new.skill_scope)
-        .bind(new.include_always_on)
-        .bind(new.include_repo_defaults)
+        // Nothing to leave alone on a row that does not exist yet, so an
+        // absent switch resolves to the column's default.
+        .bind(new.include_always_on.unwrap_or(INHERITS))
+        .bind(new.include_repo_defaults.unwrap_or(INHERITS))
         .bind(nonblank(&new.settings.model))
         .bind(nonblank(&new.settings.effort))
         .bind(nonblank(&new.settings.mode))
@@ -525,6 +530,13 @@ impl Roles {
     }
 
     /// Change a role's fields. The person must be able to work in where it is filed.
+    ///
+    /// Whole-object: every column here is replaced by what was sent, which is
+    /// why `toDraft` on the desktop side carries all of them. The two
+    /// exceptions are the inheritance switches, which are `COALESCE`d onto
+    /// what is already stored — a caller that says nothing about them changes
+    /// nothing about them. See [`NewRole::include_always_on`] for why those
+    /// two cannot take the whole-object rule.
     pub async fn update(&self, person: &str, id: &str, new: &NewRole) -> Result<bool> {
         // Writer decides it, through the one predicate — the same gate the
         // interface drew `may_write` from.
@@ -536,7 +548,8 @@ impl Roles {
             "UPDATE roles SET name=$2, does=$3, \
                placement=$4, agent=$5, host_id=$6, agent_account_id=$7, instructions=$8, \
                can_delegate=$9, delegate_scope=$10, skill_scope=$11, \
-               include_always_on=$12, include_repo_defaults=$13, \
+               include_always_on=COALESCE($12, include_always_on), \
+               include_repo_defaults=COALESCE($13, include_repo_defaults), \
                pref_model=$14, pref_effort=$15, pref_mode=$16, pref_sandbox=$17, \
                updated_at=now() WHERE id=$1",
         )
@@ -593,8 +606,8 @@ mod tests {
             instructions: "Report findings as path:line.".into(),
             can_delegate: false,
             delegate_scope: vec![],
-            include_always_on: true,
-            include_repo_defaults: true,
+            include_always_on: Some(true),
+            include_repo_defaults: Some(true),
             skill_scope: vec![],
             settings: Default::default(),
             directory: None,
@@ -1017,8 +1030,8 @@ mod tests {
         // Both switches off: the named list is all that is left, and the
         // unreachable one is still gone.
         let mut bare = wanted.clone();
-        bare.include_always_on = false;
-        bare.include_repo_defaults = false;
+        bare.include_always_on = Some(false);
+        bare.include_repo_defaults = Some(false);
         assert!(roles.update(&ana, id.as_str(), &bare).await.unwrap());
         let off = roles
             .one(&ana, id.as_str(), Level::Viewer)
@@ -1078,6 +1091,107 @@ mod tests {
         // Gone.
         assert!(roles.delete(&me, id.as_str()).await.unwrap());
         assert!(roles.visible(&me, Level::Viewer).await.unwrap().is_empty());
+    }
+
+    /// An omitted inheritance switch is not a decision, and the body of a
+    /// write that never mentions one has to leave it alone.
+    ///
+    /// Shape only, no database: this is where the previous
+    /// `#[serde(default = "inherits")]` lived, and the whole of what it got
+    /// wrong is that it turned an absent field into `Some(true)` here — before
+    /// anything downstream could tell the two apart.
+    #[test]
+    fn an_absent_switch_deserialises_to_no_opinion_rather_than_to_on() {
+        let body = |extra: &str| {
+            serde_json::from_str::<NewRole>(&format!(
+                "{{\"name\":\"reviewer\",\"does\":\"reviews a branch\"{extra}}}"
+            ))
+            .unwrap()
+        };
+
+        let silent = body("");
+        assert_eq!(silent.include_always_on, None);
+        assert_eq!(silent.include_repo_defaults, None);
+
+        // And a field that *is* sent still arrives as itself, in both
+        // directions — `false` especially, which is the one that used to be
+        // indistinguishable from silence.
+        let off = body(",\"includeAlwaysOn\":false,\"includeRepoDefaults\":false");
+        assert_eq!(off.include_always_on, Some(false));
+        assert_eq!(off.include_repo_defaults, Some(false));
+        let on = body(",\"includeAlwaysOn\":true");
+        assert_eq!(on.include_always_on, Some(true));
+        assert_eq!(on.include_repo_defaults, None);
+    }
+
+    /// Criterion 11, at the layer that decides it: what a write that omits the
+    /// switches does to a profile somebody has narrowed.
+    ///
+    /// QA's repro, and the reason this is a `COALESCE` rather than a bind.
+    /// `toDraft` on the desktop dropped both fields, so the editor's own save
+    /// was the body in step three — and under the old default it read as "both
+    /// on", which turned a switch somebody had deliberately switched off back
+    /// on. The desktop is fixed, but the client that is already installed on
+    /// somebody's machine is not, and this is what makes its save harmless.
+    #[tokio::test]
+    async fn a_write_that_never_mentions_a_switch_leaves_it_as_it_was() {
+        let (roles, me, org, slug) = setup().await;
+
+        // Said nothing either way, so a new profile gets the column default.
+        let mut silent = new("reviewer");
+        silent.include_always_on = None;
+        silent.include_repo_defaults = None;
+        let id = roles.create(&org, &me, &slug, &silent).await.unwrap();
+        let read = || {
+            let roles = &roles;
+            let me = &me;
+            let id = id.clone();
+            async move {
+                let r = roles
+                    .one(me, id.as_str(), Level::Viewer)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                (r.include_always_on, r.include_repo_defaults)
+            }
+        };
+        assert_eq!(read().await, (true, true), "a new profile inherits both");
+
+        // Narrowed on purpose.
+        let mut narrowed = new("reviewer");
+        narrowed.include_always_on = Some(false);
+        assert!(roles.update(&me, id.as_str(), &narrowed).await.unwrap());
+        assert_eq!(read().await, (false, true));
+
+        // The save that says nothing about either. Everything else it carries
+        // still lands, so this is a real write and not a no-op update.
+        let mut unaware = new("reviewer");
+        unaware.include_always_on = None;
+        unaware.include_repo_defaults = None;
+        unaware.does = "implements and opens a PR".into();
+        assert!(roles.update(&me, id.as_str(), &unaware).await.unwrap());
+        assert_eq!(
+            read().await,
+            (false, true),
+            "a switch somebody turned off was turned back on by a save that never mentioned it",
+        );
+        assert_eq!(
+            roles
+                .one(&me, id.as_str(), Level::Viewer)
+                .await
+                .unwrap()
+                .unwrap()
+                .does,
+            "implements and opens a PR",
+            "the rest of the body is still whole-object",
+        );
+
+        // And it is still switchable: only silence is inert.
+        let mut back = new("reviewer");
+        back.include_always_on = Some(true);
+        back.include_repo_defaults = Some(false);
+        assert!(roles.update(&me, id.as_str(), &back).await.unwrap());
+        assert_eq!(read().await, (true, false));
     }
 
     #[tokio::test]
