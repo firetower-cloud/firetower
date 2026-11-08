@@ -49,6 +49,23 @@ import { HostMark } from "~/components/ui";
 import { useHostOf, why } from "~/data";
 import { openExternal } from "~/open";
 
+/**
+ * The task a session was cut from, as the reference the sheet starts with.
+ *
+ * The key is tried first, then the URL: a Trello card's key is its bare
+ * shortLink, which `parseReference` refuses on its own because it could be
+ * any word, while its URL names it exactly.
+ */
+export function seededRefs(
+  session: { taskKey?: string | null; taskUrl?: string | null },
+  within: string | undefined,
+): Reference[] {
+  const r =
+    (session.taskKey ? parseReference(session.taskKey, within) : null) ??
+    (session.taskUrl ? parseReference(session.taskUrl, within) : null);
+  return r ? [r] : [];
+}
+
 export function Ship({ session, branch, files }: { session: Session; branch?: string; files: Changed[] }) {
   const cache = useQueryClient();
   const hostOf = useHostOf();
@@ -96,8 +113,7 @@ export function Ship({ session, branch, files }: { session: Session; branch?: st
   const [trouble, setTrouble] = useState<string | null>(null);
   const within = session.repo ?? undefined;
   const [refs, setRefs] = useState<Reference[]>(() => {
-    const r = session.taskKey ? parseReference(session.taskKey, within) : null;
-    return r ? [r] : [];
+    return seededRefs(session, within);
   });
   const [typedRef, setTypedRef] = useState("");
 

@@ -770,6 +770,11 @@ const server = createServer(async (req, res) => {
     /* No fallback configured, said explicitly. */
     "/api/v1/sessions/s_1/fallback": { enabled: false, order: [] },
     /* What a tracker is scoped to. */
+    /* Trello's scopes are boards, keyed by board id, which search and the lists route take as they are. */
+    "/api/v1/trackers/trello/scopes": [
+      { key: "5f1b2c3d4e5f6a7b8c9d0e1f", label: "Roadmap" },
+      { key: "60a1b2c3d4e5f6a7b8c9d0e1", label: "Support inbox" },
+    ],
     "/api/v1/trackers/gh_1/scopes": [
       { id: "acme/web", label: "acme/web" },
       { id: "acme/api", label: "acme/api" },
@@ -814,7 +819,12 @@ const server = createServer(async (req, res) => {
       { id: "gitea_01k", kind: "gitea", label: "Gitea", gitHost: "code.acme.dev", connected: false, configured: false, identity: null, builtin: false, maySetApplication: true, sharedApplication: false, authModes: ["token"], kinds: ["issue", "pullRequest"], changeNoun: "pull request" },
     ],
     "/api/v1/trackers": scene === "no-trackers" ? [] : TRACKERS,
-    "/api/v1/tasks": scene === "no-tasks" ? { more: false, next: null, tasks: [] } : TASKS,
+    /* Every source answered `TASKS` before Trello; only Trello has cards of its own. */
+    "/api/v1/tasks": scene === "no-tasks"
+      ? { more: false, next: null, tasks: [] }
+      : url.searchParams.get("source") === "trello"
+        ? { more: false, next: null, tasks: TRELLO_CARDS }
+        : TASKS,
     "/api/v1/colleagues": scene === "no-people" ? [] : COLLEAGUES,
     "/api/v1/teams": scene === "no-people" ? [] : TEAMS,
     "/api/v1/directories": scene === "no-dirs" ? [] : DIRECTORIES,
@@ -1304,6 +1314,7 @@ const PROVIDER_KINDS = [
 const TRACKERS = [
   { id: "gh_1", kind: "github", label: "GitHub", host: "github.com", connected: true, auth: "gitProvider", kinds: ["issue", "pullRequest"], changeNoun: "pull request", scopeKind: "repos", keyUrl: null, secret: null, path: null },
   { id: "tr_linear", kind: "linear", label: "Linear", host: "linear.app", connected: false, auth: "apiKey", kinds: ["ticket"], changeNoun: "change", scopeKind: "teams", keyUrl: "https://linear.app/settings/api", secret: null, path: null },
+  { id: "trello", kind: "trello", label: "Trello", host: "trello.com", connected: true, auth: "apiKey", kinds: ["ticket"], changeNoun: "change", scopeKind: "boards", keyUrl: null, secret: null, path: null },
 ];
 
 /**
@@ -1364,6 +1375,16 @@ const DONE_RUN = {
   finishedAt: minutesAgo(21580),
   steps: RUNNING.steps.map((t) => ({ ...t, state: "done", detail: null })),
 };
+
+/**
+ * Three Trello cards, one per list, so the status in the row has three
+ * different things to say. A card has no repository; its key is the short link.
+ */
+const TRELLO_CARDS = [
+  { id: "trello:aB3dE9fG", key: "aB3dE9fG", kind: "ticket", source: "trello", state: "open", status: "To do", title: "Draft the launch checklist", repo: null, url: "https://trello.com/c/aB3dE9fG", updatedAt: minutesAgo(50), body: null, labels: [{ name: "launch", colour: null }], assignees: [] },
+  { id: "trello:hJ5kL2mN", key: "hJ5kL2mN", kind: "ticket", source: "trello", state: "open", status: "Doing", title: "Import the old support macros", repo: null, url: "https://trello.com/c/hJ5kL2mN", updatedAt: minutesAgo(180), body: "Two hundred macros, most of them duplicates.", labels: [{ name: "bug", colour: "red" }], assignees: [{ login: "ana", avatar: null }] },
+  { id: "trello:pQ8rS3tU", key: "pQ8rS3tU", kind: "ticket", source: "trello", state: "open", status: "Review", title: "Check the export against the new schema", repo: null, url: "https://trello.com/c/pQ8rS3tU", updatedAt: minutesAgo(900), body: null, labels: [], assignees: [] },
+];
 
 const TASKS = {
   more: false,

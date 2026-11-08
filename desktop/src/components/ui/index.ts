@@ -1,5 +1,5 @@
 export { Icon } from "./Icon";
-export { GithubMark, GitLabMark, GiteaMark, HostMark, LinearMark } from "./Brand";
+export { GithubMark, GitLabMark, GiteaMark, HostMark, LinearMark, TrelloMark } from "./Brand";
 export { Button } from "./Button";
 export { IconButton } from "./IconButton";
 export { Badge } from "./Badge";

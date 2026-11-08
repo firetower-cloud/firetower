@@ -11,7 +11,7 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { paneFor, pickable, SourceRows, TasksPage } from "./TasksPage";
+import { paneFor, pickable, scoped, SourceRows, TasksPage } from "./TasksPage";
 import { paneAt, FIRST } from "~/ui/config/panes";
 import { StartProvider } from "~/start";
 import { getListTasksQueryKey } from "~/api/generated/tasks/tasks";
@@ -60,6 +60,35 @@ const ticket = (key: string, title: string): Task => ({
   repo: null,
 });
 
+const trello = (connected: boolean): TrackerStatus => ({
+  id: "trello",
+  label: "Trello",
+  host: "trello.com",
+  kind: "trello",
+  changeNoun: "pull request",
+  connected,
+  auth: "apiKey",
+  scopeKind: "boards",
+  kinds: ["ticket"],
+  keyUrl: null,
+});
+
+/** A card as `tasks::trello` builds one: keyed by its short link, with its list. */
+const card = (key: string, title: string, status: string): Task => ({
+  id: `trello:${key}`,
+  source: "trello",
+  key,
+  title,
+  url: `https://trello.com/c/${key}`,
+  kind: "ticket",
+  state: "open",
+  status,
+  labels: [],
+  assignees: [],
+  updatedAt: new Date().toISOString(),
+  repo: null,
+});
+
 const page = (tasks: Task[], rest: Partial<Page> = {}): Page => ({
   tasks,
   total: null,
@@ -73,7 +102,7 @@ const opening = (source: string, kind: string): ListTasksParams => ({
   source,
   kind: kind as ListTasksParams["kind"],
   state: "open",
-  ...(source === "linear" ? { team: undefined } : { repo: undefined }),
+  ...(source === "linear" || source === "trello" ? { team: undefined } : { repo: undefined }),
 });
 
 function draw(trackers: TrackerStatus[], seed?: [ListTasksParams, Page]) {
@@ -231,11 +260,32 @@ describe("a tracker with no credential", () => {
    * undefined because the list itself is empty. This drew nothing at all: a
    * heading, a sentence, and a blank page under them.
    */
-  it("names the four kinds when there is no tracker at all", () => {
+  it("names the trackers it can read when there is no tracker at all", () => {
     const html = draw([]);
     expect(html).toContain("No tracker connected");
-    expect(html).toContain("GitHub, GitLab, Gitea and Linear can all feed this list.");
+    expect(html).toContain("GitHub, GitLab, Gitea, Linear and Trello can all feed this list.");
     expect(html).toContain("Connect your task tracker");
+  });
+});
+
+describe("trello", () => {
+  it("asks a trello board as a team, not as a repository", () => {
+    const asked = scoped("boards", "aB3dE9fG");
+    expect(asked).toEqual({ team: "aB3dE9fG" });
+    expect(asked).not.toHaveProperty("repo");
+    expect(scoped("repos", "acme/web")).toEqual({ repo: "acme/web" });
+    expect(scoped("teams", "")).toEqual({ team: undefined });
+  });
+
+  it("shows the column a card sits in", () => {
+    const html = draw(
+      [trello(true)],
+      [opening("trello", "ticket"), page([card("aB3dE9fG", "Write the brief", "Doing")])],
+    );
+    expect(html).toContain("Write the brief");
+    // In the row's meta line, beside its key, not just anywhere in the markup.
+    const meta = html.match(/<s>([^<]*)<\/s>/g)?.find((m) => m.includes("aB3dE9fG")) ?? "";
+    expect(meta).toContain("Doing");
   });
 });
 

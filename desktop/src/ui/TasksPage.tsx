@@ -32,7 +32,7 @@ import {
   Ticket,
   User,
 } from "lucide-react";
-import { Badge, GitLabMark, GiteaMark, GithubMark, Icon, IconButton, Input, LinearMark, Select } from "~/components/ui";
+import { Badge, GitLabMark, GiteaMark, GithubMark, Icon, IconButton, Input, LinearMark, Select, TrelloMark } from "~/components/ui";
 import { Blank, Note, Typed } from "~/ui/config/bits";
 import { usePathname } from "~/shims/next-navigation";
 import { elapsed, minutesSince } from "~/api/view";
@@ -90,7 +90,28 @@ const MARK: Record<string, (p: { size?: number; className?: string }) => React.R
   gitlab: GitLabMark,
   gitea: GiteaMark,
   linear: LinearMark,
+  trello: TrelloMark,
 };
+
+/** What the scope picker's first entry says, by what the tracker scopes by. */
+const ALL: Record<string, string> = {
+  repos: "All repositories",
+  teams: "All teams",
+  boards: "All boards",
+};
+
+/**
+ * The scope as the parameter it travels in.
+ *
+ * Only a git host's scope is a repository. A Linear team and a Trello board are
+ * both sent as `team`, which is the server's name for "the part of this tracker
+ * to read", so a board picked here never reaches a request as a `repo`.
+ */
+export function scoped(kind: string | undefined, scope: string): { repo?: string; team?: string } {
+  return kind === "repos" || kind === undefined
+    ? { repo: scope || undefined }
+    : { team: scope || undefined };
+}
 
 /**
  * Which trackers the picker offers: the ones that can actually answer.
@@ -162,7 +183,7 @@ export function TasksPage({ backend }: { backend: Backend }) {
       state,
       ...(mine ? { mine: true } : {}),
       ...(q ? { q } : {}),
-      ...(source?.scopeKind === "teams" ? { team: scope || undefined } : { repo: scope || undefined }),
+      ...scoped(source?.scopeKind, scope),
       ...(at ? { cursor: at } : {}),
       ...(trail.length > 0 ? { page: trail.length + 1 } : {}),
     };
@@ -230,7 +251,7 @@ export function TasksPage({ backend }: { backend: Backend }) {
                 value={scope}
                 onChange={(v) => source && setScopes({ ...scopes, [source.id]: v })}
                 options={[
-                  ["", source?.scopeKind === "teams" ? "All teams" : "All repositories"],
+                  ["", ALL[source?.scopeKind ?? "repos"]],
                   ...tracker.data.map((s) => [s.key, s.label] as [string, string]),
                 ]}
                 className="h-7 max-w-[220px] text-meta"
@@ -283,7 +304,11 @@ export function TasksPage({ backend }: { backend: Backend }) {
               spellCheck={false}
               aria-label="Narrow the list"
               placeholder={
-                source?.id === "linear" ? "team:ENG label:bug" : "label:bug sort:updated-desc"
+                source?.id === "linear"
+                  ? "team:ENG label:bug"
+                  : source?.id === "trello"
+                    ? "board:Roadmap list:Doing label:bug"
+                    : "label:bug sort:updated-desc"
               }
               className="min-w-0 flex-1 bg-transparent font-mono text-meta text-bone placeholder:text-mute focus:outline-none"
             />
@@ -311,7 +336,7 @@ export function TasksPage({ backend }: { backend: Backend }) {
                 </button>
               }
             >
-              GitHub, GitLab, Gitea and Linear can all feed this list.
+              GitHub, GitLab, Gitea, Linear and Trello can all feed this list.
             </Blank>
           )}
 
@@ -412,7 +437,7 @@ export function TasksPage({ backend }: { backend: Backend }) {
                 <span className="tx">
                   <b>{t.title}</b>
                   <s>
-                    {[t.repo, short, elapsed(minutesSince(t.updatedAt)), ...t.assignees.map((a) => a.login)]
+                    {[t.repo, short, t.status, elapsed(minutesSince(t.updatedAt)), ...t.assignees.map((a) => a.login)]
                       .filter(Boolean)
                       .join(" · ")}
                   </s>
@@ -423,8 +448,8 @@ export function TasksPage({ backend }: { backend: Backend }) {
                 {/* Neutral. The tracker's own hue is somebody else's palette
                     arriving on a screen that is allowed one accent, and at
                     11px a tinted chip reads as a warning whatever it says. */}
-                {t.labels.slice(0, 2).map((l) => (
-                  <Badge key={l.name}>{l.name}</Badge>
+                {t.labels.slice(0, 2).map((l, i) => (
+                  <Badge key={`${i}|${l.name}`}>{l.name}</Badge>
                 ))}
 
                 <button
