@@ -548,7 +548,12 @@ export const SHOTS = [
 
   /* Every list, in all five states */
   { id: "every-list-in-all-five-states__has-things", go: (p) => at(p, "/configuration/repositories", 1400) },
-  { id: "every-list-in-all-five-states__empty", scene: "no-repos", go: (p) => at(p, "/configuration/repositories", 1400) },
+  /* **`no-hosts`, not `no-repos`.** The prototype's *Empty* is the page body
+     with nothing in it and one action; `no-repos` leaves GitHub connected, so
+     the app drew the *section* note instead — the same screen, one rung down,
+     against a reference tile of a different state. Nothing registered is the
+     state the drawing is of. */
+  { id: "every-list-in-all-five-states__empty", scene: "no-hosts", go: (p) => at(p, "/configuration/repositories", 1400) },
   {
     id: "every-list-in-all-five-states__slow",
     scene: "slow-repos",

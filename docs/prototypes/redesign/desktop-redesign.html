@@ -3015,14 +3015,15 @@ function artifacts(){
       </span>
     </div>`;
 
+  /* **The one blank whose button is plain and not filled.** This page fills
+     up as a *consequence* of work, so empty here is ordinary, and the weight
+     of the one button is where that is said. The object is the gallery's own
+     poster rather than a row, because this page is a grid: the border goes
+     round the thumbnail, never round the thumbnail and its label together. */
   if(S.lib==="empty") return `<div class="pcol">${head}
-    <div style="display:grid;place-items:center;padding:110px 0 80px;text-align:center">
-      <div style="max-width:40ch">
-        <span style="width:54px;height:54px;border-radius:17px;background:var(--raised);display:grid;place-items:center;color:var(--hush);margin:0 auto">${ic("shapes",24)}</span>
-        <h2 style="margin-top:20px;font-size:25px;letter-spacing:-.02em;font-weight:530;color:var(--ink)">Nothing published yet</h2>
-        <p style="margin-top:8px;font-size:16.5px;line-height:1.55;color:var(--quiet)">Ask an agent for a chart, a mock-up or a report and it appears here.</p>
-        <button class="btn primary" style="margin-top:20px">${ic("sparkles",15)}Ask for one</button>
-      </div></div></div>`;
+    ${pblank({glyph:"shapes",shape:"card",title:"Nothing published yet",
+      body:"Ask an agent for a chart, a mock-up or a report.",
+      action:`${ic("sparkles",15)}Ask for one`,kind:"plain"})}</div>`;
 
   const body=S.look==="grid"
     ? `<div class="gal">${shown.map(a=>`<button class="art" data-act="noop">
@@ -5875,23 +5876,25 @@ function tasksPage(){
   /* Not connected, and which half connects it: a git host shares the
      token that pushes commits and is connected under Git hosts, while
      an API key is its own credential and lives under Trackers. */
+  /* **The headline is the page's name over a blank.** It is a status sentence
+     when there are rows, which is two titles on one screen when there are
+     not — and the status it would carry is the thing the blank already says,
+     better and beside the glyph that explains it. */
   if(S.tasks==="off") return `<div class="scroll"><div class="pg">
     <div class="pg-head"><div style="min-width:0">
-      <h1>Nothing to pick from yet</h1>
-      <p class="sub">Tasks reads from a tracker. Every git host is one — an issue is work to pick up and a request to merge is work to review.</p>
+      <h1>Tasks</h1>
+      <p class="sub">Work the tracker already knows about. Starting one opens a workspace on its repository with the task attached.</p>
     </div></div>
-    <div class="whereto" style="margin-top:20px"><span class="g">${ic("git-branch",17)}</span>
-      <p><b>GitHub isn’t connected yet.</b> It authorizes with the token that pushes your commits, so it is connected under <b>Git hosts</b> rather than here.</p></div>
-    <div style="margin-top:16px;display:flex;gap:8px">
-      <button class="btn primary" data-act="go" data-to="hosts">${ic("git-branch",15)}Connect GitHub</button>
-      <button class="btn plain" data-act="go" data-to="trackers">Trackers</button></div>
+    ${pblank({glyph:"list-todo",title:"GitHub is not connected",
+      body:"Signing in once covers both its code and its issues.",
+      action:`Connect GitHub${ic("arrow-right",13)}`})}
   </div></div>`;
 
   const rows=S.tasks==="empty"?[]:TASKS;
   return `<div class="scroll"><div class="pg">
     <div class="pg-head">
       <div style="min-width:0">
-        <h1>${rows.length?`${rows.length} to pick from.`:"Nothing open here."}</h1>
+        <h1>${rows.length?`${rows.length} to pick from.`:"Tasks"}</h1>
         <p class="sub">Work the tracker already knows about. Starting one opens a workspace on its repository with the task attached.</p>
       </div>
       <div class="acts">
@@ -5933,11 +5936,11 @@ function tasksPage(){
       <span>1–6 of 38</span>
       <button class="btn quiet" style="height:30px">More${ic("arrow-right",14)}</button>
     </div>`
-    :`<div class="blank" style="margin-top:32px">
-       <span class="g">${ic("inbox",22)}</span>
-       <h2>Nothing open here</h2>
-       <p>Everything this tracker holds is closed, or the filters above are narrower than the list. The chips are sent to the tracker, so this is its answer rather than a local one.</p>
-     </div>`}
+    /* **No button.** Nothing is wrong here, and the head already carries the
+       two things that could change the answer: which tracker, and refresh. A
+       page that nags you to go and open an issue has misread its own job. */
+    :pblank({glyph:"list-todo",title:"Nothing open right now",
+       body:"GitHub has no open issues or pull requests for you."})}
   </div></div>`;
 }
 

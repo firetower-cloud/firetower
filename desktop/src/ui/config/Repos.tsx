@@ -61,7 +61,9 @@ import {
 } from "~/api/generated/providers/providers";
 import { useHostOf, useProviders, useRepos, why } from "~/data";
 import { Blank, Group, Note, Rows, Section, Typed } from "~/ui/config/bits";
-import { AddHost } from "~/ui/config/GitHosts";
+import { useConnect } from "~/ui/config/connect";
+import { navigate } from "~/shims/next-navigation";
+import { actionsFor, AddHost } from "~/ui/config/GitHosts";
 import { Pop } from "~/ui/Pop";
 import { useConfirm } from "~/ui/Confirm";
 import { useOpened } from "~/ui/opened";
@@ -648,27 +650,39 @@ function Settings({ repo, onGone }: { repo: Repo; onGone: () => void }) {
 /* ── Nothing connected yet ─────────────────────────────────────────────── */
 
 /**
- * The page body with nothing in it, and it is still two states rather than
- * one: a fresh solo install, and an install where colleagues have been here
- * first. Connected-but-empty is not here at all — that is a `Note` inside the
- * upper list, because the screen is not empty, one section of it is.
+ * The page body with nothing in it, and **one action that is the actual next
+ * step for the state the screen is in**.
  *
- * **The N brand buttons are one action now, and it opens the list of kinds.**
- * Three buttons with their brand marks were doing a real job: the mark is the
- * thing people scan for and three buttons are the fastest possible first run.
- * But three saturated brand buttons are also the loudest object in the
- * product, on a screen somebody sees once, and the rule is one clear call to
- * action.
+ * One action in every case, but not always the same one. The three host
+ * buttons it replaced were doing a real job — the mark is the thing people
+ * scan for, and three buttons are the fastest possible first run — so folding
+ * them into one is only worth it if the one is *right*. A generic *Add a host*
+ * over an install whose `github.com` is already registered and merely needs
+ * signing into is both the wrong verb and a dead end, and that is the most
+ * common first run there is: the built-in row arrives with every install.
  *
- * **What that one press buys is the whole set, not a narrower one.** It opens
- * `AddHost`, whose first step is the vertical list of *kinds* — GitHub,
- * GitHub Enterprise Server, GitLab, GitLab self-managed, Gitea or Forgejo —
- * built from `kindInfo` by `choicesFrom`, so a sixth kind appears on its own.
- * `GitHosts.tsx` argues the case and it is the argument this screen is now
- * resting on: the kinds are the only place the product ever says *what it can
- * talk to*, and somebody who has a Forgejo learns nothing from a row of three
- * brands. Nothing here re-implements that list; a second copy of it is a
- * second place for it to fall behind the server.
+ * So the ladder, in order, and `actionsFor` is the thing that decides each
+ * rung — the same function the Git hosts rows are drawn from, so the two
+ * screens cannot disagree about what a host needs next:
+ *
+ *   1. **a registered host merely waiting to be signed into** — the action
+ *      connects *that one*, by name. It does not open "What are you
+ *      connecting?", because the answer to that question is already known;
+ *   2. **a registered host with no application yet** — the action goes where
+ *      that is resolved rather than to a sign-in that cannot succeed. And
+ *      where this reader may not resolve it, there is no action at all: a
+ *      control the server would refuse is worse than the sentence;
+ *   3. **nothing registered** — the action opens `AddHost`, whose first step
+ *      is the vertical list of *kinds*: GitHub, GitHub Enterprise Server,
+ *      GitLab, GitLab self-managed, Gitea or Forgejo, built from `kindInfo`
+ *      so a sixth appears on its own. `GitHosts.tsx` argues that list and it
+ *      is the argument this screen rests on — the kinds are the only place
+ *      the product says what it can talk to, and somebody who has a Forgejo
+ *      learns nothing from a row of three brands. Nothing here re-implements
+ *      it; a second copy is a second place for it to fall behind the server.
+ *
+ * The sentence agrees with whichever action is showing. "Add" above a button
+ * that says "connect" is the screen contradicting itself in two lines.
  */
 function Start({
   hosts,
@@ -679,6 +693,19 @@ function Start({
   loading: boolean;
   onAddHost: () => void;
 }) {
+  /* **A host somebody here added, before the one that ships.** Every install
+     has the built-in GitHub whether anybody chose it or not, so where a
+     colleague has registered their own GitLab that is what this install is
+     actually for — and it is the one worth naming on the button. It is also
+     the test for whether anybody has been here before: "a host exists" is not,
+     and using it would greet the very first person as though somebody had. */
+  const waiting = [...hosts.filter((h) => !h.connected)].sort(
+    (a, b) => Number(!!a.builtin) - Number(!!b.builtin),
+  );
+  const signIn = waiting.find((h) => actionsFor(h).primary === "connect");
+  const unready = waiting.find((h) => !h.configured);
+  const theirs = waiting.some((h) => !h.builtin);
+
   if (loading) {
     return (
       <p className="flex items-center gap-2 px-3.5 py-6 text-ui text-mute">
@@ -688,13 +715,34 @@ function Start({
     );
   }
 
-  /* **A host somebody here added, versus the one that ships.** Every install
-     has the built-in GitHub whether anybody chose it or not, so "a host
-     exists" cannot be the test for "a colleague set this up" — that would
-     greet the very first person on a fresh install as though somebody had
-     been here before them. */
-  const theirs = hosts.some((h) => !h.connected && !h.builtin);
+  /* 1. Registered, configured, and waiting for you. */
+  if (signIn) return <SignIn host={signIn} theirs={theirs} />;
 
+  /* 2. Registered, and not something anybody can sign into yet. */
+  if (unready) {
+    return (
+      <Blank
+        icon={FolderGit2}
+        title="No repository yet"
+        action={
+          actionsFor(unready).primary === "set-up" ? (
+            <button
+              onClick={() => navigate("/configuration/git-hosts")}
+              className="btn primary"
+            >
+              Set up {unready.label}
+            </button>
+          ) : undefined
+        }
+      >
+        {actionsFor(unready).primary === "set-up"
+          ? `${unready.label} needs an application of its own before anybody can sign in.`
+          : `${unready.label} needs an application. An administrator of this Firetower sets that up.`}
+      </Blank>
+    );
+  }
+
+  /* 3. Nothing registered at all. */
   return (
     <Blank
       icon={FolderGit2}
@@ -706,10 +754,37 @@ function Start({
         </button>
       }
     >
-      {theirs
-        ? "Your colleagues added these hosts. You sign in with your own account."
-        : "Connect a git host and import what you want to work on."}
+      Connect a git host and import what you want to work on.
     </Blank>
+  );
+}
+
+/**
+ * The blank, where the next step is signing into a host that is already here.
+ *
+ * Its own component because `useConnect` is a hook per host, and the three
+ * rungs above it are a choice made before there is a host to give it.
+ */
+function SignIn({ host, theirs }: { host: ProviderStatus; theirs: boolean }) {
+  const connect = useConnect(host);
+  return (
+    <>
+      <Blank
+        icon={FolderGit2}
+        title="No repository yet"
+        action={
+          <button disabled={connect.busy} onClick={connect.start} className="btn primary">
+            <Icon of={Link2} size={14} />
+            Connect {host.label}
+          </button>
+        }
+      >
+        {theirs
+          ? "Your colleagues added these hosts. You sign in with your own account."
+          : "Sign in with your own account, then import what you want to work on."}
+      </Blank>
+      {connect.node}
+    </>
   );
 }
 

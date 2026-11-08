@@ -782,14 +782,33 @@ const server = createServer(async (req, res) => {
     "/api/v1/providers/github/repos": REPOS.map((r) => ({
       id: r.id, slug: r.slug, remote: r.remote, defaultBranch: r.defaultBranch, private: false,
     })),
-    "/api/v1/repos": scene === "no-repos" ? [] : REPOS,
+    "/api/v1/repos": ["no-repos", "no-hosts", "fresh-install", "host-needs-app"].includes(scene) ? [] : REPOS,
     "/api/v1/hosts": scene === "no-machines" ? [] : scene === "long-machine" ? LONG_HOSTS : HOSTS,
     "/api/v1/agents": AGENTS,
     "/api/v1/agent-accounts": ACCOUNTS,
     /* What `GitHosts` actually reads. The stub here was four fields, so the
        screen drew one row with no state, no address and no "Add a host" —
-       `maySetApplication` is what that button is gated on. */
-    "/api/v1/providers": [
+       `maySetApplication` is what that button is gated on.
+
+       **And it was not scene-varied at all**, so a fresh install — the
+       built-in `github.com` registered and nobody signed into it — could not
+       be driven or photographed by anything in the harness. That is the same
+       gap that let the composer's chip overflow ship: every fixture was
+       already in the happy state, so the state that was broken was invisible
+       to every check at once. Three scenes, which are the three rungs the
+       Repositories blank's one action climbs:
+
+         `fresh-install`  the built-in GitHub, registered, nobody signed in;
+         `host-needs-app` a colleague's host with no application of its own;
+         `no-hosts`       nothing registered, which is the only state where
+                          the next step is genuinely *adding* one. */
+    "/api/v1/providers": scene === "no-hosts"
+      ? []
+      : scene === "fresh-install"
+        ? [{ id: "github", kind: "github", label: "GitHub", gitHost: "github.com", connected: false, configured: true, identity: null, builtin: true, maySetApplication: true, sharedApplication: false, authModes: ["deviceCode", "token"], kinds: ["issue", "pullRequest"], changeNoun: "pull request" }]
+        : scene === "host-needs-app"
+          ? [{ id: "gitlab_01j", kind: "gitlab", label: "GitLab (internal)", gitHost: "git.acme.internal", connected: false, configured: false, identity: null, builtin: false, maySetApplication: true, sharedApplication: false, authModes: ["token"], kinds: ["issue", "pullRequest"], changeNoun: "merge request" }]
+          : [
       { id: "github", kind: "github", label: "GitHub", gitHost: "github.com", connected: true, configured: true, identity: "kevin", builtin: true, maySetApplication: true, sharedApplication: false, authModes: ["deviceCode", "token"], kinds: ["issue", "pullRequest"], changeNoun: "pull request" },
       { id: "gitlab_01j", kind: "gitlab", label: "GitLab (internal)", gitHost: "git.acme.internal", connected: false, configured: true, identity: null, builtin: false, maySetApplication: true, sharedApplication: true, authModes: ["token"], kinds: ["issue", "pullRequest"], changeNoun: "merge request" },
       { id: "gitea_01k", kind: "gitea", label: "Gitea", gitHost: "code.acme.dev", connected: false, configured: false, identity: null, builtin: false, maySetApplication: true, sharedApplication: false, authModes: ["token"], kinds: ["issue", "pullRequest"], changeNoun: "pull request" },
