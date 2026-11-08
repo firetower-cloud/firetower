@@ -93,33 +93,50 @@ front panel's width, on the inner display.
 
 ### What every pose actually resolves to
 
+**`railOn = p => !!p.regular`, and only `innerp`/`innerl` are `regular`.** The
+phone poses and the front panel were never modelled as inset. This matters for
+reading device evidence correctly — see the note under the table.
+
 | Pose | Window | Rail insets? | Content | Band | Column |
 |---|---|---|---|---|---|
 | `iphone` | 390 | no | 390 | **push** | — |
 | `android` | 412 | no | 412 | **push** | — |
-| `front` | 466 | no | 466 | **push** | — |
-| `innerp` | 669 | yes, −74 | 595 | **float** | — |
-| `innerl` | 951 | yes, −74 | 877 | **dock** | **317** |
+| `front` | 466 | no — `regular:false` | 466 | **push** | — |
+| `innerp` | 669 | **open** | 595 or 669 | **float** either way | — |
+| `innerl` | 951 | **open** | 877 or 951 | **dock** either way | **317 or 340** |
 | `iphone` landscape | 844 | no | 844 | **dock** | **284** |
 | `android` landscape | 915 | no | 915 | **dock** | **340** |
 
-Three consequences, each a trap:
+**Measured on a booted simulator:** the front panel lays out at `window 466,
+laid out 466` — the iOS 26/27 tab bar is a floating pill that overlays. That
+**confirms** the model (`front` is `regular:false`, so `contentW` was already
+466); it is not evidence about the inner display, which is the only place
+`railOn` is ever true and the only thing §8's question asked about. Do not
+propagate a compact-width measurement to a regular width: a regular width is
+where iOS may lay the tab bar down the trailing edge as a sidebar, and a
+sidebar-shaped tab bar is exactly the thing that insets.
 
-1. **669 floats and must never dock.** Window 669 ≥ 600 so it is not pushed;
-   content 595 < 840 so it may not dock. Docking there would leave the
-   conversation 329 — narrower than the 390 phone this design came from, 255
-   once the rail is counted. The band exists to stop that one move.
-2. **The column at 951 is 317, not 340.** 877 − 560 = 317. The drawing's prose
-   says "a 340-point column", which is the figure with the rail *overlaying*
-   rather than insetting. §8's default is that it **insets**, so **317 is the
-   number to build** — and 340 is only correct if a device says the rail
-   overlays. One log line settles it.
-3. **Unlocking `orientation` makes both phone landscapes dock.** Necessary —
-   without it the dock band is unreachable on any device — but it exposes two
-   poses nobody drew: 844 × 390 and 915 × 412. The band rule already defines
-   the layout, so do not invent one. The unmeasured risk is the **height**: a
-   docked column beside a conversation in 390pt with the keyboard up. Report
-   what breaks; do not redesign it.
+**So the inner display is still unmeasured, and one number depends on it:**
+
+- If it **insets** (§8's default): content 877, column **317**, and the dock
+  line expressed as an inner-display *window* is 914.
+- If it **overlays**: content 951, column **340** — which is the drawing's own
+  prose — and the dock line as a window is 840 everywhere.
+
+**Either way `innerp` floats and `innerl` docks**, so no band changes and the
+669 trap is untouched. Only the column width and the window figure move.
+
+**The build must therefore measure, never assume** — compute the band from the
+laid-out width the system reports, so the app is right under either answer.
+That is the standing requirement, not a workaround until someone folds a
+simulator.
+
+**Front panel height is 466 × 678, measured — not the 466 × 951 in §2.** Only
+width feeds the bands, so no band changes. But the drawing's own fit table
+measured the front pose against **951**, so every "it fits" claim for that pose
+is asserted against 273pt it does not have. Vertical fit on the front panel —
+the home, and anything with the keyboard up — has to be re-checked on the
+device rather than inherited from the drawing.
 
 **`[id].tsx` is wrong today** and the prototype says so: it writes
 `Math.min(340, Math.max(280, width - 400))` — the same idea with 400 standing
@@ -336,12 +353,15 @@ A screenshot verifies layout and never a value. Assert on resolved style:
    caught; a regression here is invisible to the eye and fatal to the design.
 2. **No hard-coded colour.** Every colour resolves to a token that exists in
    `web/app/globals.css`. `just gen-check` and `just check-style` pass.
-3. **The band thresholds, per the table in §2.** Assert on resolved layout,
-   not a screenshot. Window 599 pushes, 600 does not. Content 839 floats, 840
-   docks. **669 floats and must not dock.** `panelW` returns 317 at `innerl`,
-   284 at 844, 340 at 915, and **0** — never 280 — where 280 would not fit.
-   Assert the conversation's computed width never drops below `READING` (560)
-   in any docked pose, and never below 390 in any pose at all.
+3. **The band thresholds — assert the formula against the measured width, not
+   a literal.** The inner display's inset is unresolved (§2), so a hard-coded
+   317 or 340 will assert the wrong number under one of the two answers.
+   Assert instead: window 599 pushes and 600 does not; content 839 floats and
+   840 docks; **669 floats and never docks**; `panelW` floors to **0** rather
+   than 280 where 280 would not fit; the conversation's computed width never
+   drops below `READING` (560) in any docked pose, nor below 390 in any pose at
+   all; and the column equals `panelW(measured content)` whatever that measures
+   as. Report the measured inner-display inset as a finding either way.
 4. **The composer is pinned.** Its height does not reflow across poses; it sits
    outside the scroller. At 390 with the keyboard up there are 256pt above it,
    of which the greeting, the "Agents waiting for you" heading and the chip row
