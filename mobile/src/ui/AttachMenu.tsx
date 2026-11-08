@@ -18,7 +18,8 @@ import { Pressable, Text, View } from "react-native";
 import Animated, { FadeIn, FadeOut, withSpring, withTiming } from "react-native-reanimated";
 import { Camera, FileText, Image as ImageIcon } from "lucide-react-native";
 import { pickFiles, pickImages, takePhoto, type Picked } from "~/ui/attach";
-import { color, size } from "~/design/tokens.generated";
+import { size } from "~/design/tokens.generated";
+import { useTheme } from "~/design/theme";
 
 const Scrim = Animated.createAnimatedComponent(Pressable);
 
@@ -92,6 +93,7 @@ export function AttachMenu({
   onPick: (run: () => Promise<Picked[]>) => void;
   onClose: () => void;
 }) {
+  const { color } = useTheme();
   return (
     <>
       <Scrim

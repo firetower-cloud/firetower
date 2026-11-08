@@ -17,9 +17,10 @@ import { View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useServer } from "~/native/current";
 import { ReplacePassword } from "~/ui/ReplacePassword";
-import { color } from "~/design/tokens.generated";
+import { useTheme } from "~/design/theme";
 
 export default function Locked() {
+  const { color } = useTheme();
   const insets = useSafeAreaInsets();
   const cache = useQueryClient();
   const here = useServer();

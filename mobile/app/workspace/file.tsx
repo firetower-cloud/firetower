@@ -16,11 +16,13 @@ import { addedLines } from "~/api/patch";
 import { TabStrip } from "~/ui/TabStrip";
 import { Waiting } from "~/ui/Waiting";
 import { open as openTab } from "~/workspace/tabs";
-import { color, size } from "~/design/tokens.generated";
+import { size } from "~/design/tokens.generated";
+import { useTheme } from "~/design/theme";
 
 const ROW = 19;
 
 export default function FileScreen() {
+  const { color } = useTheme();
   const { id, path } = useLocalSearchParams<{ id: string; path: string }>();
   const insets = useSafeAreaInsets();
 

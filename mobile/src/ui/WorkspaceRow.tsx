@@ -16,7 +16,7 @@ import { doing, lead } from "~/api/workspaces";
 import { BEAT, BEAT_TOKEN, elapsed, minutesSince, STATUS_LABEL } from "~/api/view";
 import { AgentMark } from "~/ui/AgentMark";
 import { Blocks } from "~/ui/Blocks";
-import { color } from "~/design/tokens.generated";
+import { useTheme } from "~/design/theme";
 
 /**
  * What this place is up to, in words.
@@ -50,6 +50,7 @@ function line(place: Workspace): string {
 }
 
 export function WorkspaceRow({ place, onPress }: { place: Workspace; onPress?: () => void }) {
+  const { color } = useTheme();
   const speaker = lead(place);
   /* Ember, and the tinted row, mean exactly one thing: an agent stopped and
      cannot go on until you answer. `needsYou` is a wider question — it also

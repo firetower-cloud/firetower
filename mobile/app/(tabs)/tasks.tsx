@@ -25,7 +25,8 @@ import { elapsed, minutesSince } from "~/api/view";
 import { useTasks, useTrackers } from "~/data";
 import { Segmented } from "~/ui/Segmented";
 import { Waiting } from "~/ui/Waiting";
-import { color, size } from "~/design/tokens.generated";
+import { size } from "~/design/tokens.generated";
+import { useTheme } from "~/design/theme";
 
 const KIND = { issue: CircleDot, pullRequest: GitPullRequest, ticket: Ticket };
 
@@ -42,6 +43,7 @@ const STATES: [TaskState, string][] = [
 ];
 
 export default function Tasks() {
+  const { color } = useTheme();
   const insets = useSafeAreaInsets();
   const cache = useQueryClient();
 

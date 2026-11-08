@@ -28,7 +28,8 @@ import {
 } from "~/api/generated/sessions/sessions";
 import { answerable } from "~/api/view";
 import { why } from "~/data";
-import { color, size } from "~/design/tokens.generated";
+import { size } from "~/design/tokens.generated";
+import { useTheme } from "~/design/theme";
 
 type Row = {
   id: string;
@@ -58,6 +59,7 @@ export function WorkspaceMenu({
   onClose: () => void;
   onEnded: () => void;
 }) {
+  const { color } = useTheme();
   const insets = useSafeAreaInsets();
   const cache = useQueryClient();
   const [renaming, setRenaming] = useState(false);

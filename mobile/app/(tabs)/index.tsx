@@ -25,7 +25,8 @@ import { ServerChip } from "~/ui/ServerChip";
 import { WorkspaceRow } from "~/ui/WorkspaceRow";
 import { Waiting } from "~/ui/Waiting";
 import { COLUMN } from "~/ui/measure";
-import { color, size } from "~/design/tokens.generated";
+import { size } from "~/design/tokens.generated";
+import { useTheme } from "~/design/theme";
 
 type Filter = "all" | "waiting" | "working" | "idle";
 const FILTERS: [Filter, string][] = [
@@ -36,6 +37,7 @@ const FILTERS: [Filter, string][] = [
 ];
 
 export default function Inbox() {
+  const { color } = useTheme();
   const insets = useSafeAreaInsets();
   const [filter, setFilter] = useState<Filter>("all");
   const here = useServer();

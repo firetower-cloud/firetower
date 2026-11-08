@@ -45,7 +45,7 @@ import { ArtifactCard } from "~/ui/ArtifactCard";
 import { Overview } from "~/ui/Overview";
 import { ImagesFrom } from "~/ui/WorkspaceImage";
 import { Waiting } from "~/ui/Waiting";
-import { color } from "~/design/tokens.generated";
+import { useTheme } from "~/design/theme";
 
 /**
  * Resolving the address before anything reads it.
@@ -85,6 +85,7 @@ export default function WorkspaceScreen() {
 }
 
 function Conversation({ place }: { place: Workspace }) {
+  const { color } = useTheme();
   const insets = useSafeAreaInsets();
   const scroller = useRef<ScrollViewInstance>(null);
   const [atEnd, setAtEnd] = useState(true);

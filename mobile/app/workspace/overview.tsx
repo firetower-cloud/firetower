@@ -24,9 +24,10 @@ import { group, lead } from "~/api/workspaces";
 import { useSession, useSessions } from "~/data";
 import { Overview } from "~/ui/Overview";
 import { Waiting } from "~/ui/Waiting";
-import { color } from "~/design/tokens.generated";
+import { useTheme } from "~/design/theme";
 
 export default function OverviewScreen() {
+  const { color } = useTheme();
   const { id } = useLocalSearchParams<{ id: string }>();
   const insets = useSafeAreaInsets();
   const { data: sessions, loading } = useSessions();

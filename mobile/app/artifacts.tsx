@@ -28,7 +28,7 @@ import { useListArtifacts } from "~/api/generated/artifacts/artifacts";
 import { ArtifactCard } from "~/ui/ArtifactCard";
 import { Segmented } from "~/ui/Segmented";
 import { Waiting } from "~/ui/Waiting";
-import { color } from "~/design/tokens.generated";
+import { useTheme } from "~/design/theme";
 
 type Scope = "all" | "mine" | "shared";
 const SCOPES: [Scope, string][] = [
@@ -38,6 +38,7 @@ const SCOPES: [Scope, string][] = [
 ];
 
 export default function Artifacts() {
+  const { color } = useTheme();
   const insets = useSafeAreaInsets();
   const [scope, setScope] = useState<Scope>("all");
   const { data: everything = [], isPending, error } = useListArtifacts();

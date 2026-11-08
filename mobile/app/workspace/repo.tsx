@@ -22,7 +22,7 @@ import { Files } from "~/ui/Files";
 import { Segmented } from "~/ui/Segmented";
 import { Ship } from "~/ui/Ship";
 import { Waiting } from "~/ui/Waiting";
-import { color } from "~/design/tokens.generated";
+import { useTheme } from "~/design/theme";
 
 type TabId = "diff" | "files" | "ship";
 const TABS: [TabId, string][] = [
@@ -32,6 +32,7 @@ const TABS: [TabId, string][] = [
 ];
 
 export default function Repo() {
+  const { color } = useTheme();
   const insets = useSafeAreaInsets();
   const { id, tab: want } = useLocalSearchParams<{ id: string; tab?: TabId }>();
   const [tab, setTab] = useState<TabId>(want ?? "diff");

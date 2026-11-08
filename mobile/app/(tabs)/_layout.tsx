@@ -19,7 +19,7 @@ import { Redirect } from "expo-router";
 import { NativeTabs } from "expo-router/native-tabs";
 import { useServer } from "~/native/current";
 import { useGate } from "~/data";
-import { color } from "~/design/tokens.generated";
+import { useTheme } from "~/design/theme";
 
 export default function TabLayout() {
   /**
@@ -44,6 +44,7 @@ export default function TabLayout() {
  * the `!here` return would be a hook behind a condition.
  */
 function Signed() {
+  const { color } = useTheme();
   const { locked, ready } = useGate();
 
   /* Signed in with a password the server will not accept any work under. Not

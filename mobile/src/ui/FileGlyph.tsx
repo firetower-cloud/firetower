@@ -5,10 +5,17 @@
  * saturation: a panel of four hundred rows must not be able to out-shout the
  * one thing on screen that means an agent is waiting on you. Seven categories,
  * not ninety formats.
+ *
+ * `kindOf` is the whole of the logic and it is a pure function of a path, so
+ * it stays a plain export. The *tone* is theme-dependent, so it is a hook —
+ * the map used to be a module-scope constant, which froze whichever branch
+ * happened to be loaded first into every file tree in the app.
  */
-import { color } from "~/design/tokens.generated";
+import { useTheme } from "~/design/theme";
 
-export function kindOf(path: string): keyof typeof TONE {
+export type Kind = "source" | "native" | "data" | "style" | "media" | "store" | "prose";
+
+export function kindOf(path: string): Kind {
   const ext = path.slice(path.lastIndexOf(".") + 1).toLowerCase();
   if (["rs", "go", "c", "h", "cpp", "swift", "kt"].includes(ext)) return "native";
   if (["ts", "tsx", "js", "jsx", "py", "rb", "java"].includes(ext)) return "source";
@@ -19,14 +26,8 @@ export function kindOf(path: string): keyof typeof TONE {
   return "prose";
 }
 
-const TONE = {
-  source: color["kind-source"],
-  native: color["kind-native"],
-  data: color["kind-data"],
-  style: color["kind-style"],
-  media: color["kind-media"],
-  store: color["kind-store"],
-  prose: color["kind-prose"],
-} as const;
-
-export const toneOf = (path: string) => TONE[kindOf(path)];
+/** The tone for a path, in the theme being drawn. */
+export function useToneOf(): (path: string) => string {
+  const { color } = useTheme();
+  return (path: string) => color[`kind-${kindOf(path)}`];
+}

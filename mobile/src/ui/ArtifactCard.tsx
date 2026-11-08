@@ -24,12 +24,13 @@ import { Shapes } from "lucide-react-native";
 import type { Artifact } from "~/api/generated/model";
 import { apiBase, token } from "~/client/http";
 import { elapsed, minutesSince } from "~/api/view";
-import { color } from "~/design/tokens.generated";
+import { useTheme } from "~/design/theme";
 
 /** Width over height. The crop keeps this shape at every size. */
 const RATIO = 16 / 10;
 
 export function ArtifactCard({ artifact, onOpen }: { artifact: Artifact; onOpen: () => void }) {
+  const { color } = useTheme();
   /* A poster the server says exists can still fail to load, and the
      placeholder is the same either way — so this collapses into one flag. */
   const [broken, setBroken] = useState(false);

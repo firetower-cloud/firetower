@@ -41,7 +41,8 @@ import { useAccounts, useAgents, useHosts, useRepos, why } from "~/data";
 import { leaveDraft } from "~/workspace/draft";
 import { takeConnected } from "~/workspace/connected";
 import { Field, Picker, Trigger, type Choice } from "~/ui/Picker";
-import { color, size } from "~/design/tokens.generated";
+import { size } from "~/design/tokens.generated";
+import { useTheme } from "~/design/theme";
 
 /** `auth refactor` → `agent/auth-refactor`, the way the web build suggests one. */
 const slug = (name: string) =>
@@ -50,6 +51,7 @@ const slug = (name: string) =>
 type Open = null | "repo" | "host" | "agent" | "account";
 
 export default function NewWorkspace() {
+  const { color } = useTheme();
   const insets = useSafeAreaInsets();
   const nav = useRouter();
 

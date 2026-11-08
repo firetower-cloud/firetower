@@ -18,9 +18,10 @@ import { Check, ChevronRight, Plus, Shapes } from "lucide-react-native";
 import { forget, onServers, servers, type Connected } from "~/native/servers";
 import { choose, useServer } from "~/native/current";
 import { useListArtifacts } from "~/api/generated/artifacts/artifacts";
-import { color } from "~/design/tokens.generated";
+import { useTheme } from "~/design/theme";
 
 export default function You() {
+  const { color } = useTheme();
   const insets = useSafeAreaInsets();
   /* The registry, not a fixture: this list is the one piece of state that is
      genuinely the phone's rather than any server's. */

@@ -27,7 +27,7 @@ import { router, useLocalSearchParams } from "expo-router";
 import { ChevronLeft } from "lucide-react-native";
 import { useListArtifacts } from "~/api/generated/artifacts/artifacts";
 import { Waiting } from "~/ui/Waiting";
-import { color } from "~/design/tokens.generated";
+import { useTheme } from "~/design/theme";
 
 /**
  * `react-native-webview` 14 is a class component written before React 19
@@ -46,6 +46,7 @@ type Webish = {
 const WebView = Untyped as unknown as React.ComponentType<Webish>;
 
 export default function ArtifactScreen() {
+  const { color } = useTheme();
   const { id } = useLocalSearchParams<{ id: string }>();
   const insets = useSafeAreaInsets();
   const { data: artifacts, isPending } = useListArtifacts();

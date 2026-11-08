@@ -49,9 +49,11 @@ import { elapsed, minutesSince } from "~/api/view";
 import { useProviderRepos, useProviders, useRepos, why } from "~/data";
 import { leaveConnected } from "~/workspace/connected";
 import { Waiting } from "~/ui/Waiting";
-import { color, size } from "~/design/tokens.generated";
+import { size } from "~/design/tokens.generated";
+import { useTheme } from "~/design/theme";
 
 export default function Repos() {
+  const { color } = useTheme();
   const insets = useSafeAreaInsets();
   const cache = useQueryClient();
   const { pick } = useLocalSearchParams<{ pick?: string }>();
@@ -341,6 +343,7 @@ function Row({
   chosen: boolean;
   onPress: () => void;
 }) {
+  const { color } = useTheme();
   const owner = repoOwner(repo.slug);
 
   return (

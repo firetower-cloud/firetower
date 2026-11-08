@@ -21,7 +21,7 @@ import type { Artifact, PlanStep, Session } from "~/api/generated/model";
 import { BEAT, BEAT_TOKEN, STATUS_LABEL, elapsed, minutesSince } from "~/api/view";
 import { AgentMark } from "~/ui/AgentMark";
 import { Blocks } from "~/ui/Blocks";
-import { color } from "~/design/tokens.generated";
+import { useTheme } from "~/design/theme";
 
 /** Working first, then whatever wants a human, then the quiet ones. */
 const RANK: Record<string, number> = {
@@ -35,6 +35,7 @@ const RANK: Record<string, number> = {
 };
 
 function Legend({ children, lit = false, note }: { children: string; lit?: boolean; note?: string }) {
+  const { color } = useTheme();
   return (
     <View className="flex-row items-baseline gap-2 px-4 pb-2 pt-4">
       <Text
@@ -61,6 +62,7 @@ function Member({
   /** Running in the manager's own workspace rather than one of its own. */
   shared?: boolean;
 }) {
+  const { color } = useTheme();
   const beat = BEAT[session.status];
   const tone = BEAT_TOKEN[beat];
   return (
@@ -96,6 +98,7 @@ function Member({
 
 /** One line of the plan. Done is ticked, the live one wears a ring. */
 function Step({ step }: { step: PlanStep }) {
+  const { color } = useTheme();
   const state = String(step.status);
   const done = state === "Completed";
   const live = state === "InProgress";
@@ -140,6 +143,7 @@ export function Overview({
   artifacts: Artifact[];
   onOpenArtifact: (id: string) => void;
 }) {
+  const { color } = useTheme();
   const manager = lead ?? session;
   const roster = [...team].sort(
     (a, b) => (RANK[a.status] ?? 9) - (RANK[b.status] ?? 9) || (a.name ?? "").localeCompare(b.name ?? ""),

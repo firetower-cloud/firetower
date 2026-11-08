@@ -33,7 +33,7 @@ import Animated, {
 } from "react-native-reanimated";
 import type { Beat } from "~/api/view";
 import { BEAT_TOKEN } from "~/api/view";
-import { color } from "~/design/tokens.generated";
+import { useTheme } from "~/design/theme";
 
 /* `--dur-turn` and `--ease-turn`. Not the app's own 200ms/swift: the glyph's
    timing is its own, and it has to be the same here as on the desk. */
@@ -104,6 +104,7 @@ function Quadrant({
 }
 
 export function Blocks({ beat, size = 13 }: { beat: Beat; size?: number }) {
+  const { color } = useTheme();
   const tone = color[BEAT_TOKEN[beat]];
   const gap = Math.max(1.5, size * 0.11);
   const cell = (size - gap) / 2;

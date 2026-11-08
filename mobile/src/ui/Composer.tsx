@@ -71,7 +71,8 @@ import { AttachMenu } from "~/ui/AttachMenu";
 import { Waveform } from "~/ui/Waveform";
 import { useDictation } from "~/ui/useDictation";
 import { takeDraft } from "~/workspace/draft";
-import { color, size } from "~/design/tokens.generated";
+import { size } from "~/design/tokens.generated";
+import { useTheme } from "~/design/theme";
 
 /**
  * One line at rest, six before it scrolls.
@@ -147,6 +148,7 @@ export function Composer({
   onAttach: (name: string, data: string) => Promise<void>;
   onInterrupt: () => void;
 }) {
+  const { color } = useTheme();
   const insets = useSafeAreaInsets();
   /* How far the keyboard is up, 0 to 1, on the UI thread. The composer's own
      bottom padding is the home indicator's — but only while the home

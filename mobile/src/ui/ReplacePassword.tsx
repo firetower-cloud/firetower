@@ -23,7 +23,7 @@
  */
 import { Linking, Pressable, Text, View } from "react-native";
 import { KeyRound } from "lucide-react-native";
-import { color } from "~/design/tokens.generated";
+import { useTheme } from "~/design/theme";
 
 export function ReplacePassword({
   url,
@@ -40,6 +40,7 @@ export function ReplacePassword({
   onBack?: () => void;
   backLabel?: string;
 }) {
+  const { color } = useTheme();
   const origin = url.replace(/\/+$/, "");
   const host = origin.replace(/^https?:\/\//, "");
 

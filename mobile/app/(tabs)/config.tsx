@@ -40,9 +40,10 @@ import { getListReposQueryKey } from "~/api/generated/repos/repos";
 import { useRepos } from "~/data";
 import { useServer } from "~/native/current";
 import { Waiting } from "~/ui/Waiting";
-import { color } from "~/design/tokens.generated";
+import { useTheme } from "~/design/theme";
 
 export default function Config() {
+  const { color } = useTheme();
   const insets = useSafeAreaInsets();
   const cache = useQueryClient();
   const here = useServer();

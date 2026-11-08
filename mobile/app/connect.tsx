@@ -34,7 +34,8 @@ import { remember } from "~/native/servers";
 import { Mark } from "~/ui/Mark";
 import { ReplacePassword } from "~/ui/ReplacePassword";
 import { READING } from "~/ui/measure";
-import { color, size } from "~/design/tokens.generated";
+import { size } from "~/design/tokens.generated";
+import { useTheme } from "~/design/theme";
 
 type Stage =
   | { at: "where" }
@@ -48,6 +49,7 @@ type Stage =
   | { at: "locked"; url: string; boot: Bootstrap; user: string };
 
 export default function Connect() {
+  const { color } = useTheme();
   const insets = useSafeAreaInsets();
   const [typed, setTyped] = useState("");
   const [stage, setStage] = useState<Stage>({ at: "where" });
@@ -148,6 +150,7 @@ export default function Connect() {
 }
 
 function Field(props: React.ComponentProps<typeof TextInput>) {
+  const { color } = useTheme();
   const [on, setOn] = useState(false);
   return (
     <TextInput
@@ -186,6 +189,7 @@ function Primary({
   disabled?: boolean;
   busy?: boolean;
 }) {
+  const { color } = useTheme();
   return (
     <Pressable
       onPress={onPress}
@@ -218,6 +222,7 @@ function Where({
   onTyped: (v: string) => void;
   onGo: () => void;
 }) {
+  const { color } = useTheme();
   const plain = typed.trim().length > 0 && cleartext(`http://${typed}`) && !/^https:/i.test(typed);
 
   return (
@@ -280,6 +285,7 @@ function NoRoute({
   onRetry: () => void;
   onBack: () => void;
 }) {
+  const { color } = useTheme();
   return (
     <View>
       <View className="items-center">
@@ -324,6 +330,7 @@ function NoRoute({
 }
 
 function NotOne({ typed, detail, onBack }: { typed: string; detail: string; onBack: () => void }) {
+  const { color } = useTheme();
   return (
     <View className="items-center">
       <CircleSlash2 color={color.mute} size={26} />
@@ -366,6 +373,7 @@ function Who({
   onLocked: (user: string) => void;
   onBack: () => void;
 }) {
+  const { color } = useTheme();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);

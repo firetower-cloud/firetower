@@ -19,7 +19,7 @@ import { Image, Text, View } from "react-native";
 import { ImageOff } from "lucide-react-native";
 import { useFileText } from "~/api/text";
 import { resolvePath, resolvedPath } from "~/api/paths";
-import { color } from "~/design/tokens.generated";
+import { useTheme } from "~/design/theme";
 
 /**
  * Which session the pictures in some markdown belong to.
@@ -101,6 +101,7 @@ function Drawn({ session, path, alt }: { session: string; path: string; alt?: st
  * was writing, and a missing screenshot is worth a line, not a panel.
  */
 function Caption({ alt, src, why }: { alt?: string; src: string; why: string }) {
+  const { color } = useTheme();
   return (
     <View className="my-1 flex-row items-center gap-1.5">
       <ImageOff color={color.mute} size={13} />

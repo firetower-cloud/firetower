@@ -25,7 +25,7 @@ import Animated, {
   withTiming,
   type SharedValue,
 } from "react-native-reanimated";
-import { color } from "~/design/tokens.generated";
+import { useTheme } from "~/design/theme";
 
 /** Enough to hold about two and a half seconds of speech. */
 const BARS = 28;
@@ -55,6 +55,7 @@ export function Waveform({ level }: { level: SharedValue<number> }) {
 }
 
 function Bar({ trail, at }: { trail: SharedValue<number[]>; at: number }) {
+  const { color } = useTheme();
   const rise = useAnimatedStyle(() => {
     const loud = trail.value[at] ?? 0;
     return {

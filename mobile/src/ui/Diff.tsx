@@ -18,13 +18,15 @@ import { Pressable, ScrollView, Text, View } from "react-native";
 import { ChevronDown, ChevronRight } from "lucide-react-native";
 import { fromPatch, isNew } from "~/api/patch";
 import type { ChangedFile } from "~/data";
-import { toneOf } from "~/ui/FileGlyph";
+import { useToneOf } from "~/ui/FileGlyph";
 import { split } from "~/api/paths";
-import { color, size } from "~/design/tokens.generated";
+import { size } from "~/design/tokens.generated";
+import { useTheme } from "~/design/theme";
 
 const ROW = 19;
 
 function Hunks({ patch }: { patch: string }) {
+  const { color } = useTheme();
   const lines = fromPatch(patch);
   /* Line numbers in the new file, counted as we walk — the same pass the
      gutter is drawn from, so the two cannot come apart. */
@@ -96,6 +98,8 @@ function Hunks({ patch }: { patch: string }) {
 }
 
 export function Diff({ files, onOpen }: { files: ChangedFile[]; onOpen?: (path: string) => void }) {
+  const { color } = useTheme();
+  const toneOf = useToneOf();
   const [open, setOpen] = useState<string | null>(files[0]?.path ?? null);
 
   return (

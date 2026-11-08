@@ -29,7 +29,7 @@ import Animated, {
   withRepeat,
   withTiming,
 } from "react-native-reanimated";
-import { color } from "~/design/tokens.generated";
+import { useTheme } from "~/design/theme";
 
 /** `text-sheen 1.6s linear infinite`, and the same overshoot at both ends. */
 const SWEEP = 1600;
@@ -49,6 +49,7 @@ function Glyph({
   clock: SharedValue<number>;
   still: boolean;
 }) {
+  const { color } = useTheme();
   const style = useAnimatedStyle(() => {
     if (still) return { color: color.dim };
     const head = FROM + (TO - FROM) * clock.value;

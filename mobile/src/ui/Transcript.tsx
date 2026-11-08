@@ -18,7 +18,7 @@ import { ChevronDown, ChevronRight, FileDiff, FileText, Search, Terminal, Users 
 import type { Item, Task } from "~/api/conversation";
 import { delegated, fold, mainline, type Row } from "~/api/steps";
 import { Code, Prose } from "~/ui/Prose";
-import { color } from "~/design/tokens.generated";
+import { useTheme } from "~/design/theme";
 
 const GLYPH = {
   CommandExecution: Terminal,
@@ -29,6 +29,7 @@ const GLYPH = {
 
 /** A verb and an argument. What a tool call is, in one line. */
 function Tool({ item }: { item: Item }) {
+  const { color } = useTheme();
   const Icon = GLYPH[item.kind as keyof typeof GLYPH] ?? Terminal;
   const pictures = item.images ?? [];
   return (
@@ -61,6 +62,7 @@ function Tool({ item }: { item: Item }) {
 
 /** Everything hangs off one hairline, so the work reads as attached to the turn. */
 function Rail({ children }: { children: React.ReactNode }) {
+  const { color } = useTheme();
   return (
     <View className="my-1 border-l pl-3" style={{ borderColor: color["line-soft"] }}>
       {children}
@@ -69,6 +71,7 @@ function Rail({ children }: { children: React.ReactNode }) {
 }
 
 function Group({ items }: { items: Item[] }) {
+  const { color } = useTheme();
   const [open, setOpen] = useState(false);
   return (
     <Rail>
@@ -97,6 +100,7 @@ function Thought({ item }: { item: Item }) {
 }
 
 function Edit({ item }: { item: Item }) {
+  const { color } = useTheme();
   return (
     <Rail>
       <View className="flex-row items-center gap-2 py-1">
@@ -158,6 +162,7 @@ function Said({ item }: { item: Item }) {
  * came back with.
  */
 function Delegated({ item, items, tasks }: { item: Item; items: Item[]; tasks: Task[] }) {
+  const { color } = useTheme();
   const [open, setOpen] = useState(false);
   const task = tasks.find((t) => t.item === item.id);
   const mine = task ? delegated(items, task.id) : [];

@@ -1,11 +1,17 @@
 /**
  * The shell.
  *
- * Dark, always — `web/app/globals.css` sets `color-scheme: dark` and the token
- * set has no light values, so respecting the system theme would render half a
- * design system. The splash is held until the faces are loaded: Archivo is
- * distinctive enough that a frame of the system face and a reflow is the first
- * thing that reads as a web page.
+ * **Light and dark, following the system by default.** It was dark always,
+ * because `globals.css` had no light values to fall back to and a phone that
+ * respected the system theme would have rendered half a design system. PR #261
+ * added the light branch to that shared sheet; this is the opt-in criterion 6
+ * was holding the phone still for. The control is on **You** — three settings,
+ * System first — and `ThemeProvider` is above everything so a redraw reaches
+ * every screen at once.
+ *
+ * The splash is held until the faces are loaded: Archivo is distinctive enough
+ * that a frame of the system face and a reflow is the first thing that reads
+ * as a web page.
  */
 import "../global.css";
 import { useEffect, useState } from "react";
@@ -21,7 +27,7 @@ import { JetBrainsMono_400Regular, JetBrainsMono_500Medium } from "@expo-google-
 import { BackendProvider } from "~/api/backend";
 import { hydrate } from "~/native/servers";
 import { useServer } from "~/native/current";
-import { color } from "~/design/tokens.generated";
+import { ThemeProvider, useTheme } from "~/design/theme";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -50,10 +56,28 @@ export default function Root() {
   if (!ready || !keys) return null;
 
   return (
+    <ThemeProvider>
+      <Shell />
+    </ThemeProvider>
+  );
+}
+
+/**
+ * Inside the provider, because it reads the theme it is drawn in.
+ *
+ * A second component rather than four more lines above: `Root` is what
+ * *provides* the theme, so it cannot also consume it — and the status bar is
+ * the one piece of chrome that has to be told, since the system draws it and
+ * dark glyphs on a near-black page are invisible either way round.
+ */
+function Shell() {
+  const { color, scheme } = useTheme();
+  return (
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: color.ground }}>
       <KeyboardProvider>
         <SafeAreaProvider>
-          <StatusBar style="light" />
+          {/* The ink, not the background: `light` means light *glyphs*. */}
+          <StatusBar style={scheme === "dark" ? "light" : "dark"} />
           <Fleet />
         </SafeAreaProvider>
       </KeyboardProvider>
@@ -61,11 +85,16 @@ export default function Root() {
   );
 }
 
-const SCREENS = {
-  headerShown: false,
-  contentStyle: { backgroundColor: color.ground },
-  animation: "slide_from_right",
-} as const;
+/* A function of the palette rather than a constant. It was a module-scope
+   object reading `color.ground`, which froze whichever branch loaded first
+   into every pushed screen's background — invisible in dark and a black
+   flash behind every push in light. */
+const screens = (ground: string) =>
+  ({
+    headerShown: false,
+    contentStyle: { backgroundColor: ground },
+    animation: "slide_from_right",
+  }) as const;
 
 /**
  * Everything below here belongs to one server.
@@ -80,9 +109,10 @@ const SCREENS = {
  */
 function Fleet() {
   const here = useServer();
+  const { color } = useTheme();
 
-  const screens = (
-    <Stack screenOptions={SCREENS}>
+  const stack = (
+    <Stack screenOptions={screens(color.ground)}>
       <Stack.Screen name="new" options={{ presentation: "modal", animation: "slide_from_bottom" }} />
     </Stack>
   );
@@ -90,11 +120,11 @@ function Fleet() {
   /* No server, no provider: there is nothing to be a client of, and the only
      route that means anything is connecting. `(tabs)/_layout` is what sends
      you there. */
-  if (!here) return screens;
+  if (!here) return stack;
 
   return (
     <BackendProvider id={here.serverId} key={here.serverId}>
-      {screens}
+      {stack}
     </BackendProvider>
   );
 }
