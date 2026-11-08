@@ -1,5 +1,49 @@
 # Changelog
 
+## [0.27.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.26.0...desktop-v0.27.0) (2026-11-08)
+
+
+### Features
+
+* **design:** light and dark, from one sheet ([adc1bf6](https://github.com/firetower-cloud/firetower/commit/adc1bf61fde6e5b2ba3c0c13432d2a2ca5f22265))
+* **desktop:** ⌘K opens the palette, which existed and was reachable by nothing ([6e3f926](https://github.com/firetower-cloud/firetower/commit/6e3f9267554fc9bef076209b167d5a8f7247ea9d))
+* **desktop:** Artifacts, to its drawing ([551ed21](https://github.com/firetower-cloud/firetower/commit/551ed21313fdda6fa0f332a8c89b8488f0b38b49))
+* **desktop:** getting in, to its drawing ([1204a64](https://github.com/firetower-cloud/firetower/commit/1204a64e3ba761433de171c77c69b2db971418e6))
+* **desktop:** no ALL-CAPS, and no live artifact outside the viewer ([49919ea](https://github.com/firetower-cloud/firetower/commit/49919ea0a4b5cf60643165443d004c174f0e2bc7))
+* **desktop:** one authority, every neutral at R = G, and a tab that forgot the page ([74f48cf](https://github.com/firetower-cloud/firetower/commit/74f48cfd834ea76f3bd669d44bdda15a25012135))
+* **desktop:** one Firetower at a time, behind a 62px rail ([26bcb5f](https://github.com/firetower-cloud/firetower/commit/26bcb5f8c97d12f8e29cabb75ff79992e26d71b0))
+* **desktop:** one Recent agents section, ordered by severity ([78ec94b](https://github.com/firetower-cloud/firetower/commit/78ec94b5a32f6b78d1e85da8fbf43b740f29c4b0))
+* **desktop:** photograph the shell, and the three things looking at it found ([2e00008](https://github.com/firetower-cloud/firetower/commit/2e000081f1e99a1aafb159ef9b4335a24846a8d5))
+* **desktop:** quieter, following the drawing's refinement pass ([3663cd6](https://github.com/firetower-cloud/firetower/commit/3663cd6742c6646eccf00469954ad160062a6bb5))
+* **desktop:** read-only says what the screen is ([f0ce46e](https://github.com/firetower-cloud/firetower/commit/f0ce46e45bd60892aa3ccec11826f227de53ea68))
+* **desktop:** Skills, to its drawing ([c53b317](https://github.com/firetower-cloud/firetower/commit/c53b317cfa7400500a5352a9c3692321f5b206fc))
+* **desktop:** Tasks, to its drawing ([eb12a3e](https://github.com/firetower-cloud/firetower/commit/eb12a3e6394e7ec9b8d0a46f4af87ab70e919a9a))
+* **desktop:** the conversation page, to its drawing ([7fe31ac](https://github.com/firetower-cloud/firetower/commit/7fe31ac6b39a9668247014defcded8ca3be6b47c))
+* **desktop:** the Dashboard is a sentence and the questions themselves ([9f44568](https://github.com/firetower-cloud/firetower/commit/9f44568f0701bf8f41ea55403aef20aae14bd5ab))
+* **desktop:** the five states every list has — criterion 49 ([b499721](https://github.com/firetower-cloud/firetower/commit/b49972139ded11ca1b06e4016d9742e55818c01e))
+* **desktop:** the home, and one pixel on everything under 28 ([93762ef](https://github.com/firetower-cloud/firetower/commit/93762ef910d18f77c97a9daac23027c60cd32202))
+* **desktop:** the palette and the confirmation, to their drawings ([0c76da9](https://github.com/firetower-cloud/firetower/commit/0c76da95513ef5807705f4286208d6fbcd2bda60))
+* **desktop:** the panes that are made of those shapes ([8e8e5db](https://github.com/firetower-cloud/firetower/commit/8e8e5db7435744f027abbf28637da48038cc7931))
+* **desktop:** the rail panel takes the shared mark alphabet ([f1ad59b](https://github.com/firetower-cloud/firetower/commit/f1ad59b0d7e4584efc5e0fa667a5c828c5b8c3d5))
+* **desktop:** the rest of Phase 5, and a frame that should not have been open ([6381968](https://github.com/firetower-cloud/firetower/commit/6381968ce21098287bc44e7b63bfe6950a3fab87))
+* **desktop:** the seeded home — proposition 5 ([d75dd31](https://github.com/firetower-cloud/firetower/commit/d75dd318e9bf38ed72ffdd16c16aebedcf57fb19))
+* **desktop:** the shared shapes, written once ([31ae01c](https://github.com/firetower-cloud/firetower/commit/31ae01c2d372cbeaeb93349abfe498095bba57d9))
+* **desktop:** the skill screen to its drawing, and a crash under it ([9f1c230](https://github.com/firetower-cloud/firetower/commit/9f1c230f4326710bb6a250e584534e9b0f0ae9de))
+* **desktop:** the style page, in both themes and with the sets it was missing ([04a81bc](https://github.com/firetower-cloud/firetower/commit/04a81bc98d872ffd967c8cb5f1ac073dbed03215))
+* **desktop:** the team rail reads as three marks and no words ([ae51a51](https://github.com/firetower-cloud/firetower/commit/ae51a51c0c94ddef94f3878326ad20a61f241376))
+* **desktop:** the workspace keeps its behaviour and loses its status bar ([2dd4ab2](https://github.com/firetower-cloud/firetower/commit/2dd4ab23f02010b5eda90c5afdd92f4151b37d1c))
+
+
+### Bug Fixes
+
+* **desktop:** a Firetower that is not answering, in the panel ([c092cf8](https://github.com/firetower-cloud/firetower/commit/c092cf875dd092b88cdb905406360233ce9d0573))
+* **desktop:** a floating card never wears the recessed fill ([f5c1405](https://github.com/firetower-cloud/firetower/commit/f5c1405b55b625de0b3d1b22fc93900e78e2a8eb))
+* **desktop:** a server's mark never moves ([f6b67d1](https://github.com/firetower-cloud/firetower/commit/f6b67d1cdb1d67c6c3c155f870397d959f2f80e0))
+* **desktop:** no `lead` placement, no ⌘P, and the checks that missed both ([419da2c](https://github.com/firetower-cloud/firetower/commit/419da2c8f15f9d5a7109cfcaf2601306ec86e873))
+* **desktop:** the branch cap cuts between words too ([b27b430](https://github.com/firetower-cloud/firetower/commit/b27b4308a3c5976345e509c7c3141b2fb04ca7f8))
+* **desktop:** the stronger surface rule found two more, in the stylesheet ([f553aa0](https://github.com/firetower-cloud/firetower/commit/f553aa0112c3d662b68feed89de86479191b1571))
+* **style:** check-style looks at desktop/src, and the nine it finds ([588e34e](https://github.com/firetower-cloud/firetower/commit/588e34eb6a1a6c85bafd7366c98f38b4c1cfbed8))
+
 ## [0.26.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.25.0...desktop-v0.26.0) (2026-11-05)
 
 
