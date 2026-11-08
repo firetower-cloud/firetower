@@ -1,0 +1,82 @@
+# The peek needs a pending request, and the shipped mock has none.
+#
+# `desktop/scripts/mock-server.mjs` is the stand-in control plane the phone is
+# driven against. It serves a conversation for **`s_1` only**, and that session
+# is `Working` with no `RequestOpened` in its transcript — so the two sessions
+# that *are* `NeedsYou` (`s_6`, `s_7`) have no conversation at all.
+#
+# That makes coverage §5's **P4** — answer a waiting agent from the peek,
+# without a round trip into the workspace — impossible to exercise against the
+# repository as it stands. The peek folds `getConversation` to find the `Asked`
+# it must answer; with no events there is nothing to fold and the Allow/No
+# buttons correctly do not render.
+#
+# This patch adds a conversation for `s_6` and `s_7` carrying a real
+# `RequestOpened`, and an endpoint that accepts the answer and logs which
+# decision arrived.
+#
+#   cd firetower
+#   git apply mobile/e2e/peek-fixture.patch
+#   node desktop/scripts/mock-server.mjs 4455
+#   # …then connect the app to localhost:4455 and hold a waiting chip.
+#   git checkout desktop/scripts/mock-server.mjs   # when you are done
+#
+# It lives here, as a patch rather than an edit, for one reason: this branch
+# holds `git diff origin/main HEAD -- web/ desktop/` empty, which is the
+# guarantee the whole redesign was reviewed against. Extending the shipped mock
+# properly is the follow-up and belongs in a change that is allowed to touch
+# `desktop/`.
+
+--- a/desktop/scripts/mock-server.mjs
++++ b/desktop/scripts/mock-server.mjs
+@@ -388,6 +388,26 @@
+ const CODEX_DONE = JSON.parse(
+   readFileSync(new URL("./codex-events-done.json", import.meta.url), "utf8"),
+ );
++
++/* PATCHED FOR VERIFICATION — not in the repo. A conversation for s_6 with a
++   real `RequestOpened`, so the peek has an `Asked` to fold and a `req` to
++   answer. The shipped mock serves a conversation only for s_1 and that one
++   has no pending request, so P4 could not be exercised against it. */
++const blockedConversation = () => ({
++  lastLine: 12,
++  firstLine: 0,
++  hasMore: false,
++  events: [
++    { lineNo: 0, type: "SessionConfigured", model: "claude-opus-5", mode: "acceptEdits", tools: [], commands: [] },
++    { lineNo: 1, type: "TurnStarted", turn: "t_q" },
++    { lineNo: 2, type: "ItemStarted", item: "q_1", kind: "AgentMessage", title: null, task: null },
++    { lineNo: 3, type: "ContentDelta", item: "q_1", stream: "Content",
++      delta: "The amber band starts at 80% of the soft limit. A free plan has no soft limit." },
++    { lineNo: 4, type: "ItemCompleted", item: "q_1", status: "Completed" },
++    { lineNo: 5, type: "RequestOpened", req: "rq_peek_1", kind: "CommandExecution",
++      detail: "cargo test -p ft-server quota", args: { command: "cargo test -p ft-server quota" } },
++  ],
++});
+ 
+ const conversation = () => ({
+   lastLine: 42,
+@@ -520,6 +540,14 @@
+   }
+ 
+   if (req.method === "POST" && path === "/api/v1/updates/plan") return json(res, PLAN);
++
++  /* PATCHED: answering a request. Logged so the verification can see which
++     decision actually arrived. */
++  const answered = /^\/api\/v1\/sessions\/([^/]+)\/requests\/([^/]+)$/.exec(path);
++  if (req.method === "POST" && answered) {
++    console.log(`[mock] ANSWERED session=${answered[1]} req=${answered[2]}`);
++    return json(res, { detail: "ok" });
++  }
+ 
+   /* Signing in, so the first-run flow can be walked end to end rather than
+      stopping at the password field. `locked` hands back the temporary
+@@ -741,6 +769,8 @@
+     "/api/v1/sessions/s_1/turn": { sent: true },
+     "/api/v1/artifacts": scene === "no-artifacts" || scene === "bare" ? [] : ARTIFACTS,
+     "/api/v1/sessions/s_1/conversation": conversation(),
++    "/api/v1/sessions/s_6/conversation": blockedConversation(),
++    "/api/v1/sessions/s_7/conversation": blockedConversation(),
+     "/api/v1/sessions/s_1/controls": scene.startsWith("codex") ? [] : CLAUDE_CONTROLS,
+     "/api/v1/sessions/s_1/account":
+       scene === "limit-hit"

@@ -141,7 +141,7 @@ sideload.
 ## Tests
 
 ```sh
-pnpm test        # the folds, in node — 82 of them, ported with the code
+pnpm test        # the folds, in node — 213 of them, ported with the code
 pnpm tsc --noEmit
 ```
 
@@ -165,5 +165,21 @@ stay small.
 `maestro` picks the first device it finds, which on a machine with an Android
 emulator running is the wrong one. Pass `--device` with the simulator's UDID
 from `xcrun simctl list devices`.
+
+**Maestro cannot target coordinates on an iPhone Duo.** Percentages, element
+ids and absolute points all resolve to the wrong place — a tap aimed at a chip
+at y≈193pt landed around y≈393pt, and an id-targeted tap opened an element
+roughly 148pt away. Only `assertVisible` is trustworthy there. Anything that
+has to *touch* a particular control on that device needs `idb` driving HID
+events directly, not Maestro.
+
+### The peek needs a pending request
+
+`desktop/scripts/mock-server.mjs` serves a conversation for `s_1` only, and
+that session is `Working` with no `RequestOpened` — so the sessions that are
+`NeedsYou` have no conversation at all, and the peek's Allow/No cannot be
+exercised against the repository as it stands. `e2e/peek-fixture.patch` adds
+one; its header says how to apply it and why it is a patch rather than an
+edit.
 
 These need a booted simulator, so they are not in the pull-request workflow.
