@@ -241,7 +241,7 @@ export function DeviceCode({ pending, note }: { pending: PendingAuth; note?: str
           rel="noopener"
           className="text-dim underline underline-offset-2 transition-colors hover:text-bone"
         >
-          {pending.userCode ? pending.verificationUri.replace(/^https?:\/\//, "") : "Continue with Cursor"}
+          {pending.userCode ? pending.verificationUri.replace(/^https?:\/\//, "") : "Continue to sign in"}
         </a>
         {pending.userCode ? ". Enter this code:" : ". Approve the sign-in in your browser."}
       </p>

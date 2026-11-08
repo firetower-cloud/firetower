@@ -81,6 +81,7 @@ pub enum Agent {
     Codex,
     KimiCode,
     CursorAgent,
+    MistralVibe,
     /// A plain shell. Not offered — see [`Agent::all`].
     Shell,
 }
@@ -99,12 +100,13 @@ impl Agent {
     /// network, and a session row that already says `Shell` still decodes.
     ///
     /// [`Shell`]: Agent::Shell
-    pub fn all() -> [Agent; 4] {
+    pub fn all() -> [Agent; 5] {
         [
             Agent::ClaudeCode,
             Agent::Codex,
             Agent::KimiCode,
             Agent::CursorAgent,
+            Agent::MistralVibe,
         ]
     }
 
@@ -115,6 +117,7 @@ impl Agent {
             Agent::Codex => "Codex",
             Agent::KimiCode => "Kimi Code",
             Agent::CursorAgent => "Cursor Agent",
+            Agent::MistralVibe => "Mistral Vibe",
             Agent::Shell => "Shell",
         }
     }
@@ -131,6 +134,7 @@ impl Agent {
             Agent::Codex => "codex",
             Agent::KimiCode => "kimi",
             Agent::CursorAgent => "cursor-agent",
+            Agent::MistralVibe => "vibe-acp",
             Agent::Shell => "bash",
         }
     }
@@ -142,7 +146,11 @@ impl Agent {
     /// one, and fetching it would be absurd.
     pub fn installable(&self) -> bool {
         match self {
-            Agent::ClaudeCode | Agent::Codex | Agent::KimiCode | Agent::CursorAgent => true,
+            Agent::ClaudeCode
+            | Agent::Codex
+            | Agent::KimiCode
+            | Agent::CursorAgent
+            | Agent::MistralVibe => true,
             Agent::Shell => false,
         }
     }
@@ -281,6 +289,9 @@ impl Agent {
             Agent::Codex => Some(vec![self.command().to_string(), "app-server".to_string()]),
             Agent::KimiCode => Some(vec!["kimi".into(), "acp".into()]),
             Agent::CursorAgent => Some(vec!["cursor-agent".into(), "acp".into()]),
+            // Mistral publishes a standalone ACP executable rather than an
+            // `acp` subcommand on its interactive CLI.
+            Agent::MistralVibe => Some(vec!["vibe-acp".into()]),
             Agent::Shell => None,
         }
     }
@@ -306,7 +317,7 @@ impl Agent {
                 }
             }
             Agent::Codex => crate::codex::opening(cwd, preferred),
-            Agent::KimiCode | Agent::CursorAgent => {
+            Agent::KimiCode | Agent::CursorAgent | Agent::MistralVibe => {
                 if prompt.trim().is_empty() {
                     Vec::new()
                 } else {
@@ -330,12 +341,13 @@ impl Agent {
     /// [`all`](Agent::all) must not turn an old row into an error.
     ///
     /// [`Shell`]: Agent::Shell
-    pub fn every() -> [Agent; 5] {
+    pub fn every() -> [Agent; 6] {
         [
             Agent::ClaudeCode,
             Agent::Codex,
             Agent::KimiCode,
             Agent::CursorAgent,
+            Agent::MistralVibe,
             Agent::Shell,
         ]
     }
@@ -361,6 +373,18 @@ impl Agent {
             None,
         )
         .is_some()
+    }
+
+    /// How long a direct CLI probe may take before it is considered unusable.
+    ///
+    /// Vibe's first native launch performs one-time initialization and can
+    /// take roughly 25 seconds on macOS; subsequent probes are fast. Leave a
+    /// wider cold-start window for it while keeping other probes short.
+    pub fn probe_timeout(&self) -> std::time::Duration {
+        match self {
+            Agent::MistralVibe => std::time::Duration::from_secs(45),
+            _ => std::time::Duration::from_secs(3),
+        }
     }
 }
 
@@ -1181,7 +1205,11 @@ impl Agent {
     pub fn auth_status_command(&self) -> Option<&'static [&'static str]> {
         match self {
             Agent::ClaudeCode => Some(&["auth", "status"]),
-            Agent::Codex | Agent::KimiCode | Agent::CursorAgent | Agent::Shell => None,
+            Agent::Codex
+            | Agent::KimiCode
+            | Agent::CursorAgent
+            | Agent::MistralVibe
+            | Agent::Shell => None,
         }
     }
 
@@ -1194,7 +1222,11 @@ impl Agent {
     pub fn token_setup(&self) -> Option<(&'static str, &'static str)> {
         match self {
             Agent::ClaudeCode => Some(("claude setup-token", "CLAUDE_CODE_OAUTH_TOKEN")),
-            Agent::Codex | Agent::KimiCode | Agent::CursorAgent | Agent::Shell => None,
+            Agent::Codex
+            | Agent::KimiCode
+            | Agent::CursorAgent
+            | Agent::MistralVibe
+            | Agent::Shell => None,
         }
     }
 
@@ -1212,7 +1244,25 @@ impl Agent {
     /// there is a driver to use it — it is the longer half of the setup, and
     /// nothing about it depends on being able to start a session yet.
     pub fn signs_in_with_a_code(&self) -> bool {
-        matches!(self, Agent::Codex | Agent::KimiCode | Agent::CursorAgent)
+        matches!(
+            self,
+            Agent::Codex | Agent::KimiCode | Agent::CursorAgent | Agent::MistralVibe
+        )
+    }
+
+    /// Whether an authentication mode this agent can actually use is offered.
+    ///
+    /// Subscription access may arrive through either browser sign-in on a
+    /// worker or a token the person obtains locally. API keys are available
+    /// only when the agent names an environment variable for them. Keeping
+    /// this answer next to those capabilities lets account validation and the
+    /// UI offer the same modes.
+    pub fn supports_auth_mode(&self, mode: AgentMode) -> bool {
+        match mode {
+            AgentMode::Subscription => self.signs_in_with_a_code() || self.token_setup().is_some(),
+            AgentMode::ApiKey => self.api_key_var().is_some(),
+            AgentMode::NotNeeded => !self.needs_credential(),
+        }
     }
 
     /// Environment this agent needs *every* time it is run, probes included.
@@ -1240,6 +1290,12 @@ impl Agent {
                 ("AGENT_CLI_CREDENTIAL_STORE", "file"),
                 ("NO_OPEN_BROWSER", "1"),
             ],
+            Agent::MistralVibe => &[
+                ("VIBE_ENABLE_TELEMETRY", "false"),
+                // Vibe's file-backed credential is the portable format used
+                // by Firetower's vault; do not bind it to a host OS keyring.
+                ("VIBE_TEST_DISABLE_KEYRING", "1"),
+            ],
             Agent::ClaudeCode | Agent::Codex | Agent::KimiCode | Agent::Shell => &[],
         }
     }
@@ -1264,7 +1320,11 @@ impl Agent {
     pub fn answers_usage_command(&self) -> bool {
         match self {
             Agent::KimiCode => true,
-            Agent::ClaudeCode | Agent::Codex | Agent::CursorAgent | Agent::Shell => false,
+            Agent::ClaudeCode
+            | Agent::Codex
+            | Agent::CursorAgent
+            | Agent::MistralVibe
+            | Agent::Shell => false,
         }
     }
 
@@ -1291,6 +1351,7 @@ impl Agent {
         match self {
             Agent::Codex => Some("auth.json"),
             Agent::CursorAgent => Some(".cursor/auth.json"),
+            Agent::MistralVibe => Some(".env"),
             Agent::ClaudeCode | Agent::KimiCode | Agent::Shell => None,
         }
     }
@@ -1304,6 +1365,7 @@ impl Agent {
             Agent::Codex => Some("CODEX_HOME"),
             Agent::KimiCode => Some("KIMI_CODE_HOME"),
             Agent::CursorAgent => Some("HOME"),
+            Agent::MistralVibe => Some("VIBE_HOME"),
             Agent::ClaudeCode | Agent::Shell => None,
         }
     }
@@ -1323,8 +1385,8 @@ impl Agent {
     ///   `<root>/.claude/skills/<name>/` is loaded for that session and no
     ///   other. `CLAUDE_CONFIG_DIR` would also work and is not used: it hides
     ///   the host's own `~/.claude`, which is a bigger change than this needs.
-    /// * **Codex** and **Kimi** already get a home per session, so `skills/`
-    ///   inside it is per session for free.
+    /// * **Codex**, **Kimi** and **Mistral Vibe** already get a home per
+    ///   session, so `skills/` inside it is per session for free.
     /// * **Cursor Agent** scans a fixed table of `<config>/skills` directories
     ///   — `.cursor`, `.claude`, `.codex`, `.grok`, `.agents` — under both the
     ///   project root and the home directory. The project root is somebody's
@@ -1334,7 +1396,9 @@ impl Agent {
     pub fn skills_home(&self) -> Option<SkillsHome> {
         match self {
             Agent::ClaudeCode => Some(SkillsHome::AddedDirectory),
-            Agent::Codex | Agent::KimiCode => Some(SkillsHome::AgentHome("skills")),
+            Agent::Codex | Agent::KimiCode | Agent::MistralVibe => {
+                Some(SkillsHome::AgentHome("skills"))
+            }
             Agent::CursorAgent => Some(SkillsHome::AgentHome(".cursor/skills")),
             Agent::Shell => None,
         }
@@ -1345,6 +1409,7 @@ impl Agent {
         match self {
             Agent::ClaudeCode => Some("ANTHROPIC_API_KEY"),
             Agent::Codex => Some("OPENAI_API_KEY"),
+            Agent::MistralVibe => Some("MISTRAL_API_KEY"),
             Agent::KimiCode | Agent::CursorAgent | Agent::Shell => None,
         }
     }
@@ -1388,7 +1453,11 @@ impl Agent {
             }),
             // Not because they don't have one, but because nobody has worked
             // out what it wants. An unanswered first run costs a keypress.
-            Agent::Codex | Agent::KimiCode | Agent::CursorAgent | Agent::Shell => None,
+            Agent::Codex
+            | Agent::KimiCode
+            | Agent::CursorAgent
+            | Agent::MistralVibe
+            | Agent::Shell => None,
         }
     }
 
@@ -1424,7 +1493,11 @@ impl Agent {
             ],
             // No hooks. See `status_for` — nothing will move these off
             // `Working` and the interface should admit that.
-            Agent::Codex | Agent::KimiCode | Agent::CursorAgent | Agent::Shell => &[],
+            Agent::Codex
+            | Agent::KimiCode
+            | Agent::CursorAgent
+            | Agent::MistralVibe
+            | Agent::Shell => &[],
         }
     }
 
@@ -1432,7 +1505,11 @@ impl Agent {
     pub fn hooks_file(&self) -> Option<&'static str> {
         match self {
             Agent::ClaudeCode => Some(".claude/settings.json"),
-            Agent::Codex | Agent::KimiCode | Agent::CursorAgent | Agent::Shell => None,
+            Agent::Codex
+            | Agent::KimiCode
+            | Agent::CursorAgent
+            | Agent::MistralVibe
+            | Agent::Shell => None,
         }
     }
 }
@@ -1932,6 +2009,43 @@ mod launch_tests {
         assert!(Agent::every().contains(&Agent::Shell));
     }
 
+    #[test]
+    fn mistral_vibe_has_a_portable_home_and_subscription_and_api_key_modes() {
+        let agent = Agent::MistralVibe;
+        assert!(Agent::all().contains(&agent));
+        assert!(Agent::every().contains(&agent));
+        assert_eq!(Agent::from_name("MistralVibe"), Some(agent));
+        assert_eq!(agent.label(), "Mistral Vibe");
+        assert_eq!(agent.probe_timeout(), std::time::Duration::from_secs(45));
+        assert_eq!(agent.command(), "vibe-acp");
+        assert_eq!(
+            agent.launch_headless(
+                "session",
+                &Asking::CannotAsk,
+                Start::Fresh,
+                &crate::controls::Preferred::default(),
+                None,
+            ),
+            Some(vec!["vibe-acp".into()])
+        );
+        assert!(agent.signs_in_with_a_code());
+        assert_eq!(agent.token_setup(), None);
+        assert_eq!(agent.api_key_var(), Some("MISTRAL_API_KEY"));
+        assert!(agent.supports_auth_mode(AgentMode::Subscription));
+        assert!(agent.supports_auth_mode(AgentMode::ApiKey));
+        assert!(!agent.supports_auth_mode(AgentMode::NotNeeded));
+        assert_eq!(agent.home_var(), Some("VIBE_HOME"));
+        assert_eq!(agent.credential_file(), Some(".env"));
+        assert_eq!(agent.skills_home(), Some(SkillsHome::AgentHome("skills")));
+        assert_eq!(
+            agent.env(),
+            &[
+                ("VIBE_ENABLE_TELEMETRY", "false"),
+                ("VIBE_TEST_DISABLE_KEYRING", "1"),
+            ]
+        );
+    }
+
     /// Both of the agents on offer can be driven. Nothing else can be started
     /// at all now, so this is the whole of what "supported" means.
     #[test]
@@ -1955,6 +2069,7 @@ mod launch_tests {
             Agent::ClaudeCode,
             Agent::Codex,
             Agent::CursorAgent,
+            Agent::MistralVibe,
             Agent::Shell,
         ] {
             assert!(

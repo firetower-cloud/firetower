@@ -8,7 +8,7 @@
 use crate::db::Db;
 use anyhow::{Context, Result};
 use ft_core::SessionStatus;
-use ft_core::{AgentPresence, CheckoutSummary, Event, EventKind, HostId, SessionId};
+use ft_core::{Agent, AgentPresence, CheckoutSummary, Event, EventKind, HostId, SessionId};
 use ft_proto::{
     decode, encode, Codec, CodecError, Credential, ProbeFailure, Pty, RemoteInfo, ReqId, ToServer,
     ToWorker, PROTOCOL_VERSION,
@@ -3331,16 +3331,22 @@ impl Fleet {
 
         // Only as far as the code. Spawning the process and two round trips to
         // OpenAI is a probe's worth of waiting; the person is not part of it.
-        let pending = match tokio::time::timeout(PROBE_TIMEOUT, wait_started).await {
+        // A cold Vibe native archive takes about 25s to start on macOS.
+        // Leave room for the worker's bounded startup and provider request.
+        let timeout = PROBE_TIMEOUT.max(agent.probe_timeout() + std::time::Duration::from_secs(15));
+        let pending = match tokio::time::timeout(timeout, wait_started).await {
             Ok(Ok(Ok(pending))) => pending,
             Ok(Ok(Err(why))) => {
                 self.probes.write().await.remove(&req);
                 anyhow::bail!("{why}")
             }
-            Ok(Err(_)) => anyhow::bail!("the worker connection dropped while signing Codex in"),
+            Ok(Err(_)) => anyhow::bail!(
+                "the worker connection dropped while signing {} in",
+                agent.label()
+            ),
             Err(_) => {
                 self.probes.write().await.remove(&req);
-                anyhow::bail!("{host_id} did not answer within {PROBE_TIMEOUT:?}")
+                anyhow::bail!("{host_id} did not answer within {timeout:?}")
             }
         };
 
@@ -3376,14 +3382,20 @@ impl Fleet {
             return Err(e);
         }
 
-        match tokio::time::timeout(PROBE_TIMEOUT, rx).await {
+        let timeout = agent.map_or(PROBE_TIMEOUT, |kind| {
+            PROBE_TIMEOUT
+                + kind
+                    .probe_timeout()
+                    .saturating_sub(std::time::Duration::from_secs(3))
+        });
+        match tokio::time::timeout(timeout, rx).await {
             Ok(Ok(agents)) => Ok(agents),
             Ok(Err(_)) => {
                 anyhow::bail!("the worker connection dropped while checking requirements")
             }
             Err(_) => {
                 self.probes.write().await.remove(&req);
-                anyhow::bail!("{host_id} did not answer within {PROBE_TIMEOUT:?}")
+                anyhow::bail!("{host_id} did not answer within {timeout:?}")
             }
         }
     }
@@ -3407,12 +3419,19 @@ impl Fleet {
             return Err(e);
         }
 
-        match tokio::time::timeout(PROBE_TIMEOUT, rx).await {
+        // The worker probes sequentially; cover each agent's cold-start
+        // budget as well as the ordinary auth/tool and transport overhead.
+        let timeout = Agent::all()
+            .iter()
+            .map(Agent::probe_timeout)
+            .sum::<std::time::Duration>()
+            + PROBE_TIMEOUT;
+        match tokio::time::timeout(timeout, rx).await {
             Ok(Ok(agents)) => Ok(agents),
             Ok(Err(_)) => anyhow::bail!("the worker connection dropped while checking agents"),
             Err(_) => {
                 self.probes.write().await.remove(&req);
-                anyhow::bail!("{host_id} did not answer within {PROBE_TIMEOUT:?}")
+                anyhow::bail!("{host_id} did not answer within {timeout:?}")
             }
         }
     }

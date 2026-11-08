@@ -64,10 +64,10 @@ export function Section({
 }
 
 /** A device code, shown large enough to type across the room. */
-export function DeviceCode({ code, url, note }: { code: string; url: string; note?: string }) {
+export function DeviceCode({ code, url, note, linkLabel = "Continue to sign in" }: { code: string; url: string; note?: string; linkLabel?: string }) {
   return (
     <div className="rounded-xl border border-line bg-ground px-4 py-4 text-center">
-      <p className="text-meta text-dim">{code ? "Enter this code at" : "Open this sign-in link:"} <a href={url} target="_blank" rel="noreferrer" className="text-bone underline decoration-line underline-offset-2">{code ? url.replace(/^https?:\/\//, "") : "Continue with Cursor"}</a></p>
+      <p className="text-meta text-dim">{code ? "Enter this code at" : "Open this sign-in link:"} <a href={url} target="_blank" rel="noreferrer" className="text-bone underline decoration-line underline-offset-2">{code ? url.replace(/^https?:\/\//, "") : linkLabel}</a></p>
       {code && <div className="mx-auto mt-3 inline-flex items-center gap-2 rounded-lg border border-line bg-panel px-4 py-2 font-mono text-display tracking-[0.2em] text-bone">
         {code}
         <button onClick={() => navigator.clipboard?.writeText(code)} className="text-micro tracking-normal text-mute hover:text-bone">copy</button>

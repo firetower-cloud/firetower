@@ -12,7 +12,7 @@ import { WhoCanAccess } from "~/ui/Sharing";
 import { useQueryClient } from "@tanstack/react-query";
 import { getListSessionsQueryKey, useRenameSession } from "~/api/generated/sessions/sessions";
 import { Signal } from "~/components/Signal";
-import { AgentMark } from "~/components/AgentMark";
+import { AGENT_LABEL, AgentMark } from "~/components/AgentMark";
 import { childrenElsewhere, group, placeOf } from "~/api/workspaces";
 import type { Backend } from "~/fleet";
 import { useHostOf, useSession, useSessions } from "~/data";
@@ -498,7 +498,7 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
               key={r.id}
               onClick={() => setReading(r.id)}
               onContextMenu={(e) => chipMenu.show(e, r.id)}
-              title={`${r.agent === "ClaudeCode" ? "Claude Code" : r.agent} — ${r.title}`}
+              title={`${AGENT_LABEL[r.agent]} — ${r.title}`}
               className={`flex items-center gap-1.5 rounded-md px-2 py-1 transition-colors ${
                 r.id === run.id
                   ? "bg-overlay text-bone shadow-(--shadow-raise)"
@@ -730,7 +730,7 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
                 disabled: !r || !mine,
                 onPick: () => {
                   if (!r || !mine) return;
-                  void endAgent(id, `${r.agent === "ClaudeCode" ? "Claude Code" : r.agent} — ${r.title}`, place.runs.length - 1).then(
+                  void endAgent(id, `${AGENT_LABEL[r.agent]} — ${r.title}`, place.runs.length - 1).then(
                     (ended) => ended && id === run.id && setReading(place.runs.find((x) => x.id !== id)?.id ?? null),
                   );
                 },

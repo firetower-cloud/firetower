@@ -102,7 +102,7 @@ pub async fn propose(about: About<'_>) -> Result<Proposal> {
     anyhow::ensure!(
         !matches!(
             about.agent,
-            ft_core::Agent::KimiCode | ft_core::Agent::CursorAgent
+            ft_core::Agent::KimiCode | ft_core::Agent::CursorAgent | ft_core::Agent::MistralVibe
         ),
         "Automatic change descriptions are not supported for ACP sessions yet"
     );
@@ -325,7 +325,7 @@ fn invocation(
         }
         // Not offered, and has no answer to give. Reached only by a session
         // recorded before `Shell` stopped being startable.
-        ft_core::Agent::KimiCode | ft_core::Agent::CursorAgent => {
+        ft_core::Agent::KimiCode | ft_core::Agent::CursorAgent | ft_core::Agent::MistralVibe => {
             unreachable!("ACP descriptions are rejected before invocation")
         }
         ft_core::Agent::Shell => {

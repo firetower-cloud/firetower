@@ -1,5 +1,64 @@
 # ACP agents
 
+## Connect Mistral Vibe
+
+Firetower drives the official `vibe-acp` executable through ACP v1. **Install**
+downloads Mistral's native release archive, verifies its GitHub asset SHA-256,
+and keeps the executable together with its bundled `_internal` runtime. The
+worker needs neither Python nor uv. macOS and glibc Linux have arm64 and x64
+archives; musl Linux is refused.
+
+1. Upgrade the server, workers and clients together. Mistral requires worker
+   protocol **23**; an older worker cannot decode the new agent variant.
+2. In **Configuration → Agents → Mistral Vibe**, install the agent on a worker.
+3. Connect an account using browser sign-in or an API key. Browser sign-in
+   uses Vibe's delegated ACP authentication: the worker requests the link,
+   Firetower displays it, and the worker waits for approval. No browser opens
+   on the worker. API keys are stored in the same encrypted account vault.
+4. Select that account for a Mistral Vibe workspace.
+
+Browser sign-in also produces a Mistral API key. Firetower does not infer a
+plan or spending allowance from it; the connected Mistral account determines
+which usage is included or billed.
+
+Each session gets its own `VIBE_HOME`. Browser credentials travel as `.env`,
+written with private file permissions; API keys travel as `MISTRAL_API_KEY`.
+Vibe's `VIBE_TEST_DISABLE_KEYRING=1` switch disables its global keychain for
+every Firetower invocation, so a worker does not borrow another account's
+login. `VIBE_ENABLE_TELEMETRY=false` disables Vibe's optional telemetry.
+An organization's managed Vibe configuration can override that setting.
+
+The model, thinking and mode lists come from Vibe rather than a Firetower
+catalogue. Fresh sessions apply remembered choices only when Vibe still
+offers them, rechecking thinking levels after a model change. Resumed sessions
+keep the agent's persisted settings. Agent-reported modes have no Firetower
+risk classification; their descriptions come from the agent.
+
+Skills live under the session's `VIBE_HOME/skills`. The workspace is passed as
+an ACP additional directory so Vibe can read project instructions without
+changing a shared trust configuration. A selected profile is written as a
+private `AGENTS.md` in a separate additional directory for that session;
+it does not replace the workspace's instructions. Permissions still use the normal
+Firetower approval flow. Authentication is never started implicitly by a
+workspace launch, and an auth failure never causes a prompt to be replayed.
+
+Vibe 3.1.0's native binary was checked for installation, version, ACP
+initialization and delegated sign-in link creation without a Mistral account.
+Those checks do **not** establish successful authentication or a real model
+turn. A signed-in account is still required for the live acceptance checklist
+in [adding-an-agent.md](adding-an-agent.md#verify-it-live): streamed/follow-up
+turns, controls, skill use and refresh, approved/denied tool effects,
+cancellation, resume and rejected entitlement. Deterministic ACP fixtures
+exercise transport behavior separately; they do not satisfy these live gates.
+
+```sh
+cargo test -p ft-worker --test acp --locked
+cargo test -p ft-worker --lib mistral::tests --locked
+# With the installed vibe-acp on PATH: obtain a link, then cancel. No approval
+# or model call is made by this opt-in network test.
+cargo test -p ft-worker --lib real_vibe_acp_advertises_and_starts_delegated_browser_auth --locked -- --ignored
+```
+
 ## Connect Cursor Agent
 
 Cursor Agent uses the official `cursor-agent acp` CLI and ACP protocol v1. The

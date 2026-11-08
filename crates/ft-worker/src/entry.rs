@@ -16,7 +16,7 @@ use std::path::PathBuf;
 /// there is a file at all. Unreadable is the same as absent: a session that
 /// starts as a plain agent is a smaller surprise than one that refuses to
 /// start, and the control plane's copy is what the interface shows either way.
-fn persona_for(workspace: &std::path::Path, session: &str) -> Option<String> {
+pub(crate) fn persona_for(workspace: &std::path::Path, session: &str) -> Option<String> {
     let written = std::fs::read_to_string(crate::agentd::persona_path(workspace, session))
         .ok()
         .filter(|text| !text.trim().is_empty());
@@ -49,7 +49,10 @@ pub async fn run_agent(session: &str, workspace: PathBuf, agent: &str) -> Result
     };
 
     let launch = |start| {
-        if matches!(kind, ft_core::Agent::KimiCode | ft_core::Agent::CursorAgent) {
+        if matches!(
+            kind,
+            ft_core::Agent::KimiCode | ft_core::Agent::CursorAgent | ft_core::Agent::MistralVibe
+        ) {
             return Ok(crate::agentd::Launch {
                 session_id: session.to_string(),
                 workspace: workspace.clone(),

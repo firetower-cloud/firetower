@@ -16,6 +16,11 @@ impl Peer {
 
     async fn start_agent(scenario: &str, saved: bool, agent: ft_core::Agent) -> Self {
         let workspace = tempfile::tempdir().unwrap();
+        if scenario == "mistral-profile" {
+            let path = ft_worker::agentd::persona_path(workspace.path(), "test");
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, "Answer only in French.").unwrap();
+        }
         if saved {
             std::fs::create_dir(workspace.path().join(".firetower")).unwrap();
             std::fs::write(
@@ -119,6 +124,115 @@ impl Peer {
             .unwrap()
             .unwrap()
             .unwrap();
+    }
+}
+
+#[tokio::test]
+async fn mistral_profiles_are_private_instructions_before_the_first_prompt() {
+    let mut peer = Peer::start_agent("mistral-profile", false, ft_core::Agent::MistralVibe).await;
+    let records = peer.ready().await;
+    let new = records
+        .iter()
+        .find_map(|r| match r {
+            Record::Sent { message } if message["method"] == "session/new" => Some(message),
+            _ => None,
+        })
+        .unwrap();
+    let directories = new["params"]["additionalDirectories"].as_array().unwrap();
+    assert_eq!(directories.len(), 2);
+    assert_eq!(directories[0], new["params"]["cwd"]);
+    let instructions = std::path::Path::new(directories[1].as_str().unwrap());
+    assert_eq!(
+        std::fs::read_to_string(instructions.join("AGENTS.md")).unwrap(),
+        "Answer only in French."
+    );
+    assert!(
+        !peer._workspace.path().join("AGENTS.md").exists(),
+        "the profile must not replace shared project instructions"
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            instructions.metadata().unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        assert_eq!(
+            instructions
+                .join("AGENTS.md")
+                .metadata()
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+    }
+    peer.finish().await;
+}
+
+#[tokio::test]
+async fn mistral_workspace_trust_and_missing_session_carry_are_session_scoped() {
+    let mut peer = Peer::start_agent("mistral-missing", true, ft_core::Agent::MistralVibe).await;
+    let records = peer.ready().await;
+    let sent: Vec<_> = records
+        .iter()
+        .filter_map(|r| match r {
+            Record::Sent { message } => Some(message),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        sent.iter()
+            .filter_map(|m| m["method"].as_str())
+            .collect::<Vec<_>>(),
+        ["initialize", "session/load", "session/new"]
+    );
+    for message in &sent[1..] {
+        let params = &message["params"];
+        assert_eq!(params["additionalDirectories"], json!([params["cwd"]]));
+    }
+    peer.send(Input::Prompt {
+        text: "continue".into(),
+    })
+    .await;
+    let prompt = peer.sent("session/prompt").await;
+    let carried = prompt["params"]["prompt"][0]["text"].as_str().unwrap();
+    assert!(carried.contains("remember the blue door"));
+    assert!(carried.contains("continue"));
+    peer.finish().await;
+}
+
+#[tokio::test]
+async fn mistral_auth_and_unrelated_missing_session_errors_never_replay_a_prompt() {
+    for (scenario, saved, detail) in [
+        ("mistral-auth", false, "Missing API key"),
+        ("load-auth", true, "Authentication required"),
+        ("mistral-wrong-session", true, "another-session"),
+    ] {
+        let mut peer = Peer::start_agent(scenario, saved, ft_core::Agent::MistralVibe).await;
+        let mut methods = Vec::new();
+        loop {
+            match peer.record().await {
+                Record::Sent { message } => {
+                    methods.push(message["method"].as_str().unwrap().to_owned())
+                }
+                Record::Failed { detail: failed } => {
+                    assert!(failed.contains(detail), "{failed}");
+                    break;
+                }
+                _ => (),
+            }
+        }
+        assert!(!methods
+            .iter()
+            .any(|method| method == "authenticate" || method == "session/prompt"));
+        if saved {
+            assert_eq!(methods, ["initialize", "session/load"]);
+        } else {
+            assert_eq!(methods, ["initialize", "session/new"]);
+        }
+        assert!(peer.task.await.unwrap().is_err());
     }
 }
 

@@ -66,7 +66,9 @@ use serde::{Deserialize, Serialize};
 ///      command line and a long persona no longer fits in it. A worker older
 ///      than this reads the field as nothing, and a session started as a
 ///      profile on one would come up as a plain agent with no indication why.
-pub const PROTOCOL_VERSION: u32 = 22;
+/// 23 — MistralVibe requires a worker that understands its agent variant,
+///      standalone ACP command and portable account sign-in.
+pub const PROTOCOL_VERSION: u32 = 23;
 
 mod codec;
 pub use codec::{Codec, CodecError, FrameReader, FrameWriter};

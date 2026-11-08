@@ -103,7 +103,7 @@ export function Composer({
   const attach = useAttachFile();
   const interrupt = useInterruptSession();
   const choose = useChooseControl();
-  const acp = session.agent === "KimiCode" || session.agent === "CursorAgent";
+  const acp = session.agent === "KimiCode" || session.agent === "CursorAgent" || session.agent === "MistralVibe";
   /* Only for this agent's name. `ClaudeCode` is how it is stored and sent;
      `Claude Code` is what this install calls it, and the menu is a place a
      person reads. */

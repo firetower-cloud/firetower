@@ -100,6 +100,7 @@ pub mod git;
 pub mod history;
 pub mod hooks;
 pub mod kimi;
+pub mod mistral;
 pub mod path;
 pub mod readiness;
 pub mod runtime;
@@ -641,6 +642,7 @@ impl Worker {
                     Codex(codex::Waiting),
                     Kimi(kimi::Waiting),
                     Cursor(cursor::Waiting),
+                    Mistral(mistral::Waiting),
                 }
 
                 let home = self.root.join("agent-login").join(&req);
@@ -656,6 +658,9 @@ impl Worker {
                     ft_core::Agent::CursorAgent => cursor::start(&self.root, &home)
                         .await
                         .map(|(p, w)| (p.user_code, p.verification_url, Signing::Cursor(w))),
+                    ft_core::Agent::MistralVibe => mistral::start(&self.root, &home)
+                        .await
+                        .map(|(p, w)| (p.user_code, p.verification_url, Signing::Mistral(w))),
                     other => Err(anyhow::anyhow!(
                         "{} does not sign in with a code",
                         other.label()
@@ -686,6 +691,7 @@ impl Worker {
                                 Signing::Codex(w) => w.finish().await,
                                 Signing::Kimi(w) => w.finish().await,
                                 Signing::Cursor(w) => w.finish().await,
+                                Signing::Mistral(w) => w.finish().await,
                             };
                             let result = finished
                                 .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
@@ -4003,12 +4009,14 @@ async fn prepare_agent_home(
     };
     let has_key = agent
         .api_key_var()
-        .is_some_and(|key| env.iter().any(|(k, _)| k == key));
+        .is_some_and(|key| env.iter().any(|(k, v)| k == key && !v.trim().is_empty()));
     // `wanted` is whether anything else needs this directory. Skills live
     // inside it for the agents that have one, so a session with skills and an
     // API key — no credential *file* at all — still needs it made and still
     // needs the variable pointing at it.
-    if files.is_empty() && !has_key && !wanted {
+    // Even a missing credential must not make Vibe fall back to the worker
+    // operator's global home and silently borrow its account or settings.
+    if files.is_empty() && !has_key && !wanted && agent != ft_core::Agent::MistralVibe {
         return Ok(());
     }
     let home = agentd::dir_for(path).join(format!("agent-home-{}", id.as_str()));
@@ -4038,16 +4046,30 @@ async fn prepare_agent_home(
         .await??;
     }
     if files.is_empty() {
-        match tokio::fs::remove_file(home.join("auth.json")).await {
-            Ok(()) => (),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
-            Err(e) => return Err(e.into()),
+        if let Some(file) = agent.credential_file() {
+            match tokio::fs::remove_file(home.join(file)).await {
+                Ok(()) => (),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
+                Err(e) => return Err(e.into()),
+            }
         }
     } else {
         write_agent_home(&home, files).await?;
     }
     if agent == ft_core::Agent::CursorAgent {
         cursor::prepare_home(&home).await?;
+    }
+    if agent == ft_core::Agent::MistralVibe && !has_key {
+        // An inherited worker/tmux key must not shadow this session's .env.
+        // Vibe loads a file value when the process value is empty (3.1.0
+        // load_dotenv_values), and a missing file stays unauthenticated.
+        env.retain(|(key, _)| key != "MISTRAL_API_KEY");
+        env.push(("MISTRAL_API_KEY".into(), String::new()));
+    }
+    #[cfg(unix)]
+    if agent == ft_core::Agent::MistralVibe {
+        use std::os::unix::fs::PermissionsExt;
+        tokio::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o700)).await?;
     }
     env.retain(|(k, _)| k != variable);
     env.push((variable.to_string(), home.display().to_string()));
@@ -6565,6 +6587,102 @@ mod tests {
 #[cfg(test)]
 mod account_home_tests {
     use super::*;
+    #[tokio::test]
+    async fn mistral_credentials_and_skills_are_private_to_the_session() {
+        let workspace = tempfile::tempdir().unwrap();
+        let a = SessionId::new();
+        let b = SessionId::new();
+        let mut env_a = vec![];
+        let mut env_b = vec![("MISTRAL_API_KEY".into(), "api-key-b".into())];
+        prepare_agent_home(
+            workspace.path(),
+            &a,
+            ft_core::Agent::MistralVibe,
+            &[(".env".into(), "MISTRAL_API_KEY=account-a\n".into())],
+            &mut env_a,
+            true,
+        )
+        .await
+        .unwrap();
+        prepare_agent_home(
+            workspace.path(),
+            &b,
+            ft_core::Agent::MistralVibe,
+            &[],
+            &mut env_b,
+            true,
+        )
+        .await
+        .unwrap();
+        let home = |env: &[(String, String)]| {
+            std::path::PathBuf::from(
+                env.iter()
+                    .find(|(key, _)| key == "VIBE_HOME")
+                    .unwrap()
+                    .1
+                    .clone(),
+            )
+        };
+        let home_a = home(&env_a);
+        let home_b = home(&env_b);
+        assert_ne!(home_a, home_b);
+        assert_eq!(
+            tokio::fs::read_to_string(home_a.join(".env"))
+                .await
+                .unwrap(),
+            "MISTRAL_API_KEY=account-a\n"
+        );
+        assert!(!home_b.join(".env").exists());
+        assert!(env_b
+            .iter()
+            .any(|(k, v)| k == "MISTRAL_API_KEY" && v == "api-key-b"));
+        for env in [&env_a, &env_b] {
+            assert!(env
+                .iter()
+                .any(|(k, v)| k == "VIBE_TEST_DISABLE_KEYRING" && v == "1"));
+        }
+        assert!(env_a
+            .iter()
+            .any(|(k, v)| k == "MISTRAL_API_KEY" && v.is_empty()));
+        let mut empty = Vec::new();
+        prepare_agent_home(
+            workspace.path(),
+            &SessionId::new(),
+            ft_core::Agent::MistralVibe,
+            &[],
+            &mut empty,
+            false,
+        )
+        .await
+        .unwrap();
+        assert!(empty.iter().any(|(k, _)| k == "VIBE_HOME"));
+        assert!(empty
+            .iter()
+            .any(|(k, v)| k == "MISTRAL_API_KEY" && v.is_empty()));
+        // Switching this session to an API key must not retain its previous
+        // browser credential on disk.
+        env_a.push(("MISTRAL_API_KEY".into(), "replacement".into()));
+        prepare_agent_home(
+            workspace.path(),
+            &a,
+            ft_core::Agent::MistralVibe,
+            &[],
+            &mut env_a,
+            true,
+        )
+        .await
+        .unwrap();
+        assert!(!home_a.join(".env").exists());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(home_b).unwrap().permissions().mode() & 0o777,
+                0o700
+            );
+        }
+    }
+
     #[tokio::test]
     async fn accounts_in_one_workspace_have_independent_credentials_and_keep_legacy_threads() {
         let dir = tempfile::tempdir().unwrap();

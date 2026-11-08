@@ -34,7 +34,7 @@ export const listSessionsResponseUsageTwoOomKillsMin = 0;
 
 
 export const ListSessionsResponseItem = zod.object({
-  "agent": zod.enum(['ClaudeCode', 'Codex', 'KimiCode', 'CursorAgent', 'Shell']).describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
+  "agent": zod.enum(['ClaudeCode', 'Codex', 'KimiCode', 'CursorAgent', 'MistralVibe', 'Shell']).describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
   "base": zod.string().nullish(),
   "branch": zod.string().nullish().describe('The first checkout\'s branch, or `None` for a bare agent.\n\nEvery checkout in a session is cut with the same requested name, so this\nis the right thing to show once — but git may have numbered them\ndifferently, so anything acting on a branch reads it from the checkout.'),
   "checkouts": zod.array(zod.object({
@@ -92,7 +92,7 @@ export const ListSessionsResponse = zod.array(ListSessionsResponseItem)
 
 export const CreateSessionBody = zod.object({
   "accountId": zod.string().nullish().describe('Named connection to use. Omit for the default for this agent.'),
-  "agent": zod.enum(['ClaudeCode', 'Codex', 'KimiCode', 'CursorAgent', 'Shell']).optional().describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
+  "agent": zod.enum(['ClaudeCode', 'Codex', 'KimiCode', 'CursorAgent', 'MistralVibe', 'Shell']).optional().describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
   "base": zod.string().nullish().describe('The branch to start from. Omit for the repository\'s default.'),
   "branch": zod.string().nullish().describe('The branch the agent works on. Omit to derive one from the prompt.\n\nNamed by whoever starts the session, because this is what ends up on a\npull request and a machine-written slug is a poor thing to live with.'),
   "directoryId": zod.union([zod.null(),zod.string().describe('Which directory to file the workspace in, and therefore who will be able\nto see it.\n\nOmit for your own space, which is what a workspace has always been.\nNaming one hands it to that directory at the one moment when nobody has\nto be told it changed hands.')]).optional(),
@@ -130,7 +130,7 @@ export const createSessionResponseUsageTwoOomKillsMin = 0;
 
 
 export const CreateSessionResponse = zod.object({
-  "agent": zod.enum(['ClaudeCode', 'Codex', 'KimiCode', 'CursorAgent', 'Shell']).describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
+  "agent": zod.enum(['ClaudeCode', 'Codex', 'KimiCode', 'CursorAgent', 'MistralVibe', 'Shell']).describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
   "base": zod.string().nullish(),
   "branch": zod.string().nullish().describe('The first checkout\'s branch, or `None` for a bare agent.\n\nEvery checkout in a session is cut with the same requested name, so this\nis the right thing to show once — but git may have numbered them\ndifferently, so anything acting on a branch reads it from the checkout.'),
   "checkouts": zod.array(zod.object({
@@ -235,7 +235,7 @@ export const getSessionResponseUsageTwoOomKillsMin = 0;
 
 
 export const GetSessionResponse = zod.object({
-  "agent": zod.enum(['ClaudeCode', 'Codex', 'KimiCode', 'CursorAgent', 'Shell']).describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
+  "agent": zod.enum(['ClaudeCode', 'Codex', 'KimiCode', 'CursorAgent', 'MistralVibe', 'Shell']).describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
   "base": zod.string().nullish(),
   "branch": zod.string().nullish().describe('The first checkout\'s branch, or `None` for a bare agent.\n\nEvery checkout in a session is cut with the same requested name, so this\nis the right thing to show once — but git may have numbered them\ndifferently, so anything acting on a branch reads it from the checkout.'),
   "checkouts": zod.array(zod.object({
@@ -326,7 +326,7 @@ export const renameSessionResponseUsageTwoOomKillsMin = 0;
 
 
 export const RenameSessionResponse = zod.object({
-  "agent": zod.enum(['ClaudeCode', 'Codex', 'KimiCode', 'CursorAgent', 'Shell']).describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
+  "agent": zod.enum(['ClaudeCode', 'Codex', 'KimiCode', 'CursorAgent', 'MistralVibe', 'Shell']).describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
   "base": zod.string().nullish(),
   "branch": zod.string().nullish().describe('The first checkout\'s branch, or `None` for a bare agent.\n\nEvery checkout in a session is cut with the same requested name, so this\nis the right thing to show once — but git may have numbered them\ndifferently, so anything acting on a branch reads it from the checkout.'),
   "checkouts": zod.array(zod.object({
@@ -1179,7 +1179,7 @@ export const setShareResponseUsageTwoOomKillsMin = 0;
 
 
 export const SetShareResponse = zod.object({
-  "agent": zod.enum(['ClaudeCode', 'Codex', 'KimiCode', 'CursorAgent', 'Shell']).describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
+  "agent": zod.enum(['ClaudeCode', 'Codex', 'KimiCode', 'CursorAgent', 'MistralVibe', 'Shell']).describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
   "base": zod.string().nullish(),
   "branch": zod.string().nullish().describe('The first checkout\'s branch, or `None` for a bare agent.\n\nEvery checkout in a session is cut with the same requested name, so this\nis the right thing to show once — but git may have numbered them\ndifferently, so anything acting on a branch reads it from the checkout.'),
   "checkouts": zod.array(zod.object({

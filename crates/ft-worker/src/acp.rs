@@ -34,13 +34,15 @@ pub async fn run(session: &str, workspace: &Path, agent: ft_core::Agent) -> Resu
     anyhow::ensure!(
         matches!(
             agent,
-            ft_core::Agent::KimiCode | ft_core::Agent::CursorAgent
+            ft_core::Agent::KimiCode | ft_core::Agent::CursorAgent | ft_core::Agent::MistralVibe
         ),
         "{} is not an ACP agent",
         agent.label()
     );
     let mut command = Command::new(agent.command());
-    command.arg("acp");
+    if agent != ft_core::Agent::MistralVibe {
+        command.arg("acp");
+    }
     command.envs(agent.env().iter().copied());
     serve_agent(
         command,
@@ -321,6 +323,100 @@ struct Session<'a> {
     agent: ft_core::Agent,
 }
 
+fn session_params(
+    agent: ft_core::Agent,
+    cwd: &str,
+    session: Option<&str>,
+    instructions: Option<&Path>,
+) -> Value {
+    let mut params = json!({"cwd":cwd, "mcpServers":[]});
+    if let Some(session) = session {
+        params["sessionId"] = json!(session);
+    }
+    if agent == ft_core::Agent::MistralVibe {
+        // Vibe reads project instructions and skills only from trusted folders.
+        // This trusts the selected workspace for this session without changing
+        // the account's persistent trusted_folders.toml.
+        let mut directories = vec![cwd.to_string()];
+        if let Some(instructions) = instructions {
+            directories.push(instructions.to_string_lossy().into_owned());
+        }
+        params["additionalDirectories"] = json!(directories);
+    }
+    params
+}
+
+async fn mistral_instructions(
+    workspace: &Path,
+    session: &str,
+) -> Result<Option<std::path::PathBuf>> {
+    let directory =
+        crate::agentd::dir_for(workspace).join(format!("mistral-instructions-{session}"));
+    let Some(persona) = crate::entry::persona_for(workspace, session) else {
+        match tokio::fs::remove_file(directory.join("AGENTS.md")).await {
+            Ok(()) => (),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
+            Err(error) => return Err(error.into()),
+        }
+        return Ok(None);
+    };
+    // Vibe loads AGENTS.md from each session's additional directories. Keep
+    // the profile separate from the shared workspace and credential home.
+    crate::write_agent_home(&directory, &[("AGENTS.md".into(), persona)]).await?;
+    Ok(Some(directory.canonicalize()?))
+}
+
+/// Vibe persists settings in the private session home. A fresh session must
+/// still open on this person's choices, not on the CLI defaults. Re-read the
+/// offered options after each change because thinking levels depend on model.
+async fn prefer_mistral<W: AsyncWrite + Unpin>(
+    stdin: &mut ChildStdin,
+    stdout: &mut Lines<BufReader<ChildStdout>>,
+    out: &mut W,
+    session: &str,
+    response: Value,
+    preferred: ft_core::controls::Preferred,
+) -> Result<()> {
+    use ft_core::controls::ControlKind;
+    let mut reader = ft_core::acp::AcpNormaliser::default();
+    reader.push(&serde_json::to_string(&Record::Sent {
+        message: json!({"id":3,"method":"session/new"}),
+    })?);
+    reader.push(&serde_json::to_string(&Record::Received {
+        message: response,
+        replay: false,
+    })?);
+    for (kind, value, id) in [
+        (ControlKind::Model, preferred.model, "initial-model"),
+        (ControlKind::Effort, preferred.effort, "initial-thinking"),
+        (ControlKind::Mode, preferred.mode, "initial-mode"),
+    ] {
+        let Some(value) = value else { continue };
+        if reader
+            .controls()
+            .iter()
+            .any(|c| c.kind == kind && c.current.as_deref() == Some(&value))
+        {
+            continue;
+        }
+        let Some(change) = reader.configure(kind, &value) else {
+            continue;
+        };
+        let request = json!({"jsonrpc":"2.0", "id":id, "method":"session/set_config_option", "params":{"sessionId":session,"configId":change["config_id"],"value":value}});
+        reader.push(&serde_json::to_string(&Record::Sent {
+            message: request.clone(),
+        })?);
+        let response = exchange(stdin, stdout, out, request, false).await?;
+        // Rejection is not confirmation. Keep the actual advertised value;
+        // ambiguous timeouts terminate startup without sending a prompt.
+        reader.push(&serde_json::to_string(&Record::Received {
+            message: response,
+            replay: false,
+        })?);
+    }
+    Ok(())
+}
+
 async fn connection<R, W>(
     session: Session<'_>,
     stdin: &mut ChildStdin,
@@ -357,6 +453,11 @@ where
     // RPC starts a browser login; that belongs only to AgentLoginStart.
     let can_load = init["agentCapabilities"]["loadSession"] == true;
     let cwd = workspace.canonicalize()?.to_string_lossy().into_owned();
+    let instructions = if agent == ft_core::Agent::MistralVibe {
+        mistral_instructions(workspace, session).await?
+    } else {
+        None
+    };
     let mut loaded = false;
     if let Some(saved) = &previous {
         if can_load {
@@ -367,7 +468,7 @@ where
                 rpc(
                     2,
                     "session/load",
-                    json!({"sessionId":saved.session, "cwd":cwd, "mcpServers":[]}),
+                    session_params(agent, &cwd, Some(&saved.session), instructions.as_deref()),
                 ),
                 true,
             )
@@ -386,7 +487,14 @@ where
                 && response["error"]["data"]["message"]
                     .as_str()
                     .is_some_and(|s| s == format!("Session \"{}\" not found", saved.session));
-            let missing = response["error"]["code"] == -32602 && (kimi_missing || cursor_missing);
+            // Vibe 3.1.0 uses snake_case here. Only a missing record for this
+            // exact session permits context carry; other invalid parameters
+            // (or an authentication failure) must remain errors.
+            let mistral_missing = agent == ft_core::Agent::MistralVibe
+                && response["error"]["data"]["session_id"] == saved.session
+                && response["error"]["message"] == format!("Session not found: {}", saved.session);
+            let missing = response["error"]["code"] == -32602
+                && (kimi_missing || cursor_missing || mistral_missing);
             if !missing {
                 result(&response)?;
                 loaded = true;
@@ -400,7 +508,11 @@ where
             stdin,
             stdout,
             out,
-            rpc(3, "session/new", json!({"cwd":cwd, "mcpServers":[]})),
+            rpc(
+                3,
+                "session/new",
+                session_params(agent, &cwd, None, instructions.as_deref()),
+            ),
             false,
         )
         .await?;
@@ -409,6 +521,17 @@ where
             .filter(|s| !s.is_empty())
             .context("ACP session/new returned no sessionId")?
             .to_owned();
+        if agent == ft_core::Agent::MistralVibe {
+            prefer_mistral(
+                stdin,
+                stdout,
+                out,
+                &id,
+                response,
+                ft_core::controls::Preferred::from_env(),
+            )
+            .await?;
+        }
         let carry = crate::history::carry(workspace, session, agent).await?;
         Saved { session: id, carry }
     };
@@ -559,5 +682,52 @@ where
                 configure_deadline = None;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod preference_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn a_fresh_mistral_session_validates_effort_after_the_model_change() {
+        let mut child = Command::new("python3")
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/acp.py"
+            ))
+            .arg("mistral-preferences")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let mut stdin = child.stdin.take().unwrap();
+        let mut stdout = BufReader::new(child.stdout.take().unwrap()).lines();
+        let mut journal = Vec::new();
+        prefer_mistral(&mut stdin, &mut stdout, &mut journal, "fresh",
+            json!({"id":3,"result":{"sessionId":"fresh","configOptions":[
+                {"id":"model","category":"model","name":"Model","type":"select","currentValue":"a","options":[{"value":"a","name":"A"},{"value":"b","name":"B"}]},
+                {"id":"thinking","category":"thinking","name":"Thinking","type":"select","currentValue":"off","options":[{"value":"off","name":"Off"}]}
+            ]}}),
+            ft_core::controls::Preferred { model:Some("b".into()), effort:Some("high".into()), mode:Some("retired".into()), sandbox:None }
+        ).await.unwrap();
+        let sent: Vec<Value> = String::from_utf8(journal)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).unwrap())
+            .filter(|record| record["acp"] == "Sent")
+            .map(|record| record["message"].clone())
+            .collect();
+        assert_eq!(sent.len(), 2);
+        assert_eq!(sent[0]["params"]["configId"], "model");
+        assert_eq!(sent[0]["params"]["value"], "b");
+        assert_eq!(sent[1]["params"]["configId"], "thinking");
+        assert_eq!(sent[1]["params"]["value"], "high");
+        assert!(sent
+            .iter()
+            .all(|m| m["method"] == "session/set_config_option"));
+        child.kill().await.unwrap();
+        child.wait().await.unwrap();
     }
 }
