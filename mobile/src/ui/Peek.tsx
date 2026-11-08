@@ -32,7 +32,14 @@
  */
 import { useCallback } from "react";
 import { Pressable, Text, View } from "react-native";
-import Animated, { FadeIn, FadeOut, ZoomIn } from "react-native-reanimated";
+import Animated, {
+  FadeIn,
+  FadeOut,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+  ZoomIn,
+} from "react-native-reanimated";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import * as Haptics from "expo-haptics";
 import { useWindowDimensions } from "react-native";
@@ -47,19 +54,39 @@ import { size } from "~/design/tokens.generated";
 export const PEEK_MS = 420;
 
 /**
- * The long-press that opens one, as a gesture a row can wear.
+ * Hold to peek, tap to open — **both gestures in one place**.
  *
- * Exported separately so the row owns the gesture and the overlay is drawn
- * once at the screen's root — a peek rendered inside a list row would be
- * clipped by the row and would scroll with it.
+ * The first version wrapped a `Pressable` in a `GestureDetector` and put only
+ * the long press in gesture-handler. That does not work: `Pressable` claims
+ * the touch through React Native's own responder system, so the RNGH long
+ * press never activates. It did not throw and it did not log — the press
+ * simply did nothing, which is the hardest kind of failure to notice in a
+ * screenshot and the reason this was reported as "component complete".
+ *
+ * So the tap moves into gesture-handler too and the row is a plain `View`.
+ * `Gesture.Exclusive` makes them race properly: a long press wins if the
+ * finger stays, a tap wins if it leaves first, and neither fires twice.
+ *
+ * Returned as one object from one place because the two call sites — the
+ * home's chips and the Workspaces list — had already drifted once. Two copies
+ * of a gesture composition is how three sheets ended up drawing a grabber
+ * none of them honoured.
  */
-export function usePeekGesture(onPeek: () => void) {
-  return Gesture.LongPress()
+export function usePeekable(onPeek: () => void, onOpen: () => void) {
+  const held = useSharedValue(0);
+
+  const hold = Gesture.LongPress()
     .minDuration(PEEK_MS)
     /* Any movement cancels. A press that drifts is a scroll that has not got
        going yet, and stealing it is what makes a list feel like it is
        fighting you. */
     .maxDistance(10)
+    .onBegin(() => {
+      held.value = withTiming(1, { duration: PEEK_MS });
+    })
+    .onFinalize(() => {
+      held.value = withTiming(0, { duration: 140 });
+    })
     .onStart(() => {
       /* On the press, not on the release — latency is the thing that kills
          directness, and this is the only confirmation the gesture gives. */
@@ -70,22 +97,26 @@ export function usePeekGesture(onPeek: () => void) {
      * **On the JS thread, and this crashed the app without it.**
      *
      * In gesture-handler 3 a gesture callback is a *worklet* on the UI thread
-     * by default. This one calls a native module and a React `setState`, and
-     * doing either from a worklet with no marshalling throws inside the
-     * worklet runtime — which escapes as an uncaught C++ exception rather
-     * than a red screen. `EXC_CRASH / SIGABRT`, every time, on the press.
+     * by default, and this one calls a native module and a React `setState`.
+     * Unmarshalled, that throws inside the worklet runtime and escapes as an
+     * uncaught C++ exception — `EXC_CRASH / SIGABRT`, not a red screen.
      *
-     * Nothing here belongs on the UI thread: there is no shared value to
-     * animate, only a haptic and a state change, so the whole callback goes
-     * to JS. That is what `Composer`'s drag-down already does. Where a
-     * callback *does* drive a shared value — `Picker`'s sheet — the worklet
-     * stays and only the JS call is wrapped in `runOnJS`. Two patterns, and
-     * which one applies is decided by whether the callback animates anything.
+     * The whole callback goes to JS because nothing in it animates. Where a
+     * callback *does* drive a shared value, as `Sheet`'s pan does, the worklet
+     * stays and only the JS call is wrapped in `runOnJS`. Which pattern applies
+     * is decided by whether the callback animates anything.
      *
-     * A type checker cannot see this. `onStart(() => …)` is perfectly
-     * well-typed; the defect is which thread it runs on.
+     * `onBegin`/`onFinalize` above stay worklets — they only touch `held`.
      */
     .runOnJS(true);
+
+  const tap = Gesture.Tap().maxDuration(PEEK_MS).onEnd(onOpen).runOnJS(true);
+
+  /* The row sinks slightly while a press is being held, so the gesture is
+     visibly *being considered* rather than ignored for 420ms. */
+  const pressed = useAnimatedStyle(() => ({ opacity: 1 - held.value * 0.35 }));
+
+  return { gesture: Gesture.Exclusive(hold, tap), pressed };
 }
 
 type Answer = { label: string; run: () => void; tone?: "loud" | "quiet" };

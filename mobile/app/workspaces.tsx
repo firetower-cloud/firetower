@@ -22,6 +22,7 @@
 import { useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import Animated from "react-native-reanimated";
 import { GestureDetector } from "react-native-gesture-handler";
 import { router } from "expo-router";
 import { ChevronLeft } from "lucide-react-native";
@@ -31,7 +32,7 @@ import { BEAT, BEAT_TOKEN, elapsed, minutesSince, type Beat } from "~/api/view";
 import { useSessions } from "~/data";
 import { usePending } from "~/api/pending";
 import { useAnswerRequest } from "~/api/generated/sessions/sessions";
-import { Peek, usePeekGesture } from "~/ui/Peek";
+import { Peek, usePeekable } from "~/ui/Peek";
 import { Waiting } from "~/ui/Waiting";
 import { COLUMN } from "~/ui/measure";
 import { useTheme } from "~/design/theme";
@@ -53,15 +54,15 @@ function Row({ place, onPeek }: { place: Workspace; onPeek: () => void }) {
   const token = BEAT_TOKEN[beat];
   const tone = token === "mute" ? color.dim : token === "ember" ? color["ember-ink"] : color[token];
   const soft = beat === "done" || beat === "over";
-  const hold = usePeekGesture(onPeek);
+  const { gesture, pressed } = usePeekable(onPeek, () => router.push(`/workspace/${place.id}`));
 
   return (
-    <GestureDetector gesture={hold}>
-      <Pressable
+    <GestureDetector gesture={gesture}>
+      <Animated.View
         testID="workspace-row"
-        onPress={() => router.push(`/workspace/${place.id}`)}
-        className="min-h-[54px] flex-row items-center gap-3 px-5 active:bg-raise"
-        android_ripple={{ color: color.raise }}
+        accessibilityRole="button"
+        className="min-h-[54px] flex-row items-center gap-3 px-5"
+        style={pressed}
       >
         <View className="h-2 w-2 rounded-full" style={{ backgroundColor: tone }} />
         <Text
@@ -72,7 +73,7 @@ function Row({ place, onPeek }: { place: Workspace; onPeek: () => void }) {
           {place.name}
         </Text>
         <Text className="font-sans text-meta text-mute">{elapsed(minutesSince(speaker.updatedAt))}</Text>
-      </Pressable>
+      </Animated.View>
     </GestureDetector>
   );
 }

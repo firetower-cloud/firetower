@@ -37,6 +37,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import Animated from "react-native-reanimated";
 import { GestureDetector } from "react-native-gesture-handler";
 import { router } from "expo-router";
 import { ChevronRight } from "lucide-react-native";
@@ -52,7 +53,7 @@ import { ServerChip } from "~/ui/ServerChip";
 import { ArtifactCard } from "~/ui/ArtifactCard";
 import { usePending } from "~/api/pending";
 import { useAnswerRequest } from "~/api/generated/sessions/sessions";
-import { Peek, usePeekGesture } from "~/ui/Peek";
+import { Peek, usePeekable } from "~/ui/Peek";
 import { Servers } from "~/ui/Servers";
 import { StartBox, type Chip, type Pick_ } from "~/ui/StartBox";
 import { Waiting } from "~/ui/Waiting";
@@ -87,17 +88,16 @@ function WaitingChip({
   onOpen: () => void;
   onPeek: () => void;
 }) {
-  const { color } = useTheme();
   const speaker = lead(place);
-  const hold = usePeekGesture(onPeek);
+  const { gesture, pressed } = usePeekable(onPeek, onOpen);
 
   return (
-    <GestureDetector gesture={hold}>
-      <Pressable
+    <GestureDetector gesture={gesture}>
+      <Animated.View
         testID="waiting-chip"
-        onPress={onOpen}
+        accessibilityRole="button"
         className="h-11 flex-row items-center gap-2.5 rounded-full bg-raise px-4"
-        android_ripple={{ color: color.overlay }}
+        style={pressed}
       >
         {/* The ember dot, and it is the only saturated thing on the screen. */}
         <View className="h-2 w-2 rounded-full bg-ember" />
@@ -105,7 +105,7 @@ function WaitingChip({
           {place.name}
         </Text>
         <Text className="font-sans text-meta text-mute">{elapsed(minutesSince(speaker.updatedAt))}</Text>
-      </Pressable>
+      </Animated.View>
     </GestureDetector>
   );
 }
