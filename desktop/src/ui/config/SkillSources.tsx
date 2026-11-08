@@ -19,6 +19,15 @@
  * the machine's own `~/.claude/skills` is a qualifier on the always-on switch,
  * where the decision is made, and not a row.
  *
+ * **Two things a source can offer that cannot be delivered**, and both are
+ * excluded from the figure *and* from every line, by one rule each applied in
+ * one place: a skill with no approved version (there is nothing to pin), and
+ * two skills of one name (there is one folder of that name on the worker's
+ * disk, and the agent answers to the name). Each is then **named** in a strip
+ * under the answer. A row that does not add up is a broken promise; a gap
+ * nobody explains is worse — that was a brand-new profile saying 4 while its
+ * lines said 5, with no line mentioning the fifth.
+ *
  * **The count is per viewer, and that is not a bug.** A profile is Placed, so
  * it can be filed into a directory and used by colleagues — and `skill_defaults`
  * is keyed on `user_id`, so the first two sources resolve against whoever
@@ -34,7 +43,7 @@
 import { useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { Check, Info, Plus, Search, X } from "lucide-react";
-import type { Agent, NewRole, Skill } from "~/api/generated/model";
+import type { Agent, NewRole, Repo, Skill } from "~/api/generated/model";
 import { AGENT_LABEL } from "~/components/AgentMark";
 import { useRepos, useSkills } from "~/data";
 import {
@@ -97,101 +106,158 @@ export function useSkillSources(draft: SkillDraft, shared: boolean) {
   // it is changed.
   const at = lens ?? repos[0]?.slug ?? null;
 
-  return useMemo(() => {
-    const alwaysList = library.filter((s) => s.alwaysOn);
-    const repoList = at ? library.filter((s) => s.defaultIn.includes(at)) : [];
-
-    const seen = new Set<string>();
-    const from: { always: Skill[]; repo: Skill[]; named: Skill[] } = {
-      always: [],
-      repo: [],
-      named: [],
-    };
-    const take = (into: Skill[], rows: Skill[]) => {
-      for (const s of rows)
-        if (!seen.has(s.id)) {
-          seen.add(s.id);
-          into.push(s);
-        }
-    };
-    if (draft.includeAlwaysOn) take(from.always, alwaysList);
-    if (draft.includeRepoDefaults) take(from.repo, repoList);
-    // A name one of the two already supplied is counted once and attributed to
-    // the first, so the lines always sum to the figure. Criterion 5.
-    const dupes: Skill[] = [];
-    for (const s of library)
-      if (named.has(s.id)) {
-        if (seen.has(s.id)) dupes.push(s);
-        else {
-          seen.add(s.id);
-          from.named.push(s);
-        }
-      }
-
-    const skipped = [...from.named, ...dupes].filter(unpinnable);
-    const loads = [...from.always, ...from.repo, ...from.named].filter((s) => !unpinnable(s));
-    const spend = loads.reduce((n, s) => n + s.tokens, 0);
-
-    const agent = draft.agent ?? null;
-    const budget = (agent && BUDGET[agent]) || SMALLEST_BUDGET;
-    /* What the person controls exactly, under every checkout: their always-on
-       set and the list. If those two alone clear the budget the profile is
-       broken wherever it runs, so the save is refused rather than warned
-       about — where only a repository's contribution tips it over, that depends
-       on a checkout nobody has made yet. */
-    const own = new Map<string, Skill>();
-    for (const s of from.always) own.set(s.id, s);
-    for (const s of library) if (named.has(s.id) && !unpinnable(s)) own.set(s.id, s);
-    const ownSpend = [...own.values()].reduce((n, s) => n + s.tokens, 0);
-
-    // What in the resolved set can act outside the model, worst first.
-    const acts = new Map<string, Skill[]>();
-    for (const s of loads)
-      for (const r of s.risk) acts.set(r, [...(acts.get(r) ?? []), s]);
-
-    // Named skills in somebody's own space, on a profile that is shared: the
-    // one part of this that is not per-viewer-by-design.
-    const personal = shared
-      ? [...from.named, ...dupes].filter((s) => groupOf(s.path) === "yours")
-      : [];
-
-    const readsHost = agent ? !!READS_HOST_DIRECTORY[agent] : true;
-
-    return {
+  return useMemo(
+    () => ({ ...resolve({ draft, library, repos, at, named, shared }), setLens }),
+    [
       library,
       repos,
       at,
-      setLens,
+      draft.includeAlwaysOn,
+      draft.includeRepoDefaults,
+      draft.agent,
       named,
-      alwaysList,
-      repoList,
-      from,
-      dupes,
-      skipped,
-      loads,
-      spend,
-      budget,
-      ownSpend,
-      acts,
-      personal,
-      readsHost,
-      includeAlwaysOn: !!draft.includeAlwaysOn,
-      includeRepoDefaults: !!draft.includeRepoDefaults,
-      agentLabel: agent ? (AGENT_LABEL[agent as Agent] ?? agent) : "Codex",
-      /** Whether the profile pins an agent at all — the budget says which it
-       *  used and why, every time. */
-      pinned: !!agent,
-      over: spend > budget,
-      near: spend > budget * 0.8 && spend <= budget,
-      /** Over the limit on what the person controls alone. Refuses the save. */
-      ownOver: ownSpend > budget,
       shared,
-    };
-  }, [library, repos, at, draft.includeAlwaysOn, draft.includeRepoDefaults, draft.agent, named, shared]);
+    ],
+  );
+}
+
+/**
+ * The union itself, as a function of what it reads.
+ *
+ * Pulled out of the hook so the one promise this section makes — **the lines
+ * sum to the figure** — can be asserted over states a browser cannot easily be
+ * put into: a skill with no approved version arriving through a *switch*, and
+ * two skills of one name. Both were reachable and neither was drawn honestly.
+ * See `skill-sources.test.ts`.
+ */
+export function resolve({
+  draft,
+  library,
+  repos,
+  at,
+  named,
+  shared,
+}: {
+  draft: SkillDraft;
+  library: Skill[];
+  repos: Repo[];
+  at: string | null;
+  named: Set<string>;
+  shared: boolean;
+}) {
+  const alwaysList = library.filter((s) => s.alwaysOn);
+  const repoList = at ? library.filter((s) => s.defaultIn.includes(at)) : [];
+
+  const seen = new Set<string>();
+  const from: { always: Skill[]; repo: Skill[]; named: Skill[] } = {
+    always: [],
+    repo: [],
+    named: [],
+  };
+  /* Everything a source offered that cannot be delivered, whatever offered it.
+     **One rule, in one place.** The figure and the three lines each used to
+     decide for themselves and two of them did not check at all — so a
+     version-0 skill reaching the set through a switch made the lines add to
+     one more than the figure with no line saying why, and the token meter
+     disagreed too. Nothing filters downstream of `take` now: what the lines
+     count is exactly what `loads` holds. */
+  const skipped: Skill[] = [];
+  const take = (into: Skill[], rows: Skill[]) => {
+    for (const s of rows)
+      if (!seen.has(s.id)) {
+        seen.add(s.id);
+        (unpinnable(s) ? skipped : into).push(s);
+      }
+  };
+  if (draft.includeAlwaysOn) take(from.always, alwaysList);
+  if (draft.includeRepoDefaults) take(from.repo, repoList);
+  // A name one of the two already supplied is counted once and attributed to
+  // the first, so the lines always sum to the figure. Criterion 5. One a
+  // switch offered and the figure excluded is on `skipped` — not "already
+  // included", which would be a claim that it arrives.
+  const namedRows = library.filter((s) => named.has(s.id));
+  const dupes = namedRows.filter((s) => seen.has(s.id) && !skipped.includes(s));
+  take(from.named, namedRows);
+
+  /* Two skills of one name cannot both land: the folder on the worker's disk
+     *is* the name, because that is what the agent answers to. Neither is sent
+     — `Skills::set_for_session` drops the pair rather than letting one win
+     carrying the other's `scripts/`, and the count has to say what arrives or
+     it is a figure of N that delivers N−1. Named below, because a collision a
+     shared profile introduced is somebody else's doing. */
+  const together = new Map<string, Skill[]>();
+  for (const s of [...from.always, ...from.repo, ...from.named])
+    together.set(s.name, [...(together.get(s.name) ?? []), s]);
+  const clashes = [...together.values()].filter((g) => g.length > 1);
+  const clashing = new Set(clashes.flat().map((s) => s.id));
+  for (const key of ["always", "repo", "named"] as const)
+    from[key] = from[key].filter((s) => !clashing.has(s.id));
+
+  const loads = [...from.always, ...from.repo, ...from.named];
+  const spend = loads.reduce((n, s) => n + s.tokens, 0);
+
+  const agent = draft.agent ?? null;
+  const budget = (agent && BUDGET[agent]) || SMALLEST_BUDGET;
+  /* What the person controls exactly, under every checkout: their always-on
+     set and the list. If those two alone clear the budget the profile is
+     broken wherever it runs, so the save is refused rather than warned
+     about — where only a repository's contribution tips it over, that depends
+     on a checkout nobody has made yet. */
+  const own = new Map<string, Skill>();
+  for (const s of [...from.always, ...from.named, ...dupes]) own.set(s.id, s);
+  const ownSpend = [...own.values()].reduce((n, s) => n + s.tokens, 0);
+
+  // What in the resolved set can act outside the model, worst first.
+  const acts = new Map<string, Skill[]>();
+  for (const s of loads) for (const r of s.risk) acts.set(r, [...(acts.get(r) ?? []), s]);
+
+  // Named skills in somebody's own space, on a profile that is shared: the
+  // one part of this that is not per-viewer-by-design.
+  const personal = shared
+    ? [...from.named, ...dupes].filter((s) => groupOf(s.path) === "yours")
+    : [];
+
+  const readsHost = agent ? !!READS_HOST_DIRECTORY[agent] : true;
+
+  return {
+    library,
+    repos,
+    at,
+    named,
+    alwaysList,
+    repoList,
+    from,
+    dupes,
+    skipped,
+    clashes,
+    loads,
+    spend,
+    budget,
+    ownSpend,
+    acts,
+    personal,
+    readsHost,
+    includeAlwaysOn: !!draft.includeAlwaysOn,
+    includeRepoDefaults: !!draft.includeRepoDefaults,
+    agentLabel: agent ? (AGENT_LABEL[agent as Agent] ?? agent) : "Codex",
+    /** Whether the profile pins an agent at all — the budget says which it
+     *  used and why, every time. */
+    pinned: !!agent,
+    over: spend > budget,
+    near: spend > budget * 0.8 && spend <= budget,
+    /** Over the limit on what the person controls alone. Refuses the save. */
+    ownOver: ownSpend > budget,
+    shared,
+  };
 }
 
 /** `1,599`. */
 const n = (x: number) => x.toLocaleString("en-US");
+/** `dataviz, in yours and d/platform`. Which two is the whole question. */
+const whose = (clashes: Skill[][]) =>
+  clashes
+    .map((g) => `${g[0].name}, in ${g.map((s) => groupOf(s.path)).join(" and ")}`)
+    .join("; ");
 const Mono = ({ children }: { children: React.ReactNode }) => (
   <span className="font-mono">{children}</span>
 );
@@ -225,11 +291,6 @@ export function SkillSources({
     <>
       <b>Not even the built-ins.</b> <Mono>firetower-artifacts</Mono> goes with them, and a child
       that cannot publish an artifact has no way to hand work back.
-    </>
-  ) : r.skipped.length ? (
-    <>
-      {r.skipped.length} named skill{r.skipped.length === 1 ? " is" : "s are"} waiting for review and
-      will be skipped, so {r.skipped.length === 1 ? "it is" : "they are"} not in the count.
     </>
   ) : r.shared ? (
     <>
@@ -296,24 +357,14 @@ export function SkillSources({
                 <>defaults in {here ? <Mono>{here}</Mono> : "this repository"}</>,
               )}
           {line(
-            r.from.named.filter((s) => !unpinnable(s)).length,
+            r.from.named.length,
             <>
               named below
               {r.dupes.length > 0 && (
                 <span className="text-slate"> ({r.dupes.length} more already included)</span>
               )}
             </>,
-            r.from.named.filter((s) => !unpinnable(s)),
-          )}
-          {r.skipped.length > 0 && (
-            <div className="ln skip">
-              <span className="n">{r.skipped.length}</span>
-              <span className="src">
-                <i />
-                named, {r.skipped.every((s) => s.held) ? "waiting for review" : "with no approved version"} — skipped
-              </span>
-              <span className="cost">0 tokens</span>
-            </div>
+            r.from.named,
           )}
         </div>
 
@@ -348,6 +399,60 @@ export function SkillSources({
           </div>
         )}
 
+        {/* **What the figure left out, said out loud and by name.**
+            Deliberately not a breakdown line: a row inside `.brk` with its
+            count in the same column reads as a fourth addend, and this one is
+            excluded from the figure on purpose — which is how the lines came
+            to say 6 against a figure of 5. And it was never only about named
+            skills. A version-0 skill reaching the set through either switch
+            appeared on no line at all, on a brand-new profile, which is the
+            worse failure of the two: an unexplained gap rather than a visible
+            mismatch. */}
+        {r.skipped.length > 0 && (
+          <div className="strip">
+            <span className="risk">
+              <i />
+              <span>
+                <b>
+                  {r.skipped.length === 1
+                    ? "One skill is not in the count."
+                    : `${r.skipped.length} skills are not in the count.`}
+                </b>{" "}
+                {r.skipped.map((s) => s.name).join(", ")}{" "}
+                {r.skipped.length === 1 ? "has" : "have"} no approved version yet, so there is
+                nothing to pin — whichever source named{" "}
+                {r.skipped.length === 1 ? "it" : "them"}, Firetower sends{" "}
+                {r.skipped.length === 1 ? "it" : "them"} nowhere.
+              </span>
+            </span>
+          </div>
+        )}
+
+        {/* A collision is a warning at import, never a refusal
+            (`docs/skills.md` §1), so two people may each hold a `dataviz`.
+            Only one folder of that name can exist on a worker, so the server
+            sends neither rather than letting one win carrying the other's
+            `scripts/` — and this is where somebody can see that happen,
+            because under a union the second one may be a tick a colleague
+            made on a shared profile. */}
+        {r.clashes.length > 0 && (
+          <div className="strip">
+            <span className="risk">
+              <i />
+              <span>
+                <b>
+                  {r.clashes.flat().length} skills share{" "}
+                  {r.clashes.length === 1 ? "a name" : `${r.clashes.length} names`}, so none of
+                  them is sent.
+                </b>{" "}
+                {whose(r.clashes)}. A skill's folder on the worker is its name, which is what the
+                agent answers to, so there is no way to deliver both. Drop one from the list, or
+                rename it in the library.
+              </span>
+            </span>
+          </div>
+        )}
+
         {r.shared && (
           <div className="strip who">
             {r.personal.length > 0 ? (
@@ -359,7 +464,7 @@ export function SkillSources({
                 {r.personal.map((s) => s.name).join(" and ")}{" "}
                 {r.personal.length === 1 ? "is" : "are"} filed in your own space and this profile is
                 shared, so a colleague who starts it gets{" "}
-                {r.loads.length - r.personal.filter((s) => !unpinnable(s)).length}. Share{" "}
+                {r.loads.length - r.personal.length}. Share{" "}
                 {r.personal.length === 1 ? "it" : "them"} into the directory, or drop{" "}
                 {r.personal.length === 1 ? "it" : "them"}.
               </>

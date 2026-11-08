@@ -965,18 +965,20 @@ function Editor({
               profile starts with *no* skills at all on Codex, and one with
               both sources off and nothing named is a child that cannot even
               publish an artifact. Both are worth more than the standing note. */}
-          <span className={`msg${skills.ownOver ? " bad" : skills.over || skills.loads.length === 0 || skills.skipped.length ? " warn" : ""}`}>
+          <span className={`msg${skills.ownOver ? " bad" : skills.over || skills.loads.length === 0 || skills.skipped.length || skills.clashes.length ? " warn" : ""}`}>
             {skills.ownOver
               ? `Over ${skills.agentLabel}'s limit before this repository's defaults are counted — ${skills.ownSpend.toLocaleString("en-US")} of ${skills.budget.toLocaleString("en-US")}.`
               : skills.over
                 ? `Over budget in ${skills.at?.split("/").pop() ?? "this repository"} — ${skills.spend.toLocaleString("en-US")} of ${skills.budget.toLocaleString("en-US")}. Another repository may fit.`
                 : skills.loads.length === 0
                   ? "This child will have no Firetower skills at all."
-                  : skills.skipped.length
-                    ? `${skills.skipped.length} named skill${skills.skipped.length === 1 ? "" : "s"} will be skipped.`
-                    : existing
-                      ? "Saved when you press it. Running workspaces keep the profile they started with."
-                      : "Nothing is created until you press this."}
+                  : skills.clashes.length
+                    ? `${skills.clashes.length === 1 ? "Two skills share the name" : "Skills share the names"} ${skills.clashes.map((g) => g[0].name).join(", ")} — ${skills.clashes.length === 1 ? "neither is sent" : "none is sent"}.`
+                    : skills.skipped.length
+                      ? `${skills.skipped.length} skill${skills.skipped.length === 1 ? "" : "s"} ${skills.skipped.length === 1 ? "has" : "have"} no approved version and will be skipped.`
+                      : existing
+                        ? "Saved when you press it. Running workspaces keep the profile they started with."
+                        : "Nothing is created until you press this."}
           </span>
           {existing && (
             <button onClick={remove} disabled={busy} className="btn danger">

@@ -150,6 +150,38 @@ const shot = async (page, id) => {
   );
   await shot(page, "named-already-supplied");
 
+  /* ── 2: a named skill with nothing approved to pin ─────────────────
+     The state QA reached by clicking, where the lines said 6 against a
+     figure of 5 — because the skipped row was drawn inside `.brk` with its
+     count in the same column while being deliberately outside the figure.
+     `read()` has always summed every `.ln` in `.brk`, so this harness's own
+     definition of criterion 2 called it a failure; nothing had driven it.
+     It is a strip under the answer now, and it names the skill. */
+  await page.getByRole("button", { name: /Name a skill/ }).click();
+  await page.waitForTimeout(400);
+  await page.locator(".sheet2 .sh-row").filter({ hasText: "deploy-runbook" }).first().click();
+  await page.getByRole("button", { name: /^Keep these/ }).click();
+  await page.waitForTimeout(350);
+  const e = await read(page);
+  ok("2 · naming a version-0 skill adds zero", e.count === a.count, `${a.count} → ${e.count}`);
+  ok("2 · and the lines still sum", e.sum === e.count, `${e.sum} vs ${e.count}`);
+  ok(
+    "2 · no non-summing row is drawn in the breakdown",
+    e.brk.length === 3,
+    `${e.brk.length} lines`,
+  );
+  const gone = (await page.locator(".answer .strip").allInnerTexts()).join(" ");
+  ok(
+    "2 · and a strip names it rather than leaving a gap",
+    /not in the count/.test(gone) && /deploy-runbook/.test(gone),
+    gone.slice(0, 120),
+  );
+  // Not asserted on the foot: this mock's 900-token fixtures put the profile
+  // over Claude Code's budget, and over budget outranks it on that one line.
+  await shot(page, "named-with-no-approved-version");
+  await page.locator(".src-row .pk").first().click(); // drop it again
+  await page.waitForTimeout(250);
+
   /* ── 10: both off and empty says so before it is saved ────────────── */
   await page.locator(".src-row .pk").first().click(); // drop the one named
   await page.waitForTimeout(200);

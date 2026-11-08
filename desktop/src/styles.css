@@ -3496,19 +3496,6 @@ html:not([data-platform="macos"]) {
   .brk .ln.off .src {
     color: var(--color-mute);
   }
-  .brk .ln.skip .src {
-    display: inline-flex;
-    align-items: baseline;
-    gap: 7px;
-  }
-  .brk .ln.skip .src i {
-    flex: none;
-    align-self: center;
-    width: 5px;
-    height: 5px;
-    border-radius: 99px;
-    background: var(--color-amber-soft);
-  }
 
   /* The budget, as a block rather than the composer's inline pill. Same bar,
      same `data-near`, and `data-over` added: only genuine breakage reaches for
