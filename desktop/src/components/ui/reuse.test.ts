@@ -20,7 +20,7 @@
  */
 import { describe, expect, test } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /* **`fileURLToPath`, never `.pathname`.** A file URL's pathname is
@@ -39,7 +39,13 @@ function sources(): { path: string; text: string }[] {
       if (entry.isDirectory()) {
         if (entry.name !== "generated") walk(path);
       } else if (/\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name)) {
-        out.push({ path: path.slice(ROOT.length), text: readFileSync(path, "utf8") });
+        /* Posix separators whatever the runner is. The sets below are
+           written with `/`, and on Windows these arrive as `\` — which made
+           every recorded offender read as a new one. */
+        out.push({
+          path: path.slice(ROOT.length).split(sep).join("/"),
+          text: readFileSync(path, "utf8"),
+        });
       }
     }
   };
