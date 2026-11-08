@@ -134,25 +134,28 @@ describe("the empty state", () => {
     expect(html).not.toContain("Your colleagues added these hosts");
     /* **The next step is a sign-in, not an add.** Both rows are registered
        already; what is missing is this person's own account on one of them. */
-    expect(html).toContain("Connect GitHub");
+    expect(html).toContain("Connect a provider");
     expect(html).toContain("Sign in with your own account, then import what you want to work on.");
     expect(html).not.toContain("Add a host");
   });
 
   /**
    * The case the first draft got wrong, and the common one on any install
-   * with more than one person: a colleague added the hosts, and this person
-   * needs *those* — a generic "GitLab" would send them to gitlab.com.
+   * with more than one person: a colleague registered the hosts, and this
+   * person needs an account on one of *those*.
    *
-   * So the button names the host, and names the one somebody here added
-   * before the one that ships with the product.
+   * The button used to name that host. It does not any more — naming one
+   * provider on the only button on the screen reads as a recommendation, and
+   * which provider an install runs on is not ours to assume. What still has
+   * to be right is the sentence, which is the only thing telling a
+   * somebody-has-been-here install apart from a fresh one.
    */
-  it("names the host a colleague added, before the one that ships", () => {
+  it("tells an install a colleague set up from a fresh one", () => {
     const hosts = [host({ connected: false }), gitlab({ connected: false })];
     const html = draw({ hosts, repos: [] });
-    expect(html).toContain("Connect GitLab (internal)");
-    expect(html).not.toContain("Connect GitHub");
+    expect(html).toContain("Connect a provider");
     expect(html).toContain("Your colleagues added these hosts. You sign in with your own account.");
+    expect(html).not.toContain("Sign in with your own account, then import");
   });
 
   /**
@@ -167,7 +170,7 @@ describe("the empty state", () => {
     });
     expect(html).toContain("Set up GitLab (internal)");
     expect(html).toContain("needs an application of its own before anybody can sign in");
-    expect(html).not.toContain("Connect GitLab");
+    expect(html).not.toContain("Connect a provider");
   });
 
   /** And where this reader may not set it up, the sentence stands alone. */
@@ -184,8 +187,8 @@ describe("the empty state", () => {
   /** Only with nothing registered at all is the next step adding one. */
   it("opens the kind list when nothing is registered", () => {
     const html = draw({ hosts: [], repos: [] });
-    expect(html).toContain("Connect a git host");
-    expect(html).toContain("Connect a git host and import what you want to work on.");
+    expect(html).toContain("Connect a provider");
+    expect(html).toContain("Connect a provider and import what you want to work on.");
   });
 
   /**
@@ -237,8 +240,8 @@ describe("the empty state", () => {
 
     // Not the "connect something" screen.
     expect(html).not.toContain("No repository yet");
-    expect(html).not.toContain("Connect a git host");
-    expect(html).not.toContain("Connect GitHub");
+    expect(html).not.toContain("Connect a provider");
+    expect(html).not.toContain("Connect a provider");
 
     // The import list, for the host that is actually connected.
     expect(html).toContain("Not imported yet on GitLab (internal)");
@@ -259,7 +262,7 @@ describe("the empty state", () => {
       hosts: [host({ connected: false }), gitlab({ connected: false })],
       repos: [],
     });
-    expect(html).toContain("Connect GitLab (internal)");
+    expect(html).toContain("Connect a provider");
     expect(html).not.toContain("Available on");
     /* **And nothing else.** One action, zero links, zero banners: the two
        routes that were small print under the buttons are rows in the menu. */
@@ -270,7 +273,7 @@ describe("the empty state", () => {
   /** The dead end. The blank is a way in, never a box to type a URL into. */
   it("is never only a paste box", () => {
     const html = draw({ hosts: [host({ connected: false })], repos: [] });
-    expect(html).toContain("Connect GitHub");
+    expect(html).toContain("Connect a provider");
     // The paste box itself is not drawn until somebody asks for it.
     expect(html).not.toContain("git@github.com:acme/web.git");
   });
@@ -415,7 +418,7 @@ describe("the controls", () => {
        control that already owns that state and already has a word for being
        in it. */
     const empty = draw({ hosts: [gitlab({ connected: false })], repos: [] });
-    expect(empty).toContain("Connect GitLab (internal)");
+    expect(empty).toContain("Connect a provider");
     expect(empty).not.toContain("Paste a remote");
   });
 });

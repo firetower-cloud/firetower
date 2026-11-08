@@ -112,7 +112,7 @@ describe("a tracker that stops answering for you", () => {
     const revoked = draw([linear(false)], [opening("linear", "ticket"), page(tickets)]);
     expect(revoked).not.toContain("Get familiar with Linear");
     expect(revoked).not.toContain("WES-1");
-    expect(revoked).toContain("Linear is not connected");
+    expect(revoked).toContain("No tracker connected");
   });
 });
 
@@ -166,8 +166,8 @@ describe("which tracker the page asks", () => {
 describe("a tracker with no credential", () => {
   it("offers to connect it instead of reporting an error", () => {
     const html = draw([github(false), linear(false)]);
-    expect(html).toContain("GitHub is not connected");
-    expect(html).toContain("Connect GitHub");
+    expect(html).toContain("No tracker connected");
+    expect(html).toContain("Connect your task tracker");
     // A git host shares the sign-in that pushes commits, and says so.
     expect(html).toContain("Signing in once covers both its code and its issues.");
     // Nothing was read, so nothing claims to be reading.
@@ -192,9 +192,9 @@ describe("a tracker with no credential", () => {
    */
   it("says how the tracker authorises, and offers one way through", () => {
     const html = draw([linear(false)]);
-    expect(html).toContain("Linear is not connected");
+    expect(html).toContain("No tracker connected");
     expect(html).toContain("It reads with an API key, kept in this Firetower’s vault.");
-    expect(html).toContain("Connect Linear");
+    expect(html).toContain("Connect your task tracker");
     expect(html).not.toContain("https://linear.app/settings/api");
     expect(html).not.toContain("Make a key");
   });
@@ -222,8 +222,8 @@ describe("a tracker with no credential", () => {
    */
   it("still offers a way in when nothing is connected at all", () => {
     const html = draw([github(false), linear(false)]);
-    expect(html).toContain("GitHub is not connected");
-    expect(html).toContain("Connect GitHub");
+    expect(html).toContain("No tracker connected");
+    expect(html).toContain("Connect your task tracker");
   });
 
   /**
@@ -235,7 +235,7 @@ describe("a tracker with no credential", () => {
     const html = draw([]);
     expect(html).toContain("No tracker connected");
     expect(html).toContain("GitHub, GitLab, Gitea and Linear can all feed this list.");
-    expect(html).toContain("Connect a tracker");
+    expect(html).toContain("Connect your task tracker");
   });
 });
 
@@ -397,13 +397,13 @@ describe("the way to connect a tracker that is not connected", () => {
 describe("the prompt for a tracker that is not connected", () => {
   it("does not tell a git host to make a key", () => {
     const html = draw([github(false)]);
-    expect(html).toContain("Connect GitHub");
+    expect(html).toContain("Connect your task tracker");
     expect(html).not.toContain("Make a key");
   });
 
   it("does not tell one that reads with a key either", () => {
     const html = draw([linear(false)]);
-    expect(html).toContain("Connect Linear");
+    expect(html).toContain("Connect your task tracker");
     expect(html).not.toContain("Make a key");
     expect(html).not.toContain("https://linear.app/settings/api");
     // The sentence is where the difference is said.

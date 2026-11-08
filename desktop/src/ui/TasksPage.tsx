@@ -306,7 +306,7 @@ export function TasksPage({ backend }: { backend: Backend }) {
               title="No tracker connected"
               action={
                 <button onClick={() => navigate("/configuration/trackers")} className="btn primary">
-                  Connect a tracker
+                  Connect your task tracker
                   <Icon of={ArrowRight} size={12} />
                 </button>
               }
@@ -326,16 +326,28 @@ export function TasksPage({ backend }: { backend: Backend }) {
               instruction besides. Making a key is step one *inside* the
               connect flow, where the scopes are spelled out. */}
           {!findingTrackers && source && !connected && (
+            /* **It does not name the tracker it happens to have picked.**
+                This read `GitHub is not connected` with `Connect GitHub`
+                under it, which tells somebody whose work lives in Linear
+                that they are on the wrong screen. `source` is whichever
+                tracker the page defaulted to, not a choice the reader made,
+                so naming it turns a default into a recommendation. The
+                trackers page lists all of them. */
             <Blank
               icon={ListTodo}
-              title={`${source.label} is not connected`}
+              title="No tracker connected"
               action={
-                <button onClick={() => navigate(paneFor(source))} className="btn primary">
-                  Connect {source.label}
+                <button onClick={() => navigate("/configuration/trackers")} className="btn primary">
+                  Connect your task tracker
                   <Icon of={ArrowRight} size={12} />
                 </button>
               }
             >
+              {/* The sentence still says how *this* tracker authorises. That
+                  was never the opinionated part: naming a default in the
+                  title and on the button was, because it reads as a
+                  recommendation. How a key or a sign-in works is a fact the
+                  reader needs once they are on their way. */}
               {source.auth === "apiKey"
                 ? "It reads with an API key, kept in this Firetower’s vault."
                 : "Signing in once covers both its code and its issues."}

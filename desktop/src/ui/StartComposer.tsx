@@ -863,7 +863,7 @@ export function StartComposer({
 
       {open?.which === "repo" && (
         <Pop anchor={open.at} onClose={close} width={340}>
-          <RepoMenu repos={repos} checkouts={checkouts} onToggle={toggleRepo} />
+          <RepoMenu repos={repos} checkouts={checkouts} onToggle={toggleRepo} onClose={close} />
         </Pop>
       )}
 
@@ -1033,10 +1033,12 @@ function RepoMenu({
   repos,
   checkouts,
   onToggle,
+  onClose,
 }: {
   repos: { id: string; slug: string; defaultBranch?: string | null }[];
   checkouts: Checkout[];
   onToggle: (r: { id: string; slug: string }) => void;
+  onClose: () => void;
 }) {
   const [q, setQ] = useState("");
   const shown = matching(repos, q);
@@ -1066,8 +1068,28 @@ function RepoMenu({
         </div>
       )}
       <Menu>
+        {/* **The shape `NoMachine` uses, because it is the same moment.** A
+            line of grey saying "No repositories connected." states the
+            problem and withholds the remedy, and this is the menu you opened
+            looking for one. It names no host: which provider this install
+            uses is not ours to assume, so it sends you to the page where
+            every one of them is. */}
         {repos.length === 0 && (
-          <p className="px-3 py-2 text-meta text-mute">No repositories connected.</p>
+          <div className="px-3 py-3">
+            <p className="text-ui text-bone">No repository connected</p>
+            <p className="mt-1 max-w-[46ch] text-meta text-dim">
+              Workspaces are cut from a repository you connect. You can start without one.
+            </p>
+            <button
+              onClick={() => {
+                onClose();
+                navigate("/configuration/repositories");
+              }}
+              className="control mt-2.5 border border-line bg-panel text-ui text-bone hover:bg-overlay"
+            >
+              Connect a repository
+            </button>
+          </div>
         )}
         {shown.map((r) => (
           <Opt
@@ -1087,10 +1109,15 @@ function RepoMenu({
         )}
       </Menu>
       {/* What ticking another one actually does. Outside the scroller, so it
-          stays put while the list moves under the pointer. */}
+          stays put while the list moves under the pointer.
+
+          Not drawn when there is nothing to tick: the block above already
+          says there is no repository, and saying it twice in forty pixels
+          reads as two different facts until you have read both. */}
+      {repos.length > 0 && (
       <div className="pkfoot">
         {checkouts.length === 0 ? (
-          "No repository — a bare workspace with no code in it."
+          "No repository: a bare workspace with no code in it."
         ) : (
           <>
             <b>{checkouts.length} checked out.</b> Each one gets its own copy of the code, cut from its
@@ -1098,6 +1125,7 @@ function RepoMenu({
           </>
         )}
       </div>
+      )}
     </>
   );
 }

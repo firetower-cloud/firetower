@@ -61,7 +61,6 @@ import {
 } from "~/api/generated/providers/providers";
 import { useHostOf, useProviders, useRepos, why } from "~/data";
 import { Blank, Group, Note, Rows, Section, Typed } from "~/ui/config/bits";
-import { useConnect } from "~/ui/config/connect";
 import { navigate } from "~/shims/next-navigation";
 import { actionsFor, AddHost } from "~/ui/config/GitHosts";
 import { Pop } from "~/ui/Pop";
@@ -716,7 +715,7 @@ function Start({
   }
 
   /* 1. Registered, configured, and waiting for you. */
-  if (signIn) return <SignIn host={signIn} theirs={theirs} />;
+  if (signIn) return <SignIn theirs={theirs} />;
 
   /* 2. Registered, and not something anybody can sign into yet. */
   if (unready) {
@@ -750,11 +749,11 @@ function Start({
       action={
         <button onClick={onAddHost} className="btn primary">
           <Icon of={Plus} size={14} />
-          Connect a git host
+          Connect a provider
         </button>
       }
     >
-      Connect a git host and import what you want to work on.
+      Connect a provider and import what you want to work on.
     </Blank>
   );
 }
@@ -762,29 +761,28 @@ function Start({
 /**
  * The blank, where the next step is signing into a host that is already here.
  *
- * Its own component because `useConnect` is a hook per host, and the three
- * rungs above it are a choice made before there is a host to give it.
+ * Its own component because the sentence it carries turns on whether anybody
+ * else has been here, and the three rungs above it are a choice made before
+ * there is a host to give it. It names no provider: it sends you to the page
+ * that lists every one of them, because which provider this install runs on
+ * is not something this screen gets to assume.
  */
-function SignIn({ host, theirs }: { host: ProviderStatus; theirs: boolean }) {
-  const connect = useConnect(host);
+function SignIn({ theirs }: { theirs: boolean }) {
   return (
-    <>
-      <Blank
-        icon={FolderGit2}
-        title="No repository yet"
-        action={
-          <button disabled={connect.busy} onClick={connect.start} className="btn primary">
-            <Icon of={Link2} size={14} />
-            Connect {host.label}
-          </button>
-        }
-      >
-        {theirs
-          ? "Your colleagues added these hosts. You sign in with your own account."
-          : "Sign in with your own account, then import what you want to work on."}
-      </Blank>
-      {connect.node}
-    </>
+    <Blank
+      icon={FolderGit2}
+      title="No repository yet"
+      action={
+        <button onClick={() => navigate("/configuration/git-hosts")} className="btn primary">
+          <Icon of={Link2} size={14} />
+          Connect a provider
+        </button>
+      }
+    >
+      {theirs
+        ? "Your colleagues added these hosts. You sign in with your own account."
+        : "Sign in with your own account, then import what you want to work on."}
+    </Blank>
   );
 }
 
