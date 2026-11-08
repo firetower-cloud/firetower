@@ -30,6 +30,21 @@ export interface NewRole {
      */
   directory?: string | null;
   does: string;
+  /**
+     * Include the owner's always-on skills. **Absent means on**, not off.
+     *
+     * `#[serde(default)]` would give `false` here, so a client that predates
+     * these two fields would turn inheritance off on every profile it saved —
+     * and it saves the whole object, so opening a profile and pressing Save
+     * would silently empty it. `default = "inherits"` is what makes the
+     * migration's column default survive a round trip through an old client.
+     */
+  includeAlwaysOn?: boolean;
+  /**
+     * Include the owner's defaults for the repositories the child checks out.
+     * **Absent means on** — see above.
+     */
+  includeRepoDefaults?: boolean;
   instructions?: string;
   /**
      * The machine its own workspace runs on, by host id. Required when
@@ -42,6 +57,6 @@ export interface NewRole {
   placement?: string;
   /** How it runs its agent — model, effort, mode, sandbox. Each optional. */
   settings?: Preferred;
-  /** The skills it may load, by id. Empty = any the owner can use. */
+  /** The skills it loads on top of those two, by id. Empty = just those two. */
   skillScope?: string[];
 }

@@ -40,6 +40,16 @@ export interface Role {
      */
   does: string;
   id: string;
+  /**
+     * Include the owner's always-on skills — their `skill_defaults` rows with
+     * no repository against them. On unless somebody turns it off.
+     */
+  includeAlwaysOn: boolean;
+  /**
+     * Include the owner's defaults for the repositories the child checks out.
+     * On unless somebody turns it off.
+     */
+  includeRepoDefaults: boolean;
   /** Composed into the child's instructions. */
   instructions: string;
   /**
@@ -67,8 +77,12 @@ export interface Role {
      */
   settings: Preferred;
   /**
-     * The skills it may load, by id. Empty means any the owner can use; an
-     * off-list skill is never written to its workspace.
+     * Skills this profile loads whatever the two switches say, by id.
+     *
+     * **A tick grants.** It adds a skill on top of the two sources above
+     * rather than keeping one they already supplied, so an empty list narrows
+     * nothing and turning a switch off is the only way to load less. See
+     * [`skills_for`].
      */
   skillScope: string[];
   updatedAt: string;

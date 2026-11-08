@@ -12343,6 +12343,14 @@
           "does": {
             "type": "string"
           },
+          "includeAlwaysOn": {
+            "type": "boolean",
+            "description": "Include the owner's always-on skills. **Absent means on**, not off.\n\n`#[serde(default)]` would give `false` here, so a client that predates\nthese two fields would turn inheritance off on every profile it saved —\nand it saves the whole object, so opening a profile and pressing Save\nwould silently empty it. `default = \"inherits\"` is what makes the\nmigration's column default survive a round trip through an old client."
+          },
+          "includeRepoDefaults": {
+            "type": "boolean",
+            "description": "Include the owner's defaults for the repositories the child checks out.\n**Absent means on** — see above."
+          },
           "instructions": {
             "type": "string"
           },
@@ -12369,7 +12377,7 @@
             "items": {
               "type": "string"
             },
-            "description": "The skills it may load, by id. Empty = any the owner can use."
+            "description": "The skills it loads on top of those two, by id. Empty = just those two."
           }
         }
       },
@@ -13943,6 +13951,8 @@
           "instructions",
           "canDelegate",
           "delegateScope",
+          "includeAlwaysOn",
+          "includeRepoDefaults",
           "skillScope",
           "mayWrite",
           "mayShare",
@@ -13987,6 +13997,14 @@
           "id": {
             "type": "string"
           },
+          "includeAlwaysOn": {
+            "type": "boolean",
+            "description": "Include the owner's always-on skills — their `skill_defaults` rows with\nno repository against them. On unless somebody turns it off."
+          },
+          "includeRepoDefaults": {
+            "type": "boolean",
+            "description": "Include the owner's defaults for the repositories the child checks out.\nOn unless somebody turns it off."
+          },
           "instructions": {
             "type": "string",
             "description": "Composed into the child's instructions."
@@ -14029,7 +14047,7 @@
             "items": {
               "type": "string"
             },
-            "description": "The skills it may load, by id. Empty means any the owner can use; an\noff-list skill is never written to its workspace."
+            "description": "Skills this profile loads whatever the two switches say, by id.\n\n**A tick grants.** It adds a skill on top of the two sources above\nrather than keeping one they already supplied, so an empty list narrows\nnothing and turning a switch off is the only way to load less. See\n[`skills_for`]."
           },
           "updatedAt": {
             "type": "string",

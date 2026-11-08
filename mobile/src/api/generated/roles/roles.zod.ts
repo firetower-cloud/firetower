@@ -16,6 +16,8 @@ export const ListRolesResponseItem = zod.object({
   "delegateScope": zod.array(zod.string()).describe('The subagents a Manager may delegate to, by id. Empty means any the owner\ncan see — scope is opt-in. Everything off the list is invisible to it.'),
   "does": zod.string().describe('What it does and when to reach for it — the one line a lead reads to\ndecide whether to hand it work, the way a skill\'s `description` is read.'),
   "id": zod.string(),
+  "includeAlwaysOn": zod.boolean().describe('Include the owner\'s always-on skills — their `skill_defaults` rows with\nno repository against them. On unless somebody turns it off.'),
+  "includeRepoDefaults": zod.boolean().describe('Include the owner\'s defaults for the repositories the child checks out.\nOn unless somebody turns it off.'),
   "instructions": zod.string().describe('Composed into the child\'s instructions.'),
   "isDefault": zod.boolean().describe('Whether this person starts a new workspace as this profile by default.\nAt most one of theirs is, so setting another unsets this one.'),
   "machine": zod.string().nullish().describe('The machine its own workspace runs on, by host id, or absent to let the\nlead choose. Meaningful only when `placement` is `new`.'),
@@ -30,7 +32,7 @@ export const ListRolesResponseItem = zod.object({
   "model": zod.string().nullish(),
   "sandbox": zod.string().nullish()
 }).describe('How it runs its agent — model, effort, mode, sandbox. Each unset falls\nback to the engine\'s default at launch, so a profile need not pin all.'),
-  "skillScope": zod.array(zod.string()).describe('The skills it may load, by id. Empty means any the owner can use; an\noff-list skill is never written to its workspace.'),
+  "skillScope": zod.array(zod.string()).describe('Skills this profile loads whatever the two switches say, by id.\n\n**A tick grants.** It adds a skill on top of the two sources above\nrather than keeping one they already supplied, so an empty list narrows\nnothing and turning a switch off is the only way to load less. See\n[`skills_for`].'),
   "updatedAt": zod.iso.datetime({"offset":true})
 }).describe('A role, as the interface and the spawn tool read it.')
 export const ListRolesResponse = zod.array(ListRolesResponseItem)
@@ -42,6 +44,8 @@ export const CreateRoleBody = zod.object({
   "delegateScope": zod.array(zod.string()).optional().describe('The subagents it may delegate to, by id. Empty = any the owner can see.'),
   "directory": zod.string().nullish().describe('A directory to file it in, by id, so a teammate can reach it. Omit for\nyour own space. Only honoured at creation; move it later with sharing.'),
   "does": zod.string(),
+  "includeAlwaysOn": zod.boolean().optional().describe('Include the owner\'s always-on skills. **Absent means on**, not off.\n\n`#[serde(default)]` would give `false` here, so a client that predates\nthese two fields would turn inheritance off on every profile it saved —\nand it saves the whole object, so opening a profile and pressing Save\nwould silently empty it. `default = "inherits"` is what makes the\nmigration\'s column default survive a round trip through an old client.'),
+  "includeRepoDefaults": zod.boolean().optional().describe('Include the owner\'s defaults for the repositories the child checks out.\n**Absent means on** — see above.'),
   "instructions": zod.string().optional(),
   "machine": zod.string().nullish().describe('The machine its own workspace runs on, by host id. Required when\nplacement is `new`.'),
   "name": zod.string(),
@@ -52,7 +56,7 @@ export const CreateRoleBody = zod.object({
   "model": zod.string().nullish(),
   "sandbox": zod.string().nullish()
 }).optional().describe('How it runs its agent — model, effort, mode, sandbox. Each optional.'),
-  "skillScope": zod.array(zod.string()).optional().describe('The skills it may load, by id. Empty = any the owner can use.')
+  "skillScope": zod.array(zod.string()).optional().describe('The skills it loads on top of those two, by id. Empty = just those two.')
 }).describe('What the API accepts to create or change a role.')
 
 export const CreateRoleResponse = zod.object({
@@ -63,6 +67,8 @@ export const CreateRoleResponse = zod.object({
   "delegateScope": zod.array(zod.string()).describe('The subagents a Manager may delegate to, by id. Empty means any the owner\ncan see — scope is opt-in. Everything off the list is invisible to it.'),
   "does": zod.string().describe('What it does and when to reach for it — the one line a lead reads to\ndecide whether to hand it work, the way a skill\'s `description` is read.'),
   "id": zod.string(),
+  "includeAlwaysOn": zod.boolean().describe('Include the owner\'s always-on skills — their `skill_defaults` rows with\nno repository against them. On unless somebody turns it off.'),
+  "includeRepoDefaults": zod.boolean().describe('Include the owner\'s defaults for the repositories the child checks out.\nOn unless somebody turns it off.'),
   "instructions": zod.string().describe('Composed into the child\'s instructions.'),
   "isDefault": zod.boolean().describe('Whether this person starts a new workspace as this profile by default.\nAt most one of theirs is, so setting another unsets this one.'),
   "machine": zod.string().nullish().describe('The machine its own workspace runs on, by host id, or absent to let the\nlead choose. Meaningful only when `placement` is `new`.'),
@@ -77,7 +83,7 @@ export const CreateRoleResponse = zod.object({
   "model": zod.string().nullish(),
   "sandbox": zod.string().nullish()
 }).describe('How it runs its agent — model, effort, mode, sandbox. Each unset falls\nback to the engine\'s default at launch, so a profile need not pin all.'),
-  "skillScope": zod.array(zod.string()).describe('The skills it may load, by id. Empty means any the owner can use; an\noff-list skill is never written to its workspace.'),
+  "skillScope": zod.array(zod.string()).describe('Skills this profile loads whatever the two switches say, by id.\n\n**A tick grants.** It adds a skill on top of the two sources above\nrather than keeping one they already supplied, so an empty list narrows\nnothing and turning a switch off is the only way to load less. See\n[`skills_for`].'),
   "updatedAt": zod.iso.datetime({"offset":true})
 }).describe('A role, as the interface and the spawn tool read it.')
 
@@ -92,6 +98,8 @@ export const UpdateRoleBody = zod.object({
   "delegateScope": zod.array(zod.string()).optional().describe('The subagents it may delegate to, by id. Empty = any the owner can see.'),
   "directory": zod.string().nullish().describe('A directory to file it in, by id, so a teammate can reach it. Omit for\nyour own space. Only honoured at creation; move it later with sharing.'),
   "does": zod.string(),
+  "includeAlwaysOn": zod.boolean().optional().describe('Include the owner\'s always-on skills. **Absent means on**, not off.\n\n`#[serde(default)]` would give `false` here, so a client that predates\nthese two fields would turn inheritance off on every profile it saved —\nand it saves the whole object, so opening a profile and pressing Save\nwould silently empty it. `default = "inherits"` is what makes the\nmigration\'s column default survive a round trip through an old client.'),
+  "includeRepoDefaults": zod.boolean().optional().describe('Include the owner\'s defaults for the repositories the child checks out.\n**Absent means on** — see above.'),
   "instructions": zod.string().optional(),
   "machine": zod.string().nullish().describe('The machine its own workspace runs on, by host id. Required when\nplacement is `new`.'),
   "name": zod.string(),
@@ -102,7 +110,7 @@ export const UpdateRoleBody = zod.object({
   "model": zod.string().nullish(),
   "sandbox": zod.string().nullish()
 }).optional().describe('How it runs its agent — model, effort, mode, sandbox. Each optional.'),
-  "skillScope": zod.array(zod.string()).optional().describe('The skills it may load, by id. Empty = any the owner can use.')
+  "skillScope": zod.array(zod.string()).optional().describe('The skills it loads on top of those two, by id. Empty = just those two.')
 }).describe('What the API accepts to create or change a role.')
 
 export const UpdateRoleResponse = zod.object({
@@ -113,6 +121,8 @@ export const UpdateRoleResponse = zod.object({
   "delegateScope": zod.array(zod.string()).describe('The subagents a Manager may delegate to, by id. Empty means any the owner\ncan see — scope is opt-in. Everything off the list is invisible to it.'),
   "does": zod.string().describe('What it does and when to reach for it — the one line a lead reads to\ndecide whether to hand it work, the way a skill\'s `description` is read.'),
   "id": zod.string(),
+  "includeAlwaysOn": zod.boolean().describe('Include the owner\'s always-on skills — their `skill_defaults` rows with\nno repository against them. On unless somebody turns it off.'),
+  "includeRepoDefaults": zod.boolean().describe('Include the owner\'s defaults for the repositories the child checks out.\nOn unless somebody turns it off.'),
   "instructions": zod.string().describe('Composed into the child\'s instructions.'),
   "isDefault": zod.boolean().describe('Whether this person starts a new workspace as this profile by default.\nAt most one of theirs is, so setting another unsets this one.'),
   "machine": zod.string().nullish().describe('The machine its own workspace runs on, by host id, or absent to let the\nlead choose. Meaningful only when `placement` is `new`.'),
@@ -127,7 +137,7 @@ export const UpdateRoleResponse = zod.object({
   "model": zod.string().nullish(),
   "sandbox": zod.string().nullish()
 }).describe('How it runs its agent — model, effort, mode, sandbox. Each unset falls\nback to the engine\'s default at launch, so a profile need not pin all.'),
-  "skillScope": zod.array(zod.string()).describe('The skills it may load, by id. Empty means any the owner can use; an\noff-list skill is never written to its workspace.'),
+  "skillScope": zod.array(zod.string()).describe('Skills this profile loads whatever the two switches say, by id.\n\n**A tick grants.** It adds a skill on top of the two sources above\nrather than keeping one they already supplied, so an empty list narrows\nnothing and turning a switch off is the only way to load less. See\n[`skills_for`].'),
   "updatedAt": zod.iso.datetime({"offset":true})
 }).describe('A role, as the interface and the spawn tool read it.')
 
