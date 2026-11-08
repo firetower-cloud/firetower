@@ -32,6 +32,7 @@ import { AppState, type AppStateStatus } from "react-native";
 import * as Network from "expo-network";
 import { applyEvent } from "~/api/events";
 import { forgetConversations } from "~/api/conversation";
+import { forgetDrafts } from "~/workspace/draft";
 import { identity, useIdentityKey, type Who } from "~/api/identity";
 import { SocketProvider, useSocket } from "~/api/socket";
 import { useBackendId } from "~/client/http";
@@ -145,6 +146,9 @@ export function dropCache(who: string) {
   clients.get(who)?.clear();
   clients.delete(who);
   // Transcripts are kept outside the QueryClient — see `held` in
-  // `api/conversation.ts` — so clearing one does not clear the other.
+  // `api/conversation.ts` — so clearing one does not clear the other. Drafts
+  // are a third store with the same objection: private text somebody typed
+  // and did not send has no business outliving them.
   forgetConversations(who);
+  forgetDrafts();
 }
