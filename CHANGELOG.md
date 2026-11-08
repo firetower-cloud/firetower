@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.52.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.51.0...firetower-v0.52.0) (2026-11-08)
+
+
+### Features
+
+* **design:** light and dark, from one sheet ([adc1bf6](https://github.com/firetower-cloud/firetower/commit/adc1bf61fde6e5b2ba3c0c13432d2a2ca5f22265))
+* **desktop:** ⌘K opens the palette, which existed and was reachable by nothing ([6e3f926](https://github.com/firetower-cloud/firetower/commit/6e3f9267554fc9bef076209b167d5a8f7247ea9d))
+* **desktop:** one authority, every neutral at R = G, and a tab that forgot the page ([74f48cf](https://github.com/firetower-cloud/firetower/commit/74f48cfd834ea76f3bd669d44bdda15a25012135))
+* **desktop:** the home, and one pixel on everything under 28 ([93762ef](https://github.com/firetower-cloud/firetower/commit/93762ef910d18f77c97a9daac23027c60cd32202))
+* **server:** no cap on how many children a lead starts ([187709e](https://github.com/firetower-cloud/firetower/commit/187709ecfad3fb18d54eb54799428dca2c22953f))
+* **server:** no cap on how many children a lead starts ([05726cb](https://github.com/firetower-cloud/firetower/commit/05726cbdaa76cc9b6232c605eef7a74c54e38e5a))
+
+
+### Bug Fixes
+
+* **desktop:** a server's mark never moves ([f6b67d1](https://github.com/firetower-cloud/firetower/commit/f6b67d1cdb1d67c6c3c155f870397d959f2f80e0))
+* healthy sessions no longer report that their agent is not running ([348418a](https://github.com/firetower-cloud/firetower/commit/348418aab400a55c8ddf136a80c0b6cfa34f37c0))
+* **server:** a child's hand-back that never arrived is held again ([579698f](https://github.com/firetower-cloud/firetower/commit/579698fb36bb16ad285534dc6a4106faddd5621f))
+* **server:** one child's result in flight to a lead at a time ([7d7f684](https://github.com/firetower-cloud/firetower/commit/7d7f6848ca787e79642636eb70af7aeaa0f76363))
+* **style:** check-style looks at desktop/src, and the nine it finds ([588e34e](https://github.com/firetower-cloud/firetower/commit/588e34eb6a1a6c85bafd7366c98f38b4c1cfbed8))
+* **worker:** a message to an agent waits off the read loop, in its session's order ([31253fa](https://github.com/firetower-cloud/firetower/commit/31253fa7fb01b278305097b9eac8d69ac7fbabf9))
+* **worker:** a pane that cannot join its cgroup says nothing about it ([3a82123](https://github.com/firetower-cloud/firetower/commit/3a821239d871389e09151c17cb08a89fbd8446f2))
+* **worker:** a session's shell no longer answers for its agent ([8b850b0](https://github.com/firetower-cloud/firetower/commit/8b850b02931aa7a2e9a84fc439919f95fd13608d))
+* **worker:** what a failed send says upward carries no path ([5be6bda](https://github.com/firetower-cloud/firetower/commit/5be6bdad456d3b3ee002d10fc5896e2f1b8c494a))
+
 ## [0.51.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.50.0...firetower-v0.51.0) (2026-11-05)
 
 

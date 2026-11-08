@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.13.0](https://github.com/firetower-cloud/firetower/compare/mobile-v0.12.0...mobile-v0.13.0) (2026-11-08)
+
+
+### Features
+
+* **design:** light and dark, from one sheet ([adc1bf6](https://github.com/firetower-cloud/firetower/commit/adc1bf61fde6e5b2ba3c0c13432d2a2ca5f22265))
+* **desktop:** ⌘K opens the palette, which existed and was reachable by nothing ([6e3f926](https://github.com/firetower-cloud/firetower/commit/6e3f9267554fc9bef076209b167d5a8f7247ea9d))
+
+
+### Bug Fixes
+
+* **desktop:** a server's mark never moves ([f6b67d1](https://github.com/firetower-cloud/firetower/commit/f6b67d1cdb1d67c6c3c155f870397d959f2f80e0))
+
 ## [0.12.0](https://github.com/firetower-cloud/firetower/compare/mobile-v0.11.0...mobile-v0.12.0) (2026-11-05)
 
 
