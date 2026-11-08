@@ -4209,10 +4209,9 @@ function firstRun(){
   if(at==="where") return C(`${steps(0)}
     <div class="mk">${ic("building",22)}</div>
     <h1>Where is your Firetower?</h1>
-    <p>The address somebody at your company gave you. Not a code — a code carries no address, and there is nowhere to look one up that would not be a service holding every install’s whereabouts.</p>
+    <p>Enter the domain where your Firetower control plane has been installed.</p>
     <div class="in">${ic("server",17)}<input placeholder="northwind.firetower.dev" autofocus aria-label="Address"></div>
-    <button class="btn primary go" data-act="first" data-first="reaching">Continue${ic("arrow-right",15)}</button>
-    <p class="alt">Running one yourself? Use <code style="font-family:var(--mono);font-size:14px">localhost:8080</code>.</p>`);
+    <button class="btn primary go" data-act="first" data-first="reaching">Continue${ic("arrow-right",15)}</button>`);
   if(at==="reaching") return C(`${steps(0)}
     <div class="mk">${ic("building",22)}</div>
     <h1>Looking for it…</h1>

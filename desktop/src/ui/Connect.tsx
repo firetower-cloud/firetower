@@ -180,11 +180,7 @@ function Where({
         <Mark size={24} />
       </span>
       <h1>Where is your Firetower?</h1>
-      <p>
-        The address somebody at your company gave you. Not a code — a code carries no address,
-        and there is nowhere to look one up that would not be a service holding every
-        install&rsquo;s whereabouts.
-      </p>
+      <p>Enter the domain where your Firetower control plane has been installed.</p>
 
       <label className="in">
         <Icon of={Server} size={16} className="shrink-0 text-mute" />
@@ -206,10 +202,6 @@ function Where({
         Continue
         <ArrowRight className="h-4 w-4" strokeWidth={2} />
       </button>
-
-      <p className="alt">
-        Running one yourself? Use <code className="font-mono text-meta text-text">localhost:8080</code>.
-      </p>
 
       {onCancel && (
         <button
