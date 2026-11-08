@@ -182,4 +182,12 @@ exercised against the repository as it stands. `e2e/peek-fixture.patch` adds
 one; its header says how to apply it and why it is a patch rather than an
 edit.
 
+It covers two cases, and the second is the one worth knowing about. A
+workspace that leads with a **busy** run while another is blocked is the shape
+that caught a real defect — `lead()` returns the busy one, so a peek that
+fetched the lead's conversation would hide the Allow/No buttons on exactly the
+workspace that most needs them. That case lives in the mock's `team` scene
+(`curl -X POST 'http://localhost:4455/__reset?scene=team'`), and the patch
+serves the two conversations it needs to tell a right answer from a wrong one.
+
 These need a booted simulator, so they are not in the pull-request workflow.
