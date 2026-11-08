@@ -185,7 +185,7 @@ export default function Tasks() {
         ) : !source ? (
           <Empty
             title="No trackers connected"
-            detail="Connect GitHub or Linear on the desktop or the web console, and what you could work on shows up here."
+            detail="Connect GitHub, Linear or Trello on the desktop or the web console, and what you could work on shows up here."
           />
         ) : !connected ? (
           <Empty
@@ -224,10 +224,15 @@ export default function Tasks() {
                       {task.title}
                     </Text>
                     <View className="mt-1 flex-row items-center gap-2">
-                      <Text className="font-mono text-meta text-mute">{task.key}</Text>
+                      <Text className="shrink-0 font-mono text-meta text-mute">{task.key}</Text>
                       {task.repo ? (
                         <Text numberOfLines={1} className="min-w-0 shrink font-mono text-meta text-mute">
                           {task.repo}
+                        </Text>
+                      ) : null}
+                      {task.status ? (
+                        <Text numberOfLines={1} className="max-w-[45%] min-w-0 shrink font-sans text-meta text-mute">
+                          {task.status}
                         </Text>
                       ) : null}
                       <Text className="font-sans text-meta text-mute">

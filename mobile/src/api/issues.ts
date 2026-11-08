@@ -26,10 +26,14 @@
  * host ignores the other's: `Closes #32` means nothing to Linear, `Fixes
  * ENG-123` means nothing to GitHub. So both can be written into one body
  * without either acting on the other's line.
+ *
+ * Trello is a third, and the odd one out: it has no keyword at all. A card is
+ * linked from the body by its URL, so the line is `Trello: <url>` and the
+ * card's own page lists the pull request that mentioned it.
  */
 
 /** Which tracker a reference belongs to. */
-export type Tracker = "github" | "linear";
+export type Tracker = "github" | "linear" | "trello";
 
 /** What a keyword does when the request merges. */
 export type Keyword = "Closes" | "Fixes" | "Resolves" | "Refs";
@@ -73,6 +77,7 @@ export type Reference = {
  */
 export function idOf(ref: Pick<Reference, "source" | "key" | "repo">): string {
   if (ref.source === "linear") return `linear:${ref.key}`;
+  if (ref.source === "trello") return `trello:${ref.key}`;
   const sigil = ref.key.startsWith("!") ? "" : "#";
   return `${ref.repo ?? ""}${sigil}${ref.key}`;
 }
@@ -92,6 +97,22 @@ export function idOf(ref: Pick<Reference, "source" | "key" | "repo">): string {
 export function parseReference(text: string, within?: string): Reference | null {
   const trimmed = text.trim();
   if (!trimmed) return null;
+
+  // A Trello card link, with whatever people paste after the short link: a
+  // slug, a trailing `/`, a query, a fragment, `www.`. Only `/c/` is a card;
+  // `/b/` is a board, which nothing can be linked back to. A bare short link
+  // is not read: eight letters and digits is a word as often as a card.
+  const card = trimmed.match(
+    /^(?:https?:\/\/)?(?:www\.)?trello\.com\/c\/([A-Za-z0-9]+)(?:[/?#]|$)/,
+  );
+  if (card) {
+    return {
+      source: "trello",
+      key: card[1],
+      keyword: "Refs",
+      url: `https://trello.com/c/${card[1]}`,
+    };
+  }
 
   // A Linear link. The workspace name sits between the host and `issue`, and
   // is not worth reading — the identifier is unique on its own.
@@ -169,7 +190,7 @@ export function parseReference(text: string, within?: string): Reference | null 
  * it rather than being given a second one.
  */
 export function label(ref: Reference, within?: string): string {
-  if (ref.source === "linear") return ref.key;
+  if (ref.source === "linear" || ref.source === "trello") return ref.key;
   const sigil = ref.key.startsWith("!") ? "" : "#";
   return !ref.repo || ref.repo === within
     ? `${sigil}${ref.key}`
@@ -193,6 +214,9 @@ export function label(ref: Reference, within?: string): string {
 export function trailerFor(refs: Reference[], within?: string): string {
   return refs
     .map((ref) => {
+      // The canonical short URL, never the slug: the slug is the title at the
+      // time it was pasted, and the short link is what the card keeps.
+      if (ref.source === "trello") return `Trello: https://trello.com/c/${ref.key}`;
       if (ref.source === "linear") {
         return `${ref.keyword === "Refs" ? "Part of" : ref.keyword} ${ref.key}`;
       }
@@ -250,7 +274,11 @@ export function fromTask(
     // A merge request is not something a trailer closes. `Closes !1` would
     // render as a link and do nothing else, which is a promise nothing keeps —
     // so a session cut from one references it instead.
-    keyword: found.key.startsWith("!") ? "Refs" : "Closes",
+    //
+    // And a Trello card has no keyword at all: its line is `Trello: <url>`,
+    // so it keeps the neutral one it was parsed with rather than a `Closes`
+    // nothing will honour.
+    keyword: found.source === "trello" || found.key.startsWith("!") ? "Refs" : "Closes",
     url: found.url ?? taskUrl ?? undefined,
   };
 }
