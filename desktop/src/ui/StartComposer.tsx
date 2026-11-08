@@ -38,6 +38,7 @@ import {
   Plus,
   Search,
   Server,
+  ServerOff,
   UserRound,
   X,
 } from "lucide-react";
@@ -581,8 +582,32 @@ export function StartComposer({
           )}
 
           {/* Only a blocker that needs *you* surfaces here. Readiness lives in
-              the machine chip's menu, where the machine is. */}
-          {host && kind && mine.length === 0 && (
+              the machine chip's menu, where the machine is.
+
+              **One notice at a time, and the machine comes first.** An agent
+              account cannot be checked without a machine to check it on —
+              `hostReady` depends on `host` — so drawing both would report a
+              fact nobody can yet know above the one thing that is actually
+              stopping you. */}
+          {all.length === 0 ? (
+            /* **Amber, not ember.** Ember means an agent is waiting on you,
+                and this is not that: it is a thing *you* have not done yet.
+                `--color-amber-soft` for a mark on the page is the token's own
+                stated job. The glyph is what makes it more than a hue. */
+            <div className="mx-2.5 mb-2 flex items-center gap-3 rounded-xl border border-amber-deep bg-amber-tint px-3 py-2">
+              <span className="grid shrink-0 place-items-center text-amber-soft">
+                <Icon of={ServerOff} size={14} />
+              </span>
+              <span className="min-w-0 flex-1 text-meta text-bone">No machine to run on yet.</span>
+              <button
+                onClick={() => navigate("/configuration/machines/add")}
+                className="control h-7 border border-line bg-panel text-meta text-bone hover:bg-raise"
+              >
+                <Icon of={Plus} size={12} />
+                Add a machine
+              </button>
+            </div>
+          ) : host && kind && mine.length === 0 ? (
             <div className="mx-2.5 mb-2 flex items-center gap-3 rounded-xl border border-amber-deep bg-amber-tint px-3 py-2">
               <span className="min-w-0 flex-1 text-meta text-bone">
                 No {agents.find((a) => a.kind === kind)?.label ?? kind} account connected.
@@ -595,7 +620,7 @@ export function StartComposer({
                 Connect an account
               </button>
             </div>
-          )}
+          ) : null}
           {create.isError && (
             <p className="mx-2.5 mb-2 rounded-xl border border-brick-deep bg-brick-tint px-3 py-2 text-meta text-brick">
               {(create.error as { code?: string })?.code === "NoCapacity"
@@ -655,17 +680,23 @@ export function StartComposer({
               data-set={!!where.machine}
               data-which="machine"
               className="chip"
-              title="Where it runs"
+              title={machine ? "Where it runs" : "No machine to run on"}
             >
+              {/* **No hue on the chip, and a different glyph instead.** One
+                  coloured object for one fact — the notice above — and the
+                  chip agrees with it by *shape*. That is "never hue alone"
+                  honoured in both directions at once. It read "Where it runs"
+                  in `--color-dim`, which is indistinguishable from "Add a
+                  repository" beside it. */}
               <span className="grid place-items-center text-mute">
-                <Icon of={Server} size={14} />
+                <Icon of={machine ? Server : ServerOff} size={14} />
               </span>
               {/* The whole name on the label, because the label is the part
                   that gets cut — the button keeps saying what it *does*, so
                   hovering the chevron still explains the control and hovering
                   the name reads it back in full. */}
               <span className="lbl" title={machine ? machineLabel(machine) : undefined}>
-                {machine ? machineLabel(machine) : "Where it runs"}
+                {machine ? machineLabel(machine) : "No machine"}
               </span>
               {host && kind && (
                 <span
@@ -790,11 +821,20 @@ export function StartComposer({
                   <Mic state={voice.state} onStart={voice.start} onStop={voice.stop} />
                 </span>
               )}
+              {/* Already disabled, correctly, by `ready`. Its title said
+                  **Start it** either way, which is the one thing it cannot
+                  do. */}
               <button
                 onClick={go}
                 disabled={!ready}
-                title={busy ? "Waiting for the images" : "Start it   ⏎"}
-                aria-label="Start it"
+                title={
+                  busy
+                    ? "Waiting for the images"
+                    : all.length === 0
+                      ? "Add a machine first"
+                      : "Start it   ⏎"
+                }
+                aria-label={all.length === 0 ? "Add a machine first" : "Start it"}
                 className="send"
               >
                 <ArrowUp className="h-[17px] w-[17px]" strokeWidth={2.5} />
