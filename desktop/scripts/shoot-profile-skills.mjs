@@ -40,6 +40,35 @@ async function editor(theme = "dark") {
   return page;
 }
 
+/**
+ * Open the editor on a profile that **already exists**, by name.
+ *
+ * `saved` rewrites that profile's row in the listing on the wire, the way QA
+ * reached the states the shared mock has no fixture for — so a profile with a
+ * switch deliberately off can be opened without adding a fourth role to
+ * `ROLES` and moving every other script's screenshots.
+ */
+async function existing(theme, name, saved = {}) {
+  const page = await fresh(theme);
+  if (Object.keys(saved).length)
+    await page.route(/\/api\/v1\/roles$/, async (route) => {
+      if (route.request().method() !== "GET") return route.fallback();
+      const res = await route.fetch();
+      const rows = await res.json();
+      await route.fulfill({
+        response: res,
+        json: rows.map((r) => (r.name === name ? { ...r, ...saved } : r)),
+      });
+    });
+  await page.goto(`${process.env.APP ?? "http://localhost:5293"}/#/configuration/roles`, {
+    waitUntil: "networkidle",
+  });
+  await page.waitForTimeout(900);
+  await page.getByRole("button", { name: new RegExp(name) }).first().click();
+  await page.waitForTimeout(900);
+  return page;
+}
+
 /** The figure, the breakdown's numbers, and the count on each source row. */
 async function read(page) {
   const fig = (await page.locator(".answer .fig").innerText()).trim();
@@ -235,6 +264,44 @@ const shot = async (page, id) => {
   }
   // An unpinned profile is the Claude Code case too: the lead may be running it.
   await shot(page, "always-off-claude");
+  await page.close();
+}
+
+/* ── 11: a profile that already exists opens as itself ────────────────────
+   **Every state above is a *new* profile**, and that is how criterion 11
+   shipped broken. A new one is built from `BLANK`, which sets both switches
+   on; a saved one goes through `toDraft`, which carried eleven fields and not
+   these two. So every existing profile opened reading *"It loads no skills
+   from Firetower"* over a button offering to **Save with no skills** — for
+   profiles the API says load four — and nothing here was looking.
+
+   Driven on `Reviewer`, which is the profile the report screenshotted, and
+   then on the same profile with a switch flipped on the wire: *on* alone
+   would also pass against a `toDraft` that hardcoded `true`, and hardcoding
+   it is the other way to get this wrong. */
+{
+  const page = await existing("light", "Reviewer");
+  const togs = await page.locator(".src-row .tog").all();
+  const checked = await Promise.all(togs.map((t) => t.getAttribute("aria-checked")));
+  ok("11 · a saved profile's switches are what was saved", checked.join(",") === "true,true", checked.join(","));
+
+  const r = await read(page);
+  ok(`11 · and it reports what it loads (${r.count})`, r.count > 0 && !/loads no skills/.test(r.fig), r.fig);
+  ok("11 · whose lines still sum", r.sum === r.count, `${r.sum} vs ${r.count}`);
+  const save = (await page.locator(".formfoot .btn.primary").innerText()).trim();
+  ok("11 · and Save does not offer to empty it", !/no skills/.test(save), save);
+  await shot(page, "existing-profile");
+  await page.close();
+}
+{
+  // The same profile, saved with the always-on source deliberately off.
+  const page = await existing("light", "Reviewer", { includeAlwaysOn: false });
+  const togs = await page.locator(".src-row .tog").all();
+  const checked = await Promise.all(togs.map((t) => t.getAttribute("aria-checked")));
+  ok("11 · a switch saved off opens off", checked.join(",") === "false,true", checked.join(","));
+  const r = await read(page);
+  ok("11 · and its lines sum with that source dead", r.sum === r.count && r.brk[0].off, `${r.sum} vs ${r.count}`);
+  await shot(page, "existing-profile-narrowed");
   await page.close();
 }
 

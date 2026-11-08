@@ -100,7 +100,7 @@ const CONTROL_ICON: Record<ControlKind, LucideIcon> = {
 };
 
 /** An empty profile, for a new one. An Operator until made a Manager. */
-const BLANK: NewRole = {
+const BLANK: Settled = {
   name: "",
   does: "",
   placement: "here",
@@ -114,9 +114,10 @@ const BLANK: NewRole = {
   skillScope: [],
   // Both on, which is what the column defaults to and what makes a new
   // profile load the owner's usual set rather than nothing. Sent explicitly
-  // rather than left off: absent means on to the server, but an existing
-  // profile with a switch *off* has to be able to say so, and a draft that
-  // omitted the field could never turn one back off.
+  // rather than left off: absent tells the server to leave them as they are,
+  // which on a profile that does not exist yet is the same answer — but the
+  // two switches are what this screen draws, and a draft that omitted them
+  // would draw them off while saving them on.
   includeAlwaysOn: true,
   includeRepoDefaults: true,
   directory: null,
@@ -267,13 +268,39 @@ export function Roles() {
 }
 
 /**
+ * A draft with both inheritance switches stated as a plain boolean.
+ *
+ * `boolean | null | undefined` on `NewRole`, because the API takes all three
+ * and reads the absent two as *leave whatever is stored alone* — a sound
+ * answer for a client that has never heard of these fields, and the wrong one
+ * for this editor, which draws a switch per field and has nothing to draw for
+ * "no opinion". It drew them **off**, for profiles that load four.
+ *
+ * So a draft has to have decided. Spelt as an intersection rather than
+ * `Required<Pick<…>>`, which would leave `null` in: both of these are
+ * questions with two answers by the time they reach a screen. `Settled` is
+ * assignable to `NewRole` wherever one is wanted, so this narrows what a draft
+ * promises without widening what anything reading one has to handle.
+ */
+type Settled = NewRole & { includeAlwaysOn: boolean; includeRepoDefaults: boolean };
+
+/**
  * A profile as the form that edits it.
  *
  * Exported because Compute's notice about a removed machine unpins a profile
  * that pointed at it, and `update_role` takes the whole object: sending a
  * partial one would quietly blank every field it left out.
+ *
+ * **That hazard fired.** The two inheritance switches were added to `Role` and
+ * to `NewRole` and not to here, so every existing profile opened with both off
+ * — "It loads no skills from Firetower", over a button offering to save it that
+ * way — and `Machines.tsx` sent the same gap with nobody at the keyboard. The
+ * fields were optional on `NewRole`, so nothing failed. `role-draft.test.ts`
+ * is what makes the next one fail instead of ship: it walks a `Role` whose
+ * every field is enumerated by the type checker and insists each one is either
+ * carried here or named as deliberately dropped.
  */
-export function toDraft(r: Role): NewRole {
+export function toDraft(r: Role): Settled {
   return {
     name: r.name,
     does: r.does,
@@ -286,9 +313,30 @@ export function toDraft(r: Role): NewRole {
     canDelegate: r.canDelegate,
     delegateScope: r.delegateScope ?? [],
     skillScope: r.skillScope ?? [],
+    includeAlwaysOn: r.includeAlwaysOn,
+    includeRepoDefaults: r.includeRepoDefaults,
     directory: null,
   };
 }
+
+/**
+ * Fields of a `Role` that `toDraft` deliberately does not carry, and why.
+ *
+ * The server owns every one of them: four are identity or timestamps, two are
+ * the answers to "may I" that the request is checked against rather than told,
+ * and `isDefault` is set by its own endpoint so that setting one profile's can
+ * unset another's. Exported for `role-draft.test.ts`, which treats anything
+ * absent from a draft and absent from here as a field somebody forgot.
+ */
+export const SERVER_OWNED = [
+  "id",
+  "path",
+  "createdAt",
+  "updatedAt",
+  "mayWrite",
+  "mayShare",
+  "isDefault",
+] as const satisfies readonly (keyof Role)[];
 
 /** One role in the list: its name, what it does, and the shape of it as chips. */
 function RoleRow({
