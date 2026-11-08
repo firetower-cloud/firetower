@@ -54,6 +54,7 @@ export const ListTasksResponse = zod.object({
   "repo": zod.string().nullish().describe('Where the work would happen. Known for an issue; a binding for a ticket.'),
   "source": zod.string(),
   "state": zod.enum(['open', 'closed']),
+  "status": zod.string().nullish().describe('The column or workflow state it sits in, by the tracker\'s own name: a\nTrello list, a Linear state. Git hosts have none.'),
   "title": zod.string(),
   "updatedAt": zod.iso.datetime({"offset":true}),
   "url": zod.string().describe('Always somewhere to go and read it.')
@@ -92,6 +93,7 @@ export const GetTaskResponse = zod.object({
   "repo": zod.string().nullish().describe('Where the work would happen. Known for an issue; a binding for a ticket.'),
   "source": zod.string(),
   "state": zod.enum(['open', 'closed']),
+  "status": zod.string().nullish().describe('The column or workflow state it sits in, by the tracker\'s own name: a\nTrello list, a Linear state. Git hosts have none.'),
   "title": zod.string(),
   "updatedAt": zod.iso.datetime({"offset":true}),
   "url": zod.string().describe('Always somewhere to go and read it.')

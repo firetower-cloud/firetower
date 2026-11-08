@@ -101,6 +101,9 @@ pub struct Task {
     pub updated_at: chrono::DateTime<chrono::Utc>,
     /// Where the work would happen. Known for an issue; a binding for a ticket.
     pub repo: Option<String>,
+    /// The column or workflow state it sits in, by the tracker's own name: a
+    /// Trello list, a Linear state. Git hosts have none.
+    pub status: Option<String>,
 }
 
 /// What to ask a source for.
@@ -427,6 +430,7 @@ fn task_from(item: Item, source: &str) -> Task {
             .collect(),
         updated_at: item.updated_at,
         repo,
+        status: None,
     }
 }
 

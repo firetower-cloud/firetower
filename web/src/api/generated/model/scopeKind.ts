@@ -15,4 +15,5 @@ export type ScopeKind = typeof ScopeKind[keyof typeof ScopeKind];
 export const ScopeKind = {
   repos: 'repos',
   teams: 'teams',
+  boards: 'boards',
 } as const;

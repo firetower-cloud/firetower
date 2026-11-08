@@ -42,6 +42,7 @@ pub enum Auth {
 pub enum ScopeKind {
     Repos,
     Teams,
+    Boards,
 }
 
 /// A tracker that is not a git host.

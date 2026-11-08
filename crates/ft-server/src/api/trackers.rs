@@ -322,6 +322,6 @@ pub(super) async fn list_tracker_scopes(
                 })
                 .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e:#}")))
         }
-        ScopeKind::Teams => Err(ApiError::not_found("tracker")),
+        ScopeKind::Teams | ScopeKind::Boards => Err(ApiError::not_found("tracker")),
     }
 }

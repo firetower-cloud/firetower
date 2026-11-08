@@ -14088,7 +14088,8 @@
         "description": "What the scope picker offers for this tracker.",
         "enum": [
           "repos",
-          "teams"
+          "teams",
+          "boards"
         ]
       },
       "Sent": {
@@ -15380,6 +15381,13 @@
           },
           "state": {
             "$ref": "#/components/schemas/TaskState"
+          },
+          "status": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The column or workflow state it sits in, by the tracker's own name: a\nTrello list, a Linear state. Git hosts have none."
           },
           "title": {
             "type": "string"

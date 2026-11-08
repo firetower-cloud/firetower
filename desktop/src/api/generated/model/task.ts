@@ -36,6 +36,12 @@ export interface Task {
   repo?: string | null;
   source: string;
   state: TaskState;
+  /**
+     * The column or workflow state it sits in, by the tracker's own name: a
+     * Trello list, a Linear state. Git hosts have none.
+     * @nullable
+     */
+  status?: string | null;
   title: string;
   updatedAt: string;
   /** Always somewhere to go and read it. */

@@ -154,7 +154,8 @@ pub(super) struct Listing {
     pub source: Option<String>,
     /// `acme/web`, when the source has repositories.
     pub repo: Option<String>,
-    /// `ENG`, when the source has teams.
+    /// A team or a board, by the tracker's own key: `ENG`, when the source has
+    /// teams or boards.
     pub team: Option<String>,
     /// `issue`, `pullRequest` or `ticket`.
     pub kind: Option<TaskKind>,
@@ -224,7 +225,7 @@ pub(super) async fn list_tasks(
             .into_iter()
             .map(|r| r.slug)
             .collect(),
-        trackers::ScopeKind::Teams => Vec::new(),
+        trackers::ScopeKind::Teams | trackers::ScopeKind::Boards => Vec::new(),
     };
 
     let query = tasks::Query {

@@ -19,7 +19,7 @@ export const ListTrackersResponseItem = zod.object({
   "kinds": zod.array(zod.enum(['issue', 'pullRequest', 'ticket']).describe('What sort of thing it is.\n\nThe one field the Issues/PRs toggle reads, and the reason "filter by kind"\nis a query parameter rather than a migration when a second source lands.')).describe('What this tracker can return, so the kind toggle offers no more.'),
   "label": zod.string(),
   "path": zod.string().nullish().describe('Where that key is filed, and so who else it answers for. Set only\nalongside `secret`: the two describe the same shareable thing.'),
-  "scopeKind": zod.enum(['repos', 'teams']).describe('Whether the scope picker offers repositories or teams.'),
+  "scopeKind": zod.enum(['repos', 'teams', 'boards']).describe('Whether the scope picker offers repositories or teams.'),
   "secret": zod.string().nullish().describe('The key that answers for this person, as the vault addresses it —\n`scope/name/owner`. Absent when nothing is held.\n\nA handle, so a screen can ask who can reach it and offer to file it\nsomewhere. It is the *resolved* one: their own if they have connected\none, otherwise whatever a directory they work in holds.')
 })
 export const ListTrackersResponse = zod.array(ListTrackersResponseItem)
