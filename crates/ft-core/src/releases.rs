@@ -45,6 +45,16 @@ pub const CODEX_RELEASE_LIST: &str =
 /// The prefix Codex tags its CLI releases with.
 pub const CODEX_TAG_PREFIX: &str = "rust-v";
 
+/// Where Mistral Vibe publishes its native ACP builds.
+///
+/// The GitHub release API's `latest` endpoint identifies the current stable
+/// release. Each release's assets carry an API-provided SHA-256 digest, which
+/// the worker verifies before extracting the onedir archive.
+pub const MISTRAL_VIBE_RELEASES: &str =
+    "https://api.github.com/repos/mistralai/mistral-vibe/releases";
+pub const MISTRAL_VIBE_RELEASE_LATEST: &str =
+    "https://api.github.com/repos/mistralai/mistral-vibe/releases/latest";
+
 /// Cursor's own installer, which is where its current build is written down.
 ///
 /// There is no feed to ask. `downloads.cursor.com/lab/latest` is a 403, and
@@ -62,9 +72,25 @@ pub fn newest_url(kind: Agent) -> Option<String> {
         Agent::ClaudeCode => Some(format!("{CLAUDE_RELEASES}/latest")),
         Agent::KimiCode => Some(format!("{KIMI_RELEASES}/latest")),
         Agent::Codex => Some(CODEX_RELEASE_LIST.to_string()),
+        Agent::MistralVibe => Some(MISTRAL_VIBE_RELEASE_LATEST.to_string()),
         Agent::CursorAgent => Some(CURSOR_INSTALLER.to_string()),
         Agent::Shell => None,
     }
+}
+
+/// A stable Mistral Vibe release tag, in its published `vX.Y.Z` form.
+///
+/// The release feed and installer use the tag itself as the authority. Keep
+/// parsing strict so an error page or an unexpected tag shape never appears as
+/// a version that every worker is behind.
+pub fn mistral_vibe_version_in_tag(tag: &str) -> Option<String> {
+    let version = tag.strip_prefix('v')?;
+    let parts: Vec<_> = version.split('.').collect();
+    (parts.len() == 3
+        && parts
+            .iter()
+            .all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit())))
+    .then(|| version.to_string())
 }
 
 /// The build Cursor's installer fetches, out of the script itself.
@@ -148,6 +174,21 @@ mod tests {
         for kind in Agent::all() {
             assert!(newest_url(kind).is_some(), "{kind:?}");
         }
+    }
+
+    #[test]
+    fn mistral_vibe_uses_the_official_latest_release_feed_and_strict_tags() {
+        assert_eq!(
+            newest_url(Agent::MistralVibe).as_deref(),
+            Some(MISTRAL_VIBE_RELEASE_LATEST)
+        );
+        assert_eq!(
+            mistral_vibe_version_in_tag("v3.1.0").as_deref(),
+            Some("3.1.0")
+        );
+        assert_eq!(mistral_vibe_version_in_tag("v3.1.0-rc1"), None);
+        assert_eq!(mistral_vibe_version_in_tag("3.1.0"), None);
+        assert_eq!(mistral_vibe_version_in_tag("v3.1/0"), None);
     }
 
     /// Cursor's installer names its build, and nothing else is read as one.

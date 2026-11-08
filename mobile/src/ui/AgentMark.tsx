@@ -30,6 +30,14 @@ export function AgentMark({ agent, size = 14, tone }: { agent: Agent; size?: num
     case "CursorAgent":
       return <Svg width={size} height={size} viewBox="0 0 24 24"><Path d="M11.503.131 1.891 5.678a.84.84 0 0 0-.42.726v11.188c0 .3.162.575.42.724l9.609 5.55a1 1 0 0 0 .998 0l9.61-5.55a.84.84 0 0 0 .42-.724V6.404a.84.84 0 0 0-.42-.726L12.497.131a1.01 1.01 0 0 0-.996 0M2.657 6.338h18.55c.263 0 .43.287.297.515L12.23 22.918c-.062.107-.229.064-.229-.06V12.335a.59.59 0 0 0-.295-.51l-9.11-5.257c-.109-.063-.064-.23.061-.23" fill={tone} /></Svg>;
 
+    // Mistral AI's mark, from Simple Icons 16.0.0 (CC0).
+    case "MistralVibe":
+      return (
+        <Svg width={size} height={size} viewBox="0 0 24 24">
+          <Path fill={tone} d="M17.143 3.429v3.428h-3.429v3.429h-3.428V6.857H6.857V3.43H3.43v13.714H0v3.428h10.286v-3.428H6.857v-3.429h3.429v3.429h3.429v-3.429h3.428v3.429h-3.428v3.428H24v-3.428h-3.43V3.429z" />
+        </Svg>
+      );
+
     case "Codex":
       return (
         <Svg width={size} height={size} viewBox="0 0 2406 2406">

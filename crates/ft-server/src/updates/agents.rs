@@ -29,6 +29,7 @@ pub struct Feeds {
     claude: String,
     codex: String,
     kimi: String,
+    mistral_vibe: String,
     cursor: String,
 }
 
@@ -36,6 +37,7 @@ impl Feeds {
     pub const CLAUDE_ENV: &'static str = "FIRETOWER_AGENT_FEED_CLAUDE_CODE";
     pub const CODEX_ENV: &'static str = "FIRETOWER_AGENT_FEED_CODEX";
     pub const KIMI_ENV: &'static str = "FIRETOWER_AGENT_FEED_KIMI_CODE";
+    pub const MISTRAL_VIBE_ENV: &'static str = "FIRETOWER_AGENT_FEED_MISTRAL_VIBE";
     pub const CURSOR_ENV: &'static str = "FIRETOWER_AGENT_FEED_CURSOR_AGENT";
 
     pub fn from_env() -> Self {
@@ -43,6 +45,7 @@ impl Feeds {
             claude: from_env_or(Self::CLAUDE_ENV, Agent::ClaudeCode),
             codex: from_env_or(Self::CODEX_ENV, Agent::Codex),
             kimi: from_env_or(Self::KIMI_ENV, Agent::KimiCode),
+            mistral_vibe: from_env_or(Self::MISTRAL_VIBE_ENV, Agent::MistralVibe),
             cursor: from_env_or(Self::CURSOR_ENV, Agent::CursorAgent),
         }
     }
@@ -52,6 +55,7 @@ impl Feeds {
             Agent::ClaudeCode => Some(&self.claude),
             Agent::Codex => Some(&self.codex),
             Agent::KimiCode => Some(&self.kimi),
+            Agent::MistralVibe => Some(&self.mistral_vibe),
             Agent::CursorAgent => Some(&self.cursor),
             // Shell has no publisher to ask.
             Agent::Shell => None,
@@ -138,6 +142,13 @@ async fn newest(http: &reqwest::Client, kind: Agent, url: &str) -> Result<String
                 response.json().await.context("reading the release list")?;
             pick_codex(&body)
         }
+        // Mistral Vibe's release API returns one release object. Its `latest`
+        // endpoint is already restricted to stable releases, and the tag is
+        // the version the worker uses to name the installed directory.
+        Agent::MistralVibe => {
+            let body: serde_json::Value = response.json().await.context("reading the release")?;
+            pick_mistral_vibe(&body)
+        }
         // Cursor publishes no feed at all, so its installer is the feed: a
         // shell script with the current build written into one URL.
         Agent::CursorAgent => {
@@ -184,6 +195,21 @@ pub fn pick_codex(body: &serde_json::Value) -> Result<String> {
         .max()
         .map(|v| v.to_string())
         .context("no Codex CLI release in the list")
+}
+
+/// The stable Mistral Vibe release in GitHub's latest-release response.
+pub fn pick_mistral_vibe(body: &serde_json::Value) -> Result<String> {
+    anyhow::ensure!(!flag(body, "draft"), "the Mistral Vibe release is a draft");
+    anyhow::ensure!(
+        !flag(body, "prerelease"),
+        "the Mistral Vibe release is a pre-release"
+    );
+    let tag = body
+        .get("tag_name")
+        .and_then(|v| v.as_str())
+        .context("the Mistral Vibe release has no tag")?;
+    ft_core::releases::mistral_vibe_version_in_tag(tag)
+        .with_context(|| format!("unrecognized Mistral Vibe release tag: {tag}"))
 }
 
 fn flag(release: &serde_json::Value, name: &str) -> bool {
@@ -269,6 +295,31 @@ mod tests {
         assert!(pick_codex(&serde_json::json!({})).is_err());
     }
 
+    #[test]
+    fn the_mistral_vibe_latest_release_is_a_stable_tagged_release() {
+        assert_eq!(
+            pick_mistral_vibe(&serde_json::json!({
+                "tag_name": "v3.1.0",
+                "draft": false,
+                "prerelease": false
+            }))
+            .unwrap(),
+            "3.1.0"
+        );
+        assert!(pick_mistral_vibe(&serde_json::json!({
+            "tag_name": "v3.2.0-rc1",
+            "draft": false,
+            "prerelease": true
+        }))
+        .is_err());
+        assert!(pick_mistral_vibe(&serde_json::json!({
+            "tag_name": "<html>502</html>",
+            "draft": false,
+            "prerelease": false
+        }))
+        .is_err());
+    }
+
     /// Read out of what each binary actually prints, not out of a bare version.
     #[test]
     fn a_host_is_behind_only_when_both_sides_are_readable_and_it_is_older() {
@@ -300,6 +351,7 @@ mod tests {
             claude: "http://127.0.0.1:1/latest".into(),
             codex: from_env_or("FIRETOWER_AGENT_FEED_NOT_SET_ANYWHERE", Agent::Codex),
             kimi: from_env_or("FIRETOWER_AGENT_FEED_NOT_SET_ANYWHERE", Agent::KimiCode),
+            mistral_vibe: from_env_or("FIRETOWER_AGENT_FEED_NOT_SET_ANYWHERE", Agent::MistralVibe),
             cursor: from_env_or("FIRETOWER_AGENT_FEED_NOT_SET_ANYWHERE", Agent::CursorAgent),
         };
         assert_eq!(
@@ -313,6 +365,10 @@ mod tests {
         assert!(feeds
             .url(Agent::KimiCode)
             .is_some_and(|u| u.starts_with(ft_core::releases::KIMI_RELEASES)));
+        assert_eq!(
+            feeds.url(Agent::MistralVibe),
+            Some(ft_core::releases::MISTRAL_VIBE_RELEASE_LATEST)
+        );
         assert_eq!(
             feeds.url(Agent::CursorAgent),
             Some(ft_core::releases::CURSOR_INSTALLER)

@@ -18,7 +18,9 @@ for line in sys.stdin:
         else:
             emit({"id": m["id"], "result": {}})
     elif method == "session/new":
-        if scenario == "auth":
+        if scenario == "mistral-auth":
+            emit({"id": m["id"], "error": {"code": -32000, "message": "Missing API key for mistral provider."}})
+        elif scenario == "auth":
             emit({"id": m["id"], "error": {"code": -32000, "message": "Authentication required"}})
         else:
             emit({"id": m["id"], "result": {"sessionId": "fixture-session"}})
@@ -27,7 +29,10 @@ for line in sys.stdin:
             if scenario == "metered":
                 emit({"method":"session/update","params":{"sessionId":"fixture-session","update":{"sessionUpdate":"available_commands_update","availableCommands":[{"name":"usage","description":"Show session token usage"}]}}})
     elif method == "session/load":
-        if scenario == "cursor-missing":
+        if scenario in ("mistral-missing", "mistral-wrong-session"):
+            session_id = "old-session" if scenario == "mistral-missing" else "another-session"
+            emit({"id": m["id"], "error": {"code": -32602, "message": f"Session not found: {session_id}", "data": {"session_id": session_id}}})
+        elif scenario == "cursor-missing":
             emit({"id":m["id"], "error":{"code":-32602,"message":"Invalid params","data":{"message":'Session "old-session" not found'}}})
         elif scenario == "missing":
             emit({"id":m["id"], "error":{"code":-32602,"message":"Invalid params: Unknown sessionId: old-session","data":{"sessionId":"old-session"}}})
@@ -63,6 +68,12 @@ for line in sys.stdin:
         emit({"id":active,"result":{"stopReason":"cancelled"}})
         active = None
     elif method == "session/set_config_option":
+        if scenario == "mistral-preferences":
+            emit({"id":m["id"], "result":{"configOptions":[
+                {"id":"model","category":"model","name":"Model","type":"select","currentValue":"b","options":[{"value":"a","name":"A"},{"value":"b","name":"B"}]},
+                {"id":"thinking","category":"thinking","name":"Thinking","type":"select","currentValue":"high" if m["params"]["configId"] == "thinking" else "off","options":[{"value":"off","name":"Off"},{"value":"high","name":"High"}]}
+            ]}})
+            continue
         if scenario == "configure-hold":
             continue
         if m["params"]["value"] == "refused":

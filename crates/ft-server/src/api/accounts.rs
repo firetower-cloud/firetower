@@ -226,7 +226,9 @@ pub(super) async fn validate(
     // nothing, which would report a connected subscription as needing to be set
     // up.
     if !state.vault.holds(a.credential()).await? {
-        return Err(invalid("this account uses host-local authentication; connect a portable credential before selecting it"));
+        return Err(invalid(
+            "this account uses host-local authentication; connect a portable credential before selecting it",
+        ));
     }
     Ok(a)
 }
@@ -293,17 +295,10 @@ pub(super) async fn create_account(
 ) -> ApiResult<Json<Account>> {
     let owner = owner(&p)?;
     let label = name(&req.name)?;
-    if !matches!(
-        req.kind,
-        Agent::ClaudeCode | Agent::Codex | Agent::KimiCode | Agent::CursorAgent
-    ) || req.mode == AgentMode::NotNeeded
-    {
+    if !Agent::all().contains(&req.kind) || !req.kind.supports_auth_mode(req.mode) {
         return Err(invalid(
             "choose an available agent and an authentication method",
         ));
-    }
-    if req.kind == Agent::CursorAgent && req.mode != AgentMode::Subscription {
-        return Err(invalid("Cursor Agent requires subscription sign-in"));
     }
     let secret = req
         .secret
@@ -545,7 +540,7 @@ pub(super) async fn update_account(
     let owner = owner(&p)?;
     let a = mine(&state.db, owner, &id).await?;
     if let Some(secret) = req.secret.as_deref() {
-        if a.kind == "Codex" && a.mode == "Subscription" {
+        if subscription_uses_browser_sign_in(&a.kind, &a.mode) {
             return Err(invalid("use device sign-in to reconnect this account"));
         }
         if secret.trim().is_empty() {
@@ -589,6 +584,11 @@ pub(super) async fn update_account(
     }
     tx.commit().await?;
     Ok(Json(mine(&state.db, owner, &id).await?))
+}
+
+fn subscription_uses_browser_sign_in(kind: &str, mode: &str) -> bool {
+    mode == "Subscription"
+        && Agent::from_name(kind).is_some_and(|agent| agent.signs_in_with_a_code())
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema, sqlx::FromRow)]
@@ -955,6 +955,37 @@ pub(super) async fn ensure_not_switching(
 mod tests {
     use super::*;
     use crate::db::Db;
+
+    #[test]
+    fn account_modes_match_the_agent_auth_capabilities() {
+        assert!(Agent::MistralVibe.supports_auth_mode(AgentMode::Subscription));
+        assert!(Agent::MistralVibe.supports_auth_mode(AgentMode::ApiKey));
+        assert!(!Agent::MistralVibe.supports_auth_mode(AgentMode::NotNeeded));
+        assert!(Agent::CursorAgent.supports_auth_mode(AgentMode::Subscription));
+        assert!(!Agent::CursorAgent.supports_auth_mode(AgentMode::ApiKey));
+        assert!(Agent::KimiCode.supports_auth_mode(AgentMode::Subscription));
+        assert!(!Agent::KimiCode.supports_auth_mode(AgentMode::ApiKey));
+    }
+
+    #[test]
+    fn subscription_reconnect_requires_browser_for_each_device_sign_in_agent() {
+        for kind in ["Codex", "KimiCode", "CursorAgent", "MistralVibe"] {
+            assert!(
+                subscription_uses_browser_sign_in(kind, "Subscription"),
+                "{kind}"
+            );
+        }
+        assert!(!subscription_uses_browser_sign_in("MistralVibe", "ApiKey"));
+        assert!(!subscription_uses_browser_sign_in(
+            "ClaudeCode",
+            "Subscription"
+        ));
+        assert!(!subscription_uses_browser_sign_in(
+            "unknown",
+            "Subscription"
+        ));
+    }
+
     async fn account(db: &Db, owner: &str, id: &str, label: &str) {
         sqlx::query("INSERT INTO agent_accounts(id,user_id,kind,name,mode,credential_key,state,path) VALUES($1,$2,'ClaudeCode',$3,'Subscription',$1,'pending',('u.' || (SELECT slug FROM principals WHERE id=$2) || '.' || $1)::ltree)")
             .bind(id).bind(owner).bind(label).execute(db.pool()).await.unwrap();

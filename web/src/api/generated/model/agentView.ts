@@ -17,6 +17,14 @@ import type { AgentOnHost } from './agentOnHost';
  */
 export interface AgentView {
   /**
+     * The variable Firetower sets when an API-key account is selected.
+     *
+     * Read as a capability, never as a secret. The account dialog uses it to
+     * offer API-key setup only for agents that can consume one.
+     * @nullable
+     */
+  apiKeyVar?: string | null;
+  /**
      * Whether the default account holds a credential that travels: a
      * subscription token or an API key. False when nothing is connected yet.
      */

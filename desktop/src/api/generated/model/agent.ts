@@ -20,5 +20,6 @@ export const Agent = {
   Codex: 'Codex',
   KimiCode: 'KimiCode',
   CursorAgent: 'CursorAgent',
+  MistralVibe: 'MistralVibe',
   Shell: 'Shell',
 } as const;

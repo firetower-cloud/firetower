@@ -5,7 +5,7 @@ use std::{ffi::OsStr, path::Path, time::Duration};
 use tokio::process::Command;
 
 async fn output(program: &str, args: &[&str], path: &OsStr) -> Option<String> {
-    output_with_env(program, args, path, &[]).await
+    output_with_env(program, args, path, &[], Duration::from_secs(3)).await
 }
 
 async fn output_with_env(
@@ -13,6 +13,7 @@ async fn output_with_env(
     args: &[&str],
     path: &OsStr,
     env: &[(&str, &str)],
+    timeout: Duration,
 ) -> Option<String> {
     let mut command = Command::new(program);
     // What the agent needs to answer at all — see `Agent::env`.
@@ -24,7 +25,7 @@ async fn output_with_env(
         .env("PATH", path)
         .stdin(std::process::Stdio::null())
         .kill_on_drop(true);
-    let result = tokio::time::timeout(Duration::from_secs(3), command.output())
+    let result = tokio::time::timeout(timeout, command.output())
         .await
         .ok()?
         .ok()?;
@@ -50,7 +51,17 @@ async fn tool(
     remedy: &str,
     path: &OsStr,
 ) -> Requirement {
-    tool_with_env(name, program, args, required, remedy, path, &[]).await
+    tool_with_env(
+        name,
+        program,
+        args,
+        required,
+        remedy,
+        path,
+        &[],
+        Duration::from_secs(3),
+    )
+    .await
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -62,14 +73,19 @@ async fn tool_with_env(
     remedy: &str,
     path: &OsStr,
     env: &[(&str, &str)],
+    timeout: Duration,
 ) -> Requirement {
-    let found = output_with_env(program, args, path, env).await;
+    let found = output_with_env(program, args, path, env, timeout).await;
     Requirement {
         name: name.into(),
         available: found.is_some(),
         required,
-        detail: found
-            .unwrap_or_else(|| "Missing, failed, or did not answer within 3 seconds".into()),
+        detail: found.unwrap_or_else(|| {
+            format!(
+                "Missing, failed, or did not answer within {} seconds",
+                timeout.as_secs()
+            )
+        }),
         remedy: Some(remedy.into()),
     }
 }
@@ -154,7 +170,7 @@ async fn check_with_path(root: &Path, agent: Option<Agent>, path: &OsStr) -> Rea
     });
     if let Some(agent) = agent {
         checks.push(tool_with_env(agent.label(), agent.command(), &["--version"], true,
-            "Install this agent on the machine, or let Firetower fetch it: the readiness panel offers Install, and `firetower-worker agents add` does the same by hand.", path, agent.env()).await);
+            "Install this agent on the machine, or let Firetower fetch it: the readiness panel offers Install, and `firetower-worker agents add` does the same by hand.", path, agent.env(), agent.probe_timeout()).await);
         // Answering `--version` is the whole of what the check above proves,
         // and for Codex that is not enough to run a session.
         if agent == Agent::Codex {

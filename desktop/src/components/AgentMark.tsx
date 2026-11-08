@@ -68,6 +68,14 @@ export function AgentMark({
         </svg>
       );
 
+    // Mistral AI's mark, from Simple Icons 16.0.0 (CC0).
+    case "MistralVibe":
+      return (
+        <svg {...common} viewBox="0 0 24 24" fill="currentColor" stroke="none">
+          <path d="M17.143 3.429v3.428h-3.429v3.429h-3.428V6.857H6.857V3.43H3.43v13.714H0v3.428h10.286v-3.428H6.857v-3.429h3.429v3.429h3.429v-3.429h3.428v3.429h-3.428v3.428H24v-3.428h-3.43V3.429z" />
+        </svg>
+      );
+
     case "Codex":
       return (
         <svg {...common} viewBox="0 0 2406 2406">
@@ -104,6 +112,7 @@ export const AGENT_LABEL: Record<Agent, string> = {
   Codex: "Codex",
   KimiCode: "Kimi Code",
   CursorAgent: "Cursor Agent",
+  MistralVibe: "Mistral Vibe",
   Shell: "Shell",
 };
 
@@ -113,5 +122,6 @@ export const AGENT_SHORT: Record<Agent, string> = {
   Codex: "codex",
   KimiCode: "kimi",
   CursorAgent: "cursor",
+  MistralVibe: "vibe",
   Shell: "shell",
 };

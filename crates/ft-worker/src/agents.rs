@@ -20,7 +20,7 @@ pub async fn probe(state: &Path) -> Vec<AgentPresence> {
 async fn probe_on(path: &std::ffi::OsStr) -> Vec<AgentPresence> {
     let mut out = Vec::new();
     for kind in Agent::all() {
-        let version = version_of(kind.command(), path, kind.env()).await;
+        let version = version_of(kind.command(), path, kind.env(), kind.probe_timeout()).await;
         let installed = version.is_some();
 
         // Only worth asking if it's there at all.
@@ -51,7 +51,9 @@ pub async fn present(state: &Path, kind: Agent) -> bool {
 }
 
 async fn present_on(path: &std::ffi::OsStr, kind: Agent) -> bool {
-    version_of(kind.command(), path, kind.env()).await.is_some()
+    version_of(kind.command(), path, kind.env(), kind.probe_timeout())
+        .await
+        .is_some()
 }
 
 /// Whether an agent is signed in, and as whom.
@@ -108,9 +110,14 @@ async fn signed_in(kind: Agent, path: &std::ffi::OsStr) -> (Option<bool>, Option
 /// Deliberately does not say whether the agent is *authenticated*: none of
 /// these offer a non-interactive way to ask, and inferring it from their
 /// credential files means depending on a format that is theirs to change.
-async fn version_of(program: &str, path: &std::ffi::OsStr, env: &[(&str, &str)]) -> Option<String> {
+async fn version_of(
+    program: &str,
+    path: &std::ffi::OsStr,
+    env: &[(&str, &str)],
+    timeout: std::time::Duration,
+) -> Option<String> {
     let output = tokio::time::timeout(
-        std::time::Duration::from_secs(3),
+        timeout,
         Command::new(program)
             .arg("--version")
             .env("PATH", path)
@@ -154,7 +161,9 @@ mod tests {
             let path = std::env::var_os("FIRETOWER_PROBE_TEST_PATH").unwrap();
             if mode == "version" {
                 assert_eq!(
-                    version_of("claude", &path, &[]).await.as_deref(),
+                    version_of("claude", &path, &[], Agent::ClaudeCode.probe_timeout())
+                        .await
+                        .as_deref(),
                     Some("1.0.0")
                 );
             } else if mode == "readiness" {
@@ -212,9 +221,14 @@ mod tests {
     #[tokio::test]
     async fn a_missing_binary_is_an_answer_not_a_failure() {
         let path = std::env::var_os("PATH").unwrap_or_default();
-        assert!(version_of("firetower-definitely-not-installed", &path, &[])
-            .await
-            .is_none());
+        assert!(version_of(
+            "firetower-definitely-not-installed",
+            &path,
+            &[],
+            Agent::ClaudeCode.probe_timeout()
+        )
+        .await
+        .is_none());
     }
 
     /// A PATH holding exactly one agent, which answers at once.

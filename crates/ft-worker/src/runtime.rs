@@ -1,14 +1,16 @@
 //! The agents this machine can run, and where they came from.
 //!
 //! Each agent is fetched as the standalone binary its publisher ships — Claude
-//! Code and Kimi Code from their own download services, Codex from its GitHub
-//! releases — and kept under the worker's state directory, one per version:
+//! Code and Kimi Code from their own download services, Codex and Mistral Vibe
+//! from their GitHub releases — and kept under the worker's state directory,
+//! one per version:
 //!
 //! ```text
 //! <state>/agents/claude-code/2.1.0/bin/claude
 //! <state>/agents/codex/0.154.0/bin/codex
 //! <state>/agents/codex/0.154.0/bin/codex-code-mode-host
 //! <state>/agents/kimi/2.1.1/bin/kimi
+//! <state>/agents/mistral-vibe/3.1.0/bin/vibe-acp
 //! ```
 //!
 //! Codex is two binaries, and both of them are Codex — see `CODE_MODE_HOST`.
@@ -142,11 +144,15 @@ pub async fn install(state: &Path, kind: Agent, version: Option<&str>) -> Result
         .await
         .with_context(|| format!("making {}", dir.display()))?;
 
-    // Into a scratch directory first, then renamed once it is whole.
-    let staging = dir.join(".installing");
-    let _ = tokio::fs::remove_dir_all(&staging).await;
+    // Each request gets its own scratch directory. Removing one shared
+    // `.installing` directory here lets a second UI request delete the first
+    // request's live download.
+    let staging = staging_dir(&dir);
     let bin = staging.join("bin");
-    tokio::fs::create_dir_all(&bin)
+    tokio::fs::create_dir(&staging)
+        .await
+        .with_context(|| format!("making {}", staging.display()))?;
+    tokio::fs::create_dir(&bin)
         .await
         .with_context(|| format!("making {}", bin.display()))?;
 
@@ -154,6 +160,7 @@ pub async fn install(state: &Path, kind: Agent, version: Option<&str>) -> Result
         Agent::ClaudeCode => fetch_claude(&bin, &platform, version).await,
         Agent::Codex => fetch_codex(&bin, &platform, version).await,
         Agent::KimiCode => fetch_kimi(&bin, &platform, version).await,
+        Agent::MistralVibe => fetch_mistral_vibe(&bin, &platform, version).await,
         Agent::CursorAgent => fetch_cursor(&bin, &platform, version).await,
         Agent::Shell => unreachable!("refused above"),
     };
@@ -183,6 +190,11 @@ pub async fn install(state: &Path, kind: Agent, version: Option<&str>) -> Result
     })
 }
 
+/// A fresh hidden directory for one in-flight installer request.
+fn staging_dir(agent_root: &Path) -> PathBuf {
+    agent_root.join(format!(".installing-{}", ft_core::SessionId::new()))
+}
+
 /// Remove every copy of one.
 pub async fn remove(state: &Path, kind: Agent) -> Result<()> {
     let dir = root(state).join(directory(kind));
@@ -201,6 +213,7 @@ fn directory(kind: Agent) -> &'static str {
         Agent::Codex => "codex",
         Agent::Shell => "shell",
         Agent::KimiCode => "kimi",
+        Agent::MistralVibe => "mistral-vibe",
         Agent::CursorAgent => "cursor-agent",
     }
 }
@@ -280,6 +293,22 @@ impl Platform {
             (Os::Linux, false) => Ok(format!("linux-{arch}")),
             (Os::Linux, true) => {
                 bail!("Kimi Code publishes no musl build, so it cannot run on this machine")
+            }
+        }
+    }
+
+    /// The tar.gz asset suffix Mistral Vibe uses for its native ACP builds.
+    ///
+    /// Its Linux build is glibc based. The publisher has no musl archive, so
+    /// refuse Alpine rather than install a binary that cannot start there.
+    fn mistral_vibe(&self) -> Result<&'static str> {
+        match (self.os, self.arch, self.musl) {
+            (Os::Darwin, Arch::Aarch64, _) => Ok("darwin-aarch64"),
+            (Os::Darwin, Arch::X86_64, _) => Ok("darwin-x86_64"),
+            (Os::Linux, Arch::Aarch64, false) => Ok("linux-aarch64"),
+            (Os::Linux, Arch::X86_64, false) => Ok("linux-x86_64"),
+            (Os::Linux, _, true) => {
+                bail!("Mistral Vibe publishes no musl build, so it cannot run on this machine")
             }
         }
     }
@@ -379,6 +408,7 @@ async fn fetch_cursor(bin: &Path, platform: &Platform, version: Option<&str>) ->
         .arg(bin)
         .args(["--strip-components=1"])
         .stdin(std::process::Stdio::null())
+        .kill_on_drop(true)
         .output()
         .await
         .context("unpacking Cursor Agent")?;
@@ -602,6 +632,178 @@ async fn fetch_codex_binary(
     executable(&installed).await
 }
 
+// ── Mistral Vibe ────────────────────────────────────────────────────
+
+use ft_core::releases::{MISTRAL_VIBE_RELEASES, MISTRAL_VIBE_RELEASE_LATEST};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MistralVibeReleaseAsset {
+    version: String,
+    api_url: String,
+    sha256: String,
+}
+
+/// Resolve the GitHub release and its platform archive from the release API.
+///
+/// Asset digests are part of GitHub's release API response. Missing or
+/// malformed digest metadata is a hard failure; a successful HTTPS download
+/// alone is not enough to install the archive.
+fn mistral_vibe_release_asset(
+    body: &serde_json::Value,
+    requested_version: Option<&str>,
+    target: &str,
+) -> Result<MistralVibeReleaseAsset> {
+    anyhow::ensure!(
+        !body.get("draft").and_then(|v| v.as_bool()).unwrap_or(false),
+        "the Mistral Vibe release is a draft"
+    );
+    anyhow::ensure!(
+        !body
+            .get("prerelease")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        "the Mistral Vibe release is a pre-release"
+    );
+
+    let tag = body
+        .get("tag_name")
+        .and_then(|v| v.as_str())
+        .context("the Mistral Vibe release has no tag")?;
+    let version = ft_core::releases::mistral_vibe_version_in_tag(tag)
+        .with_context(|| format!("unrecognized Mistral Vibe release tag: {tag}"))?;
+    if let Some(requested) = requested_version {
+        anyhow::ensure!(
+            version == requested,
+            "GitHub returned Mistral Vibe {version} for requested version {requested}"
+        );
+    }
+
+    let name = format!("vibe-acp-{target}-{version}.tar.gz");
+    let expected_url =
+        format!("https://github.com/mistralai/mistral-vibe/releases/download/v{version}/{name}");
+    let assets = body
+        .get("assets")
+        .and_then(|v| v.as_array())
+        .context("the Mistral Vibe release has no assets")?;
+    let asset = assets
+        .iter()
+        .find(|a| a.get("name").and_then(|v| v.as_str()) == Some(name.as_str()))
+        .with_context(|| format!("Mistral Vibe {version} has no {target} archive"))?;
+    let digest = asset
+        .get("digest")
+        .and_then(|v| v.as_str())
+        .context("the GitHub release asset has no SHA-256 digest")?;
+    let sha256 = digest
+        .strip_prefix("sha256:")
+        .with_context(|| format!("unrecognized GitHub asset digest: {digest}"))?;
+    anyhow::ensure!(
+        sha256.len() == 64 && sha256.bytes().all(|b| b.is_ascii_hexdigit()),
+        "the GitHub asset SHA-256 digest is malformed"
+    );
+    let url = asset
+        .get("browser_download_url")
+        .and_then(|v| v.as_str())
+        .context("the GitHub release asset has no download URL")?;
+    anyhow::ensure!(
+        url == expected_url,
+        "the GitHub release asset URL does not match the official release path"
+    );
+    let api_url = asset
+        .get("url")
+        .and_then(|v| v.as_str())
+        .context("the GitHub release asset has no API URL")?;
+    const ASSET_API_PREFIX: &str =
+        "https://api.github.com/repos/mistralai/mistral-vibe/releases/assets/";
+    let asset_id = api_url
+        .strip_prefix(ASSET_API_PREFIX)
+        .context("the GitHub release asset API URL is not official")?;
+    anyhow::ensure!(
+        !asset_id.is_empty() && asset_id.bytes().all(|b| b.is_ascii_digit()),
+        "the GitHub release asset API URL has an invalid asset id"
+    );
+
+    Ok(MistralVibeReleaseAsset {
+        version,
+        api_url: api_url.to_string(),
+        sha256: sha256.to_ascii_lowercase(),
+    })
+}
+
+fn normalise_mistral_vibe_version(version: &str) -> Result<String> {
+    let version = version.strip_prefix('v').unwrap_or(version);
+    anyhow::ensure!(
+        ft_core::releases::mistral_vibe_version_in_tag(&format!("v{version}")).is_some(),
+        "Mistral Vibe version must be a stable X.Y.Z version"
+    );
+    Ok(version.to_string())
+}
+
+async fn fetch_mistral_vibe(
+    bin: &Path,
+    platform: &Platform,
+    requested: Option<&str>,
+) -> Result<()> {
+    let target = platform.mistral_vibe()?;
+    let requested = requested.map(normalise_mistral_vibe_version).transpose()?;
+    let release_url = match requested.as_deref() {
+        Some(version) => format!("{MISTRAL_VIBE_RELEASES}/tags/v{version}"),
+        None => MISTRAL_VIBE_RELEASE_LATEST.to_string(),
+    };
+    let body = text(&release_url)
+        .await
+        .with_context(|| format!("asking GitHub about Mistral Vibe at {release_url}"))?;
+    let body: serde_json::Value =
+        serde_json::from_str(&body).context("the GitHub release response is not JSON")?;
+    let asset = mistral_vibe_release_asset(&body, requested.as_deref(), target)?;
+
+    // Extract the onedir archive in place. Its executable depends on the
+    // adjacent `_internal` tree, which includes relative symlinks into the
+    // bundled Python framework. Keeping the tree intact and renaming the
+    // complete staging directory preserves those links.
+    let archive = bin.join(".vibe-acp.tar.gz");
+    download_github_release_asset(&asset.api_url, &archive)
+        .await
+        .with_context(|| format!("downloading Mistral Vibe {}", asset.version))?;
+    let actual = sha256_of(&archive).await?;
+    anyhow::ensure!(
+        actual == asset.sha256,
+        "Mistral Vibe {} archive did not match GitHub's SHA-256 digest",
+        asset.version
+    );
+    untar(&archive, bin)
+        .await
+        .with_context(|| format!("unpacking Mistral Vibe {}", asset.version))?;
+    tokio::fs::remove_file(&archive).await?;
+
+    let launcher = bin.join("vibe-acp");
+    anyhow::ensure!(
+        tokio::fs::metadata(&launcher).await?.is_file(),
+        "the Mistral Vibe archive has no vibe-acp launcher"
+    );
+    anyhow::ensure!(
+        tokio::fs::metadata(bin.join("_internal")).await?.is_dir(),
+        "the Mistral Vibe archive has no _internal runtime directory"
+    );
+    executable(&launcher).await?;
+
+    // This release supports `--version`; require it to match the API response
+    // so a broken or incomplete onedir extraction cannot be installed under a
+    // version it did not answer for.
+    let reported = version_of_with_timeout(
+        &launcher,
+        Agent::MistralVibe.env(),
+        Agent::MistralVibe.probe_timeout(),
+    )
+    .await
+    .context("Mistral Vibe --version did not return a version")?;
+    anyhow::ensure!(
+        reported == asset.version,
+        "Mistral Vibe reported version {reported}, expected {}",
+        asset.version
+    );
+    Ok(())
+}
+
 /// The executable in an unpacked release.
 ///
 /// Each Codex asset holds one file, named for its target. Looked for by name
@@ -666,6 +868,7 @@ async fn download(url: &str, to: &Path) -> Result<()> {
         .arg(to)
         .arg(url)
         .stdin(std::process::Stdio::null())
+        .kill_on_drop(true)
         .output()
         .await
         .context("running curl — is it installed on this machine?")?;
@@ -679,11 +882,46 @@ async fn download(url: &str, to: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Fetch a public GitHub release asset through its API endpoint.
+///
+/// `Accept: application/octet-stream` asks GitHub for the asset bytes instead
+/// of its JSON metadata. This also keeps the downloaded object paired with the
+/// API response whose `digest` is checked before extraction.
+async fn download_github_release_asset(api_url: &str, to: &Path) -> Result<()> {
+    let output = Command::new("curl")
+        .args([
+            "-fsSL",
+            "--retry",
+            "3",
+            "-H",
+            "Accept: application/octet-stream",
+            "-H",
+            "X-GitHub-Api-Version: 2022-11-28",
+            "-o",
+        ])
+        .arg(to)
+        .arg(api_url)
+        .stdin(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .output()
+        .await
+        .context("running curl to fetch a GitHub release asset")?;
+    if !output.status.success() {
+        let said = String::from_utf8_lossy(&output.stderr);
+        bail!(
+            "{api_url}: {}",
+            said.lines().last().unwrap_or("curl said nothing").trim()
+        );
+    }
+    Ok(())
+}
+
 /// Fetch a URL as text.
 async fn text(url: &str) -> Result<String> {
     let output = Command::new("curl")
         .args(["-fsSL", "--retry", "3", url])
         .stdin(std::process::Stdio::null())
+        .kill_on_drop(true)
         .output()
         .await
         .context("running curl — is it installed on this machine?")?;
@@ -704,6 +942,7 @@ async fn untar(archive: &Path, into: &Path) -> Result<()> {
         .arg("-C")
         .arg(into)
         .stdin(std::process::Stdio::null())
+        .kill_on_drop(true)
         .output()
         .await
         .context("running tar — is it installed on this machine?")?;
@@ -741,8 +980,16 @@ async fn executable(path: &Path) -> Result<()> {
 /// first word that looks like a version is the answer for both, and for
 /// whatever either prints next year.
 async fn version_of(binary: &Path, env: &[(&str, &str)]) -> Option<String> {
+    version_of_with_timeout(binary, env, std::time::Duration::from_secs(10)).await
+}
+
+async fn version_of_with_timeout(
+    binary: &Path,
+    env: &[(&str, &str)],
+    timeout: std::time::Duration,
+) -> Option<String> {
     let output = tokio::time::timeout(
-        std::time::Duration::from_secs(10),
+        timeout,
         Command::new(binary)
             .arg("--version")
             .env(NO_SELF_UPDATE.0, NO_SELF_UPDATE.1)
@@ -830,6 +1077,24 @@ mod tests {
     }
 
     #[test]
+    fn every_in_flight_install_gets_its_own_hidden_staging_directory() {
+        let agent_root = Path::new("/state/agents/mistral-vibe");
+        let first = staging_dir(agent_root);
+        let second = staging_dir(agent_root);
+        assert_ne!(first, second);
+        assert!(first
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with('.'));
+        assert!(first
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with(".installing-"));
+    }
+
+    #[test]
     fn the_version_is_read_out_of_whatever_the_binary_prints() {
         assert_eq!(version_in("2.1.0 (Claude Code)").as_deref(), Some("2.1.0"));
         assert_eq!(version_in("codex-cli 0.154.0").as_deref(), Some("0.154.0"));
@@ -890,5 +1155,70 @@ mod tests {
 
         let nothing: Vec<PathBuf> = vec![];
         assert_eq!(pick_binary(&nothing, "codex", "aarch64-apple-darwin"), None);
+    }
+
+    #[test]
+    fn mistral_vibe_release_asset_requires_exact_platform_archive_and_sha256() {
+        let body = serde_json::json!({
+            "tag_name": "v3.1.0",
+            "draft": false,
+            "prerelease": false,
+            "assets": [{
+                "name": "vibe-acp-darwin-aarch64-3.1.0.tar.gz",
+                "digest": "sha256:c56ec63bd6bcd60591bee441cf31f3fe555da493275a1756b2f5152039f65ec4",
+                "url": "https://api.github.com/repos/mistralai/mistral-vibe/releases/assets/42",
+                "browser_download_url": "https://github.com/mistralai/mistral-vibe/releases/download/v3.1.0/vibe-acp-darwin-aarch64-3.1.0.tar.gz"
+            }]
+        });
+        let asset = mistral_vibe_release_asset(&body, Some("3.1.0"), "darwin-aarch64").unwrap();
+        assert_eq!(asset.version, "3.1.0");
+        assert_eq!(asset.sha256.len(), 64);
+        assert!(asset.api_url.ends_with("/assets/42"));
+
+        assert!(mistral_vibe_release_asset(&body, Some("3.0.0"), "darwin-aarch64").is_err());
+        assert!(mistral_vibe_release_asset(&body, None, "linux-x86_64").is_err());
+
+        let mut malformed_digest = body.clone();
+        malformed_digest["assets"][0]["digest"] = serde_json::json!("sha256:1234");
+        assert!(mistral_vibe_release_asset(&malformed_digest, None, "darwin-aarch64").is_err());
+
+        let mut untrusted_api_url = body.clone();
+        untrusted_api_url["assets"][0]["url"] =
+            serde_json::json!("https://example.invalid/releases/assets/42");
+        assert!(mistral_vibe_release_asset(&untrusted_api_url, None, "darwin-aarch64").is_err());
+
+        let missing_digest = serde_json::json!({
+            "tag_name": "v3.1.0",
+            "draft": false,
+            "prerelease": false,
+            "assets": [{
+                "name": "vibe-acp-darwin-aarch64-3.1.0.tar.gz",
+                "url": "https://api.github.com/repos/mistralai/mistral-vibe/releases/assets/42",
+                "browser_download_url": "https://github.com/mistralai/mistral-vibe/releases/download/v3.1.0/vibe-acp-darwin-aarch64-3.1.0.tar.gz"
+            }]
+        });
+        assert!(mistral_vibe_release_asset(&missing_digest, None, "darwin-aarch64").is_err());
+    }
+
+    #[test]
+    fn mistral_vibe_assets_cover_native_platforms_and_reject_musl() {
+        let cases = [
+            (Os::Darwin, Arch::Aarch64, false, Ok("darwin-aarch64")),
+            (Os::Darwin, Arch::X86_64, false, Ok("darwin-x86_64")),
+            (Os::Linux, Arch::Aarch64, false, Ok("linux-aarch64")),
+            (Os::Linux, Arch::X86_64, false, Ok("linux-x86_64")),
+            (Os::Linux, Arch::Aarch64, true, Err(())),
+            (Os::Linux, Arch::X86_64, true, Err(())),
+        ];
+        for (os, arch, musl, expected) in cases {
+            let platform = Platform { os, arch, musl };
+            match expected {
+                Ok(target) => assert_eq!(platform.mistral_vibe().unwrap(), target),
+                Err(()) => assert!(platform.mistral_vibe().is_err()),
+            }
+        }
+        assert_eq!(normalise_mistral_vibe_version("v3.1.0").unwrap(), "3.1.0");
+        assert!(normalise_mistral_vibe_version("3.1.0/../../other").is_err());
+        assert!(normalise_mistral_vibe_version("v3.1.0-rc1").is_err());
     }
 }

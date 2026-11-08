@@ -9,6 +9,7 @@ import * as zod from 'zod';
 
 
 export const ListAgentsResponseItem = zod.object({
+  "apiKeyVar": zod.string().nullish().describe('The variable Firetower sets when an API-key account is selected.\n\nRead as a capability, never as a secret. The account dialog uses it to\noffer API-key setup only for agents that can consume one.'),
   "credentialSet": zod.boolean().describe('Whether the default account holds a credential that travels: a\nsubscription token or an API key. False when nothing is connected yet.'),
   "enabled": zod.boolean(),
   "hosts": zod.array(zod.object({
@@ -23,7 +24,7 @@ export const ListAgentsResponseItem = zod.object({
   "mayUpdate": zod.boolean().describe('Whether the person asking may actually move this one.\n\nInstalling an agent is administrative and felt by everybody running on\nthe machine, so it is the same question `may_share` answers about a\nmachine\'s fate — see `api::hosts::to_administer`. Answered here rather\nthan in `status`, because this is the layer that knows who is asking;\nthe Updates screen settles `may_upgrade` the same way.\n\nSeparate from `behind` on purpose. A colleague\'s machine being stale is\nworth seeing; it is not yours to fix, and a button that 403s is worse\nthan no button.'),
   "version": zod.string().nullish()
 })),
-  "kind": zod.enum(['ClaudeCode', 'Codex', 'KimiCode', 'CursorAgent', 'Shell']).describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
+  "kind": zod.enum(['ClaudeCode', 'Codex', 'KimiCode', 'CursorAgent', 'MistralVibe', 'Shell']).describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
   "label": zod.string(),
   "latestVersion": zod.string().nullish().describe('The newest version its publisher is serving, when the control plane has\nmanaged to ask.\n\nOne per kind rather than per host: what is published does not depend on\nwhich machine is behind it. `None` means nobody has asked yet, or the\npublisher could not be reached — neither of which is "up to date".'),
   "mode": zod.union([zod.null(),zod.enum(['Subscription', 'ApiKey', 'NotNeeded']).describe('`None` until someone configures it.')]).optional(),
@@ -40,6 +41,7 @@ export const ListAgentsResponse = zod.array(ListAgentsResponseItem)
  * @summary Re-ask every reachable host what it has.
  */
 export const CheckAgentsResponseItem = zod.object({
+  "apiKeyVar": zod.string().nullish().describe('The variable Firetower sets when an API-key account is selected.\n\nRead as a capability, never as a secret. The account dialog uses it to\noffer API-key setup only for agents that can consume one.'),
   "credentialSet": zod.boolean().describe('Whether the default account holds a credential that travels: a\nsubscription token or an API key. False when nothing is connected yet.'),
   "enabled": zod.boolean(),
   "hosts": zod.array(zod.object({
@@ -54,7 +56,7 @@ export const CheckAgentsResponseItem = zod.object({
   "mayUpdate": zod.boolean().describe('Whether the person asking may actually move this one.\n\nInstalling an agent is administrative and felt by everybody running on\nthe machine, so it is the same question `may_share` answers about a\nmachine\'s fate — see `api::hosts::to_administer`. Answered here rather\nthan in `status`, because this is the layer that knows who is asking;\nthe Updates screen settles `may_upgrade` the same way.\n\nSeparate from `behind` on purpose. A colleague\'s machine being stale is\nworth seeing; it is not yours to fix, and a button that 403s is worse\nthan no button.'),
   "version": zod.string().nullish()
 })),
-  "kind": zod.enum(['ClaudeCode', 'Codex', 'KimiCode', 'CursorAgent', 'Shell']).describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
+  "kind": zod.enum(['ClaudeCode', 'Codex', 'KimiCode', 'CursorAgent', 'MistralVibe', 'Shell']).describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
   "label": zod.string(),
   "latestVersion": zod.string().nullish().describe('The newest version its publisher is serving, when the control plane has\nmanaged to ask.\n\nOne per kind rather than per host: what is published does not depend on\nwhich machine is behind it. `None` means nobody has asked yet, or the\npublisher could not be reached — neither of which is "up to date".'),
   "mode": zod.union([zod.null(),zod.enum(['Subscription', 'ApiKey', 'NotNeeded']).describe('`None` until someone configures it.')]).optional(),
@@ -135,6 +137,7 @@ export const InstallAgentBody = zod.object({
 }).describe('What a host is being asked to fetch.')
 
 export const InstallAgentResponseItem = zod.object({
+  "apiKeyVar": zod.string().nullish().describe('The variable Firetower sets when an API-key account is selected.\n\nRead as a capability, never as a secret. The account dialog uses it to\noffer API-key setup only for agents that can consume one.'),
   "credentialSet": zod.boolean().describe('Whether the default account holds a credential that travels: a\nsubscription token or an API key. False when nothing is connected yet.'),
   "enabled": zod.boolean(),
   "hosts": zod.array(zod.object({
@@ -149,7 +152,7 @@ export const InstallAgentResponseItem = zod.object({
   "mayUpdate": zod.boolean().describe('Whether the person asking may actually move this one.\n\nInstalling an agent is administrative and felt by everybody running on\nthe machine, so it is the same question `may_share` answers about a\nmachine\'s fate — see `api::hosts::to_administer`. Answered here rather\nthan in `status`, because this is the layer that knows who is asking;\nthe Updates screen settles `may_upgrade` the same way.\n\nSeparate from `behind` on purpose. A colleague\'s machine being stale is\nworth seeing; it is not yours to fix, and a button that 403s is worse\nthan no button.'),
   "version": zod.string().nullish()
 })),
-  "kind": zod.enum(['ClaudeCode', 'Codex', 'KimiCode', 'CursorAgent', 'Shell']).describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
+  "kind": zod.enum(['ClaudeCode', 'Codex', 'KimiCode', 'CursorAgent', 'MistralVibe', 'Shell']).describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
   "label": zod.string(),
   "latestVersion": zod.string().nullish().describe('The newest version its publisher is serving, when the control plane has\nmanaged to ask.\n\nOne per kind rather than per host: what is published does not depend on\nwhich machine is behind it. `None` means nobody has asked yet, or the\npublisher could not be reached — neither of which is "up to date".'),
   "mode": zod.union([zod.null(),zod.enum(['Subscription', 'ApiKey', 'NotNeeded']).describe('`None` until someone configures it.')]).optional(),

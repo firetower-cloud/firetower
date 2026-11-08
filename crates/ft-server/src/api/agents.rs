@@ -206,6 +206,11 @@ pub struct AgentView {
     pub supported: bool,
     /// What to run locally to get a token, when this agent works that way.
     pub token_command: Option<String>,
+    /// The variable Firetower sets when an API-key account is selected.
+    ///
+    /// Read as a capability, never as a secret. The account dialog uses it to
+    /// offer API-key setup only for agents that can consume one.
+    pub api_key_var: Option<String>,
     /// Whether this one uses a worker-mediated browser sign-in, with or without a short code.
     ///
     /// Separate from `supported`: a credential is worth having before there is
@@ -403,6 +408,7 @@ pub(super) async fn list_agents(
             // What to run, and where. The command happens on your own machine
             // because that is where a browser is.
             token_command: kind.token_setup().map(|(cmd, _)| cmd.to_string()),
+            api_key_var: kind.api_key_var().map(str::to_string),
             signs_in_with_a_code: kind.signs_in_with_a_code(),
             latest_version: latest_version.clone(),
             hosts: hosts
@@ -456,10 +462,13 @@ pub(super) async fn configure_agent(
 ) -> ApiResult<StatusCode> {
     let kind = agent_from_path(&kind)?;
 
-    if !kind.needs_credential() && req.mode != AgentMode::NotNeeded {
+    if !kind.supports_auth_mode(req.mode) {
         return Err(ApiError::new(
             ErrorCode::InvalidRequest,
-            format!("{} has nothing to authenticate", kind.label()),
+            format!(
+                "{} does not support that authentication method",
+                kind.label()
+            ),
         ));
     }
 

@@ -418,7 +418,10 @@ pub fn for_agent(agent: crate::Agent, models: Vec<Choice>, efforts: Vec<Choice>)
             controls
         }
         // Nothing to change about a shell.
-        crate::Agent::KimiCode | crate::Agent::CursorAgent | crate::Agent::Shell => Vec::new(),
+        crate::Agent::KimiCode
+        | crate::Agent::CursorAgent
+        | crate::Agent::MistralVibe
+        | crate::Agent::Shell => Vec::new(),
     }
 }
 
@@ -462,6 +465,7 @@ pub fn put(agent: crate::Agent, kind: ControlKind, value: &str) -> Option<serde_
         crate::Agent::Codex
         | crate::Agent::KimiCode
         | crate::Agent::CursorAgent
+        | crate::Agent::MistralVibe
         | crate::Agent::Shell => None,
     }
 }
@@ -469,6 +473,25 @@ pub fn put(agent: crate::Agent, kind: ControlKind, value: &str) -> Option<serde_
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn acp_agents_report_their_own_controls() {
+        for agent in [
+            crate::Agent::KimiCode,
+            crate::Agent::CursorAgent,
+            crate::Agent::MistralVibe,
+        ] {
+            assert!(for_agent(agent, Vec::new(), Vec::new()).is_empty());
+            for kind in [
+                ControlKind::Model,
+                ControlKind::Mode,
+                ControlKind::Effort,
+                ControlKind::Sandbox,
+            ] {
+                assert!(put(agent, kind, "choice").is_none(), "{agent:?} {kind:?}");
+            }
+        }
+    }
 
     /// The bug this file exists for: a Codex session was offering Opus.
     #[test]

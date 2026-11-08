@@ -8782,6 +8782,7 @@
           "Codex",
           "KimiCode",
           "CursorAgent",
+          "MistralVibe",
           "Shell"
         ]
       },
@@ -8906,6 +8907,13 @@
           "hosts"
         ],
         "properties": {
+          "apiKeyVar": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The variable Firetower sets when an API-key account is selected.\n\nRead as a capability, never as a secret. The account dialog uses it to\noffer API-key setup only for agents that can consume one."
+          },
           "credentialSet": {
             "type": "boolean",
             "description": "Whether the default account holds a credential that travels: a\nsubscription token or an API key. False when nothing is connected yet."

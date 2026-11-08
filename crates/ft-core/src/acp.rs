@@ -111,6 +111,19 @@ pub enum Input {
 /// either will do, and both are checked because Kimi fills the title in before
 /// the locations arrive.
 fn skill_in(update: &Value) -> Option<String> {
+    // Vibe 3.1.0 identifies the effect in ACP metadata, independently of
+    // its human-readable tool title. Its input calls the skill `name`.
+    if update["_meta"]["tool_name"] == "skill" {
+        if let Some(name) = update["_meta"]["skill_name"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+        {
+            return Some(name.to_string());
+        }
+        if let Some(found) = crate::normalise::skill_reached_for("skill", update) {
+            return Some(found);
+        }
+    }
     if let Some(found) = crate::normalise::skill_reached_for("read", update) {
         return Some(found);
     }
@@ -490,7 +503,7 @@ impl AcpNormaliser {
             .filter_map(|option| {
                 let kind = match option["category"].as_str()? {
                     "model" => ControlKind::Model,
-                    "thought_level" => ControlKind::Effort,
+                    "thought_level" | "thinking" => ControlKind::Effort,
                     // How much the agent may do unasked. Kimi offers this
                     // alongside the other two and Firetower already has a
                     // picker for it, so dropping it hid a control that works.

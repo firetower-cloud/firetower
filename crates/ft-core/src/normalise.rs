@@ -45,8 +45,9 @@ pub fn classify(tool_name: &str) -> ItemKind {
     // Before everything, including MCP: `skills.read` would otherwise be read
     // as a file read, and a skill being loaded is not work done to the
     // workspace. Claude Code calls the tool `Skill`; Codex namespaces its two
-    // as `skills.read` and `skills.list`.
-    if name == "skill" || name.starts_with("skills.") {
+    // as `skills.read` and `skills.list`; Mistral Vibe reports its built-in as
+    // `skill` in ACP metadata.
+    if name == "skill" || name == "skill.read" || name.starts_with("skills.") {
         return ItemKind::SkillUse;
     }
     if name.starts_with("mcp__") || name.contains("mcp") {
@@ -113,16 +114,42 @@ pub fn classify(tool_name: &str) -> ItemKind {
 pub fn skill_reached_for(tool_name: &str, input: &Value) -> Option<String> {
     let at = |key: &str| input.get(key).and_then(Value::as_str);
     let name = tool_name.to_ascii_lowercase();
+    let meta = input
+        .get("_meta")
+        .or_else(|| input.get("fieldMeta"))
+        .or_else(|| input.get("field_meta"));
+    let meta_tool = meta
+        .and_then(|m| m.get("tool_name"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let is_skill_tool = matches!(name.as_str(), "skill" | "skill.read")
+        || matches!(meta_tool.as_str(), "skill" | "skill.read");
+
+    // Vibe's ACP adapter includes the skill name as metadata once it has a
+    // resolved result; this is more precise than re-reading the arguments.
+    if let Some(found) = meta
+        .and_then(|m| m.get("skill_name"))
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+    {
+        return Some(skill_from(found));
+    }
 
     // Arguments one level down, which is where ACP puts them once they have
     // finished arriving.
     for nested in ["rawInput", "arguments", "input"] {
-        if let Some(found) = input
-            .get(nested)
-            .and_then(|o| o.get("skill"))
-            .and_then(Value::as_str)
-            .filter(|s| !s.is_empty())
-        {
+        let Some(args) = input.get(nested) else {
+            continue;
+        };
+        let found = args.get("skill").or_else(|| {
+            // Mistral Vibe's v3.1.0 `SkillArgs` names this field `name`. ACP
+            // marks the effect as `tool_name: "skill"`; the outer `name`
+            // fallback below covers that shape, and this handles streamed
+            // updates where the arguments are nested in `rawInput`.
+            is_skill_tool.then(|| args.get("name")).flatten()
+        });
+        if let Some(found) = found.and_then(Value::as_str).filter(|s| !s.is_empty()) {
             return Some(skill_from(found));
         }
     }
@@ -131,8 +158,9 @@ pub fn skill_reached_for(tool_name: &str, input: &Value) -> Option<String> {
         return Some(found.trim().to_string());
     }
 
-    if name == "skill" || name.starts_with("skills.") {
-        // `package` is Codex's word for which skill a read belongs to.
+    if is_skill_tool || name.starts_with("skills.") {
+        // `package` is Codex's word for which skill a read belongs to; Vibe's
+        // skill tool uses the argument `name`.
         if let Some(found) = at("skill").or_else(|| at("package")).or_else(|| at("name")) {
             return Some(skill_from(found));
         }
@@ -261,7 +289,9 @@ impl Reader {
                 reader.sent_model_list(crate::codex::MODEL_LIST_ID);
                 Reader::Codex(Box::new(reader))
             }
-            crate::Agent::KimiCode | crate::Agent::CursorAgent => Reader::Acp(Box::default()),
+            crate::Agent::KimiCode | crate::Agent::CursorAgent | crate::Agent::MistralVibe => {
+                Reader::Acp(Box::default())
+            }
             _ => Reader::Claude(Box::new(ClaudeNormaliser::new())),
         }
     }
@@ -1506,10 +1536,30 @@ mod skill_tests {
 
         // Codex names its two `skills.read` and `skills.list`.
         assert_eq!(classify("skills.read"), ItemKind::SkillUse);
+        assert_eq!(classify("skill.read"), ItemKind::SkillUse);
         assert_eq!(
             skill_reached_for(
                 "skills.read",
                 &serde_json::json!({"package": "rust-review"})
+            ),
+            Some("rust-review".into())
+        );
+
+        // Vibe 3.1.0 source fixture: `SkillArgs.name` identifies the skill,
+        // and its ACP adapter normalizes `skill.read` to the tool name
+        // `skill`. This proves the adapter contract only; it is not a live
+        // Mistral model run.
+        assert_eq!(
+            skill_reached_for("skill", &serde_json::json!({"name": "frontend-design"})),
+            Some("frontend-design".into())
+        );
+        assert_eq!(
+            skill_reached_for(
+                "read",
+                &serde_json::json!({
+                    "_meta": {"tool_name": "skill", "skill_name": "rust-review"},
+                    "rawInput": {"name": "rust-review"}
+                })
             ),
             Some("rust-review".into())
         );
@@ -1618,6 +1668,14 @@ mod skill_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mistral_vibe_sessions_use_the_acp_reader() {
+        assert!(matches!(
+            Reader::for_agent(crate::Agent::MistralVibe),
+            Reader::Acp(_)
+        ));
+    }
 
     fn usage_of(lines: &[&str]) -> Usage {
         let mut reader = ClaudeNormaliser::new();

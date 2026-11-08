@@ -3,6 +3,54 @@ use ft_core::turn::{StreamKind, TurnEvent, TurnStatus};
 use serde_json::json;
 
 #[test]
+fn mistral_skill_metadata_keeps_the_name_after_completion() {
+    use ft_core::turn::ItemKind;
+    let mut reader = AcpNormaliser::default();
+    reader.push(&json!({"acp":"Ready","session":"vibe-session"}).to_string());
+    reader.push(&json!({"acp":"Sent","message":{"id":4,"method":"session/prompt"}}).to_string());
+    let mut kinds = Vec::new();
+    let mut named = Vec::new();
+    for update in [
+        json!({"sessionUpdate":"tool_call","toolCallId":"effect-skill","kind":"read","title":"Load the review instructions","status":"in_progress","rawInput":{"name":"review"},"_meta":{"tool_name":"skill","skill_name":"review"}}),
+        json!({"sessionUpdate":"tool_call_update","toolCallId":"effect-skill","status":"completed"}),
+    ] {
+        for event in reader.push(&json!({"acp":"Received","replay":false,"message":{"method":"session/update","params":{"sessionId":"vibe-session","update":update}}}).to_string()) {
+            match event {
+                TurnEvent::ItemStarted {kind,..} => kinds.push(kind),
+                TurnEvent::ItemUpdated {data,..} => named.push(data.get("skill").cloned()),
+                _ => (),
+            }
+        }
+    }
+    assert_eq!(kinds, [ItemKind::SkillUse]);
+    assert_eq!(named, [Some(json!("review")), Some(json!("review"))]);
+}
+
+#[test]
+fn mistral_thinking_category_is_a_configurable_effort_control() {
+    use ft_core::controls::ControlKind;
+    let mut reader = AcpNormaliser::default();
+    for record in [
+        Record::Sent {
+            message: json!({"id":3,"method":"session/new"}),
+        },
+        Record::Received {
+            message: json!({"id":3,"result":{"sessionId":"vibe-session","configOptions":[
+                {"id":"thinking","name":"Thinking","category":"thinking","type":"select","currentValue":"off","options":[{"value":"off","name":"Off"},{"value":"high","name":"High"}]}
+            ]}}),
+            replay: false,
+        },
+    ] {
+        reader.push(&serde_json::to_string(&record).unwrap());
+    }
+    assert_eq!(reader.controls()[0].kind, ControlKind::Effort);
+    assert_eq!(reader.controls()[0].current.as_deref(), Some("off"));
+    let request = reader.configure(ControlKind::Effort, "high").unwrap();
+    assert_eq!(request["config_id"], "thinking");
+    assert_eq!(request["value"], "high");
+}
+
+#[test]
 fn session_configuration_is_discovered_on_load_and_replaced_while_idle() {
     use ft_core::controls::ControlKind;
     let mut reader = AcpNormaliser::default();
