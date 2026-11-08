@@ -52,31 +52,79 @@ Object.assign(S, { tab:"inbox", era:"home", home:"typing" });   // then re-rende
 
 ### The bands are the design, not a breakpoint
 
-Three panel behaviours. Each threshold is the width at which the previous one
-would start stealing from the thing being read:
+**Corrected after the build found my error. The two thresholds do not ask the
+same question, and that is the whole point** — putting both on one number is
+what makes `820` wrong, and putting both on the laid-out width flips 669 into
+`push` by five points, contradicting the rule the band exists to serve.
 
-- **Push**, under 600 — the panel gets its own screen.
-- **Float**, from 600 — over the top; the conversation keeps its full width
-  underneath, and the scrim dismisses it.
-- **Dock**, from 914 — beside.
+The prototype computes it (~line 1011). The constants:
 
-Three numbers that are load-bearing, and each is a trap:
+```js
+const COLUMN = 640;   // rows, lists, controls — things you scan
+const READING = 560;  // prose — things you read
+const RAIL = 74;      // the system's trailing tab rail on the inner display
+const DOCK_MIN = 280; // under this a column is a strip, not a panel
 
-1. **669 must not dock.** It is wider than a phone, so it invites a docked
-   panel — and docking there leaves the conversation 329pt, narrower than the
-   390 phone this design came from. 255pt once the system tab rail is counted.
-   The whole band rule exists to stop that one move.
-2. **914, not 820.** 914 is the width at which a column can dock without taking
-   the conversation below its measure. The `820` written in the documents is
-   that question answered against the window instead, and it is ~90pt early.
-   Nothing ships between 820 and 914 today, so it is wrong rather than harmful —
-   but it is the number somebody will reach for. Use **914**.
-3. **951 is the only pose with room for two things**, and it gets them: a
-   340pt column beside a conversation that still clears its measure. The column
-   holds the inbox.
+const railOn = p => !!p.regular;
+function contentW(p) { return railOn(p) && S.inset ? p.w - RAIL : p.w; }
 
-Nothing exists between 466 and 669, so the push/float line at 600 has never
-been tested by a real screen — the float band has to be right first time.
+function band(p) {
+  if (w < 600) return "push";                           // WINDOW width
+  return cw >= READING + DOCK_MIN ? "dock" : "float";   // CONTENT width
+}
+function panelW(cw) {
+  const left = cw - READING;
+  if (left < DOCK_MIN) return 0;
+  return Math.min(340, left);
+}
+```
+
+- **Whether a panel is worth offering at all** is a question about the
+  **device**: a phone has no room for one at any width, and the front panel is
+  a phone. That is the **window**, and **600** is the right number for it.
+- **Whether a panel may dock** is a question about the **box the conversation
+  is laid out in**: it may dock only if the conversation keeps `READING` (560)
+  and the column clears `DOCK_MIN` (280). That is **840 of laid-out width** —
+  a window of **914 only on the Duo**, once its 74pt rail is taken off.
+
+**914 is not a universal threshold. 840 of content width is.** Conflating them
+puts the dock line at 820, where docking leaves the conversation 466 — the
+front panel's width, on the inner display.
+
+### What every pose actually resolves to
+
+| Pose | Window | Rail insets? | Content | Band | Column |
+|---|---|---|---|---|---|
+| `iphone` | 390 | no | 390 | **push** | — |
+| `android` | 412 | no | 412 | **push** | — |
+| `front` | 466 | no | 466 | **push** | — |
+| `innerp` | 669 | yes, −74 | 595 | **float** | — |
+| `innerl` | 951 | yes, −74 | 877 | **dock** | **317** |
+| `iphone` landscape | 844 | no | 844 | **dock** | **284** |
+| `android` landscape | 915 | no | 915 | **dock** | **340** |
+
+Three consequences, each a trap:
+
+1. **669 floats and must never dock.** Window 669 ≥ 600 so it is not pushed;
+   content 595 < 840 so it may not dock. Docking there would leave the
+   conversation 329 — narrower than the 390 phone this design came from, 255
+   once the rail is counted. The band exists to stop that one move.
+2. **The column at 951 is 317, not 340.** 877 − 560 = 317. The drawing's prose
+   says "a 340-point column", which is the figure with the rail *overlaying*
+   rather than insetting. §8's default is that it **insets**, so **317 is the
+   number to build** — and 340 is only correct if a device says the rail
+   overlays. One log line settles it.
+3. **Unlocking `orientation` makes both phone landscapes dock.** Necessary —
+   without it the dock band is unreachable on any device — but it exposes two
+   poses nobody drew: 844 × 390 and 915 × 412. The band rule already defines
+   the layout, so do not invent one. The unmeasured risk is the **height**: a
+   docked column beside a conversation in 390pt with the keyboard up. Report
+   what breaks; do not redesign it.
+
+**`[id].tsx` is wrong today** and the prototype says so: it writes
+`Math.min(340, Math.max(280, width - 400))` — the same idea with 400 standing
+in for `READING` and no floor test, so it returns 280 at widths where 280 does
+not fit. Replace it with `panelW`.
 
 ## 3. The 44 states
 
@@ -288,10 +336,12 @@ A screenshot verifies layout and never a value. Assert on resolved style:
    caught; a regression here is invisible to the eye and fatal to the design.
 2. **No hard-coded colour.** Every colour resolves to a token that exists in
    `web/app/globals.css`. `just gen-check` and `just check-style` pass.
-3. **The band thresholds.** At 599 the panel pushes; at 600 it floats; at 913
-   it floats; at 914 it docks. Assert on the resolved layout, not a screenshot.
-   **At 669 it must not dock** — assert the conversation's computed width is
-   never below 390 on any pose.
+3. **The band thresholds, per the table in §2.** Assert on resolved layout,
+   not a screenshot. Window 599 pushes, 600 does not. Content 839 floats, 840
+   docks. **669 floats and must not dock.** `panelW` returns 317 at `innerl`,
+   284 at 844, 340 at 915, and **0** — never 280 — where 280 would not fit.
+   Assert the conversation's computed width never drops below `READING` (560)
+   in any docked pose, and never below 390 in any pose at all.
 4. **The composer is pinned.** Its height does not reflow across poses; it sits
    outside the scroller. At 390 with the keyboard up there are 256pt above it,
    of which the greeting, the "Agents waiting for you" heading and the chip row
