@@ -36,7 +36,7 @@
  */
 import { useCallback, useMemo, useState } from "react";
 import { Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { BLEED, useEdges } from "~/ui/edges";
 import Animated from "react-native-reanimated";
 import { GestureDetector } from "react-native-gesture-handler";
 import { router } from "expo-router";
@@ -132,7 +132,7 @@ function Heading({ text, all }: { text: string; all?: () => void }) {
 
 export default function Home() {
   const { color } = useTheme();
-  const insets = useSafeAreaInsets();
+  const edges = useEdges({ gutter: BLEED });
   const pose = usePose();
   const here = useServer();
   const cache = useQueryClient();
@@ -242,7 +242,7 @@ export default function Home() {
       <View
         className="flex-1 bg-ground"
         onLayout={pose.onLayout}
-        style={{ paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }}
+        style={edges}
       >
         {header}
         <View className="flex-1 items-center justify-center gap-2.5 px-9">
@@ -448,7 +448,7 @@ export default function Home() {
       <View
         className="flex-1 bg-ground"
         onLayout={pose.onLayout}
-        style={{ paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }}
+        style={edges}
       >
         {header}
         <View className="min-h-0 flex-1 flex-row">
@@ -486,7 +486,7 @@ export default function Home() {
     <View
       className="flex-1 bg-ground"
       onLayout={pose.onLayout}
-      style={{ paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }}
+      style={edges}
     >
       {header}
       {scroller}

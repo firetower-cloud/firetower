@@ -36,6 +36,7 @@
 import { useMemo, useState } from "react";
 import { Pressable, RefreshControl, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { BLEED, useEdges } from "~/ui/edges";
 import { KeyboardStickyView } from "react-native-keyboard-controller";
 import { router, useLocalSearchParams } from "expo-router";
 import * as Haptics from "expo-haptics";
@@ -55,6 +56,7 @@ import { useTheme } from "~/design/theme";
 export default function Repos() {
   const { color } = useTheme();
   const insets = useSafeAreaInsets();
+  const edges = useEdges({ gutter: BLEED });
   const cache = useQueryClient();
   const { pick } = useLocalSearchParams<{ pick?: string }>();
 
@@ -153,7 +155,7 @@ export default function Repos() {
     setChosen((was) => (was.includes(slug) ? was.filter((s) => s !== slug) : [...was, slug]));
 
   return (
-    <View className="flex-1 bg-ground" style={{ paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }}>
+    <View className="flex-1 bg-ground" style={edges}>
       <View className="flex-row items-center gap-1 pb-2 pl-1">
         <Pressable
           onPress={() => router.back()}

@@ -14,14 +14,14 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { router } from "expo-router";
 import { View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { LEDE_GUTTER, useEdges } from "~/ui/edges";
 import { useServer } from "~/native/current";
 import { ReplacePassword } from "~/ui/ReplacePassword";
 import { useTheme } from "~/design/theme";
 
 export default function Locked() {
   const { color } = useTheme();
-  const insets = useSafeAreaInsets();
+  const edges = useEdges({ gutter: LEDE_GUTTER, top: 24, bottom: 24 });
   const cache = useQueryClient();
   const here = useServer();
   if (!here) return null;
@@ -32,11 +32,7 @@ export default function Locked() {
         flex: 1,
         backgroundColor: color.ground,
         justifyContent: "center",
-        paddingHorizontal: 24,
-        paddingTop: insets.top + 24,
-        paddingBottom: insets.bottom + 24,
-        paddingLeft: insets.left,
-        paddingRight: insets.right,
+        ...edges,
       }}
     >
       <ReplacePassword

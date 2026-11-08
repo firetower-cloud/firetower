@@ -14,6 +14,7 @@
 import { useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { BLEED, useEdges } from "~/ui/edges";
 import { router, useLocalSearchParams } from "expo-router";
 import { ChevronLeft } from "lucide-react-native";
 import { useDiff, useSession } from "~/data";
@@ -34,6 +35,7 @@ const TABS: [TabId, string][] = [
 export default function Repo() {
   const { color } = useTheme();
   const insets = useSafeAreaInsets();
+  const edges = useEdges({ gutter: BLEED });
   const { id, tab: want } = useLocalSearchParams<{ id: string; tab?: TabId }>();
   const [tab, setTab] = useState<TabId>(want ?? "diff");
 
@@ -57,7 +59,7 @@ export default function Repo() {
   }
 
   return (
-    <View className="flex-1 bg-ground" style={{ paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }}>
+    <View className="flex-1 bg-ground" style={edges}>
       <View className="flex-row items-center gap-1 pb-2 pl-1">
         <Pressable
           onPress={() => router.back()}

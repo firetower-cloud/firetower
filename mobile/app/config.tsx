@@ -32,7 +32,7 @@
  * A hard-coded row that opens nothing is a picture of a control.
  */
 import { Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { BLEED, useEdges } from "~/ui/edges";
 import { router } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { ChevronRight, FolderGit2, Plus } from "lucide-react-native";
@@ -44,7 +44,7 @@ import { useTheme } from "~/design/theme";
 
 export default function Config() {
   const { color } = useTheme();
-  const insets = useSafeAreaInsets();
+  const edges = useEdges({ gutter: BLEED, top: 8, bottom: 24 });
   const cache = useQueryClient();
   const here = useServer();
   const repos = useRepos();
@@ -52,12 +52,7 @@ export default function Config() {
   return (
     <ScrollView
       className="flex-1 bg-ground"
-      contentContainerStyle={{
-        paddingTop: insets.top + 8,
-        paddingBottom: insets.bottom + 24,
-        paddingLeft: insets.left,
-        paddingRight: insets.right,
-      }}
+      contentContainerStyle={edges}
       refreshControl={
         <RefreshControl
           refreshing={false}

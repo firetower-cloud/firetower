@@ -21,7 +21,7 @@
  */
 import { useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { BLEED, useEdges } from "~/ui/edges";
 import Animated from "react-native-reanimated";
 import { GestureDetector } from "react-native-gesture-handler";
 import { router } from "expo-router";
@@ -80,7 +80,7 @@ function Row({ place, onPeek }: { place: Workspace; onPeek: () => void }) {
 
 export default function Workspaces() {
   const { color } = useTheme();
-  const insets = useSafeAreaInsets();
+  const edges = useEdges({ gutter: BLEED });
   const { data: sessions, loading } = useSessions();
   const [peeking, setPeeking] = useState<string | null>(null);
 
@@ -136,7 +136,7 @@ export default function Workspaces() {
   return (
     <View
       className="flex-1 bg-ground"
-      style={{ paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }}
+      style={edges}
     >
       <View className="flex-row items-center gap-0.5 pb-1 pl-1" style={COLUMN}>
         <Pressable

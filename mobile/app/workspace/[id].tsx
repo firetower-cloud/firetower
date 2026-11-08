@@ -16,6 +16,7 @@ import type { ScrollViewInstance } from "react-native";
 import Animated, { useAnimatedStyle } from "react-native-reanimated";
 import { useReanimatedKeyboardAnimation } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { BLEED, useEdges } from "~/ui/edges";
 import { router, useLocalSearchParams } from "expo-router";
 import { ChevronLeft, Eye, MoreHorizontal, PanelRight, TriangleAlert } from "lucide-react-native";
 import { delegating, interruptible, useConversation } from "~/api/conversation";
@@ -88,6 +89,7 @@ export default function WorkspaceScreen() {
 function Conversation({ place }: { place: Workspace }) {
   const { color } = useTheme();
   const insets = useSafeAreaInsets();
+  const edges = useEdges({ gutter: BLEED });
   const scroller = useRef<ScrollViewInstance>(null);
   const [atEnd, setAtEnd] = useState(true);
 
@@ -287,7 +289,7 @@ function Conversation({ place }: { place: Workspace }) {
     <View
       className="flex-1 bg-ground"
       onLayout={pose.onLayout}
-      style={{ paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }}
+      style={edges}
     >
       <View className="flex-row items-center gap-1 border-b border-line-soft px-1 pb-2.5 pt-1">
         <Pressable onPress={() => router.back()} className="h-10 w-10 items-center justify-center" hitSlop={8}>

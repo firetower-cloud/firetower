@@ -22,6 +22,7 @@
 import { useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { BLEED, useEdges } from "~/ui/edges";
 import { router } from "expo-router";
 import { ChevronLeft } from "lucide-react-native";
 import { useListArtifacts } from "~/api/generated/artifacts/artifacts";
@@ -43,6 +44,7 @@ export default function Artifacts() {
   const { color } = useTheme();
   const pose = usePose();
   const insets = useSafeAreaInsets();
+  const edges = useEdges({ gutter: BLEED });
   const [scope, setScope] = useState<Scope>("all");
   const { data: everything = [], isPending, error } = useListArtifacts();
 
@@ -58,7 +60,7 @@ export default function Artifacts() {
     <View
       className="flex-1 bg-ground"
       onLayout={pose.onLayout}
-      style={{ paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }}
+      style={edges}
     >
       <View className="flex-row items-center gap-1 pb-2 pl-1">
         <Pressable onPress={() => router.back()} className="h-10 w-10 items-center justify-center" hitSlop={8}>

@@ -22,7 +22,7 @@
 import { useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
 import { WebView as Untyped } from "react-native-webview";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { BLEED, useEdges } from "~/ui/edges";
 import { router, useLocalSearchParams } from "expo-router";
 import { ChevronLeft, MoreHorizontal } from "lucide-react-native";
 import { useListArtifacts } from "~/api/generated/artifacts/artifacts";
@@ -53,7 +53,7 @@ const WebView = Untyped as unknown as React.ComponentType<Webish>;
 export default function ArtifactScreen() {
   const { color } = useTheme();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const insets = useSafeAreaInsets();
+  const edges = useEdges({ gutter: BLEED });
   const [menu, setMenu] = useState(false);
   /* The bytes failed, as opposed to the row being gone. */
   const [broken, setBroken] = useState<number | null>(null);
@@ -72,7 +72,7 @@ export default function ArtifactScreen() {
   return (
     <View
       className="flex-1 bg-ground"
-      style={{ paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }}
+      style={edges}
     >
       <View className="flex-row items-center gap-1 border-b border-line-soft pb-2 pl-1">
         <Pressable onPress={() => router.back()} className="h-10 w-10 items-center justify-center" hitSlop={8}>

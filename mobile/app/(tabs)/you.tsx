@@ -13,7 +13,7 @@
 import { useSyncExternalStore } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { router } from "expo-router";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { BLEED, useEdges } from "~/ui/edges";
 import { Check, ChevronRight, Plus, Shapes } from "lucide-react-native";
 import { forget, onServers, servers, type Connected } from "~/native/servers";
 import { choose, useServer } from "~/native/current";
@@ -25,7 +25,7 @@ import { useRepos } from "~/data";
 
 export default function You() {
   const { color } = useTheme();
-  const insets = useSafeAreaInsets();
+  const edges = useEdges({ gutter: BLEED, top: 8, bottom: 24 });
   /* The registry, not a fixture: this list is the one piece of state that is
      genuinely the phone's rather than any server's. */
   const known = useSyncExternalStore(onServers, servers, servers);
@@ -39,12 +39,7 @@ export default function You() {
   return (
     <ScrollView
       className="flex-1 bg-ground"
-      contentContainerStyle={{
-        paddingTop: insets.top + 8,
-        paddingBottom: insets.bottom + 24,
-        paddingLeft: insets.left,
-        paddingRight: insets.right,
-      }}
+      contentContainerStyle={edges}
     >
       <Text className="px-4 font-semibold text-display text-bone">You</Text>
 

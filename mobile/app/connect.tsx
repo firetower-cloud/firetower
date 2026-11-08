@@ -25,7 +25,7 @@
  */
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, Text, TextInput, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { LEDE_GUTTER, useEdges } from "~/ui/edges";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { router } from "expo-router";
 import { ArrowRight, CircleSlash2, Lock, ShieldOff } from "lucide-react-native";
@@ -50,7 +50,7 @@ type Stage =
 
 export default function Connect() {
   const { color } = useTheme();
-  const insets = useSafeAreaInsets();
+  const edges = useEdges({ gutter: LEDE_GUTTER, top: 24, bottom: 24 });
   const [typed, setTyped] = useState("");
   const [stage, setStage] = useState<Stage>({ at: "where" });
 
@@ -83,11 +83,7 @@ export default function Connect() {
       contentContainerStyle={{
         flexGrow: 1,
         justifyContent: "center",
-        paddingHorizontal: 24,
-        paddingTop: insets.top + 24,
-        paddingBottom: insets.bottom + 24,
-        paddingLeft: insets.left,
-        paddingRight: insets.right,
+        ...edges,
         ...READING,
       }}
       keyboardShouldPersistTaps="handled"

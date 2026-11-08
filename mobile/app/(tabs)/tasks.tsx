@@ -16,6 +16,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Pressable, RefreshControl, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { BLEED, useEdges } from "~/ui/edges";
 import { router } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, ArrowRight, CircleDot, GitPullRequest, Ticket, User } from "lucide-react-native";
@@ -46,6 +47,7 @@ const STATES: [TaskState, string][] = [
 export default function Tasks() {
   const { color } = useTheme();
   const insets = useSafeAreaInsets();
+  const edges = useEdges({ gutter: BLEED });
   const cache = useQueryClient();
 
   const { data: trackers, loading: findingTrackers } = useTrackers();
@@ -100,7 +102,7 @@ export default function Tasks() {
   const count = feed.total ?? feed.data.length;
 
   return (
-    <View className="flex-1 bg-ground" style={{ paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }}>
+    <View className="flex-1 bg-ground" style={edges}>
       <View className="px-4 pb-3 pt-2">
         <Text className="font-semibold text-display text-bone">Tasks</Text>
         <Text className="mt-0.5 font-sans text-ui text-dim">
