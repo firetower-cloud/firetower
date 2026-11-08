@@ -186,7 +186,10 @@ export default function Home() {
   ];
 
   const header = (
-    <View className="flex-row items-center px-2 pb-2 pt-0.5" style={COLUMN}>
+    /* `z-index: 20` in the drawing, the same rung as the composer:
+       both are chrome the content scrolls under, and both have to sit
+       above it to do that. */
+    <View className="flex-row items-center px-2 pb-2 pt-0.5" style={[COLUMN, { zIndex: 20 }]}>
       <ServerChip
         org={here?.org ?? "—"}
         reach={error ? "unreachable" : "live"}

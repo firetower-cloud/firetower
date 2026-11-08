@@ -551,6 +551,10 @@ function Conversation({ place }: { place: Workspace }) {
             className="absolute bottom-0 right-0 top-0 border-l border-line bg-float"
             style={{
               width: panel,
+              /* 46 in the drawing — a floated panel is a popover by the test
+                 that picks between the two backdrops: the conversation stays
+                 on screen behind it and is exactly what you read it against. */
+              zIndex: 46,
               /* A shadow is a light-theme device: below ~1% luminance there
                  is nothing under a surface to cast into. It is kept because
                  where it overlaps something lighter it does register, but

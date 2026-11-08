@@ -19,13 +19,14 @@
  * the mapping is a design question rather than a wiring one. A composer that
  * collects a note and drops it is worse than no composer, so there is none.
  */
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
 import { WebView as Untyped } from "react-native-webview";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router, useLocalSearchParams } from "expo-router";
-import { ChevronLeft } from "lucide-react-native";
+import { ChevronLeft, MoreHorizontal } from "lucide-react-native";
 import { useListArtifacts } from "~/api/generated/artifacts/artifacts";
+import { ArtifactMenu } from "~/ui/ArtifactMenu";
 import { Waiting } from "~/ui/Waiting";
 import { useTheme } from "~/design/theme";
 
@@ -49,6 +50,7 @@ export default function ArtifactScreen() {
   const { color } = useTheme();
   const { id } = useLocalSearchParams<{ id: string }>();
   const insets = useSafeAreaInsets();
+  const [menu, setMenu] = useState(false);
   const { data: artifacts, isPending } = useListArtifacts();
 
   const artifact = useMemo(() => (artifacts ?? []).find((a) => a.id === id) ?? null, [artifacts, id]);
@@ -81,9 +83,20 @@ export default function ArtifactScreen() {
           ) : null}
         </View>
         {artifact ? (
-          <View className="mr-2 rounded-sm bg-raise px-2 py-1">
+          <View className="mr-1 rounded-sm bg-raise px-2 py-1">
             <Text className="font-mono text-micro text-dim">v{artifact.version}</Text>
           </View>
+        ) : null}
+        {artifact ? (
+          <Pressable
+            testID="artifact-menu"
+            accessibilityLabel="More"
+            onPress={() => setMenu(true)}
+            className="h-11 w-11 items-center justify-center"
+            hitSlop={8}
+          >
+            <MoreHorizontal color={color.dim} size={21} />
+          </Pressable>
         ) : null}
       </View>
 
@@ -111,6 +124,23 @@ export default function ArtifactScreen() {
           )}
         />
       )}
+      {menu && artifact ? (
+        <ArtifactMenu
+          title={artifact.title}
+          path={artifact.path}
+          version={artifact.version}
+          address={artifact.url}
+          onClose={() => setMenu(false)}
+          onWorkspace={
+            artifact.fromSessionId
+              ? () => {
+                  setMenu(false);
+                  router.push(`/workspace/${artifact.fromSessionId}`);
+                }
+              : undefined
+          }
+        />
+      ) : null}
     </View>
   );
 }

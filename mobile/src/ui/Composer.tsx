@@ -395,7 +395,12 @@ export function Composer({
 
   return (
     <KeyboardStickyView offset={{ closed: 0, opened: 0 }}>
-      <Animated.View style={[{ paddingTop: 6 }, skirt]}>
+      {/* `z-index: 20`, as the drawing gives it. The system's floating tab
+          bar declares a container the size of the whole screen on the Duo,
+          and a composer with no stacking order of its own ends up behind it:
+          it draws correctly and then cannot be reached, by a finger or by
+          VoiceOver. The same line is on the home's `StartBox`. */}
+      <Animated.View style={[{ paddingTop: 6, zIndex: 20 }, skirt]}>
         {above}
 
         {more ? <AttachMenu onPick={carry} onClose={() => setMore(false)} /> : null}

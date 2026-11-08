@@ -104,7 +104,19 @@ export function StartBox({
     /* `flex:none` under a `flex:1` scroller is the whole mechanism: the
        sections take what is left and the box does not move. It is pinned, so
        it is outside the scroller and its height does not reflow at any pose. */
-    <View className="pb-1.5" style={{ flexShrink: 0 }}>
+    <View
+      className="pb-1.5"
+      style={{
+        flexShrink: 0,
+        /* The drawing gives the composer `z-index: 20`, and on the Duo's
+           front panel it is load-bearing rather than cosmetic: the system's
+           floating tab bar declares a container the full size of the screen,
+           and without a stacking order of its own the composer and its shelf
+           fall behind it — they draw correctly and then cannot be reached, by
+           a finger or by VoiceOver. */
+        zIndex: 20,
+      }}
+    >
       <Shelf chips={chips} />
 
       <View

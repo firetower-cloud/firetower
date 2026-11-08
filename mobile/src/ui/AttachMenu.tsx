@@ -107,6 +107,10 @@ export function AttachMenu({
           bottom: 0,
           /* Far enough up to catch a press anywhere on the conversation. */
           top: -900,
+          /* The drawing's own stacking order: a catcher at 45, the popover it
+             belongs to at 46. Both have to clear the composer's 20 or the
+             panel opens behind the control that opened it. */
+          zIndex: 45,
           /* **A catcher, not a scrim**, and it was a scrim — a hand-written
              `rgba(0,0,0,0.5)`, the one colour in `mobile/src` that came from
              nowhere. The test that picks between the two is whether the thing
@@ -120,7 +124,7 @@ export function AttachMenu({
       <Animated.View
         entering={open}
         exiting={shut}
-        style={{ transformOrigin: "bottom left" }}
+        style={{ transformOrigin: "bottom left", zIndex: 46 }}
         className="mb-2 ml-3 w-64 overflow-hidden rounded-3xl border border-line bg-float py-2"
       >
         {WAYS.map(({ id, label, hint, icon: Icon, run }) => (
