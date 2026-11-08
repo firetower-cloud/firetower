@@ -103,6 +103,16 @@ Warnings, never refusals:
 - Unknown frontmatter — say which agent reads it.
 - Name collides with a skill you can already reach, or with one the agent ships
   (`/code-review`, `/doctor`, `imagegen`, `plan`, `skill-creator`).
+
+  A warning, so the library really does hold two — `skills_one_name_per_owner`
+  only stops *one* person owning both, and two people may each own a `dataviz`.
+  **At delivery it is a refusal**, because the folder on a worker is the name:
+  `Skills::set_for_session` sends neither of a colliding pair rather than
+  letting one win carrying the other's `scripts/`, the profile editor names the
+  pair where the count is shown, and `POST /roles` and
+  `PUT /sessions/{id}/skills` refuse a set containing one. Whether *importing*
+  a colliding name should stop being a warning is a product question this does
+  not answer.
 - The risk scan: `` !`cmd` ``, `allowed-tools`, `hooks`, `scripts/`. See §8.
 
 ---

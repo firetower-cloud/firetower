@@ -2054,7 +2054,11 @@ impl Skills {
     /// said, so the switch on the Defaults screen could not move and had to be
     /// locked to stop it lying. A default that cannot be changed is not a
     /// default.
-    pub async fn defaults_for(&self, person: &str, repos: &[ft_core::RepoId]) -> Result<Vec<String>> {
+    pub async fn defaults_for(
+        &self,
+        person: &str,
+        repos: &[ft_core::RepoId],
+    ) -> Result<Vec<String>> {
         let ids: Vec<&str> = repos.iter().map(ft_core::RepoId::as_str).collect();
         sqlx::query_scalar(
             "SELECT DISTINCT sd.skill_id FROM skill_defaults sd \
@@ -2104,36 +2108,110 @@ impl Skills {
 
     pub async fn bundles_for_session(&self, session: &str) -> Result<Vec<ft_proto::SkillBundle>> {
         let rows = sqlx::query(
-            "SELECT k.name, f.path, f.executable, b.bytes \
+            "SELECT p.skill_id, k.name, f.path, f.executable, b.bytes \
                FROM skill_pins p \
                JOIN skills k ON k.id = p.skill_id \
                JOIN skill_files f ON f.version_id = p.version_id \
                JOIN blobs b ON b.hash = f.hash \
               WHERE p.session_id = $1 \
-              ORDER BY k.name, f.path",
+              ORDER BY k.name, p.skill_id, f.path",
         )
         .bind(session)
         .fetch_all(&self.pool)
         .await
         .context("reading a session's skill bundles")?;
 
+        // Grouped on the **skill**, not on its name. Keyed on the name, two
+        // skills called `dataviz` collapsed into one bundle holding two
+        // `SKILL.md` entries at one path, and the worker — writing in order —
+        // left the second one's body beside the first one's `scripts/`. A pin
+        // is one skill, so a bundle is one skill, whatever it is called;
+        // `set_for_session` is where a pair that cannot both be delivered is
+        // refused.
         let mut out: Vec<ft_proto::SkillBundle> = Vec::new();
+        let mut last: Option<String> = None;
         for row in rows {
-            let name: String = row.get("name");
+            let id: String = row.get("skill_id");
             let file = ft_proto::SkillFile {
                 path: row.get("path"),
                 contents: ft_proto::encode(&row.get::<Vec<u8>, _>("bytes")),
                 executable: row.get("executable"),
             };
             match out.last_mut() {
-                Some(bundle) if bundle.name == name => bundle.files.push(file),
-                _ => out.push(ft_proto::SkillBundle {
-                    name,
-                    files: vec![file],
-                }),
+                Some(bundle) if last.as_deref() == Some(id.as_str()) => bundle.files.push(file),
+                _ => {
+                    last = Some(id);
+                    out.push(ft_proto::SkillBundle {
+                        name: row.get("name"),
+                        files: vec![file],
+                    });
+                }
             }
         }
         Ok(out)
+    }
+
+    /// Of what was handed over, what can actually become a folder on a
+    /// worker's disk.
+    ///
+    /// **Two skills of one name cannot both.** The folder *is* the name —
+    /// that is what the agent answers to and what the standard calls a bundle
+    /// — and a name collision is a warning at import and never a refusal
+    /// (`docs/skills.md` §1), so two people may each own a `dataviz` and
+    /// nothing stops both reaching one session. Both did: `bundles_for_session`
+    /// grouped on the name, so they merged into one folder with two `SKILL.md`
+    /// entries at one path, and the worker wrote them in order — the survivor
+    /// carrying the loser's `scripts/`.
+    ///
+    /// **Neither is sent, rather than one of them picked.** A rule nobody
+    /// wrote down deciding whose executable your agent runs under your
+    /// credentials is the failure here, not the missing folder; and a profile
+    /// is shareable, so the second one may be a tick a colleague made. So the
+    /// pair is dropped and said out loud: the editor names it where the count
+    /// is shown, `api::skills::choose_skills` refuses a selection outright,
+    /// and this logs it for the paths with nobody to tell.
+    ///
+    /// Filtered here rather than in each caller for the reason the visibility
+    /// check is: this is the chokepoint, and a resolver is not its only caller.
+    async fn deliverable(&self, person: &str, skills: &[String]) -> Result<Vec<String>> {
+        let sql = format!(
+            "SELECT k.id, k.name {FROM} WHERE k.id = ANY($1) AND {visible}",
+            visible = filed_where("k", 2, Level::Viewer),
+        );
+        let named: Vec<(String, String)> = sqlx::query(&sql)
+            .bind(skills)
+            .bind(person)
+            .fetch_all(&self.pool)
+            .await
+            .context("reading the names of the skills a session was handed")?
+            .into_iter()
+            .map(|r| (r.get("id"), r.get("name")))
+            .collect();
+
+        let mut by_name: std::collections::BTreeMap<&str, Vec<&str>> = Default::default();
+        for (id, name) in &named {
+            by_name.entry(name.as_str()).or_default().push(id.as_str());
+        }
+        let mut clashing: std::collections::HashSet<&str> = Default::default();
+        for (name, ids) in by_name.iter().filter(|(_, ids)| ids.len() > 1) {
+            // Logged, because the paths that resolve a set at spawn have
+            // nobody to answer to. The ids, not just the name: which two is
+            // the whole question, and under a shared profile one of them may
+            // not be this person's.
+            tracing::warn!(
+                "{} skills are called {name} ({}), so none of them is sent: a skill's folder \
+                 on a worker is its name, and the agent answers to it",
+                ids.len(),
+                ids.join(", "),
+            );
+            clashing.extend(ids.iter().copied());
+        }
+
+        Ok(skills
+            .iter()
+            .filter(|id| !clashing.contains(id.as_str()))
+            .cloned()
+            .collect())
     }
 
     /// Replace what a session is reading with exactly this set.
@@ -2167,6 +2245,7 @@ impl Skills {
         person: &str,
         skills: &[String],
     ) -> Result<()> {
+        let skills = &self.deliverable(person, skills).await?;
         let mut tx = self.pool.begin().await?;
         sqlx::query("DELETE FROM skill_pins WHERE session_id = $1 AND NOT (skill_id = ANY($2))")
             .bind(session)
@@ -3108,5 +3187,202 @@ mod tests {
         ))
         .unwrap_err();
         assert!(forged.0.contains("system-reminder"), "{}", forged.0);
+    }
+
+    /// Two owners, one name — and the folder on a worker's disk is the name.
+    ///
+    /// A collision is a warning at import and never a refusal
+    /// (`docs/skills.md` §1), and `skills_one_name_per_owner` only stops *one*
+    /// person holding two, so two people each holding a `qa-dup` needs no
+    /// attack. Both reached one session: `bundles_for_session` grouped on the
+    /// name, so they merged into a single bundle holding two `SKILL.md` entries
+    /// at one path plus the loser's `scripts/`, and the worker — which writes
+    /// what it is sent, in order — kept the last of each. A figure of N that
+    /// delivers N−1, on disk rather than on screen.
+    ///
+    /// Three things are asserted, and the third is the one that closes it:
+    ///
+    /// 1. `set_for_session` pins **neither**, rather than picking a winner
+    ///    nobody wrote a rule for. Whose executable runs under your
+    ///    credentials is not a tie to break quietly.
+    /// 2. Pinned directly, as a caller that skipped the chokepoint would, they
+    ///    are **two** bundles rather than one merged one.
+    /// 3. **No bundle has two files at one path.** That is what the worker was
+    ///    never tested against — `ft-worker`'s four `apply` tests all send
+    ///    distinct paths, and `apply` writes in order with no dedup, so such a
+    ///    bundle would silently be last-write-wins. It can no longer be built:
+    ///    a bundle is grouped on one `skill_id`, a pin names one `version_id`,
+    ///    and `skill_files` is keyed `(version_id, path)`. The worker's
+    ///    behaviour on that shape stops mattering because it cannot receive it.
+    #[tokio::test]
+    async fn two_skills_of_one_name_are_never_merged_into_one_folder() {
+        let (db, admin) = crate::db::Db::open_for_test_owned().await.unwrap();
+        let pool = db.pool().clone();
+        let skills = Skills::new(pool.clone());
+        let accounts = crate::accounts::Accounts::new(pool.clone());
+        let org = db.org().await.unwrap();
+        let org_id = ft_core::OrgId::from_stored(org.clone());
+
+        let (ana, _) = accounts
+            .create_user(&org_id, "ana", "ana@example.test", "member")
+            .await
+            .unwrap();
+
+        let bundle = |body: &str, script: bool| NewSkill {
+            name: "qa-dup".into(),
+            description: "Does the thing.".into(),
+            frontmatter: serde_json::json!({ "name": "qa-dup" }),
+            body: body.into(),
+            files: {
+                let mut files = vec![IncomingFile {
+                    path: "SKILL.md".into(),
+                    contents: ft_proto::encode(body.as_bytes()),
+                    executable: false,
+                }];
+                if script {
+                    files.push(IncomingFile {
+                        path: "scripts/run.sh".into(),
+                        contents: ft_proto::encode(b"#!/bin/sh\n"),
+                        executable: true,
+                    });
+                }
+                files
+            },
+            notes: None,
+        };
+
+        // The admin's own, and Ana's — filed where the admin can see it, which
+        // is all it takes for both to be pinnable to one of their sessions.
+        let mine = skills
+            .create(&org, &admin, "admin", &bundle("MINE", false), false)
+            .await
+            .unwrap()
+            .as_str()
+            .to_string();
+        let theirs = skills
+            .create(&org, ana.id.as_str(), "ana", &bundle("THEIRS", true), false)
+            .await
+            .unwrap()
+            .as_str()
+            .to_string();
+        // Into the directory the whole organisation works in, which is where
+        // a skill a colleague shares ends up and what makes both reachable
+        // by one person.
+        let access = crate::access::Access::new(pool.clone());
+        let shared = access.shared(&org).await.unwrap();
+        let slug = access
+            .directory(shared.as_str())
+            .await
+            .unwrap()
+            .unwrap()
+            .slug;
+        sqlx::query("UPDATE skills SET path = ($2 || '.qa_dup')::ltree WHERE id = $1")
+            .bind(&theirs)
+            .bind(format!("d.{slug}"))
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            skills
+                .visible(&admin, Level::Viewer)
+                .await
+                .unwrap()
+                .iter()
+                .filter(|s| s.name == "qa-dup")
+                .count(),
+            2,
+            "two skills of one name, both reachable — no attack needed"
+        );
+
+        let host = db.ensure_test_host("fire-01", &admin).await.unwrap();
+        let session = ft_core::SessionId::new();
+        db.insert_session(
+            &session,
+            &host.id,
+            &admin,
+            None,
+            "Reviewing",
+            "",
+            None,
+            None,
+            "ClaudeCode",
+            ft_core::WorkspaceSize::Medium,
+            ft_core::Share::Equal,
+            &[],
+            None,
+        )
+        .await
+        .unwrap();
+
+        // 1. Neither, and the rest of a set survives.
+        let other = skills
+            .create(
+                &org,
+                &admin,
+                "admin",
+                &NewSkill {
+                    name: "qa-other".into(),
+                    ..bundle("OTHER", false)
+                },
+                false,
+            )
+            .await
+            .unwrap()
+            .as_str()
+            .to_string();
+        skills
+            .set_for_session(
+                session.as_str(),
+                &admin,
+                &[mine.clone(), theirs.clone(), other.clone()],
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            skills.of_session(session.as_str()).await.unwrap(),
+            vec![other],
+            "a colliding pair is dropped and the rest is delivered"
+        );
+
+        // 2 and 3. Pinned directly, bypassing the chokepoint: two bundles, and
+        // no bundle with two files at one path.
+        for id in [&mine, &theirs] {
+            sqlx::query(
+                "INSERT INTO skill_pins (session_id, skill_id, version_id, added_by) \
+                 SELECT $1, k.id, k.current_version_id, $2 FROM skills k WHERE k.id = $3",
+            )
+            .bind(session.as_str())
+            .bind(&admin)
+            .bind(id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        let bundles = skills.bundles_for_session(session.as_str()).await.unwrap();
+        for b in &bundles {
+            let mut paths: Vec<&str> = b.files.iter().map(|f| f.path.as_str()).collect();
+            paths.sort();
+            let unique = paths.len();
+            paths.dedup();
+            assert_eq!(
+                paths.len(),
+                unique,
+                "a bundle with two files at one path is written in order and silently \
+                 loses one: {} {paths:?}",
+                b.name,
+            );
+        }
+        assert_eq!(
+            bundles.iter().filter(|b| b.name == "qa-dup").count(),
+            2,
+            "two pinned skills are two bundles, whatever they are called"
+        );
+        let carries_both = bundles
+            .iter()
+            .any(|b| b.files.iter().any(|f| f.path == "scripts/run.sh") && b.files.len() > 2);
+        assert!(
+            !carries_both,
+            "no bundle carries another skill's scripts/ alongside its own SKILL.md"
+        );
     }
 }

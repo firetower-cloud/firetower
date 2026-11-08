@@ -65,17 +65,17 @@ async fn check_skills(state: &AppState, owner: &str, new: &NewRole) -> ApiResult
     if new.skill_scope.is_empty() {
         return Ok(());
     }
-    let reachable: std::collections::HashSet<String> = state
+    let reachable: std::collections::HashMap<String, String> = state
         .skills
         .visible(owner, Level::Viewer)
         .await?
         .into_iter()
-        .map(|s| s.id.as_str().to_string())
+        .map(|s| (s.id.as_str().to_string(), s.name))
         .collect();
     let out: Vec<&str> = new
         .skill_scope
         .iter()
-        .filter(|id| !reachable.contains(*id))
+        .filter(|id| !reachable.contains_key(*id))
         .map(String::as_str)
         .collect();
     if !out.is_empty() {
@@ -86,6 +86,38 @@ async fn check_skills(state: &AppState, owner: &str, new: &NewRole) -> ApiResult
                  them: {}",
                 out.len(),
                 out.join(", "),
+            ),
+        ));
+    }
+
+    // Two of one name is a profile that cannot do what it says: a skill's
+    // folder on a worker is its name, so only one of them can be written and
+    // `Skills::set_for_session` sends neither rather than picking. A collision
+    // is a warning at import and never a refusal (`docs/skills.md` §1), so the
+    // library really does hold two — and a profile is read by everybody who
+    // can reach it, which is why this is refused here and filtered there.
+    //
+    // Only the list. The two switches resolve per viewer against whoever
+    // *starts* the run, so a tick that collides with somebody else's always-on
+    // set is not knowable from here; the editor's count says so instead.
+    let mut together: std::collections::BTreeMap<&str, Vec<&str>> = Default::default();
+    for id in &new.skill_scope {
+        if let Some(name) = reachable.get(id) {
+            together.entry(name.as_str()).or_default().push(id);
+        }
+    }
+    let clashing: Vec<String> = together
+        .iter()
+        .filter(|(_, ids)| ids.len() > 1)
+        .map(|(name, ids)| format!("{name} ({})", ids.join(", ")))
+        .collect();
+    if !clashing.is_empty() {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            format!(
+                "two of the skills named share a name, and a skill's folder on a worker is its \
+                 name — so neither could be loaded. Drop one, or rename it in the library: {}",
+                clashing.join("; "),
             ),
         ));
     }
