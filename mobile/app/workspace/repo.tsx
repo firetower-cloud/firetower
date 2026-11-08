@@ -19,7 +19,7 @@ import { ChevronLeft } from "lucide-react-native";
 import { useDiff, useSession } from "~/data";
 import { Diff } from "~/ui/Diff";
 import { Files } from "~/ui/Files";
-import { Segmented } from "~/ui/Segmented";
+import { TextTabs } from "~/ui/TextTabs";
 import { Ship } from "~/ui/Ship";
 import { Waiting } from "~/ui/Waiting";
 import { useTheme } from "~/design/theme";
@@ -80,9 +80,7 @@ export default function Repo() {
         </View>
       </View>
 
-      <View className="px-3 pb-2">
-        <Segmented options={TABS} value={tab} onChange={setTab} />
-      </View>
+      <TextTabs options={TABS} value={tab} onChange={setTab} />
 
       {tab === "ship" ? (
         <Ship session={session} files={files.length} bottom={insets.bottom} />

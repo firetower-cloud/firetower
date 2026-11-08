@@ -26,7 +26,7 @@ import { router } from "expo-router";
 import { ChevronLeft } from "lucide-react-native";
 import { useListArtifacts } from "~/api/generated/artifacts/artifacts";
 import { ArtifactCard } from "~/ui/ArtifactCard";
-import { Segmented } from "~/ui/Segmented";
+import { TextTabs } from "~/ui/TextTabs";
 import { Waiting } from "~/ui/Waiting";
 import { useTheme } from "~/design/theme";
 
@@ -66,9 +66,7 @@ export default function Artifacts() {
         ) : null}
       </View>
 
-      <View className="px-4 pb-3">
-        <Segmented options={SCOPES} value={scope} onChange={setScope} />
-      </View>
+      <TextTabs options={SCOPES} value={scope} onChange={setScope} />
 
       <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 24, flexGrow: 1 }}>
         <View className="flex-row flex-wrap gap-x-3 gap-y-1 px-4">

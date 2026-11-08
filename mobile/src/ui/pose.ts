@@ -48,15 +48,18 @@ function said(line: string) {
 }
 
 export function usePose(): Pose {
-  const { width: window } = useWindowDimensions();
+  const { width: window, height: windowHeight } = useWindowDimensions();
   const [measured, setMeasured] = useState<number | null>(null);
+  const [tall, setTall] = useState<number | null>(null);
 
   const onLayout = useCallback((e: LayoutChangeEvent) => {
     const w = Math.round(e.nativeEvent.layout.width);
+    const h = Math.round(e.nativeEvent.layout.height);
     /* Only on a real change. `onLayout` fires on every re-layout and setting
        state unconditionally from it is a render loop with a rounding error in
        it. */
     setMeasured((was) => (was === w ? was : w));
+    setTall((was) => (was === h ? was : h));
   }, []);
 
   const content = measured ?? window;
@@ -65,10 +68,13 @@ export function usePose(): Pose {
      bar *insets* the content or *overlays* it decides whether the dock
      threshold is a 914pt window or an 840pt one, and it cannot be answered
      from a browser. Dev only, and it prints once per distinct pose. */
-  if (__DEV__ && measured !== null && measured !== window) {
-    said(`pose: window ${window}, laid out ${measured} — the rail insets by ${window - measured}`);
-  } else if (__DEV__ && measured !== null) {
-    said(`pose: window ${window}, laid out ${measured} — the rail overlays, nothing inset`);
+  if (__DEV__ && measured !== null) {
+    const inset = window - measured;
+    said(
+      `pose: window ${window}x${windowHeight}, laid out ${measured}x${tall} — ` +
+        (inset > 0 ? `the rail insets by ${inset}` : "the rail overlays, nothing inset") +
+        ` — band ${band(window, measured)}, panel ${panelWidth(measured)}`,
+    );
   }
 
   return {

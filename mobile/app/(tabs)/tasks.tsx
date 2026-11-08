@@ -24,6 +24,7 @@ import type { ListTasksParams, TaskKind, TaskState, TrackerStatus } from "~/api/
 import { elapsed, minutesSince } from "~/api/view";
 import { useTasks, useTrackers } from "~/data";
 import { Segmented } from "~/ui/Segmented";
+import { TextTabs } from "~/ui/TextTabs";
 import { Waiting } from "~/ui/Waiting";
 import { size } from "~/design/tokens.generated";
 import { useTheme } from "~/design/theme";
@@ -132,13 +133,14 @@ export default function Tasks() {
       {connected ? (
         <>
           {kinds.length > 1 ? (
-            <View className="px-4 pb-2">
-              <Segmented
-                options={kinds.map((k) => [k, KIND_LABEL[k]] as [TaskKind, string])}
-                value={showing as TaskKind}
-                onChange={setKind}
-              />
-            </View>
+            /* The tracker is a destination — GitHub's issues and Linear's
+               are different lists, not two values of one. The state filter
+               below it genuinely is a filter and keeps its track. */
+            <TextTabs
+              options={kinds.map((k) => [k, KIND_LABEL[k]] as [TaskKind, string])}
+              value={showing as TaskKind}
+              onChange={setKind}
+            />
           ) : null}
 
           <View className="flex-row items-center gap-2 px-4 pb-3">
