@@ -36,7 +36,7 @@ Object.assign(S, { tab:"inbox", era:"home", home:"typing" });   // then re-rende
 `S.theme` is `"light"` or `"dark"`. `S.pose` is one of the five ids in §2.
 
 > The artifact `@firetower-mobile` v54 is one revision **newer** than the
-> committed copy: it rewrites the sign-in and connect copy (states 37 and 39).
+> committed copy: it rewrites the connect copy (states **32 and 36** — verified by QA against the app).
 > Where the two disagree, **v54 wins** — it is the revision the user validated.
 > Every other byte is identical.
 
@@ -62,7 +62,7 @@ The prototype computes it (~line 1011). The constants:
 ```js
 const COLUMN = 640;   // rows, lists, controls — things you scan
 const READING = 560;  // prose — things you read
-const RAIL = 74;      // the system's trailing tab rail on the inner display
+const RAIL = 74;      // WRONG — the device reports 84, all on the trailing edge
 const DOCK_MIN = 280; // under this a column is a strip, not a panel
 
 const railOn = p => !!p.regular;
@@ -85,7 +85,7 @@ function panelW(cw) {
 - **Whether a panel may dock** is a question about the **box the conversation
   is laid out in**: it may dock only if the conversation keeps `READING` (560)
   and the column clears `DOCK_MIN` (280). That is **840 of laid-out width** —
-  a window of **914 only on the Duo**, once its 74pt rail is taken off.
+  a window of **914 only on the Duo** on the drawing's 74 — but the device reports **84**, so never write either down: measure.
 
 **914 is not a universal threshold. 840 of content width is.** Conflating them
 puts the dock line at 820, where docking leaves the conversation 466 — the
@@ -201,7 +201,7 @@ replaces, for comparison. They are marked `REF`. Build 42.
 
 | # | State | Prototype patch | Must show | Likely file |
 |---|---|---|---|---|
-| 27 | The library | `{tab:"art", screen:"artifacts", art:"library"}` | posters, never frames. Two tiles at 390, three at 669 | `app/artifacts.tsx` |
+| 27 | The library | `{tab:"art", screen:"artifacts", art:"library"}` | posters, never frames. The drawing's own rule is `cw >= 620 ? 3 : 2`, so under the inset default 669 gives **two**, not three — my "three at 669" prose was wrong against the drawing's code | `app/artifacts.tsx` |
 | 28 | Nothing photographed yet | `{tab:"art", screen:"artifacts", art:"fresh"}` | | `app/artifacts.tsx` |
 | 29 | Nothing published | `{tab:"art", screen:"artifacts", art:"none"}` | | `app/artifacts.tsx` |
 | 30 | Reading one | `{tab:"art", screen:"artifact"}` | the only live bytes in the app | `app/workspace/artifact.tsx` |
@@ -211,12 +211,12 @@ replaces, for comparison. They are marked `REF`. Build 42.
 
 | # | State | Prototype patch | Must show | Likely file |
 |---|---|---|---|---|
-| 32 | Where is it | `{tab:"connect", screen:"connect", connect:"where"}` | | `app/connect.tsx` |
+| 32 | Where is it | `{tab:"connect", screen:"connect", connect:"where"}` | **v54 copy** | `app/connect.tsx` |
 | 33 | Looking for it | `{... connect:"reaching"}` | | `app/connect.tsx` |
 | 34 | Nothing answered | `{... connect:"noroute"}` | | `app/connect.tsx` |
 | 35 | Not a Firetower | `{... connect:"notone"}` | | `app/connect.tsx` |
 | 36 | Who are you here | `{... connect:"who"}` | url, username, password. **v54 copy** | `app/connect.tsx` |
-| 37 | Replace the password | `{... connect:"locked"}` | **v54 copy** | `src/ui/ReplacePassword.tsx`, `app/locked.tsx` |
+| 37 | Replace the password | `{... connect:"locked"}` | | `src/ui/ReplacePassword.tsx`, `app/locked.tsx` |
 
 ### The rest of it
 
@@ -227,8 +227,8 @@ replaces, for comparison. They are marked `REF`. Build 42.
 | 40 | Not authorised | `{tab:"you", screen:"repos", repos:"noauth"}` | | `app/repos.tsx` |
 | 41 | You | `{tab:"you", screen:"you"}` | this phone's | `app/(tabs)/you.tsx` |
 | 42 | Switching Firetower | `{tab:"you", screen:"you", menu:"servers"}` | | `src/native/servers.ts`, `app/(tabs)/you.tsx` |
-| 43 | The notification | `{tab:"you"}` → `lock` | | — |
-| 44 | The badge | `{tab:"you"}` → `springboard` | set from the payload | — |
+| 43 | The notification | `{tab:"you"}` → `lock` | **NOT BUILDABLE — mobile 0.13.0 has no push implementation at all. My error in this contract; building it is the push plan, not this PR.** | — |
+| 44 | The badge | `{tab:"you"}` → `springboard` | **NOT BUILDABLE — see 43.** | — |
 
 ## 4. Light and dark, both first-class
 
