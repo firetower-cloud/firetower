@@ -35,11 +35,17 @@ use crate::providers::Connection;
 mod gitea;
 mod gitlab;
 mod linear;
+mod trello;
 pub use gitea::Gitea;
 pub use gitlab::GitLab;
 pub use linear::{
     identifier_of, split_identifier as linear_identifier, teams as linear_teams,
     viewer as linear_viewer, Linear, Team as LinearTeam,
+};
+pub use trello::{
+    boards as trello_boards, card_of as trello_card, search_params as trello_search_params,
+    token_in as trello_token, viewer as trello_viewer, Board as TrelloBoard, Card as TrelloCard,
+    Trello,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]

@@ -105,10 +105,16 @@ pub(super) async fn whose(
         .unwrap_or_else(|| me.to_string()))
 }
 
+/// This install's Trello app key, or the reason there is none.
+pub(super) fn trello_app_key() -> anyhow::Result<String> {
+    trackers::trello_app_key()
+        .ok_or_else(|| anyhow::anyhow!("Trello is not set up on this install: it has no app key."))
+}
+
 /// One page from whichever tracker was asked for.
 ///
 /// A `match` rather than a boxed trait object: [`Source`] returns an opaque
-/// future per implementation, and four arms are cheaper than the indirection
+/// future per implementation, and a few arms are cheaper than the indirection
 /// that would make it object-safe.
 pub(super) async fn list_from(
     tracker: &Resolved,
@@ -121,7 +127,19 @@ pub(super) async fn list_from(
             "gitea" => tasks::Gitea { conn }.list(credential, query).await,
             _ => tasks::GitHub { conn }.list(credential, query).await,
         },
-        (None, Some(tracker)) => tasks::Linear { tracker }.list(credential, query).await,
+        (None, Some(t)) => match t.id {
+            "linear" => tasks::Linear { tracker: t }.list(credential, query).await,
+            "trello" => {
+                let app_key = trello_app_key()?;
+                tasks::Trello {
+                    tracker: t,
+                    app_key,
+                }
+                .list(credential, query)
+                .await
+            }
+            _ => anyhow::bail!("{} reads from nowhere", tracker.label),
+        },
         (None, None) => anyhow::bail!("{} reads from nowhere", tracker.label),
     }
 }
@@ -137,7 +155,19 @@ pub(super) async fn one_from(
             "gitea" => tasks::Gitea { conn }.one(credential, url).await,
             _ => tasks::GitHub { conn }.one(credential, url).await,
         },
-        (None, Some(tracker)) => tasks::Linear { tracker }.one(credential, url).await,
+        (None, Some(t)) => match t.id {
+            "linear" => tasks::Linear { tracker: t }.one(credential, url).await,
+            "trello" => {
+                let app_key = trello_app_key()?;
+                tasks::Trello {
+                    tracker: t,
+                    app_key,
+                }
+                .one(credential, url)
+                .await
+            }
+            _ => anyhow::bail!("{} reads from nowhere", tracker.label),
+        },
         (None, None) => anyhow::bail!("{} reads from nowhere", tracker.label),
     }
 }
@@ -150,7 +180,7 @@ pub(super) async fn one_from(
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct Listing {
-    /// Which tracker: `github` or `linear`.
+    /// Which tracker: `github`, `linear` or `trello`.
     pub source: Option<String>,
     /// `acme/web`, when the source has repositories.
     pub repo: Option<String>,

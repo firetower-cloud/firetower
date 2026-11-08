@@ -7,6 +7,9 @@
  */
 
 export interface TrackerKey {
-  /** Linear's look like `lin_api_…`. */
+  /**
+     * Linear's look like `lin_api_…`. For Trello it is the token made on the
+     * authorize page, which only works with the app key that issued it.
+     */
   key: string;
 }

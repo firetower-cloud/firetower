@@ -7,6 +7,10 @@
 //! connects by a key somebody makes in Linear and pastes here. The key is tried
 //! before it is stored: one that does not work is a thing to say now, not on the
 //! next screen.
+//!
+//! Trello connects the same way, with one difference: its key is two parts, the
+//! app key Firetower ships (or the install sets) and the token the person makes
+//! for it, so the field here takes only the token.
 
 use axum::{
     extract::{Path, State},
@@ -18,7 +22,9 @@ use utoipa::ToSchema;
 
 use super::{ApiError, ApiResult, ErrorCode};
 use crate::auth::Principal;
-use crate::tasks::{linear_teams, linear_viewer, TaskKind};
+use crate::tasks::{
+    linear_teams, linear_viewer, trello_boards, trello_token, trello_viewer, TaskKind,
+};
 use crate::trackers::{self, Auth, ScopeKind};
 use crate::vault::Key;
 use crate::AppState;
@@ -61,7 +67,7 @@ pub struct TrackerStatus {
     /// We hold a credential for it.
     pub connected: bool,
     pub auth: Auth,
-    /// Whether the scope picker offers repositories or teams.
+    /// Whether the scope picker offers repositories, teams or boards.
     pub scope_kind: ScopeKind,
     /// What this tracker can return, so the kind toggle offers no more.
     pub kinds: Vec<TaskKind>,
@@ -79,11 +85,11 @@ pub struct TrackerStatus {
     pub path: Option<String>,
 }
 
-/// One thing the list can be narrowed to: a repository, or a team.
+/// One thing the list can be narrowed to: a repository, a team or a board.
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskScope {
-    /// What goes on the wire: `acme/web`, or `ENG`.
+    /// What goes on the wire: `acme/web`, `ENG`, or a board's id.
     pub key: String,
     /// What a person reads.
     pub label: String,
@@ -157,7 +163,8 @@ pub(super) async fn list_trackers(
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TrackerKey {
-    /// Linear's look like `lin_api_…`.
+    /// Linear's look like `lin_api_…`. For Trello it is the token made on the
+    /// authorize page, which only works with the app key that issued it.
     pub key: String,
 }
 
@@ -201,7 +208,10 @@ pub(super) async fn set_tracker_key(
         ));
     }
 
-    let key = request.key.trim();
+    let key = match tracker.id.as_str() {
+        "trello" => trello_token(&request.key),
+        _ => request.key.trim(),
+    };
     if key.is_empty() {
         return Err(ApiError::new(ErrorCode::InvalidRequest, "a key is needed"));
     }
@@ -211,9 +221,18 @@ pub(super) async fn set_tracker_key(
     let statically = tracker
         .tracker
         .ok_or_else(|| ApiError::new(ErrorCode::InvalidRequest, "that tracker takes no key"))?;
-    let account = linear_viewer(statically, key)
-        .await
-        .map_err(|e| ApiError::new(ErrorCode::ProviderNotConnected, format!("{e:#}")))?;
+    let account = match tracker.id.as_str() {
+        "linear" => linear_viewer(statically, key).await,
+        "trello" => {
+            async {
+                let app_key = super::tasks::trello_app_key()?;
+                trello_viewer(&tracker.api_base, &app_key, key).await
+            }
+            .await
+        }
+        _ => Err(anyhow::anyhow!("that tracker takes no key")),
+    }
+    .map_err(|e| ApiError::new(ErrorCode::ProviderNotConnected, format!("{e:#}")))?;
 
     state
         .vault
@@ -316,6 +335,32 @@ pub(super) async fn list_tracker_scopes(
                             .map(|t| TaskScope {
                                 label: format!("{} · {}", t.key, t.name),
                                 key: t.key,
+                            })
+                            .collect(),
+                    )
+                })
+                .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e:#}")))
+        }
+        ScopeKind::Boards if tracker.id == "trello" => {
+            let app_key =
+                super::tasks::trello_app_key().map_err(|_| ApiError::not_found("tracker"))?;
+            let credential = super::tasks::credential_for(
+                &state,
+                &principal,
+                &tracker,
+                "listing boards to pick from",
+            )
+            .await?;
+
+            trello_boards(&tracker.api_base, &app_key, &credential)
+                .await
+                .map(|boards| {
+                    Json(
+                        boards
+                            .into_iter()
+                            .map(|b| TaskScope {
+                                key: b.key,
+                                label: b.name,
                             })
                             .collect(),
                     )

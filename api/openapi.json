@@ -14085,7 +14085,7 @@
       },
       "ScopeKind": {
         "type": "string",
-        "description": "What the scope picker offers for this tracker.",
+        "description": "What the scope picker offers for this tracker: repositories, teams or\nboards, whichever the tracker's own unit of work is.",
         "enum": [
           "repos",
           "teams",
@@ -15417,7 +15417,7 @@
       },
       "TaskScope": {
         "type": "object",
-        "description": "One thing the list can be narrowed to: a repository, or a team.",
+        "description": "One thing the list can be narrowed to: a repository, a team or a board.",
         "required": [
           "key",
           "label"
@@ -15425,7 +15425,7 @@
         "properties": {
           "key": {
             "type": "string",
-            "description": "What goes on the wire: `acme/web`, or `ENG`."
+            "description": "What goes on the wire: `acme/web`, `ENG`, or a board's id."
           },
           "label": {
             "type": "string",
@@ -15605,7 +15605,7 @@
         "properties": {
           "key": {
             "type": "string",
-            "description": "Linear's look like `lin_api_…`."
+            "description": "Linear's look like `lin_api_…`. For Trello it is the token made on the\nauthorize page, which only works with the app key that issued it."
           }
         }
       },
@@ -15671,7 +15671,7 @@
           },
           "scopeKind": {
             "$ref": "#/components/schemas/ScopeKind",
-            "description": "Whether the scope picker offers repositories or teams."
+            "description": "Whether the scope picker offers repositories, teams or boards."
           },
           "secret": {
             "type": [

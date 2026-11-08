@@ -7,10 +7,10 @@
  */
 
 /**
- * One thing the list can be narrowed to: a repository, or a team.
+ * One thing the list can be narrowed to: a repository, a team or a board.
  */
 export interface TaskScope {
-  /** What goes on the wire: `acme/web`, or `ENG`. */
+  /** What goes on the wire: `acme/web`, `ENG`, or a board's id. */
   key: string;
   /** What a person reads. */
   label: string;

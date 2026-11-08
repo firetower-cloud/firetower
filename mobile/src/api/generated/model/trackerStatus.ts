@@ -55,7 +55,7 @@ export interface TrackerStatus {
      * @nullable
      */
   path?: string | null;
-  /** Whether the scope picker offers repositories or teams. */
+  /** Whether the scope picker offers repositories, teams or boards. */
   scopeKind: ScopeKind;
   /**
      * The key that answers for this person, as the vault addresses it —
