@@ -499,7 +499,7 @@ async fn repo_defaults(
         out.push(RepoDefaults {
             repo_id: repo.to_string(),
             slug: c.slug.clone(),
-            defaults: state.skills.defaults_in(me, repo.as_str()).await?,
+            defaults: state.skills.defaults_in(me, repo).await?,
         });
     }
     Ok(out)

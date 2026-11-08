@@ -288,10 +288,10 @@ async fn spawn(state: &AppState, request: &AgentRequest) -> Result<String> {
     // owner's defaults, as before.
     let skills: Option<Vec<String>> = match role.as_ref() {
         Some(r) => {
-            let repos: Vec<String> = lead
+            let repos: Vec<ft_core::RepoId> = lead
                 .checkouts
                 .iter()
-                .filter_map(|c| c.repo_id.as_ref().map(|r| r.as_str().to_string()))
+                .filter_map(|c| c.repo_id.clone())
                 .collect();
             Some(
                 crate::roles::skills_at_spawn(&state.skills, r, lead.owner.as_str(), &repos)

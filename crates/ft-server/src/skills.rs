@@ -1989,12 +1989,16 @@ impl Skills {
     }
 
     /// This person's defaults for one repository, without the always-on set.
-    pub async fn defaults_in(&self, person: &str, repo: &str) -> Result<Vec<String>> {
+    ///
+    /// `RepoId` rather than `&str`, because `repo_id` is what the column holds
+    /// and a slug bound to it finds nothing without complaining — see
+    /// [`crate::roles::skills_at_spawn`], which is where that happened.
+    pub async fn defaults_in(&self, person: &str, repo: &ft_core::RepoId) -> Result<Vec<String>> {
         Ok(sqlx::query_scalar(
             "SELECT skill_id FROM skill_defaults WHERE user_id = $1 AND repo_id = $2 ORDER BY skill_id",
         )
         .bind(person)
-        .bind(repo)
+        .bind(repo.as_str())
         .fetch_all(&self.pool)
         .await?)
     }
@@ -2050,13 +2054,14 @@ impl Skills {
     /// said, so the switch on the Defaults screen could not move and had to be
     /// locked to stop it lying. A default that cannot be changed is not a
     /// default.
-    pub async fn defaults_for(&self, person: &str, repos: &[String]) -> Result<Vec<String>> {
+    pub async fn defaults_for(&self, person: &str, repos: &[ft_core::RepoId]) -> Result<Vec<String>> {
+        let ids: Vec<&str> = repos.iter().map(ft_core::RepoId::as_str).collect();
         sqlx::query_scalar(
             "SELECT DISTINCT sd.skill_id FROM skill_defaults sd \
               WHERE sd.user_id = $1 AND (sd.repo_id IS NULL OR sd.repo_id = ANY($2))",
         )
         .bind(person)
-        .bind(repos)
+        .bind(&ids)
         .fetch_all(&self.pool)
         .await
         .context("reading somebody's default skills")

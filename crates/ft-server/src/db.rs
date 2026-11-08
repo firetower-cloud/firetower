@@ -1672,6 +1672,28 @@ impl Db {
             .collect())
     }
 
+    /// Every repository a workspace has checked out, by **id**, in order.
+    ///
+    /// [`WorkspacePlace::repo`] is the first checkout's slug — a caption, for
+    /// a row in a list — and anything resolving against a repository wants the
+    /// id. A slug bound to a `repo_id` column matches nothing and says nothing
+    /// about it, which is exactly what `include_repo_defaults` did for a second
+    /// agent until this existed. A checkout whose repository has since been
+    /// disconnected has no id and is not one defaults can be read for.
+    pub async fn repo_ids_in(&self, workspace: &WorkspaceId) -> Result<Vec<RepoId>> {
+        Ok(sqlx::query_scalar::<_, String>(
+            "SELECT repo_id FROM workspace_repos \
+              WHERE workspace_id = $1 AND repo_id IS NOT NULL ORDER BY position",
+        )
+        .bind(workspace.as_str())
+        .fetch_all(&self.pool)
+        .await
+        .context("reading a workspace's repositories")?
+        .into_iter()
+        .map(RepoId::from_stored)
+        .collect())
+    }
+
     /// One workspace they may work in, for starting another agent in it.
     ///
     /// Writer, not viewer: this is the read that precedes putting an agent into

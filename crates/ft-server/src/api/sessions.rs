@@ -784,7 +784,7 @@ pub(crate) async fn create_session_as(
     // Best effort. A workspace that starts with no skills is a workspace
     // somebody can fix in one click; one that refuses to start because a
     // default could not be read is not.
-    let on_these: Vec<String> = repos.iter().map(|(r, _)| r.id.to_string()).collect();
+    let on_these: Vec<ft_core::RepoId> = repos.iter().map(|(r, _)| r.id.clone()).collect();
     // What this session reads: a profile's own resolved set when it runs as one,
     // and otherwise the explicit selection the New page sent or this person's
     // defaults for these repositories.
@@ -1541,8 +1541,18 @@ async fn start_another_agent(
     let wanted: Option<Vec<String>> = match skills_source(req.skills.as_ref(), profile.as_ref()) {
         SkillsSource::Handed(chosen) => Some(chosen.clone()),
         SkillsSource::Profile(p) => {
-            let repos: Vec<String> = place.repo.clone().into_iter().collect();
-            match crate::roles::skills_at_spawn(&state.skills, p, &owner, &repos).await {
+            // The workspace's repositories **by id**, which is what
+            // `skill_defaults.repo_id` holds. `place.repo` is the first
+            // checkout's slug — a caption — so resolving against it matched
+            // nothing, and `include_repo_defaults` read on, counted in the
+            // editor and delivered none of them. `delegate.rs` reads a lead's
+            // the same way, off the checkouts rather than off the caption.
+            let resolved = async {
+                let repos = state.db.repo_ids_in(&place.id).await?;
+                crate::roles::skills_at_spawn(&state.skills, p, &owner, &repos).await
+            }
+            .await;
+            match resolved {
                 Ok(resolved) => Some(resolved),
                 Err(e) => {
                     tracing::warn!("resolving a profile's skills for a second agent: {e:#}");
@@ -1551,7 +1561,7 @@ async fn start_another_agent(
             }
         }
         SkillsSource::AlwaysOn => {
-            let everywhere: Vec<String> = Vec::new();
+            let everywhere: Vec<ft_core::RepoId> = Vec::new();
             state.skills.defaults_for(&owner, &everywhere).await.ok()
         }
     };

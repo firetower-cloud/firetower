@@ -284,11 +284,18 @@ pub fn skills_for(
 ///
 /// `person` is whoever is starting the run, never whoever wrote the profile —
 /// see [`skills_for`].
+///
+/// **`repos` is `RepoId`, not a slug, and that is the whole reason it is typed.**
+/// `skill_defaults.repo_id` is an id; a slug bound to it matches nothing, so
+/// `include_repo_defaults` reads on, counts in the editor, and delivers
+/// nothing. That is what the second-agent path did when this took
+/// `&[String]` and was handed `WorkspacePlace::repo` — the first checkout's
+/// *caption*. A `Vec<String>` will hold either happily; this will not.
 pub async fn skills_at_spawn(
     skills: &crate::skills::Skills,
     role: &Role,
     person: &str,
-    repos: &[String],
+    repos: &[ft_core::RepoId],
 ) -> Result<Vec<String>> {
     let always_on = skills
         .always_on(person)
@@ -889,13 +896,13 @@ mod tests {
             )
             .await
             .unwrap();
-        let repo_id = repo.id.as_str().to_string();
+        let repo_id = repo.id.clone();
         skills
             .set_default(&ana, &everywhere, None, true)
             .await
             .unwrap();
         skills
-            .set_default(&ana, &in_repo, Some(&repo_id), true)
+            .set_default(&ana, &in_repo, Some(repo_id.as_str()), true)
             .await
             .unwrap();
 
