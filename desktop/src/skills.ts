@@ -421,6 +421,56 @@ export const RISK_SAYS: Record<string, string> = {
   scripts: "Ships executable scripts",
 };
 
+/** The same four, short enough to sit on a row. */
+export const RISK_SHORT: Record<string, string> = {
+  shell: "runs before the model",
+  tools: "pre-approves tools",
+  hooks: "registers hooks",
+  scripts: "ships scripts",
+};
+
+/** Worst first, so a row reads the same way every time. */
+export const RISK_ORDER = ["shell", "tools", "hooks", "scripts"];
+
+/**
+ * Roughly what each agent will carry in descriptions, in tokens.
+ *
+ * **The number that matters is the cliff.** Past its budget Codex removes
+ * *every* description rather than the last one, so a meter that only warned at
+ * the end would warn too late. Codex states its own in
+ * `skills.max_context_tokens`; 2,000 reconciles with `docs/skills.md` §3's
+ * "about 8,000 characters" at roughly four characters a token.
+ *
+ * **Cursor is here because it was silently taking Claude Code's.** `Agent` has
+ * five variants and this had three, so `BUDGET[agent] ?? 3000` gave a Cursor
+ * session a 3,000 limit under a quiet meter. Cursor reads the same per-session
+ * directory the others do and states no budget of its own, so it takes the
+ * floor rather than the ceiling: being told you have less than you do costs a
+ * skill, and being told you have more costs all of them.
+ */
+export const BUDGET: Record<string, number> = {
+  ClaudeCode: 3000,
+  Codex: 2000,
+  KimiCode: 2250,
+  CursorAgent: 2000,
+};
+
+/** The smallest budget anything could run under, for a profile that pins no
+ *  agent — which is the honest figure to meter it against. */
+export const SMALLEST_BUDGET = Math.min(...Object.values(BUDGET));
+
+/** Whether this agent also reads the machine's own `~/.claude/skills`.
+ *
+ *  Only Claude Code does, so "include always-on" is not a clean off for it and
+ *  the screen says so when it is off. The others read only the per-session
+ *  directory Firetower writes, which makes the same fact a reassurance. */
+export const READS_HOST_DIRECTORY: Record<string, boolean> = {
+  ClaudeCode: true,
+  Codex: false,
+  KimiCode: false,
+  CursorAgent: false,
+};
+
 /* ── the small parsers ───────────────────────────────────────────────── */
 
 /**

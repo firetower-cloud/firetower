@@ -186,6 +186,31 @@ const AGENTS = [
     latestVersion: "0.159.2",
     hosts: [{ hostId: "h_1", hostName: "this Mac", installed: true, coveredByToken: true, loggedIn: true, account: "kevin@acme.com", version: "0.159.2", behind: false, mayUpdate: true }],
   },
+  /* The other two Firetower drives. Here because a profile can pin any of
+     them, and because the Skills section's note about the machine's own
+     `~/.claude/skills` is agent-dependent: Claude Code reads it as well,
+     these three read only what Firetower writes. Without them the states
+     where that note becomes a reassurance cannot be driven at all. */
+  {
+    kind: "KimiCode",
+    label: "Kimi Code",
+    enabled: true,
+    supported: true,
+    needsCredential: true,
+    credentialSet: true,
+    latestVersion: "1.4.0",
+    hosts: [{ hostId: "h_1", hostName: "this Mac", installed: true, coveredByToken: true, loggedIn: true, account: "kevin@acme.com", version: "1.4.0", behind: false, mayUpdate: true }],
+  },
+  {
+    kind: "CursorAgent",
+    label: "Cursor Agent",
+    enabled: true,
+    supported: true,
+    needsCredential: true,
+    credentialSet: true,
+    latestVersion: "0.8.1",
+    hosts: [{ hostId: "h_1", hostName: "this Mac", installed: true, coveredByToken: true, loggedIn: true, account: "kevin@acme.com", version: "0.8.1", behind: false, mayUpdate: true }],
+  },
 ];
 
 /* What a Claude Code session's pickers hold. The agent lists none of this —
@@ -1141,7 +1166,7 @@ const SKILLS = [
   skill({
     id: "sk_1", name: "deploy-runbook", version: 0, held: true,
     description: "Deploy the control plane to staging, run the smoke suite, then promote. Use when somebody asks to ship, cut a release or roll back.",
-    risk: ["Ships executable scripts", "Registers hooks for the whole session"],
+    risk: ["hooks", "scripts"],
   }),
   skill({
     id: "sk_2", name: "firetower-surfaces", version: 4,
@@ -1149,18 +1174,18 @@ const SKILLS = [
     alwaysOn: true,
   }),
   skill({
-    id: "sk_3", name: "claude-api", version: 2,
+    id: "sk_3", name: "claude-api", version: 2, defaultIn: ["acme/web"],
     description: "Reference for the Claude API and the Anthropic SDK: model ids, pricing, params, streaming, tool use, MCP, caching and token counting.",
   }),
   skill({
     id: "sk_4", name: "dataviz", version: 1,
     description: "Read before writing any chart, graph, plot or dashboard, in any medium. A form heuristic, a colour formula with a runnable validator, and mark specs.",
-    risk: ["Ships executable scripts"],
+    risk: ["scripts"], defaultIn: ["acme/web"],
   }),
   skill({
     id: "sk_5", name: "pr-screenshots", version: 6,
     description: "Drive the app, take the screenshots a pull request needs, and attach them. Use when a change is visible to somebody.",
-    risk: ["Runs shell commands before the model sees it", "Ships executable scripts"],
+    risk: ["shell", "scripts"],
   }),
   skill({
     id: "sk_6", name: "skill-creator", version: 3, builtin: true, mayShare: false, mayWrite: false,
@@ -1169,7 +1194,7 @@ const SKILLS = [
   }),
   skill({
     id: "sk_7", name: "incident-timeline", version: 2, mayShare: false, mayWrite: false,
-    path: "d/platform",
+    path: "d/platform", risk: ["tools"],
     description: "Turn an incident channel into the note that goes to the customer. Use when somebody asks for a customer-facing write-up.",
   }),
 ];
@@ -1249,6 +1274,7 @@ const role = (over) => ({
   id: "r_x", name: "A profile", does: "", instructions: "", path: "u/kevin",
   placement: "here", agent: "ClaudeCode", account: null, machine: null,
   isDefault: false, canDelegate: false, delegateScope: [], skillScope: [],
+  includeAlwaysOn: true, includeRepoDefaults: true,
   mayShare: true, mayWrite: true, settings: { model: null, effort: null, mode: null, sandbox: null },
   createdAt: minutesAgo(20000), updatedAt: minutesAgo(400), ...over,
 });

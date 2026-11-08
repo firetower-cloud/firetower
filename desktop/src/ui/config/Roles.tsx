@@ -55,6 +55,7 @@ import { useAgentControls } from "~/api/generated/agents/agents";
 import { useAccounts, useAgents, useDirectories, useHosts, useSkills, why } from "~/data";
 import { usable } from "~/api/accounts";
 import { ScopePicker, type ScopeItem } from "~/ui/config/ScopePicker";
+import { SkillSources, useSkillSources } from "~/ui/config/SkillSources";
 import { machineLabel, machines } from "~/api/environments";
 import type { Agent, Control, ControlKind, Role, NewRole } from "~/api/generated/model";
 import { useConfirm } from "~/ui/Confirm";
@@ -111,6 +112,13 @@ const BLANK: NewRole = {
   canDelegate: false,
   delegateScope: [],
   skillScope: [],
+  // Both on, which is what the column defaults to and what makes a new
+  // profile load the owner's usual set rather than nothing. Sent explicitly
+  // rather than left off: absent means on to the server, but an existing
+  // profile with a switch *off* has to be able to say so, and a draft that
+  // omitted the field could never turn one back off.
+  includeAlwaysOn: true,
+  includeRepoDefaults: true,
   directory: null,
 };
 
@@ -392,9 +400,13 @@ function Reading({ role, onClose }: { role: Role; onClose: () => void }) {
         <Reads label="Hands work off">
           {role.canDelegate ? `yes — to ${named(role.delegateScope)} profile${named(role.delegateScope) === 1 ? "" : "s"}` : "no"}
         </Reads>
-        <Reads label="Skills it may read">
-          {named(role.skillScope) === 0 ? "whatever the workspace has" : `${named(role.skillScope)} named`}
-        </Reads>
+        {/* **One sentence, in all three places** — here, the editor's label
+            and its empty note. "Skills it may read" and "whatever the
+            workspace has" were both wrong twice over: a workspace has no
+            skills, sessions do, and two in one workspace already carry
+            different sets; and under a union nothing is "may" — the profile
+            names a set. What it loads is said as what it loads. */}
+        <Reads label="Skills it loads">{loadsWhat(role)}</Reads>
         {role.instructions.trim() && (
           <Reads label="Instructions">
             <span className="block whitespace-pre-wrap text-text">{role.instructions.trim()}</span>
@@ -407,6 +419,26 @@ function Reading({ role, onClose }: { role: Role; onClose: () => void }) {
       </p>
     </Section>
   );
+}
+
+/**
+ * What a profile loads, for somebody who cannot open it.
+ *
+ * The sources it is drawing from rather than a number, because the number is
+ * per viewer — `skill_defaults` is keyed on `user_id`, so a profile shared
+ * through a directory resolves against whoever starts it, and a count taken
+ * from this reader's library would be a different person's answer. The editor,
+ * which can resolve against a repository, is where the figure lives.
+ */
+function loadsWhat(role: Role): string {
+  const parts: string[] = [];
+  if (role.includeAlwaysOn) parts.push("your always-on set");
+  if (role.includeRepoDefaults) parts.push("this repository's defaults");
+  const named = role.skillScope.length;
+  if (named > 0) parts.push(`${named} named`);
+  if (parts.length === 0) return "nothing — both sources are off and nothing is named";
+  if (parts.length === 1) return parts[0]!;
+  return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
 }
 
 /** One fact and its name, in the shape the rest of the pane reads in. */
@@ -528,7 +560,6 @@ function Editor({
     const [root, label] = path.split("/");
     return root === "u" ? "yours" : `d/${label}`;
   };
-  const { data: skillList } = useSkills();
   const delegationItems: ScopeItem[] = all
     .filter((r) => r.id !== state.id)
     .map((r) => ({
@@ -538,13 +569,12 @@ function Editor({
       group: groupOf(r.path),
       badge: r.canDelegate ? { text: "manager", tone: "sage" } : undefined,
     }));
-  const skillItems: ScopeItem[] = skillList.map((s) => ({
-    id: s.id,
-    name: s.name,
-    desc: s.description,
-    group: groupOf(s.path),
-    badge: s.risk?.includes("scripts") ? { text: "scripts", tone: "brick" } : undefined,
-  }));
+
+  /* Where this profile is filed decides whether the Skills section's count is
+     "yours" or everybody's: a profile in a directory is used by colleagues, and
+     the first two of its three sources resolve against whoever starts it. */
+  const shared = existing ? !!state.path?.startsWith("d/") : !!draft.directory;
+  const skills = useSkillSources(draft, shared);
 
   const set = <K extends keyof NewRole>(k: K, v: NewRole[K]) => setDraft((d) => ({ ...d, [k]: v }));
   // Pin one run control, or clear it back to the engine's default (null).
@@ -860,15 +890,7 @@ function Editor({
           />
         )}
 
-        <ScopePicker
-          label="Skills it can load"
-          hint="What it may load into context. Off the list means never written to its workspace."
-          items={skillItems}
-          selected={draft.skillScope ?? []}
-          onChange={(ids) => set("skillScope", ids)}
-          searchPlaceholder="Search skills…"
-          allNote="Any skill you can use — and any you add later."
-        />
+        <SkillSources r={skills} onChange={(patch) => setDraft((d) => ({ ...d, ...patch }))} />
 
         <Field label="Instructions" hint="Composed into its prompt. Markdown; the agent reads all of it. A Manager names its delegates here.">
           <textarea
@@ -939,10 +961,22 @@ function Editor({
             a sage-tinted button here said "this went well", which is a
             verdict about something that has not happened yet. */}
         <div className="formfoot">
-          <span className="msg">
-            {existing
-              ? "Saved when you press it. Running workspaces keep the profile they started with."
-              : "Nothing is created until you press this."}
+          {/* The Skills section has first claim on this line: an over-budget
+              profile starts with *no* skills at all on Codex, and one with
+              both sources off and nothing named is a child that cannot even
+              publish an artifact. Both are worth more than the standing note. */}
+          <span className={`msg${skills.ownOver ? " bad" : skills.over || skills.loads.length === 0 || skills.skipped.length ? " warn" : ""}`}>
+            {skills.ownOver
+              ? `Over ${skills.agentLabel}'s limit before this repository's defaults are counted — ${skills.ownSpend.toLocaleString("en-US")} of ${skills.budget.toLocaleString("en-US")}.`
+              : skills.over
+                ? `Over budget in ${skills.at?.split("/").pop() ?? "this repository"} — ${skills.spend.toLocaleString("en-US")} of ${skills.budget.toLocaleString("en-US")}. Another repository may fit.`
+                : skills.loads.length === 0
+                  ? "This child will have no Firetower skills at all."
+                  : skills.skipped.length
+                    ? `${skills.skipped.length} named skill${skills.skipped.length === 1 ? "" : "s"} will be skipped.`
+                    : existing
+                      ? "Saved when you press it. Running workspaces keep the profile they started with."
+                      : "Nothing is created until you press this."}
           </span>
           {existing && (
             <button onClick={remove} disabled={busy} className="btn danger">
@@ -953,8 +987,20 @@ function Editor({
           <button onClick={onClose} className="btn quiet">
             Cancel
           </button>
-          <button onClick={save} disabled={!valid || busy} className="btn primary">
-            {existing ? "Save changes" : "Create profile"}
+          {/* Over budget on always-on and the named list *alone* is broken
+              under every checkout, so there is nothing to save. Where only a
+              repository's defaults tip it over, that depends on a checkout
+              nobody has made, so it warns and allows. */}
+          <button onClick={save} disabled={!valid || busy || skills.ownOver} className="btn primary">
+            {skills.ownOver
+              ? "Can't save"
+              : skills.loads.length === 0
+                ? existing
+                  ? "Save with no skills"
+                  : "Create with no skills"
+                : existing
+                  ? "Save changes"
+                  : "Create profile"}
           </button>
         </div>
       </div>

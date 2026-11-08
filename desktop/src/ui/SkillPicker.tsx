@@ -42,15 +42,9 @@ import {
 import type { Session, Skill } from "~/api/generated/model";
 import { navigate } from "~/shims/next-navigation";
 import { useSessionSkillIds, useSkills, why } from "~/data";
-import { sameSet } from "~/skills";
+import { BUDGET, sameSet, SMALLEST_BUDGET } from "~/skills";
 
-/**
- * Roughly what the agent will allow. The real limit differs per agent — Codex
- * states its own in `skills.max_context_tokens` — and the number that matters
- * is the cliff: past it Codex removes *every* description rather than the last
- * one, so a meter that only warned at the end would warn too late.
- */
-const BUDGET: Record<string, number> = { ClaudeCode: 3000, Codex: 2000, KimiCode: 2250 };
+
 
 export function SkillPicker({ session, onClose }: { session: Session; onClose: () => void }) {
   const all = useSkills();
@@ -89,7 +83,10 @@ export function SkillPicker({ session, onClose }: { session: Session; onClose: (
     onClose();
     navigate("/configuration/skills");
   };
-  const budget = BUDGET[session.agent] ?? 3000;
+  /* The floor, not Claude Code's 3,000: an agent this table does not know is
+     one whose real limit we cannot name, and overstating it is what hides the
+     cliff. See `BUDGET`. */
+  const budget = BUDGET[session.agent] ?? SMALLEST_BUDGET;
 
   const spend = useMemo(
     () => all.data.filter((s) => picked.has(s.id)).reduce((n, s) => n + s.tokens, 0),
