@@ -410,7 +410,6 @@ function Who({
       </div>
 
       <h1 className="mt-6">Who are you here?</h1>
-      <p>An account on this Firetower. It exists on this server only — it is not an account with us.</p>
 
       {proxyOnly ? (
         <div className="rounded-xl border border-line bg-panel px-4 py-4 text-center">
@@ -466,10 +465,7 @@ function Who({
       {/* The way out of this server is the × on the panel above; what belongs
           here is the answer to the question somebody stuck on this screen is
           actually asking. */}
-      <p className="alt">
-        Forgotten it? An administrator resets it, or{" "}
-        <code className="font-mono text-meta text-text">firetower passwd</code> on the server.
-      </p>
+      <p className="alt">Forgotten it? Ask an administrator to reset it.</p>
     </>
   );
 }

@@ -2449,8 +2449,6 @@ function connectScreen(p, st) {
         '<button class="p-tap" data-go="connect:where" aria-label="Not this one">'+ic("x",19)+'</button>'+
       '</div>'+
       '<h1 class="p-lede" style="margin-top:26px">Who are you here?</h1>'+
-      '<p class="p-readtx p-dimtx" style="margin-top:12px">An account on this Firetower. It exists '+
-        'on this server only \u2014 it is not an account with us.</p>'+
       '<div style="margin-top:24px;display:flex;flex-direction:column;gap:11px">'+
         '<div class="p-field">'+ic("person",18)+
           '<span style="margin-left:11px">kevin</span></div>'+
@@ -2458,9 +2456,8 @@ function connectScreen(p, st) {
           '<span style="margin-left:11px;letter-spacing:.14em">\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022</span></div>'+
       '</div>'+
       '<div class="p-primary" style="margin:18px 0 0" data-go="goto:inbox">Sign in</div>'+
-      '<p class="p-micro" style="margin-top:18px;line-height:1.55">Forgotten it? An administrator '+
-        'resets it, or <b style="color:var(--p-dim);font-family:var(--d-mono)">firetower passwd</b> '+
-        'on the server.</p>');
+      '<p class="p-micro" style="margin-top:18px;line-height:1.55">Forgotten it? Ask an '+
+        'administrator to reset it.</p>');
   }
   if (mode === "locked") {
     return wrap(1, plate("key")+

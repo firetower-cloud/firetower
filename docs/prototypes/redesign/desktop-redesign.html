@@ -4238,11 +4238,10 @@ function firstRun(){
       <span class="tx"><b>Northwind</b><s>northwind.firetower.dev · 2.14.0</s></span>
       <button class="gbtn" data-act="first" data-first="where" title="Not this one">${ic("x",15)}</button></div>
     <h1 style="margin-top:24px">Who are you here?</h1>
-    <p>An account on this Firetower. It exists on this server only — it is not an account with us.</p>
     <div class="in">${ic("user-round",17)}<input placeholder="kevin" autofocus aria-label="Username"></div>
     <div class="in" style="margin-top:10px">${ic("lock",17)}<input type="password" placeholder="Password" value="••••••••••" aria-label="Password"></div>
     <button class="btn primary go" data-act="first" data-first="locked">Sign in</button>
-    <p class="alt">Forgotten it? An administrator resets it, or <code style="font-family:var(--mono);font-size:14px">firetower passwd</code> on the server.</p>`);
+    <p class="alt">Forgotten it? Ask an administrator to reset it.</p>`);
   if(at==="locked") return C(`${steps(1)}
     <div class="mk">${ic("key",22)}</div>
     <h1>Replace this password first</h1>
