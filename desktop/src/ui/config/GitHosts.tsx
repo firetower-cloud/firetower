@@ -437,7 +437,7 @@ export function AddHost({
 }
 
 /** One row of the first step: a thing somebody has, and where it lives. */
-type Choice = {
+export type Choice = {
   kind: string;
   label: string;
   /** The address, for a hosted instance. Absent means they have to say. */
@@ -445,8 +445,15 @@ type Choice = {
   aside: string;
 };
 
-/** Every kind, as the hosted and the self-hosted things people actually run. */
-function choicesFrom(kinds: KindInfo[]): Choice[] {
+/**
+ * Every kind, as the hosted and the self-hosted things people actually run.
+ *
+ * Exported so `repos.test.tsx` can assert what the Repositories blank's one
+ * action reaches: the whole set this server supports, enumerated from
+ * `kindInfo`, rather than a list of brands written down somewhere. A sixth
+ * kind has to appear on its own.
+ */
+export function choicesFrom(kinds: KindInfo[]): Choice[] {
   const out: Choice[] = [];
   for (const k of kinds) {
     if (k.hostedBaseUrl) {

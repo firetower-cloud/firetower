@@ -1260,10 +1260,26 @@ const ROLES = [
 ];
 
 /* Enough to list; the kinds page is what the git-host picker offers. */
+/**
+ * What this server can talk to, as `KindInfo` — the shape the client actually
+ * reads.
+ *
+ * **It was a different shape entirely**: `kind`/`defaultHost`/`ways`/
+ * `tokenUrl`, which is nothing `useListKinds`'s consumers look for. So the
+ * kind picker — the one place the product ever says what it supports — drew
+ * three nameless rows all reading *your own server*, and the hosted forms
+ * were missing altogether. Nothing caught it because no state drove the list
+ * far enough to read it.
+ *
+ * `selfHostedLabel` is the field that matters most here: it is what tells
+ * somebody with an Enterprise install or a Forgejo that this product can talk
+ * to it at all, and it is why the hosted and the self-hosted forms are
+ * separate rows rather than one brand.
+ */
 const PROVIDER_KINDS = [
-  { kind: "github", label: "GitHub", defaultHost: "github.com", ways: ["deviceCode", "token"], tokenUrl: "https://github.com/settings/tokens", scopes: ["repo", "read:org"] },
-  { kind: "gitlab", label: "GitLab", defaultHost: "gitlab.com", ways: ["token"], tokenUrl: "https://gitlab.com/-/user_settings/personal_access_tokens", scopes: ["api", "read_repository"] },
-  { kind: "gitea", label: "Gitea", defaultHost: null, ways: ["token"], tokenUrl: null, scopes: ["repo", "read:org"] },
+  { id: "github", label: "GitHub", selfHostedLabel: "GitHub Enterprise Server", changeNoun: "pull request", authModes: ["device", "token"], hostedBaseUrl: "https://github.com", selfHosted: false, appPage: "/settings/applications/new", appSteps: ["Tick **Enable Device Flow**", "Leave the callback URL blank"], tokenSteps: ["Make a token with **repo** and **read:org**"] },
+  { id: "gitlab", label: "GitLab", selfHostedLabel: "GitLab self-managed", changeNoun: "merge request", authModes: ["device", "token"], hostedBaseUrl: "https://gitlab.com", selfHosted: false, appPage: "/-/profile/applications", appSteps: ["Untick **Confidential**", "Scopes: **api**, **read_repository**"], tokenSteps: ["Make a token with **api** and **read_repository**"] },
+  { id: "gitea", label: "Gitea", selfHostedLabel: "Gitea or Forgejo", changeNoun: "pull request", authModes: ["token"], hostedBaseUrl: null, selfHosted: true, appPage: "/user/settings/applications", appSteps: [], tokenSteps: ["Make a token with the **user** scope"] },
 ];
 
 const TRACKERS = [

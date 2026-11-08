@@ -10,14 +10,15 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { connectChoices, Repos } from "./Repos";
+import { Repos } from "./Repos";
+import { choicesFrom } from "./GitHosts";
 import { getListReposQueryKey } from "~/api/generated/repos/repos";
 import {
   getListKindsQueryKey,
   getListProvidersQueryKey,
   getListProviderReposQueryKey,
 } from "~/api/generated/providers/providers";
-import type { ProviderStatus, RemoteRepo, Repo } from "~/api/generated/model";
+import type { KindInfo, ProviderStatus, RemoteRepo, Repo } from "~/api/generated/model";
 
 const host = (p: Partial<ProviderStatus> = {}): ProviderStatus => ({
   id: "github",
@@ -67,11 +68,17 @@ const offered = (slug: string, remote: string): RemoteRepo => ({
   pushedAt: null,
 });
 
-/** What the server ships. gitlab.com and github.com need nothing registered. */
-const KINDS = [
-  { id: "github", label: "GitHub", changeNoun: "pull request", authModes: ["device", "token"], hostedBaseUrl: "https://github.com", selfHosted: false },
-  { id: "gitlab", label: "GitLab", changeNoun: "merge request", authModes: ["device", "token"], hostedBaseUrl: "https://gitlab.com", selfHosted: false },
-  { id: "gitea", label: "Gitea", changeNoun: "pull request", authModes: ["token"], hostedBaseUrl: null, selfHosted: true },
+/**
+ * What the server ships. gitlab.com and github.com need nothing registered.
+ *
+ * `selfHostedLabel` is the field the kind picker is built from, so it is the
+ * one this fixture most has to carry: it is what tells somebody with an
+ * Enterprise install or a Forgejo that the product can talk to it.
+ */
+const KINDS: KindInfo[] = [
+  { id: "github", label: "GitHub", selfHostedLabel: "GitHub Enterprise Server", changeNoun: "pull request", authModes: ["device", "token"], hostedBaseUrl: "https://github.com", selfHosted: false, appPage: "/settings/applications/new", appSteps: [], tokenSteps: [] },
+  { id: "gitlab", label: "GitLab", selfHostedLabel: "GitLab self-managed", changeNoun: "merge request", authModes: ["device", "token"], hostedBaseUrl: "https://gitlab.com", selfHosted: false, appPage: "/-/profile/applications", appSteps: [], tokenSteps: [] },
+  { id: "gitea", label: "Gitea", selfHostedLabel: "Gitea or Forgejo", changeNoun: "pull request", authModes: ["token"], hostedBaseUrl: null, selfHosted: true, appPage: "/user/settings/applications", appSteps: [], tokenSteps: [] },
 ];
 
 function draw({
@@ -115,15 +122,9 @@ describe("the empty state", () => {
     expect(html).toContain("No repository yet");
     expect(html).toContain("Connect a git host and import what you want to work on.");
     expect(html).not.toContain("Your colleagues added these hosts");
-    /* Both still on offer. They are rows in the blank's one menu now rather
-       than three brand buttons, so the assertion is about what the menu
-       holds — a closed menu renders nothing. */
-    expect(connectChoices(hosts).map((c) => c.label)).toEqual([
-      "GitHub",
-      "GitLab",
-      "Paste a URL",
-      "Add a host",
-    ]);
+    // One call to action, and nothing else competing with it.
+    expect(html).toContain("Connect a git host");
+    expect(html).not.toContain("Add a host");
   });
 
   /**
@@ -131,15 +132,39 @@ describe("the empty state", () => {
    * with more than one person: a colleague added the hosts, and this person
    * needs *those* — a generic "GitLab" would send them to gitlab.com.
    */
-  it("names the hosts somebody already added rather than their kinds", () => {
+  it("says when a colleague has been here first", () => {
     const hosts = [host({ connected: false }), gitlab({ connected: false })];
     const html = draw({ hosts, repos: [] });
     expect(html).toContain("Connect a git host");
     expect(html).toContain("Your colleagues added these hosts. You sign in with your own account.");
-    /* The name a colleague gave it, and the address beneath — not "GitLab",
-       which would send somebody to gitlab.com. */
-    expect(connectChoices(hosts)).toContainEqual(
-      expect.objectContaining({ label: "GitLab (internal)", note: "git.acme.internal" }),
+  });
+
+  /**
+   * **The one press buys the whole set, not a narrower one.**
+   *
+   * Three brand buttons were doing a real job and folding them into one
+   * action costs a press — but only if what the press opens is *more* than
+   * they were. It opens `AddHost`'s first step, which enumerates every kind
+   * this server supports from `kindInfo`: the hosted and the self-hosted form
+   * of each, separately, because they are separate products to whoever is
+   * picking and they need different second steps. An empty box asking "where
+   * is it" tells somebody who has a Forgejo nothing at all.
+   *
+   * Asserted against `choicesFrom` rather than the markup, because the dialog
+   * is shut until the button is pressed — and against the *shape* rather than
+   * a list of names, so a sixth kind is a passing test rather than a failing
+   * one.
+   */
+  it("reaches every kind the server supports, hosted and self-hosted", () => {
+    const rows = choicesFrom(KINDS);
+    expect(rows.length).toBeGreaterThanOrEqual(5);
+    // Every kind contributes a self-hosted row; only some are also hosted.
+    expect(rows.filter((c) => c.baseUrl === null).length).toBe(KINDS.length);
+    expect(rows.some((c) => c.label === "Gitea or Forgejo")).toBe(true);
+    expect(rows.some((c) => c.label === "GitHub Enterprise Server")).toBe(true);
+    // Nothing is written down here: the labels are the server's own.
+    expect(rows.map((c) => c.label)).toEqual(
+      KINDS.flatMap((k) => (k.hostedBaseUrl ? [k.label, k.selfHostedLabel] : [k.selfHostedLabel])),
     );
   });
 
@@ -192,13 +217,10 @@ describe("the empty state", () => {
     expect(html).not.toContain("Self-hosted or enterprise");
   });
 
-  /** The dead end. Pasting stays available; it is no longer the only thing. */
+  /** The dead end. The blank is a way in, never a box to type a URL into. */
   it("is never only a paste box", () => {
-    const hosts = [host({ connected: false })];
-    const html = draw({ hosts, repos: [] });
-    expect(connectChoices(hosts).map((c) => c.label)).toContain("Paste a URL");
-    // The host it can actually sign into comes first, and pasting is not it.
-    expect(connectChoices(hosts)[0].label).toBe("GitHub");
+    const html = draw({ hosts: [host({ connected: false })], repos: [] });
+    expect(html).toContain("Connect a git host");
     // The paste box itself is not drawn until somebody asks for it.
     expect(html).not.toContain("git@github.com:acme/web.git");
   });
@@ -338,9 +360,13 @@ describe("the controls", () => {
     });
     expect(populated).not.toContain("Paste a remote");
 
-    const waiting = [gitlab({ connected: false })];
-    expect(draw({ hosts: waiting, repos: [] })).toContain("Connect a git host");
-    expect(connectChoices(waiting).map((c) => c.label)).toContain("Paste a URL");
+    /* And it is not on the blank either. The blank is one button and one
+       sentence; pasting a remote moved into the host picker, which is the
+       control that already owns that state and already has a word for being
+       in it. */
+    const empty = draw({ hosts: [gitlab({ connected: false })], repos: [] });
+    expect(empty).toContain("Connect a git host");
+    expect(empty).not.toContain("Paste a remote");
   });
 });
 

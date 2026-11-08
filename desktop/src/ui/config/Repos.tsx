@@ -29,10 +29,9 @@
  * install, which is the price of the default being the true answer rather
  * than whichever host happened to sort first.
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { useQueries, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowUpRight,
   Check,
   ChevronDown,
   FolderGit2,
@@ -61,10 +60,7 @@ import {
   getListProviderReposQueryOptions,
 } from "~/api/generated/providers/providers";
 import { useHostOf, useProviders, useRepos, why } from "~/data";
-import { navigate } from "~/shims/next-navigation";
 import { Blank, Group, Note, Rows, Section, Typed } from "~/ui/config/bits";
-import { CreateMenu } from "~/ui/config/CreateMenu";
-import { useConnect } from "~/ui/config/connect";
 import { AddHost } from "~/ui/config/GitHosts";
 import { Pop } from "~/ui/Pop";
 import { useConfirm } from "~/ui/Confirm";
@@ -202,7 +198,6 @@ export function Repos({ live, open: asked = null }: { live: boolean; open?: stri
         <Start
           hosts={providers.data}
           loading={providers.loading}
-          onPaste={() => setFrom(PASTE)}
           onAddHost={() => setAdding(true)}
         />
       ) : (
@@ -569,6 +564,23 @@ function HostPicker({
                 )}
               </button>
             ))}
+            {/* **A remote no host can list**, and this is where it lives now.
+                It was a link in small print under the empty state's buttons,
+                and the empty state is one button and one sentence — so it
+                moved to the control that already owns the state it sets and
+                already has a word for being in it. It is not a host to filter
+                to, which is why it sits under the rule. */}
+            <button
+              onClick={() => { onPick(PASTE); setOpen(null); }}
+              className="flex w-full items-center gap-2.5 border-t border-line px-3 py-2 text-left hover:bg-raise/60"
+            >
+              <Link2 className="h-3.5 w-3.5 shrink-0 text-mute" strokeWidth={1.75} />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-ui text-bone">Paste a remote</span>
+                <span className="block truncate text-micro text-mute">Anything git can clone.</span>
+              </span>
+              {pasting && <Check className="h-3.5 w-3.5 shrink-0 text-sage" strokeWidth={2} />}
+            </button>
           </div>
         </Pop>
       )}
@@ -636,69 +648,37 @@ function Settings({ repo, onGone }: { repo: Repo; onGone: () => void }) {
 /* ── Nothing connected yet ─────────────────────────────────────────────── */
 
 /**
- * The page body with nothing in it, and it is still three states rather than
- * one.
+ * The page body with nothing in it, and it is still two states rather than
+ * one: a fresh solo install, and an install where colleagues have been here
+ * first. Connected-but-empty is not here at all — that is a `Note` inside the
+ * upper list, because the screen is not empty, one section of it is.
  *
- * Which you get depends on what the installation already has, and only the
- * first is a fresh solo install:
+ * **The N brand buttons are one action now, and it opens the list of kinds.**
+ * Three buttons with their brand marks were doing a real job: the mark is the
+ * thing people scan for and three buttons are the fastest possible first run.
+ * But three saturated brand buttons are also the loudest object in the
+ * product, on a screen somebody sees once, and the rule is one clear call to
+ * action.
  *
- *   * **nothing added** — the sentence says what connecting a host is for;
- *   * **hosts added, none of them yours** — those hosts are named *in the
- *     menu*, because a colleague set them up and a generic "GitLab" would
- *     send somebody to gitlab.com rather than to the GitLab they work on;
- *   * **connected but empty** — not here at all; that is a `Note` inside the
- *     upper list, because the screen is not empty, one section of it is.
- *
- * **The N brand buttons are one action now, and that costs a press.** They
- * were doing a real job: the mark is the thing people scan for and three
- * buttons are the fastest possible first run. But three saturated brand
- * buttons are also the loudest object in the product, on a screen somebody
- * sees once, and the rule is one clear call to action. The provider is a
- * choice *inside* the action, and the two routes that were links under the
- * button — paste a URL, register a self-hosted host — are rows in the same
- * menu rather than small print.
+ * **What that one press buys is the whole set, not a narrower one.** It opens
+ * `AddHost`, whose first step is the vertical list of *kinds* — GitHub,
+ * GitHub Enterprise Server, GitLab, GitLab self-managed, Gitea or Forgejo —
+ * built from `kindInfo` by `choicesFrom`, so a sixth kind appears on its own.
+ * `GitHosts.tsx` argues the case and it is the argument this screen is now
+ * resting on: the kinds are the only place the product ever says *what it can
+ * talk to*, and somebody who has a Forgejo learns nothing from a row of three
+ * brands. Nothing here re-implements that list; a second copy of it is a
+ * second place for it to fall behind the server.
  */
-/**
- * What the blank's one action offers, in order.
- *
- * Exported because this is the thing three host buttons used to say out loud
- * and a closed menu cannot: *these* hosts, by the name a colleague gave them,
- * with the address that tells two of a kind apart. `repos.test.tsx` reads it,
- * because a menu that has not been opened renders nothing to assert against
- * and the fact is worth a test either way.
- */
-export function connectChoices(
-  hosts: ProviderStatus[],
-): { label: string; note: string; of: ProviderStatus | "paste" | "host" }[] {
-  return [
-    /* The address on the second line, because once there are two of a kind it
-       is the only thing telling them apart — `github.com` beside
-       `ghe.acme.com`. */
-    ...hosts.filter((h) => !h.connected).map((h) => ({ label: h.label, note: h.gitHost, of: h })),
-    /* The two routes that were links in small print under the buttons. A
-       reader with a URL in hand, and a reader whose company runs its own
-       GitLab, are both doing the same thing as the rows above. */
-    { label: "Paste a URL", note: "Anything git can clone.", of: "paste" as const },
-    { label: "Add a host", note: "A self-hosted or enterprise one.", of: "host" as const },
-  ];
-}
-
 function Start({
   hosts,
   loading,
-  onPaste,
   onAddHost,
 }: {
   hosts: ProviderStatus[];
   loading: boolean;
-  onPaste: () => void;
   onAddHost: () => void;
 }) {
-  /* Which host the menu chose, if one has been chosen. `useConnect` is a hook
-     per host, so the flow is a child mounted on the pick rather than a hook
-     whose subject changes underneath it. */
-  const [connecting, setConnecting] = useState<ProviderStatus | null>(null);
-
   if (loading) {
     return (
       <p className="flex items-center gap-2 px-3.5 py-6 text-ui text-mute">
@@ -716,53 +696,21 @@ function Start({
   const theirs = hosts.some((h) => !h.connected && !h.builtin);
 
   return (
-    <>
-      <Blank
-        icon={FolderGit2}
-        title="No repository yet"
-        action={
-          <CreateMenu
-            label="Connect a git host"
-            choices={connectChoices(hosts).map(({ label, note, of }) => ({
-              icon: of === "paste" ? Link2 : of === "host" ? Plus : ArrowUpRight,
-              label,
-              note,
-              onPick:
-                of === "paste" ? onPaste : of === "host" ? onAddHost : () => setConnecting(of),
-            }))}
-          />
-        }
-      >
-        {theirs
-          ? "Your colleagues added these hosts. You sign in with your own account."
-          : "Connect a git host and import what you want to work on."}
-      </Blank>
-      {connecting && <Connecting key={connecting.id} host={connecting} />}
-    </>
+    <Blank
+      icon={FolderGit2}
+      title="No repository yet"
+      action={
+        <button onClick={onAddHost} className="btn primary">
+          <Icon of={Plus} size={14} />
+          Connect a git host
+        </button>
+      }
+    >
+      {theirs
+        ? "Your colleagues added these hosts. You sign in with your own account."
+        : "Connect a git host and import what you want to work on."}
+    </Blank>
   );
-}
-
-/**
- * The host the menu chose, signing in.
- *
- * Mounted on the pick and keyed by the host, so the flow starts once and a
- * second pick is a second flow rather than the first one with its subject
- * swapped. What it draws is `useConnect`'s own node: a device code over the
- * screen, or the token field inline.
- */
-function Connecting({ host }: { host: ProviderStatus }) {
-  const connect = useConnect(host);
-  const started = useRef(false);
-  useEffect(() => {
-    if (started.current) return;
-    started.current = true;
-    connect.start();
-    /* On mount and never again. `start` is rebuilt every render, so listing it
-       would re-authorize on each one — the ref is the guard either way, and
-       naming the dependency would only make the guard do more work. */
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  return <>{connect.node}</>;
 }
 
 /* ── A remote no host can list ─────────────────────────────────────────── */

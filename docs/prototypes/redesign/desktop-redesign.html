@@ -451,13 +451,52 @@ input,textarea{font:inherit;color:inherit;background:none;border:0;outline:none;
 .send:hover{opacity:.86}
 .send:active{transform:scale(.94)}
 
-/* ── Nothing at all ──────────────────────────────────────────────── */
-.blank{flex:1;min-height:0;display:grid;place-items:center;padding:0 34px 170px}
-.blank .in{text-align:center;max-width:430px}
-.blank .glyph{color:var(--hush);margin:0 auto 22px;display:grid;place-items:center;
-  width:52px;height:52px;border-radius:16px;background:var(--raised)}
-.blank h2{font-size:34px;line-height:1.12;letter-spacing:-.026em;font-weight:530;color:var(--ink)}
-.blank p{margin-top:9px;font-size:16.5px;color:var(--quiet)}
+/* ── Nothing at all ──────────────────────────────────────────────────
+   Two members, and after this nothing else draws an empty list. `.blank` is
+   for a page whose body has nothing in it; `.note2` is for a page that has
+   content, one part of which is empty. The difference is not severity, it is
+   *what caused it*: nothing exists yet, or a control the reader changed. */
+.blank{display:grid;place-items:center;padding:72px 34px 104px}
+.blank .in{text-align:center;max-width:420px}
+
+/* The object: one of this list's own rows, raised, with nothing in it. Not an
+   icon in a square. It is the sentence the loading state already says, with
+   the animation off and the count at one, so empty and loading read as one
+   family — and the page's glyph sits where the row's glyph sits, which is
+   what makes Machines differ from Skills without a second design. */
+.blank .obj{margin:0 auto 20px}
+.blank .obj.row{display:flex;align-items:center;gap:13px;width:252px;padding:12px 14px;
+  border-radius:14px;background:var(--raised);box-shadow:var(--lift-1)}
+.blank .obj.row .d{display:grid;place-items:center;flex:none;width:30px;height:30px;
+  border-radius:99px;background:var(--sunk);color:var(--hush)}
+.blank .obj .b{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}
+.blank .obj .b i{display:block;height:7px;border-radius:99px;background:var(--hair)}
+.blank .obj.row .b i:nth-child(2){width:52%}
+/* The gallery's own object, for the one page that is a grid. */
+.blank .obj.card{display:block;width:150px}
+.blank .obj.card .p{display:grid;place-items:center;height:104px;border-radius:12px;
+  background:var(--raised);box-shadow:var(--lift-1);color:var(--hush)}
+.blank .obj.card .b{margin-top:11px}
+.blank .obj.card .b i:nth-child(1){width:72%}
+.blank .obj.card .b i:nth-child(2){width:44%}
+/* The trouble states keep the plate, and that is the point: the shape that
+   says "nothing here" and the shape that says "something went wrong" must not
+   be the same shape. */
+.blank .obj.plate{display:grid;place-items:center;width:52px;height:52px;border-radius:16px;
+  background:var(--raised);box-shadow:var(--lift-1);color:var(--hush)}
+.blank h2{font-size:23px;line-height:1.2;letter-spacing:-.02em;font-weight:530;color:var(--ink)}
+.blank p{margin-top:9px;font-size:16px;line-height:1.6;color:var(--quiet)}
+.blank .acts{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:22px}
+
+/* ── Note: one section, or one filter, is empty ───────────────────────
+   Left on the row's own grid, one line, 46px so it cannot be mistaken for a
+   58px row, and never a primary. A grid rather than a row, so the one control
+   wraps *under* the sentence at panel width instead of squeezing it. */
+.note2{display:grid;grid-template-columns:16px 1fr;gap:0 13px;margin-top:10px;padding:13px 0}
+.note2 .g{display:grid;place-items:center;height:21px;color:var(--hush)}
+.note2 .say{display:flex;align-items:center;flex-wrap:wrap;gap:4px 10px}
+.note2 p{min-width:0;font-size:14.5px;line-height:1.45;color:var(--quiet)}
+.note2 .q{font-family:var(--mono);font-size:13.5px;color:var(--body)}
 
 /* ── A menu ──────────────────────────────────────────────────────── */
 /* An anchored popover's click-catcher. Invisible on purpose: the thing
@@ -3729,42 +3768,108 @@ const initials=n=>n.split(/[\s@._-]/).filter(Boolean).slice(0,2).map(w=>w[0]).jo
    A fresh install hits every empty state at once, so none of these is an
    edge case. */
 const BLANKS={
-  empty:   [ "shapes",        "Nothing here yet", "", ""],
   loading: [ null,            "", "", ""],
-  error:   [ "triangle-alert","That did not load","Northwind answered 503. Nothing has been lost — this list is on the server, not in this window.","Try again"],
-  denied:  [ "lock",          "You cannot see this","Ask an administrator of this Firetower. Nothing is hidden from you by this window — the server decides, and it said no.",""],
-  dark:    [ "circle-slash-2","Can’t reach Northwind","Showing what was last known. Rows from a server that is not answering stay visible — a list that empties itself reads as work being lost.",""],
+  error:   [ "triangle-alert","That did not load","Northwind answered 503. Nothing has been lost. This list is on the server, not in this window.","Try again"],
+  denied:  [ "lock",          "You cannot see this","Ask an administrator of this Firetower. Nothing is hidden by this window. The server decides, and it said no.",""],
+  dark:    [ "circle-slash-2","Can’t reach Northwind","Showing what was last known. Rows from a server that is not answering stay visible.",""],
 };
+/**
+ * One line each: the page's own glyph, the title, the sentence.
+ *
+ * **The glyph is never chosen freshly.** It is the row's own where the rows
+ * have one, and the rail destination's where they wear a brand mark or a
+ * monogram instead. Every one of them is already on screen somewhere else in
+ * the product, which is what makes the object read as a thing rather than as
+ * decoration.
+ *
+ * **The title names what is not there**, in five words or fewer, and never
+ * carries the verb — the button already does. **The sentence is one idea**, in
+ * sixteen words or fewer: why it matters, or what fills it, never both.
+ */
 const EMPTY_SAYS={
-  people:["Nobody else yet","Accounts are made on the administration site."],
-  teams:["No teams yet","A team is made on the administration site, beside the accounts it names."],
-  dirs:["No directories yet","Make one and file things into it. Whoever makes a directory administers it."],
-  vault:["Nothing held yet","Each secret is made where it is used — connecting a git host, a subscription, a repository’s variables."],
-  repos:["No repository yet","Connect a git host and import one. This screen can connect a host on its own."],
-  hosts:["No git host yet","Add the address of a GitHub, GitLab or Gitea your company already uses."],
-  machines:["No machine connected","Firetower’s own machine is always here; add another to run more at once."],
-  agents:["No agent configured","An agent is installed on a machine and runs on somebody’s subscription."],
-  profiles:["No profiles yet","A profile is a saved way of working. Every workspace can run without one."],
-  trackers:["Nothing to read from","Connect a git host and its issues and pull requests appear here."],
-  server:["",""],
+  people:["user-round","Nobody else yet","Accounts are made on the administration site."],
+  teams:["users-round","No teams yet","A team is made on the administration site, beside the accounts it names."],
+  dirs:["folder","No directories yet","Make one and file things into it. Whoever makes a directory administers it."],
+  vault:["key","Nothing held yet","Each secret is made where it is used: a git host, a subscription, a repository’s variables."],
+  repos:["folder-git-2","No repository yet","Connect a git host and import what you want to work on."],
+  hosts:["folder-git-2","No git host yet","Add the address of a GitHub, GitLab or Gitea your company already uses."],
+  machines:["server","No machine yet","Agents run on a machine you add over ssh. Firetower does not run them on itself."],
+  agents:["puzzle","No agent configured","An agent is installed on a machine and runs on somebody’s subscription."],
+  profiles:["users-round","No profiles yet","Every workspace can run without one. Make one to stop repeating yourself."],
+  trackers:["ticket","Nothing to read from","Connect a git host and its issues and pull requests appear here."],
+  server:["shapes","",""],
 };
+
+/**
+ * The object a blank wears, and there are three of them.
+ *
+ * `row` — one of this list's own rows, raised, with nothing in it. It is the
+ * sentence the loading state already says, with the animation off and the
+ * count at one, so empty and loading read as one family. It has presence
+ * because it is a real object at the system's own elevation rather than a
+ * 52px square of grey, and it answers *what is this page for* before a word
+ * is read.
+ *
+ * `card` — the gallery's own poster, for the one page that is a grid.
+ *
+ * `plate` — the 52px tile, and **only the trouble states take it**: a shape
+ * of content behind *that did not load* says the content is coming, which is
+ * the opposite of true.
+ */
+function obj(shape,glyph){
+  if(shape==="card") return `<span class="obj card" aria-hidden="true">
+    <span class="p">${ic(glyph,22)}</span><span class="b"><i></i><i></i></span></span>`;
+  if(shape==="plate") return `<span class="obj plate" aria-hidden="true">${ic(glyph,22)}</span>`;
+  return `<span class="obj row" aria-hidden="true">
+    <span class="d">${ic(glyph,16)}</span><span class="b"><i></i><i></i></span></span>`;
+}
+
+/**
+ * The page's body has nothing in it: one object, one title, one sentence, one
+ * action at most.
+ *
+ * **The button's weight is the register, and nothing else about the block
+ * moves.** Filled where the emptiness is a job to do, plain where it is only
+ * a fact, absent where the page head already carries everything that could
+ * change the answer. Zero ember on every one of them: an empty list is never
+ * an agent waiting on you.
+ */
+function pblank({glyph,title,body,action,kind,shape}){
+  return `<div class="blank">
+    <div class="in">
+      ${obj(shape||"row",glyph)}
+      <h2>${title}</h2>
+      ${body?`<p>${body}</p>`:""}
+      ${action?`<div class="acts"><button class="btn ${kind||"primary"}" data-act="noop">${action}</button></div>`:""}
+    </div></div>`;
+}
+
+/**
+ * One section of a page, or one filter over it, is empty.
+ *
+ * The second member. It sits left on the row's own grid, one line, because it
+ * belongs to the list rather than to the page — a centred plate here would
+ * say the whole page had failed. Never a primary; the only control it may
+ * carry is the one that undoes what caused it.
+ */
+function note(glyph,line,control){
+  return `<div class="note2"><span class="g">${ic(glyph,16)}</span>
+    <span class="say"><p>${line}</p>${control?`<button class="btn quiet" style="height:28px" data-act="noop">${control}</button>`:""}</span></div>`;
+}
+
 function blank(kind,which,action){
   if(kind==="loading") return `<div class="lrows" style="margin-top:22px">${[70,45,60,38,55].map(w=>`
     <div class="r"><span class="settling" style="width:24px;height:24px;border-radius:99px"></span>
       <span class="tx"><span class="settling" style="display:block;width:${w}%;height:10px"></span>
       <span class="settling" style="display:block;width:${Math.round(w*0.4)}%;height:8px;margin-top:6px"></span></span>
       <span class="settling" style="width:54px;height:8px"></span></div>`).join("")}</div>`;
+  if(kind==="empty"){
+    const [glyph,title,body]=EMPTY_SAYS[which]||["shapes","Nothing here yet",""];
+    return pblank({glyph,title,body,action});
+  }
   const [icon,title,body,act]=BLANKS[kind];
-  const [t2,b2]=kind==="empty"?(EMPTY_SAYS[which]||["Nothing here yet",""]):[title,body];
-  return `<div style="display:grid;place-items:center;padding:90px 0 70px;text-align:center">
-    <div style="max-width:44ch">
-      <span style="width:52px;height:52px;border-radius:16px;background:var(--raised);display:grid;
-        place-items:center;color:var(--hush);margin:0 auto">${ic(icon,22)}</span>
-      <h2 style="margin-top:20px;font-size:23px;letter-spacing:-.018em;font-weight:530;color:var(--ink)">${t2}</h2>
-      ${b2?`<p style="margin-top:8px;font-size:16px;line-height:1.6;color:var(--quiet)">${b2}</p>`:""}
-      ${act?`<button class="btn plain" style="margin-top:20px" data-act="noop">${ic("refresh-cw",15)}${act}</button>`
-        :action?`<button class="btn primary" style="margin-top:20px" data-act="noop">${action}</button>`:""}
-    </div></div>`;
+  return pblank({glyph:icon,title,body,shape:"plate",
+    action:act,kind:act?"plain":undefined});
 }
 let WHICH=null, PRIMARY="";
 const pane=(w,p)=>{WHICH=w;PRIMARY=p||"";};
@@ -3790,18 +3895,35 @@ const snav=()=> !SETTINGS.some(([,items])=>items.some(([at])=>at===S.rt)) ? ""
         `<button class="sitem" data-act="go" data-to="${at}" aria-current="${at===S.rt}">${l}</button>`).join("")}</span>
     </div>`).join("")}</nav>`;
 
+/**
+ * A pane, and the two rules an empty one obeys.
+ *
+ * **A page's header action is not drawn over a blank whose action is the same
+ * action.** It is a 33px target in the top right corner of a page whose only
+ * words are 500px away at the optical centre, where the blank's own button
+ * carries the same verb *and* the sentence that explains it. The moment one
+ * row exists the header action is back and the blank is gone, so the two are
+ * never on screen together.
+ *
+ * **And a `WhereTo` is never drawn beside a blank.** A note about operating
+ * things you do not have is a paragraph nobody can use: a reader with no
+ * machines cannot drain one. It comes back with the first row.
+ *
+ * Both are one condition, here rather than at eleven call sites.
+ */
 function pg(title,sentence,acts,body){
   const which=WHICH, primary=PRIMARY;
+  const bare = S.data==="empty" && !!which;
   if(S.data!=="full" && which) body = S.data==="dark"
     ? `<div class="whereto" style="margin:22px 0 0"><span class="g">${ic("circle-slash-2",17)}</span>
-         <p><b>Can’t reach Northwind.</b> Showing what was last known. Rows from a server that is not answering stay visible — a list that empties itself reads as work being lost.</p></div>
+         <p><b>Can’t reach Northwind.</b> Showing what was last known. Rows from a server that is not answering stay visible.</p></div>
        <div class="stale2">${body}</div>`
     : blank(S.data,which,primary);
   return `<div class="pg">
     ${snav()}
     <div class="pg-head">
       <div style="min-width:0"><h1>${title}</h1><p class="sub">${sentence}</p></div>
-      ${acts?`<div class="acts">${acts}</div>`:""}
+      ${acts&&!bare?`<div class="acts">${acts}</div>`:""}
     </div>${body}</div>`;
 }
 const onWeb=`<a class="out" data-act="noop" title="Opens the administration site">Manage on the web${ic("arrow-up-right",15)}</a>`;
@@ -4041,8 +4163,8 @@ function pMachines(){
           <button class="btn quiet" style="height:28px">Remove</button>
           <span style="flex:1"></span>
           <span class="said">filed in ${m.where}</span></div>`:""}`).join(""))
-    + `<div class="whereto"><span class="g">${ic("info",17)}</span>
-        <p>A machine that is <b>not answering keeps its workspaces</b> until it comes back — a list that empties itself when the VPN drops reads as work being lost. Draining stops new work without ending what is running.</p></div>`);
+    + (S.data==="full"?`<div class="whereto"><span class="g">${ic("info",17)}</span>
+        <p>A machine that is <b>not answering keeps its workspaces</b> until it comes back. Draining stops new work without ending what is running.</p></div>`:""));
 }
 
 /* ── Agents and the accounts they run on ───────────────────────── */
@@ -4086,7 +4208,7 @@ const PROFILE_ROWS=[
 function pProfiles(){
   pane("profiles","New profile");
   return pg("Agent profiles",
-    "A saved way of working — what it is for, what it may do, and who it may hand work to. A profile with a team leads; one without is a worker.",
+    "A saved way of working. One with a team leads, one without is a worker.",
     `<button class="btn primary" data-act="pick" data-pick="newprofile">${ic("plus",15)}New profile${ic("chevron-down",14)}</button>`,
     lsec("","",PROFILE_ROWS.map(p=>`<button class="r" data-act="openprofile">
         <span class="g" style="color:var(--body)">${AGENT[p.a](17)}</span>
@@ -4097,7 +4219,7 @@ function pProfiles(){
         <span class="gbtn hov">${ic("ellipsis",15)}</span>
       </button>`).join(""))
     + `<div class="whereto"><span class="g">${ic("info",17)}</span>
-        <p>A profile is filed like a skill or a machine, so sharing one is the same sheet everything else uses. <b>The team is the only thing that makes one a manager</b> — same object either way.</p></div>`);
+        <p>A profile is filed like a skill or a machine, so sharing one uses the same sheet. <b>The team is the only thing that makes one a manager</b>.</p></div>`);
 }
 
 /* ── Trackers, now under Tasks ─────────────────────────────────── */
