@@ -176,6 +176,10 @@ pub(super) async fn rename_skill(
         "description": body.description,
     }))
     .map_err(refused)?;
+    // And the same again for a character that is a line break to one reader
+    // and text to another, which is the other way this description reaches a
+    // system prompt saying something the checks never read.
+    crate::skills::check_one_reading("a description", &body.description).map_err(refused)?;
 
     state
         .skills

@@ -133,6 +133,34 @@ thing to check live; the menu is not evidence either way.
 One capability method on `Agent`, beside `home_var`. Never a `kind ===
 "ClaudeCode"` in a client.
 
+### What each agent calls a line break
+
+**Firetower writes the same bundle to every agent, and they do not agree about
+where a frontmatter line ends.** YAML 1.1 ends one on five characters; YAML 1.2
+narrowed it to LF and CR, and the readers are split across the change. So a
+description holding U+2028 is one field to one agent and two to another — and
+the second field can be `allowed-tools` or `hooks`, which §8 is about.
+
+| Reader | Ends a line on | Verified |
+| --- | --- | --- |
+| Firetower `read_frontmatter` | LF, CR | Yes. `split_inclusive('\n')`, and the tests. |
+| Claude Code 2.1.273 | LF, CR | Yes. Probed with a payload valid only if split: U+0085, U+2028 and U+2029 all left the frontmatter a single field. |
+| libyaml / `unsafe-libyaml` | LF, CR, U+0085, U+2028, U+2029 | Yes. pyyaml's `CSafeLoader` and `serde_yaml` both read an injected `allowed-tools` from one line. |
+| Codex 0.156.1 | — | **No.** Its binary links `serde_yaml` and `unsafe-libyaml`, so a libyaml reading is the inference; that those are what it parses a skill's frontmatter *with* was not observed. |
+| Kimi Code 2.1.1, Cursor Agent | — | **No.** Not probed at all. |
+
+Probing Claude Code needs no account: skills load before the auth check, so
+`claude -p --debug --debug-file <path>` in a directory with a planted bundle
+logs `Failed to parse YAML frontmatter` for a frontmatter it rejected and
+nothing for one it accepted. That one bit is enough to tell a break from text,
+given a payload that is valid only one way round. Reading the parser out of the
+binary is not — it is one packed Mach-O and every YAML signature greps to zero.
+
+So the control plane refuses the three disputed characters rather than
+betting on the reader: `skills::check_one_reading`. A description has no use
+for a line separator, and the agent on the other end is whichever one the
+session picked.
+
 **Not project scope.** One workspace holds several sessions with different
 agents and different selections; project scope is shared by all of them. Kimi
 resolves its project root by walking up for `.git`, which in a workspace finds
