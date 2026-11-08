@@ -1,5 +1,8 @@
 "use client";
 
+import { ChevronDown } from "lucide-react";
+import { Icon } from "./Icon";
+
 /**
  * Text in, and one of a list.
  *
@@ -47,20 +50,29 @@ export function Select<T extends string>({
   options: [T, string][];
   className?: string;
 }) {
+  /* **Our arrow, not the browser's.** The native one sat flush against the
+     right border, at an inset each engine picks for itself, while the text
+     sat at `px-2.5`. So it is turned off and a chevron is drawn at that same
+     inset, in the muted colour the other pickers' chevrons use, with clicks passing through it to the
+     select underneath. The wrapper only positions it: widths and heights in
+     `className` still land on the select, which is what sizes the pair. */
   return (
-    <select
-      // Chrome restores form controls across a reload and fires change as it
-      // does, which quietly narrows a page to a scope nobody picked this time.
-      autoComplete="off"
-      value={value}
-      onChange={(e) => onChange(e.target.value as T)}
-      className={`${BASE} cursor-pointer pr-7 text-dim ${className}`}
-    >
-      {options.map(([id, label]) => (
-        <option key={id} value={id}>
-          {label}
-        </option>
-      ))}
-    </select>
+    <span className="relative inline-flex min-w-0 items-center">
+      <select
+        // Chrome restores form controls across a reload and fires change as it
+        // does, which quietly narrows a page to a scope nobody picked this time.
+        autoComplete="off"
+        value={value}
+        onChange={(e) => onChange(e.target.value as T)}
+        className={`${BASE} cursor-pointer appearance-none pr-8 text-dim ${className}`}
+      >
+        {options.map(([id, label]) => (
+          <option key={id} value={id}>
+            {label}
+          </option>
+        ))}
+      </select>
+      <Icon of={ChevronDown} size={14} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-mute" />
+    </span>
   );
 }
