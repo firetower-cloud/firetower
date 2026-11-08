@@ -50,8 +50,14 @@ export function ArtifactCard({ artifact, onOpen }: { artifact: Artifact; onOpen:
             className="h-full w-full"
           />
         ) : (
-          <View className="h-full w-full items-center justify-center">
-            <Shapes color={color.settling} size={28} />
+          <View className="h-full w-full items-center justify-center gap-[7px]">
+            <Shapes color={color.settling} size={22} />
+            {/* **It is a state, not a failure.** A version is published before
+                anything has photographed it, so a fresh library hits this on
+                every tile at once — and a plate with no words on it reads as
+                a broken image. The same plate covers a poster that 404s,
+                because the two are the same thing to look at. */}
+            <Text className="font-sans text-micro text-mute">no picture yet</Text>
           </View>
         )}
       </View>

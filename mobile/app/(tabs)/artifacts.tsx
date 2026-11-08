@@ -27,6 +27,8 @@ import { ChevronLeft } from "lucide-react-native";
 import { useListArtifacts } from "~/api/generated/artifacts/artifacts";
 import { ArtifactCard } from "~/ui/ArtifactCard";
 import { TextTabs } from "~/ui/TextTabs";
+import { libraryColumns } from "~/ui/measure";
+import { usePose } from "~/ui/pose";
 import { Waiting } from "~/ui/Waiting";
 import { useTheme } from "~/design/theme";
 
@@ -39,6 +41,7 @@ const SCOPES: [Scope, string][] = [
 
 export default function Artifacts() {
   const { color } = useTheme();
+  const pose = usePose();
   const insets = useSafeAreaInsets();
   const [scope, setScope] = useState<Scope>("all");
   const { data: everything = [], isPending, error } = useListArtifacts();
@@ -54,6 +57,7 @@ export default function Artifacts() {
   return (
     <View
       className="flex-1 bg-ground"
+      onLayout={pose.onLayout}
       style={{ paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }}
     >
       <View className="flex-row items-center gap-1 pb-2 pl-1">
@@ -71,7 +75,10 @@ export default function Artifacts() {
       <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 24, flexGrow: 1 }}>
         <View className="flex-row flex-wrap gap-x-3 gap-y-1 px-4">
           {shown.map((a) => (
-            <View key={a.id} className="w-[47%]">
+            /* Two at a phone's width, three from 620 — a grid reflows and a
+               column does not. Measured rather than fixed at 47%, which was
+               two columns at every width the Duo has. */
+            <View key={a.id} style={{ width: `${100 / libraryColumns(pose.content) - 2}%` }}>
               <ArtifactCard
                 artifact={a}
                 onOpen={() => router.push({ pathname: "/workspace/artifact", params: { id: a.id } })}

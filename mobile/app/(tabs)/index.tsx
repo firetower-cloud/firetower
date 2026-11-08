@@ -249,10 +249,21 @@ export default function Home() {
      44 of air above it, not the desk's 192. The same *proportion* of a 390pt
      phone would be 194pt of nothing on the scarce axis and the page would not
      then fit. */
+  /* **The greeting stops holding it open** once there is nothing under it.
+     The 44 of air is there to let the greeting breathe *above the sections*;
+     with no sections it is 44pt of nothing on the scarce axis, holding a
+     salutation away from the only other thing on screen. Two states collapse
+     it — no repository at all, and a repository with nothing waiting and
+     nothing made. */
+  const nothing = dotted.length === 0 && posters.length === 0;
   const head = (
     <View
       className="px-5 pb-5"
-      style={{ minHeight: bare ? 0 : 44, paddingTop: bare ? 28 : 16, justifyContent: "flex-end" }}
+      style={{
+        minHeight: bare || nothing ? 0 : 44,
+        paddingTop: bare || nothing ? 28 : 16,
+        justifyContent: "flex-end",
+      }}
     >
       <Text
         className="font-medium text-bone"
