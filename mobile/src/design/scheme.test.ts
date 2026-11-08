@@ -59,8 +59,12 @@ describe("the float surface is not the page", () => {
     expect(dark.float).not.toBe(dark.ground);
     // A ΔE alone is not enough at the bottom of the range; check the ratio of
     // the luminances too, which is what says how hard the edge will read.
-    const jump = (Y(dark.float) + 0.05) / (Y(dark.ground) + 0.05);
-    expect(jump).toBeGreaterThan(1.1);
+    // **The ratio of luminances, not the contrast ratio** — the two are
+    // different numbers and the PR called 1.184 a luminance ratio for a
+    // while. Here: 3.92x the luminance, a 1.184:1 contrast ratio.
+    expect(Y(dark.float) / Y(dark.ground)).toBeGreaterThan(3);
+    const contrast = (Y(dark.float) + 0.05) / (Y(dark.ground) + 0.05);
+    expect(contrast).toBeGreaterThan(1.1);
   });
 
   it("is the page's own white in light, where the shadow does the work", () => {

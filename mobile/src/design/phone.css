@@ -68,7 +68,9 @@
 
      **A shadow is a light-theme device.** Below about 1% luminance there is
      nothing left under a surface to cast into, so elevation has to be carried
-     by the fill. L* 11.42 against the page's 3.04, a 1.18× jump in light.
+     by the fill. L* 11.42 against the page's 3.04 — **3.92× the luminance**,
+     which is a 1.184:1 contrast ratio. Those are two different numbers and
+     this comment used to give the second one the first one's name.
 
      It is not a sixth rung — the value is `--color-overlay`'s in dark and
      `--color-panel`'s in light. It is that step given a name, because what
