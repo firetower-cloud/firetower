@@ -301,7 +301,7 @@ merge is work to review. They are **derived** from the hosts, with the same id
 and the same credential, so adding a GitLab adds a place to read work from with
 nothing more to configure and no second token.
 
-Linear is a tracker only, and connects with a key of its own — see
+Linear and Trello are trackers only, and connect with a key of their own — see
 [Task trackers](trackers.md).
 
 ### Dialects

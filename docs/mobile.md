@@ -340,11 +340,11 @@ prompt field is the composer from the conversation screen, reused.
 ### Tasks
 
 `/tasks` answers for one tracker per request and the two page differently —
-GitHub by number with a total, Linear by cursor with none — so the desktop
-shows one at a time and the phone does the same. The chips and the search box
-are query parameters the source reads in its own dialect; they are sent, never
-applied locally, for the reason the desktop file already gives: filtering the
-answer again is how rows go missing.
+GitHub by number with a total, Linear by cursor with none, Trello by number with
+none — so the desktop shows one at a time and the phone does the same. The chips
+and the search box are query parameters the source reads in its own dialect;
+they are sent, never applied locally, for the reason the desktop file already
+gives: filtering the answer again is how rows go missing.
 
 Which tracker is a mark, not a word, and on 390pt that stops being an
 aesthetic choice.
