@@ -2137,6 +2137,25 @@ impl Skills {
     /// order leaves a session holding a set nobody chose. Each one pins the
     /// version that is current *now*, so a version made later does not change
     /// what this conversation reads.
+    ///
+    /// **Nothing `person` cannot see is pinned, and that check lives here.**
+    /// This is the one place every path funnels through — the New page's
+    /// selection, a session's own picker, a profile's resolved set, a delegated
+    /// child's — and a pin is what puts a skill's files on a worker's disk and
+    /// runs them. `person` used to be bound only as `added_by`, with
+    /// `current_version_id IS NOT NULL` the sole predicate, so any id reaching
+    /// any caller was pinned; the HTTP handler filtered on `visible()` and
+    /// nothing else did. With a profile's list now *granting* skills rather
+    /// than filtering them, and profiles shareable, the gap was a way to run
+    /// your code on somebody else's worker. So the check is in the chokepoint,
+    /// the way `approve`, `discard` and `roles::update` each hold their own —
+    /// and it is `filed_where`, pasted, because that is the only definition of
+    /// "may see this" anywhere in the product.
+    ///
+    /// It filters rather than refusing, which matches the `DELETE` above: this
+    /// method's promise is that a session reads exactly what it is allowed to
+    /// of what it was handed. Whoever has somebody to tell says so first —
+    /// `api::roles::check_skills` refuses the write outright.
     pub async fn set_for_session(
         &self,
         session: &str,
@@ -2149,18 +2168,20 @@ impl Skills {
             .bind(skills)
             .execute(&mut *tx)
             .await?;
+        let insert = format!(
+            "INSERT INTO skill_pins (session_id, skill_id, version_id, added_by) \
+             SELECT $1, k.id, k.current_version_id, $3 FROM skills k \
+              WHERE k.id = $2 AND k.current_version_id IS NOT NULL AND {visible} \
+             ON CONFLICT (session_id, skill_id) DO NOTHING",
+            visible = filed_where("k", 3, Level::Viewer),
+        );
         for skill in skills {
-            sqlx::query(
-                "INSERT INTO skill_pins (session_id, skill_id, version_id, added_by) \
-                 SELECT $1, k.id, k.current_version_id, $3 FROM skills k \
-                  WHERE k.id = $2 AND k.current_version_id IS NOT NULL \
-                 ON CONFLICT (session_id, skill_id) DO NOTHING",
-            )
-            .bind(session)
-            .bind(skill)
-            .bind(person)
-            .execute(&mut *tx)
-            .await?;
+            sqlx::query(&insert)
+                .bind(session)
+                .bind(skill)
+                .bind(person)
+                .execute(&mut *tx)
+                .await?;
         }
         tx.commit().await?;
         Ok(())

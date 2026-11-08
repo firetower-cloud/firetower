@@ -268,32 +268,37 @@ async fn spawn(state: &AppState, request: &AgentRequest) -> Result<String> {
         .map(|r| r.settings.clone())
         .unwrap_or_default();
 
-    // The child's skills, scoped the way a "start as" session's are — the
-    // owner's defaults, kept to the profile's skill_scope when it has one. A
-    // delegated child carries its persona in the brief rather than a
-    // profile_id, so the session layer cannot look the scope up: we hand it the
-    // already-filtered set. An unscoped profile (or an ad-hoc child) passes
-    // nothing and gets the owner's defaults, exactly as before.
+    // The child's skills: what the profile resolves to for this lead's owner
+    // and this lead's checkouts. A delegated child carries its persona in the
+    // brief rather than a `profile_id`, so the session layer cannot look the
+    // profile up — it is handed the already-resolved set either way, and
+    // `start_another_agent` now honours it, which is what makes `here` and
+    // `new` deliver the same thing.
+    //
+    // **Every profile resolves, not only one with a list.** This used to run
+    // only when `skill_scope` was non-empty, and to intersect it with the
+    // owner's defaults — so a tick could only ever subtract, and an empty
+    // intersection handed over `Some(vec![])`, which is honoured as "nothing".
+    // A scoped profile could end up strictly worse off than an unscoped one.
+    // The switches are part of the answer now, so a profile with an empty list
+    // still has one: both on resolves to exactly the owner's defaults, which is
+    // what every existing profile gets.
+    //
+    // An ad-hoc child with no profile still passes nothing and takes the
+    // owner's defaults, as before.
     let skills: Option<Vec<String>> = match role.as_ref() {
-        Some(r) if !r.skill_scope.is_empty() => {
+        Some(r) => {
             let repos: Vec<String> = lead
                 .checkouts
                 .iter()
                 .filter_map(|c| c.repo_id.as_ref().map(|r| r.as_str().to_string()))
                 .collect();
-            let defaults = state
-                .skills
-                .defaults_for(lead.owner.as_str(), &repos)
-                .await
-                .unwrap_or_default();
             Some(
-                defaults
-                    .into_iter()
-                    .filter(|id| r.skill_scope.contains(id))
-                    .collect(),
+                crate::roles::skills_at_spawn(&state.skills, r, lead.owner.as_str(), &repos)
+                    .await?,
             )
         }
-        _ => None,
+        None => None,
     };
     // What the child is called. A child in its own workspace is named
     // `"<lead> / <what>"`, so the two sort together and the interface drops the
@@ -599,7 +604,15 @@ fn new_role_from(input: &Value) -> Result<crate::roles::NewRole> {
             .and_then(Value::as_bool)
             .unwrap_or(false),
         delegate_scope: vec![],
+        // **Not settable from here, deliberately.** A tick on `skill_scope`
+        // grants a skill rather than filtering one, so an agent that could set
+        // it could widen its own children's reach — which is the thing scope
+        // exists to prevent — and it names skills by id, which nothing shows
+        // it. The two switches default on instead, so a profile an agent
+        // writes loads the owner's usual set rather than nothing at all.
         skill_scope: vec![],
+        include_always_on: true,
+        include_repo_defaults: true,
         settings: Default::default(),
         // Resolved and filed separately below: the agent names a directory, not
         // an id, so the service's `directory` field is left out here.
@@ -760,7 +773,12 @@ async fn update_profile(state: &AppState, request: &AgentRequest) -> Result<Stri
             .and_then(Value::as_bool)
             .unwrap_or(existing.can_delegate),
         delegate_scope: existing.delegate_scope.clone(),
+        // Carried, not settable — see `new_role_from`. An agent changing a
+        // profile must not be able to widen what its children load, nor to
+        // quietly switch off a source somebody chose on the Profiles screen.
         skill_scope: existing.skill_scope.clone(),
+        include_always_on: existing.include_always_on,
+        include_repo_defaults: existing.include_repo_defaults,
         settings: existing.settings.clone(),
         directory: None,
     };
@@ -1288,6 +1306,8 @@ mod tests {
             instructions: "Report findings as path:line.".into(),
             can_delegate: false,
             delegate_scope: vec![],
+            include_always_on: true,
+            include_repo_defaults: true,
             skill_scope: vec![],
             settings: Default::default(),
             may_write: true,

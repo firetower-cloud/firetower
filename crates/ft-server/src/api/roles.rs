@@ -42,6 +42,56 @@ async fn check_account(
     Ok(())
 }
 
+/// Every skill a profile names has to be one this person can actually see.
+///
+/// **A tick grants now, so it needs authorising.** Under the intersection this
+/// replaces, `skill_scope` needed no check at all: a spawn took the owner's own
+/// defaults and kept only the ids on the list, so an id they could not reach
+/// dropped out on its own and the list could only ever subtract. A tick now
+/// *introduces* a skill, profiles are shareable (`roles.rs` — a role is Placed),
+/// and a skill is executable (`docs/skills.md` §8). Without this, somebody with
+/// Writer on a shared profile could name a skill only they can see, and a
+/// colleague who started that profile would materialise and run it on their own
+/// worker under their own credentials.
+///
+/// Refused rather than quietly filtered, which is the opposite of what the
+/// session's own skill selection does — and right for the opposite reason. That
+/// one is a live choice about one conversation; this one is written down and
+/// read by everybody who can reach the profile, so a save that silently kept
+/// less than the screen showed would be a profile that does not do what the
+/// person was told it does. `skills_for` and `set_for_session` filter at spawn
+/// as well: this is the half that can explain itself to somebody.
+async fn check_skills(state: &AppState, owner: &str, new: &NewRole) -> ApiResult<()> {
+    if new.skill_scope.is_empty() {
+        return Ok(());
+    }
+    let reachable: std::collections::HashSet<String> = state
+        .skills
+        .visible(owner, Level::Viewer)
+        .await?
+        .into_iter()
+        .map(|s| s.id.as_str().to_string())
+        .collect();
+    let out: Vec<&str> = new
+        .skill_scope
+        .iter()
+        .filter(|id| !reachable.contains(*id))
+        .map(String::as_str)
+        .collect();
+    if !out.is_empty() {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            format!(
+                "{} of the skills named aren't ones you can use, so this profile can't load \
+                 them: {}",
+                out.len(),
+                out.join(", "),
+            ),
+        ));
+    }
+    Ok(())
+}
+
 #[utoipa::path(
     get, path = "/api/v1/roles", tag = "roles",
     responses((status = 200, body = Vec<Role>), (status = 401, body = ApiError)),
@@ -69,6 +119,7 @@ pub(super) async fn create_role(
     let me = whoever(&principal)?;
     crate::roles::check(&new).map_err(refused)?;
     check_account(&state, me.id.as_str(), &new).await?;
+    check_skills(&state, me.id.as_str(), &new).await?;
 
     let id = state
         .roles
@@ -137,6 +188,7 @@ pub(super) async fn update_role(
     let me = whoever(&principal)?;
     crate::roles::check(&new).map_err(refused)?;
     check_account(&state, me.id.as_str(), &new).await?;
+    check_skills(&state, me.id.as_str(), &new).await?;
 
     // Absent rather than refused when they may not change it, for the reason
     // every other read gives: a role you cannot reach is one you are not told

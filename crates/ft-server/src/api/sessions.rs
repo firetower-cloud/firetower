@@ -785,29 +785,30 @@ pub(crate) async fn create_session_as(
     // somebody can fix in one click; one that refuses to start because a
     // default could not be read is not.
     let on_these: Vec<String> = repos.iter().map(|(r, _)| r.id.to_string()).collect();
-    // What this session reads: the explicit selection the New page sent, or —
-    // when none was named — this person's defaults for these repositories.
-    let wanted = match &req.skills {
-        Some(chosen) => chosen.clone(),
-        None => state
-            .skills
-            .defaults_for(&owner, &on_these)
-            .await
-            .unwrap_or_else(|e| {
-                tracing::warn!("reading default skills: {e:#}");
-                Vec::new()
-            }),
-    };
-    // When this session runs as a profile that scopes its skills, keep only the
-    // ones on that list. Off-scope skills are never pinned, so they are never
-    // materialised into the workspace and never reach the agent.
-    let wanted: Vec<String> = match profile
-        .as_ref()
-        .map(|p| &p.skill_scope)
-        .filter(|s| !s.is_empty())
-    {
-        Some(scope) => wanted.into_iter().filter(|id| scope.contains(id)).collect(),
-        None => wanted,
+    // What this session reads: a profile's own resolved set when it runs as one,
+    // and otherwise the explicit selection the New page sent or this person's
+    // defaults for these repositories.
+    //
+    // **A profile replaces that selection rather than narrowing it**, which is
+    // the shape the composer already assumes: it draws no skills chip, because
+    // "starting something, the profile decides what it reads" — so a selection
+    // arriving beside a profile is the client's own copy of these same
+    // defaults, which is what the profile is resolving in the first place. This
+    // used to intersect the two, and an empty intersection meant a scoped
+    // profile started with nothing at all.
+    let wanted: Vec<String> = match profile.as_ref() {
+        Some(p) => crate::roles::skills_at_spawn(&state.skills, p, &owner, &on_these).await?,
+        None => match &req.skills {
+            Some(chosen) => chosen.clone(),
+            None => state
+                .skills
+                .defaults_for(&owner, &on_these)
+                .await
+                .unwrap_or_else(|e| {
+                    tracing::warn!("reading default skills: {e:#}");
+                    Vec::new()
+                }),
+        },
     };
     if !wanted.is_empty() {
         if let Err(e) = state
@@ -1336,6 +1337,37 @@ pub(crate) async fn relaunch(
 /// Deliberately not a flag on the path above. That one decides where to put a
 /// workspace and then builds it; this one decides nothing and builds nothing,
 /// and the two share only the launch at the end.
+/// Where a second agent in an existing workspace gets its skills.
+///
+/// A named decision rather than a match buried in a 200-line function, because
+/// this is the one that was wrong: every arm but the last was missing, so a
+/// delegated child in its lead's workspace — the default placement — was seeded
+/// from `defaults_for(&owner, &[])` and nothing it was handed was read at all.
+/// Pure, so `a_second_agent_reads_what_it_was_handed` fails if an arm goes back.
+enum SkillsSource<'a> {
+    /// A set somebody handed over: a delegated child's already-resolved set, or
+    /// an explicit selection. It wins — whoever built it knew the lead's
+    /// checkouts, which this function does not.
+    Handed(&'a Vec<String>),
+    /// The profile this agent runs as, resolving its own three sources.
+    Profile(&'a crate::roles::Role),
+    /// This person's always-on set, which is what a plain second agent has
+    /// always taken. Not repository defaults: the checkouts belong to the
+    /// place, and this run did not pick them.
+    AlwaysOn,
+}
+
+fn skills_source<'a>(
+    handed: Option<&'a Vec<String>>,
+    profile: Option<&'a crate::roles::Role>,
+) -> SkillsSource<'a> {
+    match (handed, profile) {
+        (Some(chosen), _) => SkillsSource::Handed(chosen),
+        (None, Some(profile)) => SkillsSource::Profile(profile),
+        (None, None) => SkillsSource::AlwaysOn,
+    }
+}
+
 async fn start_another_agent(
     state: AppState,
     owner: String,
@@ -1503,17 +1535,37 @@ async fn start_another_agent(
     }
     let agent_home = agent_home(&state, req.agent, &id, &owner).await?;
 
-    // A second agent in a workspace is a second session, so it chooses for
-    // itself — seeded from this person's always-on set, in a directory of its
-    // own. Not from repository defaults: the checkouts belong to the place,
-    // and this run did not pick them.
-    let everywhere: Vec<String> = Vec::new();
-    if let Ok(wanted) = state.skills.defaults_for(&owner, &everywhere).await {
-        if !wanted.is_empty() {
-            let _ = state
-                .skills
-                .set_for_session(id.as_str(), &owner, &wanted)
-                .await;
+    // What this second agent reads — see `SkillsSource`. A profile resolves
+    // against this workspace's repository, which is the only one its checkouts
+    // can be for.
+    let wanted: Option<Vec<String>> = match skills_source(req.skills.as_ref(), profile.as_ref()) {
+        SkillsSource::Handed(chosen) => Some(chosen.clone()),
+        SkillsSource::Profile(p) => {
+            let repos: Vec<String> = place.repo.clone().into_iter().collect();
+            match crate::roles::skills_at_spawn(&state.skills, p, &owner, &repos).await {
+                Ok(resolved) => Some(resolved),
+                Err(e) => {
+                    tracing::warn!("resolving a profile's skills for a second agent: {e:#}");
+                    None
+                }
+            }
+        }
+        SkillsSource::AlwaysOn => {
+            let everywhere: Vec<String> = Vec::new();
+            state.skills.defaults_for(&owner, &everywhere).await.ok()
+        }
+    };
+    // Best effort, for the reason the bundles below are: a workspace that comes
+    // up without its skills is one somebody fixes in a click, and one that
+    // refuses to start is not. Logged rather than swallowed — a skill that
+    // silently did not arrive is this feature's whole subject.
+    if let Some(wanted) = wanted.filter(|w| !w.is_empty()) {
+        if let Err(e) = state
+            .skills
+            .set_for_session(id.as_str(), &owner, &wanted)
+            .await
+        {
+            tracing::warn!("seeding a second agent's skills: {e:#}");
         }
     }
     let skills = state
@@ -3961,7 +4013,78 @@ mod gh_tests {
 
 #[cfg(test)]
 mod tests {
-    use super::{asked_for, nothing_to_do, sanitise, within};
+    use super::{asked_for, nothing_to_do, sanitise, skills_source, within, SkillsSource};
+
+    /// The reported bug, as a test.
+    ///
+    /// A profile's skills had no effect on any child sharing its lead's
+    /// workspace — which is the default placement, so it was no effect on most
+    /// children. `create_session_as` early-returns into `start_another_agent`
+    /// when `workspace_id` is set, and that function never read `req.skills`
+    /// and never resolved the profile: it seeded from the owner's always-on set
+    /// and nothing else. Both of the first two arms below were missing, and
+    /// deleting either one brings the bug back and this test with it.
+    #[test]
+    fn a_second_agent_reads_what_it_was_handed() {
+        let role = crate::roles::Role {
+            id: "role_x".into(),
+            path: "u/kevin/reviewer".into(),
+            name: "reviewer".into(),
+            does: "reviews a branch".into(),
+            placement: "here".into(),
+            agent: Some("ClaudeCode".into()),
+            machine: None,
+            account: None,
+            settings: Default::default(),
+            instructions: String::new(),
+            can_delegate: false,
+            delegate_scope: vec![],
+            include_always_on: true,
+            include_repo_defaults: true,
+            skill_scope: vec![],
+            may_write: true,
+            may_share: true,
+            is_default: false,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+        let handed = vec!["sk_one".to_string(), "sk_two".to_string()];
+
+        // A delegated child arrives with its set already resolved against its
+        // lead's checkouts, which this function cannot see. It wins over the
+        // profile for exactly that reason.
+        assert!(matches!(
+            skills_source(Some(&handed), Some(&role)),
+            SkillsSource::Handed(set) if set == &handed
+        ));
+        assert!(matches!(
+            skills_source(Some(&handed), None),
+            SkillsSource::Handed(_)
+        ));
+
+        // Somebody adding an agent to a workspace as a profile: the profile
+        // resolves its own three sources. This is the arm that was absent.
+        assert!(matches!(
+            skills_source(None, Some(&role)),
+            SkillsSource::Profile(_)
+        ));
+
+        // And a plain second agent still takes the always-on set, which is what
+        // this function did for everybody before.
+        assert!(matches!(
+            skills_source(None, None),
+            SkillsSource::AlwaysOn
+        ));
+
+        // An empty set is a decision, not an absence: a profile with both
+        // switches off and nothing named resolves to none, and that has to
+        // survive the trip rather than falling through to the defaults.
+        let none: Vec<String> = vec![];
+        assert!(matches!(
+            skills_source(Some(&none), None),
+            SkillsSource::Handed(set) if set.is_empty()
+        ));
+    }
 
     /// Ending a filtered list must end that list and nothing beside it.
     #[test]
