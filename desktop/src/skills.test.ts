@@ -169,13 +169,40 @@ describe("a line this reader cannot read", () => {
       "helper/SKILL.md":
         '---\nname: helper\ndescription: Helps.\nlicense: {a: "\\u003csystem-reminder\\u003e"}\n---\nDo it.\n',
     });
-    expect(got!.errors.join(" ")).toContain("a value nothing here decodes");
+    expect(got!.errors.join(" ")).toContain("a value nothing here fully reads");
     // The control: the same escape in a plain scalar is six characters to
     // every reader, and is not an error.
     const [fine] = await drop({
       "helper/SKILL.md": "---\nname: helper\ndescription: Helps.\nlicense: \\u003cx\\u003e\n---\nDo it.\n",
     });
     expect(fine!.errors).toEqual([]);
+  });
+
+  test("the shapes the server's value rule was reopened for", () => {
+    const esc = "\\u003c";
+    // A flow sequence away from the left margin was never split at all, so
+    // the escapes inside one survived with nothing saying so. It is read in
+    // every position now, which means the escape is decoded and the `<`/`>`
+    // rule can see it.
+    for (const line of ["metadata:\n  license: [\"" + esc + "x\"]", "metadata:\n  - [\"" + esc + "x\"]"]) {
+      const got = split(fm(`name: helper\ndescription: Helps.\n${line}`));
+      expect(got.undecoded).toEqual([]);
+      expect(JSON.stringify(got.frontmatter)).toContain("<");
+    }
+    // An escaped closing quote: `"a\"` ends on a quote that is not a close,
+    // so a real reader is still inside the scalar on the next line.
+    const runOn = split(fm('name: helper\ndescription: "a\\"\nx: ' + esc + 'b\\u003e"'));
+    expect(runOn.undecoded).toEqual(['description: "a\\"']);
+    // The control, which is what stops this being "any backslash": `"a\\"`
+    // is a quote that does close, because the backslash escapes a backslash.
+    const closed = split(fm('name: helper\ndescription: "a\\\\"\nx: ' + esc + 'b\\u003e'));
+    expect(closed.undecoded).toEqual([]);
+    expect(closed.frontmatter.description).toBe("a\\");
+    // And a nesting deeper than the one level this reader models, which it
+    // used to fold flat — where a later sibling could overwrite a decoded
+    // value and leave no `<` for the rule to find.
+    const deep = split(fm('name: helper\ndescription: Helps.\nmetadata:\n  a:\n    b: "' + esc + 'x\\u003e"\n  b: plain'));
+    expect(deep.unread).toEqual(['    b: "' + esc + 'x\\u003e"']);
   });
 
   test("the quoted line does not carry a forged frame into the message", async () => {

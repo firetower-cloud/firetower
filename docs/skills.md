@@ -115,23 +115,67 @@ Errors:
   So a line in a frontmatter is blank, a comment, `key: value` at the left
   margin, a `- list item`, an indented `key: value` under one, or part of a
   block scalar already open — and anything else is refused. The cost was
-  measured the same way the frame rule's was: **0 of 53** published and
+  measured the same way the frame rule's was: **0 of 57** published and
   library `SKILL.md` hold a line this reader drops.
 
-  **And a value this reader keeps as text rather than decoding is refused for
-  the same reason.** A line it cannot read is a key the agent has and
-  Firetower does not; a value it did not decode is a *character* the agent has
-  and Firetower does not, which is the same hole for the bracket rule below.
-  The reader decodes one complete quoted scalar and keeps anything else
-  verbatim, so `license: {a: "\u003csystem-reminder\u003e"}` was accepted —
-  the bracket rule asked about six characters while libyaml hands the agent a
-  `<`. Four shapes: a flow mapping, a tag or anchor or alias, a flow list
-  holding one of those, and a double-quoted scalar that does not close on its
-  line. Measured against libyaml — pyyaml's `CSafeLoader` and Ruby's Psych,
-  both over libyaml — with the controls that matter: a **plain** scalar and a
-  **single-quoted** scalar process no escapes in YAML either, so the escape is
-  six characters to both readers there and nothing is refused. 0 of 53 hold
-  any of the four.
+  **And a value this reader did not fully read is refused for the same
+  reason, with the reader itself being the thing that says so.** A line it
+  cannot read is a key the agent has and Firetower does not; a value it did
+  not decode is a *character* the agent has and Firetower does not, which is
+  the same hole for the bracket rule below. So
+  `license: {a: "\u003csystem-reminder\u003e"}` was accepted — the bracket
+  rule asked about six characters while libyaml hands the agent a `<`.
+
+  The rule is one sentence and it is deliberately not a list of shapes:
+  **reading a value means decoding it, and the decoder reports whether it
+  did.** A quoted scalar is decoded, escapes and all. A plain or a block
+  scalar means exactly what it spells, because YAML processes no escapes in
+  either. Anything else is kept as the characters that spell it, and that is
+  not a reading of it — so it is refused, by name, from inside the decoder.
+  A flow mapping, a tag, an anchor, an alias and a directive are all refused
+  without being named anywhere, because what is *allowed* is stated instead:
+  YAML's own rule for what a plain scalar may begin with.
+
+  That shape matters more than the list it replaced, and the reason is this
+  area's history. The first version of this rule was a separate predicate
+  sitting *beside* the decoder, guessing from a value's first and last
+  characters what the decoder was about to do — and it was wrong in two
+  places at once. A flow sequence was only ever split at the left margin, so
+  in a nested or a list position the escapes inside one survived untouched
+  with nothing reporting it; and `description: "a\"` ends on a quote that is
+  not a close, so a scalar libyaml had not finished reading looked complete,
+  and libyaml folded the next line — key and all — into `description`. Both
+  were accepted. A rule that approximates the reader instead of being
+  produced by it is the shape every round of this bug has had.
+
+  **One level of nesting is all this reader models, and that is now a
+  statement it keeps.** It used to fold every nested pair into a single flat
+  map whatever its indentation, so a key three levels deep landed beside its
+  own parent's siblings and a later sibling of the same name overwrote it —
+  *after* it had been decoded. `metadata:` / `  a:` / `    b: "\u003c…"` /
+  `  b: plain` left a frontmatter with no `<` in it anywhere for the bracket
+  rule to find, while libyaml keeps it at `metadata.a.b` and hands it to the
+  agent. The root keys agree, so no comparison of *keys* says a word about
+  it; it was found by the property in §2 comparing the characters the two
+  readers deliver, which is the only reason anybody knows about it.
+
+  Measured against libyaml — pyyaml's `CSafeLoader`, Ruby's Psych, and
+  `serde_yaml` over `unsafe-libyaml` in the tests — with the controls that
+  matter: a **plain** scalar and a **single-quoted** scalar process no
+  escapes in YAML either, so the escape is six characters to both readers
+  there and nothing is refused. Claude Code 2.1.273 renders the literal six
+  characters for both, and **decodes `\u003c` in a double-quoted scalar** — so
+  the escape class is live against it too, and the exemption is right in three
+  readers rather than two. *(Claude Code measured by the security review of
+  `d408c3c2`, against a loopback capture sink reading the `name: description`
+  pair it renders into the system prompt, with positive and negative controls.
+  Not re-derived here; the independent evidence in this section is libyaml, in
+  three bindings.)* **57 of 57** published and library `SKILL.md` are
+  accepted: 0 hold a flow sequence, a brace, or a `\u` escape anywhere in
+  their frontmatter, and 0 nest three deep. The one cost is honest and worth
+  naming: a frontmatter nested three levels deep is refused whether or not
+  that instance carries anything, for the same reason a dropped line is — a
+  parse of the frontmatter is not evidence about the frontmatter.
 
   And the rule that the file has to **declare** a name and a description is
   asked of the bytes for the same reason. It used to read the `frontmatter`
@@ -212,6 +256,14 @@ thing to check live; the menu is not evidence either way.
 
 One capability method on `Agent`, beside `home_var`. Never a `kind ===
 "ClaudeCode"` in a client.
+
+**Where the `claude` binary is, because it was twice reported as absent.** Not
+on `PATH`, not under `~/.claude`, not in any `node_modules` — it is at
+`~/.firetower/worker/agents/claude-code/<version>/bin/claude`, which is how a
+worker session has one at all. Probing it needs no account: skills load before
+the auth check, so pointing `ANTHROPIC_BASE_URL` at a loopback sink that
+answers every request with a 400 is enough to read the system prompt it built.
+Every Claude Code row in this document was measured that way.
 
 ### What each agent calls a line break
 
@@ -314,6 +366,75 @@ request.
 
 **Not `CLAUDE_CONFIG_DIR`.** It works, but it hides the host's own `~/.claude`
 — their settings, their skills, their plugins. Keep it as the fallback.
+
+### The property, and why the oracle is libyaml itself
+
+Each rule above closes the variants somebody has thought of. **The property
+closes the next one without anybody having to think of it first**, and after
+five rounds in this area it is the only thing that ends the sequence rather
+than continuing it:
+
+> For every bundle `check()` accepts, the readers agree — about the keys they
+> find **and about the characters they deliver**.
+
+Asserted as a gate rather than as a test. Every test that puts a bundle
+through `check()` goes through `checked`, so the property is asked about all
+of them, and a direct `check()` that accepts is itself a test failure — the
+one way the gate could go quiet without anybody noticing.
+
+Three things are compared, and the second two exist because the first was not
+enough:
+
+1. **The keys, against a reader looser than Firetower's on every axis** — one
+   that skips a byte-order mark, opens on anything starting with `---`, splits
+   on all five of YAML 1.1's line breaks, takes a quoted or an explicit `?`
+   key, and finds the root mapping wherever it is indented to.
+2. **The keys, against libyaml itself**, which is `serde_yaml` as a
+   `[dev-dependencies]` entry. The model in (1) is built on *more* — more
+   breaks, more spellings — so it assumes the other reader's keys are a
+   superset of Firetower's, and libyaml can find a **subset**: a quoted
+   scalar that does not close on its line swallows the following line, key and
+   all. On that whole family the model returned exactly Firetower's own answer
+   and the property was silent.
+3. **The characters libyaml ends up handing the agent**, every one of which
+   has to be a character Firetower also saw. This is the one that generalises,
+   because it is what the bracket rule is actually about: that rule exists so
+   a `<` does not reach a system prompt, and it can only do that if the text
+   it inspects is the text the agent gets. Any route that decodes a character
+   Firetower never saw fails it, named or not.
+
+Containment rather than equality in (3), and the direction is the security
+question: a character libyaml delivers that Firetower never saw is one the
+agent is handed and no rule inspected. The other way round — Firetower holding
+more than libyaml, which is what it does with a `~` or a `1e3` — is only this
+reader being blunter than the standard, and no rule is blind to it. Whitespace
+is dropped on both sides, so two readers' *folding* of a `description: >` is
+not a disagreement.
+
+**A real dependency rather than a model of one.** `ft-server` has no YAML
+library and should not: `read_frontmatter` is deliberately small and
+deliberately the same shape as the desktop client's, and a parser in the
+server would be one that disagrees with the client. None of that is an
+argument about test code, and an oracle that *is* libyaml cannot be weaker
+than libyaml. The hand-written one was.
+
+**And the property is asked of a generated corpus, not only of the payloads
+somebody wrote down.** That distinction is not theoretical: with the nesting
+rule reverted and its own test disabled, the whole suite stayed green, because
+nothing in it happened to hand the gate a frontmatter nested three deep. Every
+value shape in every position Firetower reads a value in, crossed with the key
+spellings, is generated and run — and the test asserts the corpus *contains*
+disagreements and that every one of them is refused, so it cannot pass by
+having become boring.
+
+The measured two-sided result, over 934 payloads from two independent
+enumerations: at `d408c3c2`, 293 accepted with **72** where libyaml delivered
+a character Firetower never saw and 11 key disagreements; with the rules
+above, 172 accepted with **0** and **0**. The same oracle, the same payloads.
+And over the 57 unique published and library `SKILL.md` on a worker: **57
+accepted, 0 refused, 0 disagreeing** — with 4 of the 57 refused by libyaml
+outright, which is issue #275 and not a security finding, since a reader that
+refuses the document finds no keys to disagree about.
 
 ### Toggling mid-conversation
 

@@ -336,14 +336,17 @@ async function bundle(root: string, raw: Raw[]): Promise<Found> {
         "takes more than that — `description : x` with a space before the colon, or a quoted " +
         "key — so a line this one cannot read is a field nothing on this screen has checked.",
     );
-  /* And the same of a value. A scalar kept as the characters that spell it is
-     a scalar whose meaning no rule here saw — the `<`/`>` check below is asked
-     about `\u003c` while a real YAML reader hands the agent a `<`. */
+  /* And the same of a value, answered the same way: the decoder is what
+     reports. A scalar kept as the characters that spell it is a scalar whose
+     meaning no rule here saw — the `<`/`>` check below is asked about
+     `\u003c` while a real YAML reader hands the agent a `<`. */
   else if (undecoded.length)
     errors.push(
-      `The frontmatter has a value nothing here decodes: \`${brief(undecoded[0]!)}\`. ` +
-        "A flow mapping, a tag, an anchor, an alias, a flow list holding one of those, or a " +
-        "quote that never closes is decoded by a real YAML reader and kept verbatim here. " +
+      `The frontmatter has a value nothing here fully reads: \`${brief(undecoded[0]!)}\`. ` +
+        "Reading a value means decoding it, and a quoted scalar is decoded here while a plain " +
+        "or a block scalar means exactly what it spells. Anything else — a flow mapping, a " +
+        "tag, an anchor, an alias, a quote that does not close where it looks like it does — " +
+        "a real YAML reader decodes and this one keeps verbatim. " +
         "Write it as an indented `key: value` map, a `- list`, or a plain or quoted scalar.",
     );
   else if (!declared) {
@@ -506,29 +509,50 @@ export function split(text: string): {
   const undecoded: string[] = [];
   const lines = m[1]!.split(/\r?\n/);
   let key: string | null = null;
-  let map: Record<string, string> | null = null;
-  let list: string[] | null = null;
+  let map: Record<string, unknown> | null = null;
+  let list: unknown[] | null = null;
+  /* **The one place a value's verdict is recorded.** The value only comes out
+     of `readValue` through here, so a position that reads a value cannot
+     forget to say whether reading is what happened — the same reason the
+     dropped line is counted in exactly one place below. */
+  const took = (line: string, got: Scalar) => {
+    if (!got.read) undecoded.push(line);
+    return got.value;
+  };
+
+  /* The indentation the lines under the current key sit at, set by the first
+     of them. **One level of nesting is all this reader models**, and this is
+     what makes that a statement it can keep. It folded every nested pair into
+     one flat map whatever its depth, so a key three levels deep landed beside
+     its own parent's siblings and a later sibling of the same name overwrote
+     it — after it had been decoded. `metadata:` / `  a:` / `    b: "\u003c…"`
+     / `  b: plain` left a frontmatter with no `<` in it for the check below
+     while a real reader keeps it at `metadata.a.b`. Mirrors the server. */
+  let nest: number | null = null;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!;
     if (!line.trim() || line.trim().startsWith("#")) continue;
 
+    const lead = line.length - line.trimStart().length;
+    const astray = lead > 0 && nest !== null && lead !== nest;
+
     // `  - item`, which is how the standard spells a list.
-    const item = /^\s+-\s+(.*)$/.exec(line);
+    const item = astray ? null : /^\s+-\s+(.*)$/.exec(line);
     if (item && key) {
       if (!list) {
         list = [];
         out[key] = list;
       }
-      if (!decoded(item[1]!)) undecoded.push(line);
-      list.push(unquote(item[1]!));
+      nest = lead;
+      list.push(took(line, readValue(item[1]!)));
       continue;
     }
     // `  key: value` under a key with nothing after its colon.
-    const nested = /^\s{2,}([A-Za-z0-9_-]+):\s*(.*)$/.exec(line);
+    const nested = astray ? null : /^\s{2,}([A-Za-z0-9_-]+):\s*(.*)$/.exec(line);
     if (nested && map) {
-      if (!decoded(nested[2]!)) undecoded.push(line);
-      map[nested[1]!] = unquote(nested[2]!);
+      nest = lead;
+      map[nested[1]!] = took(line, readValue(nested[2]!));
       continue;
     }
 
@@ -541,6 +565,7 @@ export function split(text: string): {
     key = top[1]!;
     map = null;
     list = null;
+    nest = null;
     const value = top[2]!.trim();
 
     // `>`, `|`, and either with a chomp (`-`/`+`) or an explicit indent
@@ -580,41 +605,118 @@ export function split(text: string): {
       continue;
     }
 
-    if (value !== "" && !decoded(value)) undecoded.push(line);
     if (value === "") {
       // A list or a map — decided by the first indented line after it.
       map = {};
       out[key] = map;
-    } else if (value.startsWith("[") && value.endsWith("]")) {
-      out[key] = value
-        .slice(1, -1)
-        .split(",")
-        .map((v) => unquote(v))
-        .filter(Boolean);
     } else {
-      out[key] = unquote(value);
+      // A flow sequence used to be split here and nowhere else, which is why
+      // the two positions above read one verbatim. `readValue` is now the
+      // only thing that turns text into a value, so all three read it the
+      // same way or report the same way.
+      out[key] = took(line, readValue(value));
     }
   }
   return { frontmatter: out, body: text.slice(m[0].length).trim(), framed: true, unread, undecoded };
 }
 
+/** One value as this reader made of it, and whether making it was reading it. */
+type Scalar = { value: unknown; read: boolean };
+
 /**
- * Whether this reader **decoded** a scalar rather than keeping the characters
- * that spell it.
+ * A value as this reader makes of it — **and whether that is what a real
+ * reader would have done with it**. Mirrors the server's `read_value`.
  *
- * `unquote` decodes one complete quoted scalar and keeps anything else
- * verbatim, which is right for a plain and for a block scalar — YAML
- * processes no escapes in either, so `\u003c` is six characters to every
- * reader. It is not right for a flow mapping, a tag/anchor/alias, a flow list
- * holding one of those, or a quote that does not close on its line: libyaml
- * decodes all four, so the `<`/`>` rule is asked about the escape while the
- * agent is handed the character. Mirrors the server's `decoded`.
+ * The two cannot be had apart, which is the point. This used to be a
+ * `decoded(value)` predicate sitting *beside* `unquote(value)`, re-guessing
+ * from the value's first and last characters what `unquote` was about to do,
+ * and it had drifted from `unquote` in two of the three positions that read a
+ * value: a flow sequence was only ever split at the left margin, so in a
+ * nested or a list position the escapes inside one survived with nothing
+ * saying so; and `"a\"` ends on a quote that is not a close, so a scalar
+ * libyaml had not finished reading looked complete. Both are the server's
+ * Blocker, and this file carried them identically — `riskOf` is computed from
+ * this parse, so a badge was being drawn from a reading nobody had.
  */
-function decoded(value: string): boolean {
-  const v = value.trim();
-  if (/^[{!&*]/.test(v)) return false;
-  if (v.startsWith("[") && v.endsWith("]")) return !/[{}[\]]/.test(v.slice(1, -1));
-  for (const q of ['"', "'"]) if (v.startsWith(q) && !(v.length >= 2 && v.endsWith(q))) return false;
+function readValue(raw: string, flow = false): Scalar {
+  const t = raw.trim();
+
+  const dq = closes(t, '"');
+  if (dq !== null) return { value: unescape(dq), read: true };
+  const sq = closes(t, "'");
+  if (sq !== null) return { value: sq.replace(/''/g, "'"), read: true };
+
+  // `[a, b]`, split the way this reader splits it — and every element put
+  // back through here, so an element that is not one scalar is reported by
+  // the same answer rather than assumed away by its caller.
+  if (t.startsWith("[") && t.endsWith("]")) {
+    let read = true;
+    const got: unknown[] = [];
+    for (const piece of t.slice(1, -1).split(",")) {
+      const el = readValue(piece, true);
+      read = read && el.read;
+      if (el.value !== "") got.push(el.value);
+    }
+    return { value: got, read };
+  }
+  // The `else`: verbatim, and verbatim is a reading only of a plain scalar.
+  return { value: t, read: plain(t, flow) };
+}
+
+/**
+ * `t` as **one complete quoted scalar** — the text between the quotes — or
+ * `null`, because it is not that and keeping it whole is not reading it.
+ *
+ * **The escape is the point.** `"a\"` ends on a quote that is not a close:
+ * `\"` is an escaped quote, so for a reader that knows that, the scalar runs
+ * on and swallows the next line. Text after the close — `"a" b` — is `null`
+ * as well: a reader that ends the scalar at the quote does not then ignore
+ * what follows it.
+ */
+function closes(t: string, q: string): string | null {
+  if (!t.startsWith(q)) return null;
+  const inner = t.slice(1);
+  for (let i = 0; i < inner.length; i++) {
+    // In a double-quoted scalar, whatever follows a backslash is spelled
+    // rather than structural — including a quote.
+    if (q === '"' && inner[i] === "\\") {
+      i++;
+      continue;
+    }
+    if (inner[i] !== q) continue;
+    // `''` inside a single-quoted scalar is one quote, not the close.
+    if (q === "'" && inner[i + 1] === q) {
+      i++;
+      continue;
+    }
+    return i === inner.length - 1 ? inner.slice(0, i) : null;
+  }
+  return null;
+}
+
+/**
+ * Whether `t` is something YAML reads as a **plain scalar** — the one shape
+ * whose reading is its spelling, because a plain scalar has no escapes.
+ *
+ * The rule is the standard's `ns-plain-first` rather than a list of the
+ * shapes that have bitten: a plain scalar may not *begin* with an indicator,
+ * and `-`, `?` and `:` are indicators only when a space or the end of the
+ * value follows. Inside a flow collection the same production also forbids
+ * `,`, `[`, `]`, `{` and `}` anywhere in the scalar and ends it at a `: `.
+ *
+ * Stated as the complement, which is what makes it fail closed: a flow
+ * mapping, a tag, an anchor, an alias and a directive are all refused
+ * without being named, and so is the next one.
+ */
+function plain(t: string, flow: boolean): boolean {
+  if (t === "") return true;
+  const first = t[0]!;
+  if ("-?:".includes(first)) {
+    if (t.length === 1 || t[1] === " " || t[1] === "\t") return false;
+  } else if (",[]{}#&*!|>'\"%@`".includes(first)) {
+    return false;
+  }
+  if (flow && (/[,[\]{}]/.test(t) || t.includes(": ") || t.endsWith(":"))) return false;
   return true;
 }
 
@@ -696,25 +798,15 @@ function editsBetween(a: string, b: string): number {
 }
 
 /**
- * A scalar with its quotes taken off and its escapes resolved.
+ * YAML's double-quoted escapes. Anything else is left as it was written.
  *
  * **The escapes are the point, not a nicety.** A double-quoted scalar may
  * spell any character as `\uXXXX`, so `description: "\u003csystem-reminder\u003e"`
- * holds no `<` for the rule below to find — and then the agent, which reads
+ * holds no `<` for the rule above to find — and then the agent, which reads
  * `SKILL.md` with a real YAML parser, renders the tag. Stripping the quotes
  * without decoding what is inside them makes the rule advice rather than a
- * check. A single-quoted scalar has one escape, `''` for a quote.
+ * check.
  */
-const unquote = (v: string) => {
-  const t = v.trim();
-  const dq = /^"([\s\S]*)"$/.exec(t);
-  if (dq) return unescape(dq[1]!);
-  const sq = /^'([\s\S]*)'$/.exec(t);
-  if (sq) return sq[1]!.replace(/''/g, "'");
-  return t;
-};
-
-/** YAML's double-quoted escapes. Anything else is left as it was written. */
 function unescape(s: string): string {
   return s.replace(
     /\\(u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8}|x[0-9a-fA-F]{2}|.)/gs,
