@@ -97,6 +97,8 @@ export function AttachMenu({
   return (
     <>
       <Scrim
+        testID="attach-dismiss"
+        accessibilityLabel="Dismiss"
         entering={FadeIn.duration(140)}
         exiting={FadeOut.duration(120)}
         onPress={onClose}

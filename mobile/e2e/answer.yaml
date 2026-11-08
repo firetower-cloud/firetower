@@ -69,9 +69,15 @@ appId: com.usefiretower.app
 # Maestro matches the whole accessibility label, and this row has two lines.
 - assertVisible: "Files.*workspace"
 - takeScreenshot: attach-menu
-# Tapping the conversation behind it closes it.
+# Tapping the conversation behind it closes it — through the catcher, by id.
+#
+# **Not a percentage.** Maestro's percentage coordinates are wrong on the
+# iPhone Duo: `90%,77%` lands on a control at roughly (85,600)pt. Absolute
+# points are correct and element ids are better still, because they survive a
+# layout change as well as a device change. This was `50%, 25%`, which on that
+# device is not the conversation.
 - tapOn:
-    point: "50%, 25%"
+    id: "attach-dismiss"
 - assertNotVisible: "Photos"
 
 # The pickers were `Pressable`s with no `onPress` for weeks — a picture of a
