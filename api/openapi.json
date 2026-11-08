@@ -7099,6 +7099,15 @@
             }
           },
           {
+            "name": "status",
+            "in": "query",
+            "description": "One column, by the key /trackers/{id}/columns gave it",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "page",
             "in": "query",
             "description": "One-based",
@@ -7674,6 +7683,71 @@
           },
           "404": {
             "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/trackers/{id}/columns": {
+      "get": {
+        "tags": [
+          "trackers"
+        ],
+        "summary": "The columns of a board, left to right.",
+        "description": "Only a tracker with boards has any; the others answer 404, which is how a\nclient knows not to offer a board view.",
+        "operationId": "list_tracker_columns",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Tracker id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "team",
+            "in": "query",
+            "description": "The board, by the tracker's own key",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TaskColumn"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "That tracker has not been connected",
             "content": {
               "application/json": {
                 "schema": {
@@ -15399,6 +15473,24 @@
           "url": {
             "type": "string",
             "description": "Always somewhere to go and read it."
+          }
+        }
+      },
+      "TaskColumn": {
+        "type": "object",
+        "description": "One column of a tracker's board: a Trello list.\n\nAsked of the tracker rather than worked out from a page of cards, because a\npage holds thirty cards: a column with nothing recent in it, or an empty\none, would be missing from the board.",
+        "required": [
+          "key",
+          "label"
+        ],
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "The tracker's own key for it, and what `status` on the task list is\ngiven to ask for this column."
+          },
+          "label": {
+            "type": "string",
+            "description": "What a person reads."
           }
         }
       },

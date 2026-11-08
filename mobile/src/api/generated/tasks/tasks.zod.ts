@@ -27,6 +27,7 @@ export const ListTasksQueryParams = zod.object({
   "state": zod.enum(['open', 'closed']).optional().describe('open or closed'),
   "mine": zod.boolean().optional().describe('Only what you are assigned'),
   "q": zod.string().optional().describe('The query box, passed to the source verbatim'),
+  "status": zod.string().optional().describe('One column, by the key /trackers/{id}/columns gave it'),
   "page": zod.int().min(listTasksQueryPageMin).optional().describe('One-based'),
   "cursor": zod.string().optional().describe('Where the last page stopped, for a source that pages by cursor')
 })

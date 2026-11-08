@@ -11,6 +11,13 @@
 //! column without a second request. Search gives no total and no cursor, only
 //! a page number, so [`Page::more`] is "a full page came back".
 //!
+//! The one exception is a board column with nothing typed: it is a Trello
+//! list, asked by the list's id through `/lists/{id}/cards`, because that is
+//! the only call that returns a list's cards exactly, in the board's own
+//! order. Search matches `list:` by word, so "Urgent" would also bring the
+//! cards of "Non urgent". When a column is searched anyway (something typed,
+//! or Assigned to me), the answer is checked against the list id.
+//!
 //! The credentials never appear in a URL. Trello will take `key` and `token`
 //! as query parameters, and those end up in proxy logs, error messages and
 //! `Debug` output. They go in an `Authorization: OAuth` header instead, which
@@ -40,6 +47,22 @@ pub struct Trello<'a> {
     pub app_key: String,
 }
 
+impl Trello<'_> {
+    /// A list's name, which search wants for `list:"…"` and which a card
+    /// from `/lists/{id}/cards` does not carry.
+    async fn list_name(&self, token: &str, id: &str) -> Result<String> {
+        let list: ListName = ask_trello(
+            self.tracker.api_base,
+            &self.app_key,
+            token,
+            &format!("/lists/{id}"),
+            &[("fields", "name".to_string())],
+        )
+        .await?;
+        Ok(list.name)
+    }
+}
+
 impl Source for Trello<'_> {
     async fn list(&self, token: &str, ask: &Query) -> Result<Page> {
         // Trello has no pull requests. Asking for them asks for nothing.
@@ -60,24 +83,59 @@ impl Source for Trello<'_> {
             }
         }
 
+        // A column is a list, named by its id. Checked before anything is sent.
+        let column = column_of(ask)?;
+        let list_name = match column {
+            Some(id) => Some(self.list_name(token, id).await?),
+            None => None,
+        };
+
+        if let (Some(id), Some(name), Way::WholeList) = (column, &list_name, way_of(ask)) {
+            let cards: Vec<Card> = ask_trello(
+                self.tracker.api_base,
+                &self.app_key,
+                token,
+                &format!("/lists/{id}/cards"),
+                &list_params(ask),
+            )
+            .await?;
+            return Ok(Page {
+                tasks: in_column(cards, name),
+                total: None,
+                more: false,
+                next: None,
+            });
+        }
+
         #[derive(Deserialize)]
         struct Found {
             #[serde(default)]
             cards: Vec<Card>,
         }
 
+        // Search matches `list:` by word, so the column's name goes in as
+        // the query asks and the answer is checked against the column's id.
+        let named = Query {
+            status: list_name,
+            ..ask.clone()
+        };
         let found: Found = ask_trello(
             self.tracker.api_base,
             &self.app_key,
             token,
             "/search",
-            &search_params(ask, board),
+            &search_params(&named, board),
         )
         .await?;
 
+        // A full page is what Trello sent, before Firetower checked it.
         let more = found.cards.len() as u32 >= super::PER_PAGE;
+        let cards = match column {
+            Some(id) => in_list(found.cards, id),
+            None => found.cards,
+        };
         Ok(Page {
-            tasks: found.cards.into_iter().map(Into::into).collect(),
+            tasks: cards.into_iter().map(Into::into).collect(),
             total: None,
             more,
             next: None,
@@ -107,7 +165,7 @@ impl Source for Trello<'_> {
 
 /// A shortLink is letters and digits. Checked before one is put in a path, so
 /// a pasted link cannot steer the request somewhere else on the API.
-fn is_short_link(link: &str) -> bool {
+pub fn is_short_link(link: &str) -> bool {
     !link.is_empty() && link.chars().all(|c| c.is_ascii_alphanumeric())
 }
 
@@ -115,6 +173,12 @@ fn is_short_link(link: &str) -> bool {
 /// Checked before one is put in a path, for the same reason as a shortLink.
 pub fn is_board_id(id: &str) -> bool {
     id.len() == 24 && id.chars().all(|c| matches!(c, '0'..='9' | 'a'..='f'))
+}
+
+/// A list id has the same shape as a board id, and is checked for the same
+/// reason before it goes into a path.
+pub fn is_list_id(id: &str) -> bool {
+    is_board_id(id)
 }
 
 /// The token out of whatever was pasted.
@@ -203,6 +267,65 @@ fn in_name_order(raw: Vec<RawBoard>) -> Vec<Board> {
         .collect();
     boards.sort_by_key(|b| b.name.to_lowercase());
     boards
+}
+
+/// A column of a board, as the board view lays them side by side.
+#[derive(Debug, Clone)]
+pub struct Column {
+    /// The list's id.
+    pub key: String,
+    /// What the list is called, which is also what `list:"…"` searches by.
+    pub name: String,
+}
+
+/// A list as Trello answers for a board.
+#[derive(Deserialize)]
+struct List {
+    id: String,
+    name: String,
+    /// Where it sits on the board. Fractional: Trello halves the gap when a
+    /// list is dropped between two others.
+    pos: f64,
+}
+
+/// A board's open lists, left to right.
+///
+/// Asked of Trello rather than read off a page of cards: a page holds thirty
+/// cards, so a column with nothing recent in it, or an empty one, would
+/// otherwise be missing from the board.
+pub async fn columns(
+    api_base: &str,
+    app_key: &str,
+    token: &str,
+    board: &str,
+) -> Result<Vec<Column>> {
+    if !is_board_id(board) {
+        bail!("{board} is not a Trello board");
+    }
+    let lists: Vec<List> = ask_trello(
+        api_base,
+        app_key,
+        token,
+        &format!("/boards/{board}/lists"),
+        &[
+            ("filter", "open".to_string()),
+            ("fields", "name,pos".to_string()),
+        ],
+    )
+    .await?;
+    Ok(in_board_order(lists))
+}
+
+/// Trello does not promise the order it answers in; `pos` is the order.
+fn in_board_order(mut lists: Vec<List>) -> Vec<Column> {
+    lists.sort_by(|a, b| a.pos.total_cmp(&b.pos));
+    lists
+        .into_iter()
+        .map(|l| Column {
+            key: l.id,
+            name: l.name,
+        })
+        .collect()
 }
 
 /// One request, and the handling every caller would repeat.
@@ -422,7 +545,8 @@ fn query_for(ask: &Query) -> String {
     if let Some(board) = &typed.board {
         parts.push(format!("board:{}", quoted(board)));
     }
-    if let Some(list) = &typed.list {
+    // A typed `list:` beats the column asked for beside it, like every chip.
+    if let Some(list) = typed.list.as_ref().or(ask.status.as_ref()) {
         parts.push(format!("list:{}", quoted(list)));
     }
     for label in &typed.labels {
@@ -445,6 +569,75 @@ fn query_for(ask: &Query) -> String {
         return WHEN_NOTHING_IS_ASKED.into();
     }
     parts.join(" ")
+}
+
+/// How a column is asked for.
+#[derive(Debug, PartialEq, Eq)]
+enum Way {
+    /// `/lists/{id}/cards`: the list's own cards, in Trello's own order.
+    /// Only when nothing narrows the column, because that endpoint takes no
+    /// query, no member and no label.
+    WholeList,
+    /// `/search`, which is the only call that takes a question. Cards come
+    /// back in search order, not the board's.
+    Search,
+}
+
+/// Whole list or search: nothing typed and not "Assigned to me" is the list.
+fn way_of(ask: &Query) -> Way {
+    let nothing_typed = ask.raw.as_deref().unwrap_or("").trim().is_empty();
+    if ask.status.is_some() && nothing_typed && !ask.mine {
+        Way::WholeList
+    } else {
+        Way::Search
+    }
+}
+
+/// The column asked for, as a list id that may go into a path.
+fn column_of(ask: &Query) -> Result<Option<&str>> {
+    match ask.status.as_deref().filter(|s| !s.is_empty()) {
+        None => Ok(None),
+        Some(id) if is_list_id(id) => Ok(Some(id)),
+        Some(other) => bail!("{other} is not a Trello list"),
+    }
+}
+
+/// What `/lists/{id}/cards` is called with: the state chip as Trello's
+/// `filter` (open when there is none), and the members a row draws.
+fn list_params(ask: &Query) -> Vec<(&'static str, String)> {
+    let filter = match ask.state {
+        Some(TaskState::Closed) => "closed",
+        _ => "open",
+    };
+    vec![
+        ("filter", filter.to_string()),
+        ("members", "true".to_string()),
+        ("member_fields", "username,avatarUrl".to_string()),
+    ]
+}
+
+/// A list's cards as tasks, each in the list it was asked from. The endpoint
+/// does not embed the list, so its name is put on them here.
+fn in_column(cards: Vec<Card>, name: &str) -> Vec<Task> {
+    cards
+        .into_iter()
+        .map(|mut card| {
+            card.list = Some(ListName { name: name.into() });
+            card.into()
+        })
+        .collect()
+}
+
+/// The cards that sit in exactly this list.
+///
+/// The one place Firetower checks what Trello returned. Search's `list:`
+/// matches words, not names, so asking for "Urgent" also brings back the
+/// cards of "Non urgent". Cards with no `idList` are kept out.
+fn in_list(cards: Vec<Card>, id: &str) -> Vec<Card> {
+    cards
+        .into_iter()
+        .filter(|card| card.id_list.as_deref() == Some(id))
+        .collect()
 }
 
 /// Every parameter `/1/search` is called with.
@@ -487,6 +680,8 @@ pub struct Card {
     members: Vec<Member>,
     /// The column. Absent when the request did not ask for it.
     list: Option<ListName>,
+    /// The column's id, which search's `list:` word match is checked against.
+    id_list: Option<String>,
 }
 
 /// A label as search answers it.
@@ -578,6 +773,44 @@ mod tests {
     }
 
     #[test]
+    fn a_column_is_asked_by_name_and_quoted() {
+        let q = query_of(
+            &Query {
+                status: Some("To do".into()),
+                ..Default::default()
+            },
+            None,
+        );
+        assert!(q.contains(r#"list:"To do""#), "{q}");
+    }
+
+    #[test]
+    fn a_typed_list_wins_over_the_column_beside_it() {
+        let q = query_of(
+            &Query {
+                status: Some("To do".into()),
+                raw: Some("list:Doing".into()),
+                ..Default::default()
+            },
+            None,
+        );
+        assert!(q.contains("list:Doing"), "{q}");
+        assert!(!q.contains("To do"), "{q}");
+    }
+
+    #[test]
+    fn columns_come_back_in_the_boards_own_order() {
+        let lists: Vec<List> = serde_json::from_value(json!([
+            { "id": "c", "name": "Done", "pos": 3 },
+            { "id": "a", "name": "To do", "pos": 1.5 },
+            { "id": "b", "name": "Doing", "pos": 2 }
+        ]))
+        .unwrap();
+        let labels: Vec<String> = in_board_order(lists).into_iter().map(|c| c.name).collect();
+        assert_eq!(labels, vec!["To do", "Doing", "Done"]);
+    }
+
+    #[test]
     fn a_card_url_with_a_slug_still_names_its_card() {
         for url in [
             "https://trello.com/c/aB3dE9fG/42-fix-export",
@@ -597,6 +830,7 @@ mod tests {
         assert!(is_short_link("aB3dE9fG"));
         assert!(!is_short_link(""));
         assert!(!is_short_link("../members/me"));
+        assert!(!is_short_link("a/b"));
         assert!(!is_short_link("a?b"));
     }
 
@@ -763,6 +997,121 @@ mod tests {
         assert!(params.contains(&("cards_limit", "30".to_string())));
         assert!(params.contains(&("modelTypes", "cards".to_string())));
         assert!(params.contains(&("card_list", "true".to_string())));
+    }
+
+    #[test]
+    fn a_column_with_nothing_typed_is_the_whole_list() {
+        let ask = Query {
+            status: Some("5f1b2c3d4e5f6a7b8c9d0e1f".into()),
+            ..Default::default()
+        };
+        assert_eq!(way_of(&ask), Way::WholeList);
+        let blank = Query {
+            raw: Some("   ".into()),
+            ..ask
+        };
+        assert_eq!(way_of(&blank), Way::WholeList);
+    }
+
+    #[test]
+    fn typing_or_assigned_to_me_turns_a_column_into_a_search() {
+        let typed = Query {
+            status: Some("5f1b2c3d4e5f6a7b8c9d0e1f".into()),
+            raw: Some("export".into()),
+            ..Default::default()
+        };
+        assert_eq!(way_of(&typed), Way::Search);
+        let mine = Query {
+            status: Some("5f1b2c3d4e5f6a7b8c9d0e1f".into()),
+            mine: true,
+            ..Default::default()
+        };
+        assert_eq!(way_of(&mine), Way::Search);
+    }
+
+    #[test]
+    fn no_column_is_a_plain_search() {
+        assert_eq!(way_of(&Query::default()), Way::Search);
+    }
+
+    #[test]
+    fn a_list_is_asked_open_or_archived_by_the_state_chip() {
+        let open = list_params(&Query::default());
+        assert!(open.contains(&("filter", "open".to_string())));
+        assert!(open.contains(&("members", "true".to_string())));
+        assert!(open.contains(&("member_fields", "username,avatarUrl".to_string())));
+        let closed = list_params(&Query {
+            state: Some(TaskState::Closed),
+            ..Default::default()
+        });
+        assert!(closed.contains(&("filter", "closed".to_string())));
+    }
+
+    #[test]
+    fn a_malformed_column_key_is_refused_before_any_request() {
+        let ask = Query {
+            status: Some("../members/me".into()),
+            ..Default::default()
+        };
+        let err = column_of(&ask).unwrap_err().to_string();
+        assert!(err.contains("not a Trello list"), "{err}");
+        assert_eq!(column_of(&Query::default()).unwrap(), None);
+    }
+
+    #[test]
+    fn only_a_list_id_may_go_into_a_list_path() {
+        assert!(is_board_id("5f1b2c3d4e5f6a7b8c9d0e1f"));
+        assert!(column_of(&Query {
+            status: Some("5f1b2c3d4e5f6a7b8c9d0e1f".into()),
+            ..Default::default()
+        })
+        .unwrap()
+        .is_some());
+    }
+
+    #[test]
+    fn a_search_keeps_only_the_cards_of_the_exact_list() {
+        let card = |link: &str, list: &str| {
+            let mut c = full_card();
+            c["shortLink"] = json!(link);
+            c["idList"] = json!(list);
+            serde_json::from_value::<Card>(c).unwrap()
+        };
+        // Trello's `list:"Urgent"` also matched the cards of "Non urgent".
+        let found = vec![
+            card("aaaaaaaa", "urgent"),
+            card("bbbbbbbb", "non-urgent"),
+            card("cccccccc", "urgent"),
+        ];
+        let kept: Vec<String> = in_list(found, "urgent")
+            .into_iter()
+            .map(|c| c.short_link)
+            .collect();
+        assert_eq!(kept, vec!["aaaaaaaa", "cccccccc"]);
+    }
+
+    #[test]
+    fn a_lists_cards_take_the_lists_name_and_keep_trellos_order() {
+        let cards: Vec<Card> = serde_json::from_value(json!([
+            {
+                "shortLink": "bbbbbbbb", "name": "Second", "shortUrl": "https://trello.com/c/bbbbbbbb",
+                "dateLastActivity": "2026-11-01T10:00:00.000Z", "idList": "l1"
+            },
+            {
+                "shortLink": "aaaaaaaa", "name": "First", "shortUrl": "https://trello.com/c/aaaaaaaa",
+                "dateLastActivity": "2026-11-02T10:00:00.000Z", "idList": "l1"
+            }
+        ]))
+        .unwrap();
+        let tasks = in_column(cards, "Urgent");
+        let seen: Vec<(&str, Option<&str>)> = tasks
+            .iter()
+            .map(|t| (t.title.as_str(), t.status.as_deref()))
+            .collect();
+        assert_eq!(
+            seen,
+            vec![("Second", Some("Urgent")), ("First", Some("Urgent"))]
+        );
     }
 
     #[test]

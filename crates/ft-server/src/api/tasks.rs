@@ -196,6 +196,8 @@ pub(super) struct Listing {
     pub mine: bool,
     /// The query box, verbatim.
     pub q: Option<String>,
+    /// One column, by the key `/trackers/{id}/columns` gave it.
+    pub status: Option<String>,
     #[serde(default)]
     pub page: u32,
     /// Where the last page stopped, for a source that pages by cursor.
@@ -218,6 +220,7 @@ pub(super) struct Listing {
         ("state" = Option<TaskState>, Query, description = "open or closed"),
         ("mine" = Option<bool>, Query, description = "Only what you are assigned"),
         ("q" = Option<String>, Query, description = "The query box, passed to the source verbatim"),
+        ("status" = Option<String>, Query, description = "One column, by the key /trackers/{id}/columns gave it"),
         ("page" = Option<u32>, Query, description = "One-based"),
         ("cursor" = Option<String>, Query, description = "Where the last page stopped, for a source that pages by cursor"),
     ),
@@ -266,6 +269,7 @@ pub(super) async fn list_tasks(
         state: ask.state,
         mine: ask.mine,
         raw: ask.q,
+        status: ask.status,
         page: ask.page,
         cursor: ask.cursor,
     };

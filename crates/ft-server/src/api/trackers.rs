@@ -23,7 +23,8 @@ use utoipa::ToSchema;
 use super::{ApiError, ApiResult, ErrorCode};
 use crate::auth::Principal;
 use crate::tasks::{
-    linear_teams, linear_viewer, trello_boards, trello_token, trello_viewer, TaskKind,
+    linear_teams, linear_viewer, trello_board_id, trello_boards, trello_columns, trello_token,
+    trello_viewer, TaskKind,
 };
 use crate::trackers::{self, Auth, ScopeKind};
 use crate::vault::Key;
@@ -282,6 +283,21 @@ pub(super) async fn disconnect_tracker(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// One column of a tracker's board: a Trello list.
+///
+/// Asked of the tracker rather than worked out from a page of cards, because a
+/// page holds thirty cards: a column with nothing recent in it, or an empty
+/// one, would be missing from the board.
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskColumn {
+    /// The tracker's own key for it, and what `status` on the task list is
+    /// given to ask for this column.
+    pub key: String,
+    /// What a person reads.
+    pub label: String,
+}
+
 /// What the list can be narrowed to. The scope picker's data.
 #[utoipa::path(
     get, path = "/api/v1/trackers/{id}/scopes", tag = "trackers",
@@ -368,5 +384,75 @@ pub(super) async fn list_tracker_scopes(
                 .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e:#}")))
         }
         ScopeKind::Teams | ScopeKind::Boards => Err(ApiError::not_found("tracker")),
+    }
+}
+
+/// Which board to read the columns of.
+#[derive(Debug, Deserialize)]
+pub(super) struct Columns {
+    pub team: Option<String>,
+}
+
+/// The columns of a board, left to right.
+///
+/// Only a tracker with boards has any; the others answer 404, which is how a
+/// client knows not to offer a board view.
+#[utoipa::path(
+    get, path = "/api/v1/trackers/{id}/columns", tag = "trackers",
+    params(
+        ("id" = String, Path, description = "Tracker id"),
+        ("team" = Option<String>, Query, description = "The board, by the tracker's own key"),
+    ),
+    responses(
+        (status = 200, body = Vec<TaskColumn>),
+        (status = 404, body = ApiError),
+        (status = 409, body = ApiError, description = "That tracker has not been connected"),
+    ),
+)]
+pub(super) async fn list_tracker_columns(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(id): Path<String>,
+    axum::extract::Query(ask): axum::extract::Query<Columns>,
+) -> ApiResult<Json<Vec<TaskColumn>>> {
+    let tracker = trackers::find(&state, &id)
+        .await
+        .ok_or_else(|| ApiError::not_found("tracker"))?;
+
+    match tracker.id.as_str() {
+        "trello" => {
+            let board = ask
+                .team
+                .as_deref()
+                .filter(|t| !t.is_empty())
+                .filter(|t| trello_board_id(t))
+                .ok_or_else(|| ApiError::not_found("board"))?;
+
+            let app_key =
+                super::tasks::trello_app_key().map_err(|_| ApiError::not_found("tracker"))?;
+            let credential = super::tasks::credential_for(
+                &state,
+                &principal,
+                &tracker,
+                "listing columns to lay out",
+            )
+            .await?;
+
+            trello_columns(&tracker.api_base, &app_key, &credential, board)
+                .await
+                .map(|columns| {
+                    Json(
+                        columns
+                            .into_iter()
+                            .map(|c| TaskColumn {
+                                key: c.key,
+                                label: c.name,
+                            })
+                            .collect(),
+                    )
+                })
+                .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e:#}")))
+        }
+        _ => Err(ApiError::not_found("tracker")),
     }
 }

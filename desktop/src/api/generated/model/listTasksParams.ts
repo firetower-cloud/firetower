@@ -38,6 +38,10 @@ mine?: boolean;
  */
 q?: string;
 /**
+ * One column, by the key /trackers/{id}/columns gave it
+ */
+status?: string;
+/**
  * One-based
  * @minimum 0
  */

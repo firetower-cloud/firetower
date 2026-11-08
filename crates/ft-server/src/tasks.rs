@@ -43,9 +43,10 @@ pub use linear::{
     viewer as linear_viewer, Linear, Team as LinearTeam,
 };
 pub use trello::{
-    boards as trello_boards, card_of as trello_card, search_params as trello_search_params,
+    boards as trello_boards, card_of as trello_card, columns as trello_columns,
+    is_board_id as trello_board_id, search_params as trello_search_params,
     token_in as trello_token, viewer as trello_viewer, Board as TrelloBoard, Card as TrelloCard,
-    Trello,
+    Column as TrelloColumn, Trello,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -134,6 +135,10 @@ pub struct Query {
     /// Only what this person is assigned.
     pub mine: bool,
     pub raw: Option<String>,
+    /// One column, by the key `/trackers/{id}/columns` gave it: a Trello
+    /// list's id. What the board view asks once per column. A source without
+    /// columns ignores it.
+    pub status: Option<String>,
     pub page: u32,
     /// Where the last page stopped, for a source that pages by cursor.
     ///

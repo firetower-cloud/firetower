@@ -28,6 +28,8 @@ import type {
 import type {
   ApiError,
   Connected,
+  ListTrackerColumnsParams,
+  TaskColumn,
   TaskScope,
   TrackerKey,
   TrackerStatus
@@ -233,7 +235,143 @@ export const useDisconnectTracker = <TError = ApiError,
       > => {
       return useMutation(getDisconnectTrackerMutationOptions(options), queryClient);
     }
-    export const getSetTrackerKeyUrl = (id: string,) => {
+    export const getListTrackerColumnsUrl = (id: string,
+    params?: ListTrackerColumnsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/v1/trackers/${id}/columns?${stringifiedParams}` : `/api/v1/trackers/${id}/columns`
+}
+
+/**
+ * Only a tracker with boards has any; the others answer 404, which is how a
+ * client knows not to offer a board view.
+ * @summary The columns of a board, left to right.
+ */
+export const listTrackerColumns = async (id: string,
+    params?: ListTrackerColumnsParams, options?: Parameters<typeof http>[1]): Promise<TaskColumn[]> => {
+
+  return http<TaskColumn[]>(getListTrackerColumnsUrl(id,params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListTrackerColumnsQueryKey = (id: string,
+    params?: ListTrackerColumnsParams,) => {
+    return [
+    `/api/v1/trackers/${id}/columns`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListTrackerColumnsQueryOptions = <TData = Awaited<ReturnType<typeof listTrackerColumns>>, TError = ApiError>(id: string,
+    params?: ListTrackerColumnsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTrackerColumns>>, TError, TData>>, request?: SecondParameter<typeof http>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListTrackerColumnsQueryKey(id,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listTrackerColumns>>> = ({ signal }) => listTrackerColumns(id,params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listTrackerColumns>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListTrackerColumnsQueryResult = NonNullable<Awaited<ReturnType<typeof listTrackerColumns>>>
+export type ListTrackerColumnsQueryError = ApiError
+
+
+export function useListTrackerColumns<TData = Awaited<ReturnType<typeof listTrackerColumns>>, TError = ApiError>(
+ id: string,
+    params: undefined |  ListTrackerColumnsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTrackerColumns>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listTrackerColumns>>,
+          TError,
+          Awaited<ReturnType<typeof listTrackerColumns>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListTrackerColumns<TData = Awaited<ReturnType<typeof listTrackerColumns>>, TError = ApiError>(
+ id: string,
+    params?: ListTrackerColumnsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTrackerColumns>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listTrackerColumns>>,
+          TError,
+          Awaited<ReturnType<typeof listTrackerColumns>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListTrackerColumns<TData = Awaited<ReturnType<typeof listTrackerColumns>>, TError = ApiError>(
+ id: string,
+    params?: ListTrackerColumnsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTrackerColumns>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary The columns of a board, left to right.
+ */
+
+export function useListTrackerColumns<TData = Awaited<ReturnType<typeof listTrackerColumns>>, TError = ApiError>(
+ id: string,
+    params?: ListTrackerColumnsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTrackerColumns>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListTrackerColumnsQueryOptions(id,params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+/**
+ * @summary The columns of a board, left to right.
+ */
+export const useSetListTrackerColumnsQueryData = () => {
+  const queryClient = useQueryClient();
+  return (id: string,
+    params: ListTrackerColumnsParams | undefined,updater: Awaited<ReturnType<typeof listTrackerColumns>> | undefined | ((old: Awaited<ReturnType<typeof listTrackerColumns>> | undefined) => Awaited<ReturnType<typeof listTrackerColumns>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof listTrackerColumns>>>({ exact: $exactMatch, queryKey: getListTrackerColumnsQueryKey(id,params) }, updater);
+  };
+}
+
+/**
+ * @summary The columns of a board, left to right.
+ */
+export const useGetListTrackerColumnsQueryData = () => {
+  const queryClient = useQueryClient();
+  return (id: string,
+    params?: ListTrackerColumnsParams,) =>
+    queryClient.getQueryData<Awaited<ReturnType<typeof listTrackerColumns>>>(getListTrackerColumnsQueryKey(id,params));
+}
+
+
+export const getSetTrackerKeyUrl = (id: string,) => {
 
 
 

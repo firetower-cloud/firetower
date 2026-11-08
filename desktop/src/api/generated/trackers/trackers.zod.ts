@@ -34,6 +34,25 @@ export const DisconnectTrackerParams = zod.object({
 export const DisconnectTrackerResponse = zod.void()
 
 /**
+ * Only a tracker with boards has any; the others answer 404, which is how a
+ * client knows not to offer a board view.
+ * @summary The columns of a board, left to right.
+ */
+export const ListTrackerColumnsParams = zod.object({
+  "id": zod.string().describe('Tracker id')
+})
+
+export const ListTrackerColumnsQueryParams = zod.object({
+  "team": zod.string().optional().describe('The board, by the tracker\'s own key')
+})
+
+export const ListTrackerColumnsResponseItem = zod.object({
+  "key": zod.string().describe('The tracker\'s own key for it, and what `status` on the task list is\ngiven to ask for this column.'),
+  "label": zod.string().describe('What a person reads.')
+}).describe('One column of a tracker\'s board: a Trello list.\n\nAsked of the tracker rather than worked out from a page of cards, because a\npage holds thirty cards: a column with nothing recent in it, or an empty\none, would be missing from the board.')
+export const ListTrackerColumnsResponse = zod.array(ListTrackerColumnsResponseItem)
+
+/**
  * @summary Store a key for a tracker, once it is known to work.
  */
 export const SetTrackerKeyParams = zod.object({
