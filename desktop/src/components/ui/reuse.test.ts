@@ -21,8 +21,14 @@
 import { describe, expect, test } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const ROOT = new URL("../..", import.meta.url).pathname;
+/* **`fileURLToPath`, never `.pathname`.** A file URL's pathname is
+   `/C:/src/...` on Windows, and `join` turns that into `C:\C:\src\...` —
+   a doubled drive letter, and an `ENOENT` on `scandir` that only ever
+   appears on the Windows runner. The other two tests that read a file from
+   disk here already do it this way. */
+const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 
 /** Every `.ts`/`.tsx` under `src`, read once. */
 function sources(): { path: string; text: string }[] {
