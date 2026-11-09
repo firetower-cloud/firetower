@@ -10,20 +10,25 @@ Existing runs stay pinned to their account. Rename, reconnect, change the defaul
 or disable a connection from the agent's account list. Disabling prevents new
 selections; it does not interrupt runs already using the account.
 
-In a conversation, **Switch account** continues in the existing workspace.
-Stop a running turn and resolve pending approvals first. Switching within the same
-agent resumes the native conversation. Codex uses `thread/resume`; a rejected
-resume is surfaced as a failure rather than silently starting a new thread.
-Switching agents creates a new conversation tab with the original request and
-recorded progress. Files, checkouts and branches remain in place. The destination
-must inspect current changes and test results; internal reasoning is not copied.
-Cross-agent handoffs require accepting the destination's default permissions.
+In a conversation, **Switch account** continues in the existing workspace. It
+does not require stopping the turn or answering a pending approval first: the
+switch stops the agent as its first step, and a question that agent was waiting
+on goes with the process it was addressed to — the continuation tells the
+relaunched agent to ask again for anything it still needs. Only an ended
+workspace refuses. Switching within the same agent resumes the native
+conversation; Codex uses `thread/resume`, and a rejected resume is surfaced as a
+failure rather than silently starting a new thread. Switching agents creates a
+new conversation tab with the original request and recorded progress. Files,
+checkouts and branches remain in place. The destination must inspect current
+changes and test results; internal reasoning is not copied. Cross-agent handoffs
+require accepting the destination's default permissions.
 
 **On usage limit → Edit** enables an ordered fallback list for this task. It is
 off by default. Only explicitly selected connections can be used. Including a
 connection authorizes its quota consumption, destination default permissions for
 a different agent, and metered charges if it is an API-key connection. The
-server performs recovery even when no browser is open. Each target is attempted
+server performs recovery even when no browser is open, and does not wait for a
+running turn or an unanswered approval to clear first. Each target is attempted
 at most once per saved order; a switching error disables automatic recovery.
 
 ## Limits

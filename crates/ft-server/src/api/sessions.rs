@@ -3862,6 +3862,10 @@ pub(super) async fn continue_with_account(
         .await
         .map_err(|e| ApiError::new(ErrorCode::HostUnreachable, format!("{e:#}")))?;
     stopped.map_err(|e| ApiError::new(ErrorCode::ActionFailed, e))?;
+    // The agent that was asking is gone, so what it asked goes with it. Said
+    // here rather than waited for: the worker announces the exit, and this has
+    // to be true before the relaunch below puts the session back to Working.
+    state.fleet.forget_questions(&session.id).await;
     if kind == session.agent {
         super::accounts::pin(state, owner, &session.id, account, kind).await?;
         // Keep the target selected on an uncertain launch: the worker may have
