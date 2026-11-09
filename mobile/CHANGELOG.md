@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.14.0](https://github.com/firetower-cloud/firetower/compare/mobile-v0.13.0...mobile-v0.14.0) (2026-11-09)
+
+
+### Features
+
+* **mobile:** light and dark, from a declared phone token layer ([cda98c9](https://github.com/firetower-cloud/firetower/commit/cda98c9def4b0ed5a8e262b31a9068e80ccf95b4))
+* **mobile:** text tabs for destinations, and the row the redesign removes ([1d05cbd](https://github.com/firetower-cloud/firetower/commit/1d05cbd136e2fbcdc95f8c87b536e3191ec817ff))
+* **mobile:** the five float surfaces, and the bands measured not guessed ([ba706d0](https://github.com/firetower-cloud/firetower/commit/ba706d001d12789d6cf86d86e1c5f81c8648b9bf))
+* **mobile:** the home is a greeting, and the tab bar is the desk's words ([0f02c4b](https://github.com/firetower-cloud/firetower/commit/0f02c4bd56d93538ed2ecb507acbb5b8e71fbcd3))
+* **mobile:** the peek answers, and three sheets keep their promise ([65a8c74](https://github.com/firetower-cloud/firetower/commit/65a8c74a61e10504fa7cfa792c89172ab5b48497))
+* **mobile:** the theme control on You, and v54's connect copy ([67c72ec](https://github.com/firetower-cloud/firetower/commit/67c72ece10645fe37463eb46775e79e347532ebf))
+
+
+### Bug Fixes
+
+* **mobile:** a draft is private text and should not outlive the account ([58d1475](https://github.com/firetower-cloud/firetower/commit/58d1475b1aef8f8a44e5be787d547e4271ec8ea7))
+* **mobile:** a safe-area inset was replacing the gutter, not raising it ([76c3edd](https://github.com/firetower-cloud/firetower/commit/76c3edd01375429f0492187344a81c2b3b04e823))
+* **mobile:** an approval could fail silently, and the peek asked the wrong session ([753699b](https://github.com/firetower-cloud/firetower/commit/753699b51a25c5446086331aef80b143d274863c))
+* **mobile:** four screens' row gutters were 16 where the drawing has 20 ([47ddff9](https://github.com/firetower-cloud/firetower/commit/47ddff9009a74dc577c9230ae2c971dacea6f59e))
+* **mobile:** key the cache on the account, not just the Firetower ([a26eeaf](https://github.com/firetower-cloud/firetower/commit/a26eeaf7e41c621fd0d135ed19050681144a5a1d))
+* **mobile:** QA's three real defects — a frozen scrim, dead flows, dim under AA ([6968dbe](https://github.com/firetower-cloud/firetower/commit/6968dbeb3f62af2b53987b39361b772564cad652))
+* **mobile:** the drawing's stacking order, which is not decoration ([f5badfe](https://github.com/firetower-cloud/firetower/commit/f5badfe3664cb750cf3987c3770547f37d790b07))
+* **mobile:** the fidelity gaps I had reported as matched ([51fcd5f](https://github.com/firetower-cloud/firetower/commit/51fcd5f88bf3f3e734e020b315c6934cadefd313))
+* **mobile:** the home composer did not ride the keyboard ([e0106d3](https://github.com/firetower-cloud/firetower/commit/e0106d3002ab57d053d1342909769223f04b10ec))
+* **mobile:** the peek crashed the app — a worklet calling across threads ([6d9d658](https://github.com/firetower-cloud/firetower/commit/6d9d658f47e84ca75e3afe2560c1b2858dca5a18))
+* **mobile:** the peek's gesture was never reaching gesture-handler ([13682cf](https://github.com/firetower-cloud/firetower/commit/13682cffe67d0d36b636d349db63d2e7b6bf53dd))
+* **mobile:** three states the audit caught ([7e42134](https://github.com/firetower-cloud/firetower/commit/7e42134d0492b118977c56f88bb3446292e13ce3))
+* **mobile:** usePose measured the window, not the box it lays out in ([c972155](https://github.com/firetower-cloud/firetower/commit/c9721554ba9ff9a275dce98348f7a9c81a385a26))
+
 ## [0.13.0](https://github.com/firetower-cloud/firetower/compare/mobile-v0.12.0...mobile-v0.13.0) (2026-11-08)
 
 

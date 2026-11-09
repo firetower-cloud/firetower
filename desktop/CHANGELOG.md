@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.28.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.27.0...desktop-v0.28.0) (2026-11-09)
+
+
+### Features
+
+* **desktop:** the profile editor's Skills section, three additive sources ([de6e919](https://github.com/firetower-cloud/firetower/commit/de6e9194cf774c98e87dea439d5190aa235ad7f9))
+
+
+### Bug Fixes
+
+* **desktop:** the frontmatter the client reads is the one the checks saw ([e92c6b2](https://github.com/firetower-cloud/firetower/commit/e92c6b2f03eea0a3212722f8717944b346d886e6))
+
 ## [0.27.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.26.0...desktop-v0.27.0) (2026-11-08)
 
 
