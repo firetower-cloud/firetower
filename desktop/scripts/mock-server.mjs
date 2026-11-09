@@ -1293,10 +1293,29 @@ const ROLES = [
     settings: { model: "claude-sonnet-5", effort: "medium", mode: null, sandbox: "workspace" },
   }),
   role({
-    /* **The retired `lead`**, which the server will still hand back and will
-       not take: `CreateRoleBody.placement` is "here" or "new" and `roles.rs`
-       refuses the rest. A profile written before it was retired looks like
-       this, and the client has to read it without offering it. */
+    /* **Open on all three**, which is what a profile that commits to nothing
+       looks like on the wire: `placement: "lead"`, no engine, no machine, and
+       no subscription — the owner's default for whatever engine it ends up on.
+       Without one of these the editor's open states could only be photographed
+       on a profile that does not exist yet. */
+    id: "r_4", name: "Documentation reviewer",
+    placement: "lead", agent: null, machine: null, account: null, canDelegate: true,
+    does: "Turns a change into words somebody outside can read, then checks the words against the diff.",
+    instructions: "Read the diff, then the docs. Say which sentences are now wrong.",
+  }),
+  role({
+    /* An open *machine* under a committed engine and placement: the state the
+       Machines screen's cleanup block is about, and the row that reads
+       "new workspace, any machine". */
+    id: "r_5", name: "Load tester", path: "u/kevin",
+    placement: "new", machine: null, agent: "Codex",
+    does: "Hammers a branch until something gives, on whatever is free.",
+    instructions: "Ramp until it breaks. Report the shape of the failure, not just the number.",
+  }),
+  role({
+    /* **`lead` on a profile somebody else administers.** Readable here and not
+       writable — not because the value is retired (the server takes all three
+       now), but because the directory is not this person's. */
     id: "r_3", name: "Triager", path: "d/platform", placement: "lead", mayWrite: false, mayShare: false,
     does: "Reads an inbox of issues and files each one where it belongs.",
     instructions: "Label, assign and close duplicates. Ask before closing anything with a customer on it.",

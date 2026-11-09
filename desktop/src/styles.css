@@ -3873,6 +3873,171 @@ html:not([data-platform="macos"]) {
   .pk[aria-pressed="true"] .sub {
     color: color-mix(in srgb, var(--color-panel) 70%, transparent);
   }
+  /* **A pressed pill needs a focus ring of its own.** The global
+     `:focus-visible` outline is `--color-bone`, and a pressed pill's background
+     is also bone — so keyboard focus on the selected choice was invisible, on
+     the one control in the row somebody is most likely to be sitting on. An
+     inset ring in the pill's own ink, which reads on both states. */
+  .pk:focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 2px var(--color-bone);
+  }
+  .pk[aria-pressed="true"]:focus-visible {
+    box-shadow: inset 0 0 0 2px var(--color-panel);
+  }
+
+  /* ── The same choice as a vertical list ─────────────────────────────
+     A pill carries a label and a word; a row carries four facts and reads down
+     a list of any length. Machines take this shape rather than the pill row —
+     name, what it is, how it is, and whether the pinned engine runs there — and
+     the drawing uses it wherever a list has a reason against each row
+     (`desktop-redesign.html:1747`). */
+  .pickrows {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .pr2 {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    width: 100%;
+    padding: 9px 10px;
+    border-radius: 11px;
+    text-align: left;
+  }
+  .pr2:hover {
+    background: var(--color-raise);
+  }
+  .pr2[aria-pressed="true"] {
+    background: var(--color-overlay);
+  }
+  /* Marked rather than hidden: gone from a list looks like gone, and leaves
+     nowhere to say what is missing. Still pressable — a machine the engine is
+     not installed on is a thing somebody may deliberately pin and then fix. */
+  .pr2[data-off="true"] {
+    opacity: 0.55;
+  }
+  .pr2 .g {
+    flex: none;
+    display: grid;
+    place-items: center;
+    color: var(--color-dim);
+  }
+  .pr2 .tx {
+    flex: 1;
+    min-width: 0;
+  }
+  .pr2 .tx b {
+    display: block;
+    font-size: 0.9375rem;
+    font-weight: 500;
+    color: var(--color-bone);
+  }
+  .pr2 .tx s {
+    display: block;
+    margin-top: 1px;
+    font-size: 0.84375rem;
+    color: var(--color-dim);
+    text-decoration: none;
+  }
+  .pr2 .tick {
+    color: var(--color-bone);
+  }
+  .pr2 .why {
+    flex: none;
+    max-width: 15ch;
+    font-size: 0.78125rem;
+    line-height: 1.3;
+    text-align: right;
+    color: var(--color-mute);
+  }
+  .pr2:focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 2px var(--color-bone);
+  }
+
+  /* A block of information inside a field — what is true when there is nothing
+     to choose, and why a field that left did. The borderless surface the rest
+     of the redesign uses, at a size somebody reads rather than skips. */
+  .inform {
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    align-items: flex-start;
+    padding: 12px 14px;
+    border-radius: 12px;
+    background: var(--color-raise);
+  }
+  .inform p {
+    max-width: 58ch;
+    font-size: 0.875rem;
+    line-height: 1.55;
+    color: var(--color-text);
+  }
+  .inform p b {
+    font-weight: 500;
+    color: var(--color-bone);
+  }
+
+  /* A read-back inside a form is part of the form, not a footer under it. */
+  .form > .whereto {
+    margin-top: 0;
+  }
+
+  /* ── The narrow desk ────────────────────────────────────────────────
+     A pickrow becomes the vertical shape rather than a wrapped row of pills,
+     and every target clears 44px. Keyed on the window because the pane has no
+     width of its own to query: `container-type` on `.form` would make it the
+     containing block for the sharing sheet it contains, which is
+     `position: fixed` and expects the viewport. */
+  @media (max-width: 900px) {
+    .form .pickrow {
+      flex-direction: column;
+      gap: 3px;
+    }
+    .form .pk {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      column-gap: 10px;
+      align-items: center;
+      width: 100%;
+      height: auto;
+      min-height: 44px;
+      padding: 8px 12px;
+      border-radius: 12px;
+      /* A button centres its text, which is right for a pill and wrong for a
+         row — a column of centred labels reads as a column of headings. */
+      text-align: left;
+    }
+    .form .pk .ic {
+      grid-row: 1 / span 2;
+    }
+    .form .pk .sub {
+      grid-column: 2;
+      margin-top: 1px;
+    }
+    .form .pr2 {
+      min-height: 48px;
+      flex-wrap: wrap;
+    }
+    .form .pr2 .why {
+      flex: 1 1 100%;
+      max-width: none;
+      padding-left: 28px;
+      text-align: left;
+    }
+    /* The sentence above the buttons rather than squeezed between them: at
+       this width "Saved when you press it" wrapped to one word a line and ran
+       under Delete. */
+    .form .formfoot {
+      flex-wrap: wrap;
+      padding-top: 14px;
+    }
+    .form .formfoot .msg {
+      flex: 1 1 100%;
+    }
+  }
 
   /* Read-only: say what the screen is instead of greying what it is not. */
   .ro-note {
