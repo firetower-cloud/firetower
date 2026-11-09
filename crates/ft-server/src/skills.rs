@@ -1395,12 +1395,43 @@ impl Skills {
         Ok(id)
     }
 
-    /// Add a version to a skill that already exists.
+    /// Add a version to a skill that already exists, as somebody who holds
+    /// Writer on it. `None` when they do not, which is the caller's to word.
+    ///
+    /// **Writer is decided here rather than left to each caller.** `approve`
+    /// and `discard` two screens up already ask it this way, and so does
+    /// `roles::update`, which is this method's sibling — the gate being a
+    /// convention at the door instead of a property of the write is what let
+    /// an agent holding Viewer publish a version over MCP while the HTTP route
+    /// beside it refused the same thing. The one predicate, `filed_where` at
+    /// `Level::Writer`, is the same one the interface draws `may_write` from.
     ///
     /// When `hold`, the version is held for review and the two editable fields
     /// stay as they were — the live skill keeps its name and description until
     /// the pending version is approved.
     pub async fn add_version(
+        &self,
+        id: &str,
+        person: &str,
+        new: &NewSkill,
+        hold: bool,
+    ) -> Result<Option<i32>> {
+        if self.one(person, id, Level::Writer).await?.is_none() {
+            return Ok(None);
+        }
+        self.write_next_version(id, person, new, hold)
+            .await
+            .map(Some)
+    }
+
+    /// The write itself, answering to nobody's access level.
+    ///
+    /// Private, and reached by exactly two routes: [`Self::add_version`],
+    /// which asks the question first, and `seed_builtins`, which is Firetower
+    /// shipping its own and has no person to ask about — nobody holds Writer
+    /// on `d/firetower`, by design, so the check would refuse the one write
+    /// that is not anybody's to refuse.
+    async fn write_next_version(
         &self,
         id: &str,
         person: &str,
@@ -1606,7 +1637,9 @@ impl Skills {
         if self.current_digest(&id).await?.as_deref() == Some(want.as_str()) {
             return Ok(false);
         }
-        self.add_version(&id, "", &new, false).await?;
+        // Past the Writer gate on purpose: `""` is Firetower rather than a
+        // person, and it holds no grant anywhere. See `write_next_version`.
+        self.write_next_version(&id, "", &new, false).await?;
         Ok(true)
     }
 
@@ -2669,6 +2702,169 @@ mod tests {
                 .unwrap()
                 .is_none(),
             "a discarded draft that was never approved is removed"
+        );
+    }
+
+    /// Writing a version is Writer's, decided where the write happens.
+    ///
+    /// The gate used to live only at each caller, and one of them read the
+    /// library at Viewer and wrote anyway — so an agent could publish over a
+    /// colleague's shared skill while the HTTP route beside it refused the
+    /// same thing. `approve`, `discard` and `roles::update` all ask it here;
+    /// this is the one that did not.
+    #[tokio::test]
+    async fn adding_a_version_is_refused_to_whoever_may_only_read_it() {
+        use crate::access::{Access, FiledKind, NewGrant, SubjectKind};
+        use crate::accounts::Accounts;
+        use crate::db::Db;
+        use crate::vault::{crypto::RootKey, Vault};
+
+        let (db, _admin) = Db::open_for_test_owned().await.unwrap();
+        let pool = db.pool().clone();
+        let skills = Skills::new(pool.clone());
+        let access = Access::new(pool.clone());
+        let accounts = Accounts::new(pool.clone());
+        let vault = Vault::new(pool.clone(), RootKey::generate());
+        let org = db.org().await.unwrap();
+        let org_id = ft_core::OrgId::from_stored(org.clone());
+        let person = |name: &'static str| {
+            let accounts = accounts.clone();
+            let org_id = org_id.clone();
+            async move {
+                accounts
+                    .create_user(&org_id, name, &format!("{name}@example.test"), "member")
+                    .await
+                    .unwrap()
+                    .0
+                    .id
+            }
+        };
+        let ana = person("ana").await;
+        let bob = person("bob").await;
+        let cal = person("cal").await;
+
+        let bundle = |body: &str| NewSkill {
+            name: "ship-it".into(),
+            description: "How this team ships.".into(),
+            frontmatter: serde_json::json!({"name": "ship-it", "description": "How this team ships."}),
+            body: body.into(),
+            files: vec![IncomingFile {
+                path: "SKILL.md".into(),
+                contents: ft_proto::encode(body.as_bytes()),
+                executable: false,
+            }],
+            notes: None,
+        };
+
+        // Hers, in her own space first — where it is nobody's but hers.
+        let id = skills
+            .create(&org, ana.as_str(), "ana", &bundle("v1"), false)
+            .await
+            .unwrap();
+        assert_eq!(
+            skills
+                .add_version(id.as_str(), ana.as_str(), &bundle("v2"), false)
+                .await
+                .unwrap(),
+            Some(2),
+            "her own skill is hers to write"
+        );
+        assert_eq!(
+            skills
+                .add_version(id.as_str(), bob.as_str(), &bundle("sneak"), false)
+                .await
+                .unwrap(),
+            None,
+            "and it is under her root, which nobody else reaches at all"
+        );
+
+        // Filed into a directory: Bob reads it, Cal works in it.
+        let team = access
+            .create_directory(
+                &org_id,
+                "Team",
+                &ana,
+                &[
+                    NewGrant {
+                        subject_kind: SubjectKind::Person,
+                        subject_id: bob.as_str().to_string(),
+                        level: Level::Viewer,
+                    },
+                    NewGrant {
+                        subject_kind: SubjectKind::Person,
+                        subject_id: cal.as_str().to_string(),
+                        level: Level::Writer,
+                    },
+                ],
+            )
+            .await
+            .unwrap();
+        let at = access
+            .path_of(FiledKind::Skill, id.as_str())
+            .await
+            .unwrap()
+            .unwrap();
+        access
+            .transfer(
+                &vault,
+                FiledKind::Skill,
+                id.as_str(),
+                &at.moved_to(ft_core::path::DIRECTORY, &team.slug),
+                "ana",
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            skills
+                .add_version(id.as_str(), bob.as_str(), &bundle("bobs"), false)
+                .await
+                .unwrap(),
+            None,
+            "Viewer sees it and does not write it"
+        );
+        assert_eq!(
+            skills
+                .add_version(id.as_str(), cal.as_str(), &bundle("cals"), false)
+                .await
+                .unwrap(),
+            Some(3),
+            "Writer through the directory is write access — the feature, not a hole"
+        );
+        let live: String = sqlx::query_scalar(
+            "SELECT v.body FROM skills k JOIN skill_versions v ON v.id = k.current_version_id \
+              WHERE k.id = $1",
+        )
+        .bind(id.as_str())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(live, "cals", "and Bob's never landed");
+
+        // Firetower's own, which answer to nobody's grant: nobody holds Writer
+        // on `d/firetower`, so seeding has to reach past the gate — and a
+        // second boot that found a new bundle has to be able to add a version.
+        assert!(skills.seed_builtins().await.unwrap() > 0);
+        let builtin: String = sqlx::query_scalar(
+            "SELECT id FROM skills WHERE path <@ 'd.firetower'::ltree ORDER BY id LIMIT 1",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(
+            skills
+                .one(ana.as_str(), &builtin, Level::Writer)
+                .await
+                .unwrap()
+                .is_none(),
+            "nobody holds Writer on what Firetower ships"
+        );
+        assert!(
+            skills
+                .write_next_version(&builtin, "", &bundle("shipped"), false)
+                .await
+                .is_ok(),
+            "and it is still seeded anyway"
         );
     }
 
