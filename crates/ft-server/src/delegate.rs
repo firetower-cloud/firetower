@@ -130,6 +130,48 @@ fn text(input: &Value, key: &str) -> Option<String> {
         .map(str::to_string)
 }
 
+/// The engine names a lead may pass, for a refusal that lists them.
+///
+/// The `{:?}` names rather than the labels: those are what the argument takes,
+/// and a refusal that lists something the next call cannot use is a second
+/// mistake rather than a correction.
+fn engine_names() -> String {
+    Agent::all()
+        .iter()
+        .filter(|a| a.speaks_a_protocol())
+        .map(|a| format!("{a:?}"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// A subscription a lead named, checked far enough to say what is wrong.
+///
+/// `accounts::validate` is one string for five causes and names neither the
+/// account nor the engine — which is fine for a picker that could only offer a
+/// valid one, and no use at all to an agent that has to pick again. So the one
+/// an agent gets wrong is named here, and everything else is left to `validate`
+/// on the way into the session.
+async fn usable_account(state: &AppState, owner: &str, id: &str, agent: Agent) -> Result<String> {
+    let found = crate::api::accounts::usable(&state.db, owner, id)
+        .await
+        .map_err(|e| anyhow::anyhow!("{}", e.message))?;
+    let wants = format!("{agent:?}");
+    if found.kind != wants {
+        let theirs = Agent::from_name(&found.kind)
+            .map(|a| a.label().to_string())
+            .unwrap_or_else(|| found.kind.clone());
+        bail!(
+            "the \"{}\" subscription is a {theirs} one and this child runs {}. Name one for {}, \
+             or leave it out and it runs on the owner's default for {}.",
+            found.name,
+            agent.label(),
+            agent.label(),
+            agent.label()
+        );
+    }
+    Ok(found.id)
+}
+
 /// Start a child for the session that asked.
 async fn spawn(state: &AppState, request: &AgentRequest) -> Result<String> {
     let lead = state
@@ -247,9 +289,19 @@ async fn spawn(state: &AppState, request: &AgentRequest) -> Result<String> {
     };
     let agent = match pinned {
         Some(pinned) => pinned,
-        None => text(&request.input, "agent")
-            .and_then(|n| Agent::from_name(&n))
-            .unwrap_or(lead.agent),
+        // A name this build does not run used to be discarded here without a
+        // word, so a lead that asked for `agent: "Claude"` got a child on its
+        // own engine and reported a build that never happened — the same
+        // silent discard the whole feature is about, one layer down.
+        None => match text(&request.input, "agent") {
+            Some(name) => Agent::from_name(&name).with_context(|| {
+                format!(
+                    "there is no engine called \"{name}\". Engines you can use: {}.",
+                    engine_names()
+                )
+            })?,
+            None => lead.agent,
+        },
     };
     if !agent.speaks_a_protocol() {
         bail!("Firetower has no driver for {}", agent.label());
@@ -283,13 +335,83 @@ async fn spawn(state: &AppState, request: &AgentRequest) -> Result<String> {
     // change of engine never carries a stale model forward.
     let on_its_engine = pinned == Some(agent);
 
-    // The subscription the profile pins for its agent, if it named one and the
-    // child is running it; otherwise absent, and the owner's default for the
-    // engine resolves at launch, as it does for a person who names no account.
-    let account = role
+    // The subscription: the profile's if it pinned one and the child is running
+    // that engine, then whichever the lead named, then absent — and the owner's
+    // default for the engine resolves at launch, as it does for a person who
+    // names no account. A pin wins over the argument, exactly as it does for
+    // the engine.
+    let account = match role
         .as_ref()
         .filter(|_| on_its_engine)
-        .and_then(|r| r.account.clone());
+        .and_then(|r| r.account.clone())
+    {
+        Some(pinned) => Some(pinned),
+        None => match text(&request.input, "account") {
+            Some(id) => Some(usable_account(state, lead.owner.as_str(), &id, agent).await?),
+            None => None,
+        },
+    };
+
+    // The machine: the profile's if it pinned one, then whichever the lead
+    // named. Only for a child in a workspace of its own — `hostId` means
+    // nothing to one sharing the lead's, which runs where the lead runs.
+    let host = match shares {
+        true => None,
+        false => match role.as_ref().and_then(|r| r.machine.clone()) {
+            Some(pinned) => Some(pinned),
+            None => text(&request.input, "machine"),
+        },
+    };
+    // Where it will run, when that is already settled. Checked here rather
+    // than in `create_session_as`: the caller is a session of the owner's own,
+    // so there is nobody to leak a machine's existence to, and the refusal can
+    // name it — which is why `sessions.rs` keeps its deliberately vague "no
+    // host is available" for a person typing an id.
+    if let Some(id) = host.as_deref() {
+        let hosts = state
+            .db
+            .hosts_for(lead.owner.as_str(), crate::access::Level::Writer)
+            .await?;
+        let Some(machine) = hosts.iter().find(|h| h.id.as_str() == id) else {
+            let names: Vec<&str> = hosts.iter().map(|h| h.name.as_str()).collect();
+            bail!(
+                "there is no machine \"{id}\" you can use. {}",
+                match names.is_empty() {
+                    true =>
+                        "No machine is connected yet, and an agent runs on a machine.".to_string(),
+                    false => format!("Machines you can use: {}.", names.join(", ")),
+                }
+            );
+        };
+        // And whether the engine is there, from what that machine last
+        // reported. Only a reported *absence* refuses: a machine that has
+        // never said is not a machine that cannot, and the readiness check
+        // before bringup is the live authority.
+        let presence = state.db.presence().await?;
+        let said = |kind: Agent| {
+            presence
+                .iter()
+                .find(|p| p.host == machine.id && p.found.kind == kind)
+                .map(|p| p.found.installed)
+        };
+        if said(agent) == Some(false) {
+            let there: Vec<&str> = presence
+                .iter()
+                .filter(|p| p.host == machine.id && p.found.installed)
+                .map(|p| p.found.kind.label())
+                .collect();
+            bail!(
+                "{} is not installed on {}. {} Name another machine, or leave the machine open \
+                 and Firetower picks one that can run it.",
+                agent.label(),
+                machine.name,
+                match there.is_empty() {
+                    true => format!("{} has none of the engines installed.", machine.name),
+                    false => format!("It has {}.", there.join(" and ")),
+                }
+            );
+        }
+    }
 
     // How the profile pins the agent — model, effort, mode, sandbox. Each unset
     // field resolves to the engine's default at launch, the same as for a
@@ -359,9 +481,6 @@ async fn spawn(state: &AppState, request: &AgentRequest) -> Result<String> {
             .branch
             .as_deref()
             .map(|b| format!("{b}-{}", ft_core::slugify(&what)));
-        // The machine the profile pins for its own workspace, if it named one;
-        // otherwise absent, and the scheduler picks as it does for a person.
-        let host = role.as_ref().and_then(|r| r.machine.clone());
         serde_json::from_value(json!({
             "repoId": repo,
             "prompt": prompt,

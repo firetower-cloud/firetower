@@ -2423,3 +2423,474 @@ async fn an_open_placement_is_the_leads_to_choose() {
 
     state.fleet.stop_supervising(&host.id).await;
 }
+
+// ── Where a child lands, and what it is told when nowhere will do ───────
+
+/// A second machine, supervised and online, so a test can prove *which* of two
+/// a child went to rather than that it went somewhere.
+async fn another_machine(state: &AppState, owner: &str, name: &str) -> Host {
+    let host = state
+        .db
+        .ensure_host(
+            name,
+            Compute::Server {
+                host: name.into(),
+                user: Some("editor".into()),
+                port: None,
+                key: ft_core::SshKey::Default,
+                host_key: None,
+            },
+            owner,
+        )
+        .await
+        .unwrap();
+    state
+        .fleet
+        .supervise(
+            host.id.clone(),
+            Arc::new(Worker {
+                ready: Arc::new(AtomicBool::new(true)),
+                probe: None,
+                launched: Default::default(),
+            }),
+        )
+        .await;
+    state
+        .db
+        .mark_host_online(
+            &host.id,
+            "test",
+            4,
+            8192,
+            &ft_core::DockerState::running("27.0.3"),
+        )
+        .await
+        .unwrap();
+    host
+}
+
+/// What a machine has told us it has, for a test that is about the choosing
+/// rather than about the probing.
+async fn says_it_has(state: &AppState, host: &Host, found: &[(Agent, bool)]) {
+    let reported: Vec<ft_core::AgentPresence> = found
+        .iter()
+        .map(|(kind, installed)| ft_core::AgentPresence {
+            kind: *kind,
+            installed: *installed,
+            version: installed.then(|| "1.0.0".to_string()),
+            logged_in: Some(*installed),
+            account: None,
+        })
+        .collect();
+    state.db.record_presence(&host.id, &reported).await.unwrap();
+}
+
+/// Criterion 21: the machine is picked for the engine, not taken in order.
+///
+/// Two machines, both up, and only the second has Codex. The first is the one
+/// `hosts_for` returns first and the one every start used to take.
+#[tokio::test]
+async fn a_child_lands_on_a_machine_that_can_run_the_engine_it_was_given() {
+    let (state, _principal, first, ready, owner) = fixture().await;
+    let lead = a_lead_that_delegates(&state, &first, &ready, &owner, Agent::ClaudeCode).await;
+    let second = another_machine(&state, &owner, "build-02").await;
+    says_it_has(
+        &state,
+        &first,
+        &[(Agent::ClaudeCode, true), (Agent::Codex, false)],
+    )
+    .await;
+    says_it_has(&state, &second, &[(Agent::Codex, true)]).await;
+    saved_profile(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Load tester",
+            "does": "Hammers a branch until something gives",
+            "placement": "new",
+        }),
+    )
+    .await;
+
+    crate::delegate::handle(
+        &state,
+        &asks(
+            &first,
+            &lead,
+            "fit",
+            "spawn",
+            serde_json::json!({ "role": "Load tester", "goal": "hammer it", "agent": "Codex" }),
+        ),
+    )
+    .await
+    .expect("one of the two machines has Codex");
+    let child = child_of(&state, &lead, "fit").await;
+    assert_eq!(child.agent, Agent::Codex);
+    assert_eq!(
+        child.host_id, second.id,
+        "the machine that has it, not the first one in the list"
+    );
+
+    state.fleet.stop_supervising(&first.id).await;
+    state.fleet.stop_supervising(&second.id).await;
+}
+
+/// Criterion 22: nowhere can run it, said now and said why.
+///
+/// The error **code** as well as the message: today's refusal is an
+/// `InvalidRequest` from the readiness check after a machine has already been
+/// chosen, so a test matching only on a substring would pass against the old
+/// behaviour.
+#[tokio::test]
+async fn no_machine_that_can_run_the_engine_is_refused_with_no_capacity() {
+    let (state, principal, host, ready, owner) = fixture().await;
+    ready.store(true, Ordering::SeqCst);
+    state
+        .db
+        .mark_host_online(
+            &host.id,
+            "test",
+            4,
+            8192,
+            &ft_core::DockerState::running("27.0.3"),
+        )
+        .await
+        .unwrap();
+    says_it_has(
+        &state,
+        &host,
+        &[(Agent::ClaudeCode, true), (Agent::Codex, false)],
+    )
+    .await;
+
+    let error = sessions::create_session(
+        State(state.clone()),
+        Extension(principal),
+        Json(serde_json::from_value(serde_json::json!({ "name": "t", "agent": "Codex" })).unwrap()),
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        matches!(error.code, ErrorCode::NoCapacity),
+        "{:?}: {}",
+        error.code,
+        error.message
+    );
+    assert!(
+        error.message.contains("No machine can run Codex"),
+        "{}",
+        error.message
+    );
+    assert!(
+        error.message.contains("has Claude Code"),
+        "and what the machines it has can run: {}",
+        error.message
+    );
+
+    // The same answer a lead gets, through the tool rather than the route.
+    let lead = a_lead_that_delegates(&state, &host, &ready, &owner, Agent::ClaudeCode).await;
+    saved_profile(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Load tester",
+            "does": "Hammers a branch until something gives",
+            "placement": "new",
+        }),
+    )
+    .await;
+    let refused = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "nope",
+            "spawn",
+            serde_json::json!({ "role": "Load tester", "goal": "hammer it", "agent": "Codex" }),
+        ),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(refused.contains("No machine can run Codex"), "{refused}");
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// Criterion 23: a machine named by hand is refused as named, not swapped.
+///
+/// The one thing engine-aware placement must not break — the comment at the
+/// selection says so, and a silent swap is the whole class of bug this feature
+/// is about.
+#[tokio::test]
+async fn a_drained_machine_named_by_hand_is_refused_rather_than_swapped() {
+    let (state, principal, host, ready, owner) = fixture().await;
+    ready.store(true, Ordering::SeqCst);
+    let second = another_machine(&state, &owner, "build-02").await;
+    says_it_has(&state, &second, &[(Agent::ClaudeCode, true)]).await;
+    sqlx::query("UPDATE hosts SET drained=true WHERE id=$1")
+        .bind(host.id.as_str())
+        .execute(state.db.pool())
+        .await
+        .unwrap();
+
+    let error = sessions::create_session(
+        State(state.clone()),
+        Extension(principal),
+        Json(
+            serde_json::from_value(
+                serde_json::json!({ "name": "t", "agent": "ClaudeCode", "hostId": host.id }),
+            )
+            .unwrap(),
+        ),
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        error.message.contains("draining"),
+        "the machine that was named, not the one that would have worked: {}",
+        error.message
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+    state.fleet.stop_supervising(&second.id).await;
+}
+
+/// Criteria 24 and 25: the lead may name a machine, and a pin still wins.
+#[tokio::test]
+async fn a_lead_may_name_a_machine_unless_the_profile_pinned_one() {
+    let (state, _principal, first, ready, owner) = fixture().await;
+    let lead = a_lead_that_delegates(&state, &first, &ready, &owner, Agent::ClaudeCode).await;
+    let second = another_machine(&state, &owner, "build-02").await;
+    saved_profile(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Load tester",
+            "does": "Hammers a branch until something gives",
+            "placement": "new",
+        }),
+    )
+    .await;
+    saved_profile(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Pinned tester",
+            "does": "Hammers a branch on one machine, always",
+            "placement": "new",
+            "machine": first.id.as_str(),
+        }),
+    )
+    .await;
+
+    // 24 — the profile pins none, so the lead's argument decides.
+    crate::delegate::handle(
+        &state,
+        &asks(
+            &first,
+            &lead,
+            "m1",
+            "spawn",
+            serde_json::json!({
+                "role": "Load tester", "goal": "hammer it", "machine": second.id.as_str(),
+            }),
+        ),
+    )
+    .await
+    .expect("a machine the owner may use");
+    assert_eq!(child_of(&state, &lead, "m1").await.host_id, second.id);
+
+    // 25 — the profile pins one, so the argument loses, as it does for the
+    // engine. A pin is the point of pinning.
+    crate::delegate::handle(
+        &state,
+        &asks(
+            &first,
+            &lead,
+            "m2",
+            "spawn",
+            serde_json::json!({
+                "role": "Pinned tester", "goal": "hammer it", "machine": second.id.as_str(),
+            }),
+        ),
+    )
+    .await
+    .unwrap();
+    assert_eq!(child_of(&state, &lead, "m2").await.host_id, first.id);
+
+    state.fleet.stop_supervising(&first.id).await;
+    state.fleet.stop_supervising(&second.id).await;
+}
+
+/// Criterion 26: a machine the owner may not use is named rather than reported
+/// as no capacity.
+///
+/// The pre-check is here rather than in `create_session_as`, which keeps its
+/// deliberately vague "no host is available" — there, somebody may be typing
+/// an id they were never given, and confirming it exists is the leak. Here the
+/// caller is a session of the owner's own and there is no third party.
+#[tokio::test]
+async fn a_machine_the_owner_may_not_use_is_named_in_the_refusal() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let lead = a_lead_that_delegates(&state, &host, &ready, &owner, Agent::ClaudeCode).await;
+    let org = ft_core::OrgId::from_stored(state.db.org().await.unwrap());
+    let ana = state
+        .accounts
+        .create_user(&org, "ana", "ana@example.test", "member")
+        .await
+        .unwrap()
+        .0;
+    let hers = state
+        .db
+        .ensure_host("anas-laptop", native(), ana.id.as_str())
+        .await
+        .unwrap();
+    saved_profile(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Load tester",
+            "does": "Hammers a branch until something gives",
+            "placement": "new",
+        }),
+    )
+    .await;
+
+    let refused = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "nothers",
+            "spawn",
+            serde_json::json!({
+                "role": "Load tester", "goal": "hammer it", "machine": hers.id.as_str(),
+            }),
+        ),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(
+        refused.contains(hers.id.as_str()),
+        "the machine it named: {refused}"
+    );
+    assert!(
+        refused.contains("Machines you can use"),
+        "and the ones it may: {refused}"
+    );
+    assert!(
+        !refused.contains("no host is available"),
+        "which is the message for somebody typing an id, not for a lead: {refused}"
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// Criterion 7: an engine name no engine has.
+///
+/// Discarded without a word until now — `agent: "Claude"` ran the child on the
+/// lead's own engine and the lead reported a build that never happened. The
+/// same silent discard the whole feature is about, one layer down, and the one
+/// it would have survived.
+#[tokio::test]
+async fn an_engine_name_no_engine_has_is_refused_by_name() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let lead = a_lead_that_delegates(&state, &host, &ready, &owner, Agent::ClaudeCode).await;
+    saved_profile(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Reviewer",
+            "does": "Reads the diff and argues with it",
+            "placement": "here",
+        }),
+    )
+    .await;
+
+    let refused = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "oops",
+            "spawn",
+            serde_json::json!({ "role": "Reviewer", "goal": "read it", "agent": "Claude" }),
+        ),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(
+        refused.contains("there is no engine called \"Claude\""),
+        "{refused}"
+    );
+    assert!(
+        refused.contains("ClaudeCode"),
+        "and the ones it may use: {refused}"
+    );
+    assert!(
+        state
+            .db
+            .child_by_req(&lead, "oops")
+            .await
+            .unwrap()
+            .is_none(),
+        "and no child was started on the lead's own engine instead"
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// A subscription that belongs to another engine, named rather than refused as
+/// "that account is not connected for this agent" — which is one string for
+/// five causes and names neither the account nor the engine.
+#[tokio::test]
+async fn a_subscription_for_another_engine_is_refused_saying_which() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let lead = a_lead_that_delegates(&state, &host, &ready, &owner, Agent::ClaudeCode).await;
+    sqlx::query(
+        "INSERT INTO agent_accounts(id,user_id,kind,name,mode,credential_key,state,enabled,path)
+         VALUES('a_codex',$1,'Codex','Codex team','Subscription','a_codex','connected',true,
+                ('u.' || (SELECT slug FROM principals WHERE id=$1) || '.a_codex')::ltree)",
+    )
+    .bind(&owner)
+    .execute(state.db.pool())
+    .await
+    .unwrap();
+    saved_profile(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Reviewer",
+            "does": "Reads the diff and argues with it",
+            "placement": "here",
+        }),
+    )
+    .await;
+
+    let refused = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "wrongacct",
+            "spawn",
+            serde_json::json!({ "role": "Reviewer", "goal": "read it", "account": "a_codex" }),
+        ),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(
+        refused.contains("Codex"),
+        "which engine it belongs to: {refused}"
+    );
+    assert!(
+        refused.contains("Claude Code"),
+        "and which engine this child runs: {refused}"
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}

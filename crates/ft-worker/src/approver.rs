@@ -290,6 +290,14 @@ async fn answer(
                                     "enum": agent_names,
                                     "description": agent_desc,
                                 },
+                                "machine": {
+                                    "type": "string",
+                                    "description": "Which machine its own workspace runs on, by host id from `list_compute`. Only for `placement: \"new\"`, and only when the profile pins no machine. Omit unless they asked for a particular machine — Firetower picks one that can run the engine, which is almost always the right answer.",
+                                },
+                                "account": {
+                                    "type": "string",
+                                    "description": "Which subscription it spends, by account id from `list_compute`. Omit for the owner's default for whatever engine it runs, which is almost always the right answer. An account belongs to one engine; naming one for another is refused.",
+                                },
                                 "name": {
                                     "type": "string",
                                     "description": "A short name for the child, like \"reviewer\" or \"developer\".",

@@ -157,7 +157,7 @@ pub(super) async fn mine(db: &crate::db::Db, owner: &str, id: &str) -> Result<Ac
 /// Writer, not viewer. Picking somebody's subscription spends their quota and
 /// puts their name on what it does, so being allowed to see that it exists is
 /// deliberately not enough.
-pub(super) async fn usable(
+pub(crate) async fn usable(
     db: &crate::db::Db,
     person: &str,
     id: &str,

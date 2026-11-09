@@ -472,24 +472,75 @@ pub(crate) async fn create_session_as(
         .db
         .hosts_for(&owner, crate::access::Level::Writer)
         .await?;
+    // What each machine last said about each agent, which is how the rest of
+    // the system already answers "can this run there" — `list_agents` builds
+    // the screen from it, and the account-switch path gates a cross-engine
+    // move on it. **Stored, not probed:** `fleet::check_readiness` is a
+    // 30-second round trip per host, inside a request somebody is watching,
+    // and a machine that is merely slow to answer would become a scheduling
+    // exclusion. `require_ready` below is still the live authority.
+    let presence = state.db.presence().await?;
+    let installed = |host: &ft_core::HostId, kind: ft_core::Agent| {
+        presence
+            .iter()
+            .find(|p| &p.host == host && p.found.kind == kind)
+            .map(|p| p.found.installed)
+    };
+    let up: Vec<&ft_core::Host> = hosts
+        .iter()
+        .filter(|h| h.state == ft_core::HostState::Online && !h.drained)
+        .collect();
     let host = match &req.host_id {
         // Named explicitly, so a drained one is still refused below rather
         // than silently swapped for another.
         Some(id) => hosts.iter().find(|h| &h.id == id),
-        None => hosts
+        // Nobody named one, so pick one that can actually run what was asked
+        // for. An engine absent where a child lands is a failed start, not a
+        // slower one, and this is the only place that sees every machine.
+        //
+        // A machine that has never reported is still a candidate: never having
+        // said is not the same as having said no, and refusing on silence
+        // would empty the fleet of a fresh install.
+        None => up
             .iter()
-            .find(|h| h.state == ft_core::HostState::Online && !h.drained),
+            .copied()
+            .find(|h| installed(&h.id, req.agent) == Some(true))
+            .or_else(|| {
+                up.iter()
+                    .copied()
+                    .find(|h| installed(&h.id, req.agent).is_none())
+            }),
     }
-    .ok_or_else(|| match hosts.is_empty() {
+    .ok_or_else(|| {
         // The ordinary state of a fresh install, now that nothing is
         // registered at boot. It is a different problem from a fleet whose
         // machines are all busy or down, and it has a different answer.
-        true => ApiError::new(
-            ErrorCode::NoCapacity,
-            "No machine is connected yet, and an agent runs on a machine. \
-             Add one under Compute, then start this again.",
-        ),
-        false => ApiError::new(ErrorCode::NoCapacity, "no host is available to take this"),
+        if hosts.is_empty() {
+            return ApiError::new(
+                ErrorCode::NoCapacity,
+                "No machine is connected yet, and an agent runs on a machine. \
+                 Add one under Compute, then start this again.",
+            );
+        }
+        // Machines are up, nobody named one, and every one of them has said
+        // this engine is not there. Said now, naming the engine and what each
+        // of them *can* run, rather than as "this environment is not ready"
+        // from the readiness check after a machine has already been chosen.
+        //
+        // Only when nothing was named: a machine named by hand was not found
+        // for reasons that have nothing to do with the engine — it is retired,
+        // or it is somebody else's — and the vague answer there is deliberate.
+        match (req.host_id.is_none(), up.is_empty()) {
+            (true, false) => ApiError::new(
+                ErrorCode::NoCapacity,
+                format!(
+                    "No machine can run {}. {}",
+                    req.agent.label(),
+                    what_runs_where(&up, &presence)
+                ),
+            ),
+            _ => ApiError::new(ErrorCode::NoCapacity, "no host is available to take this"),
+        }
     })?;
 
     if host.drained {
@@ -3795,6 +3846,36 @@ pub struct NewPullRequest {
 #[serde(rename_all = "camelCase")]
 pub struct PullRequest {
     pub url: String,
+}
+
+/// What each of these machines last said it can run, for a refusal somebody
+/// can act on.
+///
+/// Observed rather than authoritative — it is the last thing each machine
+/// reported — which is why it names the machines rather than promising
+/// anything about them.
+fn what_runs_where(hosts: &[&ft_core::Host], presence: &[crate::db::StoredPresence]) -> String {
+    let said: Vec<String> = hosts
+        .iter()
+        .map(|h| {
+            let there: Vec<&str> = presence
+                .iter()
+                .filter(|p| p.host == h.id && p.found.installed)
+                .map(|p| p.found.kind.label())
+                .collect();
+            match there.is_empty() {
+                true => format!("{} has none of them installed", h.name),
+                false => format!("{} has {}", h.name, there.join(" and ")),
+            }
+        })
+        .collect();
+    match said.is_empty() {
+        true => "No machine has reported what it has.".to_string(),
+        false => format!(
+            "{}. Install it there, or use one of those.",
+            said.join("; ")
+        ),
+    }
 }
 
 async fn require_ready(
