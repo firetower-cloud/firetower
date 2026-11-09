@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.28.1](https://github.com/firetower-cloud/firetower/compare/desktop-v0.28.0...desktop-v0.28.1) (2026-11-09)
+
+
+### Bug Fixes
+
+* **desktop:** the switch away from a spent account is offered while the turn runs ([b405b9d](https://github.com/firetower-cloud/firetower/commit/b405b9da677114b6b307496abbc14d2cefad1662))
+
 ## [0.28.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.27.0...desktop-v0.28.0) (2026-11-09)
 
 
