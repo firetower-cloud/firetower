@@ -115,8 +115,11 @@ Errors:
   So a line in a frontmatter is blank, a comment, `key: value` at the left
   margin, a `- list item`, an indented `key: value` under one, or part of a
   block scalar already open — and anything else is refused. The cost was
-  measured the same way the frame rule's was: **0 of 87** published and
-  library `SKILL.md` hold a line this reader drops.
+  measured the same way the frame rule's was: **0 of 57** published and
+  library `SKILL.md` hold a line this reader drops. A key spelt with a colon
+  — `a:b: value`, where the first colon is not a mapping indicator at all
+  because no space follows it — is one of the lines this refuses, and that
+  is the **eighth** value shape; see the colon-key paragraph below.
 
   **And a value this reader did not fully read is refused for the same
   reason, with the reader itself being the thing that says so.** A line it
@@ -171,7 +174,25 @@ Errors:
   nesting at all — libyaml refuses the document — so refusing it there closes
   no differential and costs three published skills (`firetower-artifacts`,
   `firetower-surfaces`, `pr-screenshots`: issue #275, the ones libyaml
-  already refuses). Where a mapping *is* legal it costs **0 of 87**.
+  already refuses). Where a mapping *is* legal it costs **0 of 57**.
+
+  **That exemption is narrower than it reads, and the gap was shape 8.** "A
+  second `: ` is an error to libyaml" holds for `license: a: b`, where a
+  space follows the first colon. It is *false* for `license:a: b`, where the
+  first colon is not an indicator and libyaml reads one plain-scalar key
+  `license:a` holding a decoded value. `key_colon` split on the first colon
+  regardless, so the real key ended up inside a value the reader called a
+  plain scalar in exactly the position the exemption covers, and the escape
+  was never decoded — `check()` accepted while libyaml handed the agent
+  `<system-reminder>`. Worse, *every* value of the form `<alnum>: …` passed
+  there, so anything the complement rule refuses was reachable by hiding it
+  behind a colon-key: `&`, `*`, a flow mapping and a tag all got a reading,
+  measured. **So a `:` is treated as a mapping indicator only when a space,
+  a tab or the end of the line follows it** — both halves asked of libyaml
+  rather than reasoned, since `k:<TAB>v` *is* a mapping to it and `a:b` is
+  one scalar. Measured inert against Claude Code 2.1.273 with two negative
+  controls, so the demonstrated reach is libyaml-family readers. Cost: **0
+  of 57**, and the same rule mirrored in `desktop/src/skills.ts`.
 
   That shape matters more than the list it replaced, and the reason is this
   area's history. The first version of this rule was a separate predicate
@@ -207,10 +228,10 @@ Errors:
   `d408c3c2`, against a loopback capture sink reading the `name: description`
   pair it renders into the system prompt, with positive and negative controls.
   Not re-derived here; the independent evidence in this section is libyaml, in
-  three bindings.)* **87 of 87** published and library `SKILL.md` are
+  three bindings.)* **57 of 57** published and library `SKILL.md` are
   accepted: 0 hold a flow sequence, a brace, or a `\u` escape anywhere in
-  their frontmatter, 0 nest three deep, and 0 hold a block sequence entry
-  with a `: ` in it. The one cost is honest and worth
+  their frontmatter, 0 nest three deep, 0 hold a block sequence entry
+  with a `: ` in it, and 0 hold a colon-key. The one cost is honest and worth
   naming: a frontmatter nested three levels deep is refused whether or not
   that instance carries anything, for the same reason a dropped line is — a
   parse of the frontmatter is not evidence about the frontmatter.
@@ -471,13 +492,34 @@ escape**: fourteen productions — plain, single-quoted, double-quoted, a
 double-quoted scalar that does not close where it looks like it does, literal
 and folded block scalars, flow and block sequences, flow and block mappings,
 a tag, an anchor, an alias and a merge key — composed up to three deep, in
-seven positions, with the escape and without, over four keys. **12,544
-bundles**, with one grammatical restriction (block content is not legal
-inside a flow collection) and one node property restriction (at most one tag
-and one anchor on a node). Everything the product produces is spelt, so
-adding a production is meant to be impossible: the list of kinds is walked
-from an exhaustive match, so a kind added to it does not compile until it has
-a place, and the verdict then refuses a corpus that does not produce it.
+**eight** positions, with the escape and without, over four keys. **14,336
+bundles** over 224 trees, with one grammatical restriction (block content is
+not legal inside a flow collection) and one node property restriction (at
+most one tag and one anchor on a node).
+
+**Which axes that product is closed in, stated narrowly — because the broad
+form of this sentence was wrong, and the eighth value shape lived in the
+difference.** The corpus has five axes, and the compiler pins three:
+
+| axis | closed by | how far |
+| --- | --- | --- |
+| **node production** | the compiler | `Family::all()` is walked from `Family::then()`, an exhaustive match, so a kind added to the enum does not compile until it has a place in the chain — and the verdict then refuses a corpus that does not produce it. Verified by adding a fifteenth variant: three compile errors, then a refusal by name. **This mechanism works and should not be given back.** |
+| **position** | the compiler, as of this commit | `Pos::all()` is walked from `Pos::then()`. It *was* a hand-written `[Pos; 7]` — so a position could be added to the enum, given a spelling, and then simply never generated, on a `variant is never constructed` warning and a green suite. The verdict's own position check compares against `Pos::all()`, so while that list was hand-written the check was satisfying itself. |
+| **escape spelling** | the compiler, against going *short* | `Esc::all()` is a chain and the set the corpus uses is derived from each spelling's role rather than listed at the call site. But `\u003c` is still the only **live** spelling in it. |
+| **depth** | a list | `DEEPEST`. |
+| **key spelling** | nothing | there is no enum for how a key may be spelt. `Pos::QuotedKey`, `Pos::SpacedKey` and `Pos::ColonKey` are three members of an unnamed set, and the third of them was the eighth shape. |
+
+So: **the value class is narrowed, not closed.** Shapes 5, 6, 7 and 8 were
+each found by hand after the previous fix, and a longer list of positions
+will produce a shape 9. What closes it rather than narrowing it is a
+**differential fuzzer** over the frontmatter region with libyaml as the
+oracle — the property is already written, and only the generator needs
+replacing with one that has no axis to be short of. That, the remaining
+axes, and committing the reader-mutation sweep below as a test are
+[issue #277](https://github.com/firetower-cloud/firetower/issues/277), filed
+before this merged rather than after, so nobody reads this section as a
+closure argument. The **frame** and **key** classes *are* closed, verified
+independently twice, and are not in that issue's scope.
 
 **The verdict is per family, not an aggregate floor, and that is the half
 that was missing.** The old gate asserted that the corpus held more than
@@ -502,7 +544,7 @@ family is asked for its own evidence, in characters:
 fourteen families in turn and asserts the verdict fails *and* that what is
 left would still pass an aggregate floor — hundreds of disagreements, both
 answers, and a hole nobody would have seen. Another replaces the escape with
-ordinary letters, which leaves 5,703 disagreements and no decode anywhere,
+ordinary letters, which leaves 7,269 disagreements and no decode anywhere,
 and asserts the verdict fails for the escape rather than for the shape of the
 corpus. A gate nobody has watched fail is a gate nobody has tested.
 
@@ -510,15 +552,34 @@ The measured two-sided result, over 934 payloads from two independent
 enumerations: at `d408c3c2`, 293 accepted with **72** where libyaml delivered
 a character Firetower never saw and 11 key disagreements; with the rules
 above, 172 accepted with **0** and **0**. The same oracle, the same payloads.
-And over the **87** unique published and library `SKILL.md` on a worker:
-**87 accepted, 0 refused, 0 disagreeing** — with 3 of the 87 refused by
+And over the **57** unique published and library `SKILL.md` on a worker:
+**57 accepted, 0 refused, 0 disagreeing** — with 4 of the 57 refused by
 libyaml outright, which is issue #275 and not a security finding, since a
-reader that refuses the document finds no keys to disagree about. (The
-security review measured 57 and 4 on its own snapshot; more sessions have
-materialised bundles on this machine since, and the conclusion is the same
-one. 29 of the 87 open a value with a double quote, 0 hold a flow sequence, a
-brace, a `\u` escape or three levels of nesting, and 0 hold a block sequence
-entry with a `: ` in it.)
+reader that refuses the document finds no keys to disagree about.
+
+**On that denominator, since it is load-bearing and an earlier form of this
+section said 87.** 57 is *unique-by-content* `SKILL.md` under `~/.firetower`
+and `~/.claude`, counted by content hash, and it is what two reviews
+measured independently. The 87 could not be reproduced under any definition
+tried: 427 paths, 57 unique by content, 54 unique by skill name, 23 unique
+by content excluding the plugin cache, 646 unique across all of `$HOME`. The
+explanation this section previously gave — that 87 was a later snapshot than
+57, with more bundles materialised since — **is false and was checked**:
+paths did grow (418 → 427) but unique-by-content did not move off 57, so the
+growth was duplicates. 87 is therefore treated as unverifiable and dropped
+rather than carried, and every qualitative claim re-derives on the 57: **25
+of the 57** open a value with a double quote, **0** hold a flow sequence, a
+brace, a `\u` escape or three levels of nesting, **0** hold a block sequence
+entry with a `: `, and **0 hold a colon-key**, which is what the colon-key
+condition in `key_colon` costs. The one figure that moved with the sample
+rather than with a definition is the libyaml-refusing count, 3 skills and 4
+files, because `firetower-artifacts` is present in two versions.
+
+The two enumerations re-run through the changed gate give **161 of the 892
+recoverable payloads accepted, with 0 accepted-and-disagreeing and 0 key
+disagreements** — 172 before the colon-key condition, which refuses 11 of
+them. The earlier figure of 934 payloads includes 42 that are not in the
+saved enumerations, so 892 is the honest denominator for a re-run.
 
 **Where the grammar stops, and it is named rather than implied.** Ten of
 fifteen clause-removing mutations of the reader are caught by the corpus. The
@@ -533,6 +594,17 @@ nothing after it (the mutation makes Firetower read and decode what libyaml
 keeps as spelling, which is the safe direction). The frame and key classes
 have their own grammar and their own two oracles; this one is the value
 grammar.
+
+Two things about that table are worth saying plainly. The `*` row **was
+vacuous rather than true** until the colon-key condition landed: an alias
+could reach a reading behind a colon-key, so `&`, `*`, a flow mapping and a
+tag were all live. It is unreachable again now, and that is the sharpest
+argument the eighth shape was structural rather than cosmetic. And the sweep
+that produced this table **is a table rather than a test** — the fourteenth
+node production was found by sweeping mutations rather than by enumeration,
+so the table decays the first time somebody edits the reader. Committing the
+sweep as a test is part of
+[issue #277](https://github.com/firetower-cloud/firetower/issues/277).
 
 ### Toggling mid-conversation
 

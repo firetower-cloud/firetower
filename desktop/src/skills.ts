@@ -548,15 +548,22 @@ export function split(text: string): {
       list.push(took(line, readValue(item[1]!, "item")));
       continue;
     }
-    // `  key: value` under a key with nothing after its colon.
-    const nested = astray ? null : /^\s{2,}([A-Za-z0-9_-]+):\s*(.*)$/.exec(line);
+    // `  key: value` under a key with nothing after its colon. The
+    // `(?=[ \t]|$)` is the mirror of `key_colon`'s: **a `:` is a mapping
+    // indicator only when a space, a tab or the end of the line follows
+    // it.** Without it these two regexes split on the first colon, so
+    // `  a:b: "\u003c…"` read as key `a` holding the text `b: "\u003c…"`
+    // — the eighth value shape, where libyaml reads one key `a:b` and
+    // decodes the escape in its value. A badge drawn from a reading nobody
+    // had, again.
+    const nested = astray ? null : /^\s{2,}([A-Za-z0-9_-]+):(?=[ \t]|$)\s*(.*)$/.exec(line);
     if (nested && map) {
       nest = lead;
       map[nested[1]!] = took(line, readValue(nested[2]!, "value"));
       continue;
     }
 
-    const top = /^([A-Za-z0-9_-]+):\s*(.*)$/.exec(line);
+    const top = /^([A-Za-z0-9_-]+):(?=[ \t]|$)\s*(.*)$/.exec(line);
     // The one place a line can be dropped, and it is counted here.
     if (!top) {
       unread.push(line);

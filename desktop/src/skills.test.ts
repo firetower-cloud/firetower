@@ -96,6 +96,26 @@ describe("a line this reader cannot read", () => {
     ["a tab before the key", "\tdescription: X"],
     ["a whole mapping indented", "  name: helper\n  description: X"],
     ["a declined key beside canonical ones", "allowed-tools : Bash(curl:*)"],
+    /* The eighth value shape, and it is this family crossing into the value
+       class. Both regexes split on the *first* colon, so `a:b: "…"` read as
+       key `a` holding the text `b: "…"` — while libyaml reads one
+       plain-scalar key `a:b` and *decodes* its double-quoted value, because
+       a `:` is a mapping indicator to it only when a space, a tab or the end
+       of the line follows. Measured here before the fix: `unread: []`,
+       `undecoded: []`, `riskOf: []`, no bracket anywhere in the
+       frontmatter — a badge drawn from a reading nobody had, again. */
+    ["a key spelt with a colon", 'metadata:\n  a:b: "\\u003cx\\u003e"'],
+    ["a top-level key spelt with a colon", 'license:a: "\\u003cx\\u003e"'],
+    /* And why it is structural rather than one more spelling: every value of
+       the form `<alnum>: …` landed in the exempt position, so an anchor and
+       an alias — which this reader can otherwise never give a reading —
+       both got one, and libyaml delivers the payload at both keys. */
+    ["an anchor and an alias behind a colon-key", 'anchor:a: &anc {k: "\\u003cx\\u003e"}\nmerged:b: *anc'],
+    /* The same shape with nothing to decode is declined too, which is the
+       cost and is deliberate: the readers agree about its content, but it is
+       still a key this reader cannot read. 0 of the 57 unique published and
+       library `SKILL.md` hold such a line. */
+    ["a colon-key with no escape in it", 'metadata:\n  a:b: "plain"'],
   ];
 
   for (const [label, line] of family) {
@@ -112,6 +132,15 @@ describe("a line this reader cannot read", () => {
       "# a comment\nname: helper\ndescription: Helps.",
       "name: helper\ndescription: Helps.\nallowed-tools:\n  - Bash\n  - Read",
       "name: helper\ndescription: Helps.\nmetadata:\n  version: 1",
+      // The two halves of the colon-key condition, asked of libyaml rather
+      // than reasoned: `k:<TAB>v` *is* a mapping to it, so a tab stays in
+      // the set — and a colon with nothing after it is how every nested
+      // mapping opens.
+      "name: helper\ndescription: Helps.\nmetadata:\n  a:\tb",
+      // And the cost is bounded to the *key*: a colon inside the value is
+      // untouched, which is where every real one is.
+      "name: helper\ndescription: Helps.\nlicense: a:b\nhomepage: https://example.com",
+      "name: helper\ndescription: Helps.\nallowed-tools: Bash(curl:*)",
     ])
       expect(split(fm(body)).unread).toEqual([]);
   });

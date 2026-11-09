@@ -851,9 +851,11 @@ pub fn check_one_reading(what: &str, text: &str) -> Result<(), Refused> {
 ///    a tab before the key is inert, because libyaml refuses a tab in
 ///    indentation. So a line this reader drops is **refused**, by the same
 ///    argument as the frame: a parse of the frontmatter is not evidence about
-///    the frontmatter. It costs nothing real — 0 of the 87 unique published
-///    and library `SKILL.md` on this machine hold a line `read_frontmatter`
-///    silently skips, on the larger sample the security review re-derived.
+///    the frontmatter. It costs nothing real — 0 of the **57** unique
+///    published and library `SKILL.md` on this machine hold a line
+///    `read_frontmatter` silently skips. (57 is unique-by-content under
+///    `~/.firetower` and `~/.claude`, which is the denominator every
+///    measurement in this file uses; see [`plain`].)
 pub fn check_one_frontmatter(said: &str) -> Result<(), Refused> {
     let Some(rest) = said
         .strip_prefix("---\n")
@@ -910,8 +912,10 @@ pub fn check_one_frontmatter(said: &str) -> Result<(), Refused> {
              frontmatter has to be blank, a comment, `key: value` at the left margin, a \
              `- list item`, an indented `key: value` under one, or part of a block scalar. \
              A full YAML reader takes more than that — `description : x` with a space before \
-             the colon, or a quoted key — so a line this one cannot read is a field the agent \
-             gets and nothing here has checked. Refused rather than skipped.",
+             the colon, a quoted key, or `a:b: x`, where the first colon is not a mapping \
+             indicator at all because no space follows it — so a line this one cannot read \
+             is a field the agent gets and nothing here has checked. Refused rather than \
+             skipped.",
             briefly(line)
         )));
     }
@@ -1342,6 +1346,27 @@ fn top_pair(line: &str) -> Option<(String, String)> {
 }
 
 /// Splits `key: value`, where a key is the standard's `[A-Za-z0-9_-]+`.
+///
+/// **A `:` is a mapping indicator only when a space, a tab or the end of the
+/// line follows it** — YAML's own rule, and the one this function used to
+/// skip. Splitting on the first colon regardless was the eighth value shape:
+/// `  a:b: "\u003c…"` yielded key `a` and value `b: "\u003c…"`, which
+/// [`plain`] then called a plain scalar at [`At::Value`] and never decoded,
+/// while libyaml read one plain-scalar key `a:b` holding a *decoded*
+/// `<system-reminder>`. `check()` accepted it. The first-colon split
+/// manufactured exactly the spelling the `At::Value` exemption does not
+/// cover, and because every value of the form `<alnum>: <anything>` passed
+/// `plain` there, anything the complement rule refuses was reachable by
+/// hiding it behind a colon-key — `&`, `*`, a flow mapping and a tag all
+/// got a reading, measured.
+///
+/// Both halves of the condition are measured against libyaml rather than
+/// reasoned: `k:<TAB>v` **is** a mapping to it, so a tab belongs in the set,
+/// and `a:b` is one plain scalar, so it does not. A line this rule now
+/// declines is a key this reader cannot read, so it lands in the **line**
+/// class (`unread`) rather than the value class, which is the right place.
+/// Cost: **0 of the 57 unique published and library `SKILL.md`** on this
+/// machine hold such a line, so it is free.
 fn key_colon(s: &str) -> Option<(String, String)> {
     let at = s.find(':')?;
     let (k, rest) = (&s[..at], &s[at + 1..]);
@@ -1350,6 +1375,9 @@ fn key_colon(s: &str) -> Option<(String, String)> {
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
     {
+        return None;
+    }
+    if !matches!(rest.chars().next(), None | Some(' ') | Some('\t')) {
         return None;
     }
     Some((
@@ -1479,12 +1507,21 @@ impl Scalar {
 /// The third value is what makes the production **position-sensitive rather
 /// than absent or unconditional**, and both of those are wrong: after a
 /// `key:` a second `: ` is not a nested mapping at all — libyaml refuses the
-/// document outright — so refusing there buys no differential and costs 3 of
-/// the 87 corpus `SKILL.md`: `firetower-artifacts`, `firetower-surfaces` and
-/// `pr-screenshots`, which are exactly the ones libyaml already refuses
-/// under issue #275. Where a mapping *is* legal it costs **0 of 87** —
-/// measured by asking every value in all 87 whether moving it from
-/// `At::Value` to `At::Item` changes the verdict.
+/// document outright — so refusing there buys no differential and costs 4 of
+/// the 57 corpus `SKILL.md`, which are three skills: `firetower-artifacts`
+/// (in two versions), `firetower-surfaces` and `pr-screenshots`. Those are
+/// exactly the ones libyaml already refuses under issue #275. Where a
+/// mapping *is* legal it costs **0 of 57** — measured by asking every value
+/// in all 57 whether moving it from `At::Value` to `At::Item` changes the
+/// verdict.
+///
+/// **And the exemption is narrower than it reads.** "A second `: ` is an
+/// error to libyaml" is true of `license: a: b`, where a space follows the
+/// first colon. It was *false* of `license:a: b`, where the first colon is
+/// not an indicator at all — and [`key_colon`]'s first-colon split
+/// manufactured exactly that spelling, which is the eighth shape. The
+/// exemption is sound only because `key_colon` now requires a space, a tab
+/// or the end of the line after the colon.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum At {
     /// After a `key:`, where a node is a value and a second `: ` is an
@@ -1520,6 +1557,19 @@ enum At {
 /// Where it is *not* a plain
 /// scalar, keeping it verbatim is not a reading of it, and the `else` of the
 /// two decodes above is the one place that can be said.
+///
+/// **What this function is not a closure argument about.** It reports its
+/// own reading, which is what makes a missed shape *reportable* rather than
+/// silent — but it is asked about a value only once the line has been split
+/// into a key and a value, so a value the line-splitting puts in the wrong
+/// place never reaches the right branch. That is the eighth shape: with
+/// [`key_colon`] splitting on the first colon, `a:b: "\u003c…"` arrived
+/// here as the value `b: "\u003c…"` at [`At::Value`], where [`plain`]
+/// called it a plain scalar and nothing was decoded. The corpus below
+/// crosses this function with every node production and every position, and
+/// the production and position axes are closed by the compiler; **depth and
+/// key spelling are hand-written lists**, which is the honest statement of
+/// where the evidence stops. #277.
 fn read_value(raw: &str, at: At) -> Scalar {
     let t = raw.trim();
 
@@ -1661,16 +1711,34 @@ fn closes(t: &str, q: char) -> Option<&str> {
 /// of known-bad shapes refuses what somebody has thought of; this refuses
 /// anything that cannot be shown to be the one shape whose reading is free.
 /// So a flow mapping, a tag, an anchor, an alias and a directive are all
-/// refused without being named, and so is the next one.
+/// refused without being named, and so is the next **node production**.
 ///
-/// It costs nothing real, measured on the 87 unique published and library
-/// `SKILL.md` on this machine: **87 accepted, 0 refused.** 0 hold a flow
-/// sequence, a brace, a `\u` escape or three levels of nesting anywhere in
-/// their frontmatter, and 0 hold a block sequence entry with a `: ` in it.
-/// And the control that matters for *this* function rather than for the rule
-/// as a whole: **29 of the 87 open a value with a double quote**, so the
-/// decode branch above is what the real corpus exercises and this one never
-/// sees those at all.
+/// **That last word is the limit, and it is where the eighth shape came
+/// from.** The complement is stated over productions *at a position*; it is
+/// not a claim about every way a value can be reached. Shape 8 did not
+/// defeat the complement by finding a production it had missed — it changed
+/// the **key spelling** so that the value arrived at `At::Value` as the
+/// text `b: "…"`, where the `: ` clause is exempt, and every production the
+/// complement refuses became reachable behind a colon-key: `&`, `*`, a flow
+/// mapping and a tag all got a reading, measured. The production axis is
+/// closed by the compiler; position is as of this commit; **depth and key
+/// spelling are lists**, and #277 tracks what would close them.
+///
+/// It costs nothing real, measured on the **57** unique published and
+/// library `SKILL.md` on this machine — unique-by-content under
+/// `~/.firetower` and `~/.claude`, 427 paths deduplicating to 57, 54 by
+/// skill name — **57 accepted, 0 refused, 0 disagreeing**, run through
+/// `check()` itself rather than predicted. 0 hold a flow sequence, a brace,
+/// a `\u` escape or three levels of nesting anywhere in their frontmatter,
+/// 0 hold a block sequence entry with a `: `, and **0 hold a colon-key**,
+/// which is what [`key_colon`]'s condition costs. And the control that
+/// matters for *this* function rather than for the rule as a whole: **25 of
+/// the 57 open a value with a double quote**, so the decode branch above is
+/// what the real corpus exercises and this one never sees those at all.
+///
+/// An earlier form of this comment said 87, which no definition of the
+/// corpus on this machine reproduces; 57 is what two reviews independently
+/// counted and every qualitative claim above re-derives on it.
 fn plain(t: &str, at: At) -> bool {
     /// YAML's `c-indicator`, less the three that depend on what follows.
     const INDICATORS: &str = ",[]{}#&*!|>'\"%@`";
@@ -3853,8 +3921,9 @@ mod tests {
     /// `None` when libyaml refuses the document or reads something that is
     /// not a mapping. That is honest rather than convenient: a reader that
     /// refuses the document finds no keys at all, so there is nothing it has
-    /// that we do not. 3 of 87 corpus `SKILL.md` are in exactly that
-    /// position, for a plain scalar holding a `: ` — issue #275.
+    /// that we do not. 4 of the 57 corpus `SKILL.md` are in exactly that
+    /// position — three skills, one of them in two versions — for a plain
+    /// scalar holding a `: `: issue #275.
     fn what_libyaml_reads(said: &str) -> Option<serde_yaml::Value> {
         let region = the_eager_region(said)?.join("\n");
         let got: serde_yaml::Value = serde_yaml::from_str(&region).ok()?;
@@ -4375,9 +4444,9 @@ mod tests {
         assert!(check_said(honest).is_ok());
 
         // And the shapes a real `SKILL.md` is written in, which is what the
-        // rule costs. 0 of 87 published and library bundles hold a line this
-        // reader drops; these are the constructions that measurement was
-        // about, asked here so the cost stays nothing.
+        // rule costs. 0 of the 57 published and library bundles hold a line
+        // this reader drops; these are the constructions that measurement
+        // was about, asked here so the cost stays nothing.
         for (label, body) in [
             (
                 "a folded description",
@@ -4655,6 +4724,40 @@ mod tests {
                 "a block sequence item holding a mapping to a flow sequence",
                 format!("---\nname: ship-it\ndescription: Ships.\nmetadata:\n  - a: [b: \"{payload}\"]\n---\n\nRun it.\n"),
             ),
+            (
+                // **The eighth shape, and it is the key class crossing into
+                // this one.** `key_colon` split on the *first* colon, so
+                // `a:b: "…"` yielded key `a` and value `b: "…"` — which
+                // `plain` called a plain scalar at `At::Value` and never
+                // decoded, while libyaml reads one plain-scalar key `a:b`
+                // and decodes its double-quoted value. To libyaml a `:` is
+                // a mapping indicator only when a space, a tab or the end
+                // of the line follows it, and the first-colon split
+                // manufactured exactly the spelling the `At::Value`
+                // exemption does not cover. Its negative control is below,
+                // and it is the one that names the cause.
+                "a key spelt with a colon",
+                format!("---\nname: ship-it\ndescription: Ships.\nmetadata:\n  a:b: \"{payload}\"\n---\n\nRun it.\n"),
+            ),
+            (
+                // The same at the left margin, where the colon-key is a
+                // *top-level* key libyaml finds and this reader does not.
+                "a top-level key spelt with a colon",
+                format!("---\nname: ship-it\ndescription: Ships.\nlicense:a: \"{payload}\"\n---\n\nRun it.\n"),
+            ),
+            (
+                // And the reason the shape is structural rather than one
+                // more spelling: **every** value of the form `<alnum>: …`
+                // passed `plain` at `At::Value`, so anything the complement
+                // rule refuses was reachable by hiding it behind a
+                // colon-key. Here that is an anchor and an alias — the two
+                // families the corpus can only ever refuse — reaching a
+                // reading, and libyaml delivering the payload at *both*
+                // keys. This is also what makes the doc comment's claim
+                // that `*` is unreachable true rather than vacuous.
+                "an anchor and an alias behind a colon-key",
+                format!("---\nname: ship-it\ndescription: Ships.\nanchor:a: &anc {{k: \"{payload}\"}}\nmerged:b: *anc\n---\n\nRun it.\n"),
+            ),
         ] {
             // The precondition: the rule had six characters to look at.
             assert!(
@@ -4737,9 +4840,57 @@ mod tests {
                 "an ordinary block sequence item",
                 "---\nname: ship-it\ndescription: Ships.\nallowed-tools:\n  - Bash(git log:*)\n  - Read\n---\n\nRun it.\n".to_string(),
             ),
+            (
+                // **The measured half of the colon-key condition.** A tab
+                // after the colon is a mapping indicator to libyaml — asked
+                // of it rather than reasoned, because `k:\tv` reads as
+                // `{k: v}` while `k:v` reads as the one scalar `k:v` — so a
+                // tab has to stay in the set or this reader would refuse a
+                // mapping libyaml reads and both would be reading something
+                // nobody wrote.
+                "a tab after the colon",
+                "---\nname: ship-it\ndescription: Ships.\nmetadata:\n  a:\tb\n---\n\nRun it.\n".to_string(),
+            ),
+            (
+                // And the other half: a colon with nothing after it, which
+                // is how every nested mapping in a real `SKILL.md` opens.
+                "a colon at the end of the line",
+                "---\nname: ship-it\ndescription: Ships.\nmetadata:\n  version: 1\n---\n\nRun it.\n".to_string(),
+            ),
+            (
+                // The cost of the colon-key condition is bounded to the
+                // *key*: a colon inside the value is untouched, which is
+                // where every real one is — `Bash(curl:*)`, a time, a URL.
+                "a colon inside the value",
+                "---\nname: ship-it\ndescription: Ships.\nlicense: a:b\nhomepage: https://example.com\n---\n\nRun it.\n".to_string(),
+            ),
         ] {
             assert!(check_said(&said).is_ok(), "{label}: {said}");
         }
+
+        // **The colon-key condition's cost, pinned in the direction it
+        // actually falls rather than left to be discovered.** The same shape
+        // with *no escape in it* is refused too, and that is deliberate: the
+        // readers agree about its content, so there is no differential — but
+        // it is a key this reader cannot read, and a reader that keeps
+        // `b: "plain"` as a value where libyaml has a key `a:b` is not
+        // reading the line either. So it lands in the **line** class, which
+        // is the over-refusal the measurement bounds: 0 of the 57 unique
+        // published and library `SKILL.md` on this machine hold such a line.
+        let bare = "---\nname: ship-it\ndescription: Ships.\nmetadata:\n  a:b: \"plain\"\n---\n\nRun it.\n";
+        let real = what_libyaml_reads(bare).expect("libyaml reads a colon-key happily");
+        let ours = chars_delivered(&read_frontmatter(bare).0);
+        assert!(
+            chars_libyaml_delivers(&real).difference(&ours).count() > 0,
+            "the control's point is that the two readings differ with no escape in sight, \
+             which is what makes the colon and not the escape the cause: {real:?}"
+        );
+        let refused = check_said(bare).expect_err("a key this reader cannot read is refused");
+        assert!(
+            refused.0.contains("cannot read"),
+            "it is the line class rather than the value class: {}",
+            refused.0
+        );
     }
 
     /// **The gate is a gate rather than a convention.**
@@ -4792,8 +4943,40 @@ mod tests {
     // and had never taken their product. The gate was sound; the corpus was
     // an enumeration. So the payloads below are produced from the standard's
     // node kinds and composed, and the test of whether that worked is
-    // mechanical: **adding a production has to be impossible, because every
-    // production is already there.**
+    // mechanical.
+    //
+    // **Which axes that is true of, stated narrowly, because the broad form
+    // of this sentence was wrong.** The corpus is a product of five axes —
+    // node production, depth, position, escape spelling and key spelling —
+    // and the claim holds of two of them:
+    //
+    // - **node production** is closed by the compiler: [`Family::all`] is
+    //   walked from [`Family::then`], which matches exhaustively, so a
+    //   variant cannot be added without a place in the chain, and [`judge`]
+    //   then refuses a corpus that does not produce it. Measured by adding a
+    //   fifteenth variant: three compile errors, then a refusal by name.
+    // - **position** is closed the same way as of this commit:
+    //   [`Pos::all`] is walked from [`Pos::then`]. It was a hand-written
+    //   `[Pos; 7]`, which is how the **eighth** shape hid — a position could
+    //   be added to the enum, given a spelling, and never generated, on a
+    //   warning and a green suite.
+    // - **escape spelling** is closed against going short — [`Esc::all`] is
+    //   a chain and the corpus set is derived from [`Esc::role`] — but
+    //   `\u003c` is still the only *live* spelling in it.
+    // - **depth** and **key spelling** are lists. Depth is [`DEEPEST`]; key
+    //   spelling has no enum of its own at all, and
+    //   [`Pos::QuotedKey`], [`Pos::SpacedKey`] and [`Pos::ColonKey`] are
+    //   three members of an unnamed set.
+    //
+    // So: shapes 5, 6, 7 and 8 were each found by hand after the previous
+    // fix, and a longer list of positions will produce a shape 9. What
+    // closes this rather than narrowing it is a **differential fuzzer** over
+    // the frontmatter region with libyaml as the oracle — the property is
+    // already written and only the generator needs replacing with one that
+    // has no axis to be short of. That, the remaining axes, and committing
+    // the reader-mutation sweep below as a test are **issue #277**, filed
+    // before this merged rather than after. Until then the value class is
+    // **narrowed, not closed.**
     // ---------------------------------------------------------------------
 
     /// **YAML's node productions**, which is what the corpus is generated
@@ -5035,6 +5218,21 @@ mod tests {
         Benign,
     }
 
+    /// What a spelling on the escape axis is *for*, so that the sets in use
+    /// are derived rather than written out at the call site.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    enum Role {
+        /// The class itself: a spelling a real reader turns into a character
+        /// the spelling does not contain.
+        Class,
+        /// The twin with nothing to decode, which is what makes an
+        /// accepting control a control.
+        Control,
+        /// A mutation of the axis — in the corpus it would be an escape that
+        /// is not an escape, so [`judge`] has to fail on it.
+        Mutation,
+    }
+
     impl Esc {
         fn payload(self) -> &'static str {
             match self {
@@ -5042,6 +5240,56 @@ mod tests {
                 Esc::Absent => "ok",
                 Esc::Benign => "QxZ",
             }
+        }
+
+        /// The next spelling, as an exhaustive match — the same chain
+        /// [`Family::then`] is, and for the same reason.
+        fn then(self) -> Option<Esc> {
+            Some(match self {
+                Esc::Live => Esc::Absent,
+                Esc::Absent => Esc::Benign,
+                Esc::Benign => return None,
+            })
+        }
+
+        fn all() -> Vec<Esc> {
+            let mut out = vec![Esc::Live];
+            while let Some(next) = out[out.len() - 1].then() {
+                out.push(next);
+            }
+            out
+        }
+
+        fn role(self) -> Role {
+            match self {
+                Esc::Live => Role::Class,
+                Esc::Absent => Role::Control,
+                Esc::Benign => Role::Mutation,
+            }
+        }
+
+        /// **The corpus's escape axis, derived.** Everything on the axis
+        /// that is not a mutation of it — so a spelling added to the enum
+        /// enters the corpus by existing, rather than by somebody also
+        /// remembering the call site. `\u003c` is still the only live
+        /// spelling; `\x3c` and `\U0000003c` are measured equivalent by
+        /// hand and a generator that cannot be short of *any* spelling is
+        /// the fuzzer in #277, not a longer list here.
+        fn corpus() -> Vec<Esc> {
+            Self::all()
+                .into_iter()
+                .filter(|e| e.role() != Role::Mutation)
+                .collect()
+        }
+
+        /// The same axis with the class taken out of it, which is the
+        /// review's mutation — asserted on by
+        /// [`an_escape_that_is_not_an_escape_fails_the_corpus`].
+        fn without_the_class() -> Vec<Esc> {
+            Self::all()
+                .into_iter()
+                .filter(|e| e.role() != Role::Class)
+                .collect()
         }
     }
 
@@ -5176,6 +5424,13 @@ mod tests {
 
     /// Where in the frontmatter the node sits — the position axis, taken
     /// across every tree rather than against the shapes that have bitten.
+    ///
+    /// **This list cannot quietly go short either.** [`Pos::all`] is built
+    /// by walking [`Pos::then`], which matches exhaustively, so a position
+    /// added here does not compile until it has a place in the chain — the
+    /// same mechanism [`Family`] uses, applied to the axis the eighth shape
+    /// hid in. Depth and key spelling are still lists; see #277, which is
+    /// the honest statement of where this stops.
     #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
     enum Pos {
         /// After a top-level key.
@@ -5203,19 +5458,55 @@ mod tests {
         /// a live injection route for a round longer than the frame rule's
         /// three clauses were.
         SpacedKey,
+        /// `key:a: value` — **a key spelt with a colon in it, which is where
+        /// the eighth shape lived.** [`key_colon`] split on the *first*
+        /// colon, so the real key (`key:a` to libyaml) ended up inside a
+        /// value that [`plain`] called a plain scalar at [`At::Value`], and
+        /// the escape was never decoded. This position is the one that
+        /// existed in the enum's *absence* rather than in its list: there
+        /// was no axis for how a key may be spelt at all, and
+        /// [`Pos::QuotedKey`] and [`Pos::SpacedKey`] were two members of an
+        /// unnamed set this is the third of.
+        ColonKey,
     }
 
     impl Pos {
-        fn all() -> [Pos; 7] {
-            [
-                Pos::Top,
-                Pos::Nested,
-                Pos::Entry,
-                Pos::Sibling,
-                Pos::Overwritten,
-                Pos::QuotedKey,
-                Pos::SpacedKey,
-            ]
+        /// The next position, as an exhaustive match.
+        ///
+        /// **This is the chain rather than an array because of a
+        /// measurement.** `Pos::all` used to return a hand-written
+        /// `[Pos; 7]`, so a variant added to the enum compiled the moment
+        /// [`place`] gave it a spelling and was then simply never generated
+        /// — a `variant is never constructed` warning and a green suite. And
+        /// [`judge`]'s position check compares against `Pos::all().len()`,
+        /// so with a hand-written list that check was satisfying itself. The
+        /// security review added `Pos::ColonKey` to the array and changed
+        /// nothing else, and the corpus caught the eighth shape immediately:
+        /// the gate was sound and the axis list was short.
+        ///
+        /// So the position axis is now pinned the way the node axis already
+        /// was — a variant added here does not compile until it has a place
+        /// in this chain *and* a spelling in [`place`]. The remaining axes
+        /// are tracked in #277.
+        fn then(self) -> Option<Pos> {
+            Some(match self {
+                Pos::Top => Pos::Nested,
+                Pos::Nested => Pos::Entry,
+                Pos::Entry => Pos::Sibling,
+                Pos::Sibling => Pos::Overwritten,
+                Pos::Overwritten => Pos::QuotedKey,
+                Pos::QuotedKey => Pos::SpacedKey,
+                Pos::SpacedKey => Pos::ColonKey,
+                Pos::ColonKey => return None,
+            })
+        }
+
+        fn all() -> Vec<Pos> {
+            let mut out = vec![Pos::Top];
+            while let Some(next) = out[out.len() - 1].then() {
+                out.push(next);
+            }
+            out
         }
     }
 
@@ -5268,6 +5559,9 @@ mod tests {
             }
             Pos::QuotedKey => after(format!("\"{key}\": "), 2),
             Pos::SpacedKey => after(format!("{key} : "), 2),
+            // One character inserted into the key, and it moves the whole
+            // node into a place the reader used to read as a value.
+            Pos::ColonKey => after(format!("{key}:a: "), 2),
         }
     }
 
@@ -5407,6 +5701,10 @@ mod tests {
                 ));
                 continue;
             }
+            // Compared against `Pos::all()`, which is now walked from an
+            // exhaustive chain rather than read off a hand-written array —
+            // so this check is a check rather than a thing that satisfies
+            // itself when somebody half-adds a position.
             let positions: BTreeSet<Pos> = mine.iter().map(|b| b.pos).collect();
             if positions.len() != Pos::all().len() {
                 wrong.push(format!(
@@ -5477,32 +5775,53 @@ mod tests {
     /// fails and the old generator stayed **green**; this one does not.
     ///
     /// The corpus is the cross product of [`Family`] × [`DEEPEST`] depths ×
-    /// [`Pos`] × [`Esc`] × four keys — **12,544 bundles**, 432 accepted,
-    /// 12,112 refused, 6,499 where libyaml hands the agent a character this
-    /// reader never saw and 2,136 where it decodes one the bytes do not
-    /// spell. The verdict is [`judge`], which asks each family for its own
-    /// evidence rather than counting disagreements over all of them.
+    /// [`Pos`] × [`Esc`] × four keys — **14,336 bundles** over 224 trees and
+    /// eight positions, 432 accepted, 13,904 refused, 8,079 where libyaml
+    /// hands the agent a character this reader never saw and 2,492 where it
+    /// decodes one the bytes do not spell. The verdict is [`judge`], which
+    /// asks each family for its own evidence rather than counting
+    /// disagreements over all of them.
+    ///
+    /// [`Pos::ColonKey`] is the eighth position and it added 1,792 bundles
+    /// **and not one accepted one** — the accepted count is unchanged at
+    /// 432. That is the measurement that the position is shut rather than
+    /// merely enumerated, and with [`key_colon`]'s condition reverted this
+    /// test fails on it directly: *"check() accepted a SKILL.md whose keys
+    /// libyaml reads differently"*, on `license:a: \u003cx\u003e`.
     ///
     /// **Where this stops, named rather than implied.** Fifteen
     /// clause-removing mutations of the reader were run against it and ten
-    /// are caught, including every one of the six shapes this class has
-    /// produced. The five that are not, each measured rather than reasoned:
+    /// are caught, including every one of the seven shapes this class had
+    /// produced when the sweep was run — and the eighth is caught too, by
+    /// [`Pos::ColonKey`], which is the position this commit added. The five
+    /// that are not, each measured rather than reasoned:
     ///
     /// | mutation | why the corpus is silent |
     /// | --- | --- |
     /// | `plain`'s flow-indicator clause removed | libyaml refuses every document the clause's absence would let through — measured on six shapes — so there is no reading to disagree with |
-    /// | `*` dropped from `INDICATORS` | an alias needs an anchor, and the anchor's `&` is refused by the same clause, so an alias can never reach a reading here: [`Family::Anchor`] is refused in all 4,032 of its bundles |
+    /// | `*` dropped from `INDICATORS` | an alias needs an anchor, and the anchor's `&` is refused by the same clause, so an alias can never reach a reading here: [`Family::Anchor`] is refused in all 4,608 of its bundles. **This was vacuous rather than true until the eighth shape was closed** — a colon-key gave `&anc` and `*anc` a reading, so `&`, `*`, a flow mapping and a tag were all reachable; that is the sharpest argument shape 8 was structural and not one more spelling, and the regression test for it is in `a_value_a_real_reader_decodes_and_this_one_did_not_is_refused` |
     /// | `closes`'s text-after-a-close clause removed | libyaml refuses the document; the claim about that shape was always the weaker one and says so |
     /// | `closes`'s `''` clause removed | strictly *more* refusing, so no disagreement can appear — the cost is pinned by the `'it''s fine'` control instead |
     /// | `list_item` taking a `-` with nothing after it | the mutation makes this reader read and *decode* what libyaml keeps as spelling, which is the direction no rule is blind to |
     ///
+    /// **And the sweep that produced that table is a table rather than a
+    /// test.** The fourteenth node production was found by sweeping
+    /// mutations rather than by enumerating, so this is the one part of the
+    /// method that was not kept, and the table decays the first time
+    /// somebody edits [`plain`] or `closes`. Committing the sweep — a test
+    /// that patches each clause out of a copy of the source, runs the
+    /// corpus, and asserts which answer it gets — is part of **#277**,
+    /// along with deriving the remaining axes and the differential fuzzer
+    /// that is what would close this class rather than narrow it.
+    ///
     /// The frame and the key classes have their own grammar and their own
     /// two oracles — assertions 1 and 2 in [`checked`]. This is the value
-    /// grammar, and [`Pos::QuotedKey`] and [`Pos::SpacedKey`] are where the
-    /// two meet.
+    /// grammar, and [`Pos::QuotedKey`], [`Pos::SpacedKey`] and
+    /// [`Pos::ColonKey`] are where the two meet — three members of a set
+    /// that still has no name, which is the gap #277 is about.
     #[test]
     fn the_property_holds_over_a_generated_corpus() {
-        let corpus = grown(&[Esc::Live, Esc::Absent]);
+        let corpus = grown(&Esc::corpus());
         // The sizes are asserted as floors rather than as the measured
         // numbers, so that adding a production does not come with an edited
         // constant — the per-family evidence in `judge` is the gate.
@@ -5538,7 +5857,7 @@ mod tests {
     /// enters a bundle by being in its tree.
     #[test]
     fn losing_any_one_node_kind_fails_the_corpus() {
-        let corpus = grown(&[Esc::Live, Esc::Absent]);
+        let corpus = grown(&Esc::corpus());
         for f in Family::all() {
             let without: Vec<&Bundle> =
                 corpus.iter().filter(|b| !b.families.contains(&f)).collect();
@@ -5592,7 +5911,7 @@ mod tests {
     /// libyaml is no longer delivering the escape's spelling.
     #[test]
     fn an_escape_that_is_not_an_escape_fails_the_corpus() {
-        let benign = grown(&[Esc::Benign, Esc::Absent]);
+        let benign = grown(&Esc::without_the_class());
         assert!(
             benign.iter().filter(|b| !b.unseen.is_empty()).count() > 50,
             "the mutation has to leave a corpus that an aggregate floor would still pass, or \
@@ -5633,8 +5952,8 @@ mod tests {
     /// The cost of the rule is one shape: a frontmatter nested three deep is
     /// refused, whether or not that instance carries anything, for the same
     /// reason a line this reader drops is — a parse of the frontmatter is not
-    /// evidence about the frontmatter. **0 of 87** corpus `SKILL.md` nest
-    /// that deep.
+    /// evidence about the frontmatter. **0 of the 57** corpus `SKILL.md`
+    /// nest that deep.
     #[test]
     fn a_nesting_deeper_than_this_reader_models_is_refused() {
         let payload = "\\u003csystem-reminder\\u003e";
