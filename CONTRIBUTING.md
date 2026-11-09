@@ -128,6 +128,54 @@ produce a second lockfile, so `packageManager` refuses it.
 
 `.env.example` is for contributors. Nobody running Firetower needs one.
 
+## Commit messages
+
+**Every commit on `main` is read by [release-please].** It decides the next
+version from them and writes `CHANGELOG.md` out of their subjects, so a commit
+message is not only for the reviewer — it is the release note.
+
+Write [Conventional Commits], `type(scope): subject`:
+
+| type | what it does |
+|---|---|
+| `feat` | a minor bump, and a **Features** line |
+| `fix` | a patch bump, and a **Bug Fixes** line |
+| `perf` | a patch bump |
+| `docs` `test` `refactor` `chore` `ci` `style` `build` | no bump, no line |
+| `feat!`, or a `BREAKING CHANGE:` footer | pre-1.0, so a minor bump |
+
+The scope is the area — `server`, `worker`, `desktop`, `mobile`, `web`,
+`design`, `access`, `artifacts`, `skills`, `api` — and is left off for a change
+that spans them.
+
+**Pull requests are merged with a merge commit, so every commit you write lands
+on `main` and every one of them is read. The pull request's title is not.**
+Nothing turns a title into a commit message; a branch of twenty well-written
+commits gives twenty changelog lines, and a branch of twenty prose subjects
+gives none and ships no release at all. That has happened — #265, #267 and #268
+merged with no conventional commit between them, and an authorization fix, an
+API, a migration and a screen were invisible to the release until they were
+restated by hand. `.github/workflows/commits.yml` is what now catches it, on
+the pull request, before the merge.
+
+Three more things worth knowing about the release:
+
+* **An empty commit is not a way to fix a missed one.** release-please reads a
+  commit's *files* to decide which package it belongs to, and the root package
+  carries `exclude-paths: [desktop, mobile]` — a commit with no files is
+  excluded from every package and silently ignored. A recovery commit has to
+  touch something.
+* **Three packages, split by path, not by scope.** `.`, `desktop` and `mobile`
+  version and tag separately, and a commit is attributed by the files it
+  touches. A `fix(desktop):` that edits nothing under `desktop/` does not reach
+  the desktop's release, and work under `desktop/` never ships until a
+  `desktop-v*` tag is cut.
+* **`Release-As: 1.2.3`** in a commit footer forces a version when you need
+  one.
+
+[release-please]: https://github.com/googleapis/release-please
+[Conventional Commits]: https://www.conventionalcommits.org
+
 ## The tests and your database
 
 Each test that touches Postgres works in a schema of its own, named

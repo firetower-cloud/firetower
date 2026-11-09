@@ -1,0 +1,87 @@
+# Every commit in a pull request is a conventional commit.
+#
+# Pull requests here are merged with a merge commit, so each commit you write
+# lands on `main` and release-please reads it there — it decides the next
+# version from these subjects and writes the changelogs out of them. The pull
+# request's *title* is read by nothing. A branch whose subjects are prose
+# therefore merges green, ships no release, and the work is invisible until
+# somebody restates it by hand: #265, #267 and #268 did exactly that, and took
+# an authorization fix, an API, a migration and a screen with them.
+#
+# This is the cheapest place to catch it — before the merge, while the branch
+# can still be reworded. Afterwards the only honest repair is a new commit
+# restating the work, because `main` is not rewritten and an empty commit is
+# excluded from every package (release-please attributes a commit by the files
+# it touches, and the root package excludes `desktop` and `mobile`).
+#
+# A failure here is never a failure of the code. Reword the commits it names —
+# `git rebase -i` and `reword`, or squash the branch — and push.
+name: commits
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  conventional:
+    runs-on: ubuntu-latest
+    steps:
+      # The whole history, because the check is "what is on this branch and
+      # not on its base" and a shallow clone cannot answer that.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+
+      - name: every commit says what it changes
+        env:
+          BASE: ${{ github.event.pull_request.base.ref || github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+
+          # `feat` is a minor bump and `fix` a patch; `perf` is a patch. The
+          # rest bump nothing and write no changelog line, which is the right
+          # answer for a change nobody would read about in a release — say so
+          # with `docs:` or `chore:` rather than leaving the subject bare.
+          types='feat|fix|perf|docs|test|refactor|chore|ci|style|build|revert|copy'
+          pattern="^($types)(\([a-z0-9][a-z0-9._/-]*\))?!?: .+"
+
+          # Two dots, not three: a branch that has merged `main` back into
+          # itself carries main's commits in the pull request's commit list,
+          # and those are not this branch's to answer for. `--no-merges` drops
+          # the merges themselves for the same reason.
+          range="origin/$BASE..HEAD"
+          git log --no-merges --format='%h%x09%s' "$range" > /tmp/subjects.tsv
+
+          if [ ! -s /tmp/subjects.tsv ]; then
+            echo "no commits on this branch that are not already on $BASE"
+            exit 0
+          fi
+
+          bad=0
+          while IFS=$'\t' read -r sha subject; do
+            # A revert made by GitHub's own button is `Revert "<subject>"`, and
+            # refusing one during an incident is not a trade worth making.
+            case "$subject" in 'Revert "'*) echo "  ok    $sha  $subject"; continue ;; esac
+
+            if printf '%s' "$subject" | grep -qE "$pattern"; then
+              echo "  ok    $sha  $subject"
+            else
+              echo "::error::$sha is not a conventional commit: $subject"
+              bad=$((bad + 1))
+            fi
+          done < /tmp/subjects.tsv
+
+          if [ "$bad" -ne 0 ]; then
+            echo
+            echo "$bad commit(s) above would be read by release-please as nothing at all."
+            echo "Reword them: type(scope): subject, where type is one of $types."
+            echo "See the Commit messages section of CONTRIBUTING.md."
+            exit 1
+          fi
+
+          echo
+          echo "all $(wc -l < /tmp/subjects.tsv) commit(s) parse"

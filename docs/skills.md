@@ -772,6 +772,55 @@ every description rather than the last four.
 Resolution order when over budget: repository → policy → personal, and the
 picker **says** what was dropped.
 
+### A profile's skills
+
+The three layers above are a person picking skills. A **profile** — a saved
+kind of agent a lead starts by name — picks them in advance, and what it loads
+is the **union of three additive sources** (`roles::skills_for`):
+
+1. the starter's **always-on** skills — their `skill_defaults` rows with no
+   repository against them — when `include_always_on` is on;
+2. their **defaults for the repositories the child checks out**, when
+   `include_repo_defaults` is on;
+3. **`skill_scope`**, the profile's own list, always. It is not switchable:
+   "always include these" is what the screen says.
+
+Both switches default on and `skill_scope` is empty on every profile that
+predates them, so an existing profile resolves to exactly the set it was given
+before — `migrations/server/20261108120000_profile_skill_sources.sql` is the
+whole compatibility story and there is no backfill.
+
+Three things follow from *additive*:
+
+- **A tick grants; it does not keep.** `skill_scope` used to be an
+  intersection over the starter's defaults, so a tick could only ever subtract
+  and an empty list delivered nothing at all. Turning a switch off is now the
+  only way to load less.
+- **The three lists are the starter's, not the author's.** `skill_defaults` is
+  keyed on `user_id`, so a profile shared through a directory resolves per
+  viewer — which is what "include the repository's defaults" has to mean when
+  the repository is not yours.
+- **All three are filtered through what that person can reach**, and
+  `set_for_session` checks it again at the moment it pins. Under the old
+  semantics the list could only subtract, so it needed no authorisation; a tick
+  now introduces a skill, and a skill is executable (§8). Without this a Writer
+  on a shared profile could tick something only they can see and have a
+  colleague materialise and run it on their own worker, under their own
+  credentials. A profile ticking a skill its owner can no longer reach loses
+  it, deliberately.
+
+Order is stable — always-on, then the repository's, then the list — and a skill
+two sources both supply is pinned once. `repos` is passed as `RepoId` rather
+than a slug, because `skill_defaults.repo_id` is an id: a caption bound to it
+matches nothing, and `include_repo_defaults` then reads on, counts in the
+editor, and delivers nothing.
+
+On the wire both switches are `Option<bool>`, and **absent means leave it as it
+is**. The rest of the object is a whole-object write, so a plain `bool` has to
+read an omission as something and both readings edit a profile nobody asked to
+edit: `false` switches inheritance off on every profile an older client saves,
+and `true` turns a switch somebody deliberately off back on.
+
 ---
 
 ## 8. A skill is executable
@@ -876,6 +925,33 @@ read-only.
 **Import from a git repo** — `anthropics/skills`, `openai/skills`, your own —
 needs a credential and a clone on a worker. Just after v1, but the schema
 should not make it hard.
+
+### What an agent may write
+
+`create_skill` and `update_skill` are MCP tools, so an agent writing a skill
+writes it **under its owner's access** — the same grants the Skills screen
+obeys, decided in the same place.
+
+**A version is a write.** `Skills::add_version` asks `filed_where` for
+`Level::Writer` itself rather than trusting the caller to have asked. The HTTP
+route did hold that gate and `update_skill` did not, so the screen correctly
+gave a reader no way to edit a shared skill while their agent had one. Writer
+is now a property of the write instead of a habit of its callers, which is
+where `approve`, `discard` and `roles::update` already decide it. The one write
+that is nobody's to refuse — `seed_builtins`, since nobody holds Writer on
+`d/firetower` by design — goes past the gate through a private
+`write_next_version`, explicitly. `create_skill` needs no gate of its own:
+`create` writes under the owner's personal root, the one root that needs no
+grant, and naming a directory already asks `file_skill` for Writer on it.
+
+**And what an agent publishes is held for review by the parser the badges come
+from.** `held_because` reads the bundle through `skills::risk_of` — §8's four
+categories — rather than looking at file paths and the executable bit, so what
+holds a skill and what its row says about it cannot drift apart, and a category
+added to `risk_of` holds a bundle without this path being touched. The
+executable bit is kept beside it: `risk_of` answers for a stored row, where a
+file that runs is spelled `scripts/`, and a bundle an agent sends can mark any
+path `+x`. The acknowledgement names what held it.
 
 ---
 

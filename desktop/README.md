@@ -75,6 +75,44 @@ src/
 src-tauri/    the shell: window, vibrancy, dock badge, notifications
 ```
 
+## The profile editor's Skills section
+
+`ui/config/SkillSources.tsx` draws what a profile will load as the **union of
+three additive sources** — the owner's always-on set, their defaults for the
+repositories the child checks out, and the profile's own list on top — one
+switch per inheritable source and a count for each. `docs/skills.md` §7 is the
+model; this is the screen for it.
+
+Two things the screen owes the person reading it:
+
+* **The breakdown's arithmetic is true in every state, and it names what it
+  left out.** A profile can be over the agent's budget before a repository's
+  defaults are even counted, two skills can share a name — in which case
+  neither is sent — and a source can be on and contribute nothing. Each of
+  those says so on the line under the section rather than leaving a number
+  that does not add up.
+* **A draft states both switches as a plain `boolean`.** The wire type is
+  `Option<bool>`, where absent means *leave it as it is*; an editor that draws
+  a switch has nothing to draw for absent, so `role-draft.ts` settles them on
+  load and the editor never round-trips an omission into a change nobody made.
+  That hazard fired once already.
+
+## The reader behind the badges
+
+`src/skills.ts` parses a dropped `SKILL.md` here, in the client, so the review
+screen can say what a bundle does before anything is uploaded — `split` for the
+frontmatter, `riskOf` for the four categories the badges are earned from.
+
+**It decides nothing.** The server reads the same bytes and is what enforces
+the answer. But a badge is the human gate, and a badge that is *wrong* is worse
+than one that is absent: `allowed-tools : Bash(curl:*)`, with one space before
+the colon, was a key neither reader saw and Claude Code honours, so the screen
+read "no tools, no hooks" about a bundle carrying both. So this reader refuses a
+line it cannot read rather than skipping it, and the rule it applies is the
+server's — see `docs/skills.md` §1 and §2, where the measurements are. The two
+readers agreeing is the property worth keeping; a change to either is a change
+to both.
+
 ## What is Tauri-specific
 
 `src/bridge.ts` — eight calls. Everything else is shell-agnostic, which is what
@@ -174,7 +212,10 @@ OS keychain on every platform (`bridge.secrets`).
 ## Releasing
 
 The app has its own release-please package (`desktop`, tags `desktop-v*`,
-`desktop/CHANGELOG.md`); commits scoped `(desktop)` land in its release PR.
+`desktop/CHANGELOG.md`); a conventional commit touching a file under
+`desktop/` lands in its release PR. It is the **path** that decides, not the
+scope — a `fix(desktop):` that edits nothing here reaches the root package
+instead, and a commit here with no conventional subject reaches neither.
 Merging that PR makes a draft release and runs `desktop-release.yml`: a
 universal `.dmg` (`Firetower_<version>_macos.dmg`) with the app signed by the
 Developer ID certificate and the image notarized, an `.exe` and `.msi` for
