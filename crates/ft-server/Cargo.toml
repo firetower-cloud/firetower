@@ -57,3 +57,19 @@ tempfile.workspace = true
 # The real worker, so the tunnel tests exercise the code that actually runs
 # rather than a fake that agrees with them.
 ft-worker.workspace = true
+# **libyaml, so the frontmatter property is asserted against the real reader
+# rather than against a model of it.** A dev-dependency only: `ft-server`
+# reads a `SKILL.md` with `skills::read_frontmatter`, deliberately small and
+# deliberately the same shape as the desktop client's, and a YAML library in
+# the server would be one that disagrees with the client. None of that is an
+# argument about test code. `serde_yaml` is `unsafe-libyaml` is libyaml —
+# which is what Codex links and what pyyaml's `CSafeLoader` and Ruby's Psych
+# both are — so an oracle that is libyaml cannot be weaker than libyaml. The
+# hand-written one was, and that is the whole reason this is here.
+#
+# It is published as `0.9.34+deprecated` — unmaintained upstream, which is
+# worth knowing and is not a reason to model libyaml by hand instead. It is
+# still the binding to the same C library every other reader here uses, it is
+# test-only so nothing it does reaches a request, and being frozen is a
+# property an oracle wants rather than one it minds.
+serde_yaml = "0.9"

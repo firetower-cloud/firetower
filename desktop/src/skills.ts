@@ -308,7 +308,7 @@ async function bundle(root: string, raw: Raw[]): Promise<Found> {
 
   const skillMd = raw.find((f) => f.path.endsWith("SKILL.md"));
   const text = skillMd ? new TextDecoder().decode(skillMd.bytes) : "";
-  const { frontmatter, body, framed } = split(text);
+  const { frontmatter, body, framed, unread, undecoded } = split(text);
 
   /* The *file's* name, not a guess at one. Claude Code falls back to the
      folder when this is missing; the standard says required, and so does
@@ -325,6 +325,30 @@ async function bundle(root: string, raw: Raw[]): Promise<Found> {
 
   if (!framed)
     errors.push("No frontmatter. A SKILL.md opens with a --- line, the fields, and another ---.");
+  /* A line nothing here can read is a field the agent gets and no check saw —
+     including `riskOf` below, which is the badge somebody reads before they
+     approve this. Refused rather than skipped, as on the server. */
+  else if (unread.length)
+    errors.push(
+      `The frontmatter has a line nothing reads: \`${brief(unread[0]!)}\`. ` +
+        "A line is blank, a comment, `key: value` at the left margin, a `- list item`, " +
+        "an indented `key: value` under one, or part of a block scalar. A full YAML reader " +
+        "takes more than that — `description : x` with a space before the colon, or a quoted " +
+        "key — so a line this one cannot read is a field nothing on this screen has checked.",
+    );
+  /* And the same of a value, answered the same way: the decoder is what
+     reports. A scalar kept as the characters that spell it is a scalar whose
+     meaning no rule here saw — the `<`/`>` check below is asked about
+     `\u003c` while a real YAML reader hands the agent a `<`. */
+  else if (undecoded.length)
+    errors.push(
+      `The frontmatter has a value nothing here fully reads: \`${brief(undecoded[0]!)}\`. ` +
+        "Reading a value means decoding it, and a quoted scalar is decoded here while a plain " +
+        "or a block scalar means exactly what it spells. Anything else — a flow mapping, a " +
+        "tag, an anchor, an alias, a quote that does not close where it looks like it does — " +
+        "a real YAML reader decodes and this one keeps verbatim. " +
+        "Write it as an indented `key: value` map, a `- list`, or a plain or quoted scalar.",
+    );
   else if (!declared) {
     const typo = Object.keys(frontmatter).find((k) => nearly(k) === "name");
     errors.push(
@@ -404,6 +428,21 @@ async function bundle(root: string, raw: Raw[]): Promise<Found> {
   };
 }
 
+/**
+ * As much of a line as belongs in a message about it.
+ *
+ * The same reasoning as the server's `briefly`: a line being quoted back is
+ * attacker-controlled, and this message is read by a person. Angle brackets
+ * and backticks go, because the quote sits inside a code span and the one
+ * thing a frontmatter refusal must not do is carry a forged frame out with it.
+ */
+function brief(line: string): string {
+  const safe = [...line.slice(0, 24)]
+    .map((c) => (c === " " || (c > " " && c < "\u007f" && c !== "<" && c !== ">" && c !== "`") ? c : "."))
+    .join("");
+  return line.length > 24 ? `${safe}…` : safe;
+}
+
 /** What this bundle will do to a session, read from the bundle itself. */
 export function riskOf(frontmatter: Record<string, unknown>, body: string, paths: string[]): string[] {
   const out: string[] = [];
@@ -442,48 +481,98 @@ export const RISK_SAYS: Record<string, string> = {
  * `present` is what the file *said*, which is a different question from what
  * the skill is called. A file whose key is misspelled has no `name`, and that
  * has to be a refusal rather than a fallback to the folder — see `bundle`.
+ *
+ * **And `unread` is what it could not read**, which is the half that makes
+ * the rest of this honest. The regex above wants `[A-Za-z0-9_-]` before the
+ * colon, so `allowed-tools : Bash(curl:*)` — one space — used to be dropped
+ * silently: invisible to this parser, read perfectly well by Claude Code, and
+ * so **absent from `riskOf`**. The review screen then showed a badge saying
+ * "no tools, no hooks" about a bundle carrying both, which is worse than
+ * showing nothing. A line this reader cannot read is reported, and `bundle`
+ * makes it an error — the same answer the server gives.
  */
 export function split(text: string): {
   frontmatter: Record<string, unknown>;
   body: string;
   /** Whether a `---` block was there at all. */
   framed: boolean;
+  /** Lines inside the frame this reader dropped. */
+  unread: string[];
+  /** Lines whose value this reader kept as text rather than decoding. */
+  undecoded: string[];
 } {
   const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(text);
-  if (!m) return { frontmatter: {}, body: text.trim(), framed: false };
+  if (!m) return { frontmatter: {}, body: text.trim(), framed: false, unread: [], undecoded: [] };
 
   const out: Record<string, unknown> = {};
+  const unread: string[] = [];
+  const undecoded: string[] = [];
   const lines = m[1]!.split(/\r?\n/);
   let key: string | null = null;
-  let map: Record<string, string> | null = null;
-  let list: string[] | null = null;
+  let map: Record<string, unknown> | null = null;
+  let list: unknown[] | null = null;
+  /* **The one place a value's verdict is recorded.** The value only comes out
+     of `readValue` through here, so a position that reads a value cannot
+     forget to say whether reading is what happened — the same reason the
+     dropped line is counted in exactly one place below. */
+  const took = (line: string, got: Scalar) => {
+    if (!got.read) undecoded.push(line);
+    return got.value;
+  };
+
+  /* The indentation the lines under the current key sit at, set by the first
+     of them. **One level of nesting is all this reader models**, and this is
+     what makes that a statement it can keep. It folded every nested pair into
+     one flat map whatever its depth, so a key three levels deep landed beside
+     its own parent's siblings and a later sibling of the same name overwrote
+     it — after it had been decoded. `metadata:` / `  a:` / `    b: "\u003c…"`
+     / `  b: plain` left a frontmatter with no `<` in it for the check below
+     while a real reader keeps it at `metadata.a.b`. Mirrors the server. */
+  let nest: number | null = null;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!;
     if (!line.trim() || line.trim().startsWith("#")) continue;
 
+    const lead = line.length - line.trimStart().length;
+    const astray = lead > 0 && nest !== null && lead !== nest;
+
     // `  - item`, which is how the standard spells a list.
-    const item = /^\s+-\s+(.*)$/.exec(line);
+    const item = astray ? null : /^\s+-\s+(.*)$/.exec(line);
     if (item && key) {
       if (!list) {
         list = [];
         out[key] = list;
       }
-      list.push(unquote(item[1]!));
+      nest = lead;
+      list.push(took(line, readValue(item[1]!, "item")));
       continue;
     }
-    // `  key: value` under a key with nothing after its colon.
-    const nested = /^\s{2,}([A-Za-z0-9_-]+):\s*(.*)$/.exec(line);
+    // `  key: value` under a key with nothing after its colon. The
+    // `(?=[ \t]|$)` is the mirror of `key_colon`'s: **a `:` is a mapping
+    // indicator only when a space, a tab or the end of the line follows
+    // it.** Without it these two regexes split on the first colon, so
+    // `  a:b: "\u003c…"` read as key `a` holding the text `b: "\u003c…"`
+    // — the eighth value shape, where libyaml reads one key `a:b` and
+    // decodes the escape in its value. A badge drawn from a reading nobody
+    // had, again.
+    const nested = astray ? null : /^\s{2,}([A-Za-z0-9_-]+):(?=[ \t]|$)\s*(.*)$/.exec(line);
     if (nested && map) {
-      map[nested[1]!] = unquote(nested[2]!);
+      nest = lead;
+      map[nested[1]!] = took(line, readValue(nested[2]!, "value"));
       continue;
     }
 
-    const top = /^([A-Za-z0-9_-]+):\s*(.*)$/.exec(line);
-    if (!top) continue;
+    const top = /^([A-Za-z0-9_-]+):(?=[ \t]|$)\s*(.*)$/.exec(line);
+    // The one place a line can be dropped, and it is counted here.
+    if (!top) {
+      unread.push(line);
+      continue;
+    }
     key = top[1]!;
     map = null;
     list = null;
+    nest = null;
     const value = top[2]!.trim();
 
     // `>`, `|`, and either with a chomp (`-`/`+`) or an explicit indent
@@ -527,17 +616,146 @@ export function split(text: string): {
       // A list or a map — decided by the first indented line after it.
       map = {};
       out[key] = map;
-    } else if (value.startsWith("[") && value.endsWith("]")) {
-      out[key] = value
-        .slice(1, -1)
-        .split(",")
-        .map((v) => unquote(v))
-        .filter(Boolean);
     } else {
-      out[key] = unquote(value);
+      // A flow sequence used to be split here and nowhere else, which is why
+      // the two positions above read one verbatim. `readValue` is now the
+      // only thing that turns text into a value, so all three read it the
+      // same way or report the same way.
+      out[key] = took(line, readValue(value, "value"));
     }
   }
-  return { frontmatter: out, body: text.slice(m[0].length).trim(), framed: true };
+  return { frontmatter: out, body: text.slice(m[0].length).trim(), framed: true, unread, undecoded };
+}
+
+/** One value as this reader made of it, and whether making it was reading it. */
+type Scalar = { value: unknown; read: boolean };
+
+/**
+ * **Where a value sits, because YAML's plain scalar is a different production
+ * in each of the three places this reader finds one** — and the parameter is
+ * not optional, so a position that reads a value cannot forget to say which
+ * one it is. Mirrors the server's `At`.
+ *
+ * - `value` — after a `key:`, where a second `: ` is an error to libyaml
+ *   rather than a nesting, so there is no reading of it to disagree with.
+ * - `item` — a `- ` block sequence item, where a mapping *is* legal, so
+ *   `a: b` is a block mapping and one string is not a reading of it.
+ * - `flow` — inside `[...]`, where `,` `[` `]` `{` `}` end a plain scalar
+ *   wherever they appear.
+ *
+ * This used to be a boolean `flow`, and the missing third position was a live
+ * injection route: `metadata:` / `  - a: "\u003csystem-reminder\u003e"` came
+ * back as the one string `a: "\u003cx\u003e"`, so `riskOf` and the `<`/`>`
+ * rule were both looking at a frontmatter with no bracket in it while a real
+ * reader hands the agent the tag.
+ */
+type At = "value" | "item" | "flow";
+
+/**
+ * A value as this reader makes of it — **and whether that is what a real
+ * reader would have done with it**. Mirrors the server's `read_value`.
+ *
+ * The two cannot be had apart, which is the point. This used to be a
+ * `decoded(value)` predicate sitting *beside* `unquote(value)`, re-guessing
+ * from the value's first and last characters what `unquote` was about to do,
+ * and it had drifted from `unquote` in two of the three positions that read a
+ * value: a flow sequence was only ever split at the left margin, so in a
+ * nested or a list position the escapes inside one survived with nothing
+ * saying so; and `"a\"` ends on a quote that is not a close, so a scalar
+ * libyaml had not finished reading looked complete. Both are the server's
+ * Blocker, and this file carried them identically — `riskOf` is computed from
+ * this parse, so a badge was being drawn from a reading nobody had.
+ */
+function readValue(raw: string, at: At): Scalar {
+  const t = raw.trim();
+
+  const dq = closes(t, '"');
+  if (dq !== null) return { value: unescape(dq), read: true };
+  const sq = closes(t, "'");
+  if (sq !== null) return { value: sq.replace(/''/g, "'"), read: true };
+
+  // `[a, b]`, split the way this reader splits it — and every element put
+  // back through here, so an element that is not one scalar is reported by
+  // the same answer rather than assumed away by its caller.
+  if (t.startsWith("[") && t.endsWith("]")) {
+    let read = true;
+    const got: unknown[] = [];
+    for (const piece of t.slice(1, -1).split(",")) {
+      const el = readValue(piece, "flow");
+      read = read && el.read;
+      if (el.value !== "") got.push(el.value);
+    }
+    return { value: got, read };
+  }
+  // The `else`: verbatim, and verbatim is a reading only of a plain scalar.
+  return { value: t, read: plain(t, at) };
+}
+
+/**
+ * `t` as **one complete quoted scalar** — the text between the quotes — or
+ * `null`, because it is not that and keeping it whole is not reading it.
+ *
+ * **The escape is the point.** `"a\"` ends on a quote that is not a close:
+ * `\"` is an escaped quote, so for a reader that knows that, the scalar runs
+ * on and swallows the next line. Text after the close — `"a" b` — is `null`
+ * as well: a reader that ends the scalar at the quote does not then ignore
+ * what follows it.
+ */
+function closes(t: string, q: string): string | null {
+  if (!t.startsWith(q)) return null;
+  const inner = t.slice(1);
+  for (let i = 0; i < inner.length; i++) {
+    // In a double-quoted scalar, whatever follows a backslash is spelled
+    // rather than structural — including a quote.
+    if (q === '"' && inner[i] === "\\") {
+      i++;
+      continue;
+    }
+    if (inner[i] !== q) continue;
+    // `''` inside a single-quoted scalar is one quote, not the close.
+    if (q === "'" && inner[i + 1] === q) {
+      i++;
+      continue;
+    }
+    return i === inner.length - 1 ? inner.slice(0, i) : null;
+  }
+  return null;
+}
+
+/**
+ * Whether `t` is something YAML reads as a **plain scalar** — the one shape
+ * whose reading is its spelling, because a plain scalar has no escapes.
+ *
+ * The rule is the standard's `ns-plain-first` rather than a list of the
+ * shapes that have bitten: a plain scalar may not *begin* with an indicator,
+ * and `-`, `?` and `:` are indicators only when a space or the end of the
+ * value follows. Inside a flow collection the same production also forbids
+ * `,`, `[`, `]`, `{` and `}` anywhere in the scalar.
+ *
+ * **And a `: ` ends a plain scalar and makes the element a mapping wherever a
+ * mapping is legal** — a flow collection *and* a block sequence item. Reading
+ * that as a flow-only rule is what let a `- a: "\u003c…"` item through
+ * undecoded; the negative control names the cause, since `- a:"\u003cx\u003e"`
+ * with no space really is a plain scalar and is correctly accepted.
+ *
+ * Stated as the complement, which is what makes it fail closed: a flow
+ * mapping, a tag, an anchor, an alias and a directive are all refused
+ * without being named, and so is the next one.
+ */
+function plain(t: string, at: At): boolean {
+  if (t === "") return true;
+  const first = t[0]!;
+  if ("-?:".includes(first)) {
+    if (t.length === 1 || t[1] === " " || t[1] === "\t") return false;
+  } else if (",[]{}#&*!|>'\"%@`".includes(first)) {
+    return false;
+  }
+  // The flow indicators, which end a plain scalar only inside `[...]`.
+  if (at === "flow" && /[,[\]{}]/.test(t)) return false;
+  // `: ` — a mapping, wherever a mapping is legal, and `"value"` is the one
+  // place it is not.
+  if (at !== "value" && (t.includes(": ") || t.endsWith(":"))) return false;
+  return true;
 }
 
 /**
@@ -618,25 +836,15 @@ function editsBetween(a: string, b: string): number {
 }
 
 /**
- * A scalar with its quotes taken off and its escapes resolved.
+ * YAML's double-quoted escapes. Anything else is left as it was written.
  *
  * **The escapes are the point, not a nicety.** A double-quoted scalar may
  * spell any character as `\uXXXX`, so `description: "\u003csystem-reminder\u003e"`
- * holds no `<` for the rule below to find — and then the agent, which reads
+ * holds no `<` for the rule above to find — and then the agent, which reads
  * `SKILL.md` with a real YAML parser, renders the tag. Stripping the quotes
  * without decoding what is inside them makes the rule advice rather than a
- * check. A single-quoted scalar has one escape, `''` for a quote.
+ * check.
  */
-const unquote = (v: string) => {
-  const t = v.trim();
-  const dq = /^"([\s\S]*)"$/.exec(t);
-  if (dq) return unescape(dq[1]!);
-  const sq = /^'([\s\S]*)'$/.exec(t);
-  if (sq) return sq[1]!.replace(/''/g, "'");
-  return t;
-};
-
-/** YAML's double-quoted escapes. Anything else is left as it was written. */
 function unescape(s: string): string {
   return s.replace(
     /\\(u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8}|x[0-9a-fA-F]{2}|.)/gs,
