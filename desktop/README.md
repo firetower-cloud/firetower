@@ -97,6 +97,22 @@ Two things the screen owes the person reading it:
   load and the editor never round-trips an omission into a change nobody made.
   That hazard fired once already.
 
+## The reader behind the badges
+
+`src/skills.ts` parses a dropped `SKILL.md` here, in the client, so the review
+screen can say what a bundle does before anything is uploaded — `split` for the
+frontmatter, `riskOf` for the four categories the badges are earned from.
+
+**It decides nothing.** The server reads the same bytes and is what enforces
+the answer. But a badge is the human gate, and a badge that is *wrong* is worse
+than one that is absent: `allowed-tools : Bash(curl:*)`, with one space before
+the colon, was a key neither reader saw and Claude Code honours, so the screen
+read "no tools, no hooks" about a bundle carrying both. So this reader refuses a
+line it cannot read rather than skipping it, and the rule it applies is the
+server's — see `docs/skills.md` §1 and §2, where the measurements are. The two
+readers agreeing is the property worth keeping; a change to either is a change
+to both.
+
 ## What is Tauri-specific
 
 `src/bridge.ts` — eight calls. Everything else is shell-agnostic, which is what
