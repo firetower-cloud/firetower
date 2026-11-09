@@ -15,6 +15,7 @@
     "shoot:dashboard": "node scripts/shoot-dashboard.mjs",
     "shoot:proto": "node scripts/shoot-proto.mjs",
     "shoot:app": "node scripts/shoot-app.mjs",
+    "shoot:profile-skills": "node scripts/shoot-profile-skills.mjs",
     "reconcile": "node scripts/reconcile.mjs",
     "orval": "orval",
     "test": "vitest run",

@@ -23,7 +23,17 @@ struct Worker {
     /// want: they are about a host, and a repository that cannot be read is
     /// one less thing happening. A test about repositories sets it.
     probe: Option<ft_proto::RemoteInfo>,
+    /// Every agent this worker was told to start, in order.
+    ///
+    /// The point of a protocol-speaking fake is that it can be asked what it
+    /// was sent. `StartAgent` carries the skill bundles — the folders the
+    /// worker writes — so a test can assert on those rather than stopping at
+    /// `skill_pins` and inferring the rest.
+    launched: Launches,
 }
+
+/// What the control plane told the worker to start.
+type Launches = Arc<std::sync::Mutex<Vec<ft_proto::StartAgent>>>;
 #[async_trait::async_trait]
 impl Transport for Worker {
     fn describe(&self) -> String {
@@ -33,6 +43,7 @@ impl Transport for Worker {
         let (ours, theirs) = tokio::io::duplex(65536);
         let ready = self.ready.clone();
         let probe = self.probe.clone();
+        let launched = self.launched.clone();
         tokio::spawn(async move {
             let (r, w) = tokio::io::split(theirs);
             let mut codec = Codec::new(r, w);
@@ -64,6 +75,19 @@ impl Transport for Worker {
                         req,
                         agents: vec![],
                     }),
+                    // Answered, so a handler that launches runs to the end
+                    // rather than waiting out `run_action`'s two-minute
+                    // timeout. A worker that cannot be launched on is a
+                    // different test from a worker that can.
+                    ToWorker::RunAction { req, action, .. } => {
+                        if let ft_proto::Action::StartAgent { spec } = action {
+                            launched.lock().unwrap().push(*spec);
+                        }
+                        Some(ToServer::ActionDone {
+                            req,
+                            result: Ok("started".into()),
+                        })
+                    }
                     ToWorker::ProbeRemote { req, .. } => Some(ToServer::RemoteProbed {
                         req,
                         result: match probe.clone() {
@@ -92,6 +116,22 @@ async fn fixture() -> (
     Arc<AtomicBool>,
     String,
 ) {
+    let (state, principal, host, ready, owner, _) = watched_fixture().await;
+    (state, principal, host, ready, owner)
+}
+
+/// The same fixture, and what the worker was told to start.
+///
+/// Separate only so the twenty tests that do not care keep their five-element
+/// tuple; there is one fixture, and this is it.
+async fn watched_fixture() -> (
+    AppState,
+    crate::auth::Principal,
+    Host,
+    Arc<AtomicBool>,
+    String,
+    Launches,
+) {
     let (db, owner) = crate::db::Db::open_for_test_owned().await.unwrap();
     let accounts = crate::accounts::Accounts::new(db.pool().clone());
     let principal = crate::auth::Principal {
@@ -101,6 +141,7 @@ async fn fixture() -> (
     };
     let host = db.ensure_host("native", native(), &owner).await.unwrap();
     let ready = Arc::new(AtomicBool::new(false));
+    let launched: Launches = Default::default();
     let fleet = crate::fleet::Fleet::new(db.clone());
     fleet
         .supervise(
@@ -108,6 +149,7 @@ async fn fixture() -> (
             Arc::new(Worker {
                 ready: ready.clone(),
                 probe: None,
+                launched: launched.clone(),
             }),
         )
         .await;
@@ -139,7 +181,7 @@ async fn fixture() -> (
         previews: Default::default(),
         public_url: "http://localhost".into(),
     };
-    (state, principal, host, ready, owner)
+    (state, principal, host, ready, owner, launched)
 }
 
 fn native() -> Compute {
@@ -514,7 +556,14 @@ async fn connecting_a_host_path_defers_validation_to_the_execution_machine() {
         .unwrap();
     state
         .fleet
-        .supervise(local.id.clone(), Arc::new(Worker { ready, probe: None }))
+        .supervise(
+            local.id.clone(),
+            Arc::new(Worker {
+                ready,
+                probe: None,
+                launched: Default::default(),
+            }),
+        )
         .await;
     let remote = "/home/editor/media-app";
     // The local worker would reject this repository; it exists only on the VM
@@ -1299,6 +1348,7 @@ async fn an_empty_repository_is_connected_rather_than_refused() {
                     branches: vec![],
                     empty: true,
                 }),
+                launched: Default::default(),
             }),
         )
         .await;
@@ -1535,4 +1585,184 @@ async fn one_persons_token_is_not_handed_to_another() {
     .await;
 
     assert!(env.is_empty(), "{env:?}");
+}
+
+/// The three sources a profile adds together, for an agent put into a
+/// workspace that already exists — which is the default placement, and the
+/// one path that resolved the repository's defaults against a **slug**.
+///
+/// Driven through `create_session` with a `workspaceId`: the handler a second
+/// agent and a delegated child at `placement: "here"` both arrive through. The
+/// assertion is on the bundles the worker is *told to write*, because that is
+/// what puts a folder on its disk — a pin that never becomes a bundle is the
+/// same silence this whole feature is about.
+///
+/// What this would have caught: `skills_at_spawn` was handed
+/// `WorkspacePlace::repo`, the first checkout's caption, where
+/// `skill_defaults.repo_id` is an id. Nothing matched, nothing was logged, and
+/// `include_repo_defaults` read on while delivering none of them. The unit
+/// tests over `skills_for` could not see it — they are handed ids — and the
+/// test for the arm that was missing only asserts which arm is chosen.
+#[tokio::test]
+async fn a_profile_hands_a_second_agent_the_repositorys_defaults_too() {
+    use crate::skills::{IncomingFile, NewSkill};
+
+    let (state, principal, host, ready, owner, launched) = watched_fixture().await;
+    ready.store(true, Ordering::SeqCst);
+    let org = state.db.org().await.unwrap();
+
+    let repo = state
+        .db
+        .ensure_repo(
+            "acme/backend",
+            "git@example.test:acme/backend.git",
+            Some("main"),
+            None,
+            &owner,
+            None,
+        )
+        .await
+        .unwrap();
+
+    let skill = |name: &'static str| {
+        let skills = state.skills.clone();
+        let org = org.clone();
+        let owner = owner.clone();
+        async move {
+            skills
+                .create(
+                    &org,
+                    &owner,
+                    "admin",
+                    &NewSkill {
+                        name: name.into(),
+                        description: format!("Does {name}."),
+                        frontmatter: serde_json::json!({ "name": name }),
+                        body: "body".into(),
+                        files: vec![IncomingFile {
+                            path: "SKILL.md".into(),
+                            contents: ft_proto::encode(b"body"),
+                            executable: false,
+                        }],
+                        notes: None,
+                    },
+                    false,
+                )
+                .await
+                .unwrap()
+                .as_str()
+                .to_string()
+        }
+    };
+    let always = skill("qa-always").await;
+    let in_repo = skill("qa-repo").await;
+    let ticked = skill("qa-ticked").await;
+    state
+        .skills
+        .set_default(&owner, &always, None, true)
+        .await
+        .unwrap();
+    state
+        .skills
+        .set_default(&owner, &in_repo, Some(repo.id.as_str()), true)
+        .await
+        .unwrap();
+
+    // One source each, so a missing one is unmistakable in the names.
+    let slug: String = sqlx::query_scalar("SELECT slug FROM principals WHERE id = $1")
+        .bind(&owner)
+        .fetch_one(state.db.pool())
+        .await
+        .unwrap();
+    let profile: crate::roles::NewRole = serde_json::from_value(serde_json::json!({
+        "name": "reviewer",
+        "does": "reviews",
+        "placement": "here",
+        "agent": "ClaudeCode",
+        "skillScope": [ticked],
+    }))
+    .unwrap();
+    let role = state
+        .roles
+        .create(&org, &owner, &slug, &profile)
+        .await
+        .unwrap();
+
+    // The workspace the second agent is added to, checked out on that
+    // repository — `workspaces.repo` is the slug, and `workspace_repos` is
+    // where the id is.
+    let lead = ft_core::SessionId::new();
+    state
+        .db
+        .insert_session(
+            &lead,
+            &host.id,
+            &owner,
+            Some("acme/backend"),
+            "The lead",
+            "",
+            Some("agent/x"),
+            Some("main"),
+            "ClaudeCode",
+            ft_core::WorkspaceSize::Medium,
+            ft_core::Share::Equal,
+            &[],
+            None,
+        )
+        .await
+        .unwrap();
+    state
+        .db
+        .record_checkouts(
+            &lead,
+            &[ft_core::session::Checkout {
+                repo_id: Some(repo.id.clone()),
+                slug: "acme/backend".into(),
+                base: "main".into(),
+                branch: "agent/x".into(),
+                path: String::new(),
+                trouble: None,
+                pull_request: None,
+                pull_state: None,
+            }],
+        )
+        .await
+        .unwrap();
+
+    let req = serde_json::from_value(serde_json::json!({
+        "workspaceId": lead.as_str(),
+        "agent": "ClaudeCode",
+        "prompt": "have a look",
+        "profile": role.as_str(),
+    }))
+    .unwrap();
+    let (_, Json(child)) =
+        sessions::create_session(State(state.clone()), Extension(principal), Json(req))
+            .await
+            .unwrap();
+    assert_ne!(child.id, lead, "a second run, not the lead");
+
+    let mut pinned = state.skills.of_session(child.id.as_str()).await.unwrap();
+    pinned.sort();
+    let mut expected = vec![always, in_repo, ticked];
+    expected.sort();
+    assert_eq!(
+        pinned, expected,
+        "all three sources, including the repository's defaults"
+    );
+
+    // And through to what the worker is told to write, which is the folder on
+    // its disk.
+    let spec = launched
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|s| s.session_id == child.id)
+        .cloned()
+        .expect("the child was launched");
+    let mut folders: Vec<&str> = spec.skills.iter().map(|b| b.name.as_str()).collect();
+    folders.sort();
+    assert_eq!(folders, vec!["qa-always", "qa-repo", "qa-ticked"]);
+
+    state.fleet.stop_supervising(&host.id).await;
 }

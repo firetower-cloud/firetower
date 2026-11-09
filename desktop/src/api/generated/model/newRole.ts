@@ -30,6 +30,26 @@ export interface NewRole {
      */
   directory?: string | null;
   does: string;
+  /**
+     * Include the owner's always-on skills. **Absent means leave it as it
+     * is** — on an update, whatever is stored; on a create, on.
+     *
+     * `Option` rather than `bool` because the rest of this struct is a
+     * whole-object write and a client can leave a field out. A `bool` has to
+     * read that omission as something, and both readings edit a profile
+     * nobody asked to edit: `false` switches inheritance off on every profile
+     * an older client saves, and `true` — which this was — turns a switch
+     * somebody deliberately off back on. Keeping no opinion is the only
+     * answer that leaves a profile alone.
+     * @nullable
+     */
+  includeAlwaysOn?: boolean | null;
+  /**
+     * Include the owner's defaults for the repositories the child checks out.
+     * **Absent means leave it as it is** — see above.
+     * @nullable
+     */
+  includeRepoDefaults?: boolean | null;
   instructions?: string;
   /**
      * The machine its own workspace runs on, by host id. Required when
@@ -42,6 +62,6 @@ export interface NewRole {
   placement?: string;
   /** How it runs its agent — model, effort, mode, sandbox. Each optional. */
   settings?: Preferred;
-  /** The skills it may load, by id. Empty = any the owner can use. */
+  /** The skills it loads on top of those two, by id. Empty = just those two. */
   skillScope?: string[];
 }

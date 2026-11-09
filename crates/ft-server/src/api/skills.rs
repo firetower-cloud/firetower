@@ -431,11 +431,32 @@ pub(super) async fn set_default(
     let me = whoever(&principal)?;
     // A default is this person's own, so seeing the skill is enough to want it
     // — but the skill still has to be one they can see.
-    state
+    let skill = state
         .skills
         .one(me.id.as_str(), &id, Level::Viewer)
         .await?
         .ok_or_else(|| ApiError::not_found("skill"))?;
+
+    // And it has to be one that can load. A skill whose `current_version_id`
+    // is null — an agent's draft nobody has approved — is skipped by
+    // `set_for_session` on every path, so "on in every workspace" would be a
+    // switch that does nothing. This check only existed on the screen: the
+    // desktop hides the defaults tabs while a skill is held, and nothing
+    // stopped the API. That is what made a count of 4 whose lines said 5
+    // reachable at all.
+    //
+    // Only on the way on. Turning one off has to keep working for a skill that
+    // was defaulted while it still had a version, which is the state this
+    // guard cannot retrospectively prevent.
+    if body.on && skill.version == 0 {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            format!(
+                "{} has no approved version, so it can't load anywhere — approve one first",
+                skill.name,
+            ),
+        ));
+    }
 
     state
         .skills
@@ -493,11 +514,19 @@ pub(super) async fn set_repo_defaults(
     Json(body): Json<RepoSkillDefaults>,
 ) -> ApiResult<StatusCode> {
     let me = whoever(&principal)?;
+    // Visible, and able to load: a skill with no approved version is skipped
+    // wherever it is pinned, so defaulting one is a switch that does nothing.
+    //
+    // Filtered rather than refused, unlike the single-skill route above — this
+    // is the whole set, so a skill that was fine when it was ticked and has
+    // since lost its version would otherwise make every later save fail. The
+    // same split this handler already made for an unreachable id.
     let reachable: std::collections::HashSet<String> = state
         .skills
         .visible(me.id.as_str(), Level::Viewer)
         .await?
         .into_iter()
+        .filter(|s| s.version > 0)
         .map(|s| s.id.as_str().to_string())
         .collect();
     let skills: Vec<String> = body
@@ -530,7 +559,7 @@ async fn repo_defaults(
         out.push(RepoDefaults {
             repo_id: repo.to_string(),
             slug: c.slug.clone(),
-            defaults: state.skills.defaults_in(me, repo.as_str()).await?,
+            defaults: state.skills.defaults_in(me, repo).await?,
         });
     }
     Ok(out)
@@ -590,18 +619,44 @@ pub(super) async fn choose_skills(
     // Only skills this person can actually see. A selection naming one they
     // cannot reach would otherwise pin it, and the next read would show them a
     // skill they were never granted.
-    let reachable: std::collections::HashSet<String> = state
+    let reachable: std::collections::HashMap<String, String> = state
         .skills
         .visible(me.id.as_str(), Level::Viewer)
         .await?
         .into_iter()
-        .map(|s| s.id.as_str().to_string())
+        .map(|s| (s.id.as_str().to_string(), s.name))
         .collect();
     let chosen: Vec<String> = body
         .selected
         .into_iter()
-        .filter(|s| reachable.contains(s))
+        .filter(|s| reachable.contains_key(s))
         .collect();
+
+    // Two skills of one name cannot both be written: the folder on the worker
+    // *is* the name. `set_for_session` sends neither rather than letting one
+    // win carrying the other's `scripts/` — but there is somebody here to tell,
+    // so say it instead of quietly delivering one fewer than was ticked.
+    let mut together: std::collections::BTreeMap<&str, Vec<&str>> = Default::default();
+    for id in &chosen {
+        if let Some(name) = reachable.get(id) {
+            together.entry(name.as_str()).or_default().push(id);
+        }
+    }
+    let clashing: Vec<String> = together
+        .iter()
+        .filter(|(_, ids)| ids.len() > 1)
+        .map(|(name, ids)| format!("{name} ({})", ids.join(", ")))
+        .collect();
+    if !clashing.is_empty() {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            format!(
+                "two of these share a name, and a skill's folder on a worker is its name — so \
+                 neither could be loaded. Pick one: {}",
+                clashing.join("; "),
+            ),
+        ));
+    }
 
     state
         .skills

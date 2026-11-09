@@ -76,8 +76,18 @@ pub struct Role {
     /// The subagents a Manager may delegate to, by id. Empty means any the owner
     /// can see — scope is opt-in. Everything off the list is invisible to it.
     pub delegate_scope: Vec<String>,
-    /// The skills it may load, by id. Empty means any the owner can use; an
-    /// off-list skill is never written to its workspace.
+    /// Include the owner's always-on skills — their `skill_defaults` rows with
+    /// no repository against them. On unless somebody turns it off.
+    pub include_always_on: bool,
+    /// Include the owner's defaults for the repositories the child checks out.
+    /// On unless somebody turns it off.
+    pub include_repo_defaults: bool,
+    /// Skills this profile loads whatever the two switches say, by id.
+    ///
+    /// **A tick grants.** It adds a skill on top of the two sources above
+    /// rather than keeping one they already supplied, so an empty list narrows
+    /// nothing and turning a switch off is the only way to load less. See
+    /// [`skills_for`].
     pub skill_scope: Vec<String>,
     /// Whether the person asking may edit or delete it.
     pub may_write: bool,
@@ -120,7 +130,23 @@ pub struct NewRole {
     /// The subagents it may delegate to, by id. Empty = any the owner can see.
     #[serde(default)]
     pub delegate_scope: Vec<String>,
-    /// The skills it may load, by id. Empty = any the owner can use.
+    /// Include the owner's always-on skills. **Absent means leave it as it
+    /// is** — on an update, whatever is stored; on a create, on.
+    ///
+    /// `Option` rather than `bool` because the rest of this struct is a
+    /// whole-object write and a client can leave a field out. A `bool` has to
+    /// read that omission as something, and both readings edit a profile
+    /// nobody asked to edit: `false` switches inheritance off on every profile
+    /// an older client saves, and `true` — which this was — turns a switch
+    /// somebody deliberately off back on. Keeping no opinion is the only
+    /// answer that leaves a profile alone.
+    #[serde(default)]
+    pub include_always_on: Option<bool>,
+    /// Include the owner's defaults for the repositories the child checks out.
+    /// **Absent means leave it as it is** — see above.
+    #[serde(default)]
+    pub include_repo_defaults: Option<bool>,
+    /// The skills it loads on top of those two, by id. Empty = just those two.
     #[serde(default)]
     pub skill_scope: Vec<String>,
     /// A directory to file it in, by id, so a teammate can reach it. Omit for
@@ -128,6 +154,15 @@ pub struct NewRole {
     #[serde(default)]
     pub directory: Option<String>,
 }
+
+/// What an inheritance switch is when a *new* profile does not state one: on.
+///
+/// Named rather than written `true` at the bind, because it has to agree with
+/// `include_always_on boolean not null default true` in the
+/// `profile_skill_sources` migration — a new profile loading the owner's usual
+/// set rather than nothing is the whole of that migration's compatibility
+/// story, and this is the one place the server repeats it.
+const INHERITS: bool = true;
 
 /// Why a role was refused, in a sentence somebody can act on.
 #[derive(Debug)]
@@ -140,6 +175,12 @@ impl std::fmt::Display for Refused {
 }
 
 /// Everything a well-formed role must be.
+///
+/// Shape only — everything answerable without the database. The one field that
+/// needs it is `skill_scope`, whose ids have to be skills the person saving can
+/// actually see; that is `api::roles::check_skills`, called beside this on both
+/// write paths. Said here because this is where somebody looks to find out what
+/// is validated, and the answer "not here" is only useful with the "over there".
 pub fn check(new: &NewRole) -> Result<(), Refused> {
     let name = new.name.trim();
     if name.is_empty() {
@@ -183,6 +224,105 @@ pub fn check(new: &NewRole) -> Result<(), Refused> {
     Ok(())
 }
 
+/// Which skills a profile loads: the union of its three additive sources.
+///
+/// **Pure, and deliberately apart from the queries that answer it.** Every
+/// path that starts a child funnels through here — a person starting a
+/// workspace as a profile, a lead delegating into its own workspace, a lead
+/// delegating into a new one — so the three cases worth being sure about are
+/// unit tests over a function rather than fixtures over a database: a source
+/// switched off, a tick that duplicates one of them, and a tick naming a skill
+/// this person cannot reach.
+///
+/// `always_on` and `repo_defaults` belong to **whoever is starting the run**,
+/// not to whoever wrote the profile. `skill_defaults` is keyed on `user_id`, so
+/// a profile shared through a directory resolves per viewer — which is what
+/// "include the repository's defaults" means when the repository is not yours.
+///
+/// `reachable` is that same person's visible library, and **all three sources
+/// are filtered through it**. Under the old semantics the list could only
+/// subtract, so it needed no authorisation; a tick now introduces a skill, and
+/// a skill is executable (`docs/skills.md` §8). Without this a Writer on a
+/// shared profile could tick something only they can see and have a colleague
+/// materialise and run it on their own worker under their own credentials.
+/// `set_for_session` checks the same thing again at the moment it pins, which
+/// is the chokepoint; this is the half that can say so in a test.
+///
+/// Order is stable — always-on, then the repository's, then the list — and a
+/// skill in two sources is pinned once, so a tick for something a switch
+/// already supplied costs nothing.
+pub fn skills_for(
+    role: &Role,
+    always_on: &[String],
+    repo_defaults: &[String],
+    reachable: &std::collections::HashSet<String>,
+) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for (include, ids) in [
+        (role.include_always_on, always_on),
+        (role.include_repo_defaults, repo_defaults),
+        // The list is not switchable: it is the profile's own decision, and
+        // "always include these" is what it says on the screen.
+        (true, role.skill_scope.as_slice()),
+    ] {
+        if !include {
+            continue;
+        }
+        for id in ids {
+            if reachable.contains(id) && !out.contains(id) {
+                out.push(id.clone());
+            }
+        }
+    }
+    out
+}
+
+/// [`skills_for`], with its three lists read for one person and one set of
+/// repositories.
+///
+/// The queries live here and the union lives there, which is the whole reason
+/// the union is testable. Nothing is narrowed on the way: both switches are
+/// honoured in exactly one place, so a skipped read can never disagree with the
+/// field that decides. Two indexed reads per repository is not what this costs.
+///
+/// `person` is whoever is starting the run, never whoever wrote the profile —
+/// see [`skills_for`].
+///
+/// **`repos` is `RepoId`, not a slug, and that is the whole reason it is typed.**
+/// `skill_defaults.repo_id` is an id; a slug bound to it matches nothing, so
+/// `include_repo_defaults` reads on, counts in the editor, and delivers
+/// nothing. That is what the second-agent path did when this took
+/// `&[String]` and was handed `WorkspacePlace::repo` — the first checkout's
+/// *caption*. A `Vec<String>` will hold either happily; this will not.
+pub async fn skills_at_spawn(
+    skills: &crate::skills::Skills,
+    role: &Role,
+    person: &str,
+    repos: &[ft_core::RepoId],
+) -> Result<Vec<String>> {
+    let always_on = skills
+        .always_on(person)
+        .await
+        .context("reading somebody's always-on skills for a profile")?;
+    let mut repo_defaults: Vec<String> = Vec::new();
+    for repo in repos {
+        repo_defaults.extend(
+            skills
+                .defaults_in(person, repo)
+                .await
+                .context("reading a repository's default skills for a profile")?,
+        );
+    }
+    let reachable: std::collections::HashSet<String> = skills
+        .visible(person, Level::Viewer)
+        .await
+        .context("reading the skills somebody can reach for a profile")?
+        .into_iter()
+        .map(|s| s.id.as_str().to_string())
+        .collect();
+    Ok(skills_for(role, &always_on, &repo_defaults, &reachable))
+}
+
 /// `<name>_<tail>`, so two people's `reviewer` roles do not collide on the
 /// path's own uniqueness. The same shape a skill's slug has.
 fn slug_of(name: &str, id: &str) -> String {
@@ -209,7 +349,9 @@ fn nonblank(s: &Option<String>) -> Option<&str> {
 const FIELDS: &str = "r.id, r.path::text AS path, r.name, r.does, \
                       r.placement, r.agent, r.host_id, r.agent_account_id, \
                       r.pref_model, r.pref_effort, r.pref_mode, r.pref_sandbox, r.instructions, \
-                      r.can_delegate, r.delegate_scope, r.skill_scope, r.created_at, r.updated_at";
+                      r.can_delegate, r.delegate_scope, r.skill_scope, \
+                      r.include_always_on, r.include_repo_defaults, \
+                      r.created_at, r.updated_at";
 
 fn read(row: sqlx::postgres::PgRow) -> Result<Role> {
     Ok(Role {
@@ -233,6 +375,8 @@ fn read(row: sqlx::postgres::PgRow) -> Result<Role> {
         instructions: row.get("instructions"),
         can_delegate: row.get("can_delegate"),
         delegate_scope: row.get("delegate_scope"),
+        include_always_on: row.get("include_always_on"),
+        include_repo_defaults: row.get("include_repo_defaults"),
         skill_scope: row.get("skill_scope"),
         may_write: row.get("may_write"),
         may_share: row.get("may_share"),
@@ -351,9 +495,10 @@ impl Roles {
             "INSERT INTO roles \
                (id, org_id, path, created_by, name, slug, does, \
                 placement, agent, host_id, agent_account_id, instructions, can_delegate, \
-                delegate_scope, skill_scope, pref_model, pref_effort, pref_mode, pref_sandbox) \
+                delegate_scope, skill_scope, include_always_on, include_repo_defaults, \
+                pref_model, pref_effort, pref_mode, pref_sandbox) \
              VALUES ($1, $2, $3::ltree, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, \
-                     $16, $17, $18, $19)",
+                     $16, $17, $18, $19, $20, $21)",
         )
         .bind(id.as_str())
         .bind(org)
@@ -370,6 +515,10 @@ impl Roles {
         .bind(new.can_delegate)
         .bind(&new.delegate_scope)
         .bind(&new.skill_scope)
+        // Nothing to leave alone on a row that does not exist yet, so an
+        // absent switch resolves to the column's default.
+        .bind(new.include_always_on.unwrap_or(INHERITS))
+        .bind(new.include_repo_defaults.unwrap_or(INHERITS))
         .bind(nonblank(&new.settings.model))
         .bind(nonblank(&new.settings.effort))
         .bind(nonblank(&new.settings.mode))
@@ -381,6 +530,13 @@ impl Roles {
     }
 
     /// Change a role's fields. The person must be able to work in where it is filed.
+    ///
+    /// Whole-object: every column here is replaced by what was sent, which is
+    /// why `toDraft` on the desktop side carries all of them. The two
+    /// exceptions are the inheritance switches, which are `COALESCE`d onto
+    /// what is already stored — a caller that says nothing about them changes
+    /// nothing about them. See [`NewRole::include_always_on`] for why those
+    /// two cannot take the whole-object rule.
     pub async fn update(&self, person: &str, id: &str, new: &NewRole) -> Result<bool> {
         // Writer decides it, through the one predicate — the same gate the
         // interface drew `may_write` from.
@@ -392,7 +548,9 @@ impl Roles {
             "UPDATE roles SET name=$2, does=$3, \
                placement=$4, agent=$5, host_id=$6, agent_account_id=$7, instructions=$8, \
                can_delegate=$9, delegate_scope=$10, skill_scope=$11, \
-               pref_model=$12, pref_effort=$13, pref_mode=$14, pref_sandbox=$15, \
+               include_always_on=COALESCE($12, include_always_on), \
+               include_repo_defaults=COALESCE($13, include_repo_defaults), \
+               pref_model=$14, pref_effort=$15, pref_mode=$16, pref_sandbox=$17, \
                updated_at=now() WHERE id=$1",
         )
         .bind(id)
@@ -406,6 +564,8 @@ impl Roles {
         .bind(new.can_delegate)
         .bind(&new.delegate_scope)
         .bind(&new.skill_scope)
+        .bind(new.include_always_on)
+        .bind(new.include_repo_defaults)
         .bind(nonblank(&new.settings.model))
         .bind(nonblank(&new.settings.effort))
         .bind(nonblank(&new.settings.mode))
@@ -446,10 +606,176 @@ mod tests {
             instructions: "Report findings as path:line.".into(),
             can_delegate: false,
             delegate_scope: vec![],
+            include_always_on: Some(true),
+            include_repo_defaults: Some(true),
             skill_scope: vec![],
             settings: Default::default(),
             directory: None,
         }
+    }
+
+    /// A profile with both sources on and nothing named — every row that
+    /// exists today, and what `BLANK` and `create_profile` still mint.
+    fn profile() -> Role {
+        Role {
+            id: "role_x".into(),
+            path: "u/kevin/reviewer".into(),
+            name: "reviewer".into(),
+            does: "reviews a branch".into(),
+            placement: "here".into(),
+            agent: Some("ClaudeCode".into()),
+            machine: None,
+            account: None,
+            settings: Default::default(),
+            instructions: String::new(),
+            can_delegate: false,
+            delegate_scope: vec![],
+            include_always_on: true,
+            include_repo_defaults: true,
+            skill_scope: vec![],
+            may_write: true,
+            may_share: true,
+            is_default: false,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        }
+    }
+
+    fn ids(names: &[&str]) -> Vec<String> {
+        names.iter().map(|n| n.to_string()).collect()
+    }
+
+    fn reachable(names: &[&str]) -> std::collections::HashSet<String> {
+        names.iter().map(|n| n.to_string()).collect()
+    }
+
+    /// Criterion 11: an existing profile is unchanged by the migration.
+    ///
+    /// Both switches on and an empty list has to resolve to exactly what a
+    /// profile is handed today — the owner's always-on set plus their defaults
+    /// for the repositories the child checks out. This is the whole of why the
+    /// columns default `true` and there is no backfill.
+    #[test]
+    fn both_sources_on_and_nothing_named_is_what_a_profile_already_loads() {
+        let got = skills_for(
+            &profile(),
+            &ids(&["dataviz", "treg"]),
+            &ids(&["rust-review"]),
+            &reachable(&["dataviz", "treg", "rust-review", "unused"]),
+        );
+        assert_eq!(got, ids(&["dataviz", "treg", "rust-review"]));
+    }
+
+    /// Criteria 3 and 4: a switch removes exactly its own source, and nothing
+    /// beside it.
+    #[test]
+    fn a_switch_removes_its_own_source_and_only_that() {
+        let seen = reachable(&["dataviz", "treg", "rust-review"]);
+
+        let mut no_always = profile();
+        no_always.include_always_on = false;
+        assert_eq!(
+            skills_for(
+                &no_always,
+                &ids(&["dataviz", "treg"]),
+                &ids(&["rust-review"]),
+                &seen
+            ),
+            ids(&["rust-review"]),
+        );
+
+        let mut no_repo = profile();
+        no_repo.include_repo_defaults = false;
+        assert_eq!(
+            skills_for(
+                &no_repo,
+                &ids(&["dataviz", "treg"]),
+                &ids(&["rust-review"]),
+                &seen
+            ),
+            ids(&["dataviz", "treg"]),
+        );
+    }
+
+    /// Criterion 8: a tick is a grant. Under the intersection this replaces, a
+    /// skill that was nobody's default could not be delivered at all — the
+    /// filter dropped it — which is the defect the whole model exists to fix.
+    #[test]
+    fn a_tick_introduces_a_skill_no_source_supplies() {
+        let mut role = profile();
+        role.skill_scope = ids(&["make-ugc"]);
+        let got = skills_for(
+            &role,
+            &ids(&["dataviz"]),
+            &ids(&["rust-review"]),
+            &reachable(&["dataviz", "rust-review", "make-ugc"]),
+        );
+        assert!(got.contains(&"make-ugc".to_string()));
+        assert_eq!(got, ids(&["dataviz", "rust-review", "make-ugc"]));
+    }
+
+    /// Criterion 5: naming one a switch already supplies adds nothing. The
+    /// screen promises its breakdown sums to the figure, so the set it is
+    /// counting has to be de-duplicated here too.
+    #[test]
+    fn naming_a_skill_a_source_already_supplies_adds_nothing() {
+        let plain = skills_for(
+            &profile(),
+            &ids(&["dataviz"]),
+            &ids(&["rust-review"]),
+            &reachable(&["dataviz", "rust-review"]),
+        );
+
+        let mut role = profile();
+        role.skill_scope = ids(&["dataviz", "rust-review"]);
+        let named = skills_for(
+            &role,
+            &ids(&["dataviz"]),
+            &ids(&["rust-review"]),
+            &reachable(&["dataviz", "rust-review"]),
+        );
+
+        assert_eq!(named.len(), plain.len());
+        assert_eq!(named, ids(&["dataviz", "rust-review"]));
+    }
+
+    /// Criterion 10: both off and nothing named means none, and it has to come
+    /// back as an empty set rather than as "no opinion" — `NewSession.skills`
+    /// honours `Some(vec![])` as nothing, which is what carries the decision.
+    #[test]
+    fn both_switches_off_and_nothing_named_loads_nothing() {
+        let mut role = profile();
+        role.include_always_on = false;
+        role.include_repo_defaults = false;
+        let got = skills_for(
+            &role,
+            &ids(&["dataviz"]),
+            &ids(&["rust-review"]),
+            &reachable(&["dataviz", "rust-review"]),
+        );
+        assert!(got.is_empty());
+    }
+
+    /// Criterion 9: a skill the person starting the run cannot see is never in
+    /// the set, however it got on to the profile.
+    ///
+    /// The case that makes it a security question and not a tidiness one: a
+    /// profile is shareable, so a Writer on one filed in a directory can tick
+    /// a skill filed in their own space. Without this the colleague who starts
+    /// it materialises and runs somebody else's code on their own worker, under
+    /// their own credentials.
+    #[test]
+    fn a_skill_the_person_cannot_reach_is_never_resolved() {
+        let mut role = profile();
+        role.skill_scope = ids(&["theirs-alone", "shared"]);
+        let got = skills_for(
+            &role,
+            // A stale default — the skill was shared, defaulted, then unshared.
+            &ids(&["was-shared"]),
+            &[],
+            &reachable(&["shared"]),
+        );
+        assert_eq!(got, ids(&["shared"]));
     }
 
     #[test]
@@ -496,6 +822,231 @@ mod tests {
         (Roles::new(db.pool().clone()), person, org, slug)
     }
 
+    /// The whole chain, against a real database: three sources resolve, and
+    /// only what resolved is pinned.
+    ///
+    /// The unit tests above own the union's arithmetic. This one is here for
+    /// the two things they cannot reach — that the switches survive a round
+    /// trip through the columns, and that `set_for_session` refuses to pin a
+    /// skill the person starting the run cannot see **even when it is handed
+    /// to it directly**. That last assertion is the security one: the resolver
+    /// is not the only caller, so the chokepoint has to hold on its own.
+    ///
+    /// Both placements share one call — `skills_at_spawn` — so what is asserted
+    /// here is what a child gets at `here` and at `new` alike. What differs is
+    /// only which repositories are handed in, which is the last argument.
+    #[tokio::test]
+    async fn a_profile_resolves_three_sources_and_pins_only_what_it_may() {
+        use crate::accounts::Accounts;
+        use crate::db::Db;
+        use crate::skills::{IncomingFile, NewSkill};
+
+        let (db, admin) = Db::open_for_test_owned().await.unwrap();
+        let pool = db.pool().clone();
+        let roles = Roles::new(pool.clone());
+        let skills = crate::skills::Skills::new(pool.clone());
+        let accounts = Accounts::new(pool.clone());
+        let org = db.org().await.unwrap();
+        let org_id = ft_core::OrgId::from_stored(org.clone());
+
+        // Ana is who starts the run. The profile's three sources are read
+        // against her, not against whoever wrote it.
+        let ana = accounts
+            .create_user(&org_id, "ana", "ana@example.test", "member")
+            .await
+            .unwrap()
+            .0
+            .id
+            .as_str()
+            .to_string();
+
+        let bundle = |name: &str| NewSkill {
+            name: name.into(),
+            description: format!("Does {name}."),
+            frontmatter: serde_json::json!({"name": name}),
+            body: "body".into(),
+            files: vec![IncomingFile {
+                path: "SKILL.md".into(),
+                contents: ft_proto::encode(b"body"),
+                executable: false,
+            }],
+            notes: None,
+        };
+        let hers = |name: &'static str| {
+            let skills = skills.clone();
+            let org = org.clone();
+            let ana = ana.clone();
+            async move {
+                skills
+                    .create(&org, &ana, "ana", &bundle(name), false)
+                    .await
+                    .unwrap()
+                    .as_str()
+                    .to_string()
+            }
+        };
+
+        let everywhere = hers("treg").await;
+        let in_repo = hers("rust-review").await;
+        let named = hers("dataviz").await;
+        // Filed in the admin's own space, so Ana can never reach it. This is
+        // the skill a shared profile must not be able to hand her.
+        let theirs = skills
+            .create(&org, &admin, "admin", &bundle("make-ugc"), false)
+            .await
+            .unwrap()
+            .as_str()
+            .to_string();
+
+        let repo = db
+            .ensure_repo(
+                "acme/backend",
+                "git@example.test:acme/backend.git",
+                Some("main"),
+                None,
+                &ana,
+                None,
+            )
+            .await
+            .unwrap();
+        let repo_id = repo.id.clone();
+        skills
+            .set_default(&ana, &everywhere, None, true)
+            .await
+            .unwrap();
+        skills
+            .set_default(&ana, &in_repo, Some(repo_id.as_str()), true)
+            .await
+            .unwrap();
+
+        // A profile naming two skills: one of Ana's, and one only the admin can
+        // see. Written through the store, so the columns are what is read back.
+        let slug: String = sqlx::query_scalar("SELECT slug FROM principals WHERE id = $1")
+            .bind(&ana)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let mut wanted = new("reviewer");
+        wanted.agent = Some("ClaudeCode".into());
+        wanted.skill_scope = vec![named.clone(), theirs.clone()];
+        let id = roles.create(&org, &ana, &slug, &wanted).await.unwrap();
+        let profile = roles
+            .one(&ana, id.as_str(), Level::Viewer)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            profile.include_always_on && profile.include_repo_defaults,
+            "a new profile inherits both sources"
+        );
+
+        // All three sources, counted once each — and the admin's skill absent,
+        // though it is named, because Ana cannot reach it.
+        let resolved = skills_at_spawn(&skills, &profile, &ana, std::slice::from_ref(&repo_id))
+            .await
+            .unwrap();
+        assert_eq!(
+            resolved,
+            vec![everywhere.clone(), in_repo.clone(), named.clone()],
+        );
+
+        // Pinned, which is what puts a skill on a worker's disk.
+        let host = db.ensure_test_host("fire-01", &ana).await.unwrap();
+        let session = ft_core::SessionId::new();
+        db.insert_session(
+            &session,
+            &host.id,
+            &ana,
+            None,
+            "Reviewing",
+            "",
+            None,
+            None,
+            "ClaudeCode",
+            ft_core::WorkspaceSize::Medium,
+            ft_core::Share::Equal,
+            &[],
+            None,
+        )
+        .await
+        .unwrap();
+        skills
+            .set_for_session(session.as_str(), &ana, &resolved)
+            .await
+            .unwrap();
+        let mut pinned = skills.of_session(session.as_str()).await.unwrap();
+        pinned.sort();
+        let mut expected = resolved.clone();
+        expected.sort();
+        assert_eq!(pinned, expected, "a profile's whole resolved set is pinned");
+
+        // The chokepoint, on its own. Handed the admin's skill directly — as a
+        // caller that skipped the resolver would — it pins nothing.
+        skills
+            .set_for_session(session.as_str(), &ana, std::slice::from_ref(&theirs))
+            .await
+            .unwrap();
+        assert!(
+            skills
+                .of_session(session.as_str())
+                .await
+                .unwrap()
+                .is_empty(),
+            "a skill the session's owner cannot see is never pinned",
+        );
+        // And the admin, who can see it, is not blocked by the same predicate.
+        let theirs_session = ft_core::SessionId::new();
+        db.insert_session(
+            &theirs_session,
+            &host.id,
+            &admin,
+            None,
+            "Theirs",
+            "",
+            None,
+            None,
+            "ClaudeCode",
+            ft_core::WorkspaceSize::Medium,
+            ft_core::Share::Equal,
+            &[],
+            None,
+        )
+        .await
+        .unwrap();
+        skills
+            .set_for_session(
+                theirs_session.as_str(),
+                &admin,
+                std::slice::from_ref(&theirs),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            skills.of_session(theirs_session.as_str()).await.unwrap(),
+            vec![theirs.clone()],
+            "the check narrows to what each person may see, not to nothing",
+        );
+
+        // Both switches off: the named list is all that is left, and the
+        // unreachable one is still gone.
+        let mut bare = wanted.clone();
+        bare.include_always_on = Some(false);
+        bare.include_repo_defaults = Some(false);
+        assert!(roles.update(&ana, id.as_str(), &bare).await.unwrap());
+        let off = roles
+            .one(&ana, id.as_str(), Level::Viewer)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            skills_at_spawn(&skills, &off, &ana, &[repo_id])
+                .await
+                .unwrap(),
+            vec![named],
+            "turning both off leaves only what the profile names",
+        );
+    }
+
     #[tokio::test]
     async fn a_role_is_made_found_changed_and_removed() {
         let (roles, me, org, slug) = setup().await;
@@ -540,6 +1091,107 @@ mod tests {
         // Gone.
         assert!(roles.delete(&me, id.as_str()).await.unwrap());
         assert!(roles.visible(&me, Level::Viewer).await.unwrap().is_empty());
+    }
+
+    /// An omitted inheritance switch is not a decision, and the body of a
+    /// write that never mentions one has to leave it alone.
+    ///
+    /// Shape only, no database: this is where the previous
+    /// `#[serde(default = "inherits")]` lived, and the whole of what it got
+    /// wrong is that it turned an absent field into `Some(true)` here — before
+    /// anything downstream could tell the two apart.
+    #[test]
+    fn an_absent_switch_deserialises_to_no_opinion_rather_than_to_on() {
+        let body = |extra: &str| {
+            serde_json::from_str::<NewRole>(&format!(
+                "{{\"name\":\"reviewer\",\"does\":\"reviews a branch\"{extra}}}"
+            ))
+            .unwrap()
+        };
+
+        let silent = body("");
+        assert_eq!(silent.include_always_on, None);
+        assert_eq!(silent.include_repo_defaults, None);
+
+        // And a field that *is* sent still arrives as itself, in both
+        // directions — `false` especially, which is the one that used to be
+        // indistinguishable from silence.
+        let off = body(",\"includeAlwaysOn\":false,\"includeRepoDefaults\":false");
+        assert_eq!(off.include_always_on, Some(false));
+        assert_eq!(off.include_repo_defaults, Some(false));
+        let on = body(",\"includeAlwaysOn\":true");
+        assert_eq!(on.include_always_on, Some(true));
+        assert_eq!(on.include_repo_defaults, None);
+    }
+
+    /// Criterion 11, at the layer that decides it: what a write that omits the
+    /// switches does to a profile somebody has narrowed.
+    ///
+    /// QA's repro, and the reason this is a `COALESCE` rather than a bind.
+    /// `toDraft` on the desktop dropped both fields, so the editor's own save
+    /// was the body in step three — and under the old default it read as "both
+    /// on", which turned a switch somebody had deliberately switched off back
+    /// on. The desktop is fixed, but the client that is already installed on
+    /// somebody's machine is not, and this is what makes its save harmless.
+    #[tokio::test]
+    async fn a_write_that_never_mentions_a_switch_leaves_it_as_it_was() {
+        let (roles, me, org, slug) = setup().await;
+
+        // Said nothing either way, so a new profile gets the column default.
+        let mut silent = new("reviewer");
+        silent.include_always_on = None;
+        silent.include_repo_defaults = None;
+        let id = roles.create(&org, &me, &slug, &silent).await.unwrap();
+        let read = || {
+            let roles = &roles;
+            let me = &me;
+            let id = id.clone();
+            async move {
+                let r = roles
+                    .one(me, id.as_str(), Level::Viewer)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                (r.include_always_on, r.include_repo_defaults)
+            }
+        };
+        assert_eq!(read().await, (true, true), "a new profile inherits both");
+
+        // Narrowed on purpose.
+        let mut narrowed = new("reviewer");
+        narrowed.include_always_on = Some(false);
+        assert!(roles.update(&me, id.as_str(), &narrowed).await.unwrap());
+        assert_eq!(read().await, (false, true));
+
+        // The save that says nothing about either. Everything else it carries
+        // still lands, so this is a real write and not a no-op update.
+        let mut unaware = new("reviewer");
+        unaware.include_always_on = None;
+        unaware.include_repo_defaults = None;
+        unaware.does = "implements and opens a PR".into();
+        assert!(roles.update(&me, id.as_str(), &unaware).await.unwrap());
+        assert_eq!(
+            read().await,
+            (false, true),
+            "a switch somebody turned off was turned back on by a save that never mentioned it",
+        );
+        assert_eq!(
+            roles
+                .one(&me, id.as_str(), Level::Viewer)
+                .await
+                .unwrap()
+                .unwrap()
+                .does,
+            "implements and opens a PR",
+            "the rest of the body is still whole-object",
+        );
+
+        // And it is still switchable: only silence is inert.
+        let mut back = new("reviewer");
+        back.include_always_on = Some(true);
+        back.include_repo_defaults = Some(false);
+        assert!(roles.update(&me, id.as_str(), &back).await.unwrap());
+        assert_eq!(read().await, (true, false));
     }
 
     #[tokio::test]
