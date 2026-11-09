@@ -225,11 +225,13 @@ fn written(e: sqlx::Error, new: &NewRole, doing: &'static str) -> anyhow::Error 
 
 /// Everything a well-formed role must be.
 ///
-/// Shape only — everything answerable without the database. The one field that
-/// needs it is `skill_scope`, whose ids have to be skills the person saving can
-/// actually see; that is `api::roles::check_skills`, called beside this on both
-/// write paths. Said here because this is where somebody looks to find out what
-/// is validated, and the answer "not here" is only useful with the "over there".
+/// Shape only — everything answerable without the database. Two fields need it
+/// and neither is here: `skill_scope`, whose ids have to be skills the person
+/// saving can actually see, is `api::roles::check_skills`, called beside this
+/// on both write paths; and `machine`, which has to be a machine, is the
+/// foreign key itself, read back by `refused_by_constraint` at the write.
+/// Said here because this is where somebody looks to find out what is
+/// validated, and the answer "not here" is only useful with the "over there".
 pub fn check(new: &NewRole) -> Result<(), Refused> {
     let name = new.name.trim();
     if name.is_empty() {
