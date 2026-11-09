@@ -75,6 +75,28 @@ src/
 src-tauri/    the shell: window, vibrancy, dock badge, notifications
 ```
 
+## The profile editor's Skills section
+
+`ui/config/SkillSources.tsx` draws what a profile will load as the **union of
+three additive sources** — the owner's always-on set, their defaults for the
+repositories the child checks out, and the profile's own list on top — one
+switch per inheritable source and a count for each. `docs/skills.md` §7 is the
+model; this is the screen for it.
+
+Two things the screen owes the person reading it:
+
+* **The breakdown's arithmetic is true in every state, and it names what it
+  left out.** A profile can be over the agent's budget before a repository's
+  defaults are even counted, two skills can share a name — in which case
+  neither is sent — and a source can be on and contribute nothing. Each of
+  those says so on the line under the section rather than leaving a number
+  that does not add up.
+* **A draft states both switches as a plain `boolean`.** The wire type is
+  `Option<bool>`, where absent means *leave it as it is*; an editor that draws
+  a switch has nothing to draw for absent, so `role-draft.ts` settles them on
+  load and the editor never round-trips an omission into a change nobody made.
+  That hazard fired once already.
+
 ## What is Tauri-specific
 
 `src/bridge.ts` — eight calls. Everything else is shell-agnostic, which is what
