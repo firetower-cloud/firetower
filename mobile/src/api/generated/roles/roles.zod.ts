@@ -39,7 +39,7 @@ export const ListRolesResponse = zod.array(ListRolesResponseItem)
 
 export const CreateRoleBody = zod.object({
   "account": zod.string().nullish().describe('The subscription its agent runs on, by account id. Omit to run on the\nowner\'s default for the engine.'),
-  "agent": zod.string().nullish(),
+  "agent": zod.string().nullish().describe('The engine it runs on. Null lets the lead choose, and a child then runs\nwhatever its lead names, or the lead\'s own engine.'),
   "canDelegate": zod.boolean().optional().describe('Whether it is a Manager. Defaults to an Operator.'),
   "delegateScope": zod.array(zod.string()).optional().describe('The subagents it may delegate to, by id. Empty = any the owner can see.'),
   "directory": zod.string().nullish().describe('A directory to file it in, by id, so a teammate can reach it. Omit for\nyour own space. Only honoured at creation; move it later with sharing.'),
@@ -47,9 +47,9 @@ export const CreateRoleBody = zod.object({
   "includeAlwaysOn": zod.boolean().nullish().describe('Include the owner\'s always-on skills. **Absent means leave it as it\nis** — on an update, whatever is stored; on a create, on.\n\n`Option` rather than `bool` because the rest of this struct is a\nwhole-object write and a client can leave a field out. A `bool` has to\nread that omission as something, and both readings edit a profile\nnobody asked to edit: `false` switches inheritance off on every profile\nan older client saves, and `true` — which this was — turns a switch\nsomebody deliberately off back on. Keeping no opinion is the only\nanswer that leaves a profile alone.'),
   "includeRepoDefaults": zod.boolean().nullish().describe('Include the owner\'s defaults for the repositories the child checks out.\n**Absent means leave it as it is** — see above.'),
   "instructions": zod.string().optional(),
-  "machine": zod.string().nullish().describe('The machine its own workspace runs on, by host id. Required when\nplacement is `new`.'),
+  "machine": zod.string().nullish().describe('The machine its own workspace runs on, by host id. Null lets the lead\nchoose: it may name one, and otherwise Firetower picks a machine that\ncan run the engine.'),
   "name": zod.string(),
-  "placement": zod.string().optional().describe('Required: "here" or "new". Empty when omitted, so `check` says so.'),
+  "placement": zod.string().optional().describe('Where a delegated child runs: "here" (the lead\'s workspace), "new" (its\nown), or "lead" to let the lead choose. Empty when omitted, so `check`\nsays so.'),
   "settings": zod.object({
   "effort": zod.string().nullish(),
   "mode": zod.string().nullish(),
@@ -93,7 +93,7 @@ export const UpdateRoleParams = zod.object({
 
 export const UpdateRoleBody = zod.object({
   "account": zod.string().nullish().describe('The subscription its agent runs on, by account id. Omit to run on the\nowner\'s default for the engine.'),
-  "agent": zod.string().nullish(),
+  "agent": zod.string().nullish().describe('The engine it runs on. Null lets the lead choose, and a child then runs\nwhatever its lead names, or the lead\'s own engine.'),
   "canDelegate": zod.boolean().optional().describe('Whether it is a Manager. Defaults to an Operator.'),
   "delegateScope": zod.array(zod.string()).optional().describe('The subagents it may delegate to, by id. Empty = any the owner can see.'),
   "directory": zod.string().nullish().describe('A directory to file it in, by id, so a teammate can reach it. Omit for\nyour own space. Only honoured at creation; move it later with sharing.'),
@@ -101,9 +101,9 @@ export const UpdateRoleBody = zod.object({
   "includeAlwaysOn": zod.boolean().nullish().describe('Include the owner\'s always-on skills. **Absent means leave it as it\nis** — on an update, whatever is stored; on a create, on.\n\n`Option` rather than `bool` because the rest of this struct is a\nwhole-object write and a client can leave a field out. A `bool` has to\nread that omission as something, and both readings edit a profile\nnobody asked to edit: `false` switches inheritance off on every profile\nan older client saves, and `true` — which this was — turns a switch\nsomebody deliberately off back on. Keeping no opinion is the only\nanswer that leaves a profile alone.'),
   "includeRepoDefaults": zod.boolean().nullish().describe('Include the owner\'s defaults for the repositories the child checks out.\n**Absent means leave it as it is** — see above.'),
   "instructions": zod.string().optional(),
-  "machine": zod.string().nullish().describe('The machine its own workspace runs on, by host id. Required when\nplacement is `new`.'),
+  "machine": zod.string().nullish().describe('The machine its own workspace runs on, by host id. Null lets the lead\nchoose: it may name one, and otherwise Firetower picks a machine that\ncan run the engine.'),
   "name": zod.string(),
-  "placement": zod.string().optional().describe('Required: "here" or "new". Empty when omitted, so `check` says so.'),
+  "placement": zod.string().optional().describe('Where a delegated child runs: "here" (the lead\'s workspace), "new" (its\nown), or "lead" to let the lead choose. Empty when omitted, so `check`\nsays so.'),
   "settings": zod.object({
   "effort": zod.string().nullish(),
   "mode": zod.string().nullish(),

@@ -1763,6 +1763,663 @@ async fn a_profile_hands_a_second_agent_the_repositorys_defaults_too() {
     let mut folders: Vec<&str> = spec.skills.iter().map(|b| b.name.as_str()).collect();
     folders.sort();
     assert_eq!(folders, vec!["qa-always", "qa-repo", "qa-ticked"]);
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+// ── Delegation: what a child is given, and what it is not ───────────────
+//
+// `delegate::handle` is the one door a session's own tool call comes through,
+// and everything below drives it exactly as the fleet does: an `AgentRequest`
+// naming a tool, against a lead that may use it. Built here because nothing in
+// this suite had ever started a child — the delegation tests that existed were
+// of pure functions, and the thing worth testing is the resolution: which
+// engine a child runs, on which machine, with whose subscription, and which of
+// those a profile is allowed to decide.
+
+/// A profile, saved the way the API saves one.
+///
+/// Through `crate::roles::check` rather than straight to `Roles::create`,
+/// because what a profile may leave open *is* the validation — a test that
+/// bypasses it passes today and proves nothing.
+async fn saved_profile(state: &AppState, owner: &str, fields: serde_json::Value) -> String {
+    let new: crate::roles::NewRole = serde_json::from_value(fields).unwrap();
+    crate::roles::check(&new).expect("a profile the server accepts");
+    let org = state.db.org().await.unwrap();
+    let slug = state.access.personal_root(owner).await.unwrap();
+    state
+        .roles
+        .create(&org, owner, &slug, &new)
+        .await
+        .unwrap()
+        .as_str()
+        .to_string()
+}
+
+/// A lead that may delegate: a session of this owner's, started as a profile.
+async fn lead_running(
+    state: &AppState,
+    host: &Host,
+    owner: &str,
+    agent: Agent,
+    profile: &str,
+) -> ft_core::SessionId {
+    let id = ft_core::SessionId::new();
+    state
+        .db
+        .insert_session(
+            &id,
+            &host.id,
+            owner,
+            None,
+            "The one that hands work out",
+            "lead a feature",
+            None,
+            None,
+            &format!("{agent:?}"),
+            ft_core::WorkspaceSize::Medium,
+            ft_core::Share::Equal,
+            &ft_core::Step::plan(false, false),
+            Some("lead"),
+        )
+        .await
+        .unwrap();
+    state.db.set_profile(&id, profile).await.unwrap();
+    id
+}
+
+/// The Manager every spawn test delegates from, and a machine that can take
+/// work: online, and answering the readiness probe.
+async fn a_lead_that_delegates(
+    state: &AppState,
+    host: &Host,
+    ready: &Arc<AtomicBool>,
+    owner: &str,
+    agent: Agent,
+) -> ft_core::SessionId {
+    ready.store(true, Ordering::SeqCst);
+    state
+        .db
+        .mark_host_online(
+            &host.id,
+            "test",
+            4,
+            8192,
+            &ft_core::DockerState::running("27.0.3"),
+        )
+        .await
+        .unwrap();
+    let manager = saved_profile(
+        state,
+        owner,
+        serde_json::json!({
+            "name": "Ada, the lead",
+            "does": "Breaks work up and hands it out",
+            "placement": "here",
+            "canDelegate": true,
+        }),
+    )
+    .await;
+    lead_running(state, host, owner, agent, &manager).await
+}
+
+/// One call, as the fleet hands it over. `req` is the agent's own id for it,
+/// and is what a repeated call is recognised by, so each test gives its own.
+fn asks(
+    host: &Host,
+    lead: &ft_core::SessionId,
+    req: &str,
+    tool: &str,
+    input: serde_json::Value,
+) -> crate::delegate::AgentRequest {
+    crate::delegate::AgentRequest {
+        host_id: host.id.clone(),
+        session_id: lead.clone(),
+        req: req.into(),
+        tool: tool.into(),
+        input,
+    }
+}
+
+/// What a `spawn` left behind: the child's own session row.
+async fn child_of(state: &AppState, lead: &ft_core::SessionId, req: &str) -> ft_core::Session {
+    state
+        .db
+        .child_by_req(lead, req)
+        .await
+        .unwrap()
+        .expect("spawn said it started a child")
+}
+
+/// The subscription a child was pinned to, which is a column rather than a
+/// field on `Session` — and which a trigger fills in from the owner's default
+/// when nothing named one.
+async fn account_of(state: &AppState, child: &ft_core::SessionId) -> Option<String> {
+    sqlx::query_scalar("SELECT agent_account_id FROM sessions WHERE id=$1")
+        .bind(child.as_str())
+        .fetch_one(state.db.pool())
+        .await
+        .unwrap()
+}
+
+/// What the worker was told to run this child with, as the agent will read it.
+///
+/// Off the wire rather than out of the database: a run's settings are an
+/// environment variable on the frame that starts it and are on no row anywhere.
+fn settings_told_to(launched: &Launches, child: &ft_core::SessionId) -> String {
+    launched
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|spec| &spec.session_id == child)
+        .expect("the worker was asked to start it")
+        .env
+        .iter()
+        .find(|(name, _)| name == ft_core::PREFERRED_ENV)
+        .map(|(_, value)| value.clone())
+        .unwrap_or_default()
+}
+
+/// Criterion 1: the three open values, through the route that validates them.
+///
+/// Routed through `POST /api/v1/roles` on purpose: `Roles::create` does not
+/// call `check`, so a test that saved the row directly passed before any of
+/// this and said nothing about whether the server would take it.
+#[tokio::test]
+async fn a_profile_may_be_saved_with_its_engine_machine_and_placement_open() {
+    let (state, principal, host, _ready, _owner) = fixture().await;
+    let (code, Json(made)) = super::roles::create_role(
+        State(state.clone()),
+        Extension(principal.clone()),
+        Json(
+            serde_json::from_value(serde_json::json!({
+                "name": "Reviewer",
+                "does": "Reads the diff and argues with it; after a hand-back",
+                "placement": "lead",
+                "agent": null,
+                "machine": null,
+                "account": null,
+            }))
+            .unwrap(),
+        ),
+    )
+    .await
+    .unwrap();
+    assert_eq!(code, StatusCode::CREATED);
+    assert_eq!(made.placement, "lead");
+    assert_eq!(made.agent, None);
+    assert_eq!(made.machine, None);
+
+    // And it reads back the same way, with both fields absent from the JSON
+    // rather than present and null — which is what every client already
+    // expects of them.
+    let Json(listed) = super::roles::list_roles(State(state.clone()), Extension(principal))
+        .await
+        .unwrap();
+    let read = listed
+        .iter()
+        .find(|r| r.id == made.id)
+        .expect("in the list");
+    let json = serde_json::to_value(read).unwrap();
+    assert_eq!(json["placement"], "lead");
+    assert!(json.get("agent").is_none(), "{json}");
+    assert!(json.get("machine").is_none(), "{json}");
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// Criterion 2: open is not unvalidated.
+#[tokio::test]
+async fn an_engine_by_a_name_firetower_does_not_run_is_still_refused() {
+    let (state, principal, host, _ready, _owner) = fixture().await;
+    let error = super::roles::create_role(
+        State(state.clone()),
+        Extension(principal),
+        Json(
+            serde_json::from_value(serde_json::json!({
+                "name": "Reviewer",
+                "does": "Reads the diff and argues with it",
+                "placement": "here",
+                "agent": "Claude",
+            }))
+            .unwrap(),
+        ),
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        error
+            .message
+            .contains("Claude is not an agent Firetower runs"),
+        "{}",
+        error.message
+    );
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// Criterion 3: the Unpin button on the Machines screen, which has never
+/// worked for the only profiles that can appear in its list.
+///
+/// `Machines.tsx` sends the whole profile back with `machine: null` and
+/// `placement` as it was — so for every profile pinned to a machine, which is
+/// to say every profile in that list, the request was refused and the refusal
+/// rendered in brick beside the button.
+#[tokio::test]
+async fn unpinning_a_machine_from_an_its_own_workspace_profile_succeeds() {
+    let (state, principal, host, _ready, _owner) = fixture().await;
+    let (_, Json(pinned)) = super::roles::create_role(
+        State(state.clone()),
+        Extension(principal.clone()),
+        Json(
+            serde_json::from_value(serde_json::json!({
+                "name": "Load tester",
+                "does": "Hammers a branch until something gives",
+                "placement": "new",
+                "agent": "ClaudeCode",
+                "machine": host.id.as_str(),
+            }))
+            .unwrap(),
+        ),
+    )
+    .await
+    .unwrap();
+    assert_eq!(pinned.machine.as_deref(), Some(host.id.as_str()));
+
+    // Exactly what the screen sends: the whole profile, with the machine
+    // cleared and the placement left alone.
+    let Json(unpinned) = super::roles::update_role(
+        State(state.clone()),
+        Extension(principal),
+        Path(pinned.id.clone()),
+        Json(
+            serde_json::from_value(serde_json::json!({
+                "name": pinned.name,
+                "does": pinned.does,
+                "placement": "new",
+                "agent": pinned.agent,
+                "machine": null,
+                "account": null,
+            }))
+            .unwrap(),
+        ),
+    )
+    .await
+    .expect("unpinning is what that button is for");
+    assert_eq!(unpinned.machine, None);
+    assert_eq!(unpinned.placement, "new");
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// Criteria 4, 5 and 6: who decides the engine.
+///
+/// The resolution itself already worked — this is the branch the scope warns
+/// nobody may invert — but it was unreachable, because a profile with no engine
+/// could not be saved. Asserted together because the three answers are one
+/// decision read three ways.
+#[tokio::test]
+async fn an_open_engine_is_the_leads_to_choose_and_a_pinned_one_is_not() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let lead = a_lead_that_delegates(&state, &host, &ready, &owner, Agent::ClaudeCode).await;
+    let open = saved_profile(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Reviewer",
+            "does": "Reads the diff and argues with it",
+            "placement": "here",
+        }),
+    )
+    .await;
+    let pinned = saved_profile(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Claude reviewer",
+            "does": "Reads the diff on Claude Code, always",
+            "placement": "here",
+            "agent": "ClaudeCode",
+        }),
+    )
+    .await;
+    let _ = (open, pinned);
+
+    // 4 — the engine the lead names.
+    crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "r1",
+            "spawn",
+            serde_json::json!({ "role": "Reviewer", "goal": "read it", "agent": "Codex" }),
+        ),
+    )
+    .await
+    .expect("a profile that pins no engine takes the lead's argument");
+    assert_eq!(child_of(&state, &lead, "r1").await.agent, Agent::Codex);
+
+    // 5 — nothing named, so the lead's own.
+    crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "r2",
+            "spawn",
+            serde_json::json!({ "role": "Reviewer", "goal": "read it" }),
+        ),
+    )
+    .await
+    .unwrap();
+    assert_eq!(child_of(&state, &lead, "r2").await.agent, Agent::ClaudeCode);
+
+    // 6 — pinned stays binding, whatever the lead passes.
+    crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "r3",
+            "spawn",
+            serde_json::json!({ "role": "Claude reviewer", "goal": "read it", "agent": "Codex" }),
+        ),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        child_of(&state, &lead, "r3").await.agent,
+        Agent::ClaudeCode,
+        "the pin is the point of pinning"
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// Criteria 8 and 9: the feature's own motivating bug, one layer down.
+///
+/// A subscription and a set of run settings belong to one engine. A profile
+/// that leaves the engine open and still holds either would hand Claude Code's
+/// model to Codex, and a Claude Code subscription to `accounts::validate` —
+/// which refuses it with "that account is not connected for this agent", an
+/// error about a field the lead never set. Both come off.
+#[tokio::test]
+async fn an_open_engine_carries_neither_its_subscription_nor_its_run_settings() {
+    let (state, _principal, host, ready, owner, launched) = watched_fixture().await;
+    let lead = a_lead_that_delegates(&state, &host, &ready, &owner, Agent::Codex).await;
+
+    // A Claude Code subscription the profile pins, and the owner's default for
+    // Codex — which is what the child should end up on instead.
+    for (id, kind, default) in [
+        ("a_claude", "ClaudeCode", false),
+        ("a_codex", "Codex", true),
+    ] {
+        sqlx::query(
+            "INSERT INTO agent_accounts(id,user_id,kind,name,mode,credential_key,state,enabled,is_default,path)
+             VALUES($1,$2,$3,$1,'Subscription',$1,'connected',true,$4,
+                    ('u.' || (SELECT slug FROM principals WHERE id=$2) || '.' || $1)::ltree)",
+        )
+        .bind(id)
+        .bind(&owner)
+        .bind(kind)
+        .bind(default)
+        .execute(state.db.pool())
+        .await
+        .unwrap();
+    }
+
+    let profile = saved_profile(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Reviewer",
+            "does": "Reads the diff and argues with it",
+            "placement": "here",
+            "agent": null,
+            "account": "a_claude",
+            "settings": { "model": "opus[1m]" },
+        }),
+    )
+    .await;
+    // Saved as it would be by somebody who opened an engine on a profile that
+    // already pinned both — the row the guard exists for.
+    sqlx::query("UPDATE roles SET agent_account_id='a_claude', pref_model='opus[1m]' WHERE id=$1")
+        .bind(&profile)
+        .execute(state.db.pool())
+        .await
+        .unwrap();
+
+    crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "leak",
+            "spawn",
+            serde_json::json!({ "role": "Reviewer", "goal": "read it" }),
+        ),
+    )
+    .await
+    .expect("a Codex lead can delegate to a profile that pins no engine");
+
+    let child = child_of(&state, &lead, "leak").await;
+    assert_eq!(child.agent, Agent::Codex, "the lead's own engine");
+
+    // 8 — a Claude Code model never reaches Codex's command line.
+    let told = settings_told_to(&launched, &child.id);
+    assert!(
+        !told.contains("opus[1m]"),
+        "the profile's model belongs to the engine it pinned: {told}"
+    );
+
+    // 9 — and the subscription resolves to the owner's default for the engine
+    // the child actually runs, rather than failing validation.
+    assert_eq!(
+        account_of(&state, &child.id).await.as_deref(),
+        Some("a_codex"),
+        "the owner's default for the engine it got"
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// Criterion 10: an agent can author a profile that leaves fields open, and
+/// the acknowledgement says so rather than describing it as `here`.
+#[tokio::test]
+async fn create_profile_may_leave_the_engine_and_the_placement_open() {
+    let (state, _principal, host, _ready, owner) = fixture().await;
+    let lead = lead_running(
+        &state,
+        &host,
+        &owner,
+        Agent::ClaudeCode,
+        &saved_profile(
+            &state,
+            &owner,
+            serde_json::json!({
+                "name": "Ada, the lead",
+                "does": "Breaks work up and hands it out",
+                "placement": "here",
+                "canDelegate": true,
+            }),
+        )
+        .await,
+    )
+    .await;
+
+    let said = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "mk",
+            "create_profile",
+            serde_json::json!({
+                "name": "QA",
+                "does": "Runs it and tries to break it; after a hand-back",
+            }),
+        ),
+    )
+    .await
+    .expect("a profile that settles neither is still a profile");
+    assert!(
+        said.contains("whichever engine its lead is running"),
+        "{said}"
+    );
+    assert!(said.contains("wherever its lead puts it"), "{said}");
+    assert!(
+        !said.contains("sharing the lead's workspace"),
+        "an open placement is not `here`: {said}"
+    );
+
+    let made = state.roles.by_name(&owner, "QA").await.unwrap().unwrap();
+    assert_eq!(made.agent, None);
+    assert_eq!(made.placement, "lead");
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// Criterion 11: `update_profile` can clear a pin.
+///
+/// Absent cannot mean "clear": absent is what every field a call does not
+/// mention looks like, and `.or(existing)` keeps it. So an explicit `null`
+/// does it, and nothing else does — a tool that silently kept the old value
+/// would be reporting a change it did not make, which is the exact thing that
+/// tool's own description was written to prevent.
+#[tokio::test]
+async fn update_profile_clears_a_pin_when_it_is_passed_null() {
+    let (state, _principal, host, _ready, owner) = fixture().await;
+    let lead = lead_running(
+        &state,
+        &host,
+        &owner,
+        Agent::ClaudeCode,
+        &saved_profile(
+            &state,
+            &owner,
+            serde_json::json!({
+                "name": "Ada, the lead",
+                "does": "Breaks work up and hands it out",
+                "placement": "here",
+                "canDelegate": true,
+            }),
+        )
+        .await,
+    )
+    .await;
+    saved_profile(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "QA",
+            "does": "Runs it and tries to break it",
+            "placement": "new",
+            "agent": "Codex",
+            "machine": host.id.as_str(),
+        }),
+    )
+    .await;
+
+    // Naming nothing changes nothing, which is what keeps every other field.
+    crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "u1",
+            "update_profile",
+            serde_json::json!({ "name": "QA", "does": "Runs it and tries hard to break it" }),
+        ),
+    )
+    .await
+    .unwrap();
+    let kept = state.roles.by_name(&owner, "QA").await.unwrap().unwrap();
+    assert_eq!(kept.agent.as_deref(), Some("Codex"));
+    assert_eq!(kept.machine.as_deref(), Some(host.id.as_str()));
+
+    // And null clears, on both.
+    let said = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "u2",
+            "update_profile",
+            serde_json::json!({ "name": "QA", "agent": null, "machine": null }),
+        ),
+    )
+    .await
+    .expect("\"stop pinning QA to Codex\" is a thing somebody says");
+    let open = state.roles.by_name(&owner, "QA").await.unwrap().unwrap();
+    assert_eq!(open.agent, None);
+    assert_eq!(open.machine, None);
+    assert!(
+        said.contains("no subscription"),
+        "with the engine open there is none to point at: {said}"
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// Criterion 12: the open placement, which the earlier scope had no test for
+/// at all.
+#[tokio::test]
+async fn an_open_placement_is_the_leads_to_choose() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let lead = a_lead_that_delegates(&state, &host, &ready, &owner, Agent::ClaudeCode).await;
+    saved_profile(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Reviewer",
+            "does": "Reads the diff and argues with it",
+            "placement": "lead",
+        }),
+    )
+    .await;
+    let lead_workspace = state
+        .db
+        .session(&lead)
+        .await
+        .unwrap()
+        .unwrap()
+        .workspace_id
+        .unwrap();
+
+    crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "p1",
+            "spawn",
+            serde_json::json!({ "role": "Reviewer", "goal": "read it", "placement": "new" }),
+        ),
+    )
+    .await
+    .unwrap();
+    assert_ne!(
+        child_of(&state, &lead, "p1").await.workspace_id,
+        Some(lead_workspace.clone()),
+        "the lead asked for a workspace of its own"
+    );
+
+    crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "p2",
+            "spawn",
+            serde_json::json!({ "role": "Reviewer", "goal": "read it" }),
+        ),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        child_of(&state, &lead, "p2").await.workspace_id,
+        Some(lead_workspace),
+        "and nothing named means here, as it does for a profile with no role at all"
+    );
 
     state.fleet.stop_supervising(&host.id).await;
 }

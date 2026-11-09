@@ -81,7 +81,13 @@ pub async fn serve(state: AppState, mut requests: mpsc::Receiver<AgentRequest>) 
     }
 }
 
-async fn handle(state: &AppState, request: &AgentRequest) -> Result<String> {
+/// The one door every delegation call comes through.
+///
+/// `pub(crate)` for the tests rather than for any caller: each tool below is
+/// private, and a test that reached around them would be testing a copy of the
+/// dispatch rather than the dispatch. `crate::api::execution_tests` drives this
+/// exactly as the fleet does.
+pub(crate) async fn handle(state: &AppState, request: &AgentRequest) -> Result<String> {
     match request.tool.as_str() {
         "spawn" => spawn(state, request).await,
         "children" => children(state, request).await,
@@ -226,11 +232,20 @@ async fn spawn(state: &AppState, request: &AgentRequest) -> Result<String> {
         Some("new") => "new".to_string(),
         _ => text(&request.input, "placement").unwrap_or_else(|| "here".into()),
     };
-    let agent = match role
-        .as_ref()
-        .and_then(|r| r.agent.as_deref())
-        .and_then(Agent::from_name)
-    {
+    // The engine the profile pins, read before it is resolved: `None` here is
+    // "this profile leaves the engine open", and a stored name this build does
+    // not run is a pin that cannot be honoured rather than a third silent way
+    // of being open. Everything below reads `pinned` to mean *committed*.
+    let pinned = match role.as_ref().and_then(|r| r.agent.as_deref()) {
+        Some(name) => {
+            let whose = role.as_ref().map(|r| r.name.as_str()).unwrap_or("that");
+            Some(Agent::from_name(name).with_context(|| {
+                format!("the \"{whose}\" profile pins {name}, which Firetower does not run")
+            })?)
+        }
+        None => None,
+    };
+    let agent = match pinned {
         Some(pinned) => pinned,
         None => text(&request.input, "agent")
             .and_then(|n| Agent::from_name(&n))
@@ -255,16 +270,33 @@ async fn spawn(state: &AppState, request: &AgentRequest) -> Result<String> {
         "new" => false,
         other => bail!("placement must be \"here\" or \"new\", not \"{other}\""),
     };
-    // The subscription the profile pins for its agent, if it named one;
-    // otherwise absent, and the owner's default for the engine resolves at
-    // launch, as it does for a person who names no account.
-    let account = role.as_ref().and_then(|r| r.account.clone());
+    // A subscription and a set of run settings both belong to **one engine**,
+    // so a profile only hands them on when the child is running the engine that
+    // profile pinned. An open engine means neither travels: `opus[1m]` is a
+    // Claude Code model and would reach Codex's command line as a model nobody
+    // chose, and a Claude Code subscription fails `accounts::validate` with
+    // "that account is not connected for this agent" — an error about a field
+    // the lead never set, which is the failure this whole feature removes.
+    //
+    // `StartComposer.tsx` guards the person-facing path the same way
+    // (`profile?.agent === kind`), for the same reason said the same way: so a
+    // change of engine never carries a stale model forward.
+    let on_its_engine = pinned == Some(agent);
+
+    // The subscription the profile pins for its agent, if it named one and the
+    // child is running it; otherwise absent, and the owner's default for the
+    // engine resolves at launch, as it does for a person who names no account.
+    let account = role
+        .as_ref()
+        .filter(|_| on_its_engine)
+        .and_then(|r| r.account.clone());
 
     // How the profile pins the agent — model, effort, mode, sandbox. Each unset
     // field resolves to the engine's default at launch, the same as for a
     // person who left the picker alone.
     let settings = role
         .as_ref()
+        .filter(|_| on_its_engine)
         .map(|r| r.settings.clone())
         .unwrap_or_default();
 
@@ -592,9 +624,10 @@ fn new_role_from(input: &Value) -> Result<crate::roles::NewRole> {
     Ok(crate::roles::NewRole {
         name,
         does,
-        // Required now, and left empty when absent so `check` says so plainly
-        // rather than a silent default standing in for a decision not made.
-        placement: text(input, "placement").unwrap_or_default(),
+        // Absent means open, which is the column's own default and the honest
+        // answer for a caller that was never asked where a child should run.
+        // `check` still refuses a value that is none of the three.
+        placement: text(input, "placement").unwrap_or_else(|| "lead".into()),
         agent: text(input, "agent"),
         machine: text(input, "machine"),
         account: None,
@@ -680,43 +713,31 @@ async fn owner_of(state: &AppState, session: &Session) -> Result<(String, String
     Ok((slug, whose))
 }
 
-/// Why a profile that wants its own workspace cannot be finished from here.
+/// What this tool settled, as the agent reads it back.
 ///
-/// `placement: "new"` needs the host id of a machine, and nothing shows an
-/// agent the host ids — so this is a wall, not a validation slip it can fix by
-/// trying again. It used to end as `here`: the person asked for its own
-/// workspace, got a shared one, and was told nothing. Refuse instead, in words
-/// the agent can repeat to them.
-fn machine_it_cannot_pick(new: &crate::roles::NewRole) -> Option<&'static str> {
-    let bare = new
+/// Said whole on purpose. The subscription cannot be set from here, and a field
+/// left open is a decision as much as a pin is — so the ack states what landed,
+/// open fields included, rather than letting "Created it" stand in for "created
+/// it the way you asked".
+fn profile_shape(new: &crate::roles::NewRole) -> String {
+    let machine = new
         .machine
         .as_deref()
         .map(str::trim)
-        .unwrap_or("")
-        .is_empty();
-    (new.placement == "new" && bare).then_some(
-        "a profile whose child gets its own workspace has to name the machine it runs on, and \
-         you cannot see the machines — so this one is not yours to finish. Tell them that, and \
-         offer either a host id from Settings → Compute → Machines, or `here` for now with the \
-         placement changed on Settings → Harness → Profiles. Do not file it as `here` and leave \
-         them thinking they got what they asked for.",
-    )
-}
-
-/// What this tool settled, as the agent reads it back.
-///
-/// Said whole on purpose. The subscription cannot be set from here and the
-/// machine often cannot either, and those are the two things a person names
-/// most — so the ack states what landed rather than letting "Created it" stand
-/// in for "created it the way you asked".
-fn profile_shape(new: &crate::roles::NewRole) -> String {
+        .filter(|m| !m.is_empty());
     format!(
         "{}, {}, {}",
-        new.agent.as_deref().unwrap_or("its engine"),
-        if new.placement == "new" {
-            "its own workspace"
-        } else {
-            "sharing the lead's workspace"
+        new.agent
+            .as_deref()
+            .unwrap_or("whichever engine its lead is running"),
+        match (new.placement.as_str(), machine) {
+            ("new", Some(id)) => format!("its own workspace on {id}"),
+            ("new", None) => "its own workspace, on whichever machine Firetower picks".into(),
+            ("here", _) => "sharing the lead's workspace".into(),
+            // `lead`, the open placement: the lead that delegates decides, and
+            // calling that "sharing the lead's workspace" is the ack claiming a
+            // commitment nobody made.
+            (_, _) => "wherever its lead puts it".into(),
         },
         if new.can_delegate {
             "a Manager that can delegate to other profiles"
@@ -726,26 +747,40 @@ fn profile_shape(new: &crate::roles::NewRole) -> String {
     )
 }
 
+/// What to say about the subscription, which this tool still cannot pin.
+///
+/// Two sentences rather than one: with the engine open there is no subscription
+/// to pin — an account belongs to one engine — so pointing at a screen to set
+/// one there would be sending somebody to pin a thing that cannot exist yet.
+fn subscription_note(new: &crate::roles::NewRole) -> &'static str {
+    match new.agent.is_some() {
+        true => {
+            "It runs on the owner's default subscription for that engine: this tool cannot pin a \
+             particular one, so if they asked for a subscription, tell them it is unset and set \
+             on Settings → Harness → Profiles."
+        }
+        false => {
+            "With the engine left open there is no subscription to pin: a child runs on the \
+             owner's default for whatever engine it ends up on."
+        }
+    }
+}
+
 /// Save a new profile for the session's owner.
 async fn create_profile(state: &AppState, request: &AgentRequest) -> Result<String> {
     let session = authoring_session(state, request).await?;
     let owner = session.owner.as_str();
     let new = new_role_from(&request.input)?;
-    if let Some(why) = machine_it_cannot_pick(&new) {
-        bail!("{why}");
-    }
     crate::roles::check(&new).map_err(|e| anyhow::anyhow!("{e}"))?;
     let org = state.db.org().await?;
     let (slug, whose) = owner_of(state, &session).await?;
     let id = state.roles.create(&org, owner, &slug, &new).await?;
     let where_it_is = file_profile(state, id.as_str(), &request.input, owner, &whose).await?;
     Ok(format!(
-        "Created the \"{}\" profile in {where_it_is} — {}. It runs on the owner's default \
-         subscription for that engine: this tool cannot pin a particular one, so if they asked \
-         for a subscription, tell them it is unset and set on Settings → Harness → Profiles. \
-         It's on the Profiles screen now.",
+        "Created the \"{}\" profile in {where_it_is} — {}. {} It's on the Profiles screen now.",
         new.name.trim(),
         profile_shape(&new),
+        subscription_note(&new),
     ))
 }
 
@@ -762,12 +797,21 @@ async fn update_profile(state: &AppState, request: &AgentRequest) -> Result<Stri
     // Only what was named changes; everything else stays as it is.
     let get_str =
         |key: &str, now: &str| text(&request.input, key).unwrap_or_else(|| now.to_string());
+    // Except that a pin has to be clearable, and *absent* cannot be how you say
+    // it: absent is what every field this call does not mention looks like. So
+    // an explicit JSON `null` clears one back to open, and only that — which is
+    // the difference between "stop pinning QA to Codex" working and the tool
+    // reporting a change it did not make.
+    let unpinnable = |key: &str, now: &Option<String>| match request.input.get(key) {
+        Some(Value::Null) => None,
+        _ => text(&request.input, key).or_else(|| now.clone()),
+    };
     let new = crate::roles::NewRole {
         name: get_str("new_name", &existing.name),
         does: get_str("does", &existing.does),
         placement: get_str("placement", &existing.placement),
-        agent: text(&request.input, "agent").or(existing.agent.clone()),
-        machine: text(&request.input, "machine").or(existing.machine.clone()),
+        agent: unpinnable("agent", &existing.agent),
+        machine: unpinnable("machine", &existing.machine),
         account: existing.account.clone(),
         instructions: get_str("instructions", &existing.instructions),
         can_delegate: request
@@ -789,9 +833,6 @@ async fn update_profile(state: &AppState, request: &AgentRequest) -> Result<Stri
         settings: existing.settings.clone(),
         directory: None,
     };
-    if let Some(why) = machine_it_cannot_pick(&new) {
-        bail!("{why}");
-    }
     crate::roles::check(&new).map_err(|e| anyhow::anyhow!("{e}"))?;
     if !state
         .roles
@@ -801,10 +842,17 @@ async fn update_profile(state: &AppState, request: &AgentRequest) -> Result<Stri
         bail!("you cannot change the \"{wanted}\" profile");
     }
     Ok(format!(
-        "Updated the \"{}\" profile — {}. Its subscription is untouched: that one is set on \
-         Settings → Harness → Profiles, not from here.",
+        "Updated the \"{}\" profile — {}. {}",
         new.name.trim(),
         profile_shape(&new),
+        match new.agent.is_some() {
+            true =>
+                "Its subscription is untouched: that one is set on Settings → Harness → \
+                     Profiles, not from here.",
+            false =>
+                "With the engine now open it carries no subscription: a child runs on the \
+                      owner's default for whatever engine it ends up on.",
+        },
     ))
 }
 
@@ -1462,50 +1510,76 @@ mod tests {
         assert_eq!(one, "first\n\n---\n\nsecond");
     }
 
-    fn asked_for(placement: &str, machine: Option<&str>) -> crate::roles::NewRole {
+    fn asked_for(placement: Option<&str>, machine: Option<&str>) -> crate::roles::NewRole {
         let mut input = json!({
             "name": "QA",
             "does": "runs the suite and reports what broke; after a hand-back",
             "agent": "ClaudeCode",
-            "placement": placement,
         });
+        if let Some(p) = placement {
+            input["placement"] = json!(p);
+        }
         if let Some(m) = machine {
             input["machine"] = json!(m);
         }
         new_role_from(&input).unwrap()
     }
 
+    /// What this used to assert was the opposite: a `new`-placement profile
+    /// with no machine was refused, because the agent could not see a host id
+    /// and a profile had to name one. It no longer has to — Firetower picks a
+    /// machine that can run it — so the refusal is gone and this is what is
+    /// left of the question it asked.
     #[test]
-    fn its_own_workspace_without_a_machine_is_refused_rather_than_quietly_shared() {
-        // The bug this exists for: the person asks for its own workspace, the
-        // agent cannot see the host ids, and the profile used to be filed as
-        // `here` with nobody told. Now the agent is handed the sentence.
-        let why = machine_it_cannot_pick(&asked_for("new", None)).expect("refused");
-        assert!(why.contains("cannot see the machines"));
-        assert!(why.contains("Machines"));
-        assert!(why.contains("Profiles"));
+    fn a_profile_this_tool_writes_may_leave_the_machine_to_firetower() {
+        let own = asked_for(Some("new"), None);
+        assert_eq!(own.machine, None);
+        crate::roles::check(&own).expect("its own workspace, on whichever machine can run it");
     }
 
+    /// A caller that says nothing about the placement is not making a choice,
+    /// and `lead` is what "no choice" means — the column's own default.
     #[test]
-    fn a_machine_the_person_handed_over_is_taken() {
-        assert!(machine_it_cannot_pick(&asked_for("new", Some("h_1"))).is_none());
-        // Whitespace is not a machine.
-        assert!(machine_it_cannot_pick(&asked_for("new", Some("   "))).is_some());
-    }
-
-    #[test]
-    fn a_shared_workspace_never_needed_a_machine() {
-        assert!(machine_it_cannot_pick(&asked_for("here", None)).is_none());
+    fn saying_nothing_about_the_placement_leaves_it_to_the_lead() {
+        assert_eq!(asked_for(None, None).placement, "lead");
+        crate::roles::check(&asked_for(None, None)).expect("open is a profile the server takes");
     }
 
     #[test]
     fn the_ack_says_what_landed_so_silence_cannot_read_as_applied() {
-        let shape = profile_shape(&asked_for("here", None));
+        let shape = profile_shape(&asked_for(Some("here"), None));
         assert_eq!(
             shape,
             "ClaudeCode, sharing the lead's workspace, an Operator that does the work itself"
         );
-        assert!(profile_shape(&asked_for("new", Some("h_1"))).contains("its own workspace"));
+        assert!(profile_shape(&asked_for(Some("new"), Some("h_1")))
+            .contains("its own workspace on h_1"));
+    }
+
+    /// The ack has to say a field was left open, or "Created it" stands in for
+    /// "created it the way you asked" — which is what the whole function is
+    /// written to prevent.
+    #[test]
+    fn the_ack_names_what_was_left_open_rather_than_guessing_at_it() {
+        let open = profile_shape(&asked_for(Some("lead"), None));
+        assert!(open.contains("wherever its lead puts it"), "{open}");
+        assert!(
+            !open.contains("sharing the lead's workspace"),
+            "an open placement is not `here`: {open}"
+        );
+
+        let mut engineless = asked_for(Some("new"), None);
+        engineless.agent = None;
+        let said = profile_shape(&engineless);
+        assert!(
+            said.contains("whichever engine its lead is running"),
+            "{said}"
+        );
+        assert!(said.contains("whichever machine Firetower picks"), "{said}");
+        assert!(
+            subscription_note(&engineless).contains("no subscription to pin"),
+            "with no engine there is no account to point anybody at"
+        );
     }
 
     // ── the skill library, over MCP, against a real database ────────────

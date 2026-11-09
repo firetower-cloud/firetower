@@ -33,6 +33,24 @@ A child cannot `spawn`, cannot ask the person, and is told so.
 
 Ending a lead ends its children. A branch a child pushed stays on the remote.
 
+### Profiles
+
+A lead names a saved profile with `role: "<name>"` and gets its instructions,
+its team and its skills rather than describing a child inline. A profile says
+three things about where its children run — the engine, the placement, and the
+machine when the placement is its own workspace — and **each of the three is
+either a commitment or left open**. What it commits to is binding: the lead's
+own argument does not override a pin, which is the point of pinning. What it
+leaves open is the lead's to answer, through `spawn`'s `agent`, `placement` and
+`machine` arguments, and when the lead names nothing the placement is `here`,
+the machine is Firetower's pick, and the engine is the lead's own.
+
+There is deliberately no third state. A field is a commitment or a question,
+never a default that something else may quietly outrank.
+
+The `@mention` half is not here: a person picks a profile from the composer, and
+a lead picks one by name.
+
 ## How it travels
 
 No new frame. A call to `spawn` goes down the road a permission question
@@ -111,9 +129,6 @@ in the lead's conversation rather than in the inbox.
 
 Each of these is a smaller change on top of what is here.
 
-- **Roles.** A saved narrowing — a pinned or lead-chosen agent and placement,
-  an `AGENTS.md` of instructions — that a lead can pick by name and a person
-  can `@mention`. Today a spawn is described inline.
 - **A child's questions routed to the lead.** A child's `AskUserQuestion` goes
   to the person, as any session's does.
 - **Take over.** Detaching a child from its lead so its hand-backs come to
