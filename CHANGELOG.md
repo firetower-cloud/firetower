@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.53.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.52.0...firetower-v0.53.0) (2026-11-09)
+
+
+### Features
+
+* a profile's skills are the union of three sources, not an intersection ([a828d21](https://github.com/firetower-cloud/firetower/commit/a828d215ff667cec16a19184c7ba5f6f0105b85a))
+
+
+### Bug Fixes
+
+* **mobile:** QA's three real defects — a frozen scrim, dead flows, dim under AA ([6968dbe](https://github.com/firetower-cloud/firetower/commit/6968dbeb3f62af2b53987b39361b772564cad652))
+* **server:** an agent writes a skill under its owner's access, and under review ([3c02eaf](https://github.com/firetower-cloud/firetower/commit/3c02eaf60088299818b5309ec95068fc9102b9b2))
+
 ## [0.52.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.51.0...firetower-v0.52.0) (2026-11-08)
 
 
