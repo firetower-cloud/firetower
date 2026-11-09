@@ -149,6 +149,13 @@ describe("a line this reader cannot read", () => {
       `license: "${esc}`,
       `metadata:\n  a: {b: "${esc}"}`,
       `allowed-tools:\n  - {b: "${esc}"}`,
+      /* A block sequence entry that is itself a mapping, which needs no
+         braces at all: the `: ` makes it one, and reading that production as
+         a flow-only rule left the whole entry as one string with no bracket
+         in it for the check to find. */
+      `metadata:\n  - a: "${esc}"`,
+      `metadata:\n  - a: [b: "${esc}"]`,
+      `metadata:\n  - a:`,
     ])
       expect(split(fm(`name: helper\ndescription: Helps.\n${line}`)).undecoded.length).toBeGreaterThan(0);
 
@@ -160,6 +167,15 @@ describe("a line this reader cannot read", () => {
       "allowed-tools: [Bash(git:*), Read]",
       `license: >\n  ${esc}`,
       "metadata:\n  version: 1",
+      /* **The negative control for the entry above, and it is what names the
+         cause.** No space after the colon, so this really *is* a plain
+         scalar and both readers read the same one string. The colon-space is
+         doing all of the work. */
+      `metadata:\n  - a:"${esc}"`,
+      /* And the entry position itself stays open — only a mapping in it
+         closes. This is how `allowed-tools` is spelled in the corpus, colon
+         and all. */
+      "allowed-tools:\n  - Bash(git log:*)\n  - Read",
     ])
       expect(split(fm(`name: helper\ndescription: Helps.\n${line}`)).undecoded).toEqual([]);
   });
@@ -203,6 +219,14 @@ describe("a line this reader cannot read", () => {
     // value and leave no `<` for the rule to find.
     const deep = split(fm('name: helper\ndescription: Helps.\nmetadata:\n  a:\n    b: "' + esc + 'x\\u003e"\n  b: plain'));
     expect(deep.unread).toEqual(['    b: "' + esc + 'x\\u003e"']);
+    /* And the seventh shape, which is the one this file carried identically:
+       a `- ` entry spelled `a: "…"` is a block mapping, so the escape was
+       never decoded and `riskOf` was computed from a reading nobody had. The
+       expectation is the server's — 12,544 generated bundles over YAML's node
+       grammar — since there is no libyaml in this process. */
+    const entry = split(fm('name: helper\ndescription: Helps.\nmetadata:\n  - a: "' + esc + 'x\\u003e"'));
+    expect(entry.undecoded).toEqual(['  - a: "' + esc + 'x\\u003e"']);
+    expect(JSON.stringify(entry.frontmatter)).not.toContain("<");
   });
 
   test("the quoted line does not carry a forged frame into the message", async () => {

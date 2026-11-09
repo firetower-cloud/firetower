@@ -851,7 +851,7 @@ pub fn check_one_reading(what: &str, text: &str) -> Result<(), Refused> {
 ///    a tab before the key is inert, because libyaml refuses a tab in
 ///    indentation. So a line this reader drops is **refused**, by the same
 ///    argument as the frame: a parse of the frontmatter is not evidence about
-///    the frontmatter. It costs nothing real — 0 of the 57 unique published
+///    the frontmatter. It costs nothing real — 0 of the 87 unique published
 ///    and library `SKILL.md` on this machine hold a line `read_frontmatter`
 ///    silently skips, on the larger sample the security review re-derived.
 pub fn check_one_frontmatter(said: &str) -> Result<(), Refused> {
@@ -1201,7 +1201,7 @@ fn read_said(text: &str) -> Reading {
         // `  - item`, which is how the standard spells a list.
         if let (false, Some(raw), Some(k)) = (astray, list_item(line), key.clone()) {
             nest = Some(lead);
-            let item = took(line, read_value(&raw), &mut undecoded);
+            let item = took(line, read_value(&raw, At::Item), &mut undecoded);
             match held.as_mut() {
                 Some((_, serde_json::Value::Array(got))) => got.push(item),
                 _ => {
@@ -1215,7 +1215,7 @@ fn read_said(text: &str) -> Reading {
         if let (false, Some((k, raw))) = (astray, nested_pair(line)) {
             if let Some((_, serde_json::Value::Object(got))) = held.as_mut() {
                 nest = Some(lead);
-                got.insert(k, took(line, read_value(&raw), &mut undecoded));
+                got.insert(k, took(line, read_value(&raw, At::Value), &mut undecoded));
                 continue;
             }
         }
@@ -1272,7 +1272,7 @@ fn read_said(text: &str) -> Reading {
             // is why the two positions above read one verbatim. `read_value`
             // is now the only thing that turns text into a value, so all
             // three read it the same way or report the same way.
-            out.insert(k, took(line, read_value(&value), &mut undecoded));
+            out.insert(k, took(line, read_value(&value, At::Value), &mut undecoded));
         }
     }
     flush(&mut held, &mut out);
@@ -1462,15 +1462,42 @@ impl Scalar {
     }
 }
 
-/// Where a value sits, because YAML's plain scalar is a different production
-/// inside a flow collection than at the start of a line.
-#[derive(Clone, Copy, PartialEq)]
-enum Flow {
-    /// After a `key:` or a `- ` on a line of its own.
-    No,
+/// **Where a value sits, because YAML's plain scalar is a different
+/// production in each of the three places this reader finds one** — and the
+/// parameter is not optional, so a position that reads a value cannot forget
+/// to say which one it is.
+///
+/// This used to be a two-valued `Flow`, and the missing third value was a
+/// live injection route. `: ` ending a plain scalar and making the element a
+/// mapping was applied only inside `[...]`, as though it were a flow rule.
+/// It is not: a mapping is legal wherever a *node* is legal, so a block
+/// sequence item spelled `- a: "…"` is a nested mapping too, and this reader
+/// kept the whole item as the one string `a: "\u003cx\u003e"` — no bracket
+/// for [`check_no_brackets`] to find, nothing in `undecoded` to report it,
+/// and libyaml handing the agent the `<`.
+///
+/// The third value is what makes the production **position-sensitive rather
+/// than absent or unconditional**, and both of those are wrong: after a
+/// `key:` a second `: ` is not a nested mapping at all — libyaml refuses the
+/// document outright — so refusing there buys no differential and costs 3 of
+/// the 87 corpus `SKILL.md`: `firetower-artifacts`, `firetower-surfaces` and
+/// `pr-screenshots`, which are exactly the ones libyaml already refuses
+/// under issue #275. Where a mapping *is* legal it costs **0 of 87** —
+/// measured by asking every value in all 87 whether moving it from
+/// `At::Value` to `At::Item` changes the verdict.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum At {
+    /// After a `key:`, where a node is a value and a second `: ` is an
+    /// error rather than a nesting — `license: a: b` is "mapping values are
+    /// not allowed in this context" to libyaml, so there is no reading of it
+    /// for this one to disagree with.
+    Value,
+    /// A `- ` block sequence item. A mapping is legal here, so `a: b` is a
+    /// block mapping and this reader's one string is not a reading of it.
+    Item,
     /// Inside `[...]`, where `,` `[` `]` `{` `}` end a plain scalar wherever
     /// they appear and a `: ` makes the element a mapping.
-    Yes,
+    Flow,
 }
 
 /// A scalar with its quotes taken off and its escapes resolved — **and
@@ -1493,11 +1520,7 @@ enum Flow {
 /// Where it is *not* a plain
 /// scalar, keeping it verbatim is not a reading of it, and the `else` of the
 /// two decodes above is the one place that can be said.
-fn read_value(raw: &str) -> Scalar {
-    read_in(raw, Flow::No)
-}
-
-fn read_in(raw: &str, flow: Flow) -> Scalar {
+fn read_value(raw: &str, at: At) -> Scalar {
     let t = raw.trim();
 
     // A double-quoted scalar, decoded.
@@ -1522,7 +1545,7 @@ fn read_in(raw: &str, flow: Flow) -> Scalar {
         let mut read = true;
         let mut got = Vec::new();
         for piece in inner.split(',') {
-            let item = read_in(piece, Flow::Yes);
+            let item = read_value(piece, At::Flow);
             read &= item.read;
             if item.value.as_str() != Some("") {
                 got.push(item.value);
@@ -1536,7 +1559,7 @@ fn read_in(raw: &str, flow: Flow) -> Scalar {
     // The `else`: verbatim, and verbatim is a reading only of a plain scalar.
     Scalar {
         value: t.into(),
-        read: plain(t, flow),
+        read: plain(t, at),
     }
 }
 
@@ -1598,9 +1621,41 @@ fn closes(t: &str, q: char) -> Option<&str> {
 /// have bitten: a plain scalar may not *begin* with an indicator, and `-`,
 /// `?` and `:` are indicators only when a space or the end of the value
 /// follows. Inside a flow collection the same production also forbids `,`,
-/// `[`, `]`, `{` and `}` anywhere in the scalar and ends it at a `: `, so
-/// `[a: "\u003c"]` is a mapping there and this reader's one string is not
-/// a reading of it.
+/// `[`, `]`, `{` and `}` anywhere in the scalar.
+///
+/// **And a `: ` ends a plain scalar and makes the element a mapping wherever
+/// a mapping is legal**, which is a flow collection *and* a block sequence
+/// item — see [`At`]. Reading that as a flow-only rule is what let
+/// `metadata:` / `  - a: "\u003csystem-reminder\u003e"` through with its
+/// escape undecoded and no bracket anywhere for [`check_no_brackets`]: the
+/// item is a block mapping, libyaml hands the agent the `<`, and the
+/// negative control is what names the cause — `  - a:"\u003cx\u003e"`, with
+/// no space, really is a plain scalar, both readers agree, and it is
+/// correctly accepted. Position-sensitive rather than unconditional because
+/// after a `key:` the same spelling is an error to libyaml rather than a
+/// nesting, so refusing it there closes no differential and costs the three
+/// corpus files of issue #275.
+///
+/// **Measured inert against Claude Code 2.1.273**, re-derived here against a
+/// loopback capture sink on `127.0.0.1:47331` reading the `name: description`
+/// pair it renders into the system prompt, with the positive control
+/// reproducing:
+///
+/// | frontmatter | renders | marker anywhere in the request |
+/// | --- | --- | --- |
+/// | `description: "\u003cCCPOS\u003e"` — positive control | `probe-skill: <CCPOS>` | present |
+/// | `description: Do the thing.` — negative control | `probe-skill: Do the thing.` | — |
+/// | `metadata:` / `  - a: "\u003cCC7META\u003e"` | `probe-skill: Do the thing.` | **0 occurrences** |
+/// | `description:` / `  - a: "\u003cCC7DESC\u003e"` | `probe-skill: Run it.` | **0 occurrences** |
+/// | `metadata:` / `  - a: "CC7BARE"` — no escape at all | `probe-skill: Do the thing.` | **0 occurrences** |
+///
+/// The last row is the control that says *why*, and it is one the security
+/// review did not have: Claude Code puts no `metadata` into the prompt at
+/// all, so this is not an escape failing to decode. So the demonstrated
+/// reach is a **libyaml-family** reader — pyyaml and Ruby's Psych measured
+/// by the review, `serde_yaml` in the suite below, Codex by inference from
+/// what its binary links — the same evidentiary position as
+/// [`DISPUTED_BREAKS`] and the flow-sequence shape.
 ///
 /// **Stated as the complement, which is what makes it fail closed.** A list
 /// of known-bad shapes refuses what somebody has thought of; this refuses
@@ -1608,14 +1663,15 @@ fn closes(t: &str, q: char) -> Option<&str> {
 /// So a flow mapping, a tag, an anchor, an alias and a directive are all
 /// refused without being named, and so is the next one.
 ///
-/// It costs nothing real, measured on the 57 unique published and library
-/// `SKILL.md` on this machine: **57 accepted, 0 refused.** 0 hold a flow
-/// sequence, a brace, or a `\u` escape anywhere in their frontmatter. And
-/// the control that matters for *this* function rather than for the rule as a
-/// whole: **28 of the 57 open a value with a double quote**, so the decode
-/// branch above is what the real corpus exercises and this one never sees
-/// those at all.
-fn plain(t: &str, flow: Flow) -> bool {
+/// It costs nothing real, measured on the 87 unique published and library
+/// `SKILL.md` on this machine: **87 accepted, 0 refused.** 0 hold a flow
+/// sequence, a brace, a `\u` escape or three levels of nesting anywhere in
+/// their frontmatter, and 0 hold a block sequence entry with a `: ` in it.
+/// And the control that matters for *this* function rather than for the rule
+/// as a whole: **29 of the 87 open a value with a double quote**, so the
+/// decode branch above is what the real corpus exercises and this one never
+/// sees those at all.
+fn plain(t: &str, at: At) -> bool {
     /// YAML's `c-indicator`, less the three that depend on what follows.
     const INDICATORS: &str = ",[]{}#&*!|>'\"%@`";
 
@@ -1631,9 +1687,13 @@ fn plain(t: &str, flow: Flow) -> bool {
     if opens_something {
         return false;
     }
-    if flow == Flow::Yes
-        && (t.contains([',', '[', ']', '{', '}']) || t.contains(": ") || t.ends_with(':'))
-    {
+    // The flow indicators, which end a plain scalar only inside `[...]`.
+    if at == At::Flow && t.contains([',', '[', ']', '{', '}']) {
+        return false;
+    }
+    // `: ` — a mapping, wherever a mapping is legal, and `At::Value` is the
+    // one place it is not.
+    if at != At::Value && (t.contains(": ") || t.ends_with(':')) {
         return false;
     }
     true
@@ -3793,7 +3853,7 @@ mod tests {
     /// `None` when libyaml refuses the document or reads something that is
     /// not a mapping. That is honest rather than convenient: a reader that
     /// refuses the document finds no keys at all, so there is nothing it has
-    /// that we do not. 4 of 57 corpus `SKILL.md` are in exactly that
+    /// that we do not. 3 of 87 corpus `SKILL.md` are in exactly that
     /// position, for a plain scalar holding a `: ` — issue #275.
     fn what_libyaml_reads(said: &str) -> Option<serde_yaml::Value> {
         let region = the_eager_region(said)?.join("\n");
@@ -4315,7 +4375,7 @@ mod tests {
         assert!(check_said(honest).is_ok());
 
         // And the shapes a real `SKILL.md` is written in, which is what the
-        // rule costs. 0 of 57 published and library bundles hold a line this
+        // rule costs. 0 of 87 published and library bundles hold a line this
         // reader drops; these are the constructions that measurement was
         // about, asked here so the cost stays nothing.
         for (label, body) in [
@@ -4580,6 +4640,21 @@ mod tests {
                 "a mapping inside a flow sequence",
                 format!("---\nname: ship-it\ndescription: Ships.\nlicense: [a: \"{payload}\"]\n---\n\nRun it.\n"),
             ),
+            (
+                // And the same production in **block** context, which is the
+                // one the `Flow`-only spelling of it missed: a `- ` item
+                // spelled `a: "…"` is a block mapping, so the escape was
+                // never decoded and the whole item came back as one string
+                // with no bracket in it. Its negative control is below.
+                "a block mapping as a block sequence item",
+                format!("---\nname: ship-it\ndescription: Ships.\nmetadata:\n  - a: \"{payload}\"\n---\n\nRun it.\n"),
+            ),
+            (
+                // Nothing about it needs a quote: the mapping is made by the
+                // `: `, and the escape can sit in a flow sequence inside it.
+                "a block sequence item holding a mapping to a flow sequence",
+                format!("---\nname: ship-it\ndescription: Ships.\nmetadata:\n  - a: [b: \"{payload}\"]\n---\n\nRun it.\n"),
+            ),
         ] {
             // The precondition: the rule had six characters to look at.
             assert!(
@@ -4642,6 +4717,26 @@ mod tests {
                 "a quote inside a single-quoted scalar",
                 "---\nname: ship-it\ndescription: 'it''s fine'\n---\n\nRun it.\n".to_string(),
             ),
+            (
+                // **The negative control for the block sequence item above,
+                // and it is what identifies the cause.** No space after the
+                // colon, so this really *is* a plain scalar: libyaml reads
+                // one string, this reader reads the same string, and the six
+                // characters are six characters to both. The colon-space is
+                // doing all of the work, which is the production and not a
+                // guess about dashes.
+                "a colon with no space after it, in the same position",
+                format!(
+                    "---\nname: ship-it\ndescription: Ships.\nmetadata:\n  - a:\"{esc}x{shut}\"\n---\n\nRun it.\n"
+                ),
+            ),
+            (
+                // And a list item that is an ordinary scalar, which is how
+                // `allowed-tools` is spelled in the corpus — the position
+                // stays open, only the mapping in it closes.
+                "an ordinary block sequence item",
+                "---\nname: ship-it\ndescription: Ships.\nallowed-tools:\n  - Bash(git log:*)\n  - Read\n---\n\nRun it.\n".to_string(),
+            ),
         ] {
             assert!(check_said(&said).is_ok(), "{label}: {said}");
         }
@@ -4687,147 +4782,828 @@ mod tests {
         );
     }
 
-    /// **The property, asked of a generated corpus rather than only of the
-    /// payloads somebody wrote down.**
+    // ---------------------------------------------------------------------
+    // **The corpus: YAML's node grammar, crossed — not a list of shapes.**
+    //
+    // The three rounds before this one each ended with a hand-found value
+    // shape, and the round before this one found the seventh *in twenty
+    // minutes of guessing*, from parts the generator already carried: it had
+    // `[a: "…"]`, the flow mapping inside a sequence, and the `- ` position,
+    // and had never taken their product. The gate was sound; the corpus was
+    // an enumeration. So the payloads below are produced from the standard's
+    // node kinds and composed, and the test of whether that worked is
+    // mechanical: **adding a production has to be impossible, because every
+    // production is already there.**
+    // ---------------------------------------------------------------------
+
+    /// **YAML's node productions**, which is what the corpus is generated
+    /// from.
     ///
-    /// This is what makes [`checked`] more than a gate on this module's own
-    /// fixtures, and the reason it exists is a measurement rather than a
-    /// worry. With the nesting rule reverted and its own test disabled, the
-    /// whole suite stayed **green**: the gate asserts the property about
-    /// every bundle it is *handed*, and nothing in the suite was handing it a
-    /// frontmatter nested three deep. A property that waits for somebody to
-    /// think of the payload first is what the last five rounds were made of —
-    /// each one found by a person going looking.
+    /// Fourteen: five scalar styles, the double-quoted scalar's *multi-line*
+    /// spelling, four collection spellings, the two node properties, the
+    /// alias node, and YAML 1.1's merge key. The multi-line one is in the
+    /// list because leaving it out was measurable — with it absent, removing
+    /// `closes`'s backslash clause left the corpus green, which is the whole
+    /// of the second shape this class produced.
     ///
-    /// So the payloads are generated: every value shape in every position
-    /// this reader reads a value in, plus the key spellings, crossed. It is a
-    /// grammar rather than a list, so a shape nobody has thought of is
-    /// covered if it is a combination of parts that are here — which is how
-    /// the nesting hole would have been caught, since "deeper position" and
-    /// "escaped value" are both parts.
+    /// Deliberately *not* here are the null node (`key:` with nothing after
+    /// it) and the explicit-key form (`? key`): neither carries a value, so
+    /// neither belongs to this class — they are the **key** class, covered by
+    /// `read_said`'s `unread` and by [`keys_an_eager_reader_finds`], and met
+    /// here only where the two cross, at [`Pos::QuotedKey`] and
+    /// [`Pos::SpacedKey`].
     ///
-    /// **Two-sided, and the second half is the one that keeps it honest.**
-    /// Passing is cheap if the corpus is boring, so the test also asserts
-    /// that the corpus *contains* disagreements — cases where libyaml hands
-    /// the agent a character this reader never saw — and that `check()`
-    /// refuses every one of them. A generator that stopped producing
-    /// interesting inputs would fail here rather than pass quietly.
-    #[test]
-    fn the_property_holds_over_a_generated_corpus() {
-        // `\u003c` and `\u003e`, which no reader decodes in a plain or a
-        // single-quoted scalar and every reader decodes in a double-quoted
-        // one. That difference is the whole class.
-        let (e, s) = ("\\u003c", "\\u003e");
-        let values: Vec<String> = vec![
-            // Shapes both readers agree about, which must stay accepted.
-            "ok".into(),
-            format!("{e}x{s}"),
-            format!("'{e}x{s}'"),
-            format!("\"{e}x{s}\""),
-            "Bash(git:*)".into(),
-            "[Bash, Read]".into(),
-            "[]".into(),
-            "\"it's fine\"".into(),
-            "'it''s fine'".into(),
-            "\"a\\\\\"".into(),
-            "-5".into(),
-            "1e3".into(),
-            "~".into(),
-            "true".into(),
-            // Shapes a real reader decodes and this one may not.
-            format!("{{a: \"{e}x{s}\"}}"),
-            format!("{{\"{e}x{s}\": y}}"),
-            format!("!!str \"{e}x{s}\""),
-            format!("&a \"{e}x{s}\""),
-            "*a".into(),
-            format!("[{{a: \"{e}x{s}\"}}]"),
-            format!("[\"{e}x{s}\"]"),
-            format!("[\"a{e},b\"]"),
-            format!("[a: \"{e}x{s}\"]"),
-            format!("[\"{e}x{s}\", y]"),
-            format!("\"{e}x{s}"),
-            format!("'{e}x{s}"),
-            format!("\"a\\\" {e}x{s}"),
-            format!("\"a\" {e}x{s}"),
-            "[a,".into(),
-            "{a: b".into(),
-            "%YAML 1.1".into(),
-            "@reserved".into(),
-            "`backtick".into(),
-            ": leading".into(),
-            "? leading".into(),
-            "- leading".into(),
-            "# leading".into(),
-            ">".into(),
-            "|".into(),
-            "|2".into(),
-        ];
-        // Every position this reader reads a value in, and one deeper than it
-        // reads at all.
-        let positions: Vec<fn(&str, &str) -> String> = vec![
-            |k, v| format!("{k}: {v}"),
-            |k, v| format!("outer:\n  {k}: {v}"),
-            |k, v| format!("outer:\n  - {v}\n  # {k}"),
-            |k, v| format!("outer:\n  a:\n    {k}: {v}"),
-            |k, v| format!("outer:\n  a:\n    {k}: {v}\n  {k}: plain"),
-            |k, v| format!("{k}: {v}\nafter: plain"),
-        ];
-        let keys = ["license", "allowed-tools", "hooks", "metadata"];
+    /// The list cannot quietly go short. [`Family::all`] is built by walking
+    /// [`Family::then`], which matches exhaustively, so a variant added here
+    /// does not compile until it has a place in the chain — and [`judge`]
+    /// then refuses a corpus that does not produce every family in it. That
+    /// pair is the "a production nobody thought of" cure: thinking of one is
+    /// the compiler's job now.
+    #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+    enum Family {
+        Plain,
+        Single,
+        Double,
+        RunOn,
+        Literal,
+        Folded,
+        FlowSeq,
+        FlowMap,
+        BlockSeq,
+        BlockMap,
+        Tag,
+        Anchor,
+        Alias,
+        Merge,
+    }
 
-        let mut accepted = 0usize;
-        let mut refused = 0usize;
-        let mut differentials = 0usize;
-        let mut differentials_refused = 0usize;
+    /// What a family can hold, which is what makes the product a **grammar**
+    /// rather than a blind cross product: block content is not legal inside a
+    /// flow collection, so those trees are never spelt.
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    enum Holds {
+        /// A scalar: nothing.
+        Nothing,
+        /// A flow collection, which may hold only a node spelt on one line.
+        Inline,
+        /// A block collection, which may hold anything.
+        Anything,
+    }
 
-        for value in &values {
-            for position in &positions {
-                for key in keys {
-                    let said = format!(
-                        "---\nname: ship-it\ndescription: Ships.\n{}\n---\n\nRun it.\n",
-                        position(key, value)
-                    );
+    /// What a family has to show for itself — **asked as a question about
+    /// characters, so neutralising the escape fails it.**
+    #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+    enum Owed {
+        /// A real reader turns the spelling into a character the spelling
+        /// does not contain. That is the whole class, so the family has to
+        /// produce at least one bundle where libyaml hands the agent a
+        /// character **nowhere in the bytes**.
+        Decodes,
+        /// No reader processes an escape in this production, so the six
+        /// characters are six characters to everybody. The family has to
+        /// produce at least one bundle `check()` **accepts** where libyaml
+        /// delivers the escape's own spelling and neither bracket — the
+        /// exemption the whole class rests on, and the control that stops the
+        /// rule from being "refuse anything with a backslash in it".
+        Literal,
+    }
 
-                    // Does any reader-disagreement exist in these bytes? Asked
-                    // before the verdict, so the count is about the corpus and
-                    // not about what the rule happened to allow through.
-                    let differs = what_libyaml_reads(&said).is_some_and(|real| {
-                        !chars_libyaml_delivers(&real)
-                            .difference(&chars_delivered(&read_frontmatter(&said).0))
-                            .collect::<String>()
-                            .is_empty()
-                    });
+    impl Family {
+        /// The next node kind, as an exhaustive match — see [`Family`] for
+        /// why the list is a chain rather than an array.
+        fn then(self) -> Option<Family> {
+            Some(match self {
+                Family::Plain => Family::Single,
+                Family::Single => Family::Double,
+                Family::Double => Family::RunOn,
+                Family::RunOn => Family::Literal,
+                Family::Literal => Family::Folded,
+                Family::Folded => Family::FlowSeq,
+                Family::FlowSeq => Family::FlowMap,
+                Family::FlowMap => Family::BlockSeq,
+                Family::BlockSeq => Family::BlockMap,
+                Family::BlockMap => Family::Tag,
+                Family::Tag => Family::Anchor,
+                Family::Anchor => Family::Alias,
+                Family::Alias => Family::Merge,
+                Family::Merge => return None,
+            })
+        }
 
-                    // `check_said` goes through `checked`, so the property is
-                    // asserted here by the same gate every other test uses.
-                    match check_said(&said) {
-                        Ok(()) => accepted += 1,
-                        Err(_) => refused += 1,
+        fn all() -> Vec<Family> {
+            let mut out = vec![Family::Plain];
+            while let Some(next) = out[out.len() - 1].then() {
+                out.push(next);
+            }
+            out
+        }
+
+        fn holds(self) -> Holds {
+            match self {
+                Family::FlowSeq | Family::FlowMap => Holds::Inline,
+                // **A tag and an anchor are node *properties*, so they take
+                // a node.** Spelling them as scalars would have been the
+                // enumerating mistake again: `!!str "…"` is one of their
+                // shapes and `!!map` over a block mapping is another, and
+                // only the product reaches the second.
+                Family::BlockSeq | Family::BlockMap | Family::Tag | Family::Anchor => {
+                    Holds::Anything
+                }
+                _ => Holds::Nothing,
+            }
+        }
+
+        /// Whether this family's own spelling fits on the line that
+        /// introduces it. A block scalar, a block collection and the merge
+        /// key all need lines of their own.
+        fn inline(self) -> bool {
+            !matches!(
+                self,
+                Family::Literal
+                    | Family::Folded
+                    | Family::Merge
+                    | Family::RunOn
+                    | Family::BlockSeq
+                    | Family::BlockMap
+            )
+        }
+
+        fn owed(self) -> Owed {
+            match self {
+                // YAML processes no escape in any of these, which is exactly
+                // why the rule exempts them — measured in pyyaml, Psych and
+                // Claude Code 2.1.273.
+                Family::Plain | Family::Single | Family::Literal | Family::Folded => Owed::Literal,
+                // A double-quoted scalar decodes; a collection can hold one;
+                // a tag, an anchor and an alias all carry one through.
+                Family::Double
+                | Family::RunOn
+                | Family::FlowSeq
+                | Family::FlowMap
+                | Family::BlockSeq
+                | Family::BlockMap
+                | Family::Tag
+                | Family::Anchor
+                | Family::Alias
+                | Family::Merge => Owed::Decodes,
+            }
+        }
+    }
+
+    /// A node: a family and what it holds. The corpus is **every tree of
+    /// these up to [`DEEPEST`]**, which is the product the shape-by-shape
+    /// list never took.
+    #[derive(Clone, Debug)]
+    struct Node {
+        family: Family,
+        holds: Option<Box<Node>>,
+    }
+
+    impl Node {
+        fn inline(&self) -> bool {
+            self.family.inline() && self.holds.as_ref().is_none_or(|c| c.inline())
+        }
+
+        fn depth(&self) -> usize {
+            1 + self.holds.as_ref().map_or(0, |c| c.depth())
+        }
+
+        fn families(&self) -> BTreeSet<Family> {
+            let mut out = BTreeSet::from([self.family]);
+            if let Some(c) = &self.holds {
+                out.extend(c.families());
+            }
+            out
+        }
+    }
+
+    /// Three, which is **one deeper than this reader models** — so the depth
+    /// axis crosses the cut rather than stopping short of it.
+    const DEEPEST: usize = 3;
+
+    fn trees() -> Vec<Node> {
+        let scalars: Vec<Node> = Family::all()
+            .into_iter()
+            .filter(|f| f.holds() == Holds::Nothing)
+            .map(|f| Node {
+                family: f,
+                holds: None,
+            })
+            .collect();
+        let collections: Vec<Family> = Family::all()
+            .into_iter()
+            .filter(|f| f.holds() != Holds::Nothing)
+            .collect();
+
+        let mut out = scalars.clone();
+        let mut last = scalars;
+        for _ in 1..DEEPEST {
+            let mut next = Vec::new();
+            for &c in &collections {
+                for child in &last {
+                    // Block content is not legal inside a flow collection,
+                    // and a node carries at most one tag and at most one
+                    // anchor. Those are the only restrictions: everything
+                    // else the product produces is spelt.
+                    if c.holds() == Holds::Inline && !child.inline() {
+                        continue;
                     }
-                    if differs {
-                        differentials += 1;
-                        if check_said(&said).is_err() {
-                            differentials_refused += 1;
+                    if matches!(c, Family::Tag | Family::Anchor) && c == child.family {
+                        continue;
+                    }
+                    next.push(Node {
+                        family: c,
+                        holds: Some(Box::new(child.clone())),
+                    });
+                }
+            }
+            out.extend(next.iter().cloned());
+            last = next;
+        }
+        out
+    }
+
+    /// The escape axis. `Live` is the class. `Absent` is the twin with
+    /// nothing to decode, which is what makes an accepting control a
+    /// control. `Benign` is the security review's own mutation — the escape
+    /// replaced by ordinary letters — which left the old corpus with 186
+    /// differentials and a passing test, and which [`judge`] has to fail on.
+    #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+    enum Esc {
+        Live,
+        Absent,
+        Benign,
+    }
+
+    impl Esc {
+        fn payload(self) -> &'static str {
+            match self {
+                Esc::Live => "\\u003cx\\u003e",
+                Esc::Absent => "ok",
+                Esc::Benign => "QxZ",
+            }
+        }
+    }
+
+    /// The characters `<` is spelled with. An accepting control has to
+    /// show libyaml delivering **these** rather than a `<`, or the exemption
+    /// is being asserted about a payload that no longer carries an escape.
+    const SPELLING: [char; 5] = ['\\', 'u', '0', '3', 'c'];
+
+    /// The text of a node: what goes on the line that introduces it, and the
+    /// lines underneath, which sit at column `at`.
+    struct Spelt {
+        head: String,
+        under: Vec<String>,
+    }
+
+    fn spell(node: &Node, at: usize, esc: Esc) -> Spelt {
+        let pad = " ".repeat(at);
+        let x = esc.payload();
+        let line = |head: String| Spelt {
+            head,
+            under: Vec::new(),
+        };
+        // A collection's child sits two columns in from the collection.
+        let inner = || {
+            spell(
+                node.holds.as_deref().expect("a collection holds a node"),
+                at + 2,
+                esc,
+            )
+        };
+        // `- ` and `a:` carry the child's first line when the child has one
+        // to give, which is YAML's compact form and the spelling that was
+        // live: `- a: "…"` is a block mapping as a sequence entry.
+        let compact = |open: &str, child: Spelt| {
+            let mut out = Vec::new();
+            if !child.head.is_empty() {
+                out.push(format!("{pad}{open} {}", child.head));
+                out.extend(child.under);
+                return out;
+            }
+            let mut under = child.under.into_iter();
+            let first = under.next().expect("a block node has a first line");
+            if open == "-" {
+                out.push(format!("{pad}- {}", first.trim_start()));
+            } else {
+                // After a `key:` the splice is not legal YAML, so the child
+                // starts on the next line.
+                out.push(format!("{pad}{open}"));
+                out.push(first);
+            }
+            out.extend(under);
+            out
+        };
+
+        match node.family {
+            Family::Plain => line(x.to_string()),
+            Family::Single => line(format!("'{x}'")),
+            Family::Double => line(format!("\"{x}\"")),
+            Family::Alias => line("*anc".to_string()),
+            // **A double-quoted scalar that does not close where it looks
+            // like it does** — `\"` is an escaped quote, so the scalar runs
+            // on and a real reader folds the *following key* into it. The
+            // closing line is deliberately at the **left margin and spelled
+            // as a key**, which is what made this the one shape that
+            // defeated both halves of the first remediation at once: every
+            // line reads, so the line clause was silent, and the value ends
+            // on a quote, so the value clause was too. An indented
+            // continuation is a line this reader cannot read and the line
+            // rule refuses it — see the control in
+            // `a_value_a_real_reader_decodes_and_this_one_did_not_is_refused`.
+            Family::RunOn => Spelt {
+                head: "\"a\\\"".to_string(),
+                under: vec![format!("after: {x}\"")],
+            },
+            Family::Literal => Spelt {
+                head: "|".to_string(),
+                under: vec![format!("{pad}{x}")],
+            },
+            Family::Folded => Spelt {
+                head: ">".to_string(),
+                under: vec![format!("{pad}{x}")],
+            },
+            // A mapping whose only entry is the merge key, which is how
+            // YAML 1.1 spells "and everything that one has".
+            Family::Merge => Spelt {
+                head: String::new(),
+                under: vec![format!("{pad}<<: *anc")],
+            },
+            // A node property sits in front of the node it belongs to and
+            // adds no indentation, so its child is spelt at the **same**
+            // column — which is what makes `!!map` over a block mapping
+            // come out as legal YAML rather than as a tag over nothing.
+            Family::Tag | Family::Anchor => {
+                let child = node.holds.as_deref().expect("a node property has a node");
+                let mark = if node.family == Family::Anchor {
+                    "&anc".to_string()
+                } else {
+                    // The tag has to match the node, or libyaml refuses the
+                    // document and the family measures nothing.
+                    match child.family {
+                        Family::FlowMap | Family::BlockMap | Family::Merge => "!!map",
+                        Family::FlowSeq | Family::BlockSeq => "!!seq",
+                        _ => "!!str",
+                    }
+                    .to_string()
+                };
+                let child = spell(child, at, esc);
+                if child.head.is_empty() {
+                    Spelt {
+                        head: mark,
+                        under: child.under,
+                    }
+                } else {
+                    Spelt {
+                        head: format!("{mark} {}", child.head),
+                        under: child.under,
+                    }
+                }
+            }
+            Family::FlowSeq => line(format!("[{}]", inner().head)),
+            Family::FlowMap => line(format!("{{a: {}}}", inner().head)),
+            Family::BlockSeq => Spelt {
+                head: String::new(),
+                under: compact("-", inner()),
+            },
+            Family::BlockMap => Spelt {
+                head: String::new(),
+                under: compact("a:", inner()),
+            },
+        }
+    }
+
+    /// Where in the frontmatter the node sits — the position axis, taken
+    /// across every tree rather than against the shapes that have bitten.
+    #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+    enum Pos {
+        /// After a top-level key.
+        Top,
+        /// After a key one level in.
+        Nested,
+        /// A block sequence entry — **the position the seventh shape lived
+        /// in**, and the one the `Flow`-only reading of `: ` left open.
+        Entry,
+        /// A top-level key with a sibling after it, so the container the key
+        /// holds is flushed by the next key rather than by the end of frame.
+        Sibling,
+        /// Two levels in, with a sibling of the same name *after* it — the
+        /// overwrite that hid a decoded `<` from every rule, and the shape
+        /// the character half of the property found.
+        Overwritten,
+        /// A **quoted key**, which libyaml reads and this reader does not.
+        /// Crossing the key spellings with every node is what keeps the two
+        /// classes from being closed one at a time: a key this reader cannot
+        /// read is refused whatever value it carries, and the measurement
+        /// that this position is load-bearing is that loosening
+        /// [`key_colon`] to take any characters leaves the corpus red.
+        QuotedKey,
+        /// `key : value`, one space before the colon — the spelling that was
+        /// a live injection route for a round longer than the frame rule's
+        /// three clauses were.
+        SpacedKey,
+    }
+
+    impl Pos {
+        fn all() -> [Pos; 7] {
+            [
+                Pos::Top,
+                Pos::Nested,
+                Pos::Entry,
+                Pos::Sibling,
+                Pos::Overwritten,
+                Pos::QuotedKey,
+                Pos::SpacedKey,
+            ]
+        }
+    }
+
+    fn place(pos: Pos, key: &str, node: &Node, esc: Esc) -> Vec<String> {
+        // A node after `prefix`, with its own lines at column `at`.
+        let after = |prefix: String, at: usize| {
+            let s = spell(node, at, esc);
+            let mut out = Vec::new();
+            if s.head.is_empty() {
+                // A block collection or the merge key: nothing may follow
+                // the colon.
+                out.push(prefix.trim_end().to_string());
+            } else {
+                out.push(format!("{prefix}{}", s.head));
+            }
+            out.extend(s.under);
+            out
+        };
+        match pos {
+            Pos::Top => after(format!("{key}: "), 2),
+            Pos::Nested => {
+                let mut out = vec!["outer:".to_string()];
+                out.extend(after(format!("  {key}: "), 4));
+                out
+            }
+            Pos::Entry => {
+                let s = spell(node, 4, esc);
+                let mut out = vec![format!("{key}:")];
+                if s.head.is_empty() {
+                    let mut under = s.under.into_iter();
+                    let first = under.next().expect("a block node has a first line");
+                    out.push(format!("  - {}", first.trim_start()));
+                    out.extend(under);
+                } else {
+                    out.push(format!("  - {}", s.head));
+                    out.extend(s.under);
+                }
+                out
+            }
+            Pos::Sibling => {
+                let mut out = after(format!("{key}: "), 2);
+                out.push("after: plain".to_string());
+                out
+            }
+            Pos::Overwritten => {
+                let mut out = vec!["outer:".to_string(), "  a:".to_string()];
+                out.extend(after(format!("    {key}: "), 6));
+                out.push("  a: plain".to_string());
+                out
+            }
+            Pos::QuotedKey => after(format!("\"{key}\": "), 2),
+            Pos::SpacedKey => after(format!("{key} : "), 2),
+        }
+    }
+
+    /// One generated bundle and what the two readers made of it.
+    struct Bundle {
+        said: String,
+        families: BTreeSet<Family>,
+        depth: usize,
+        pos: Pos,
+        esc: Esc,
+        accepted: bool,
+        /// Characters libyaml hands the agent that **this reader never saw**
+        /// — the security differential, and what [`checked`] refuses to
+        /// accept alongside.
+        unseen: BTreeSet<char>,
+        /// Characters libyaml hands the agent that **the bytes do not
+        /// spell**. That is a real reader *decoding*, which is the class
+        /// itself — and it is the question that an escape replaced by
+        /// ordinary letters cannot answer yes to.
+        unspelt: BTreeSet<char>,
+        /// Every character libyaml hands the agent.
+        theirs: BTreeSet<char>,
+    }
+
+    /// Every bundle the grammar produces, over the given escape axis.
+    ///
+    /// `check_said` goes through [`checked`], so the property is asserted
+    /// about each of these by the same gate every other test uses — this
+    /// function only records what happened, so that [`judge`] can say it per
+    /// family.
+    fn grown(escapes: &[Esc]) -> Vec<Bundle> {
+        // The keys differ in what else they mean — `allowed-tools` and
+        // `hooks` feed the risk scan, `metadata` is where the standard puts
+        // a version — and none of them changes the production, which is the
+        // point of taking them as an axis rather than picking one.
+        let keys = ["license", "allowed-tools", "hooks", "metadata"];
+        let mut out = Vec::new();
+        for node in trees() {
+            let families = node.families();
+            // An alias and a merge key need an anchor to point at, and the
+            // anchor's own line is refused by the complement rule for its
+            // `&` — so those two families are refused over-determinedly.
+            // **That is a conclusion rather than a weakness**: YAML has no
+            // way to define an anchor that this reader will read, so an
+            // alias can never reach a reading here. It is also the one place
+            // the corpus is measurably blind — dropping `*` from
+            // `INDICATORS` leaves it green, because the `&` refuses first.
+            let anchored = families.contains(&Family::Alias) || families.contains(&Family::Merge);
+            for &esc in escapes {
+                for pos in Pos::all() {
+                    for key in keys {
+                        let mut lines = vec![
+                            "name: ship-it".to_string(),
+                            "description: Ships.".to_string(),
+                        ];
+                        if anchored {
+                            lines.push(format!("anchored: &anc {{a: \"{}\"}}", esc.payload()));
                         }
+                        lines.extend(place(pos, key, &node, esc));
+                        let said = format!("---\n{}\n---\n\nRun it.\n", lines.join("\n"));
+
+                        let (fm, _, _) = read_frontmatter(&said);
+                        let ours = chars_delivered(&fm);
+                        let spelt: BTreeSet<char> =
+                            said.chars().filter(|c| !c.is_whitespace()).collect();
+                        let (theirs, unseen, unspelt) = match what_libyaml_reads(&said) {
+                            Some(real) => {
+                                let theirs = chars_libyaml_delivers(&real);
+                                let unseen = theirs.difference(&ours).copied().collect();
+                                let unspelt = theirs.difference(&spelt).copied().collect();
+                                (theirs, unseen, unspelt)
+                            }
+                            None => Default::default(),
+                        };
+
+                        out.push(Bundle {
+                            accepted: check_said(&said).is_ok(),
+                            said,
+                            families: families.clone(),
+                            depth: node.depth(),
+                            pos,
+                            esc,
+                            unseen,
+                            unspelt,
+                            theirs,
+                        });
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// **The verdict on a corpus, one family at a time.**
+    ///
+    /// This is the half the security review asked for and the half that was
+    /// missing. The old gate asserted an aggregate floor — *the corpus
+    /// contains more than fifty disagreements* — and that pins "the corpus is
+    /// interesting" while being unable to pin "the corpus is interesting
+    /// about the thing the rule is for". Measured: taking the entire escape
+    /// class out of the generator left **186** differentials and a passing
+    /// test, because the three-deep positions manufacture a disagreement
+    /// from any value at all. A lost family does not trip an aggregate
+    /// floor, and that is the gap the seventh shape lived in.
+    ///
+    /// So every family is asked for its own evidence, and the evidence is
+    /// stated in **characters** rather than in shapes:
+    ///
+    /// - it is produced at all, in every position, at more than one depth,
+    ///   and with the escape and without it;
+    /// - nothing in it is accepted while libyaml hands the agent a character
+    ///   this reader never saw;
+    /// - and it owes either a **decode** — libyaml delivering a character
+    ///   nowhere in the bytes — or an **exemption**, an accepted bundle where
+    ///   libyaml delivers the escape's own spelling and neither bracket.
+    ///
+    /// A `Result` rather than assertions, because the two tests below assert
+    /// that it **fails**: once per family with that family removed, and once
+    /// with the escape replaced by ordinary letters. A gate nobody has seen
+    /// fail is a gate nobody has tested.
+    fn judge(corpus: &[Bundle]) -> Result<(), String> {
+        let mut wrong: Vec<String> = Vec::new();
+        let accepted = corpus.iter().filter(|b| b.accepted).count();
+        let refused = corpus.len() - accepted;
+        if accepted == 0 || refused == 0 {
+            wrong.push(format!(
+                "the corpus has to produce both answers: {accepted} accepted, {refused} refused"
+            ));
+        }
+
+        for f in Family::all() {
+            let mine: Vec<&Bundle> = corpus.iter().filter(|b| b.families.contains(&f)).collect();
+            if mine.is_empty() {
+                wrong.push(format!(
+                    "{f:?}: the grammar does not produce this node kind at all, so the \
+                     property is asserted about nothing in it"
+                ));
+                continue;
+            }
+            let positions: BTreeSet<Pos> = mine.iter().map(|b| b.pos).collect();
+            if positions.len() != Pos::all().len() {
+                wrong.push(format!(
+                    "{f:?}: only reaches {positions:?}, so the position axis is not crossed \
+                     with it"
+                ));
+            }
+            if mine.iter().map(|b| b.depth).collect::<BTreeSet<_>>().len() < 2 {
+                wrong.push(format!("{f:?}: only occurs at one depth"));
+            }
+            if mine.iter().map(|b| b.esc).collect::<BTreeSet<_>>().len() < 2 {
+                wrong.push(format!(
+                    "{f:?}: is not generated both with an escape and without"
+                ));
+            }
+            if let Some(loose) = mine.iter().find(|b| b.accepted && !b.unseen.is_empty()) {
+                wrong.push(format!(
+                    "{f:?}: accepted a bundle where libyaml hands the agent {:?} and this \
+                     reader never saw it:\n{}",
+                    loose.unseen.iter().collect::<String>(),
+                    loose.said
+                ));
+            }
+            match f.owed() {
+                Owed::Decodes => {
+                    if !mine.iter().any(|b| !b.unspelt.is_empty()) {
+                        wrong.push(format!(
+                            "{f:?}: a real reader never decodes anything into a character the \
+                             bytes do not spell anywhere in this family, so nothing here is \
+                             about the class — an escape that is not an escape would pass"
+                        ));
+                    }
+                }
+                Owed::Literal => {
+                    let exempt = mine.iter().any(|b| {
+                        b.accepted
+                            && b.unspelt.is_empty()
+                            && SPELLING.iter().all(|c| b.theirs.contains(c))
+                            && !b.theirs.contains(&'<')
+                            && !b.theirs.contains(&'>')
+                    });
+                    if !exempt {
+                        wrong.push(format!(
+                            "{f:?}: no accepted bundle where libyaml delivers the escape's own \
+                             spelling and neither bracket, so the exemption this family is \
+                             owed is not being exercised"
+                        ));
                     }
                 }
             }
         }
 
-        // The corpus has to be big enough and interesting enough to mean
-        // something. These are floors, not the measured numbers, so that an
-        // added shape does not have to come with an edited constant.
+        if wrong.is_empty() {
+            Ok(())
+        } else {
+            Err(wrong.join("\n"))
+        }
+    }
+
+    /// **The property, asked of a corpus generated from YAML's node grammar.**
+    ///
+    /// Not of the payloads somebody wrote down, and the reason is a
+    /// measurement rather than a worry. Each of the last three rounds ended
+    /// with a value shape found by hand *after* the previous fix, and the
+    /// seventh was found from parts the old generator already carried —
+    /// `[a: "…"]` and the `- ` position, never multiplied. With the
+    /// block-context `: ` production reverted, the shape-7 regression test
+    /// fails and the old generator stayed **green**; this one does not.
+    ///
+    /// The corpus is the cross product of [`Family`] × [`DEEPEST`] depths ×
+    /// [`Pos`] × [`Esc`] × four keys — **12,544 bundles**, 432 accepted,
+    /// 12,112 refused, 6,499 where libyaml hands the agent a character this
+    /// reader never saw and 2,136 where it decodes one the bytes do not
+    /// spell. The verdict is [`judge`], which asks each family for its own
+    /// evidence rather than counting disagreements over all of them.
+    ///
+    /// **Where this stops, named rather than implied.** Fifteen
+    /// clause-removing mutations of the reader were run against it and ten
+    /// are caught, including every one of the six shapes this class has
+    /// produced. The five that are not, each measured rather than reasoned:
+    ///
+    /// | mutation | why the corpus is silent |
+    /// | --- | --- |
+    /// | `plain`'s flow-indicator clause removed | libyaml refuses every document the clause's absence would let through — measured on six shapes — so there is no reading to disagree with |
+    /// | `*` dropped from `INDICATORS` | an alias needs an anchor, and the anchor's `&` is refused by the same clause, so an alias can never reach a reading here: [`Family::Anchor`] is refused in all 4,032 of its bundles |
+    /// | `closes`'s text-after-a-close clause removed | libyaml refuses the document; the claim about that shape was always the weaker one and says so |
+    /// | `closes`'s `''` clause removed | strictly *more* refusing, so no disagreement can appear — the cost is pinned by the `'it''s fine'` control instead |
+    /// | `list_item` taking a `-` with nothing after it | the mutation makes this reader read and *decode* what libyaml keeps as spelling, which is the direction no rule is blind to |
+    ///
+    /// The frame and the key classes have their own grammar and their own
+    /// two oracles — assertions 1 and 2 in [`checked`]. This is the value
+    /// grammar, and [`Pos::QuotedKey`] and [`Pos::SpacedKey`] are where the
+    /// two meet.
+    #[test]
+    fn the_property_holds_over_a_generated_corpus() {
+        let corpus = grown(&[Esc::Live, Esc::Absent]);
+        // The sizes are asserted as floors rather than as the measured
+        // numbers, so that adding a production does not come with an edited
+        // constant — the per-family evidence in `judge` is the gate.
         assert!(
-            accepted > 100 && refused > 100,
-            "the corpus has to produce both answers: {accepted} accepted, {refused} refused"
+            corpus.len() > 2_000,
+            "the grammar should produce thousands of bundles, not {}",
+            corpus.len()
         );
         assert!(
-            differentials > 50,
-            "the corpus has to contain disagreements or the property is asserted about \
-             nothing: {differentials}"
+            trees().len() > 100,
+            "the node product should be the product: {}",
+            trees().len()
         );
-        assert_eq!(
-            differentials, differentials_refused,
-            "every set of bytes the two readers disagree about has to be refused"
+        if let Err(why) = judge(&corpus) {
+            panic!("{why}");
+        }
+    }
+
+    /// **Losing any one node kind fails the corpus** — which is the thing an
+    /// aggregate floor could not do.
+    ///
+    /// The security review measured the old gate both ways: a corpus that
+    /// stopped containing disagreements altogether failed loudly and
+    /// correctly, but dropping the **escape class** — the class this whole
+    /// change is about — left 186 differentials and a passing test, because
+    /// the deep positions manufacture disagreements from any value at all.
+    /// So this is the two-sided half, and it is run rather than described:
+    /// every family in turn is removed from the corpus and [`judge`] has to
+    /// refuse what is left.
+    ///
+    /// Removing a family from the generator and filtering it out of the
+    /// generated corpus are the same thing, because a family only ever
+    /// enters a bundle by being in its tree.
+    #[test]
+    fn losing_any_one_node_kind_fails_the_corpus() {
+        let corpus = grown(&[Esc::Live, Esc::Absent]);
+        for f in Family::all() {
+            let without: Vec<&Bundle> =
+                corpus.iter().filter(|b| !b.families.contains(&f)).collect();
+            let kept: Vec<Bundle> = without
+                .into_iter()
+                .map(|b| Bundle {
+                    said: b.said.clone(),
+                    families: b.families.clone(),
+                    depth: b.depth,
+                    pos: b.pos,
+                    esc: b.esc,
+                    accepted: b.accepted,
+                    unseen: b.unseen.clone(),
+                    unspelt: b.unspelt.clone(),
+                    theirs: b.theirs.clone(),
+                })
+                .collect();
+            // **The other side, and it is the whole point.** The corpus
+            // that is left still produces both answers and still contains
+            // hundreds of disagreements, so the aggregate floor the old gate
+            // used would pass it — a lost family really is invisible to a
+            // number taken over all of them.
+            let left_accepted = kept.iter().filter(|b| b.accepted).count();
+            let left_diffs = kept.iter().filter(|b| !b.unseen.is_empty()).count();
+            assert!(
+                left_accepted > 0 && kept.len() - left_accepted > 0 && left_diffs > 50,
+                "dropping {f:?} has to leave a corpus an aggregate floor would still pass, or \
+                 this is not the failure mode being tested: {left_accepted} accepted, \
+                 {left_diffs} differentials"
+            );
+            let why = judge(&kept).expect_err(
+                "dropping a family has to fail, or losing it would be absorbed rather than \
+                 reported — which is exactly how the seventh shape survived six rounds",
+            );
+            assert!(
+                why.contains(&format!("{f:?}")),
+                "and the failure has to name the family that went missing: {why}"
+            );
+        }
+    }
+
+    /// **And an escape that is not an escape fails it too** — the security
+    /// review's own mutation, run here rather than taken on trust.
+    ///
+    /// Replace `<` with ordinary letters and the corpus is still large,
+    /// still produces both answers, and still contains hundreds of
+    /// disagreements from its deep positions. The old aggregate floor passed.
+    /// Every family that owes a **decode** now has nothing to show, because
+    /// no reader turns `QxZ` into a character `QxZ` does not spell — and the
+    /// families that owe an **exemption** have nothing either, because
+    /// libyaml is no longer delivering the escape's spelling.
+    #[test]
+    fn an_escape_that_is_not_an_escape_fails_the_corpus() {
+        let benign = grown(&[Esc::Benign, Esc::Absent]);
+        assert!(
+            benign.iter().filter(|b| !b.unseen.is_empty()).count() > 50,
+            "the mutation has to leave a corpus that an aggregate floor would still pass, or \
+             this is not the measurement the review made"
+        );
+        let why = judge(&benign).expect_err("a corpus with no escape in it is about nothing");
+        // Both halves of the per-family evidence have to be what failed, not
+        // the presence or the position checks — those are a different gate.
+        assert!(
+            why.contains("a real reader never decodes") && why.contains("neither bracket"),
+            "it has to fail for the escape rather than for the shape of the corpus:\n{why}"
         );
     }
 
@@ -4857,7 +5633,7 @@ mod tests {
     /// The cost of the rule is one shape: a frontmatter nested three deep is
     /// refused, whether or not that instance carries anything, for the same
     /// reason a line this reader drops is — a parse of the frontmatter is not
-    /// evidence about the frontmatter. **0 of 57** corpus `SKILL.md` nest
+    /// evidence about the frontmatter. **0 of 87** corpus `SKILL.md` nest
     /// that deep.
     #[test]
     fn a_nesting_deeper_than_this_reader_models_is_refused() {

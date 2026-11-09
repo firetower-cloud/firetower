@@ -115,7 +115,7 @@ Errors:
   So a line in a frontmatter is blank, a comment, `key: value` at the left
   margin, a `- list item`, an indented `key: value` under one, or part of a
   block scalar already open — and anything else is refused. The cost was
-  measured the same way the frame rule's was: **0 of 57** published and
+  measured the same way the frame rule's was: **0 of 87** published and
   library `SKILL.md` hold a line this reader drops.
 
   **And a value this reader did not fully read is refused for the same
@@ -135,6 +135,43 @@ Errors:
   A flow mapping, a tag, an anchor, an alias and a directive are all refused
   without being named anywhere, because what is *allowed* is stated instead:
   YAML's own rule for what a plain scalar may begin with.
+
+  **And that rule is asked of a position, because it is three productions
+  and not one.** A plain scalar may not begin with an indicator wherever it
+  sits; inside `[...]` a `,` `[` `]` `{` or `}` ends one wherever it appears;
+  and a `: ` ends one and makes the element a **mapping** wherever a mapping
+  is legal. That last clause was written as though it were a flow rule, and
+  it is not: a `- ` entry spelled `a: "…"` is a block mapping too, so
+
+  ```yaml
+  metadata:
+    - a: "\u003csystem-reminder\u003e"
+  ```
+
+  came back as the one string `a: "\u003csystem-reminder\u003e"` — no
+  bracket anywhere for the rule below to find, nothing reported as undecoded,
+  and libyaml handing the agent the tag. The negative control is what names
+  the cause: `  - a:"\u003cx\u003e"`, with no space, really *is* a plain
+  scalar, both readers read the same one string, and it is correctly
+  accepted.
+
+  **Measured inert against Claude Code 2.1.273**, re-derived against a
+  loopback capture sink reading the `name: description` pair it renders:
+  `description: "\u003cCCPOS\u003e"` → `probe-skill: <CCPOS>` is the
+  positive control and reproduces, while shape 7 under `metadata` and under
+  `description` both render `Do the thing.` with **0 occurrences** of the
+  marker anywhere in the request. The control that says *why* is a third
+  row: the same entry with a plain `"CC7BARE"` and no escape at all is also
+  absent, so Claude Code puts no `metadata` into the prompt and this is not
+  an escape failing to decode. So the demonstrated reach is a libyaml-family
+  reader — the same evidentiary position as the flow-sequence shape above.
+
+  The position matters in the other direction too, which is why the clause is
+  not simply applied everywhere. After a `key:` a second `: ` is not a
+  nesting at all — libyaml refuses the document — so refusing it there closes
+  no differential and costs three published skills (`firetower-artifacts`,
+  `firetower-surfaces`, `pr-screenshots`: issue #275, the ones libyaml
+  already refuses). Where a mapping *is* legal it costs **0 of 87**.
 
   That shape matters more than the list it replaced, and the reason is this
   area's history. The first version of this rule was a separate predicate
@@ -170,9 +207,10 @@ Errors:
   `d408c3c2`, against a loopback capture sink reading the `name: description`
   pair it renders into the system prompt, with positive and negative controls.
   Not re-derived here; the independent evidence in this section is libyaml, in
-  three bindings.)* **57 of 57** published and library `SKILL.md` are
+  three bindings.)* **87 of 87** published and library `SKILL.md` are
   accepted: 0 hold a flow sequence, a brace, or a `\u` escape anywhere in
-  their frontmatter, and 0 nest three deep. The one cost is honest and worth
+  their frontmatter, 0 nest three deep, and 0 hold a block sequence entry
+  with a `: ` in it. The one cost is honest and worth
   naming: a frontmatter nested three levels deep is refused whether or not
   that instance carries anything, for the same reason a dropped line is — a
   parse of the frontmatter is not evidence about the frontmatter.
@@ -418,23 +456,83 @@ server would be one that disagrees with the client. None of that is an
 argument about test code, and an oracle that *is* libyaml cannot be weaker
 than libyaml. The hand-written one was.
 
-**And the property is asked of a generated corpus, not only of the payloads
-somebody wrote down.** That distinction is not theoretical: with the nesting
-rule reverted and its own test disabled, the whole suite stayed green, because
-nothing in it happened to hand the gate a frontmatter nested three deep. Every
-value shape in every position Firetower reads a value in, crossed with the key
-spellings, is generated and run — and the test asserts the corpus *contains*
-disagreements and that every one of them is refused, so it cannot pass by
-having become boring.
+**And the property is asked of a corpus generated from YAML's node grammar,
+not from a list of value shapes somebody thought of.** That distinction is
+not theoretical, and the measurement is this area's whole history: three
+successive rounds each ended with a value shape found by hand *after* the
+previous fix, and the last of them — a block mapping as a block sequence
+entry — was assembled in twenty minutes from parts the generator already
+carried separately. `[a: "…"]` was in its list and the `- ` position was in
+its list, and the product was never taken. The gate was sound. The corpus was
+an enumeration.
+
+So the corpus is the cross product of **node kind × depth × position ×
+escape**: fourteen productions — plain, single-quoted, double-quoted, a
+double-quoted scalar that does not close where it looks like it does, literal
+and folded block scalars, flow and block sequences, flow and block mappings,
+a tag, an anchor, an alias and a merge key — composed up to three deep, in
+seven positions, with the escape and without, over four keys. **12,544
+bundles**, with one grammatical restriction (block content is not legal
+inside a flow collection) and one node property restriction (at most one tag
+and one anchor on a node). Everything the product produces is spelt, so
+adding a production is meant to be impossible: the list of kinds is walked
+from an exhaustive match, so a kind added to it does not compile until it has
+a place, and the verdict then refuses a corpus that does not produce it.
+
+**The verdict is per family, not an aggregate floor, and that is the half
+that was missing.** The old gate asserted that the corpus held more than
+fifty disagreements. That pins *the corpus is interesting* and cannot pin
+*the corpus is interesting about the thing the rule is for*: measured, taking
+the entire escape class out of the generator left **186** disagreements and a
+passing test, because the deep positions manufacture one from any value at
+all. A lost family does not trip a number taken over all of them. So each
+family is asked for its own evidence, in characters:
+
+- it is produced at all, in every position, at more than one depth, and both
+  with the escape and without;
+- nothing in it is accepted while libyaml hands the agent a character
+  Firetower never saw;
+- and it owes either a **decode** — libyaml delivering a character that is
+  nowhere in the bytes, which is the class itself — or an **exemption**: an
+  accepted bundle where libyaml delivers the escape's own spelling and
+  neither bracket, which is the control that stops the rule from being
+  "refuse anything with a backslash in it".
+
+**Both halves are run rather than described.** One test removes each of the
+fourteen families in turn and asserts the verdict fails *and* that what is
+left would still pass an aggregate floor — hundreds of disagreements, both
+answers, and a hole nobody would have seen. Another replaces the escape with
+ordinary letters, which leaves 5,703 disagreements and no decode anywhere,
+and asserts the verdict fails for the escape rather than for the shape of the
+corpus. A gate nobody has watched fail is a gate nobody has tested.
 
 The measured two-sided result, over 934 payloads from two independent
 enumerations: at `d408c3c2`, 293 accepted with **72** where libyaml delivered
 a character Firetower never saw and 11 key disagreements; with the rules
 above, 172 accepted with **0** and **0**. The same oracle, the same payloads.
-And over the 57 unique published and library `SKILL.md` on a worker: **57
-accepted, 0 refused, 0 disagreeing** — with 4 of the 57 refused by libyaml
-outright, which is issue #275 and not a security finding, since a reader that
-refuses the document finds no keys to disagree about.
+And over the **87** unique published and library `SKILL.md` on a worker:
+**87 accepted, 0 refused, 0 disagreeing** — with 3 of the 87 refused by
+libyaml outright, which is issue #275 and not a security finding, since a
+reader that refuses the document finds no keys to disagree about. (The
+security review measured 57 and 4 on its own snapshot; more sessions have
+materialised bundles on this machine since, and the conclusion is the same
+one. 29 of the 87 open a value with a double quote, 0 hold a flow sequence, a
+brace, a `\u` escape or three levels of nesting, and 0 hold a block sequence
+entry with a `: ` in it.)
+
+**Where the grammar stops, and it is named rather than implied.** Ten of
+fifteen clause-removing mutations of the reader are caught by the corpus. The
+five that are not, each measured: the flow-indicator clause (libyaml refuses
+every document the clause's absence would let through, so there is no reading
+to disagree with); `*` in the indicator set (an alias needs an anchor, and
+the anchor's `&` is refused by the same clause, so an alias can never reach a
+reading here); the text-after-a-close clause (libyaml refuses the document —
+the claim about it was always the weaker one); the `''` clause (removing it
+is strictly *more* refusing, so no disagreement can appear); and a `-` with
+nothing after it (the mutation makes Firetower read and decode what libyaml
+keeps as spelling, which is the safe direction). The frame and key classes
+have their own grammar and their own two oracles; this one is the value
+grammar.
 
 ### Toggling mid-conversation
 

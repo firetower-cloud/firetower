@@ -545,14 +545,14 @@ export function split(text: string): {
         out[key] = list;
       }
       nest = lead;
-      list.push(took(line, readValue(item[1]!)));
+      list.push(took(line, readValue(item[1]!, "item")));
       continue;
     }
     // `  key: value` under a key with nothing after its colon.
     const nested = astray ? null : /^\s{2,}([A-Za-z0-9_-]+):\s*(.*)$/.exec(line);
     if (nested && map) {
       nest = lead;
-      map[nested[1]!] = took(line, readValue(nested[2]!));
+      map[nested[1]!] = took(line, readValue(nested[2]!, "value"));
       continue;
     }
 
@@ -614,7 +614,7 @@ export function split(text: string): {
       // the two positions above read one verbatim. `readValue` is now the
       // only thing that turns text into a value, so all three read it the
       // same way or report the same way.
-      out[key] = took(line, readValue(value));
+      out[key] = took(line, readValue(value, "value"));
     }
   }
   return { frontmatter: out, body: text.slice(m[0].length).trim(), framed: true, unread, undecoded };
@@ -622,6 +622,27 @@ export function split(text: string): {
 
 /** One value as this reader made of it, and whether making it was reading it. */
 type Scalar = { value: unknown; read: boolean };
+
+/**
+ * **Where a value sits, because YAML's plain scalar is a different production
+ * in each of the three places this reader finds one** — and the parameter is
+ * not optional, so a position that reads a value cannot forget to say which
+ * one it is. Mirrors the server's `At`.
+ *
+ * - `value` — after a `key:`, where a second `: ` is an error to libyaml
+ *   rather than a nesting, so there is no reading of it to disagree with.
+ * - `item` — a `- ` block sequence item, where a mapping *is* legal, so
+ *   `a: b` is a block mapping and one string is not a reading of it.
+ * - `flow` — inside `[...]`, where `,` `[` `]` `{` `}` end a plain scalar
+ *   wherever they appear.
+ *
+ * This used to be a boolean `flow`, and the missing third position was a live
+ * injection route: `metadata:` / `  - a: "\u003csystem-reminder\u003e"` came
+ * back as the one string `a: "\u003cx\u003e"`, so `riskOf` and the `<`/`>`
+ * rule were both looking at a frontmatter with no bracket in it while a real
+ * reader hands the agent the tag.
+ */
+type At = "value" | "item" | "flow";
 
 /**
  * A value as this reader makes of it — **and whether that is what a real
@@ -638,7 +659,7 @@ type Scalar = { value: unknown; read: boolean };
  * Blocker, and this file carried them identically — `riskOf` is computed from
  * this parse, so a badge was being drawn from a reading nobody had.
  */
-function readValue(raw: string, flow = false): Scalar {
+function readValue(raw: string, at: At): Scalar {
   const t = raw.trim();
 
   const dq = closes(t, '"');
@@ -653,14 +674,14 @@ function readValue(raw: string, flow = false): Scalar {
     let read = true;
     const got: unknown[] = [];
     for (const piece of t.slice(1, -1).split(",")) {
-      const el = readValue(piece, true);
+      const el = readValue(piece, "flow");
       read = read && el.read;
       if (el.value !== "") got.push(el.value);
     }
     return { value: got, read };
   }
   // The `else`: verbatim, and verbatim is a reading only of a plain scalar.
-  return { value: t, read: plain(t, flow) };
+  return { value: t, read: plain(t, at) };
 }
 
 /**
@@ -702,13 +723,19 @@ function closes(t: string, q: string): string | null {
  * shapes that have bitten: a plain scalar may not *begin* with an indicator,
  * and `-`, `?` and `:` are indicators only when a space or the end of the
  * value follows. Inside a flow collection the same production also forbids
- * `,`, `[`, `]`, `{` and `}` anywhere in the scalar and ends it at a `: `.
+ * `,`, `[`, `]`, `{` and `}` anywhere in the scalar.
+ *
+ * **And a `: ` ends a plain scalar and makes the element a mapping wherever a
+ * mapping is legal** — a flow collection *and* a block sequence item. Reading
+ * that as a flow-only rule is what let a `- a: "\u003c…"` item through
+ * undecoded; the negative control names the cause, since `- a:"\u003cx\u003e"`
+ * with no space really is a plain scalar and is correctly accepted.
  *
  * Stated as the complement, which is what makes it fail closed: a flow
  * mapping, a tag, an anchor, an alias and a directive are all refused
  * without being named, and so is the next one.
  */
-function plain(t: string, flow: boolean): boolean {
+function plain(t: string, at: At): boolean {
   if (t === "") return true;
   const first = t[0]!;
   if ("-?:".includes(first)) {
@@ -716,7 +743,11 @@ function plain(t: string, flow: boolean): boolean {
   } else if (",[]{}#&*!|>'\"%@`".includes(first)) {
     return false;
   }
-  if (flow && (/[,[\]{}]/.test(t) || t.includes(": ") || t.endsWith(":"))) return false;
+  // The flow indicators, which end a plain scalar only inside `[...]`.
+  if (at === "flow" && /[,[\]{}]/.test(t)) return false;
+  // `: ` — a mapping, wherever a mapping is legal, and `"value"` is the one
+  // place it is not.
+  if (at !== "value" && (t.includes(": ") || t.endsWith(":"))) return false;
   return true;
 }
 
