@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.53.1](https://github.com/firetower-cloud/firetower/compare/firetower-v0.53.0...firetower-v0.53.1) (2026-11-09)
+
+
+### Bug Fixes
+
+* **server:** an account that ran out is left mid-turn, with its question unanswered ([19c0300](https://github.com/firetower-cloud/firetower/commit/19c0300562ad2b8954443f8205d1c438916aedbf))
+
 ## [0.53.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.52.0...firetower-v0.53.0) (2026-11-09)
 
 
