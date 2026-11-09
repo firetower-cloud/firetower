@@ -10,6 +10,12 @@
  * `src/api/accounts.ts` is the contract: which limit is exhausted, what the
  * candidates are, and `switchAccount` with the permission-change
  * acknowledgement when the hand-off is to another agent.
+ *
+ * A turn in flight does not disable any of it. The account that stopped the
+ * conversation is usually the one still holding a turn or an approval, and
+ * waiting for either to clear means waiting for the limit to reset. The server
+ * stops the agent as the first step of the switch, so `working` is something
+ * to say here, not something to refuse on.
  */
 import { createContext, useContext, useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -25,7 +31,6 @@ import { ConnectAccount } from "~/ui/config/ConnectAccount";
 
 type Shared = {
   session: Session;
-  working: boolean;
   label: string;
   account?: Account | null;
   loaded: boolean;
@@ -107,7 +112,6 @@ export function AccountSwitcher({ session, working, children }: { session: Sessi
       ? null
       : {
           session,
-          working,
           label: own?.label ?? session.agent,
           account,
           loaded: !!current.data,
@@ -165,7 +169,7 @@ export function AccountSwitcher({ session, working, children }: { session: Sessi
                   </label>
                 </>
               )}
-              {working && <p className="text-meta text-mute">Stop the current turn before switching. Pending approvals must be answered first.</p>}
+              {working && <p className="text-meta text-mute">The turn running now is stopped and picked up on the account you choose. Any approval it is waiting on is asked again from there.</p>}
               <div className="flex flex-wrap gap-4">
                 {agents.data.filter((a) => a.supported && a.needsCredential).map((a) => (
                   <button key={a.kind} onClick={() => { setChoosing(false); setConnecting(a); }} className="text-meta text-dim hover:text-bone">+ Connect {a.label} account</button>
@@ -175,7 +179,7 @@ export function AccountSwitcher({ session, working, children }: { session: Sessi
 
             <div className="flex items-center gap-2 border-t border-line bg-ground/40 px-5 py-3">
               <button onClick={() => setChoosing(false)} className="control ml-auto text-mute hover:bg-raise hover:text-bone">Cancel</button>
-              <button disabled={!chosen || pending || working || (changesAgent && !permissionChange)} onClick={() => switcher.mutate(selected)} className="control bg-bone font-medium text-ground hover:opacity-90 disabled:bg-raise disabled:text-mute">
+              <button disabled={!chosen || pending || (changesAgent && !permissionChange)} onClick={() => switcher.mutate(selected)} className="control bg-bone font-medium text-ground hover:opacity-90 disabled:bg-raise disabled:text-mute">
                 {pending ? "Switching…" : changesAgent ? "Hand off and continue" : "Switch and continue"}
               </button>
             </div>
@@ -189,7 +193,7 @@ export function AccountSwitcher({ session, working, children }: { session: Sessi
           onClose={() => setConnecting(null)}
           onConnected={(made) => {
             setSelected(made.id);
-            if (!working && made.kind === session.agent) switcher.mutate(made.id);
+            if (made.kind === session.agent) switcher.mutate(made.id);
             else setChoosing(true);
           }}
         />
@@ -238,7 +242,7 @@ export function AccountNotice() {
           </p>
           <div className="mt-2.5 flex flex-wrap items-center gap-3 text-ui">
             {recommended && (
-              <button disabled={s.pending || s.working} onClick={() => s.continueWith(recommended.id)} className="control bg-bone font-medium text-ground hover:opacity-90 disabled:bg-raise disabled:text-mute">
+              <button disabled={s.pending} onClick={() => s.continueWith(recommended.id)} className="control bg-bone font-medium text-ground hover:opacity-90 disabled:bg-raise disabled:text-mute">
                 Continue with {recommended.name}
               </button>
             )}
