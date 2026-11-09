@@ -1,11 +1,20 @@
 /**
- * One QueryClient per server, kept alive across switches, fed by its stream.
+ * One QueryClient per **identity** — a server *and the account on it* — kept
+ * alive across switches, fed by its stream.
  *
  * Orval generates every query key as `[url, ...params]` with **no server
  * dimension**, so two servers answering `/api/v1/sessions` would write to the
  * same cache entry and the last to land would win. A client each avoids the
  * question, and gets the invariant for free — a server that is down cannot
  * invalidate, evict or stall anything belonging to one that is up.
+ *
+ * **This was keyed on `serverId` alone and that was a leak.** The reasoning
+ * above is about two *servers*; two *accounts on one server* share a
+ * `serverId`, so signing out and back in as somebody else reused the warm
+ * client and handed the second person the first's sessions. See
+ * `api/identity.ts`. The key is the identity now, in both halves — here and
+ * in the held transcripts — so the original invariant holds for the case it
+ * was written for and for the one it missed.
  *
  * Freshness is the event stream, not a poll. `Sessions` below follows the
  * `sessions` topic on this server's socket and folds every event into the
@@ -23,6 +32,8 @@ import { AppState, type AppStateStatus } from "react-native";
 import * as Network from "expo-network";
 import { applyEvent } from "~/api/events";
 import { forgetConversations } from "~/api/conversation";
+import { forgetDrafts } from "~/workspace/draft";
+import { identity, useIdentityKey, type Who } from "~/api/identity";
 import { SocketProvider, useSocket } from "~/api/socket";
 import { useBackendId } from "~/client/http";
 
@@ -34,10 +45,11 @@ onlineManager.setEventListener((setOnline) => {
   return () => sub.remove();
 });
 
+/** Keyed on `identity(who)`, never on `serverId`. */
 const clients = new Map<string, QueryClient>();
 
-function clientFor(id: string): QueryClient {
-  let c = clients.get(id);
+function clientFor(who: string): QueryClient {
+  let c = clients.get(who);
   if (!c) {
     c = new QueryClient({
       defaultOptions: {
@@ -52,21 +64,34 @@ function clientFor(id: string): QueryClient {
         },
       },
     });
-    clients.set(id, c);
+    clients.set(who, c);
   }
   return c;
 }
 
 const Ctx = createContext<string | null>(null);
 
-export function BackendProvider({ id, children }: { id: string; children: ReactNode }) {
+/**
+ * `server` rather than an id, because the two halves want different things:
+ * the HTTP layer resolves a URL and a keychain slot from the **`serverId`**,
+ * while the cache has to be partitioned by the **identity**. Passing only the
+ * id made those indistinguishable, which is how the account fell out of the
+ * key.
+ */
+export function BackendProvider({ server, children }: { server: Who; children: ReactNode }) {
   // The mutator is shared by every generated call, so it has to be told which
-  // server this subtree belongs to before anything under it renders.
-  useBackendId(id);
-  const client = clientFor(id);
+  // server this subtree belongs to before anything under it renders. This
+  // stays the `serverId`: it answers "which address and which token", which
+  // is a question about the server and not about the person.
+  useBackendId(server.serverId);
+  const who = identity(server);
+  // Read by `conversation.ts` without importing this file — see the note in
+  // `identity.ts` on why that import would break `pnpm test`.
+  useIdentityKey(who);
+  const client = clientFor(who);
 
   return (
-    <Ctx.Provider value={id}>
+    <Ctx.Provider value={who}>
       <QueryClientProvider client={client}>
         <SocketProvider>
           <Sessions cache={client} />
@@ -110,11 +135,20 @@ export function useBackendKey(): string {
   return useContext(Ctx) ?? "";
 }
 
-/** Throw away a disconnected server's cache rather than leaving it warm. */
-export function dropCache(id: string) {
-  clients.get(id)?.clear();
-  clients.delete(id);
+/**
+ * Throw away an identity's cache rather than leaving it warm.
+ *
+ * Takes the **identity**, not a `serverId`: signing one account out of a
+ * server must not evict another account's cache on that same server, and
+ * before the key carried the account it could not tell the difference.
+ */
+export function dropCache(who: string) {
+  clients.get(who)?.clear();
+  clients.delete(who);
   // Transcripts are kept outside the QueryClient — see `held` in
-  // `api/conversation.ts` — so clearing one does not clear the other.
-  forgetConversations(id);
+  // `api/conversation.ts` — so clearing one does not clear the other. Drafts
+  // are a third store with the same objection: private text somebody typed
+  // and did not send has no business outliving them.
+  forgetConversations(who);
+  forgetDrafts();
 }

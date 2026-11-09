@@ -15,6 +15,7 @@
 import { useMemo } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { BLEED, useEdges } from "~/ui/edges";
 import { router, useLocalSearchParams } from "expo-router";
 import { ChevronLeft } from "lucide-react-native";
 import type { Session } from "~/api/generated/model";
@@ -24,11 +25,13 @@ import { group, lead } from "~/api/workspaces";
 import { useSession, useSessions } from "~/data";
 import { Overview } from "~/ui/Overview";
 import { Waiting } from "~/ui/Waiting";
-import { color } from "~/design/tokens.generated";
+import { useTheme } from "~/design/theme";
 
 export default function OverviewScreen() {
+  const { color } = useTheme();
   const { id } = useLocalSearchParams<{ id: string }>();
   const insets = useSafeAreaInsets();
+  const edges = useEdges({ gutter: BLEED });
   const { data: sessions, loading } = useSessions();
 
   const place = useMemo(() => {
@@ -65,7 +68,7 @@ export default function OverviewScreen() {
   return (
     <View
       className="flex-1 bg-ground"
-      style={{ paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }}
+      style={edges}
     >
       <View className="flex-row items-center gap-1 border-b border-line-soft pb-2 pl-1">
         <Pressable onPress={() => router.back()} className="h-10 w-10 items-center justify-center" hitSlop={8}>

@@ -9,15 +9,16 @@
  * The repository is one tap away rather than beside: see `~/ui/Changes`.
  */
 import { useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, View, useWindowDimensions } from "react-native";
+import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 /* React Native 0.88 split the component type from the instance type: `ScrollView`
    now names the component, so a ref wants `ScrollViewInstance`. */
 import type { ScrollViewInstance } from "react-native";
 import Animated, { useAnimatedStyle } from "react-native-reanimated";
 import { useReanimatedKeyboardAnimation } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { BLEED, useEdges } from "~/ui/edges";
 import { router, useLocalSearchParams } from "expo-router";
-import { ChevronLeft, Eye, MoreHorizontal, PanelRight } from "lucide-react-native";
+import { ChevronLeft, Eye, MoreHorizontal, PanelRight, TriangleAlert } from "lucide-react-native";
 import { delegating, interruptible, useConversation } from "~/api/conversation";
 import { useListEvents } from "~/api/generated/events/events";
 import { useListArtifacts } from "~/api/generated/artifacts/artifacts";
@@ -32,7 +33,7 @@ import {
   useSendTurn,
 } from "~/api/generated/sessions/sessions";
 import { elapsed, minutesSince, STATUS_LABEL } from "~/api/view";
-import { useDiff, useSession, useSessions } from "~/data";
+import { useDiff, useSession, useSessions, why } from "~/data";
 import { group, lead, type Workspace } from "~/api/workspaces";
 import { AgentMark } from "~/ui/AgentMark";
 import { Approval } from "~/ui/Approval";
@@ -45,7 +46,8 @@ import { ArtifactCard } from "~/ui/ArtifactCard";
 import { Overview } from "~/ui/Overview";
 import { ImagesFrom } from "~/ui/WorkspaceImage";
 import { Waiting } from "~/ui/Waiting";
-import { color } from "~/design/tokens.generated";
+import { usePose } from "~/ui/pose";
+import { useTheme } from "~/design/theme";
 
 /**
  * Resolving the address before anything reads it.
@@ -85,7 +87,9 @@ export default function WorkspaceScreen() {
 }
 
 function Conversation({ place }: { place: Workspace }) {
+  const { color } = useTheme();
   const insets = useSafeAreaInsets();
+  const edges = useEdges({ gutter: BLEED });
   const scroller = useRef<ScrollViewInstance>(null);
   const [atEnd, setAtEnd] = useState(true);
 
@@ -141,40 +145,49 @@ function Conversation({ place }: { place: Workspace }) {
   const managerId = above?.id ?? speaker.id;
   const team = useMemo(() => sessions.filter((s: Session) => s.parentId === managerId), [sessions, managerId]);
 
-  /* Beside the conversation when the display is wide enough to hold both —
-     the Duo's inner panel is the first phone screen that is — and a pushed
-     route when it is not. One component, two placements. */
   /**
    * Where the overview goes, which is three answers and not two.
    *
    * The conversation is never squeezed — that is the whole rule, and the
    * widths decide which way of keeping it applies:
    *
-   * - **push**, under 600. There is no room for a rail at all; it is its own
+   * - **push**, under 600. There is no room for a panel at all; it is its own
    *   screen, one back-gesture away. The phone at 390 and the Duo's front
    *   panel at 466.
-   * - **float**, 600 to 820. Wide enough to want the rail, too narrow to
-   *   split: 669 minus a 340 rail leaves 329, which is less than the phone
-   *   this app was designed for. So it comes over the top and the
-   *   conversation keeps its full width underneath. The Duo's inner panel
-   *   in portrait, which an earlier single threshold of 700 missed entirely.
-   * - **dock**, 820 and over. Room for both, so the rail sits beside and the
-   *   conversation takes the majority — 611 of the Duo's 951 in landscape.
+   * - **float**, from 600. Wide enough to want the panel, too narrow to
+   *   split. It comes over the top and the conversation keeps its full width
+   *   underneath, and the scrim dismisses it. The Duo's inner display in
+   *   portrait: 669, which lays out in 595.
+   * - **dock**, from 840 of *laid-out* width. Room for both, so the panel
+   *   sits beside and the conversation still clears its measure. The Duo's
+   *   inner display in landscape: 951, laying out in 877, column 317.
    *
    * Collapsible in both of the last two, from one control, so rotating the
-   * device never changes what the button does — only where the rail lands.
+   * device never changes what the button does — only where the panel lands.
+   *
+   * **The arithmetic is in `measure.ts` and measured by `usePose`**, not
+   * written here. This read `width >= 820` against the *window*, which is the
+   * dock question answered about the wrong box and ~90pt early; and the panel
+   * was `Math.min(340, Math.max(280, width - 400))`, which is `panelWidth`
+   * with 400 standing in for `READING` and **no floor test** — so it returned
+   * 280 at widths where 280 does not fit.
    */
-  const { width } = useWindowDimensions();
-  const rail: "push" | "float" | "dock" = width >= 820 ? "dock" : width >= 600 ? "float" : "push";
+  const pose = usePose();
+  const rail = pose.band;
 
   /* Docked starts open because it costs the conversation nothing it needs;
-     floated starts closed because it costs the conversation all of it. */
-  const [railOpen, setRailOpen] = useState(rail === "dock");
+     floated starts closed because it costs the conversation all of it.
 
-  /* Only the docked rail yields — a floated one is over the top, so there is
-     nothing to take width from. */
-  const panel = rail === "dock" ? Math.min(340, Math.max(280, width - 400)) : 340;
-  const beside = rail === "dock" && railOpen;
+     `null` until somebody presses the control, and then it is their answer —
+     which is what carries across a fold. Arriving at a *width* changes
+     neither. */
+  const [railChoice, setRailChoice] = useState<boolean | null>(null);
+  const railOpen = railChoice ?? pose.docked;
+
+  /* A floated panel takes nothing from the conversation, so the two are
+     different numbers rather than one with a special case. */
+  const panel = pose.docked ? pose.panel : pose.floating;
+  const beside = pose.docked && railOpen;
   const floating = rail === "float" && railOpen;
 
   const { data: everyArtifact } = useListArtifacts();
@@ -184,8 +197,22 @@ function Conversation({ place }: { place: Workspace }) {
     [everyArtifact, family],
   );
 
-  const { conversation, echo, settle, remember, stopping, reread, older } = useConversation(speaker.id);
+  const { conversation, echo, unecho, settle, unsettle, remember, stopping, reread, older } =
+    useConversation(speaker.id);
   const [rereading, setRereading] = useState(false);
+  /**
+   * What the server refused or never heard, in words.
+   *
+   * Every mutation on this screen writes optimistically first — the message
+   * appears, the approval card goes, the composer says stopping — and until
+   * now **none of them had an `onError`**. A failed answer looked answered, a
+   * failed send looked sent, and a failed interrupt said stopping for ever.
+   * On a phone that is not an edge case: it is any dropped connection.
+   *
+   * So each one rolls its optimistic write back and says so here. One line,
+   * because the detail that matters is *which* action did not happen.
+   */
+  const [trouble, setTrouble] = useState<string | null>(null);
   /* The live one first — a todo list arrives on the turn stream and moves as
      the agent works. `session.plan` is the cross-engine fallback an agent set
      through `firetower:plan`, which rides on the session and lands a poll
@@ -211,14 +238,35 @@ function Conversation({ place }: { place: Workspace }) {
 
   const say = (text: string, images: Attached[] = []) => {
     echo(text, images);
-    send.mutate({ id: speaker.id, data: { text, images } });
+    setTrouble(null);
+    send.mutate(
+      { id: speaker.id, data: { text, images } },
+      {
+        onError: (e) => {
+          /* The bubble came back off, so the transcript does not claim a
+             message the agent never got. The text is gone from the composer
+             by now, so it is quoted here rather than silently lost. */
+          unecho(text);
+          setTrouble(`That message was not sent — ${why(e)}`);
+        },
+      },
+    );
     setTimeout(() => scroller.current?.scrollToEnd({ animated: true }), 60);
   };
 
   /* A file goes into the workspace rather than into the message: the agent
      has its own tools for reading one, and sending the bytes twice is waste. */
   const carry = async (name: string, data: string) => {
-    await attach.mutateAsync({ id: speaker.id, data: { name, data } });
+    setTrouble(null);
+    try {
+      await attach.mutateAsync({ id: speaker.id, data: { name, data } });
+    } catch (e) {
+      /* Nothing optimistic to roll back — the file was never shown as
+         attached — but silence here means somebody sends a message about a
+         file the workspace has not got. */
+      setTrouble(`${name} was not attached — ${why(e)}`);
+      throw e;
+    }
   };
 
   /* Named once: the docked column and the floated sheet draw the same thing
@@ -235,7 +283,14 @@ function Conversation({ place }: { place: Workspace }) {
   ) : null;
 
   return (
-    <View className="flex-1 bg-ground" style={{ paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }}>
+    /* `onLayout` is how the band knows which box it is deciding about. On
+       the Duo the system rail insets this view, so its width is the laid-out
+       width the dock test wants — measured rather than assumed. */
+    <View
+      className="flex-1 bg-ground"
+      onLayout={pose.onLayout}
+      style={edges}
+    >
       <View className="flex-row items-center gap-1 border-b border-line-soft px-1 pb-2.5 pt-1">
         <Pressable onPress={() => router.back()} className="h-10 w-10 items-center justify-center" hitSlop={8}>
           <ChevronLeft color={color.bone} size={22} />
@@ -270,7 +325,7 @@ function Conversation({ place }: { place: Workspace }) {
           onPress={() =>
             rail === "push"
               ? router.push({ pathname: "/workspace/overview", params: { id: place.id } })
-              : setRailOpen((open) => !open)
+              : setRailChoice(!railOpen)
           }
           className={`h-10 w-10 items-center justify-center rounded-md ${railOpen && rail !== "push" ? "bg-raise" : ""}`}
           hitSlop={8}
@@ -486,25 +541,68 @@ function Conversation({ place }: { place: Workspace }) {
         onAttach={carry}
         onInterrupt={() => {
           stopping(true);
-          interrupt.mutate({ id: speaker.id });
+          setTrouble(null);
+          interrupt.mutate(
+            { id: speaker.id },
+            {
+              onError: (e) => {
+                /* Otherwise the button stays "stopping" for ever over an agent
+                   that is still working. */
+                stopping(false);
+                setTrouble(`It is still working — ${why(e)}`);
+              },
+            },
+          );
         }}
         // Only to somebody who may act here. The composer is already gone for a
         // viewer, and these ride above it — an approval is the one control
         // where being drawn and refused is worst: the agent is stopped, asking
         // whether it may do something on the owner's machine.
-        above={conversation.asked.map((a) => (
+        above={[
+          /* Above the composer, with the approvals, because that is where the
+             action was taken. A rollback nobody sees is still silent. */
+          trouble ? (
+            <Pressable
+              key="trouble"
+              testID="trouble"
+              onPress={() => setTrouble(null)}
+              className="mx-3 mb-2 flex-row items-center gap-2.5 rounded-field border border-brick-deep bg-brick-tint px-4 py-3"
+            >
+              <TriangleAlert color={color.brick} size={16} />
+              <Text className="min-w-0 flex-1 font-sans text-meta text-text">{trouble}</Text>
+            </Pressable>
+          ) : null,
+          ...conversation.asked.map((a) => (
           <Approval
             key={a.req}
             asked={a}
             onAnswer={(yes) => {
+              /* Optimistic, deliberately — an approval that waits on a round
+                 trip feels broken. The rollback is what makes that safe. */
               settle(a.req);
-              answer.mutate({
-                id: speaker.id,
-                data: { req: a.req, decision: yes ? { decision: "Allow" } : { decision: "Deny", reason: null } },
-              });
+              setTrouble(null);
+              answer.mutate(
+                {
+                  id: speaker.id,
+                  data: {
+                    req: a.req,
+                    decision: yes ? { decision: "Allow" } : { decision: "Deny", reason: null },
+                  },
+                },
+                {
+                  onError: (e) => {
+                    /* The agent is still stopped and still holding the tool
+                       call open. Putting the card back is the only thing that
+                       says so. */
+                    unsettle(a);
+                    setTrouble(`That answer did not reach the agent — ${why(e)}`);
+                  },
+                },
+              );
             }}
           />
-        ))}
+          )),
+        ]}
       />
       )}
       </View>
@@ -525,13 +623,34 @@ function Conversation({ place }: { place: Workspace }) {
         <>
           <Pressable
             testID="overview-scrim"
-            onPress={() => setRailOpen(false)}
+            onPress={() => setRailChoice(false)}
             className="absolute bottom-0 left-0 right-0 top-0"
-            style={{ backgroundColor: "rgba(0,0,0,0.45)" }}
+            /* `--color-scrim`, like the four other scrims in the app. This was
+               `rgba(0,0,0,0.45)` — dark's value, frozen into light, where the
+               token is `rgb(22 22 23 / 0.34)`. A scrim is its own token
+               precisely because it is not a surface at an alpha: over a pale
+               page a dark wash is still what the page recedes into, and that
+               is the half a surface colour cannot express. */
+            style={{ backgroundColor: color.scrim }}
           />
           <View
-            className="absolute bottom-0 right-0 top-0 border-l border-line bg-panel"
-            style={{ width: panel, shadowColor: "#000", shadowOpacity: 0.5, shadowRadius: 18, shadowOffset: { width: -8, height: 0 } }}
+            className="absolute bottom-0 right-0 top-0 border-l border-line bg-float"
+            style={{
+              width: panel,
+              /* 46 in the drawing — a floated panel is a popover by the test
+                 that picks between the two backdrops: the conversation stays
+                 on screen behind it and is exactly what you read it against. */
+              zIndex: 46,
+              /* A shadow is a light-theme device: below ~1% luminance there
+                 is nothing under a surface to cast into. It is kept because
+                 where it overlaps something lighter it does register, but
+                 what draws the boundary in dark is the `float` fill and the
+                 hairline — not this. */
+              shadowColor: "#000",
+              shadowOpacity: 0.5,
+              shadowRadius: 18,
+              shadowOffset: { width: -8, height: 0 },
+            }}
           >
             <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}>{overview}</ScrollView>
           </View>

@@ -24,7 +24,7 @@ import { Clipboard, Image, Linking, Pressable, ScrollView, Text, View } from "re
 import * as Haptics from "expo-haptics";
 import { Check, Copy } from "lucide-react-native";
 import { highlight, langNamed, TONE } from "~/api/syntax";
-import { color } from "~/design/tokens.generated";
+import { useTheme } from "~/design/theme";
 import { isWorkspaceSrc, WorkspaceImage } from "~/ui/WorkspaceImage";
 import { columns, flatten, parse, type PhrasingContent, type RootContent } from "~/ui/markdown";
 
@@ -156,6 +156,7 @@ const CELL_PAD = 16;
 
 /** A table, as one grid that scrolls sideways. */
 function Table({ rows, at }: { rows: string[][]; at: string }) {
+  const { color } = useTheme();
   const width = columns(rows);
   const [head, ...body] = rows;
   if (!head) return null;
@@ -199,6 +200,7 @@ function Table({ rows, at }: { rows: string[][]; at: string }) {
 
 /** One block, whatever kind it is. */
 function Block({ node, at }: { node: RootContent; at: string }): React.ReactElement | null {
+  const { color } = useTheme();
   switch (node.type) {
     case "heading":
       return (
@@ -296,6 +298,7 @@ export function Code({
   /** The word after the backticks, if the author wrote one. */
   fence?: string;
 }) {
+  const { color } = useTheme();
   const [copied, setCopied] = useState(false);
   const lang = tint ? "text" : langNamed(fence ?? "");
   const lines = text.replace(/\n$/, "").split("\n");

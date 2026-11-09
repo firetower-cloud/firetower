@@ -30,6 +30,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { BLEED, useEdges } from "~/ui/edges";
 import { KeyboardStickyView } from "react-native-keyboard-controller";
 import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
@@ -41,7 +42,8 @@ import { useAccounts, useAgents, useHosts, useRepos, why } from "~/data";
 import { leaveDraft } from "~/workspace/draft";
 import { takeConnected } from "~/workspace/connected";
 import { Field, Picker, Trigger, type Choice } from "~/ui/Picker";
-import { color, size } from "~/design/tokens.generated";
+import { size } from "~/design/tokens.generated";
+import { useTheme } from "~/design/theme";
 
 /** `auth refactor` → `agent/auth-refactor`, the way the web build suggests one. */
 const slug = (name: string) =>
@@ -50,7 +52,9 @@ const slug = (name: string) =>
 type Open = null | "repo" | "host" | "agent" | "account";
 
 export default function NewWorkspace() {
+  const { color } = useTheme();
   const insets = useSafeAreaInsets();
+  const edges = useEdges({ gutter: BLEED });
   const nav = useRouter();
 
   /**
@@ -155,7 +159,7 @@ export default function NewWorkspace() {
     && !create.isPending;
 
   return (
-    <View className="flex-1 bg-ground" style={{ paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }}>
+    <View className="flex-1 bg-ground" style={edges}>
       <View className="flex-row items-center justify-between px-2 pb-2 pt-1">
         <Pressable
           onPress={() => router.back()}

@@ -141,7 +141,7 @@ sideload.
 ## Tests
 
 ```sh
-pnpm test        # the folds, in node — 82 of them, ported with the code
+pnpm test        # the folds, in node — 213 of them, ported with the code
 pnpm tsc --noEmit
 ```
 
@@ -165,5 +165,60 @@ stay small.
 `maestro` picks the first device it finds, which on a machine with an Android
 emulator running is the wrong one. Pass `--device` with the simulator's UDID
 from `xcrun simctl list devices`.
+
+#### Supplying the safe-area insets, in a browser
+
+`react-native-web` reports `env(safe-area-inset-*)` as `0px`, which makes one
+whole class of bug **invisible there by construction**: a screen that writes
+`paddingLeft: insets.left` over its own gutter looks perfectly padded, because
+the inset it is writing is zero. That is how a gutter collapse reached a user
+on the connect screens.
+
+So on web, in a dev build only, the insets can be supplied instead:
+
+```
+http://localhost:8081/connect?insets=0,84,34,0
+```
+
+`top,right,bottom,left`, CSS shorthand order — and those four are the Duo
+front panel's own, as the system reports them. Absent, detection happens
+normally; malformed, it says so in the console rather than falling through
+quietly. Gated on `Platform.OS === "web" && __DEV__`, and it is deliberately not a
+setting: nothing persists it and nothing writes it.
+
+That the gate holds was **checked rather than asserted**. In a dev web bundle
+the branch is present and reachable; in `expo export --platform web` its
+console warning is absent from every chunk, so `__DEV__` resolved at build
+time and the branch was stripped. On native, `Platform.OS !== "web"` returns
+before anything else runs.
+
+It exists because the gutter rule is otherwise only provable at 466 — the one
+pose there is hardware for here. With it, 390, 412, 669 and 951 can each be
+swept twice, with the insets zero and with them non-zero. `src/ui/edges.ts`
+has the full note, including why `initialMetrics` is not the mechanism.
+
+**Maestro cannot target coordinates on an iPhone Duo.** Percentages, element
+ids and absolute points all resolve to the wrong place — a tap aimed at a chip
+at y≈193pt landed around y≈393pt, and an id-targeted tap opened an element
+roughly 148pt away. Only `assertVisible` is trustworthy there. Anything that
+has to *touch* a particular control on that device needs `idb` driving HID
+events directly, not Maestro.
+
+### The peek needs a pending request
+
+`desktop/scripts/mock-server.mjs` serves a conversation for `s_1` only, and
+that session is `Working` with no `RequestOpened` — so the sessions that are
+`NeedsYou` have no conversation at all, and the peek's Allow/No cannot be
+exercised against the repository as it stands. `e2e/peek-fixture.patch` adds
+one; its header says how to apply it and why it is a patch rather than an
+edit.
+
+It covers two cases, and the second is the one worth knowing about. A
+workspace that leads with a **busy** run while another is blocked is the shape
+that caught a real defect — `lead()` returns the busy one, so a peek that
+fetched the lead's conversation would hide the Allow/No buttons on exactly the
+workspace that most needs them. That case lives in the mock's `team` scene
+(`curl -X POST 'http://localhost:4455/__reset?scene=team'`), and the patch
+serves the two conversations it needs to tell a right answer from a wrong one.
 
 These need a booted simulator, so they are not in the pull-request workflow.

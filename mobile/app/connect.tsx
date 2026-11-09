@@ -25,7 +25,7 @@
  */
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, Text, TextInput, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { LEDE_GUTTER, useEdges } from "~/ui/edges";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { router } from "expo-router";
 import { ArrowRight, CircleSlash2, Lock, ShieldOff } from "lucide-react-native";
@@ -34,7 +34,8 @@ import { remember } from "~/native/servers";
 import { Mark } from "~/ui/Mark";
 import { ReplacePassword } from "~/ui/ReplacePassword";
 import { READING } from "~/ui/measure";
-import { color, size } from "~/design/tokens.generated";
+import { size } from "~/design/tokens.generated";
+import { useTheme } from "~/design/theme";
 
 type Stage =
   | { at: "where" }
@@ -48,7 +49,8 @@ type Stage =
   | { at: "locked"; url: string; boot: Bootstrap; user: string };
 
 export default function Connect() {
-  const insets = useSafeAreaInsets();
+  const { color } = useTheme();
+  const edges = useEdges({ gutter: LEDE_GUTTER, top: 24, bottom: 24 });
   const [typed, setTyped] = useState("");
   const [stage, setStage] = useState<Stage>({ at: "where" });
 
@@ -81,11 +83,7 @@ export default function Connect() {
       contentContainerStyle={{
         flexGrow: 1,
         justifyContent: "center",
-        paddingHorizontal: 24,
-        paddingTop: insets.top + 24,
-        paddingBottom: insets.bottom + 24,
-        paddingLeft: insets.left,
-        paddingRight: insets.right,
+        ...edges,
         ...READING,
       }}
       keyboardShouldPersistTaps="handled"
@@ -148,6 +146,7 @@ export default function Connect() {
 }
 
 function Field(props: React.ComponentProps<typeof TextInput>) {
+  const { color } = useTheme();
   const [on, setOn] = useState(false);
   return (
     <TextInput
@@ -186,11 +185,12 @@ function Primary({
   disabled?: boolean;
   busy?: boolean;
 }) {
+  const { color } = useTheme();
   return (
     <Pressable
       onPress={onPress}
       disabled={disabled || busy}
-      className={`mt-3 h-13 flex-row items-center justify-center gap-2 rounded-xl ${
+      className={`mt-3 h-13 flex-row items-center justify-center gap-2 rounded-action ${
         disabled ? "bg-raise" : "bg-bone"
       }`}
       style={{ height: 52 }}
@@ -209,6 +209,37 @@ function Primary({
   );
 }
 
+/**
+ * Two questions, asked in order and never at the same time.
+ *
+ * **Where it is**, then **who you are there** — and only the first has an
+ * answer that is the same for everybody at a company. Knowing it is what lets
+ * the app name *whose* Firetower you are about to hand a password to, because
+ * `/bootstrap` is unauthenticated and answers with the organisation before
+ * anybody types.
+ *
+ * Said once at the top rather than numbered on every screen: the content
+ * already says which one you are on, and a step counter repeated six times is
+ * chrome pretending to be progress.
+ */
+function Steps({ on }: { on: 0 | 1 }) {
+  const { color } = useTheme();
+  return (
+    <View className="mb-7 flex-row items-center gap-1.5">
+      {[0, 1].map((n) => (
+        <View
+          key={n}
+          className="h-[3px] w-[22px] rounded-sm"
+          style={{ backgroundColor: n <= on ? color.settling : color.line }}
+        />
+      ))}
+      <Text className="ml-1 font-sans text-meta text-mute">
+        {on ? "Who you are" : "Where it is"}
+      </Text>
+    </View>
+  );
+}
+
 function Where({
   typed,
   onTyped,
@@ -218,18 +249,27 @@ function Where({
   onTyped: (v: string) => void;
   onGo: () => void;
 }) {
+  const { color } = useTheme();
   const plain = typed.trim().length > 0 && cleartext(`http://${typed}`) && !/^https:/i.test(typed);
 
   return (
     <View>
+      <Steps on={0} />
       <View className="mb-8 items-center">
-        <View className="h-14 w-14 items-center justify-center rounded-2xl border border-line bg-raise">
+        <View className="h-14 w-14 items-center justify-center rounded-plate border border-line bg-raise">
           <Mark size={30} />
         </View>
         <Text className="mt-5 font-semibold text-display text-bone">Connect to a Firetower</Text>
+        {/* **v54's copy.** It was "the address of the control plane your team
+            runs"; the revision the user validated says where you *get* it and
+            rules out the thing people reach for instead. A join code would
+            have to be resolved by somebody, and that somebody would be a
+            service holding every install's whereabouts — which is the one
+            thing a self-hosted product cannot have. */}
         <Text className="mt-2 text-center font-sans text-read text-dim">
-          The address of the control plane your team runs. It is never on the public internet, so
-          this is usually a name on your mesh VPN.
+          The address somebody at your company gave you. Not a code — a code carries no address,
+          and there is nowhere to look one up that would not be a service holding every install’s
+          whereabouts.
         </Text>
       </View>
 
@@ -280,6 +320,7 @@ function NoRoute({
   onRetry: () => void;
   onBack: () => void;
 }) {
+  const { color } = useTheme();
   return (
     <View>
       <View className="items-center">
@@ -324,6 +365,7 @@ function NoRoute({
 }
 
 function NotOne({ typed, detail, onBack }: { typed: string; detail: string; onBack: () => void }) {
+  const { color } = useTheme();
   return (
     <View className="items-center">
       <CircleSlash2 color={color.mute} size={26} />
@@ -366,6 +408,7 @@ function Who({
   onLocked: (user: string) => void;
   onBack: () => void;
 }) {
+  const { color } = useTheme();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -395,6 +438,7 @@ function Who({
 
   return (
     <View>
+      <Steps on={1} />
       <View className="mb-7 items-center">
         <View className="h-12 w-12 items-center justify-center rounded-2xl border border-sage-deep bg-sage-tint">
           <Lock color={color.sage} size={21} />
@@ -417,6 +461,14 @@ function Who({
             <Text className="font-sans text-meta text-mute">Not encrypted</Text>
           </View>
         ) : null}
+
+        {/* **v54's copy.** The one thing people get wrong here is thinking
+            this is an account with us. It is not: a Firetower is somebody
+            else's server and the credential is theirs to issue and reset. */}
+        <Text className="mt-3 text-center font-sans text-read text-dim">
+          An account on this Firetower. It exists on this server only — it is not an account with
+          us.
+        </Text>
       </View>
 
       {proxyOnly ? (
@@ -457,6 +509,16 @@ function Who({
           ) : null}
 
           <Primary label="Sign in" onPress={go} disabled={!ready} busy={busy} />
+
+          {/* **v54's copy.** It said only "ask an administrator". The
+              revision names the command too, because on a self-hosted install
+              the person holding the phone is very often the administrator,
+              and telling them to ask themselves is the kind of dead end that
+              ends a first run. */}
+          <Text className="mt-4 text-center font-sans text-micro text-mute">
+            Forgotten it? An administrator resets it, or{" "}
+            <Text className="font-mono text-micro text-dim">firetower passwd</Text> on the server.
+          </Text>
         </>
       )}
 

@@ -1,16 +1,23 @@
 /**
  * The shell.
  *
- * Dark, always — `web/app/globals.css` sets `color-scheme: dark` and the token
- * set has no light values, so respecting the system theme would render half a
- * design system. The splash is held until the faces are loaded: Archivo is
- * distinctive enough that a frame of the system face and a reflow is the first
- * thing that reads as a web page.
+ * **Light and dark, following the system by default.** It was dark always,
+ * because `globals.css` had no light values to fall back to and a phone that
+ * respected the system theme would have rendered half a design system. PR #261
+ * added the light branch to that shared sheet; this is the opt-in criterion 6
+ * was holding the phone still for. The control is on **You** — three settings,
+ * System first — and `ThemeProvider` is above everything so a redraw reaches
+ * every screen at once.
+ *
+ * The splash is held until the faces are loaded: Archivo is distinctive enough
+ * that a frame of the system face and a reflow is the first thing that reads
+ * as a web page.
  */
 import "../global.css";
 import { useEffect, useState } from "react";
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
+import * as SystemUI from "expo-system-ui";
 import * as SplashScreen from "expo-splash-screen";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
@@ -19,9 +26,10 @@ import { useFonts, Archivo_400Regular, Archivo_500Medium, Archivo_600SemiBold } 
 import { ArchivoNarrow_500Medium } from "@expo-google-fonts/archivo-narrow";
 import { JetBrainsMono_400Regular, JetBrainsMono_500Medium } from "@expo-google-fonts/jetbrains-mono";
 import { BackendProvider } from "~/api/backend";
+import { identity } from "~/api/identity";
 import { hydrate } from "~/native/servers";
 import { useServer } from "~/native/current";
-import { color } from "~/design/tokens.generated";
+import { ThemeProvider, useTheme } from "~/design/theme";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -50,10 +58,42 @@ export default function Root() {
   if (!ready || !keys) return null;
 
   return (
+    <ThemeProvider>
+      <Shell />
+    </ThemeProvider>
+  );
+}
+
+/**
+ * Inside the provider, because it reads the theme it is drawn in.
+ *
+ * A second component rather than four more lines above: `Root` is what
+ * *provides* the theme, so it cannot also consume it — and the status bar is
+ * the one piece of chrome that has to be told, since the system draws it and
+ * dark glyphs on a near-black page are invisible either way round.
+ */
+function Shell() {
+  const { color, scheme } = useTheme();
+
+  /**
+   * The window behind the React tree, which is not ours to set in the config.
+   *
+   * `app.config.ts` carries one `backgroundColor` and Expo has no dark
+   * counterpart for it, so the config holds light's and this holds the truth.
+   * What it shows through is the moment before the first screen paints and the
+   * overscroll at the end of a list — both of which are the page, and both of
+   * which were black in light until this existed.
+   */
+  useEffect(() => {
+    SystemUI.setBackgroundColorAsync(color.ground);
+  }, [color.ground]);
+
+  return (
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: color.ground }}>
       <KeyboardProvider>
         <SafeAreaProvider>
-          <StatusBar style="light" />
+          {/* The ink, not the background: `light` means light *glyphs*. */}
+          <StatusBar style={scheme === "dark" ? "light" : "dark"} />
           <Fleet />
         </SafeAreaProvider>
       </KeyboardProvider>
@@ -61,28 +101,40 @@ export default function Root() {
   );
 }
 
-const SCREENS = {
-  headerShown: false,
-  contentStyle: { backgroundColor: color.ground },
-  animation: "slide_from_right",
-} as const;
+/* A function of the palette rather than a constant. It was a module-scope
+   object reading `color.ground`, which froze whichever branch loaded first
+   into every pushed screen's background — invisible in dark and a black
+   flash behind every push in light. */
+const screens = (ground: string) =>
+  ({
+    headerShown: false,
+    contentStyle: { backgroundColor: ground },
+    animation: "slide_from_right",
+  }) as const;
 
 /**
- * Everything below here belongs to one server.
+ * Everything below here belongs to one **identity** — a server and the
+ * account signed into it.
  *
  * Keyed on it, so switching throws away the tree rather than letting a screen
- * render one server's ids against another's cache — which is the bug the
- * per-server `QueryClient` exists to make impossible, and this is the other
+ * render one identity's ids against another's cache — which is the bug the
+ * per-identity `QueryClient` exists to make impossible, and this is the other
  * half of it.
+ *
+ * **This was keyed on `serverId`.** That covered switching *servers* and not
+ * changing *accounts on one server*, where the id is identical — so the tree
+ * was reused across a sign-out and the next person inherited the last one's
+ * warm screens. Both halves take `identity()` now; see `api/identity.ts`.
  *
  * With no server at all there is no provider: there is nothing to be a client
  * of, and the only route that means anything is connecting.
  */
 function Fleet() {
   const here = useServer();
+  const { color } = useTheme();
 
-  const screens = (
-    <Stack screenOptions={SCREENS}>
+  const stack = (
+    <Stack screenOptions={screens(color.ground)}>
       <Stack.Screen name="new" options={{ presentation: "modal", animation: "slide_from_bottom" }} />
     </Stack>
   );
@@ -90,11 +142,11 @@ function Fleet() {
   /* No server, no provider: there is nothing to be a client of, and the only
      route that means anything is connecting. `(tabs)/_layout` is what sends
      you there. */
-  if (!here) return screens;
+  if (!here) return stack;
 
   return (
-    <BackendProvider id={here.serverId} key={here.serverId}>
-      {screens}
+    <BackendProvider server={here} key={identity(here)}>
+      {stack}
     </BackendProvider>
   );
 }

@@ -16,6 +16,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Pressable, RefreshControl, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { BLEED, useEdges } from "~/ui/edges";
 import { router } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, ArrowRight, CircleDot, GitPullRequest, Ticket, User } from "lucide-react-native";
@@ -24,8 +25,10 @@ import type { ListTasksParams, TaskKind, TaskState, TrackerStatus } from "~/api/
 import { elapsed, minutesSince } from "~/api/view";
 import { useTasks, useTrackers } from "~/data";
 import { Segmented } from "~/ui/Segmented";
+import { TextTabs } from "~/ui/TextTabs";
 import { Waiting } from "~/ui/Waiting";
-import { color, size } from "~/design/tokens.generated";
+import { size } from "~/design/tokens.generated";
+import { useTheme } from "~/design/theme";
 
 const KIND = { issue: CircleDot, pullRequest: GitPullRequest, ticket: Ticket };
 
@@ -42,7 +45,9 @@ const STATES: [TaskState, string][] = [
 ];
 
 export default function Tasks() {
+  const { color } = useTheme();
   const insets = useSafeAreaInsets();
+  const edges = useEdges({ gutter: BLEED });
   const cache = useQueryClient();
 
   const { data: trackers, loading: findingTrackers } = useTrackers();
@@ -97,8 +102,8 @@ export default function Tasks() {
   const count = feed.total ?? feed.data.length;
 
   return (
-    <View className="flex-1 bg-ground" style={{ paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }}>
-      <View className="px-4 pb-3 pt-2">
+    <View className="flex-1 bg-ground" style={edges}>
+      <View className="px-5 pb-3 pt-2">
         <Text className="font-semibold text-display text-bone">Tasks</Text>
         <Text className="mt-0.5 font-sans text-ui text-dim">
           {connected ? `${count} to pick from. Starting one opens a workspace.` : "Read from your trackers."}
@@ -109,7 +114,7 @@ export default function Tasks() {
           glyphs fit where "GitHub | Linear" pushes the filters onto a second
           row — and on 390pt that is more true, not less. */}
       {trackers.length > 1 ? (
-        <View className="flex-row gap-2 px-4 pb-2">
+        <View className="flex-row gap-2 px-5 pb-2">
           {trackers.map((t) => (
             <Pressable
               key={t.id}
@@ -130,16 +135,17 @@ export default function Tasks() {
       {connected ? (
         <>
           {kinds.length > 1 ? (
-            <View className="px-4 pb-2">
-              <Segmented
-                options={kinds.map((k) => [k, KIND_LABEL[k]] as [TaskKind, string])}
-                value={showing as TaskKind}
-                onChange={setKind}
-              />
-            </View>
+            /* The tracker is a destination — GitHub's issues and Linear's
+               are different lists, not two values of one. The state filter
+               below it genuinely is a filter and keeps its track. */
+            <TextTabs
+              options={kinds.map((k) => [k, KIND_LABEL[k]] as [TaskKind, string])}
+              value={showing as TaskKind}
+              onChange={setKind}
+            />
           ) : null}
 
-          <View className="flex-row items-center gap-2 px-4 pb-3">
+          <View className="flex-row items-center gap-2 px-5 pb-3">
             <View className="flex-1">
               <Segmented options={STATES} value={state} onChange={setState} />
             </View>
@@ -153,7 +159,7 @@ export default function Tasks() {
             </Pressable>
           </View>
 
-          <View className="px-4 pb-2">
+          <View className="px-5 pb-2">
             <TextInput
               value={typed}
               onChangeText={setTyped}
@@ -213,7 +219,7 @@ export default function Tasks() {
                       params: { title: task.title, repo: task.repo ?? "", taskKey: task.key, taskUrl: task.url },
                     })
                   }
-                  className="flex-row items-start gap-3 px-4 py-3.5"
+                  className="flex-row items-start gap-3 px-5 py-3.5"
                   android_ripple={{ color: color.overlay }}
                 >
                   <View className="pt-0.5">
@@ -242,7 +248,7 @@ export default function Tasks() {
             {/* Paging is a trail, not a number: a source that pages by cursor
                 and one that pages by number read the same state here. */}
             {(trail.length > 0 || feed.more) && (
-              <View className="flex-row justify-between px-4 py-4">
+              <View className="flex-row justify-between px-5 py-4">
                 <Pressable
                   disabled={trail.length === 0}
                   onPress={() => setTrail((t) => t.slice(0, -1))}

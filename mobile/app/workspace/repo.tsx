@@ -14,15 +14,16 @@
 import { useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { BLEED, useEdges } from "~/ui/edges";
 import { router, useLocalSearchParams } from "expo-router";
 import { ChevronLeft } from "lucide-react-native";
 import { useDiff, useSession } from "~/data";
 import { Diff } from "~/ui/Diff";
 import { Files } from "~/ui/Files";
-import { Segmented } from "~/ui/Segmented";
+import { TextTabs } from "~/ui/TextTabs";
 import { Ship } from "~/ui/Ship";
 import { Waiting } from "~/ui/Waiting";
-import { color } from "~/design/tokens.generated";
+import { useTheme } from "~/design/theme";
 
 type TabId = "diff" | "files" | "ship";
 const TABS: [TabId, string][] = [
@@ -32,7 +33,9 @@ const TABS: [TabId, string][] = [
 ];
 
 export default function Repo() {
+  const { color } = useTheme();
   const insets = useSafeAreaInsets();
+  const edges = useEdges({ gutter: BLEED });
   const { id, tab: want } = useLocalSearchParams<{ id: string; tab?: TabId }>();
   const [tab, setTab] = useState<TabId>(want ?? "diff");
 
@@ -56,7 +59,7 @@ export default function Repo() {
   }
 
   return (
-    <View className="flex-1 bg-ground" style={{ paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }}>
+    <View className="flex-1 bg-ground" style={edges}>
       <View className="flex-row items-center gap-1 pb-2 pl-1">
         <Pressable
           onPress={() => router.back()}
@@ -79,9 +82,7 @@ export default function Repo() {
         </View>
       </View>
 
-      <View className="px-3 pb-2">
-        <Segmented options={TABS} value={tab} onChange={setTab} />
-      </View>
+      <TextTabs options={TABS} value={tab} onChange={setTab} />
 
       {tab === "ship" ? (
         <Ship session={session} files={files.length} bottom={insets.bottom} />

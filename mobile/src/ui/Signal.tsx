@@ -11,9 +11,10 @@ import { View } from "react-native";
 import Svg, { Path } from "react-native-svg";
 import type { SessionStatus } from "~/api/generated/model";
 import { BEAT, BEAT_TOKEN } from "~/api/view";
-import { color } from "~/design/tokens.generated";
+import { useTheme } from "~/design/theme";
 
 export function Signal({ status, size = 9 }: { status: SessionStatus; size?: number }) {
+  const { color } = useTheme();
   const tone = color[BEAT_TOKEN[BEAT[status]]];
   const hollow = status === "Ended" || status === "Starting" || status === "Ready";
 

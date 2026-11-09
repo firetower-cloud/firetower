@@ -22,13 +22,16 @@
 import { useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { BLEED, useEdges } from "~/ui/edges";
 import { router } from "expo-router";
 import { ChevronLeft } from "lucide-react-native";
 import { useListArtifacts } from "~/api/generated/artifacts/artifacts";
 import { ArtifactCard } from "~/ui/ArtifactCard";
-import { Segmented } from "~/ui/Segmented";
+import { TextTabs } from "~/ui/TextTabs";
+import { libraryColumns } from "~/ui/measure";
+import { usePose } from "~/ui/pose";
 import { Waiting } from "~/ui/Waiting";
-import { color } from "~/design/tokens.generated";
+import { useTheme } from "~/design/theme";
 
 type Scope = "all" | "mine" | "shared";
 const SCOPES: [Scope, string][] = [
@@ -38,7 +41,10 @@ const SCOPES: [Scope, string][] = [
 ];
 
 export default function Artifacts() {
+  const { color } = useTheme();
+  const pose = usePose();
   const insets = useSafeAreaInsets();
+  const edges = useEdges({ gutter: BLEED });
   const [scope, setScope] = useState<Scope>("all");
   const { data: everything = [], isPending, error } = useListArtifacts();
 
@@ -53,7 +59,8 @@ export default function Artifacts() {
   return (
     <View
       className="flex-1 bg-ground"
-      style={{ paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }}
+      onLayout={pose.onLayout}
+      style={edges}
     >
       <View className="flex-row items-center gap-1 pb-2 pl-1">
         <Pressable onPress={() => router.back()} className="h-10 w-10 items-center justify-center" hitSlop={8}>
@@ -65,14 +72,15 @@ export default function Artifacts() {
         ) : null}
       </View>
 
-      <View className="px-4 pb-3">
-        <Segmented options={SCOPES} value={scope} onChange={setScope} />
-      </View>
+      <TextTabs options={SCOPES} value={scope} onChange={setScope} />
 
       <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 24, flexGrow: 1 }}>
-        <View className="flex-row flex-wrap gap-x-3 gap-y-1 px-4">
+        <View className="flex-row flex-wrap gap-x-3 gap-y-1 px-5">
           {shown.map((a) => (
-            <View key={a.id} className="w-[47%]">
+            /* Two at a phone's width, three from 620 — a grid reflows and a
+               column does not. Measured rather than fixed at 47%, which was
+               two columns at every width the Duo has. */
+            <View key={a.id} style={{ width: `${100 / libraryColumns(pose.content) - 2}%` }}>
               <ArtifactCard
                 artifact={a}
                 onOpen={() => router.push({ pathname: "/workspace/artifact", params: { id: a.id } })}

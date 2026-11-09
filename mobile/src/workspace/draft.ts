@@ -43,3 +43,27 @@ export function takeDraft(sessionId: string): string | null {
   held.delete(sessionId);
   return text;
 }
+
+/**
+ * Forget every draft, because somebody signed out.
+ *
+ * **Not a fourth instance of the identity bug, and worth saying why.** A draft
+ * is keyed on `sessionId` alone, with no account dimension — the same shape as
+ * the cache that leaked. It does not leak: session ids are unique per
+ * Firetower, so two accounts never produce the same key, and a second person
+ * could not open the session a draft belongs to anyway.
+ *
+ * What it *was* doing is outliving the person who typed it. A draft is private
+ * text somebody wrote and did not send, and it sat in module memory for the
+ * rest of the process after they signed out. That is the same objection
+ * `forgetConversations` exists for — "leaving it warm for an account somebody
+ * has signed out of is not a cache, it is a copy" — one surface over.
+ *
+ * Everything goes rather than one identity's, because the key cannot tell them
+ * apart and a draft is a two-screen handoff that does not survive the app
+ * being killed either. Clearing it on a sign-out costs nothing anybody would
+ * miss.
+ */
+export function forgetDrafts() {
+  held.clear();
+}

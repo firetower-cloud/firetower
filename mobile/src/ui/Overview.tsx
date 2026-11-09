@@ -21,7 +21,7 @@ import type { Artifact, PlanStep, Session } from "~/api/generated/model";
 import { BEAT, BEAT_TOKEN, STATUS_LABEL, elapsed, minutesSince } from "~/api/view";
 import { AgentMark } from "~/ui/AgentMark";
 import { Blocks } from "~/ui/Blocks";
-import { color } from "~/design/tokens.generated";
+import { useTheme } from "~/design/theme";
 
 /** Working first, then whatever wants a human, then the quiet ones. */
 const RANK: Record<string, number> = {
@@ -35,6 +35,7 @@ const RANK: Record<string, number> = {
 };
 
 function Legend({ children, lit = false, note }: { children: string; lit?: boolean; note?: string }) {
+  const { color } = useTheme();
   return (
     <View className="flex-row items-baseline gap-2 px-4 pb-2 pt-4">
       <Text
@@ -61,6 +62,7 @@ function Member({
   /** Running in the manager's own workspace rather than one of its own. */
   shared?: boolean;
 }) {
+  const { color } = useTheme();
   const beat = BEAT[session.status];
   const tone = BEAT_TOKEN[beat];
   return (
@@ -96,6 +98,7 @@ function Member({
 
 /** One line of the plan. Done is ticked, the live one wears a ring. */
 function Step({ step }: { step: PlanStep }) {
+  const { color } = useTheme();
   const state = String(step.status);
   const done = state === "Completed";
   const live = state === "InProgress";
@@ -140,6 +143,7 @@ export function Overview({
   artifacts: Artifact[];
   onOpenArtifact: (id: string) => void;
 }) {
+  const { color } = useTheme();
   const manager = lead ?? session;
   const roster = [...team].sort(
     (a, b) => (RANK[a.status] ?? 9) - (RANK[b.status] ?? 9) || (a.name ?? "").localeCompare(b.name ?? ""),
@@ -182,22 +186,9 @@ export function Overview({
         </View>
       ) : null}
 
-      {/* The live thing, above the record of what came out. Slate rather than
-          mute, because it is the panel that moves while you watch it. */}
-      {plan.length > 0 ? (
-        <View className="border-b border-line-soft bg-panel pb-3">
-          <Legend lit note={`${done} / ${plan.length} · live`}>
-            Plan
-          </Legend>
-          {plan.map((s, i) => (
-            <Step key={`${i}-${s.step}`} step={s} />
-          ))}
-        </View>
-      ) : null}
-
       {artifacts.length > 0 || links.length > 0 ? (
         <View className="pb-4">
-          <Legend>Artifacts &amp; links</Legend>
+          <Legend>Made</Legend>
           {artifacts.map((a) => (
             <Pressable
               key={a.id}
@@ -224,6 +215,23 @@ export function Overview({
           ))}
         </View>
       ) : null}
+      {/* Last, and the drawing puts it there on purpose: **Team, Made, Plan**.
+          The record of what came out sits above the thing still being worked
+          on, because *what has this produced* is the question somebody opens
+          this panel to answer and the plan is already narrated in the
+          transcript beside it. Slate rather than mute, because it is the one
+          panel that moves while you watch it. */}
+      {plan.length > 0 ? (
+        <View className="border-b border-line-soft bg-panel pb-3">
+          <Legend lit note={`${done} / ${plan.length} · live`}>
+            Plan
+          </Legend>
+          {plan.map((s, i) => (
+            <Step key={`${i}-${s.step}`} step={s} />
+          ))}
+        </View>
+      ) : null}
+
     </View>
   );
 }

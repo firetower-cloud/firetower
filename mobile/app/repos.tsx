@@ -36,6 +36,7 @@
 import { useMemo, useState } from "react";
 import { Pressable, RefreshControl, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { BLEED, useEdges } from "~/ui/edges";
 import { KeyboardStickyView } from "react-native-keyboard-controller";
 import { router, useLocalSearchParams } from "expo-router";
 import * as Haptics from "expo-haptics";
@@ -49,10 +50,13 @@ import { elapsed, minutesSince } from "~/api/view";
 import { useProviderRepos, useProviders, useRepos, why } from "~/data";
 import { leaveConnected } from "~/workspace/connected";
 import { Waiting } from "~/ui/Waiting";
-import { color, size } from "~/design/tokens.generated";
+import { size } from "~/design/tokens.generated";
+import { useTheme } from "~/design/theme";
 
 export default function Repos() {
+  const { color } = useTheme();
   const insets = useSafeAreaInsets();
+  const edges = useEdges({ gutter: BLEED });
   const cache = useQueryClient();
   const { pick } = useLocalSearchParams<{ pick?: string }>();
 
@@ -151,7 +155,7 @@ export default function Repos() {
     setChosen((was) => (was.includes(slug) ? was.filter((s) => s !== slug) : [...was, slug]));
 
   return (
-    <View className="flex-1 bg-ground" style={{ paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }}>
+    <View className="flex-1 bg-ground" style={edges}>
       <View className="flex-row items-center gap-1 pb-2 pl-1">
         <Pressable
           onPress={() => router.back()}
@@ -171,7 +175,7 @@ export default function Repos() {
       </View>
 
       {filtering ? (
-        <View className="px-4 pb-2">
+        <View className="px-5 pb-2">
           <TextInput
             testID="filter"
             value={typed}
@@ -226,9 +230,18 @@ export default function Repos() {
             detail="Firetower clones with your own account, and yours has not been authorized here yet. That is done once, in the web console or the desktop app — then your repositories show up on this screen."
           />
         ) : offered.error ? (
-          <Empty title={`${host.label} did not answer`} detail={offered.error} />
+          /* **The headline says the outcome; the detail says why.** These
+             read "did not answer", which is a claim about the *cause* that
+             the screen cannot actually make: `Feed.error` is a message
+             string — `why()` flattens the `ApiError` and the code goes with
+             it — so a permission refusal arrived here wearing a headline
+             saying the server had been silent, directly above its own detail
+             text saying it had answered and refused. A headline that
+             contradicts the body teaches somebody to stop reading one of
+             them. */
+          <Empty title={`Could not read ${host.label}`} detail={offered.error} />
         ) : connected.error ? (
-          <Empty title="This Firetower did not answer" detail={connected.error} />
+          <Empty title="Could not read this Firetower’s repositories" detail={connected.error} />
         ) : offered.data.length === 0 ? (
           /* Nothing came back at all, which is a different sentence from
              "you already have them". An account with no repositories says
@@ -268,7 +281,7 @@ export default function Repos() {
           <View className="mt-4">
             <Legend>Connected</Legend>
             {connected.data.map((repo) => (
-              <View key={repo.id} className="flex-row items-center gap-3 px-4 py-3" style={{ minHeight: 56 }}>
+              <View key={repo.id} className="flex-row items-center gap-3 px-5 py-3" style={{ minHeight: 56 }}>
                 <FolderGit2 color={color.mute} size={15} />
                 <View className="min-w-0 flex-1">
                   <Text numberOfLines={1} className="font-mono text-ui text-dim">
@@ -296,7 +309,7 @@ export default function Repos() {
       {chosen.length > 0 || wrong ? (
         <KeyboardStickyView offset={{ closed: 0, opened: 0 }}>
           <View
-            className="border-t border-line-soft bg-ground px-4 pt-3"
+            className="border-t border-line-soft bg-ground px-5 pt-3"
             style={{ paddingBottom: Math.max(insets.bottom, 10) }}
           >
             {wrong ? (
@@ -341,6 +354,7 @@ function Row({
   chosen: boolean;
   onPress: () => void;
 }) {
+  const { color } = useTheme();
   const owner = repoOwner(repo.slug);
 
   return (
@@ -348,7 +362,7 @@ function Row({
       testID="repo-row"
       onPress={onPress}
       style={{ minHeight: 56 }}
-      className={`flex-row items-center gap-3 px-4 py-3 ${chosen ? "bg-overlay" : ""}`}
+      className={`flex-row items-center gap-3 px-5 py-3 ${chosen ? "bg-overlay" : ""}`}
       android_ripple={{ color: color.overlay }}
     >
       <FolderGit2 color={chosen ? color.bone : color.mute} size={15} />
@@ -387,7 +401,7 @@ function Row({
 /** The map-legend voice. One per section, and there is room for two here. */
 function Legend({ children }: { children: React.ReactNode }) {
   return (
-    <Text className="px-4 pb-1 pt-2 font-narrow text-micro uppercase tracking-[0.18em] text-mute">
+    <Text className="px-5 pb-1 pt-2 font-narrow text-micro uppercase tracking-[0.18em] text-mute">
       {children}
     </Text>
   );

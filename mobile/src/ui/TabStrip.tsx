@@ -9,10 +9,12 @@ import { useSyncExternalStore } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { MessageSquare, X } from "lucide-react-native";
 import { activeId, close, keep, select, snapshot, subscribe } from "~/workspace/tabs";
-import { toneOf } from "~/ui/FileGlyph";
-import { color } from "~/design/tokens.generated";
+import { useToneOf } from "~/ui/FileGlyph";
+import { useTheme } from "~/design/theme";
 
 export function TabStrip({ onPick }: { onPick: (id: string) => void }) {
+  const { color } = useTheme();
+  const toneOf = useToneOf();
   const tabs = useSyncExternalStore(subscribe, snapshot, snapshot);
   const active = useSyncExternalStore(subscribe, activeId, activeId);
 

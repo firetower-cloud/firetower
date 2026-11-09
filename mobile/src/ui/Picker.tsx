@@ -20,7 +20,7 @@ import Animated, {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Check, ChevronDown, Plus } from "lucide-react-native";
 import { Waiting } from "~/ui/Waiting";
-import { color } from "~/design/tokens.generated";
+import { useTheme } from "~/design/theme";
 
 export type Choice = {
   id: string;
@@ -76,6 +76,7 @@ export function Trigger({
   placeholder: string;
   onPress: () => void;
 }) {
+  const { color } = useTheme();
   return (
     <Pressable
       onPress={onPress}
@@ -138,6 +139,7 @@ export function Picker({
    */
   empty?: string;
 }) {
+  const { color } = useTheme();
   const insets = useSafeAreaInsets();
   const has = (id: string) =>
     Array.isArray(chosen) ? chosen.includes(id) : chosen === id;

@@ -304,8 +304,27 @@ check-style:
     # `desktop/src` was missing from this list until the redesign, which is why
     # it had nine of these in it — including the two screens made entirely of
     # text, again.
+    #
     found=$(grep -rnE 'text-\[[0-9.]+px\]|rounded-\[[0-9]+px\]|(bg|text|border)-\[#[0-9a-fA-F]{3,8}\]|fontSize: *[0-9]' \
         web/app web/components web/src mobile/app mobile/src desktop/src --include='*.tsx' || true)
+    # A colour written into a `style` prop is the same offence, and the regex
+    # above structurally could not see it: it only ever looked for `#rrggbb`
+    # inside a Tailwind arbitrary value. So `backgroundColor: "rgba(0,0,0,0.45)"`
+    # sailed through — which is how a hard-coded *dark* scrim survived into the
+    # light theme in `mobile/app/workspace/[id].tsx`, beside four call sites
+    # that correctly read `color.scrim`. A check that cannot catch a literal in
+    # the position people actually write it is not a check.
+    #
+    # Anchored to the properties that take a colour, which is what keeps it
+    # honest: `shadowColor: "#000"` is idiomatic React Native and stays legal,
+    # because the shadow tokens are CSS strings a native shadow cannot read.
+    # `mobile/` only for now — `desktop/src` has pre-existing literals of this
+    # shape and widening the net is its own change, not this one's.
+    tint='(backgroundColor|borderColor|borderTopColor|borderBottomColor|borderLeftColor|borderRightColor|tintColor|placeholderTextColor|underlayColor|fill|stroke)'
+    painted=$(grep -rnE "$tint: *\"(#|rgba?\(|hsla?\()" mobile/app mobile/src --include='*.tsx' || true)
+    if [ -n "$painted" ]; then
+        found="$found$painted"
+    fi
     if [ -n "$found" ]; then
         echo "$found"
         echo

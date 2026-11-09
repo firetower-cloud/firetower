@@ -12,7 +12,6 @@
  */
 import { useState } from "react";
 import { Alert, Modal, Pressable, Text, TextInput, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQueryClient } from "@tanstack/react-query";
 import * as Haptics from "expo-haptics";
 import * as Linking from "expo-linking";
@@ -28,7 +27,9 @@ import {
 } from "~/api/generated/sessions/sessions";
 import { answerable } from "~/api/view";
 import { why } from "~/data";
-import { color, size } from "~/design/tokens.generated";
+import { size } from "~/design/tokens.generated";
+import { Sheet } from "~/ui/Sheet";
+import { useTheme } from "~/design/theme";
 
 type Row = {
   id: string;
@@ -58,7 +59,7 @@ export function WorkspaceMenu({
   onClose: () => void;
   onEnded: () => void;
 }) {
-  const insets = useSafeAreaInsets();
+  const { color } = useTheme();
   const cache = useQueryClient();
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(session.name);
@@ -215,16 +216,7 @@ export function WorkspaceMenu({
   ];
 
   return (
-    <Modal visible={open} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable className="flex-1 bg-black/60" onPress={onClose} />
-      <View
-        className="rounded-t-2xl border-t border-line bg-panel"
-        style={{ paddingBottom: insets.bottom + 8, marginLeft: insets.left, marginRight: insets.right }}
-      >
-        <View className="items-center pb-1 pt-2.5">
-          <View className="h-1 w-9 rounded-full bg-mute" />
-        </View>
-
+    <Sheet open={open} onClose={onClose}>
         {renaming ? (
           <View className="gap-3 px-5 pb-4 pt-2">
             <Text className="font-narrow text-micro uppercase tracking-[0.18em] text-mute">
@@ -292,7 +284,6 @@ export function WorkspaceMenu({
             })}
           </View>
         )}
-      </View>
-    </Modal>
+    </Sheet>
   );
 }

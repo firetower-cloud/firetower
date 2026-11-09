@@ -1,0 +1,199 @@
+/* ───────────────────────────────────────────────────────────────────────────
+   The phone's own branch of the token sheet.
+
+   `web/app/globals.css` is the shared sheet and **nothing here redefines it
+   there**. That file is byte-shared with the web client, and
+   `docs/redesign-acceptance.md` criterion 6 holds `web/` still until it opts
+   in — so a value the phone needs differently lives here, exactly the way
+   `desktop/src/styles.css` carries the desk's own re-derived dark. That file
+   is the precedent for this one.
+
+   This is a **declared generator source**, not a pile of hex.
+   `scripts/tokens.mjs` resolves the phone's palette from, in order:
+
+     1. `web/app/globals.css`  `@theme`                — the dark defaults
+     2. `web/app/globals.css`  `[data-theme="light"]`  — the light branch
+     3. `desktop/src/styles.css` `--color-syn-*` only  — the syntax palette,
+        both branches, because highlighting is a viewer's concern and the desk
+        owns it
+     4. **this file**                                  — the phone's overrides
+
+   The discipline is unchanged and still enforced: a colour that exists on the
+   phone and is in none of those four sources is a build failure. What has
+   changed is that there are four declared sources instead of three, and this
+   one is reviewed as a sheet rather than scattered through components.
+
+   ## Every entry is tagged, and the tag is the point
+
+   Three kinds, because they have three different futures:
+
+   - **CORRECTION** — the shared sheet is defective here and `globals.css`
+     should eventually follow. Promoting these is a one-file move with a
+     review attached, which is what the tagging buys. Each says what it was
+     measured against.
+   - **PHONE IDIOM** — the divergence is permanent and correct, because the
+     token means something different on a full-bleed phone than it does in a
+     window. Never promote these.
+   - **SHARED INK** — already shipping in `desktop/src/styles.css`. Taken from
+     there rather than re-derived, because the ink is shared between the two
+     app clients even where the grounds are not.
+
+   Values are the ones drawn in `docs/prototypes/redesign/mobile-redesign.html`
+   (artifact v54), which is the revision the user validated. Where this file
+   and that drawing disagree, the drawing wins and this file is wrong.
+
+   ## The one thing that is deliberately *not* here
+
+   **The dark page stays at L\* 3.0.** The desk lifted its `--color-ground` to
+   `#1d1d1e` and the phone does not follow it. The desk's complaint was
+   *chrome beside content* — an adjacency a full-bleed phone has not got. A
+   phone is one page, it is usually OLED, and iOS's own `systemBackground` in
+   dark is pure black. Lifting it would spend the platform's idiom and the
+   battery to fix a structure the phone does not have. So `--color-ground` is
+   absent from the dark block below, on purpose, and that absence is a
+   decision rather than an oversight.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+/* ── Dark. Overrides of `globals.css`'s own `@theme` ───────────────────────
+   Three entries, and the page is not one of them. */
+@theme {
+  /* NEW · both branches.
+     The fill of a surface that floats above the page — the composer, an
+     artifact card, a sheet, a popover, the peek. Five surfaces were filled
+     with `--color-ground` and separated by a shadow. In light that is exactly
+     right. In dark the shadow is `rgb(0 0 0 / .7)` over 0.337% luminance,
+     which renders *nothing*, so every one of them measured **ΔE 0.00 against
+     the page**: the most-used control in the app drawn in the page's own
+     colour with an invisible edge.
+
+     **A shadow is a light-theme device.** Below about 1% luminance there is
+     nothing left under a surface to cast into, so elevation has to be carried
+     by the fill. L* 11.42 against the page's 3.04 — **3.92× the luminance**,
+     which is a 1.184:1 contrast ratio. Those are two different numbers and
+     this comment used to give the second one the first one's name.
+
+     It is not a sixth rung — the value is `--color-overlay`'s in dark and
+     `--color-panel`'s in light. It is that step given a name, because what
+     separates a floating surface from the page is theme-dependent and a fill
+     is not. */
+  --color-float: #1e1e22;
+
+  /* SHARED INK · already in `desktop/src/styles.css`.
+     Down from near-white, which is the part of the desk's dark pass that is
+     about the ink rather than about rails: `bone` was 17.90:1 on the page, and
+     at a phone's reading distance a pure white on a near-black page haloes.
+     16.36:1 on the page, 13.82:1 on `--color-float`. */
+  --color-bone: #eaeaeb;
+  /* 10.08:1 on the page, 8.51:1 on `--color-float`. Was 11.81:1. */
+  --color-text: #b9b9bf;
+
+  /* CORRECTION · measured against the page it covers.
+     The drawing sets .45 where the sheet has .55. It gives no derivation for
+     this pair, so it is taken as drawn rather than argued for here — said
+     plainly because an undocumented value copied with a confident comment is
+     worse than one copied with an honest note. */
+  --color-scrim: rgb(0 0 0 / 0.45);
+}
+
+/* ── Light, which is the design ──────────────────────────────────────────── */
+[data-theme="light"] {
+  /* PHONE IDIOM · the role differs, not the taste.
+     On the web and the desk `--color-ground` is the *chrome* and
+     `--color-panel` is the page you read on top of it. A phone has no chrome
+     beside content: it is one full-bleed page, so **`--color-ground` is the
+     page** and it takes the one pure white. `--color-panel` becomes the rare
+     half-step above it rather than the sheet itself.
+
+     This is why the light branch cannot simply be inherited. The dark branch
+     needs none of it, because in dark the page is `--color-ground` on both
+     surfaces and the two roles happen to coincide.
+
+     The ink ramp on this page: bone 18.08:1, text 9.23:1, dim 4.98:1 (see
+     the correction below), mute 2.42:1 — the same four real gaps, and `mute`
+     is under the floor in both branches exactly as `globals.css` documents
+     and takes an explicit exception for. */
+  --color-ground: #ffffff;
+  --color-panel: #fafafb;
+
+  /* NEW · the page's own white, and here the shadow does the separating,
+     which is what a shadow is for. */
+  --color-float: #ffffff;
+
+  /* CORRECTION · R = G.
+     Every neutral in the shipped dark scale holds red equal to green and
+     lifts only blue. Two light neutrals in `globals.css` do not: `line-soft`
+     is `#f3f5fb` (G two points over R) and `settling` is `#c2c1cb` (G one
+     under). R = G with blue lifted pins the hue to the blue–yellow axis; a
+     green a point or two off red is a *different hue* rather than a cooler
+     grey, and it reads as a cast beside a neutral product.
+
+     `line-soft` 1.15:1 on the page, holding dark's 1.09 — still a line,
+     barely. `settling` 1.62:1, holding dark's 1.78: between a gridline and
+     the dimmest text, legibly there without carrying meaning.
+
+     The desk found the same defect on `line-soft` independently and corrected
+     it to `#f4f4fb` in its own sheet, holding L* and leaving the blue lift
+     alone. The phone takes the drawing's `#efeff2`. Two clients correcting one
+     upstream defect to two different values is the argument for promoting
+     this to `globals.css` rather than a reason to leave it. */
+  --color-line-soft: #efeff2;
+  --color-settling: #cbcbd1;
+
+  /* CORRECTION · AA is a floor, not a preference.
+     `--color-dim` is **4.20:1 on the page** in the shared sheet, under the
+     4.5 AA floor for normal text, across 56 `text-dim` instances on this
+     phone — none at a size that qualifies for AA-large.
+
+     `globals.css` documents an exception for `--color-mute` and gives its
+     figures (2.94 dark / 2.40 light) as the published cost of keeping the
+     faintest tier faint. **`dim` has no such exception**, which means it was
+     meant to clear and does not. So this is a defect in the sheet rather than
+     a judgement call, and the phone corrects it.
+
+     L* moved and a*/b* held, which is the handoff's own method: L* 51.85 →
+     49.3, a* 1.65 and b* −4.35 untouched, so the hue and its cool direction
+     survive. **4.98:1 on the page and 4.62:1 on `--color-raise`** — both
+     clear, which is what picks this over the value that only just clears the
+     page at 4.50/4.18, because a chip is a `raise` and `dim` lands on one.
+     `--color-overlay` reaches 4.08 and still does not clear; that is the
+     tier `globals.css` already flags as the tight one, and closing it would
+     start eating the gap to `--color-text` (9.23) that keeps the ramp
+     readable.
+
+     **And the adjacency does not exist.** Every `bg-overlay` surface in the
+     app was checked: in `Segmented`, in the tracker chips and the *Mine*
+     filter in `tasks.tsx`, and in `you.tsx`, `repos.tsx`, `Composer` and
+     `AttachMenu`. In all of them the overlay fill is the *selected* state
+     and it is paired with `text-bone`; `text-dim` is on the other branch of
+     the same ternary, over `raise`, `ground` or nothing. So dim text never
+     lands on an overlay, and 4.08 is a figure about a combination this app
+     does not draw. Left alone deliberately rather than overlooked — if some
+     screen later puts dim text on an overlay, that pairing is the defect,
+     not this value.
+
+     R = G holds. Dark is untouched — it measures 5.82:1 there. */
+  --color-dim: #6f6f77;
+
+  /* CORRECTION · a signal is gated against its own tint, never the page.
+     A badge is composed the same way in both themes — the colour on its tint,
+     inside its deep — so the figure that matters is the colour against the
+     tint it actually sits on. `globals.css` measured sage against white and
+     got `#00582b`: 8.64:1 on the page, correct by that test, and a green dark
+     enough that it no longer reads as sage. The drawing gates it where it
+     lives: 4.53:1 on its own tint, against the dark pair's 7.33.
+
+     Ember, sage and slate all move. Brick and amber already measured against
+     their tints and are unchanged, which is the check that this is a real
+     rule and not a repaint. */
+  --color-ember-tint: #fff0e8;
+  --color-ember-deep: #eaa078;
+  --color-sage: #2f7d52;
+  --color-sage-tint: #eaf6ee;
+  --color-sage-deep: #a9d6bb;
+  --color-slate-tint: #edf1f6;
+  --color-slate-deep: #afc0d2;
+
+  /* CORRECTION · as with dark, the drawing's value, taken as drawn. .34 where
+     the sheet has .22. */
+  --color-scrim: rgb(22 22 23 / 0.34);
+}

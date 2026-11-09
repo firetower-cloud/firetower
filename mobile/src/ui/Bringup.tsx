@@ -34,10 +34,11 @@ import Animated, {
 } from "react-native-reanimated";
 import { Check, X } from "lucide-react-native";
 import { DONE, LABELS, type Line } from "~/api/steps-bringup";
-import { color } from "~/design/tokens.generated";
+import { useTheme } from "~/design/theme";
 
 /** The mark for a step that is running: a ring that turns. */
 function Turning() {
+  const { color } = useTheme();
   const spin = useSharedValue(0);
 
   useEffect(() => {
@@ -68,6 +69,7 @@ function Turning() {
 }
 
 function Mark({ state }: { state: Line["state"] }) {
+  const { color } = useTheme();
   if (state === "running") return <Turning />;
   if (state === "failed") return <X color={color.brick} size={12} />;
   return <Check color={color.sage} size={12} />;

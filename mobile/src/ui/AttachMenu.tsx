@@ -18,7 +18,8 @@ import { Pressable, Text, View } from "react-native";
 import Animated, { FadeIn, FadeOut, withSpring, withTiming } from "react-native-reanimated";
 import { Camera, FileText, Image as ImageIcon } from "lucide-react-native";
 import { pickFiles, pickImages, takePhoto, type Picked } from "~/ui/attach";
-import { color, size } from "~/design/tokens.generated";
+import { size } from "~/design/tokens.generated";
+import { useTheme } from "~/design/theme";
 
 const Scrim = Animated.createAnimatedComponent(Pressable);
 
@@ -92,9 +93,12 @@ export function AttachMenu({
   onPick: (run: () => Promise<Picked[]>) => void;
   onClose: () => void;
 }) {
+  const { color } = useTheme();
   return (
     <>
       <Scrim
+        testID="attach-dismiss"
+        accessibilityLabel="Dismiss"
         entering={FadeIn.duration(140)}
         exiting={FadeOut.duration(120)}
         onPress={onClose}
@@ -103,17 +107,27 @@ export function AttachMenu({
           left: 0,
           right: 0,
           bottom: 0,
-          /* Far enough up to cover whatever conversation is on screen. */
+          /* Far enough up to catch a press anywhere on the conversation. */
           top: -900,
-          backgroundColor: "rgba(0,0,0,0.5)",
+          /* The drawing's own stacking order: a catcher at 45, the popover it
+             belongs to at 46. Both have to clear the composer's 20 or the
+             panel opens behind the control that opened it. */
+          zIndex: 45,
+          /* **A catcher, not a scrim**, and it was a scrim — a hand-written
+             `rgba(0,0,0,0.5)`, the one colour in `mobile/src` that came from
+             nowhere. The test that picks between the two is whether the thing
+             the overlay is *about* stays on screen behind it. Here it does:
+             you are mid-sentence and the composer behind this is the subject,
+             so dimming it is dimming what you are reading. A popover gets an
+             invisible dismiss target and nothing else. */
         }}
       />
 
       <Animated.View
         entering={open}
         exiting={shut}
-        style={{ transformOrigin: "bottom left" }}
-        className="mb-2 ml-3 w-64 overflow-hidden rounded-3xl border border-line bg-raise py-2"
+        style={{ transformOrigin: "bottom left", zIndex: 46 }}
+        className="mb-2 ml-3 w-64 overflow-hidden rounded-pop border border-line bg-float py-2"
       >
         {WAYS.map(({ id, label, hint, icon: Icon, run }) => (
           <Pressable

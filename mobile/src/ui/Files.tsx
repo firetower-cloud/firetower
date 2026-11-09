@@ -9,9 +9,9 @@ import { useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { ChevronDown, ChevronRight } from "lucide-react-native";
 import { useWorkspaceFiles } from "~/data";
-import { toneOf } from "~/ui/FileGlyph";
+import { useToneOf } from "~/ui/FileGlyph";
 import { Waiting } from "~/ui/Waiting";
-import { color } from "~/design/tokens.generated";
+import { useTheme } from "~/design/theme";
 
 function Level({
   sessionId,
@@ -26,6 +26,8 @@ function Level({
   touched: Set<string>;
   onOpen?: (path: string) => void;
 }) {
+  const { color } = useTheme();
+  const toneOf = useToneOf();
   const { data, loading } = useWorkspaceFiles(sessionId, path);
   const [open, setOpen] = useState<Set<string>>(new Set());
 

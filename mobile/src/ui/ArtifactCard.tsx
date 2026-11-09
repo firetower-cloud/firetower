@@ -24,12 +24,13 @@ import { Shapes } from "lucide-react-native";
 import type { Artifact } from "~/api/generated/model";
 import { apiBase, token } from "~/client/http";
 import { elapsed, minutesSince } from "~/api/view";
-import { color } from "~/design/tokens.generated";
+import { useTheme } from "~/design/theme";
 
 /** Width over height. The crop keeps this shape at every size. */
 const RATIO = 16 / 10;
 
 export function ArtifactCard({ artifact, onOpen }: { artifact: Artifact; onOpen: () => void }) {
+  const { color } = useTheme();
   /* A poster the server says exists can still fail to load, and the
      placeholder is the same either way — so this collapses into one flag. */
   const [broken, setBroken] = useState(false);
@@ -37,7 +38,7 @@ export function ArtifactCard({ artifact, onOpen }: { artifact: Artifact; onOpen:
 
   return (
     <Pressable testID="artifact-card" onPress={onOpen} className="mt-4" android_ripple={{ color: color.overlay }}>
-      <View className="w-full overflow-hidden rounded-md border border-line bg-raise" style={{ aspectRatio: RATIO }}>
+      <View className="w-full overflow-hidden rounded-card border border-line bg-float" style={{ aspectRatio: RATIO }}>
         {showing ? (
           <Image
             /* The bytes are fetched by `Image` rather than carried through
@@ -49,8 +50,14 @@ export function ArtifactCard({ artifact, onOpen }: { artifact: Artifact; onOpen:
             className="h-full w-full"
           />
         ) : (
-          <View className="h-full w-full items-center justify-center">
-            <Shapes color={color.settling} size={28} />
+          <View className="h-full w-full items-center justify-center gap-[7px]">
+            <Shapes color={color.settling} size={22} />
+            {/* **It is a state, not a failure.** A version is published before
+                anything has photographed it, so a fresh library hits this on
+                every tile at once — and a plate with no words on it reads as
+                a broken image. The same plate covers a poster that 404s,
+                because the two are the same thing to look at. */}
+            <Text className="font-sans text-micro text-mute">no picture yet</Text>
           </View>
         )}
       </View>

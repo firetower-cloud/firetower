@@ -19,15 +19,16 @@
  * the mapping is a design question rather than a wiring one. A composer that
  * collects a note and drops it is worse than no composer, so there is none.
  */
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
 import { WebView as Untyped } from "react-native-webview";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { BLEED, useEdges } from "~/ui/edges";
 import { router, useLocalSearchParams } from "expo-router";
-import { ChevronLeft } from "lucide-react-native";
+import { ChevronLeft, MoreHorizontal } from "lucide-react-native";
 import { useListArtifacts } from "~/api/generated/artifacts/artifacts";
+import { ArtifactMenu } from "~/ui/ArtifactMenu";
 import { Waiting } from "~/ui/Waiting";
-import { color } from "~/design/tokens.generated";
+import { useTheme } from "~/design/theme";
 
 /**
  * `react-native-webview` 14 is a class component written before React 19
@@ -42,12 +43,20 @@ type Webish = {
   style?: { flex: number; backgroundColor: string };
   startInLoadingState?: boolean;
   renderLoading?: () => React.ReactElement;
+  /** The server answered, with a status that is not a page. */
+  onHttpError?: (e: { nativeEvent: { statusCode: number } }) => void;
+  /** It could not be reached at all. */
+  onError?: () => void;
 };
 const WebView = Untyped as unknown as React.ComponentType<Webish>;
 
 export default function ArtifactScreen() {
+  const { color } = useTheme();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const insets = useSafeAreaInsets();
+  const edges = useEdges({ gutter: BLEED });
+  const [menu, setMenu] = useState(false);
+  /* The bytes failed, as opposed to the row being gone. */
+  const [broken, setBroken] = useState<number | null>(null);
   const { data: artifacts, isPending } = useListArtifacts();
 
   const artifact = useMemo(() => (artifacts ?? []).find((a) => a.id === id) ?? null, [artifacts, id]);
@@ -63,7 +72,7 @@ export default function ArtifactScreen() {
   return (
     <View
       className="flex-1 bg-ground"
-      style={{ paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }}
+      style={edges}
     >
       <View className="flex-row items-center gap-1 border-b border-line-soft pb-2 pl-1">
         <Pressable onPress={() => router.back()} className="h-10 w-10 items-center justify-center" hitSlop={8}>
@@ -80,9 +89,20 @@ export default function ArtifactScreen() {
           ) : null}
         </View>
         {artifact ? (
-          <View className="mr-2 rounded-sm bg-raise px-2 py-1">
+          <View className="mr-1 rounded-sm bg-raise px-2 py-1">
             <Text className="font-mono text-micro text-dim">v{artifact.version}</Text>
           </View>
+        ) : null}
+        {artifact ? (
+          <Pressable
+            testID="artifact-menu"
+            accessibilityLabel="More"
+            onPress={() => setMenu(true)}
+            className="h-11 w-11 items-center justify-center"
+            hitSlop={8}
+          >
+            <MoreHorizontal color={color.dim} size={21} />
+          </Pressable>
         ) : null}
       </View>
 
@@ -94,6 +114,38 @@ export default function ArtifactScreen() {
         <View className="flex-1 items-center justify-center px-8">
           <Text className="text-center font-sans text-ui text-mute">That artifact is not here any more.</Text>
         </View>
+      ) : broken !== null ? (
+        /**
+         * **The page could not be loaded, said as a sentence.**
+         *
+         * Without this the `WebView` renders whatever came back — so a refusal
+         * or a 404 painted its own JSON body as unstyled text across the
+         * screen: `{"code":"NotFound","message":"…"}`. That is the app's
+         * fault even when the status is not: a response body is not a page,
+         * and showing one raw is the viewer declining to have an opinion
+         * about failure.
+         *
+         * The status is named because it separates the two things somebody
+         * can do about it — a 404 means the version's bytes are gone and the
+         * row is stale, a 401 or 403 means this account may not read it, and
+         * anything else is worth retrying.
+         */
+        <View className="flex-1 items-center justify-center gap-2 px-8">
+          <Text className="text-center font-medium text-title text-bone">
+            {broken === 404
+              ? "These bytes are gone."
+              : broken === 401 || broken === 403
+                ? "You cannot read this artifact."
+                : "That artifact would not load."}
+          </Text>
+          <Text className="text-center font-sans text-meta text-mute">
+            {broken === 404
+              ? "The version is still listed, but what it pointed at has been deleted."
+              : broken === 401 || broken === 403
+                ? "The server refused it for this account."
+                : `The server answered ${broken}.`}
+          </Text>
+        </View>
       ) : (
         <WebView
           source={source}
@@ -102,6 +154,9 @@ export default function ArtifactScreen() {
           javaScriptEnabled
           originWhitelist={["*"]}
           style={{ flex: 1, backgroundColor: color.ground }}
+          onHttpError={(e) => setBroken(e.nativeEvent.statusCode)}
+          /* Unreachable rather than refused — no status to name. */
+          onError={() => setBroken(0)}
           startInLoadingState
           renderLoading={() => (
             <View className="flex-1 items-center justify-center bg-ground">
@@ -110,6 +165,23 @@ export default function ArtifactScreen() {
           )}
         />
       )}
+      {menu && artifact ? (
+        <ArtifactMenu
+          title={artifact.title}
+          path={artifact.path}
+          version={artifact.version}
+          address={artifact.url}
+          onClose={() => setMenu(false)}
+          onWorkspace={
+            artifact.fromSessionId
+              ? () => {
+                  setMenu(false);
+                  router.push(`/workspace/${artifact.fromSessionId}`);
+                }
+              : undefined
+          }
+        />
+      ) : null}
     </View>
   );
 }

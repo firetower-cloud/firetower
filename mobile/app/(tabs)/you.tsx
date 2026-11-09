@@ -13,15 +13,19 @@
 import { useSyncExternalStore } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { router } from "expo-router";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { BLEED, useEdges } from "~/ui/edges";
 import { Check, ChevronRight, Plus, Shapes } from "lucide-react-native";
 import { forget, onServers, servers, type Connected } from "~/native/servers";
 import { choose, useServer } from "~/native/current";
 import { useListArtifacts } from "~/api/generated/artifacts/artifacts";
-import { color } from "~/design/tokens.generated";
+import { useTheme } from "~/design/theme";
+import { size } from "~/design/tokens.generated";
+import { ThemeControl } from "~/ui/ThemeControl";
+import { useRepos } from "~/data";
 
 export default function You() {
-  const insets = useSafeAreaInsets();
+  const { color } = useTheme();
+  const edges = useEdges({ gutter: BLEED, top: 8, bottom: 24 });
   /* The registry, not a fixture: this list is the one piece of state that is
      genuinely the phone's rather than any server's. */
   const known = useSyncExternalStore(onServers, servers, servers);
@@ -29,20 +33,17 @@ export default function You() {
   /* Only for the count beside the row. The list itself is read on the
      screen it belongs to. */
   const { data: shelf = [] } = useListArtifacts();
+  const { data: repos } = useRepos();
+  const org = known.find((s) => s.serverId === current)?.org;
 
   return (
     <ScrollView
       className="flex-1 bg-ground"
-      contentContainerStyle={{
-        paddingTop: insets.top + 8,
-        paddingBottom: insets.bottom + 24,
-        paddingLeft: insets.left,
-        paddingRight: insets.right,
-      }}
+      contentContainerStyle={edges}
     >
-      <Text className="px-4 font-semibold text-display text-bone">You</Text>
+      <Text className="px-5 font-semibold text-display text-bone">You</Text>
 
-      <Text className="mb-2 mt-6 px-4 font-narrow text-micro uppercase tracking-[0.18em] text-mute">
+      <Text className="mb-2 mt-6 px-5 font-narrow text-micro uppercase tracking-[0.18em] text-mute">
         Firetowers
       </Text>
 
@@ -94,42 +95,51 @@ export default function You() {
         </Pressable>
       </View>
 
-      <Text className="mb-2 mt-8 px-4 font-narrow text-micro uppercase tracking-[0.18em] text-mute">
-        Account
+      {/* **Named for the server**, because that is the answer to "whose
+          configuration is this" and it changes the moment you switch above.
+          This is what the retired Config tab's subtitle was doing — said in
+          the heading rather than in a legend. */}
+      <Text className="mb-2 mt-8 px-5 font-narrow text-micro uppercase tracking-[0.18em] text-mute">
+        {org ?? "This server"}
       </Text>
       <View className="px-2">
-        {/* The artifacts shelf hangs off the account rather than off a
-            workspace, because that is who owns it: `artifacts` has foreign
-            keys to `users` and `organizations` and to nothing else. A
-            workspace is reclaimed within a minute of its last session ending
-            and the cascade takes the conversation with it — a list spanning
-            conversations can only exist outside that. And it is a row here
-            rather than a fifth tab, because there are four tabs. */}
         <Pressable
-          testID="artifacts"
-          onPress={() => router.push("/artifacts")}
-          className="flex-row items-center gap-3 rounded-lg px-3 py-3"
+          testID="repositories"
+          onPress={() => router.push("/config")}
+          className="min-h-[58px] flex-row items-center gap-3 rounded-lg px-3 py-3"
           android_ripple={{ color: color.overlay }}
         >
-          <View className="h-10 w-10 items-center justify-center rounded-md bg-raise">
-            <Shapes color={color.bone} size={18} />
+          <View className="min-w-0 flex-1">
+            <Text className="font-medium text-title text-bone">Repositories</Text>
+            <Text className="mt-0.5 font-sans text-meta text-mute">
+              What a workspace can be cut from
+            </Text>
           </View>
-          <Text className="flex-1 font-medium text-title text-bone">Artifacts</Text>
-          {shelf.length ? <Text className="font-mono text-meta text-mute">{shelf.length}</Text> : null}
+          {repos.length ? <Text className="font-sans text-meta text-mute">{repos.length}</Text> : null}
           <ChevronRight color={color.mute} size={16} />
         </Pressable>
+      </View>
 
-        <View className="rounded-lg px-3 py-3">
+      {/* **This phone's**, and it survives every server in the list going
+          away. The theme is here for exactly that reason. */}
+      <Text className="mb-2 mt-8 px-5 font-narrow text-micro uppercase tracking-[0.18em] text-mute">
+        This phone
+      </Text>
+      <ThemeControl />
+
+      <View className="mt-2 px-2">
+        <View className="min-h-[58px] justify-center rounded-lg px-3 py-3">
           <Text className="font-sans text-ui text-text">
             {current ? `Signed in as ${known.find((s) => s.serverId === current)?.user}` : "Not signed in anywhere"}
           </Text>
-          {current ? (
-            <Text className="mt-0.5 font-sans text-meta text-mute">
-              {known.find((s) => s.serverId === current)?.org}
-            </Text>
-          ) : null}
+          {current ? <Text className="mt-0.5 font-sans text-meta text-mute">{org}</Text> : null}
         </View>
       </View>
+
+      <Text className="px-5 pt-6 font-sans text-mute" style={{ fontSize: size.body, lineHeight: size.body * 1.6 }}>
+        Who else is here, what they may do, and who may reach a workspace are set on the control
+        plane’s own site. This phone reads and starts work.
+      </Text>
     </ScrollView>
   );
 }

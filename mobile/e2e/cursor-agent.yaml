@@ -24,14 +24,18 @@ appId: com.usefiretower.app
 - inputText: "${PASS}"
 - hideKeyboard
 - tapOn: "Sign in"
-- assertVisible: "Inbox"
+- assertVisible: "Dashboard"
 
+# **The `+` is gone**, because the screen it opened is the screen you are
+# already on. Starting work is the composer at the foot of the home: what you
+# type there seeds the form, so the name arrives already filled in and this
+# flow no longer types it twice.
 - tapOn:
-    id: "new-workspace"
-- assertVisible: "New workspace"
-- tapOn:
-    id: "workspace-name"
+    id: "start-text"
 - inputText: "${WORKSPACE_NAME}"
+- tapOn:
+    id: "start-send"
+- assertVisible: "New workspace"
 - hideKeyboard
 - tapOn: "Choose a repository"
 - tapOn: "firetower-cursor-pw-repo"

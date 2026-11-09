@@ -30,7 +30,8 @@ import {
 } from "~/api/generated/sessions/sessions";
 import { ready, shipping } from "~/api/ship";
 import { why } from "~/data";
-import { color, size } from "~/design/tokens.generated";
+import { size } from "~/design/tokens.generated";
+import { useTheme } from "~/design/theme";
 
 export function Ship({
   session,
@@ -42,6 +43,7 @@ export function Ship({
   /** The home indicator's room. The action is pinned, so it owes it. */
   bottom?: number;
 }) {
+  const { color } = useTheme();
   const cache = useQueryClient();
   const { data: work, isError: workFailed } = useSessionWork(session.id, {
     query: { refetchInterval: 15_000 },

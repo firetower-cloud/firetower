@@ -1,0 +1,162 @@
+# The peek needs a pending request, and the shipped mock has none.
+#
+# `desktop/scripts/mock-server.mjs` is the stand-in control plane the phone is
+# driven against. It serves a conversation for **`s_1` only**, and that session
+# is `Working` with no `RequestOpened` in its transcript — so the two sessions
+# that *are* `NeedsYou` (`s_6`, `s_7`) have no conversation at all.
+#
+# That makes coverage §5's **P4** — answer a waiting agent from the peek,
+# without a round trip into the workspace — impossible to exercise against the
+# repository as it stands. The peek folds `getConversation` to find the `Asked`
+# it must answer; with no events there is nothing to fold and the Allow/No
+# buttons correctly do not render.
+#
+# This patch adds conversations carrying a real `RequestOpened`, and an
+# endpoint that accepts the answer and logs the decision that arrived.
+#
+# The answer route is **`POST /api/v1/sessions/{id}/answer`** — what
+# `getAnswerRequestUrl` builds. An earlier version of this fixture guessed
+# `/requests/{req}`, which the client never calls: the app 404'd, the log line
+# never fired, and its absence read as a failed answer rather than a
+# mismatched mock. A fixture answering the wrong path is worse than none.
+#
+#   cd firetower
+#   git apply mobile/e2e/peek-fixture.patch
+#   node desktop/scripts/mock-server.mjs 4455
+#   # …then connect the app to localhost:4455 and hold a waiting chip.
+#   git checkout desktop/scripts/mock-server.mjs   # when you are done
+#
+# ## Two cases, and the second one is the point
+#
+# **`s_6` and `s_7`** are the straightforward one: a workspace whose only run
+# is blocked. The peek has one candidate and answering it proves the route,
+# the fold and the `req` round trip.
+#
+# **`s_k1` is the case that caught a real defect, and it needs the `team`
+# scene:**
+#
+#   curl -X POST 'http://localhost:4455/__reset?scene=team'
+#
+# which puts `s_1` *Working* and `s_k1` *NeedsYou* in the same workspace,
+# `w_1`. That matters because **`lead()` is not the run to answer**. `doing()`
+# reports `working` if any run is in flight, so this workspace leads with a
+# busy run — here `s_k2`, which sorts first among the in-flight ones — and a
+# peek that fetched the lead's conversation would find no pending request and
+# hide the Allow/No buttons on exactly the workspace that most needs them: one
+# where something is blocked *and* something else is still running.
+#
+# The first fix for the peek's session id did precisely that, and only a unit
+# test caught it. These two lines are what make it reproducible by hand:
+#
+#   `s_k1`  a blocked conversation, `req: "rq_team_1"`
+#   `s_k2`  an ordinary one, nine events and nothing pending
+#
+# `s_k2` is served rather than left to 404 so that aiming at the lead fails
+# *legibly*. A 404 fails too, but as a read error — indistinguishable from the
+# server being unreachable. Served, the peek folds a real conversation, finds
+# no `Asked`, refetches unbounded and still finds none: no buttons, and
+# nothing to blame it on but the session it chose.
+#
+# The request ids differ on purpose. `[mock] ANSWERED session=… {"req":…}`
+# carries both, so `session=s_k1 {"req":"rq_team_1"…}` is proof the fold read
+# *that session's* conversation. With one id everywhere, reading the wrong
+# session and reading the right one print the same line.
+#
+# Measured against this patch, no device needed:
+#
+#   s_k1/conversation  200, req = rq_team_1
+#   s_6/conversation   200, req = rq_peek_1          (distinct, as above)
+#   s_k2/conversation  200, 9 events, 0 RequestOpened
+#   s_1/conversation   200, 0 RequestOpened
+#   POST s_k1/answer   200 → [mock] ANSWERED session=s_k1 {"req":"rq_team_1",…}
+#
+# It lives here, as a patch rather than an edit, for one reason: this branch
+# holds `git diff origin/main HEAD -- web/ desktop/` empty, which is the
+# guarantee the whole redesign was reviewed against. Extending the shipped mock
+# properly is the follow-up and belongs in a change that is allowed to touch
+# `desktop/`.
+
+--- a/desktop/scripts/mock-server.mjs
++++ b/desktop/scripts/mock-server.mjs
+@@ -389,6 +389,34 @@ const CODEX_DONE = JSON.parse(
+   readFileSync(new URL("./codex-events-done.json", import.meta.url), "utf8"),
+ );
+ 
++/* FIXTURE — see mobile/e2e/peek-fixture.patch. A conversation for a session
++   that is `NeedsYou`, carrying a real `RequestOpened`, so the peek has an
++   `Asked` to fold and a `req` to answer.
++
++   `req` is a parameter because the fixture is served for more than one
++   session and **the ids have to differ**: the answer the app sends is logged
++   with both, so `session=s_k1 {"req":"rq_team_1"…}` proves the fold read
++   *that session's* conversation. With one id everywhere, reading the wrong
++   session and reading the right one produce the same log line. */
++const blockedConversation = (req = "rq_peek_1", said =
++  "The amber band starts at 80% of the soft limit. A free plan has no soft limit.") => ({
++  lastLine: 12,
++  firstLine: 0,
++  hasMore: false,
++  events: [
++    { lineNo: 0, type: "SessionConfigured", model: "claude-opus-5", mode: "acceptEdits", tools: [], commands: [] },
++    { lineNo: 1, type: "TurnStarted", turn: "t_q" },
++    { lineNo: 2, type: "ItemStarted", item: "q_1", kind: "AgentMessage", title: null, task: null },
++    { lineNo: 3, type: "ContentDelta", item: "q_1", stream: "Content", delta: said },
++    { lineNo: 4, type: "ItemCompleted", item: "q_1", status: "Completed" },
++    /* Deliberately the same `kind` for every session this is served for: the
++       card's render path is then the one already verified on device, and the
++       only thing that varies between them is which run gets answered. */
++    { lineNo: 5, type: "RequestOpened", req, kind: "CommandExecution",
++      detail: "cargo test -p ft-server quota", args: { command: "cargo test -p ft-server quota" } },
++  ],
++});
++
+ const conversation = () => ({
+   lastLine: 42,
+   events:
+@@ -521,6 +549,21 @@ const server = createServer(async (req, res) => {
+ 
+   if (req.method === "POST" && path === "/api/v1/updates/plan") return json(res, PLAN);
+ 
++  /* FIXTURE: answering. **`/answer`, not `/requests/{req}`** — this is the
++     route `getAnswerRequestUrl` builds, and an earlier version of this patch
++     guessed the wrong one. A fixture that answers a path the client never
++     calls is worse than no fixture: the app 404s, the log line never fires,
++     and its absence reads as a failed answer rather than a mismatched mock. */
++  const answered = /^\/api\/v1\/sessions\/([^/]+)\/answer$/.exec(path);
++  if (req.method === "POST" && answered) {
++    let body = "";
++    req.on("data", (c) => (body += c));
++    return req.on("end", () => {
++      console.log(`[mock] ANSWERED session=${answered[1]} ${body}`);
++      json(res, { detail: "ok" });
++    });
++  }
++
+   /* Signing in, so the first-run flow can be walked end to end rather than
+      stopping at the password field. `locked` hands back the temporary
+      password case, which is the one `Gate` and `ReplacePassword` exist for. */
+@@ -741,6 +784,24 @@ const server = createServer(async (req, res) => {
+     "/api/v1/sessions/s_1/turn": { sent: true },
+     "/api/v1/artifacts": scene === "no-artifacts" || scene === "bare" ? [] : ARTIFACTS,
+     "/api/v1/sessions/s_1/conversation": conversation(),
++    "/api/v1/sessions/s_6/conversation": blockedConversation(),
++    "/api/v1/sessions/s_7/conversation": blockedConversation(),
++    /* **The blocked run beside a busy one**, which is the `team` scene: `w_1`
++       holds `s_1` *Working* and `s_k1` *NeedsYou*, and `lead()` returns the
++       busy one. Without this line `s_k1`'s conversation 404s, the peek has
++       nothing to fold, and the case cannot be told apart from a peek that
++       asked the wrong session — the exact defect it exists to catch. */
++    "/api/v1/sessions/s_k1/conversation": blockedConversation(
++      "rq_team_1",
++      "A free plan has no soft limit, so there is no 80% mark to start the band at.",
++    ),
++    /* And an ordinary transcript for the run `lead()` actually returns, so
++       that aiming at the lead fails *legibly*. Left to 404 it fails too, but
++       as a read error — indistinguishable from the server being unreachable.
++       Served, the peek folds a real conversation, finds no `Asked`, refetches
++       unbounded and still finds none: no buttons, and nothing to blame it on
++       but the session it chose. */
++    "/api/v1/sessions/s_k2/conversation": conversation(),
+     "/api/v1/sessions/s_1/controls": scene.startsWith("codex") ? [] : CLAUDE_CONTROLS,
+     "/api/v1/sessions/s_1/account":
+       scene === "limit-hit"

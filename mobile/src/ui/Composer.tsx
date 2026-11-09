@@ -71,7 +71,8 @@ import { AttachMenu } from "~/ui/AttachMenu";
 import { Waveform } from "~/ui/Waveform";
 import { useDictation } from "~/ui/useDictation";
 import { takeDraft } from "~/workspace/draft";
-import { color, size } from "~/design/tokens.generated";
+import { radius, size } from "~/design/tokens.generated";
+import { useTheme } from "~/design/theme";
 
 /**
  * One line at rest, six before it scrolls.
@@ -89,8 +90,13 @@ const PAD = Platform.OS === "ios" ? 14 : 18;
 /** `--ease-swift`, and the web build's duration — in-content motion. */
 const SWIFT = { duration: 200, easing: Easing.bezier(0.16, 1, 0.3, 1) };
 
-const PILL = 28;
-const CARD = 26;
+/* 26 at rest and 22 open, which is `--radius-pill` and `--radius-box`. These
+   were 28 and 26 — a point and four points off the drawing, and off the only
+   other composer in the app, because they were written here before the phone
+   had a radius vocabulary to name them with. Read from the tokens rather than
+   restated, so the two boxes cannot drift apart again. */
+const PILL = radius.pill;
+const CARD = radius.box;
 
 /**
  * How far it sits from the edges, at rest and open.
@@ -147,6 +153,7 @@ export function Composer({
   onAttach: (name: string, data: string) => Promise<void>;
   onInterrupt: () => void;
 }) {
+  const { color } = useTheme();
   const insets = useSafeAreaInsets();
   /* How far the keyboard is up, 0 to 1, on the UI thread. The composer's own
      bottom padding is the home indicator's — but only while the home
@@ -393,7 +400,12 @@ export function Composer({
 
   return (
     <KeyboardStickyView offset={{ closed: 0, opened: 0 }}>
-      <Animated.View style={[{ paddingTop: 6 }, skirt]}>
+      {/* `z-index: 20`, as the drawing gives it. The system's floating tab
+          bar declares a container the size of the whole screen on the Duo,
+          and a composer with no stacking order of its own ends up behind it:
+          it draws correctly and then cannot be reached, by a finger or by
+          VoiceOver. The same line is on the home's `StartBox`. */}
+      <Animated.View style={[{ paddingTop: 6, zIndex: 20 }, skirt]}>
         {above}
 
         {more ? <AttachMenu onPick={carry} onClose={() => setMore(false)} /> : null}
@@ -403,7 +415,19 @@ export function Composer({
             layout={LinearTransition.duration(200)}
             style={[
               {
-                backgroundColor: color.raise,
+                /* `--color-float`, not `--color-ground` and not `--color-raise`.
+                   A floating surface's fill is the thing that separates it
+                   from the page, and in dark it has to be: the shadow below
+                   is `rgb(0 0 0 / .7)` over a 0.337%-luminance page, which
+                   renders nothing. Filled with the page's own colour this
+                   measured ΔE 0.00 against it — the most-used control in the
+                   app, with an invisible edge. `float` is L* 11.42 against
+                   the page's 3.04, a 1.18x jump in light.
+
+                   In light it is the page's own white and the shadow does the
+                   work, which is what a shadow is for. One token, both
+                   answers. */
+                backgroundColor: color.float,
                 paddingHorizontal: 8,
                 /* Roomier at rest, tighter once you are writing in it. The
                    card grows and the padding gives way at the same time,

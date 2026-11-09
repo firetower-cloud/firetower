@@ -19,7 +19,7 @@ import type { Session } from "~/api/generated/model";
 import { useSessionWork } from "~/api/generated/sessions/sessions";
 import { shipping } from "~/api/ship";
 import type { ChangedFile } from "~/data";
-import { color } from "~/design/tokens.generated";
+import { useTheme } from "~/design/theme";
 
 export function Changes({
   session,
@@ -30,6 +30,7 @@ export function Changes({
   files: ChangedFile[];
   onPress: () => void;
 }) {
+  const { color } = useTheme();
   const { data: work, isError } = useSessionWork(session.id);
   const ship = shipping(session, work, isError);
 
