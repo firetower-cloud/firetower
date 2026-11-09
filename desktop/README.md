@@ -212,7 +212,10 @@ OS keychain on every platform (`bridge.secrets`).
 ## Releasing
 
 The app has its own release-please package (`desktop`, tags `desktop-v*`,
-`desktop/CHANGELOG.md`); commits scoped `(desktop)` land in its release PR.
+`desktop/CHANGELOG.md`); a conventional commit touching a file under
+`desktop/` lands in its release PR. It is the **path** that decides, not the
+scope — a `fix(desktop):` that edits nothing here reaches the root package
+instead, and a commit here with no conventional subject reaches neither.
 Merging that PR makes a draft release and runs `desktop-release.yml`: a
 universal `.dmg` (`Firetower_<version>_macos.dmg`) with the app signed by the
 Developer ID certificate and the image notarized, an `.exe` and `.msi` for
