@@ -3790,6 +3790,17 @@ impl Fleet {
             .unwrap_or_default()
     }
 
+    /// Forget what a session was blocked on, because what asked is gone.
+    ///
+    /// Stopping an agent voids its questions: the process they were addressed
+    /// to no longer exists, and nothing it was waiting for can be delivered.
+    /// `agent_closed` does this when the worker reports the exit; this is the
+    /// same thing said from the side that asked for the stop, because that
+    /// news can arrive late — or not at all, when the worker goes with it.
+    pub async fn forget_questions(&self, session_id: &SessionId) {
+        self.asked.write().await.remove(session_id.as_str());
+    }
+
     /// Answer something the agent is blocked on.
     pub async fn answer(
         &self,
@@ -3980,18 +3991,22 @@ impl Fleet {
         }
 
         let mut readers = self.progress.write().await;
-        // Only a live blocked/in-flight turn can have answerable questions.
-        // AgentClosed persists a terminal status even when stdout ended before
-        // the provider journal could record a response or failure.
+        // Only a blocked session can have answerable questions, and NeedsYou
+        // is what blocked means here: `blocked` puts every question into that
+        // status, and `answer` only leaves it once nothing is still waiting.
+        // Working was restored from too, which brought back the questions a
+        // stopped agent never answered — an account switch relaunches and goes
+        // straight to Working, so the dead process's approval reappeared and
+        // blocked the next switch. AgentClosed persists a terminal status even
+        // when stdout ended before the provider journal could record a response
+        // or failure.
         if !self
             .db
             .session_status(session_id)
             .await
             .ok()
             .flatten()
-            .is_some_and(|status| {
-                matches!(status, SessionStatus::Working | SessionStatus::NeedsYou)
-            })
+            .is_some_and(|status| status == SessionStatus::NeedsYou)
         {
             pending.clear();
         }

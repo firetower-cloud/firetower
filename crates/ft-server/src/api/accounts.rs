@@ -679,6 +679,21 @@ pub(super) async fn switch_account(
     switch_for(&state, &owner, SessionId::from_stored(id), req).await
 }
 
+/// Move a conversation onto another account, whatever it is in the middle of.
+///
+/// **A turn in flight is not a refusal, and neither is an unanswered
+/// approval.** Both used to be, and both refusals landed hardest on the one
+/// case this exists for: an account that has just hit its limit. That turn
+/// cannot finish and that question cannot be answered — answering it spends
+/// the allowance which has just run out — so "stop the current turn before
+/// switching accounts" and "answer the pending approval or question before
+/// switching accounts" asked for two things nobody could do, and the only way
+/// out of the workspace was to wait for the reset.
+///
+/// Neither was ever needed. The switch stops the agent itself, in
+/// `continue_with_account`, before it relaunches on the account chosen here —
+/// so the turn is ended and the questions are voided by the thing being asked
+/// for, rather than being made somebody's prerequisite for asking.
 async fn switch_for(
     state: &AppState,
     owner: &str,
@@ -710,15 +725,8 @@ async fn switch_for(
     {
         return Err(invalid("install this agent on the workspace's host first"));
     }
-    if session.status == ft_core::SessionStatus::Working
-        || session.status == ft_core::SessionStatus::Starting
-    {
-        return Err(invalid("stop the current turn before switching accounts"));
-    }
-    if !state.fleet.asked(&id).await.is_empty() {
-        return Err(invalid(
-            "answer the pending approval or question before switching accounts",
-        ));
+    if session.status == ft_core::SessionStatus::Ended {
+        return Err(invalid("this workspace has ended"));
     }
     let already_handed_off: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM agent_account_switches WHERE session_id=$1 AND next_session_id IS NOT NULL AND state='continued')")
         .bind(id.as_str()).fetch_one(state.db.pool()).await?;
@@ -732,10 +740,14 @@ async fn switch_for(
         return Err(invalid("this task already uses that account"));
     }
     let line = state.db.last_agent_line(&id).await?;
-    let switch: i64 = sqlx::query_scalar("INSERT INTO agent_account_switches(session_id,from_account_id,to_account_id,after_line) SELECT id,$2,$3,$4 FROM sessions WHERE id=$1 AND status IN ('HandedBack','Failed') AND agent_account_id IS NOT DISTINCT FROM $2 RETURNING id")
-        .bind(id.as_str()).bind(source.as_ref().map(|a| &a.id)).bind(&target.id).bind(line).fetch_optional(state.db.pool()).await
-        .map_err(|e| if e.as_database_error().is_some_and(|e| e.is_unique_violation()) { invalid("an account switch is already in progress") } else {e.into()})?
-        .ok_or_else(||invalid("the task changed while selecting an account; refresh and try again"))?;
+    let switch = claim(
+        &state.db,
+        &id,
+        source.as_ref().map(|a| a.id.as_str()),
+        &target.id,
+        line,
+    )
+    .await?;
     let result =
         super::sessions::continue_with_account(state, owner, &session, &target.id, kind).await;
     match result {
@@ -760,6 +772,29 @@ async fn switch_for(
             Err(e)
         }
     }
+}
+
+/// Take the switch, or say the task moved out from under it.
+///
+/// The row is the lock: `one_account_switch_at_a_time` is a unique index over
+/// the sessions with one `switching`, so a second attempt collides rather than
+/// starting a second hand-off. What it insists on about the session is only
+/// that it still names the account being switched away from, and that it is
+/// not the one state nothing follows. The status it is *in* is not a condition
+/// — a turn in flight and an unanswered question are both things the switch
+/// itself ends, and a session that has run its account out of allowance is
+/// usually sitting in one of them.
+async fn claim(
+    db: &crate::db::Db,
+    id: &SessionId,
+    from: Option<&str>,
+    to: &str,
+    after_line: i64,
+) -> Result<i64, ApiError> {
+    sqlx::query_scalar("INSERT INTO agent_account_switches(session_id,from_account_id,to_account_id,after_line) SELECT id,$2,$3,$4 FROM sessions WHERE id=$1 AND status<>'Ended' AND agent_account_id IS NOT DISTINCT FROM $2 RETURNING id")
+        .bind(id.as_str()).bind(from).bind(to).bind(after_line).fetch_optional(db.pool()).await
+        .map_err(|e| if e.as_database_error().is_some_and(|e| e.is_unique_violation()) { invalid("an account switch is already in progress") } else {e.into()})?
+        .ok_or_else(|| invalid("the task changed while selecting an account; refresh and try again"))
 }
 
 /// Called when the worker publishes a fresh line, even with no browser open.
@@ -871,6 +906,11 @@ pub(super) async fn set_fallback(
 
 /// Runs without a browser. Only explicit quota rejection can spend an explicitly
 /// selected fallback; percentages, auth failures and throttling never trigger it.
+///
+/// An unanswered question does not hold this up either — it used to, which left
+/// the sessions that most needed recovering as the ones it skipped. The agent
+/// that asked is stopped and relaunched on the next account, and the
+/// continuation it is handed tells it to ask again for anything still pending.
 pub(crate) async fn watch_fallbacks(state: AppState) {
     let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
     loop {
@@ -885,9 +925,6 @@ async fn fallback_tick(state: &AppState) -> anyhow::Result<()> {
         .fetch_all(state.db.pool()).await?;
     for (session, owner, ids) in rows {
         let id = SessionId::from_stored(session.clone());
-        if !state.fleet.asked(&id).await.is_empty() {
-            continue;
-        }
         let current = selected(&state.db, &owner, &id).await?;
         let ids: Vec<String> = serde_json::from_value(ids)?;
         let tried: Vec<String> = sqlx::query_scalar("SELECT DISTINCT used.account_id FROM agent_account_switches x JOIN agent_fallbacks f ON f.session_id=x.session_id CROSS JOIN LATERAL unnest(ARRAY[x.from_account_id,x.to_account_id]) AS used(account_id) WHERE x.session_id=$1 AND x.created_at>=f.updated_at AND used.account_id IS NOT NULL")
@@ -981,6 +1018,81 @@ mod tests {
         .unwrap();
         id
     }
+    async fn status(db: &Db, id: &SessionId, status: &str) {
+        sqlx::query("UPDATE sessions SET status=$2 WHERE id=$1")
+            .bind(id.as_str())
+            .bind(status)
+            .execute(db.pool())
+            .await
+            .unwrap();
+    }
+    async fn running_on(db: &Db, id: &SessionId, account: &str) {
+        sqlx::query("UPDATE sessions SET agent_account_id=$2 WHERE id=$1")
+            .bind(id.as_str())
+            .bind(account)
+            .execute(db.pool())
+            .await
+            .unwrap();
+    }
+
+    /// An exhausted account is usually holding the very things that used to be
+    /// demanded first — a turn that cannot finish, a question that cannot be
+    /// answered — so a switch that waited for them waited for the reset.
+    #[tokio::test]
+    async fn a_switch_is_taken_from_every_state_a_conversation_can_be_in() {
+        let (db, owner) = Db::open_for_test_owned().await.unwrap();
+        account(&db, &owner, "spent", "Personal").await;
+        account(&db, &owner, "spare", "Startup plan").await;
+        for state in [
+            "Working",
+            "Starting",
+            "NeedsYou",
+            "HandedBack",
+            "Failed",
+            "Ready",
+        ] {
+            let id = session(&db, &owner).await;
+            running_on(&db, &id, "spent").await;
+            status(&db, &id, state).await;
+            assert!(
+                claim(&db, &id, Some("spent"), "spare", 0).await.is_ok(),
+                "a session that is {state} must be able to leave the account it ran out of"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_switch_is_refused_once_the_workspace_is_gone_or_the_account_moved() {
+        let (db, owner) = Db::open_for_test_owned().await.unwrap();
+        account(&db, &owner, "spent", "Personal").await;
+        account(&db, &owner, "spare", "Startup plan").await;
+        account(&db, &owner, "third", "Someone else").await;
+
+        // Nothing follows Ended: there is no workspace left to continue in.
+        let ended = session(&db, &owner).await;
+        running_on(&db, &ended, "spent").await;
+        status(&db, &ended, "Ended").await;
+        assert!(claim(&db, &ended, Some("spent"), "spare", 0).await.is_err());
+
+        // What the claim is actually racing: something else moved the session
+        // onto another account while this one was being chosen.
+        let moved = session(&db, &owner).await;
+        running_on(&db, &moved, "third").await;
+        status(&db, &moved, "Working").await;
+        assert!(claim(&db, &moved, Some("spent"), "spare", 0).await.is_err());
+
+        // And one at a time, which is the index's job rather than a status's.
+        let busy = session(&db, &owner).await;
+        running_on(&db, &busy, "spent").await;
+        status(&db, &busy, "Working").await;
+        claim(&db, &busy, Some("spent"), "spare", 0).await.unwrap();
+        let again = claim(&db, &busy, Some("spent"), "third", 0).await;
+        assert_eq!(
+            again.unwrap_err().message,
+            "an account switch is already in progress"
+        );
+    }
+
     #[tokio::test]
     async fn account_selection_is_pinned_and_owner_scoped() {
         let (db, owner) = Db::open_for_test_owned().await.unwrap();
