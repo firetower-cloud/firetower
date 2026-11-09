@@ -698,9 +698,15 @@ for (const [theme, motion] of [["light", false], ["dark", false], ["light", true
    placements, reasoning from `Role.placement` — documented `lead | here |
    new`. That is the *response* model: `CreateRoleBody.placement` says
    *Required: "here" or "new"* and `roles.rs` enforces
-   `PLACEMENT: ["here", "new"]`. So `lead` is readable and not writable, and
+   `PLACEMENT: ["here", "new"]`. So `lead` was readable and not writable, and
    an effect that coerces any unknown placement to `here` ran on every render
    — pressing *Let the lead choose* snapped the selection straight back.
+
+   **The server takes it now.** `PLACEMENT` carries all three, a profile may
+   leave its placement open, and the coercing effect is gone — so the three
+   pills are what this expects, open one among them. The check itself does not
+   change: the half that caught the defect was never the count, it was driving
+   every pill and reading the selection back.
 
    No screenshot holds that: a picture of the editor shows *Same workspace*
    selected, which is what it shows after the snap and also what it shows when
@@ -747,13 +753,13 @@ for (const [theme, motion] of [["light", false], ["dark", false], ["light", true
   const before = await pills();
   say(!!before, "the placement picker is on the page", "no .pickrow with a workspace option");
   if (before) {
-    say(before.length === 2, "two placements, because the server takes two", `${before.length}: ${before.map((p) => p.says).join(" / ")}`);
+    say(before.length === 3, "three placements, because the server takes three", `${before.length}: ${before.map((p) => p.says).join(" / ")}`);
     /* The option by its name, not by the word *lead* — *Same workspace*'s own
        note reads "Shares the lead's directory and branch", which is correct
        copy and was failing this. */
     say(
-      !before.some((p) => /let the lead choose/i.test(p.says)),
-      "and none of them is *Let the lead choose*, which the server refuses",
+      before.some((p) => /let the lead choose/i.test(p.says)),
+      "and one of them is *Let the lead choose*, which the server now takes",
       before.map((p) => p.says).join(" / "),
     );
     say(before.filter((p) => p.on).length === 1, "exactly one is selected", `${before.filter((p) => p.on).length} selected`);
