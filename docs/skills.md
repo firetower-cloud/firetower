@@ -877,6 +877,33 @@ read-only.
 needs a credential and a clone on a worker. Just after v1, but the schema
 should not make it hard.
 
+### What an agent may write
+
+`create_skill` and `update_skill` are MCP tools, so an agent writing a skill
+writes it **under its owner's access** — the same grants the Skills screen
+obeys, decided in the same place.
+
+**A version is a write.** `Skills::add_version` asks `filed_where` for
+`Level::Writer` itself rather than trusting the caller to have asked. The HTTP
+route did hold that gate and `update_skill` did not, so the screen correctly
+gave a reader no way to edit a shared skill while their agent had one. Writer
+is now a property of the write instead of a habit of its callers, which is
+where `approve`, `discard` and `roles::update` already decide it. The one write
+that is nobody's to refuse — `seed_builtins`, since nobody holds Writer on
+`d/firetower` by design — goes past the gate through a private
+`write_next_version`, explicitly. `create_skill` needs no gate of its own:
+`create` writes under the owner's personal root, the one root that needs no
+grant, and naming a directory already asks `file_skill` for Writer on it.
+
+**And what an agent publishes is held for review by the parser the badges come
+from.** `held_because` reads the bundle through `skills::risk_of` — §8's four
+categories — rather than looking at file paths and the executable bit, so what
+holds a skill and what its row says about it cannot drift apart, and a category
+added to `risk_of` holds a bundle without this path being touched. The
+executable bit is kept beside it: `risk_of` answers for a stored row, where a
+file that runs is spelled `scripts/`, and a bundle an agent sends can mark any
+path `+x`. The acknowledgement names what held it.
+
 ---
 
 ### Sharing several at once
