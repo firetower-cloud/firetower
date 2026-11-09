@@ -55,7 +55,7 @@ import {
 } from "~/api/generated/roles/roles";
 import { useAgentControls } from "~/api/generated/agents/agents";
 import { useAccounts, useAgents, useDirectories, useHosts, useSkills, why } from "~/data";
-import { quota, usable } from "~/api/accounts";
+import { quota, usable, type Account } from "~/api/accounts";
 import { ScopePicker, type ScopeItem } from "~/ui/config/ScopePicker";
 import { SkillSources, useSkillSources } from "~/ui/config/SkillSources";
 import { machineLabel, machines, stateLabel } from "~/api/environments";
@@ -579,6 +579,29 @@ export function whatAChildGets(
   );
 }
 
+/**
+ * Whether a pinned subscription still fits the engine a draft now names — and
+ * so whether the form may drop it.
+ *
+ * **`answered` is the whole of it.** `useAccounts()` reads `[]` while its query
+ * is in flight, so reconciling against the list before it lands finds every pin
+ * absent: a profile opened from a cold cache lost a deliberate pick to *Your
+ * default*, with nothing said, and Save wrote the loss back. An unanswered list
+ * is not an answer and keeps the pin. An *answered* empty one is a real answer
+ * — no usable subscription for this engine — and a stale pin still comes off,
+ * which is why this reads the query's own state rather than inferring it from
+ * the array's length.
+ */
+export function pinnedAccountFits(
+  account: string,
+  agent: NewRole["agent"],
+  accounts: Account[],
+  answered: boolean,
+): boolean {
+  if (!answered) return true;
+  return accounts.some((a) => a.id === account && a.kind === agent && usable(a));
+}
+
 function Editor({
   state,
   all,
@@ -674,7 +697,7 @@ function Editor({
   const runsThere = (host: string) => (pinnedEngine ? canRun(pinnedEngine, host) : null);
   // The subscriptions it can run its engine on — the owner's own plus any lent
   // to them — narrowed to the chosen engine, since an account is per-engine.
-  const { data: accounts } = useAccounts();
+  const { data: accounts, loading: accountsLoading } = useAccounts();
   /* The owner's default first, as a choice of its own rather than the absence
      of one. `account: null` has always meant "the owner's default for the
      engine, resolved when it launches" on the wire, and it is what every
@@ -787,9 +810,9 @@ function Editor({
   // (`null`) rather than to whichever account happens to be first, which is now
   // a choice the form can actually offer.
   useEffect(() => {
-    const forEngine = accounts.filter((a) => a.kind === draft.agent && usable(a));
-    if (draft.account && !forEngine.some((a) => a.id === draft.account)) set("account", null);
-  }, [draft.agent, accounts]);
+    if (draft.account && !pinnedAccountFits(draft.account, draft.agent, accounts, !accountsLoading))
+      set("account", null);
+  }, [draft.agent, accounts, accountsLoading]);
 
   /* Run controls are per-engine, so a pin for one agent means nothing to
      another. When the person switches engines — *including to no engine at
