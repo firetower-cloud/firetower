@@ -22,6 +22,20 @@ fn refused(e: crate::roles::Refused) -> ApiError {
     ApiError::new(ErrorCode::InvalidRequest, e.to_string())
 }
 
+/// The same, for a refusal the write itself raised.
+///
+/// `crate::roles` reads a foreign key violation on `host_id` back as a
+/// [`crate::roles::Refused`] naming the machine — see `refused_by_constraint`
+/// for why that is read off the violation rather than checked beforehand. It
+/// arrives here as an `anyhow::Error` like any other, so it is asked for by
+/// name; anything else is still the 500 it was.
+fn wrote(e: anyhow::Error) -> ApiError {
+    match e.downcast::<crate::roles::Refused>() {
+        Ok(no) => refused(no),
+        Err(e) => e.into(),
+    }
+}
+
 /// A pinned subscription has to be one this person may use and has to be for
 /// the profile's engine. Absent is fine — it means the owner's default at
 /// launch, which is what an agent-authored profile gets.
@@ -156,7 +170,8 @@ pub(super) async fn create_role(
     let id = state
         .roles
         .create(me.org_id.as_str(), me.id.as_str(), &me.slug, &new)
-        .await?;
+        .await
+        .map_err(wrote)?;
 
     // Hand it to a directory, when one was named — the same operation the
     // sharing sheet performs later, at the one moment nobody has to be told it
@@ -225,7 +240,12 @@ pub(super) async fn update_role(
     // Absent rather than refused when they may not change it, for the reason
     // every other read gives: a role you cannot reach is one you are not told
     // exists.
-    if !state.roles.update(me.id.as_str(), &id, &new).await? {
+    if !state
+        .roles
+        .update(me.id.as_str(), &id, &new)
+        .await
+        .map_err(wrote)?
+    {
         return Err(ApiError::not_found("role"));
     }
     let now = state

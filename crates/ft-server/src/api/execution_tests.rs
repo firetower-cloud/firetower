@@ -1996,6 +1996,134 @@ async fn an_engine_by_a_name_firetower_does_not_run_is_still_refused() {
     state.fleet.stop_supervising(&host.id).await;
 }
 
+/// A machine id no machine answers to, which QA found returning a 500 with a
+/// Postgres constraint in the message.
+///
+/// Pre-existing on both branches, and more reachable since `spawn` and the
+/// editor started handling machines more freely: `create_profile` and
+/// `update_profile` take one from a Manager by hand. The point of criterion 26
+/// is that a machine this server cannot honour is *named* rather than dumped,
+/// and a write path that dumps it undoes that on the other side of the same
+/// feature.
+#[tokio::test]
+async fn a_machine_id_no_machine_has_is_refused_by_name_rather_than_dumped() {
+    let (state, principal, host, _ready, owner) = fixture().await;
+    let error = super::roles::create_role(
+        State(state.clone()),
+        Extension(principal.clone()),
+        Json(
+            serde_json::from_value(serde_json::json!({
+                "name": "Load tester",
+                "does": "Hammers a branch until something gives",
+                "placement": "new",
+                "machine": "h_nope",
+            }))
+            .unwrap(),
+        ),
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        matches!(error.code, super::ErrorCode::InvalidRequest),
+        "a refusal, not a 500: {error:?}"
+    );
+    assert!(
+        error.message.contains("h_nope"),
+        "and it names the machine: {}",
+        error.message
+    );
+    assert!(
+        !error.message.contains("foreign key"),
+        "without the constraint it came from: {}",
+        error.message
+    );
+
+    // The same on the way through `PUT`, which is the one the editor uses.
+    let (_, Json(real)) = super::roles::create_role(
+        State(state.clone()),
+        Extension(principal.clone()),
+        Json(
+            serde_json::from_value(serde_json::json!({
+                "name": "Load tester two",
+                "does": "Hammers a branch until something gives",
+                "placement": "new",
+                "machine": host.id.as_str(),
+            }))
+            .unwrap(),
+        ),
+    )
+    .await
+    .unwrap();
+    let error = super::roles::update_role(
+        State(state.clone()),
+        Extension(principal),
+        Path(real.id.clone()),
+        Json(
+            serde_json::from_value(serde_json::json!({
+                "name": real.name,
+                "does": real.does,
+                "placement": "new",
+                "machine": "h_gone",
+            }))
+            .unwrap(),
+        ),
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        matches!(error.code, super::ErrorCode::InvalidRequest) && error.message.contains("h_gone"),
+        "{error:?}"
+    );
+
+    /* And through `create_profile`, which is where a machine id is typed by
+    hand rather than picked from a list — the reachable one. It is here to
+    show the mapping is at the write and not at the route: these three
+    callers get it from one site, which is why no handler has a copy of the
+    check. */
+    let lead = lead_running(
+        &state,
+        &host,
+        &owner,
+        Agent::ClaudeCode,
+        &saved_profile(
+            &state,
+            &owner,
+            serde_json::json!({
+                "name": "Ada, the lead",
+                "does": "Breaks work up and hands it out",
+                "placement": "here",
+                "canDelegate": true,
+            }),
+        )
+        .await,
+    )
+    .await;
+    let said = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "mk",
+            "create_profile",
+            serde_json::json!({
+                "name": "QA",
+                "does": "Runs it and tries to break it; after a hand-back",
+                "placement": "new",
+                "machine": "h_nope",
+            }),
+        ),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(
+        said.contains("h_nope") && !said.contains("foreign key"),
+        "{said}"
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
 /// Criterion 3: the Unpin button on the Machines screen, which has never
 /// worked for the only profiles that can appear in its list.
 ///

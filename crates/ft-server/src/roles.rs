@@ -184,6 +184,45 @@ impl std::fmt::Display for Refused {
     }
 }
 
+impl std::error::Error for Refused {}
+
+/// A write the database refused, said as a sentence rather than dumped.
+///
+/// `roles.host_id` references `hosts(id)`, so a machine id no row answers to
+/// came back as a 500 with the constraint's name in it. The editor only ever
+/// offers real ids, but `create_profile` and `update_profile` take one from a
+/// Manager by hand — and a machine this server cannot honour being *named* is
+/// the same promise the spawn path already makes (`delegate.rs`).
+///
+/// **Read off the violation rather than checked before the write.** A `SELECT`
+/// first would race: `host_id` is `on delete set null`, so a machine removed
+/// between the look and the insert puts the raw error back — more rarely, and
+/// so more confusingly. This is the repository's own idiom for the shape
+/// (`api/accounts.rs`, on a unique violation), and it costs no round trip.
+///
+/// Only the one constraint. `roles` has four foreign keys and the other three
+/// are the server's own doing, not something a caller named, so they stay
+/// whatever they were.
+fn refused_by_constraint(e: &sqlx::Error, new: &NewRole) -> Option<Refused> {
+    let db = e.as_database_error()?;
+    if !db.is_foreign_key_violation() || db.constraint() != Some("roles_host_id_fkey") {
+        return None;
+    }
+    Some(Refused(format!(
+        "there is no machine \"{}\" — name one of yours, or leave it out and the machine is \
+         the lead's to choose",
+        new.machine.as_deref().unwrap_or_default()
+    )))
+}
+
+/// Either the refusal above, or the error as it was, with its context.
+fn written(e: sqlx::Error, new: &NewRole, doing: &'static str) -> anyhow::Error {
+    match refused_by_constraint(&e, new) {
+        Some(refused) => anyhow::Error::new(refused),
+        None => anyhow::Error::new(e).context(doing),
+    }
+}
+
 /// Everything a well-formed role must be.
 ///
 /// Shape only — everything answerable without the database. The one field that
@@ -525,7 +564,7 @@ impl Roles {
         .bind(nonblank(&new.settings.sandbox))
         .execute(&self.pool)
         .await
-        .context("writing a role")?;
+        .map_err(|e| written(e, new, "writing a role"))?;
         Ok(id)
     }
 
@@ -572,7 +611,7 @@ impl Roles {
         .bind(nonblank(&new.settings.sandbox))
         .execute(&self.pool)
         .await
-        .context("updating a role")?;
+        .map_err(|e| written(e, new, "updating a role"))?;
         Ok(true)
     }
 
