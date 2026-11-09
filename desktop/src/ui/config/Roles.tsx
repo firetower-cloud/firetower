@@ -457,8 +457,14 @@ function Chip({ children }: { children: ReactNode }) {
  * and Teams make for the administration site.
  */
 function Reading({ role, onClose }: { role: Role; onClose: () => void }) {
+  /* `new`, which is what the server stores and has always stored. This read
+     `own`, a value nothing sends, so a profile committed to its own workspace
+     fell through to the last branch — harmless while that branch described a
+     state nothing could be in, and wrong the moment *open* became real. This is
+     the one view that is only ever read, by somebody who cannot open the form
+     and check. */
   const place =
-    role.placement === "own" ? "its own workspace" : role.placement === "here" ? "the lead's workspace" : "wherever the lead decides";
+    role.placement === "new" ? "its own workspace" : role.placement === "here" ? "the lead's workspace" : "wherever the lead decides";
   const agent = role.agent as Agent | null;
   const named = (ids: string[]) => ids.length;
 
