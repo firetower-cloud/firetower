@@ -28,7 +28,12 @@ const account = (id: string, name: string, limits: Limit[] = []): Account =>
   ({ id, name, kind: "ClaudeCode", mode: "Subscription", enabled: true, state: "connected", credentialSet: true, isDefault: false, revision: 1, limits }) as Account;
 
 /** What Claude Code reports when a window is spent rather than merely measured. */
-const spent: Limit = { scope: "seven_day", status: "blocked", resetsAt: 1796486400 };
+const spent: Limit = {
+  scope: "seven_day",
+  status: "blocked",
+  resetsAt: 1796486400,
+  observedAt: "2026-11-09T12:00:00Z",
+};
 
 const claude = { kind: "ClaudeCode", label: "Claude Code", needsCredential: true, supported: true, enabled: true, credentialSet: true, signsInWithACode: false, hosts: [{ hostId: SESSION.hostId, installed: true }] } as AgentView;
 

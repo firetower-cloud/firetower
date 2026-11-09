@@ -96,6 +96,7 @@ pub(crate) async fn handle(state: &AppState, request: &AgentRequest) -> Result<S
         "create_profile" => create_profile(state, request).await,
         "update_profile" => update_profile(state, request).await,
         "list_profiles" => list_profiles(state, request).await,
+        "list_compute" => list_compute(state, request).await,
         "create_skill" => create_skill(state, request).await,
         "update_skill" => update_skill(state, request).await,
         "list_skills" => list_skills(state, request).await,
@@ -975,6 +976,28 @@ async fn update_profile(state: &AppState, request: &AgentRequest) -> Result<Stri
     ))
 }
 
+/// What a profile leaves for the lead to answer, for a list that names it.
+///
+/// Said on the row rather than discovered through a refusal: a Manager reading
+/// a team list cannot otherwise tell which profiles will take its `agent` and
+/// which will ignore it. Committed is the ordinary case and spends no words.
+pub(crate) fn left_open(role: &crate::roles::Role) -> String {
+    let mut open: Vec<&str> = Vec::new();
+    if role.agent.is_none() {
+        open.push("engine");
+    }
+    if role.placement != "here" && role.placement != "new" {
+        open.push("placement");
+    }
+    if role.placement == "new" && role.machine.is_none() {
+        open.push("machine");
+    }
+    match open.is_empty() {
+        true => String::new(),
+        false => format!(" — you choose its {}", open.join(" and ")),
+    }
+}
+
 /// The profiles the session's owner can see, so the agent builds on them.
 async fn list_profiles(state: &AppState, request: &AgentRequest) -> Result<String> {
     let session = authoring_session(state, request).await?;
@@ -989,16 +1012,250 @@ async fn list_profiles(state: &AppState, request: &AgentRequest) -> Result<Strin
         .iter()
         .map(|r| {
             format!(
-                "- {}{}: {}",
+                "- {}{}: {}{}",
                 r.name,
                 if r.can_delegate { " (Manager)" } else { "" },
-                r.does
+                r.does,
+                left_open(r),
             )
         })
         .collect();
     Ok(format!("The profiles you can see:\n{}", lines.join("\n")))
 }
 
+// ── what can run this, and where ────────────────────────────────────────
+
+/// How long ago, in words.
+///
+/// Every number this tool reports is only as good as its age, so the age is
+/// never optional and never a timestamp somebody has to subtract.
+fn how_long_ago(then: chrono::DateTime<chrono::Utc>) -> String {
+    let seconds = (chrono::Utc::now() - then).num_seconds().max(0);
+    match seconds {
+        0..=90 => "just now".to_string(),
+        91..=5_400 => format!("{} minutes ago", seconds / 60),
+        5_401..=172_800 => format!("{} hours ago", seconds / 3_600),
+        _ => format!("{} days ago", seconds / 86_400),
+    }
+}
+
+/// How a machine itself is, in the words the screens use.
+fn how_it_is(host: &ft_core::Host) -> &'static str {
+    match (host.drained, host.state) {
+        (true, _) => "draining",
+        (_, ft_core::HostState::Draining) => "draining",
+        (_, ft_core::HostState::Online) => "ready",
+        _ => "not answering",
+    }
+}
+
+/// `five_hour` → `5h`: the window, said the short way, as the desktop says it.
+fn window(scope: &str) -> String {
+    match scope {
+        "five_hour" | "5_hour" => "5h".to_string(),
+        "seven_day" | "7_day" => "7d".to_string(),
+        other => other.replace('_', " "),
+    }
+}
+
+/// What is known of one subscription's allowance, with the age of the reading.
+fn allowance(limits: &[crate::api::accounts::Limit]) -> String {
+    if limits.is_empty() {
+        return "nothing reported about its allowance".to_string();
+    }
+    let said: Vec<String> = limits
+        .iter()
+        .map(|l| match l.used_percent {
+            Some(pct) => format!("{} {pct}% used, {}", window(&l.scope), l.status),
+            None => format!("{} {}", window(&l.scope), l.status),
+        })
+        .collect();
+    let oldest = limits.iter().map(|l| l.observed_at).min();
+    match oldest {
+        Some(at) => format!("{}, as of {}", said.join(" · "), how_long_ago(at)),
+        None => said.join(" · "),
+    }
+}
+
+/// Answer "what can run this, and where" as one join.
+///
+/// Machines, engines and subscriptions in one answer rather than three lists to
+/// correlate: correlating them is exactly where an agent pairs a machine with
+/// an engine that is not installed on it, which is a failed spawn rather than a
+/// slower one.
+async fn list_compute(state: &AppState, request: &AgentRequest) -> Result<String> {
+    let lead = state
+        .db
+        .session(&request.session_id)
+        .await?
+        .context("the session that asked no longer exists")?;
+    let owner = lead.owner.as_str();
+
+    // When the caller has already said something that settles the machine, the
+    // answer is about that machine. A fleet listing would invite it to choose
+    // one the child could never land on.
+    let role = match text(&request.input, "role") {
+        Some(wanted) => state.roles.by_name(owner, &wanted).await?,
+        None => None,
+    };
+    let placement = role
+        .as_ref()
+        .map(|r| r.placement.clone())
+        .filter(|p| p == "here" || p == "new")
+        .or_else(|| text(&request.input, "placement"));
+    let settled = match placement.as_deref() {
+        // A child in the lead's own workspace runs on the lead's own machine,
+        // whatever anybody names.
+        Some("here") => Some(lead.host_id.as_str().to_string()),
+        Some("new") => role.as_ref().and_then(|r| r.machine.clone()),
+        _ => None,
+    };
+
+    let hosts = state
+        .db
+        .hosts_for(owner, crate::access::Level::Writer)
+        .await?;
+    let shown: Vec<&ft_core::Host> = match &settled {
+        Some(id) => hosts.iter().filter(|h| h.id.as_str() == id).collect(),
+        None => hosts.iter().collect(),
+    };
+    let presence = state.db.presence().await?;
+    let engines: Vec<Agent> = Agent::all()
+        .into_iter()
+        .filter(|a| a.speaks_a_protocol())
+        .collect();
+
+    let mut out = String::new();
+    out.push_str(
+        "Everything below is the last thing each machine reported, not a live check — the age \
+         is on every line. And an engine is installed per machine rather than everywhere: one \
+         that is missing where a child lands is a failed start, not a slower one.\n",
+    );
+    if let Some(id) = &settled {
+        out.push_str(&format!(
+            "Scoped to {id}, the one machine that child would run on, because the placement \
+             settles it.\n"
+        ));
+    }
+
+    out.push_str(&format!("\nMachines you can use — {}\n", shown.len()));
+    if shown.is_empty() {
+        out.push_str("- none. An agent runs on a machine, and there is none to put one on yet.\n");
+    }
+    for host in &shown {
+        let specs = [
+            host.cpus.map(|n| format!("{n} cores")),
+            host.memory_mb.map(|mb| format!("{} GB", mb / 1024)),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" · ");
+        out.push_str(&format!(
+            "- {} ({}) · {}{} · {}\n",
+            host.name,
+            host.id,
+            specs,
+            if specs.is_empty() {
+                "specs unknown"
+            } else {
+                ""
+            },
+            how_it_is(host),
+        ));
+        let here: Vec<&crate::db::StoredPresence> =
+            presence.iter().filter(|p| p.host == host.id).collect();
+        let runs: Vec<String> = here
+            .iter()
+            .filter(|p| p.found.installed)
+            .map(|p| match p.found.logged_in {
+                Some(false) => format!("{} (installed, not signed in)", p.found.kind.label()),
+                _ => p.found.kind.label().to_string(),
+            })
+            .collect();
+        let last = here.iter().map(|p| p.checked_at).max();
+        out.push_str(&match (runs.is_empty(), last) {
+            (true, _) => "    it has reported no engines\n".to_string(),
+            (false, Some(at)) => {
+                format!(
+                    "    runs {}, as of {}\n",
+                    runs.join(" and "),
+                    how_long_ago(at)
+                )
+            }
+            (false, None) => format!("    runs {}\n", runs.join(" and ")),
+        });
+    }
+
+    out.push_str("\nEngines, and which of those machines each is ready on\n");
+    for engine in &engines {
+        let on: Vec<&str> = shown
+            .iter()
+            .filter(|h| {
+                presence
+                    .iter()
+                    .any(|p| p.host == h.id && p.found.kind == *engine && p.found.installed)
+            })
+            .map(|h| h.name.as_str())
+            .collect();
+        out.push_str(&format!(
+            "- {} — pass `agent: \"{engine:?}\"` — {}\n",
+            engine.label(),
+            match on.is_empty() {
+                true => "no machine here has reported it".to_string(),
+                false => format!("ready on {}", on.join(", ")),
+            }
+        ));
+    }
+
+    // Only what this person could actually spend: filed to them at the level
+    // that lets them spend it, connected, and holding a credential that can
+    // travel to whatever machine the child gets. Listing anything else offers a
+    // choice the spawn then refuses.
+    let accounts = crate::api::accounts::spendable(state, owner)
+        .await
+        .map_err(|e| anyhow::anyhow!("{}", e.message))?;
+    out.push_str("\nSubscriptions you can spend, by engine\n");
+    for engine in &engines {
+        let wants = format!("{engine:?}");
+        let theirs: Vec<&crate::api::accounts::Account> =
+            accounts.iter().filter(|a| a.kind == wants).collect();
+        out.push_str(&format!("- {}\n", engine.label()));
+        if theirs.is_empty() {
+            out.push_str(
+                "    none you can spend. A child on it runs on whatever that machine is signed \
+                 in as, or is refused at launch.\n",
+            );
+        }
+        for account in theirs {
+            out.push_str(&format!(
+                "    · {} ({}) — {}{}connected · {}\n",
+                account.name,
+                account.id,
+                if account.is_default {
+                    "your default · "
+                } else {
+                    ""
+                },
+                // Whose it is, only when it is not this person's: every row
+                // carries an owner name, and "kevin's" on kevin's own account
+                // is a word that says nothing.
+                match &account.owner_name {
+                    Some(whose) if account.user_id != owner => format!("{whose}'s · "),
+                    _ => String::new(),
+                },
+                allowance(&account.limits),
+            ));
+        }
+    }
+
+    out.push_str(
+        "\nMost of the time none of this is needed: your own engine and whichever machine \
+         Firetower picks are the right answers, and Firetower only picks a machine the engine \
+         is installed on.\n",
+    );
+    Ok(out)
+}
 // ── skills ──────────────────────────────────────────────────────────────
 //
 // The same road as the profile tools, with `state.skills` in place of

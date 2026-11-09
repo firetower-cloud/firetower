@@ -1088,7 +1088,7 @@ pub(super) async fn relaunch_session(
 /// see both the profile and everything its owner can reach. The identity and
 /// the instructions always; the delegation guidance and the list of profiles
 /// to hand to only for a Manager, so an Operator is never told it can delegate.
-async fn persona_for(
+pub(super) async fn persona_for(
     state: &AppState,
     owner: &str,
     profile: &crate::roles::Role,
@@ -1127,7 +1127,12 @@ async fn persona_for(
         } else {
             text.push_str("\n\nThe profiles you can hand work to — pass the name as `role`:\n");
             for r in &others {
-                text.push_str(&format!("- **{}** — {}\n", r.name, r.does));
+                text.push_str(&format!(
+                    "- **{}** — {}{}\n",
+                    r.name,
+                    r.does,
+                    crate::delegate::left_open(r)
+                ));
             }
         }
     }

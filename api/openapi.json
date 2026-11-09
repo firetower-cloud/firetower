@@ -11831,9 +11831,15 @@
         "type": "object",
         "required": [
           "scope",
-          "status"
+          "status",
+          "observedAt"
         ],
         "properties": {
+          "observedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When this was last heard, which is the only thing that makes the rest of\nit readable.\n\nA limit is **observed, not authoritative**: it is recorded from what an\nagent volunteered mid-session, so headroom on a subscription nothing has\nrun on for a week is a week old. A percentage without its age buys worse\ndecisions than no percentage at all. Both queries already selected the\ncolumn and threw it away."
+          },
           "resetsAt": {
             "type": [
               "integer",

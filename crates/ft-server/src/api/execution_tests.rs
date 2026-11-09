@@ -2894,3 +2894,320 @@ async fn a_subscription_for_another_engine_is_refused_saying_which() {
 
     state.fleet.stop_supervising(&host.id).await;
 }
+
+// ── What can run this, and where ────────────────────────────────────────
+
+/// Criteria 28, 29 and 33: one join, with its age, offering only what could
+/// actually be spent.
+///
+/// Three lists the lead has to correlate is where it pairs a machine with an
+/// engine that is not installed on it — so the test is that each half names the
+/// other, that nothing is reported without saying how old it is, and that a
+/// subscription it could not spend is not on the list at all.
+#[tokio::test]
+async fn list_compute_answers_machines_engines_and_subscriptions_together() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let lead = a_lead_that_delegates(&state, &host, &ready, &owner, Agent::ClaudeCode).await;
+    let second = another_machine(&state, &owner, "build-02").await;
+    says_it_has(
+        &state,
+        &host,
+        &[(Agent::ClaudeCode, true), (Agent::Codex, false)],
+    )
+    .await;
+    says_it_has(&state, &second, &[(Agent::Codex, true)]).await;
+
+    // Three subscriptions, of which exactly one can be spent: a connected one
+    // with a portable credential, a disconnected one, and one whose credential
+    // never left the machine it was made on.
+    for (id, kind, state_text) in [
+        ("a_good", "ClaudeCode", "connected"),
+        ("a_pending", "ClaudeCode", "pending"),
+        ("a_local", "ClaudeCode", "connected"),
+    ] {
+        sqlx::query(
+            "INSERT INTO agent_accounts(id,user_id,kind,name,mode,credential_key,state,enabled,is_default,path)
+             VALUES($1,$2,$3,$1,'Subscription',$1,$4,true,($1='a_good'),
+                    ('u.' || (SELECT slug FROM principals WHERE id=$2) || '.' || $1)::ltree)",
+        )
+        .bind(id)
+        .bind(&owner)
+        .bind(kind)
+        .bind(state_text)
+        .execute(state.db.pool())
+        .await
+        .unwrap();
+    }
+    // Only two of them have anything in the vault; `a_local` is the one whose
+    // credential is on a machine and cannot travel.
+    for id in ["a_good", "a_pending"] {
+        state
+            .vault
+            .put(
+                crate::vault::Key::of(crate::vault::AGENT, id, &owner),
+                "token",
+                "test",
+            )
+            .await
+            .unwrap();
+    }
+    sqlx::query(
+        "INSERT INTO agent_account_limits(account_id,scope,status,used_percent,observed_at)
+         VALUES('a_good','five_hour','allowed',24,now() - interval '11 minutes')",
+    )
+    .execute(state.db.pool())
+    .await
+    .unwrap();
+
+    let said = crate::delegate::handle(
+        &state,
+        &asks(&host, &lead, "lc", "list_compute", serde_json::json!({})),
+    )
+    .await
+    .expect("a lead may ask what it can run");
+
+    // The join: a machine with an id to pass back and enough to choose by, and
+    // each engine against the machines it is actually ready on.
+    assert!(
+        said.contains(host.id.as_str()),
+        "an id it can pass back: {said}"
+    );
+    assert!(said.contains("build-02"), "{said}");
+    assert!(said.contains("4 cores"), "enough to choose by: {said}");
+    assert!(
+        said.contains("Codex") && said.contains("ready on build-02"),
+        "the engine against the machine that has it: {said}"
+    );
+
+    // 29 — observed, not authoritative, and said so.
+    assert!(
+        said.contains("last thing each machine reported"),
+        "the tool's own words: {said}"
+    );
+    assert!(said.contains("5h 24% used"), "{said}");
+    assert!(
+        said.contains("11 minutes ago"),
+        "a percentage without its age buys worse decisions than none: {said}"
+    );
+
+    // 33 — only what it could spend. The other two would be refused by
+    // `validate`, so offering them offers a choice that was never there.
+    assert!(said.contains("a_good"), "{said}");
+    assert!(!said.contains("a_pending"), "not connected: {said}");
+    assert!(
+        !said.contains("a_local"),
+        "host-local, so it cannot travel to the machine the child gets: {said}"
+    );
+    assert!(said.contains("your default"), "{said}");
+
+    // 31 — the anti-trigger travels with the answer, not only in the schema.
+    assert!(
+        said.contains("Firetower picks are the right answers"),
+        "{said}"
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+    state.fleet.stop_supervising(&second.id).await;
+}
+
+/// Criterion 33, the half a `Level::Viewer` listing would get wrong.
+///
+/// A colleague's subscription that this person can *see* and may not *spend* —
+/// which is what `GET /api/v1/agent-accounts` lists, and the obvious thing to
+/// have reached for.
+#[tokio::test]
+async fn list_compute_leaves_out_a_subscription_this_person_may_only_see() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let lead = a_lead_that_delegates(&state, &host, &ready, &owner, Agent::ClaudeCode).await;
+    let org = ft_core::OrgId::from_stored(state.db.org().await.unwrap());
+    let ana = state
+        .accounts
+        .create_user(&org, "ana", "ana@example.test", "member")
+        .await
+        .unwrap()
+        .0;
+    // Filed in ana's own space, so the admin can neither see nor spend it —
+    // the simplest shape of "not yours", and the one a Viewer listing of a
+    // shared directory would get wrong in the other direction.
+    sqlx::query(
+        "INSERT INTO agent_accounts(id,user_id,kind,name,mode,credential_key,state,enabled,path)
+         VALUES('a_anas',$1,'ClaudeCode','anas plan','Subscription','a_anas','connected',true,
+                ('u.' || (SELECT slug FROM principals WHERE id=$1) || '.a_anas')::ltree)",
+    )
+    .bind(ana.id.as_str())
+    .execute(state.db.pool())
+    .await
+    .unwrap();
+    state
+        .vault
+        .put(
+            crate::vault::Key::of(crate::vault::AGENT, "a_anas", ana.id.as_str()),
+            "token",
+            "test",
+        )
+        .await
+        .unwrap();
+
+    let said = crate::delegate::handle(
+        &state,
+        &asks(&host, &lead, "lc2", "list_compute", serde_json::json!({})),
+    )
+    .await
+    .unwrap();
+    assert!(!said.contains("a_anas"), "{said}");
+    assert!(!said.contains("anas plan"), "{said}");
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// Criterion 30: where the placement settles the machine, the answer is about
+/// that machine.
+#[tokio::test]
+async fn list_compute_is_scoped_when_the_placement_settles_the_machine() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let lead = a_lead_that_delegates(&state, &host, &ready, &owner, Agent::ClaudeCode).await;
+    let second = another_machine(&state, &owner, "build-02").await;
+    saved_profile(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Reviewer",
+            "does": "Reads the diff and argues with it",
+            "placement": "here",
+        }),
+    )
+    .await;
+    saved_profile(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Pinned tester",
+            "does": "Hammers a branch on one machine, always",
+            "placement": "new",
+            "machine": second.id.as_str(),
+        }),
+    )
+    .await;
+
+    // Nothing said: the fleet, because nothing has settled anything.
+    let whole = crate::delegate::handle(
+        &state,
+        &asks(&host, &lead, "s0", "list_compute", serde_json::json!({})),
+    )
+    .await
+    .unwrap();
+    assert!(whole.contains("Machines you can use — 2"), "{whole}");
+
+    // `here`: a child in the lead's own workspace runs on the lead's own
+    // machine, whatever anybody names.
+    let here = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "s1",
+            "list_compute",
+            serde_json::json!({ "role": "Reviewer" }),
+        ),
+    )
+    .await
+    .unwrap();
+    assert!(here.contains("Machines you can use — 1"), "{here}");
+    assert!(here.contains("the placement settles it"), "{here}");
+    assert!(!here.contains("build-02"), "{here}");
+
+    // `new` with a machine pinned: that machine, and not the one the lead is on.
+    let pinned = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "s2",
+            "list_compute",
+            serde_json::json!({ "role": "Pinned tester" }),
+        ),
+    )
+    .await
+    .unwrap();
+    assert!(pinned.contains("Machines you can use — 1"), "{pinned}");
+    assert!(pinned.contains("build-02"), "{pinned}");
+
+    state.fleet.stop_supervising(&host.id).await;
+    state.fleet.stop_supervising(&second.id).await;
+}
+
+/// Criterion 32: a team list marks which profiles leave a field open.
+///
+/// So a Manager can tell before it is refused which of its team will take an
+/// `agent` argument and which will ignore it.
+#[tokio::test]
+async fn a_team_list_says_which_profiles_leave_a_field_open() {
+    let (state, _principal, host, _ready, owner) = fixture().await;
+    let manager = saved_profile(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Ada, the lead",
+            "does": "Breaks work up and hands it out",
+            "placement": "here",
+            "agent": "ClaudeCode",
+            "canDelegate": true,
+        }),
+    )
+    .await;
+    saved_profile(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Reviewer",
+            "does": "Reads the diff and argues with it",
+            "placement": "lead",
+        }),
+    )
+    .await;
+    saved_profile(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Committed",
+            "does": "Runs on one engine in one place, always",
+            "placement": "here",
+            "agent": "Codex",
+        }),
+    )
+    .await;
+    let profile = state
+        .roles
+        .one(&owner, &manager, crate::access::Level::Viewer)
+        .await
+        .unwrap()
+        .unwrap();
+
+    // The persona's own list, which is what a Manager reads before it spawns.
+    let persona = super::sessions::persona_for(&state, &owner, &profile)
+        .await
+        .unwrap();
+    assert!(
+        persona.contains("**Reviewer** — Reads the diff and argues with it — you choose its engine and placement"),
+        "{persona}"
+    );
+    assert!(
+        persona.contains("**Committed** — Runs on one engine in one place, always\n"),
+        "a committed profile spends no words on it: {persona}"
+    );
+
+    // And the tool's list, which is the same fact asked for directly.
+    let lead = lead_running(&state, &host, &owner, Agent::ClaudeCode, &manager).await;
+    let listed = crate::delegate::handle(
+        &state,
+        &asks(&host, &lead, "lp", "list_profiles", serde_json::json!({})),
+    )
+    .await
+    .unwrap();
+    assert!(
+        listed.contains("you choose its engine and placement"),
+        "{listed}"
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}

@@ -69,6 +69,9 @@ pub const CREATE_PROFILE: &str = "create_profile";
 pub const UPDATE_PROFILE: &str = "update_profile";
 /// List the saved profiles, so the agent builds on them rather than beside.
 pub const LIST_PROFILES: &str = "list_profiles";
+/// What can run a child, and where: machines, engines and subscriptions, as
+/// one answer rather than three lists to correlate.
+pub const LIST_COMPUTE: &str = "list_compute";
 /// Write a skill into the person's library, so they can ask for one in words
 /// rather than hand-copying a folder into the editor.
 pub const CREATE_SKILL: &str = "create_skill";
@@ -114,6 +117,31 @@ A question it has comes to you as a message; a command it needs permission \
 for goes to the person. There is no cap on how many you start or how many run \
 at once — dispatch what the work actually needs, and no more, since each one \
 costs tokens and a workspace.";
+
+/// What `list_compute` answers, and — as much of the point — when not to ask.
+///
+/// A Manager handed a quota table and a fleet list will shop around: it will
+/// spend a turn choosing between machines that are all fine, and another
+/// explaining the choice. So the anti-trigger is first and said plainly, the
+/// way a skill's description carries one.
+const LIST_COMPUTE_DESCRIPTION: &str = "\
+What can run a child, and where: every machine you can put one on, which \
+engines are installed on each, and which subscriptions you could spend on \
+each engine, with what is left of their allowance. \
+**You usually do not need this.** A child runs on your own engine and on \
+whichever machine Firetower picks unless you say otherwise, Firetower only \
+picks a machine the engine is installed on, and the subscription resolves to \
+the owner's default. Reach for this only when the person asked for a \
+particular engine, machine or subscription, or when a spawn was refused and \
+you need to know what to ask for instead — not before every spawn, and not to \
+choose between machines that are all fine. \
+Everything it returns is **the last thing each machine reported**, not a live \
+check: an allowance on a subscription nothing has run on for a week is a week \
+old, and the age is on every line so you can tell. Readiness is per machine — \
+an engine installed on one and not another is a failed start on the second, \
+not a slower one. \
+Pass `role` (and `placement`, if you know it) and the answer is scoped to the \
+one machine that child would actually run on.";
 
 const CHILDREN_DESCRIPTION: &str = "\
 The children this session started. `list` says what each is doing and \
@@ -246,7 +274,9 @@ async fn answer(
                 .join(", ");
             let agent_desc = format!(
                 "Which agent runs it — one of {agent_labels}. NOT a saved subagent — use \
-                 `role` for that. Omit for the same as you."
+                 `role` for that. Omit for the same as you, which is almost always right. \
+                 Ignored where the profile pins an engine; a name no engine has is refused \
+                 rather than quietly replaced with yours."
             );
             Some(reply(
                 id?,
@@ -278,7 +308,7 @@ async fn answer(
                                 },
                                 "role": {
                                     "type": "string",
-                                    "description": "A saved subagent to start, by name — e.g. \"reviewer\" or \"developer\" (what the person defines on the Subagents screen). It supplies the instructions and may pin the agent and placement; where it pins one, that wins over what you pass. Naming one that does not exist is refused with the ones that do. Omit for an ad-hoc child.",
+                                    "description": "A saved subagent to start, by name — e.g. \"reviewer\" or \"developer\" (what the person defines on the Agent profiles screen). It supplies the instructions, and it either commits to an engine, a machine and a placement or leaves any of them open. Where it commits to one, that is binding and your argument for that field is not used; where it leaves one open, `agent`, `machine` and `placement` are yours to answer. Naming a profile that does not exist is refused with the ones that do. Omit for an ad-hoc child.",
                                 },
                                 "placement": {
                                     "type": "string",
@@ -404,6 +434,16 @@ async fn answer(
                         "description": "List the saved profiles the person can see — name, whether it's a Manager, and what it does. Read this before creating one, to build on what exists rather than make a near-duplicate.",
                         "inputSchema": { "type": "object", "properties": {} },
                     }, {
+                        "name": LIST_COMPUTE,
+                        "description": LIST_COMPUTE_DESCRIPTION,
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "role": { "type": "string", "description": "The profile you are about to start, by name. Where it pins a placement or a machine, the answer is scoped to the one machine that child would run on instead of listing the fleet." },
+                                "placement": { "type": "string", "enum": ["here", "new"], "description": "Where that child would run, if you already know and the profile leaves it open. `here` scopes the answer to this workspace's own machine." },
+                            },
+                        },
+                    }, {
                         "name": CREATE_SKILL,
                         "description": "Write a skill into the person's library — a SKILL.md and, if it needs them, bundled files — so they don't have to hand-copy what you wrote into the editor. Use it when they ask you to make them a skill (\"turn this into a skill\", \"make me a changelog skill\"). It appears on their Skills screen at once. A skill that ships a script (anything under scripts/, or a file marked executable) is held for the person's review before it can run — say so when that happens. Check list_skills first so you refine an existing one rather than duplicate it.",
                         "inputSchema": {
@@ -476,7 +516,7 @@ async fn answer(
                 .unwrap_or(TOOL);
             let text = match name {
                 SPAWN | CHILDREN | UPDATE | PLAN | CREATE_PROFILE | UPDATE_PROFILE
-                | LIST_PROFILES | CREATE_SKILL | UPDATE_SKILL | LIST_SKILLS => {
+                | LIST_PROFILES | LIST_COMPUTE | CREATE_SKILL | UPDATE_SKILL | LIST_SKILLS => {
                     delegate(session_id, name, &id, &arguments).await
                 }
                 // Every call used to be a permission question, and an agent
@@ -776,6 +816,7 @@ mod tests {
                 CREATE_PROFILE,
                 UPDATE_PROFILE,
                 LIST_PROFILES,
+                LIST_COMPUTE,
                 CREATE_SKILL,
                 UPDATE_SKILL,
                 LIST_SKILLS

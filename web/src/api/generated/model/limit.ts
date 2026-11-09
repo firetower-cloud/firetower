@@ -7,6 +7,17 @@
  */
 
 export interface Limit {
+  /**
+     * When this was last heard, which is the only thing that makes the rest of
+     * it readable.
+     *
+     * A limit is **observed, not authoritative**: it is recorded from what an
+     * agent volunteered mid-session, so headroom on a subscription nothing has
+     * run on for a week is a week old. A percentage without its age buys worse
+     * decisions than no percentage at all. Both queries already selected the
+     * column and threw it away.
+     */
+  observedAt: string;
   /** @nullable */
   resetsAt?: number | null;
   scope: string;
