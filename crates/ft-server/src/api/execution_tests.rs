@@ -3686,3 +3686,97 @@ async fn a_cross_engine_continuation_stays_the_child_it_was() {
 
     state.fleet.stop_supervising(&host.id).await;
 }
+
+/// **A spawned child carries the profile it was started as.**
+///
+/// Asserted on its own, because nothing read `Session::profile_id` on a child
+/// until this feature and so nothing noticed it was never written. A profile
+/// now says what a lead may do about a child of its that runs out, and that
+/// grant is read off the *child* at the moment it is spent — so a null here
+/// is a feature that passes every unit test above and refuses every switch in
+/// the product.
+///
+/// Both placements, because they build two different `NewSession` bodies and
+/// only one of them was ever going to be the one somebody checked.
+#[tokio::test]
+async fn a_spawned_child_carries_the_profile_it_was_started_as() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let lead = a_lead_that_delegates(&state, &host, &ready, &owner, Agent::ClaudeCode).await;
+    let engineer = saved_profile(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Engineer",
+            "does": "Writes the change and the tests",
+            "placement": "here",
+            "agent": "ClaudeCode",
+            "onUsageLimit": "same",
+        }),
+    )
+    .await;
+    let own = saved_profile(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Prospector",
+            "does": "Goes off and looks at something",
+            "placement": "new",
+            "agent": "ClaudeCode",
+        }),
+    )
+    .await;
+
+    for (req, name, expected) in [("c1", "Engineer", &engineer), ("c2", "Prospector", &own)] {
+        crate::delegate::handle(
+            &state,
+            &asks(
+                &host,
+                &lead,
+                req,
+                "spawn",
+                serde_json::json!({ "role": name, "goal": "do the thing" }),
+            ),
+        )
+        .await
+        .expect("the child starts");
+        let child = child_of(&state, &lead, req).await;
+        assert_eq!(
+            child.profile_id.as_deref(),
+            Some(expected.as_str()),
+            "{name} should carry its profile"
+        );
+    }
+
+    // And the grant is reachable through it, which is the only reason the id
+    // matters: a lead asking what it may do reads the child's profile.
+    let child = child_of(&state, &lead, "c1").await;
+    let grant = state
+        .roles
+        .one(
+            &owner,
+            child.profile_id.as_deref().unwrap(),
+            crate::access::Level::Viewer,
+        )
+        .await
+        .unwrap()
+        .expect("the profile a child names is one its owner can read");
+    assert_eq!(grant.on_usage_limit, "same");
+
+    // An ad-hoc child names no profile and carries none, which is a real
+    // answer rather than a gap — there was nothing to grant it with.
+    crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "c3",
+            "spawn",
+            serde_json::json!({ "goal": "a one-off" }),
+        ),
+    )
+    .await
+    .expect("an ad-hoc child starts");
+    assert_eq!(child_of(&state, &lead, "c3").await.profile_id, None);
+
+    state.fleet.stop_supervising(&host.id).await;
+}
