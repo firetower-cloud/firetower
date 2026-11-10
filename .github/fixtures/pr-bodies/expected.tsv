@@ -1,0 +1,81 @@
+# Every body in this directory, the diff it is read against, and the verdict
+# `pr-body.sh` has to reach.
+#
+# Every expectation here was derived from GitHub's own renderer — each body was
+# POSTed to `/markdown` and the verdict read off the HTML that came back: which
+# headings exist, which images exist, what each one loads from. Not from what
+# seemed reasonable, and not from what the check happened to say. Twice now a
+# fixture has been the thing that was wrong rather than the code, and both times
+# it was because somebody wrote down what they expected instead of asking.
+#
+# name	diff	verdicts (+ separated; `ok` means it passes)
+
+# ---- honest bodies, which must keep passing --------------------------------
+# These matter more than the attacks. A false failure costs a contributor; a
+# missed bypass costs a review. The four heading forms below were all refused
+# by the old hand-written parser and all four render as plain `<h2>`.
+honest	ui	ok
+mixed-hosts	ui	ok
+dragged-video	ui	ok
+heading-setext	ui	ok
+heading-bold	ui	ok
+heading-raw-html	ui	ok
+heading-trailing-hashes	ui	ok
+image-reference-style	ui	ok
+image-in-list	ui	ok
+image-in-details	ui	ok
+comment-in-code-fence	ui	ok
+unclosed-comment-in-sentence	ui	ok
+backend-no-image	backend	ok
+# The dark-mode `<picture>` idiom written honestly, both URLs on an allowed
+# host. Refusing this would punish somebody for following GitHub's own docs.
+picture-honest-dark-mode	ui	ok
+
+# ---- the host allowlist ----------------------------------------------------
+fork-hosted	ui	not-hosted
+# An allowed host named in a sentence, or sitting in the alt text of a
+# fork-hosted `<img>`. What counts is where the picture loads from.
+allowlisted-in-prose	ui	not-hosted
+alt-text-allowlisted	ui	not-hosted
+host-suffix	ui	not-hosted
+query-string-allowlisted	ui	not-hosted
+# GitHub refuses this URL outright and renders `<img src="">`, so there is no
+# picture at all — which is why this says no-evidence and not not-hosted.
+host-userinfo	ui	no-evidence
+attachments-traversal	ui	not-hosted
+attachments-encoded-traversal	ui	not-hosted
+attachments-double-encoded	ui	not-hosted
+# A decoy attribute ahead of the real one. `data-src` was read instead of
+# `src`; `srcset` carries the allowlisted decoy while `src` carries the fork,
+# and GitHub strips `srcset` from an `<img>` — so the fork is what renders.
+img-data-src-decoy	ui	not-hosted
+img-srcset-decoy	ui	not-hosted
+# The same idea one layer in: `src=` written inside an *earlier attribute's
+# value*. GitHub keeps author attribute order and keeps single quotes inside a
+# double-quoted value, so `alt="x src='<allowed>'"` sat ahead of the real
+# `src` and a regex searching the tag found the decoy first. The attributes
+# are walked as name=value pairs now, so a value can only be a value. The `>`
+# one is here because a `>` in an alt comes back as `&gt;` — which is what
+# lets the tag end where it looks like it ends.
+img-alt-decoy	ui	not-hosted
+img-title-decoy	ui	not-hosted
+img-aria-decoy	ui	not-hosted
+img-alt-gt	ui	not-hosted
+# A `<picture>` shows its first matching `<source>` and keeps the `<img>` only
+# as a fallback, and GitHub preserves `<source srcset>` un-proxied. The `media`
+# spelling shows the fork to every reviewer in dark mode and to nobody else.
+picture-source-shadow	ui	not-hosted
+
+# ---- sections, as GitHub draws them ----------------------------------------
+evidence-in-comment	ui	no-evidence
+template-untouched	ui	no-evidence
+missing-two-sections	backend	missing-sections
+unterminated-comment	ui	no-evidence+missing-sections
+code-span-eats-comment	ui	no-evidence+missing-sections
+fenced-everything	ui	no-evidence+missing-sections
+# Raw HTML opened on the line straight after a paragraph: GitHub stops reading
+# markdown there, so every `##` under it comes out as literal text. Both of
+# these used to be counted as headings anyway. The first is the same body as
+# picture-source-shadow with `media` on it, and it loses two of its four.
+picture-source-dark-mode	ui	not-hosted+missing-sections
+picture-glued-to-paragraph	ui	missing-sections

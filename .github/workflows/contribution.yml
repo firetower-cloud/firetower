@@ -1,0 +1,117 @@
+# A pull request has to show what it changed.
+#
+# A reviewer cannot see a screen from a diff. #283 adds a List/Board toggle, a
+# column on every task row and attachment chips in the composer, across desktop
+# and mobile — 84 files — and carries no picture of any of it, so the only way
+# to review it is to build it. #260 does have screenshots, and they are served
+# from a branch of the contributor's own fork: GitHub does not proxy those, so
+# what a reviewer approved can be rewritten or deleted afterwards by somebody
+# who is not us, and a deleted fork turns the pull request into a page of
+# broken images. Both are cheap to catch here and expensive to find later.
+#
+# So a change under `web/`, `desktop/` or `mobile/` fails unless the body
+# carries an image GitHub itself is hosting, and a body missing the template's
+# sections fails. Size and a missing linked issue are warnings and never more
+# than that — a large pull request is a conversation, not an error.
+#
+# Reading the body is `.github/scripts/pr-body.sh`, and it does not parse the
+# markdown. It posts the body to GitHub's own `/markdown` endpoint and reads
+# the HTML that comes back — the same page the Conversation tab draws. Six
+# passes over a hand-written parser found six divergences, every one of them
+# the gap between what we read and what a reviewer sees; there is no second
+# renderer to disagree with the first any more. It fails open if that request
+# does not come back, and says so in the summary.
+#
+# The bodies that found each of those six are kept in
+# `.github/fixtures/pr-bodies`, with the verdict each has to reach derived from
+# the renderer, and the second job below runs them on every pull request. Over
+# half of them are honest bodies that must keep passing: four of the six were
+# false failures, and a false failure costs a contributor where a missed bypass
+# costs a review.
+#
+# A failure here is never a failure of the code. It is the description, and a
+# description is edited in place: `edited` is in the trigger list precisely so
+# that fixing the body re-runs this and turns it green without a push.
+#
+# Said plainly, so nobody discovers it later: no regex can tell a real
+# screenshot of the changed screen from a 1×1 pixel, or from an image lifted
+# out of another pull request. What this buys is durable, immutable evidence —
+# a picture that is still the picture six months after it was approved.
+# Whether it shows the right thing stays a human judgement, and always will.
+#
+# It posts no comment and sets no label, and it holds `contents: read` and
+# nothing else. That is deliberate. Commenting is the only part of this that
+# would need a writable token, and wanting one on a fork's pull request is how
+# a repository ends up on the `_target` variant of this trigger — the one that
+# runs in the base repository's context, holding its secrets, and is then asked
+# to check out the fork's code. A job summary and a red check get nearly all of
+# the value and leave this workflow unable to do any harm at all.
+name: contribution
+
+on:
+  pull_request:
+    # `edited` is the one commits.yml does not need and this cannot do without.
+    # A commit check re-runs on a push; a body check has to re-run when the body
+    # changes, or a contributor who fixes the description is left looking at a
+    # red X with no way to clear it.
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+# `edited` costs a contributor one API call and nothing else, so a body being
+# tidied in half a dozen passes starts half a dozen runs of both jobs — one of
+# which clones the whole 24 MB history to answer a question about the diff.
+# Only the last edit is the one anybody wants an answer about.
+concurrency:
+  group: contribution-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shows-its-work:
+    name: the pull request shows its work
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # The whole history, because the question is "what is on this branch and
+      # not on its base" and a shallow clone cannot answer that.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+
+      - name: the body shows what changed
+        env:
+          # Both of these are written by whoever opened the pull request, which
+          # on a fork is anybody at all. They arrive through `env:` and are only
+          # ever read as data — never pasted into this script with `${{ }}`,
+          # which would run a contributor's title as shell. commits.yml set the
+          # pattern; this keeps it.
+          BODY: ${{ github.event.pull_request.body }}
+          TITLE: ${{ github.event.pull_request.title }}
+          BASE: ${{ github.event.pull_request.base.ref }}
+          # Read-only, and the only thing it buys is a sensible rate limit on
+          # the render call — `/markdown` takes an unauthenticated one too.
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          # Three dots: this branch against where it left its base, which is
+          # the diff a reviewer reads — not against the base as it is now.
+          git diff --name-only "origin/$BASE...HEAD" > /tmp/files.txt
+          git diff --numstat  "origin/$BASE...HEAD" > /tmp/numstat.txt
+
+          .github/scripts/pr-body.sh /tmp/files.txt /tmp/numstat.txt
+
+  # Every bug the body reader has had was found by running it against a body,
+  # so the bodies that found them are kept and run here on every pull request.
+  fixtures:
+    name: the body reader still reads them right
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: every fixture reaches the verdict it is supposed to
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: .github/scripts/pr-body-test.sh

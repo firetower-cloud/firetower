@@ -1,0 +1,118 @@
+# The amber block and the last checkbox are the load-bearing parts of this
+# form. Everything else is detail a good proposal would have carried anyway.
+#
+# #283 and #260 both opened an issue first, exactly as CONTRIBUTING.md asked,
+# and both then wrote thousands of lines before anybody had agreed what they
+# were. The advice was followed and the outcome did not change, because the
+# advice stopped one step short: nothing ever said *accepted — now build it*.
+# This form says it twice, and asks the author to acknowledge it once.
+name: Proposal — a change or a new capability
+description: Describe the problem before the solution. We will say whether it is accepted before you build it.
+title: "[Proposal]: "
+labels: ["enhancement", "needs-scope"]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        **Read this before you fill it in. An issue is not agreement.** Firetower
+        moves quickly, and a proposal nobody has answered yet is not a brief to go
+        and build against — the last two large pull requests opened here were
+        written before anyone had agreed what they were, and both are still open.
+        We label a proposal `accepted` when it is one you should build. Wait for
+        that. The fastest route to it is
+        [Discord](https://discord.gg/uVa8wsYym).
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: >-
+        What is hard today, for whom, and what you do instead. Describe the problem,
+        not the feature. If the first sentence names a solution, you have skipped
+        this field.
+      placeholder: >-
+        Our team self-hosts Firetower with GitLab as the git host, but our backlog
+        lives in Trello. Today we start sessions from a written prompt and paste the
+        card in by hand, so the link between a workspace and its card is lost.
+    validations:
+      required: true
+
+  - type: textarea
+    id: behaviour
+    attributes:
+      label: How it should work
+      description: >-
+        The behaviour you want, from the outside. What someone sees and does — not
+        how it is built.
+      placeholder: >-
+        Trello cards appear on the Tasks screen the way Linear tickets do: connect
+        with a token, pick a board, filter, start a workspace from a card.
+    validations:
+      required: true
+
+  - type: textarea
+    id: why-this-answer
+    attributes:
+      label: Why this is the right answer
+      description: >-
+        The field that matters most, and the one everybody wants to skip. What else
+        did you consider, and why is each one worse? Adding a feature is often not
+        the right fix — a smaller change, or none at all, frequently is. If you
+        cannot name an alternative you rejected, you have not finished thinking
+        about it.
+      placeholder: >-
+        Considered: a generic webhook (rejected — every team then writes the same
+        glue); pasting the URL into the prompt (what we do now, and the link is lost
+        on both ends).
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: surfaces
+    attributes:
+      label: Surfaces it touches
+      description: >-
+        Everything it would change. Tick honestly — this is what decides how big the
+        review is, and whether we ask you to split it.
+      options:
+        - label: Control plane / server
+        - label: Worker
+        - label: Desktop (macOS / Windows)
+        - label: Mobile (iOS / Android)
+        - label: Web interface
+        - label: API contract — a new or changed endpoint
+        - label: Database — a migration
+        - label: Deployment — a new environment variable or a CLI change
+        - label: Docs only
+
+  - type: textarea
+    id: sketch
+    attributes:
+      label: A sketch, a mock-up or a screenshot
+      description: >-
+        If it changes something you can see, show it — a drawing, an annotated
+        screenshot of the screen today, anything. A picture settles in one round
+        what three comments will not.
+      placeholder: Drag files here, or click to upload.
+
+  - type: dropdown
+    id: offering-to-build
+    attributes:
+      label: Are you offering to build it?
+      options:
+        - "Yes — and I will wait for it to be accepted before I start"
+        - "Yes, and I have already started"
+        - "No, I am proposing it"
+        - "I could, with guidance"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: before-you-submit
+    attributes:
+      label: Before you submit
+      options:
+        - label: I searched the open issues, including closed ones, and this is not already proposed.
+          required: true
+        - label: I understand this is a proposal, not an agreement, and that a pull request opened before it is accepted may be closed without review.
+          required: true
