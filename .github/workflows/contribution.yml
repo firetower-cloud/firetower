@@ -89,7 +89,11 @@ jobs:
 
           # GitHub's own user-content hosts, and only those. An image anywhere
           # else is served live from wherever it lives, by whoever owns it.
-          hosted='user-images\.githubusercontent\.com|private-user-images\.githubusercontent\.com|github\.com/user-attachments/assets/'
+          #
+          # With the scheme, and that matters: CONTRIBUTING.md names these hosts
+          # in prose, and so does any pull request that quotes this check back
+          # at itself. Naming a host is not showing a screen.
+          hosted='https?://(user-images\.githubusercontent\.com|private-user-images\.githubusercontent\.com|github\.com/user-attachments/assets/)'
 
           # A picture with a target. The template's own `![](…)` rows are not
           # one, which is why this asks for the scheme rather than the bang.
