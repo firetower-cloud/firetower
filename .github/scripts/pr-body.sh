@@ -151,12 +151,30 @@ for my $want ('What changes', 'Why', 'How it was checked', 'What I did not do') 
 my (@found, @shadow);
 while ($h =~ m{<(img|source|video)\b([^>]*)>}gis) {
     my ($tag, $attrs) = (lc $1, $2);
-    my @urls;
-    if ($attrs =~ m{(?<![-\w:.])src\s*=\s*(["'])(.*?)\1}is) {
-        push @urls, unent($2);
+    # Walk the attributes as name=value pairs from the start of the tag. A
+    # search for `src=` instead finds one written *inside* an earlier value —
+    # GitHub keeps `alt`, `title` and `aria-label` ahead of `src` and keeps the
+    # single quotes in them, so `alt="x src='<allowlisted>'"` was read as the
+    # source while the page loaded the fork. A value can only be consumed as a
+    # value here, never re-read as a name. First one wins, as HTML does with a
+    # repeated attribute.
+    #
+    # Two properties of the sanitised HTML hold this up, and both were checked
+    # rather than assumed: a `>` inside a value comes back as `&gt;`, so the
+    # tag really does end at the first `>`; and a `"` cannot survive inside a
+    # double-quoted value at all — GitHub drops the whole element instead.
+    my %attr;
+    while ($attrs =~ m{([-\w:.]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))}gs) {
+        my $name = lc $1;
+        my $val  = defined $2 ? $2 : defined $3 ? $3 : $4;
+        $attr{$name} = $val unless exists $attr{$name};
     }
-    if ($attrs =~ m{(?<![-\w:.])srcset\s*=\s*(["'])(.*?)\1}is) {
-        for my $cand (split /\s*,\s*/, unent($2)) {   # a srcset is a candidate list
+    my @urls;
+    if (defined $attr{src}) {
+        push @urls, unent($attr{src});
+    }
+    if (defined $attr{srcset}) {
+        for my $cand (split /\s*,\s*/, unent($attr{srcset})) {   # a srcset is a candidate list
             $cand =~ s/\A\s+//;
             $cand =~ s/\s.*\z//;                      # drop the `2x` / `640w` descriptor
             push @urls, $cand if length $cand;

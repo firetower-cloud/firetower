@@ -50,6 +50,17 @@ attachments-double-encoded	ui	not-hosted
 # and GitHub strips `srcset` from an `<img>` — so the fork is what renders.
 img-data-src-decoy	ui	not-hosted
 img-srcset-decoy	ui	not-hosted
+# The same idea one layer in: `src=` written inside an *earlier attribute's
+# value*. GitHub keeps author attribute order and keeps single quotes inside a
+# double-quoted value, so `alt="x src='<allowed>'"` sat ahead of the real
+# `src` and a regex searching the tag found the decoy first. The attributes
+# are walked as name=value pairs now, so a value can only be a value. The `>`
+# one is here because a `>` in an alt comes back as `&gt;` — which is what
+# lets the tag end where it looks like it ends.
+img-alt-decoy	ui	not-hosted
+img-title-decoy	ui	not-hosted
+img-aria-decoy	ui	not-hosted
+img-alt-gt	ui	not-hosted
 # A `<picture>` shows its first matching `<source>` and keeps the `<img>` only
 # as a fallback, and GitHub preserves `<source srcset>` un-proxied. The `media`
 # spelling shows the fork to every reviewer in dark mode and to nobody else.
