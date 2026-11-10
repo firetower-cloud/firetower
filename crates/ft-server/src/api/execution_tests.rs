@@ -3079,9 +3079,21 @@ async fn list_compute_answers_machines_engines_and_subscriptions_together() {
             .await
             .unwrap();
     }
+    /* Eleven and a half minutes, not eleven — and the half is the whole
+    point. `how_long_ago` floors `seconds / 60` on *this process's* clock
+    while `observed_at` is written by `now()` on *Postgres'*, so a reading
+    placed exactly on a minute boundary reports 10 or 11 depending on which
+    of the two is a fraction ahead at the moment the test runs. That made
+    this assertion fail about one run in a hundred under load.
+
+    The flake is in the fixture, so that is what moves: placing the reading
+    in the middle of its minute leaves thirty seconds of slack in either
+    direction and keeps the assertion exact. The rounding itself is not
+    touched — a cause inferred from one failure's output is not grounds for
+    changing what every reader of this tool is told. */
     sqlx::query(
         "INSERT INTO agent_account_limits(account_id,scope,status,used_percent,observed_at)
-         VALUES('a_good','five_hour','allowed',24,now() - interval '11 minutes')",
+         VALUES('a_good','five_hour','allowed',24,now() - interval '11 minutes 30 seconds')",
     )
     .execute(state.db.pool())
     .await
@@ -3335,6 +3347,574 @@ async fn a_team_list_says_which_profiles_leave_a_field_open() {
     assert!(
         listed.contains("you choose its engine and placement"),
         "{listed}"
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+// ─── A lead re-routing a child that ran out ──────────────────────────────────
+
+/// A subscription of this owner's, connected and with a credential the vault
+/// actually holds — which `switch_for` checks and `spawn`'s path does not.
+async fn a_subscription(state: &AppState, owner: &str, id: &str, kind: Agent) -> String {
+    sqlx::query(
+        "INSERT INTO agent_accounts(id,user_id,kind,name,mode,credential_key,state,enabled,path)
+         VALUES($1,$2,$3,$1,'Subscription',$1,'connected',true,
+                ('u.' || (SELECT slug FROM principals WHERE id=$2) || '.' || $1)::ltree)",
+    )
+    .bind(id)
+    .bind(owner)
+    .bind(format!("{kind:?}"))
+    .execute(state.db.pool())
+    .await
+    .unwrap();
+    state
+        .vault
+        .put(
+            crate::vault::Key::of(crate::vault::AGENT, id, owner),
+            "{\"token\":\"t\"}",
+            "fixture",
+        )
+        .await
+        .unwrap();
+    id.to_string()
+}
+
+/// A child of `lead`, started as a profile by name, sitting where a spent one
+/// sits.
+///
+/// Spawned rather than inserted: `children_of` joins through `workspaces`, so
+/// a row written by hand is not a child as far as the lead is concerned — and
+/// the scoping this feature leans on is exactly that join.
+async fn a_child_that_ran_out(
+    state: &AppState,
+    host: &Host,
+    lead: &ft_core::SessionId,
+    req: &str,
+    profile: &str,
+) -> ft_core::Session {
+    crate::delegate::handle(
+        state,
+        &asks(
+            host,
+            lead,
+            req,
+            "spawn",
+            serde_json::json!({ "role": profile, "goal": "write the change" }),
+        ),
+    )
+    .await
+    .expect("the child starts");
+    let child = child_of(state, lead, req).await;
+    state
+        .fleet
+        .set_status(&child.id, ft_core::SessionStatus::HandedBack, None)
+        .await;
+    child
+}
+
+/// What a lead may do to a spent child is its **profile's** decision, and it
+/// is checked here rather than drawn.
+///
+/// `wait` is what every profile is until somebody says otherwise, so this is
+/// also the regression guard on the whole feature arriving switched on. A
+/// field only the editor enforced would be advice, and the point of it is that
+/// it is a grant.
+#[tokio::test]
+async fn a_child_whose_profile_says_to_wait_is_not_the_leads_to_move() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let lead = a_lead_that_delegates(&state, &host, &ready, &owner, Agent::ClaudeCode).await;
+    let account = a_subscription(&state, &owner, "a_other", Agent::ClaudeCode).await;
+    let waits = saved_profile(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Engineer",
+            "does": "Writes the change and the tests",
+            "placement": "here",
+            "agent": "ClaudeCode",
+        }),
+    )
+    .await;
+    // Not stated, so it is the column default — the shape every profile that
+    // exists today already has.
+    assert_eq!(
+        state
+            .roles
+            .one(&owner, &waits, crate::access::Level::Viewer)
+            .await
+            .unwrap()
+            .unwrap()
+            .on_usage_limit,
+        "wait"
+    );
+    let child = a_child_that_ran_out(&state, &host, &lead, "sp1", "Engineer").await;
+
+    let refused = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "sw1",
+            "children",
+            serde_json::json!({ "action": "switch", "id": child.id.as_str(), "account": account }),
+        ),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(
+        refused.contains("wait for human action"),
+        "it says what the profile decided: {refused}"
+    );
+    assert!(
+        refused.contains(child.name.as_str()),
+        "and which child it is about: {refused}"
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// The second rung allows a subscription change and not an engine change, and
+/// the refusal names the engine the account belongs to.
+///
+/// This is the gate that keeps `accept_permission_change` honest. The flag is
+/// an acknowledgement a person gives in advance by choosing the third rung; a
+/// lead cannot give one, so an account on another engine has to be refused
+/// here rather than quietly accepted with the flag set.
+#[tokio::test]
+async fn an_account_on_another_engine_is_refused_unless_the_profile_allows_it() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let lead = a_lead_that_delegates(&state, &host, &ready, &owner, Agent::ClaudeCode).await;
+    let codex = a_subscription(&state, &owner, "a_codex", Agent::Codex).await;
+    saved_profile(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Engineer",
+            "does": "Writes the change and the tests",
+            "placement": "here",
+            "agent": "ClaudeCode",
+            "onUsageLimit": "same",
+        }),
+    )
+    .await;
+    let child = a_child_that_ran_out(&state, &host, &lead, "sp2", "Engineer").await;
+
+    let refused = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "sw2",
+            "children",
+            serde_json::json!({ "action": "switch", "id": child.id.as_str(), "account": codex }),
+        ),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(
+        refused.contains("Codex") && refused.contains("Claude Code"),
+        "it names the engine it belongs to and the one the child runs: {refused}"
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// A child started as no profile granted nothing, because there was nothing
+/// to grant it with — and the refusal says that rather than reading as a bug.
+#[tokio::test]
+async fn a_child_started_as_no_profile_cannot_be_moved() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let lead = a_lead_that_delegates(&state, &host, &ready, &owner, Agent::ClaudeCode).await;
+    let account = a_subscription(&state, &owner, "a_other", Agent::ClaudeCode).await;
+    crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "sp3",
+            "spawn",
+            serde_json::json!({ "goal": "a one-off nobody wrote a profile for" }),
+        ),
+    )
+    .await
+    .expect("an ad-hoc child starts");
+    let child = child_of(&state, &lead, "sp3").await;
+
+    let refused = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "sw3",
+            "children",
+            serde_json::json!({ "action": "switch", "id": child.id.as_str(), "account": account }),
+        ),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(refused.contains("not started as a profile"), "{refused}");
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// Somebody else's child is not reachable by id, which is the same rule
+/// `steer` and `stop` already keep — reused rather than written again.
+#[tokio::test]
+async fn a_session_that_is_not_this_leads_child_cannot_be_switched() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let lead = a_lead_that_delegates(&state, &host, &ready, &owner, Agent::ClaudeCode).await;
+    let account = a_subscription(&state, &owner, "a_other", Agent::ClaudeCode).await;
+    // A session that exists and is not this lead's child — its own, which is
+    // the nearest thing to hand and the one id a lead certainly knows.
+    let stranger = lead.clone();
+
+    let refused = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "sw4",
+            "children",
+            serde_json::json!({ "action": "switch", "id": stranger.as_str(), "account": account }),
+        ),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(
+        refused.contains("is not a child of this session"),
+        "{refused}"
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// A cross-engine continuation keeps the lineage of what it continues.
+///
+/// Both directions, because the bug was the asymmetry. `continue_with_account`
+/// starts a new session when the engine changes — one engine cannot resume
+/// another's conversation — and it passed no lineage at all. That was right
+/// for every caller it had, a person switching a session of their own, and
+/// silently wrong for the one this feature adds: a lead moving a spent child
+/// across engines would have ended the delegation, losing the child from
+/// `children_of` and never being told when it handed back.
+///
+/// The second half is the guard on the person-facing switcher, which must go
+/// on producing a root from a root.
+#[tokio::test]
+async fn a_cross_engine_continuation_stays_the_child_it_was() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    says_it_has(
+        &state,
+        &host,
+        &[(Agent::ClaudeCode, true), (Agent::Codex, true)],
+    )
+    .await;
+    let lead = a_lead_that_delegates(&state, &host, &ready, &owner, Agent::ClaudeCode).await;
+    let codex = a_subscription(&state, &owner, "a_codex", Agent::Codex).await;
+    saved_profile(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Engineer",
+            "does": "Writes the change and the tests",
+            "placement": "new",
+            "agent": "ClaudeCode",
+            // The third rung: the person acknowledged in advance that another
+            // engine brings its own default permissions.
+            "onUsageLimit": "engine",
+        }),
+    )
+    .await;
+    let child = a_child_that_ran_out(&state, &host, &lead, "spx", "Engineer").await;
+
+    let said = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "swx",
+            "children",
+            serde_json::json!({ "action": "switch", "id": child.id.as_str(), "account": codex }),
+        ),
+    )
+    .await
+    .expect("the third rung allows it");
+
+    // A session of its own, because the engine changed — and still this
+    // lead's child, which is the whole point.
+    let now: Vec<_> = state.db.children_of(&lead).await.unwrap();
+    let carried = now
+        .iter()
+        .find(|c| c.id != child.id)
+        .expect("the continuation is a child of the same lead");
+    assert_eq!(carried.parent_id.as_ref(), Some(&lead));
+    assert_eq!(carried.agent, Agent::Codex);
+    assert!(
+        said.contains(carried.id.as_str()),
+        "and the lead is given the id it has to steer from now on: {said}"
+    );
+
+    // The other direction: a root switched across engines is still a root.
+    let alone = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "spy",
+            "spawn",
+            serde_json::json!({ "goal": "something else", "placement": "new" }),
+        ),
+    )
+    .await;
+    assert!(alone.is_ok(), "{alone:?}");
+    let plain = child_of(&state, &lead, "spy").await;
+    // Detach it, so what is continued is a root like a person's own session.
+    sqlx::query("UPDATE sessions SET parent_id=NULL WHERE id=$1")
+        .bind(plain.id.as_str())
+        .execute(state.db.pool())
+        .await
+        .unwrap();
+    let detached = state.db.session(&plain.id).await.unwrap().unwrap();
+    let next = crate::api::sessions::continue_with_account(
+        &state,
+        &owner,
+        &detached,
+        &codex,
+        Agent::Codex,
+    )
+    .await
+    .expect("a person switching their own session across engines");
+    assert_ne!(next, plain.id, "a different engine gets its own session");
+    assert_eq!(
+        state.db.session(&next).await.unwrap().unwrap().parent_id,
+        None,
+        "a root continues as a root"
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// **A spawned child carries the profile it was started as.**
+///
+/// Asserted on its own, because nothing read `Session::profile_id` on a child
+/// until this feature and so nothing noticed it was never written. A profile
+/// now says what a lead may do about a child of its that runs out, and that
+/// grant is read off the *child* at the moment it is spent — so a null here
+/// is a feature that passes every unit test above and refuses every switch in
+/// the product.
+///
+/// Both placements, because they build two different `NewSession` bodies and
+/// only one of them was ever going to be the one somebody checked.
+#[tokio::test]
+async fn a_spawned_child_carries_the_profile_it_was_started_as() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let lead = a_lead_that_delegates(&state, &host, &ready, &owner, Agent::ClaudeCode).await;
+    let engineer = saved_profile(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Engineer",
+            "does": "Writes the change and the tests",
+            "placement": "here",
+            "agent": "ClaudeCode",
+            "onUsageLimit": "same",
+        }),
+    )
+    .await;
+    let own = saved_profile(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Prospector",
+            "does": "Goes off and looks at something",
+            "placement": "new",
+            "agent": "ClaudeCode",
+        }),
+    )
+    .await;
+
+    for (req, name, expected) in [("c1", "Engineer", &engineer), ("c2", "Prospector", &own)] {
+        crate::delegate::handle(
+            &state,
+            &asks(
+                &host,
+                &lead,
+                req,
+                "spawn",
+                serde_json::json!({ "role": name, "goal": "do the thing" }),
+            ),
+        )
+        .await
+        .expect("the child starts");
+        let child = child_of(&state, &lead, req).await;
+        assert_eq!(
+            child.profile_id.as_deref(),
+            Some(expected.as_str()),
+            "{name} should carry its profile"
+        );
+    }
+
+    // And the grant is reachable through it, which is the only reason the id
+    // matters: a lead asking what it may do reads the child's profile.
+    let child = child_of(&state, &lead, "c1").await;
+    let grant = state
+        .roles
+        .one(
+            &owner,
+            child.profile_id.as_deref().unwrap(),
+            crate::access::Level::Viewer,
+        )
+        .await
+        .unwrap()
+        .expect("the profile a child names is one its owner can read");
+    assert_eq!(grant.on_usage_limit, "same");
+
+    // An ad-hoc child names no profile and carries none, which is a real
+    // answer rather than a gap — there was nothing to grant it with.
+    crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "c3",
+            "spawn",
+            serde_json::json!({ "goal": "a one-off" }),
+        ),
+    )
+    .await
+    .expect("an ad-hoc child starts");
+    assert_eq!(child_of(&state, &lead, "c3").await.profile_id, None);
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// A Manager told to re-route still cannot move a child told to wait.
+///
+/// **It is refused by construction today, and that is exactly why this is
+/// here.** `reroute` never reads the lead's `on_child_limit`, because that
+/// setting says whether a Manager asks the person first and asking ends in
+/// the same call once they have answered — so there is nothing to check. A
+/// property that holds because nobody wrote the branch is stronger than a
+/// test today and weaker than one tomorrow: this fails the moment somebody
+/// adds a lead-side branch that reads the Manager's own setting as
+/// permission, which is the plausible mistake.
+///
+/// The grant is the child's and only the child's. Both halves are asserted:
+/// the `wait` child is refused however the Manager is set, and the `same`
+/// child is not refused *for this reason* — the engine check beyond it is a
+/// different test.
+#[tokio::test]
+async fn a_manager_set_to_reroute_still_cannot_move_a_child_told_to_wait() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    ready.store(true, Ordering::SeqCst);
+    state
+        .db
+        .mark_host_online(
+            &host.id,
+            "test",
+            4,
+            8192,
+            &ft_core::DockerState::running("27.0.3"),
+        )
+        .await
+        .unwrap();
+    // A Manager that re-routes on its own, rather than the fixture's default.
+    let manager = saved_profile(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Ada, the lead",
+            "does": "Breaks work up and hands it out",
+            "placement": "here",
+            "canDelegate": true,
+            "onChildLimit": "reroute",
+        }),
+    )
+    .await;
+    let lead = lead_running(&state, &host, &owner, Agent::ClaudeCode, &manager).await;
+    assert_eq!(
+        state
+            .roles
+            .one(&owner, &manager, crate::access::Level::Viewer)
+            .await
+            .unwrap()
+            .unwrap()
+            .on_child_limit,
+        "reroute",
+        "the lead really is set to the permissive answer"
+    );
+    let account = a_subscription(&state, &owner, "a_other", Agent::ClaudeCode).await;
+
+    saved_profile(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Careful",
+            "does": "Does work nobody may move",
+            "placement": "here",
+            "agent": "ClaudeCode",
+            "onUsageLimit": "wait",
+        }),
+    )
+    .await;
+    let waits = a_child_that_ran_out(&state, &host, &lead, "r1", "Careful").await;
+
+    let refused = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "rw",
+            "children",
+            serde_json::json!({ "action": "switch", "id": waits.id.as_str(), "account": account }),
+        ),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(
+        refused.contains("wait for human action"),
+        "the Manager's own setting does not widen the child's grant: {refused}"
+    );
+
+    // And the other half: the same Manager against a child that does allow
+    // it gets past this gate. Whatever happens after is another test's.
+    saved_profile(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Movable",
+            "does": "Does work a lead may move",
+            "placement": "here",
+            "agent": "ClaudeCode",
+            "onUsageLimit": "same",
+        }),
+    )
+    .await;
+    let movable = a_child_that_ran_out(&state, &host, &lead, "r2", "Movable").await;
+    let said = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "rm",
+            "children",
+            serde_json::json!({ "action": "switch", "id": movable.id.as_str(), "account": account }),
+        ),
+    )
+    .await;
+    let told = match &said {
+        Ok(ok) => ok.clone(),
+        Err(e) => e.to_string(),
+    };
+    assert!(
+        !told.contains("wait for human action"),
+        "a child that allows it is not refused by the grant: {told}"
     );
 
     state.fleet.stop_supervising(&host.id).await;

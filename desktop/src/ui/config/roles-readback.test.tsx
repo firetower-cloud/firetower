@@ -23,6 +23,8 @@ function reads(over: Partial<NewRole>, machines = MACHINES) {
     agent: null,
     machine: null,
     account: null,
+    onUsageLimit: "wait",
+    onChildLimit: "ask",
     settings: {},
     instructions: "",
     canDelegate: false,
@@ -41,6 +43,22 @@ function reads(over: Partial<NewRole>, machines = MACHINES) {
 describe("what a child gets", () => {
   it("says the lead decides all of it when nothing is pinned", () => {
     expect(reads({})).toBe("A child gets whatever the lead asks for: its workspace, its machine, its engine.");
+  });
+
+  /**
+   * **The shape every new profile opens in**, which is what made this worth a
+   * test of its own: the all-open branch returns early, and it once returned
+   * before the grant was consulted — so pressing a rung on a fresh profile
+   * changed nothing in the sentence underneath it. Every other test here
+   * happens to pin something, so every other test missed it.
+   */
+  it("still says what may happen when it runs out, with all three open", () => {
+    expect(reads({ onUsageLimit: "same" })).toBe(
+      "A child gets whatever the lead asks for: its workspace, its machine, its engine, and if it runs out its lead may move it to another subscription for that engine.",
+    );
+    expect(reads({ onUsageLimit: "engine" })).toBe(
+      "A child gets whatever the lead asks for: its workspace, its machine, its engine, and if it runs out its lead may move it to another subscription, on another engine if it has to.",
+    );
   });
 
   it("names a pinned engine and a pinned machine", () => {
@@ -68,6 +86,36 @@ describe("what a child gets", () => {
   it("keeps a pinned machine under an open placement", () => {
     expect(reads({ placement: "lead", machine: "h_1", agent: "ClaudeCode" })).toBe(
       "A child gets whichever workspace the lead asks for, on build-01, running Claude Code.",
+    );
+  });
+
+  /* The common shape and the one the sentence has always implied by saying
+     nothing. A clause here would make waiting — which is what every profile
+     does — read as the exceptional case. */
+  it("says nothing about running out when nobody may do anything about it", () => {
+    expect(reads({ placement: "here", agent: "ClaudeCode", onUsageLimit: "wait" })).toBe(
+      "A child gets the lead's own workspace, running Claude Code.",
+    );
+  });
+
+  it("names the engine a lead may move it within", () => {
+    expect(reads({ placement: "here", agent: "ClaudeCode", onUsageLimit: "same" })).toBe(
+      "A child gets the lead's own workspace, running Claude Code, and if it runs out its lead may move it to another Claude Code subscription.",
+    );
+  });
+
+  /* With the engine open there is no engine to name, and the clause still has
+     to be true — which is the property this field turns on: the grant does
+     not leave with the engine, because it is not a value belonging to one. */
+  it("keeps the clause true when the engine is open", () => {
+    expect(reads({ placement: "here", onUsageLimit: "same" })).toBe(
+      "A child gets the lead's own workspace, running the engine the lead names, and if it runs out its lead may move it to another subscription for that engine.",
+    );
+  });
+
+  it("says the engine may change too on the third rung", () => {
+    expect(reads({ placement: "here", agent: "Codex", onUsageLimit: "engine" })).toBe(
+      "A child gets the lead's own workspace, running Codex, and if it runs out its lead may move it to another subscription, on another engine if it has to.",
     );
   });
 

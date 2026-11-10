@@ -1116,7 +1116,31 @@ installed on which machine and what allowance each subscription has left.
 **Most of the time none of that is needed.** Say nothing and a child runs your
 own engine, on a machine Firetower picks that the engine is installed on, on
 the owner's default subscription. Answer an open field only when the person
-asked for something particular, or when a refusal told you to.";
+asked for something particular, or when a refusal told you to.
+
+### A child that runs out of allowance
+
+A child can stop because its subscription hit a usage limit. You are a
+different session on a different allowance, so you are still running and can
+do something about it — `children` with `switch` moves it onto another
+subscription and carries it on from where it stopped. **Only once a limit has
+actually stopped it.** A child still working on a subscription that looks close
+to its limit is a child to leave alone.
+
+Whether you may is the child's profile's decision, and the list above says
+which of them allow it. A profile that says to wait for a person refuses the
+switch; one that allows a subscription change refuses an account on another
+engine; one that allows both takes either. The refusal names what is wrong, so
+you need not guess.
+
+Whether you *should* is this profile's own decision, and it is in your
+instructions: either re-route a spent child yourself, or stop and put the
+choice to the person. **If you are to ask, compose the question properly.**
+`list_compute` gives each subscription's limits, when each resets, and how old
+each reading is — put all three in the description of the option it belongs to,
+and say so when a reading is old enough to doubt. A question offering three
+bare account names gives somebody no way to choose between them, and they are
+being asked precisely because the choice spends real money.";
 
 /// Whether there is anybody to answer a permission prompt.
 ///

@@ -64,6 +64,27 @@ export interface NewRole {
   machine?: string | null;
   name: string;
   /**
+     * Whether this Manager re-routes a spent child itself (`reroute`) or
+     * asks the person first (`ask`).
+     *
+     * **Absent means leave it as it is**, for the reason `on_usage_limit`
+     * gives.
+     * @nullable
+     */
+  onChildLimit?: string | null;
+  /**
+     * What a lead may do about a child of this profile that has run out:
+     * `wait`, `same` or `engine`.
+     *
+     * **Absent means leave it as it is** — on an update, whatever is stored;
+     * on a create, `wait`. `Option` for the same reason `include_always_on`
+     * is: this is a whole-object write, and a client that has never heard of
+     * the field must not be able to revoke a grant somebody made by omitting
+     * it.
+     * @nullable
+     */
+  onUsageLimit?: string | null;
+  /**
      * Where a delegated child runs: "here" (the lead's workspace), "new" (its
      * own), or "lead" to let the lead choose. Empty when omitted, so `check`
      * says so.
