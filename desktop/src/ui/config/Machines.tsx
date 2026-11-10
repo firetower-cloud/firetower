@@ -281,7 +281,11 @@ function WasHere({ machine }: { machine: RetiredMachine }) {
             <div className="mt-3 space-y-3 border-t border-line-soft pt-3">
               {paths.length > 0 && (
                 <div>
-                  <p className="text-micro uppercase tracking-wide text-mute">
+                  {/* Not an ALL-CAPS eyebrow. Nothing in the desk's type scale
+                      is uppercased, and these two were hand-rolled rather than
+                      `.eyebrow`, so neither grep that retired the class found
+                      them. */}
+                  <p className="text-meta text-dim">
                     Repositories connected by a path on that machine — {paths.length}
                   </p>
                   <div className="mt-1.5 space-y-1">
@@ -307,7 +311,7 @@ function WasHere({ machine }: { machine: RetiredMachine }) {
 
               {pinned.length > 0 && (
                 <div>
-                  <p className="text-micro uppercase tracking-wide text-mute">
+                  <p className="text-meta text-dim">
                     Profiles pinned to that machine — {pinned.length}
                   </p>
                   <div className="mt-1.5 space-y-1">
@@ -331,9 +335,18 @@ function WasHere({ machine }: { machine: RetiredMachine }) {
                       </div>
                     ))}
                   </div>
-                  <p className="mt-1.5 text-micro leading-relaxed text-mute">
-                    Unpinned, a profile runs wherever the workspace that uses it runs. Pin it to a
-                    machine again from the profile if it needs a particular one.
+                  {/* **What unpinning actually leaves.** The sentence here used
+                      to say "a profile runs wherever the workspace that uses it
+                      runs", which describes `placement: here` — and every
+                      profile that can appear in this list has a machine, so it
+                      was never true of one. Unpinned, the machine is an open
+                      question: the lead may answer it, and Firetower answers it
+                      otherwise. "Any machine" is the phrase the Profiles list
+                      uses for the same state, so the two screens agree. */}
+                  <p className="mt-1.5 max-w-[52ch] text-meta leading-relaxed text-dim">
+                    Unpinned, a profile takes <b className="font-medium text-bone">any machine</b>:
+                    the lead may name one, and Firetower picks if it does not. Pin it again from
+                    the profile if it needs a particular one.
                   </p>
                   {unpin.isError && <p className="mt-1 text-micro text-brick">{unpin.error.message}</p>}
                 </div>

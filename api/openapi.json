@@ -11831,9 +11831,15 @@
         "type": "object",
         "required": [
           "scope",
-          "status"
+          "status",
+          "observedAt"
         ],
         "properties": {
+          "observedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When this was last heard, which is the only thing that makes the rest of\nit readable.\n\nA limit is **observed, not authoritative**: it is recorded from what an\nagent volunteered mid-session, so headroom on a subscription nothing has\nrun on for a week is a week old. A percentage without its age buys worse\ndecisions than no percentage at all. Both queries already selected the\ncolumn and threw it away."
+          },
           "resetsAt": {
             "type": [
               "integer",
@@ -12320,7 +12326,8 @@
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "The engine it runs on. Null lets the lead choose, and a child then runs\nwhatever its lead names, or the lead's own engine."
           },
           "canDelegate": {
             "type": "boolean",
@@ -12365,14 +12372,14 @@
               "string",
               "null"
             ],
-            "description": "The machine its own workspace runs on, by host id. Required when\nplacement is `new`."
+            "description": "The machine its own workspace runs on, by host id. Null lets the lead\nchoose: it may name one, and otherwise Firetower picks a machine that\ncan run the engine."
           },
           "name": {
             "type": "string"
           },
           "placement": {
             "type": "string",
-            "description": "Required: \"here\" or \"new\". Empty when omitted, so `check` says so."
+            "description": "Where a delegated child runs: \"here\" (the lead's workspace), \"new\" (its\nown), or \"lead\" to let the lead choose. Empty when omitted, so `check`\nsays so."
           },
           "settings": {
             "$ref": "#/components/schemas/Preferred",

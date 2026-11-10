@@ -17,7 +17,11 @@ export interface NewRole {
      * @nullable
      */
   account?: string | null;
-  /** @nullable */
+  /**
+     * The engine it runs on. Null lets the lead choose, and a child then runs
+     * whatever its lead names, or the lead's own engine.
+     * @nullable
+     */
   agent?: string | null;
   /** Whether it is a Manager. Defaults to an Operator. */
   canDelegate?: boolean;
@@ -52,13 +56,18 @@ export interface NewRole {
   includeRepoDefaults?: boolean | null;
   instructions?: string;
   /**
-     * The machine its own workspace runs on, by host id. Required when
-     * placement is `new`.
+     * The machine its own workspace runs on, by host id. Null lets the lead
+     * choose: it may name one, and otherwise Firetower picks a machine that
+     * can run the engine.
      * @nullable
      */
   machine?: string | null;
   name: string;
-  /** Required: "here" or "new". Empty when omitted, so `check` says so. */
+  /**
+     * Where a delegated child runs: "here" (the lead's workspace), "new" (its
+     * own), or "lead" to let the lead choose. Empty when omitted, so `check`
+     * says so.
+     */
   placement?: string;
   /** How it runs its agent — model, effort, mode, sandbox. Each optional. */
   settings?: Preferred;

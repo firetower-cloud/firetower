@@ -16,6 +16,7 @@ import {
   Check,
   ChevronDown,
   ChevronLeft,
+  CircleDashed,
   FolderGit2,
   GitBranch,
   GitBranchPlus,
@@ -32,6 +33,7 @@ import {
   Star,
   Trash2,
   User,
+  UserRound,
   Users,
   UsersRound,
   type LucideIcon,
@@ -53,42 +55,63 @@ import {
 } from "~/api/generated/roles/roles";
 import { useAgentControls } from "~/api/generated/agents/agents";
 import { useAccounts, useAgents, useDirectories, useHosts, useSkills, why } from "~/data";
-import { usable } from "~/api/accounts";
+import { quota, usable, type Account } from "~/api/accounts";
 import { ScopePicker, type ScopeItem } from "~/ui/config/ScopePicker";
 import { SkillSources, useSkillSources } from "~/ui/config/SkillSources";
-import { machineLabel, machines } from "~/api/environments";
+import { machineLabel, machines, stateLabel } from "~/api/environments";
+import { canRun } from "~/components/WhereItRuns";
 import type { Agent, Control, ControlKind, Role, NewRole } from "~/api/generated/model";
+import { navigate } from "~/shims/next-navigation";
 import { useConfirm } from "~/ui/Confirm";
 import { Badge, IconButton } from "~/components/ui";
 
 /**
- * Where a child runs. **Two, because the server takes two.**
+ * One phrase for one idea, in all three fields that have it.
  *
- * A third was added here — *Let the lead choose* — reasoning from
- * `Role.placement`, documented as `lead | here | new`. **That is the response
- * model.** `CreateRoleBody.placement` and `UpdateRoleBody.placement` both say
- * *Required: "here" or "new"*, and `roles.rs` enforces it:
- * `PLACEMENT: [&str; 2] = ["here", "new"]`, refusing anything else with
- * *placement is "here" (the lead's workspace) or "new" (its own)*. So `lead`
- * is **readable and not writable** — a value the server will hand you and
- * will not take back.
+ * Placement, Machine and Engine each say the same thing when they say nothing,
+ * so they say it in the same words and wear the same mark — a dashed ring
+ * (`CircleDashed`), because colour is spent and ember means an agent is waiting
+ * on you. Three wordings for one state would unmake the idea that it is one.
+ */
+const OPEN = "Let the lead choose";
+
+/**
+ * What happens when nobody chooses, said on the open pill rather than in the
+ * field's hint.
  *
- * **A value in a response model is not an option in a request model.** That
- * is the whole mistake, and the comment this replaces made it in writing.
+ * Both halves, likelier branch first. In a hint it would read as a default the
+ * profile sets, which is the one thing a profile must not have: a field here is
+ * a commitment or a question, never a default something else may outrank.
+ */
+const OPEN_FALLBACK = {
+  placement: "here, unless the lead says otherwise",
+  machine: "Firetower picks, unless the lead names one",
+  agent: "the lead's own, unless it names another",
+};
+
+/**
+ * Where a child runs. **Three, and the open one first.**
  *
- * What the user saw was not a save-time refusal. The effect below — main's,
- * which already called `lead` retired — coerces any unknown placement to
- * `here` on every render, so pressing *Let the lead choose* snapped the
- * selection straight back to *Same workspace*. A pill that cannot stay
- * pressed is a button that does not work, which is exactly how it was
- * reported.
+ * A third was added here once before and taken back out, and the reason is
+ * worth keeping: it was reasoned from `Role.placement`, documented as
+ * `lead | here | new`, which is the **response** model. `roles.rs` enforced
+ * `PLACEMENT: [&str; 2] = ["here", "new"]` on the way in, and the effect below
+ * coerced any unknown placement back to `here` on every render — so pressing
+ * *Let the lead choose* snapped the selection straight back to *Same
+ * workspace*. A pill that cannot stay pressed is a button that does not work,
+ * which is exactly how it was reported. **A value in a response model is not an
+ * option in a request model.**
  *
- * `lead` is still **read**: an older profile may carry it, and a profile you
- * cannot open is worse than one with an option you cannot set.
+ * What makes it work this time is that the server takes it: `PLACEMENT` now
+ * carries all three, `check()` accepts an absent engine and an absent machine,
+ * and the coercing effect is gone from this file. The order is the drawing's
+ * (`desktop-redesign.html:4447`) and the order every field here repeats: the
+ * open answer first, wearing the open mark, and the commitments after it.
  */
 const PLACEMENTS: { value: string; icon: LucideIcon; label: string; note: string }[] = [
-  { value: "here", icon: GitBranch, label: "Same workspace", note: "Shares the lead's directory and branch." },
-  { value: "new", icon: GitBranchPlus, label: "Its own workspace", note: "A fresh branch, on the machine you pin below." },
+  { value: "lead", icon: CircleDashed, label: OPEN, note: OPEN_FALLBACK.placement },
+  { value: "here", icon: GitBranch, label: "Same workspace", note: "shares the lead's branch" },
+  { value: "new", icon: GitBranchPlus, label: "Its own workspace", note: "a fresh branch" },
 ];
 
 /** A mark for each run control, so its picker reads like the others. */
@@ -99,11 +122,17 @@ const CONTROL_ICON: Record<ControlKind, LucideIcon> = {
   sandbox: Box,
 };
 
-/** An empty profile, for a new one. An Operator until made a Manager. */
+/**
+ * An empty profile, for a new one. An Operator until made a Manager, and
+ * **open on all three** — the drawing's own default
+ * (`desktop-redesign.html:4414`), and the honest one: a new profile has not
+ * decided where it runs, and two effects used to decide for it by force-picking
+ * the first engine and the first machine on the list.
+ */
 const BLANK: Settled = {
   name: "",
   does: "",
-  placement: "here",
+  placement: "lead",
   agent: null,
   machine: null,
   account: null,
@@ -348,19 +377,29 @@ function RoleRow({
   onOpen: () => void;
   onDelete: () => void;
 }) {
-  /* `lead` is readable and not writable, so a row may still carry it. Named
-     rather than lumped in with the unknown: labelling *anything* unrecognised
-     as "lead picks where" is the same mistake as offering it as a choice —
-     saying something definite about a value you do not know. */
+  /* Named rather than lumped in with the unknown: labelling *anything*
+     unrecognised as "lead picks where" is the same mistake as offering it as a
+     choice — saying something definite about a value you do not know.
+
+     An open machine is said and a pinned one is not. Committed is the ordinary
+     case and spends no words; open is the exception, and the exception is the
+     only thing worth a word on a list that is mostly read. */
   const place =
     role.placement === "here"
       ? "same workspace"
       : role.placement === "new"
-        ? "new workspace"
+        ? role.machine
+          ? "new workspace"
+          : "new workspace, any machine"
         : role.placement === "lead"
-          ? "lead picks where"
+          ? "wherever the lead decides"
           : role.placement;
   const agent = role.agent as Agent | null;
+  /* The glyph slot is already the engine's, so a changed glyph is read in
+     place: a dashed ring among solid marks is the most scannable thing on the
+     row and costs no width. Its accessible name carries the words, since the
+     mark is the only thing carrying them. */
+  const engine = agent ? `Engine: ${AGENT_LABEL[agent] ?? agent}` : "Engine: whichever the lead is running";
 
   return (
     /* One row, as every other pane draws one: the mark, the name over what it
@@ -368,8 +407,8 @@ function RoleRow({
        blocks per row on a list that is mostly read. */
     <div className="r">
       <button onClick={onOpen} className="flex min-w-0 flex-1 items-center gap-3.5 text-left">
-        <span className="g">
-          {agent ? <AgentMark agent={agent} size={16} /> : <UsersRound className="h-4 w-4" strokeWidth={1.75} />}
+        <span className="g" role="img" aria-label={engine} title={engine}>
+          {agent ? <AgentMark agent={agent} size={16} /> : <CircleDashed className="h-4 w-4" strokeWidth={1.75} />}
         </span>
         <span className="tx">
           <b>{role.name}</b>
@@ -418,8 +457,14 @@ function Chip({ children }: { children: ReactNode }) {
  * and Teams make for the administration site.
  */
 function Reading({ role, onClose }: { role: Role; onClose: () => void }) {
+  /* `new`, which is what the server stores and has always stored. This read
+     `own`, a value nothing sends, so a profile committed to its own workspace
+     fell through to the last branch — harmless while that branch described a
+     state nothing could be in, and wrong the moment *open* became real. This is
+     the one view that is only ever read, by somebody who cannot open the form
+     and check. */
   const place =
-    role.placement === "own" ? "its own workspace" : role.placement === "here" ? "the lead's workspace" : "wherever the lead decides";
+    role.placement === "new" ? "its own workspace" : role.placement === "here" ? "the lead's workspace" : "wherever the lead decides";
   const agent = role.agent as Agent | null;
   const named = (ids: string[]) => ids.length;
 
@@ -499,6 +544,70 @@ function Reads({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
+/**
+ * The three fields read back as one sentence: what a child actually gets.
+ *
+ * Open on all three is its own sentence rather than three clauses of "whatever
+ * the lead asks for", which is the same fact said three times.
+ */
+export function whatAChildGets(
+  draft: NewRole,
+  machines: { id: string; label: string }[],
+): ReactNode {
+  const open = draft.placement === "lead" && !draft.machine && !draft.agent;
+  if (open)
+    return (
+      <>
+        A child gets whatever the lead asks for: <b>its workspace, its machine, its engine</b>.
+      </>
+    );
+  const place =
+    draft.placement === "here"
+      ? "the lead's own workspace"
+      : draft.placement === "new"
+        ? "a workspace of its own"
+        : "whichever workspace the lead asks for";
+  const machine =
+    draft.placement === "here"
+      ? ""
+      : machines.length === 0
+        ? ", on the first machine you add"
+        : draft.machine
+          ? `, on ${machines.find((m) => m.id === draft.machine)?.label ?? "a pinned machine"}`
+          : ", on a machine the lead names or Firetower picks";
+  const engine = draft.agent
+    ? `, running ${AGENT_LABEL[draft.agent as Agent] ?? draft.agent}`
+    : ", running the engine the lead names";
+  return (
+    <>
+      A child gets <b>{place + machine + engine}</b>.
+    </>
+  );
+}
+
+/**
+ * Whether a pinned subscription still fits the engine a draft now names — and
+ * so whether the form may drop it.
+ *
+ * **`answered` is the whole of it.** `useAccounts()` reads `[]` while its query
+ * is in flight, so reconciling against the list before it lands finds every pin
+ * absent: a profile opened from a cold cache lost a deliberate pick to *Your
+ * default*, with nothing said, and Save wrote the loss back. An unanswered list
+ * is not an answer and keeps the pin. An *answered* empty one is a real answer
+ * — no usable subscription for this engine — and a stale pin still comes off,
+ * which is why this reads the query's own state rather than inferring it from
+ * the array's length.
+ */
+export function pinnedAccountFits(
+  account: string,
+  agent: NewRole["agent"],
+  accounts: Account[],
+  answered: boolean,
+): boolean {
+  if (!answered) return true;
+  return accounts.some((a) => a.id === account && a.kind === agent && usable(a));
+}
+
 function Editor({
   state,
   all,
@@ -560,28 +669,66 @@ function Editor({
     });
   }
 
-  // The machines its own workspace can be pinned to, and the directories it
-  // can be filed in at creation — both read from the server, both optional.
+  /* The machines its own workspace can be pinned to, and the directories it
+     can be filed in at creation — both read from the server, both optional.
+
+     A row rather than a pill, which is the one place this form departs from the
+     drawing (`desktop-redesign.html:4454` draws `pk("build-01", "32 vCPU · 64
+     GB")`). A machine carries four facts — what it is called, what it is, how
+     it is, and whether the pinned engine runs there — and the list is
+     unbounded where the engines are four. So Machine takes the drawing's
+     *other* idiom, `.pickrows` / `.pr2` (`:1747`), which is already how it
+     draws a list of agents with a reason against each. */
   const { data: hosts } = useHosts();
-  const machineOptions: Opt[] = machines(hosts)
-    .map((m) => ({ m, host: m.hosts[0]?.id }))
+  const machineRows = machines(hosts)
+    .map((m) => ({ m, host: m.hosts[0] }))
     .filter((x) => !!x.host)
     .map((x) => ({
-      value: x.host! as string | null,
-      icon: <Server className="h-4 w-4" strokeWidth={1.75} />,
+      id: x.host!.id,
       label: machineLabel(x.m),
+      /* What you would choose by, as the host card says it: cores, memory,
+         and how the machine itself is — "ready", "not answering". */
+      says: [
+        x.host!.cpus ? `${x.host!.cpus} cores` : null,
+        x.host!.memoryMb ? `${Math.round(x.host!.memoryMb / 1024)} GB` : null,
+        stateLabel(x.host!),
+      ]
+        .filter(Boolean)
+        .join(" · "),
     }));
+  /* Whether the engine this profile pins runs on a given machine — the same
+     question the person-facing picker asks (`WhereItRuns.tsx:266`). With the
+     engine open there is nothing to ask, and nothing is said. */
+  const pinnedEngine = agents.data.find((a) => a.kind === draft.agent);
+  const runsThere = (host: string) => (pinnedEngine ? canRun(pinnedEngine, host) : null);
   // The subscriptions it can run its engine on — the owner's own plus any lent
   // to them — narrowed to the chosen engine, since an account is per-engine.
-  const { data: accounts } = useAccounts();
-  const accountOptions: Opt[] = accounts
-    .filter((a) => a.kind === draft.agent && usable(a))
-    .map((a) => ({
-      value: a.id as string | null,
-      icon: <KeyRound className="h-4 w-4" strokeWidth={1.75} />,
-      label: a.name,
-      note: a.ownerName ? `${a.ownerName}'s subscription` : undefined,
-    }));
+  const { data: accounts, loading: accountsLoading } = useAccounts();
+  /* The owner's default first, as a choice of its own rather than the absence
+     of one. `account: null` has always meant "the owner's default for the
+     engine, resolved when it launches" on the wire, and it is what every
+     agent-authored profile has — but this form required a concrete id, so a
+     profile pinned the subscription that *was* the default and went on
+     pointing at it after somebody changed which one that is. */
+  const accountOptions: Opt[] = [
+    {
+      value: null,
+      icon: <UserRound className="h-4 w-4" strokeWidth={1.75} />,
+      label: `Your default for ${draft.agent ? (AGENT_LABEL[draft.agent as Agent] ?? draft.agent) : "it"}`,
+      note: "resolved when it launches",
+    },
+    ...accounts
+      .filter((a) => a.kind === draft.agent && usable(a))
+      .map((a) => ({
+        value: a.id as string | null,
+        icon: <KeyRound className="h-4 w-4" strokeWidth={1.75} />,
+        label: a.name,
+        note: a.ownerName ? `${a.ownerName}'s subscription` : quota(a),
+      })),
+  ];
+  /* Whether there is a concrete one to offer at all, which is what decides
+     between the picker and the sentence under it. */
+  const connected = accountOptions.length > 1;
 
   // The run controls the chosen engine offers — model, effort, permissions,
   // sandbox. A profile may pin any of them or leave each on the engine's own
@@ -635,59 +782,77 @@ function Editor({
     });
   const refresh = () => cache.invalidateQueries({ queryKey: getListRolesQueryKey() });
 
-  // Every profile pins an engine, and a new-workspace one pins a machine —
-  // there is no open option, so default each to the first on offer the moment
-  // it's needed and empty, and let the person change it.
-  const firstAgent = agentOptions[0]?.value ?? null;
-  useEffect(() => {
-    if (!draft.agent && firstAgent) set("agent", firstAgent);
-  }, [firstAgent, draft.agent]);
-  const firstMachine = machineOptions[0]?.value ?? null;
-  useEffect(() => {
-    if (draft.placement === "new" && !draft.machine && firstMachine) set("machine", firstMachine);
-  }, [draft.placement, draft.machine, firstMachine]);
+  /* Placement, and the machine that may no longer mean anything.
+     *Same workspace* is the one placement where a machine can never apply — a
+     child there runs wherever its lead does — so the pin comes off with the
+     press. Nothing cleared it before, which is why the Machines screen's list
+     of "profiles pinned to that machine" held two populations at once: ones
+     where unpinning is what that button says, and `here` ones carrying a
+     machine that had stopped meaning anything. Not an effect: a press is one
+     change, and an effect that rewrites a field after a render is what made
+     the last pill here unpressable. */
+  const setPlacement = (to: string) =>
+    setDraft((d) => ({ ...d, placement: to, machine: to === "here" ? null : d.machine }));
 
-  /* An older profile may hold the retired `lead` placement — the server will
-     hand it back and will not take it, so the draft has to become one of the
-     two it accepts. `here` for the same reason `BLANK` uses it: it is the one
-     that needs nothing else chosen, and it is the server's own fallback when
-     nothing says otherwise (`delegate.rs` defaults an open placement to
-     `here`).
+  /* **Three effects used to live here and all three are gone**, with the pills
+     that make them wrong:
 
-     **This is why the third pill did not work.** It ran on every render, so
-     setting `lead` was undone before the press finished. Main added it when it
-     retired the value; the pill was added here afterwards, against the read
-     model, and the two have been fighting since. */
-  useEffect(() => {
-    if (draft.placement !== "here" && draft.placement !== "new") set("placement", "here");
-  }, [draft.placement]);
+     - one force-picked the first engine on the list, so a new profile was
+       pinned to an engine nobody chose;
+     - one force-picked the first machine whenever the placement was `new`,
+       for the same reason and with the same result;
+     - one coerced any placement that was not `here` or `new` back to `here`
+       on every render, which is why *Let the lead choose* could not stay
+       pressed the last time somebody drew it.
+
+     They have to go in the same commit as their pills, not before and not
+     after: either half alone reproduces the defect for its field. What is left
+     below is the one effect that is still true — a pin for one engine means
+     nothing to another. */
 
   // A subscription belongs to one engine, so when the engine changes (or the
-  // list loads) make the pick a valid one — kept if it still fits, else the
-  // engine's default. Not keyed on the account itself, so a manual pick sticks.
+  // list loads) drop a pick that no longer fits. Not keyed on the account
+  // itself, so a manual pick sticks — and it falls back to the owner's default
+  // (`null`) rather than to whichever account happens to be first, which is now
+  // a choice the form can actually offer.
   useEffect(() => {
-    const forEngine = accounts.filter((a) => a.kind === draft.agent && usable(a));
-    if (!forEngine.some((a) => a.id === draft.account)) {
-      set("account", (forEngine.find((a) => a.isDefault) ?? forEngine[0])?.id ?? null);
-    }
-  }, [draft.agent, accounts]);
+    if (draft.account && !pinnedAccountFits(draft.account, draft.agent, accounts, !accountsLoading))
+      set("account", null);
+  }, [draft.agent, accounts, accountsLoading]);
 
-  // Run controls are per-engine, so a pin for one agent means nothing to
-  // another. When the person switches engines, drop the pins — but not on the
-  // first render (an existing profile loads its own), nor when a blank draft is
-  // handed its first agent. A ref remembers the last engine to tell these apart.
+  /* Run controls are per-engine, so a pin for one agent means nothing to
+     another. When the person switches engines — *including to no engine at
+     all* — drop the pins, but not on the first render, where an existing
+     profile is loading its own. A ref remembers the last engine to tell the
+     two apart.
+
+     What came off is said rather than left to be noticed: `dropped` feeds the
+     sentence that stands where Subscription and How it runs were, because
+     clearing is invisible and silently discarding a value is the whole bug
+     this screen is being changed for. */
   const lastAgent = useRef(draft.agent);
+  const [dropped, setDropped] = useState<{ account: boolean; settings: number } | null>(null);
   useEffect(() => {
-    if (lastAgent.current && lastAgent.current !== draft.agent) set("settings", {});
+    if (lastAgent.current !== undefined && lastAgent.current !== draft.agent) {
+      if (draft.agent === null) {
+        setDropped({
+          account: !!draft.account,
+          settings: Object.values(draft.settings ?? {}).filter((v) => v != null).length,
+        });
+      } else {
+        setDropped(null);
+      }
+      set("settings", {});
+    }
     lastAgent.current = draft.agent;
   }, [draft.agent]);
 
-  const valid =
-    draft.name.trim().length > 0 &&
-    draft.does.trim().length > 0 &&
-    !!draft.agent &&
-    !!draft.account &&
-    (draft.placement !== "new" || !!draft.machine);
+  /* What a profile cannot do without, and nothing more. `valid` used to want
+     an engine, a subscription and a machine-when-new, and all three are now
+     legal as absent — the subscription always was (`api/roles.rs:25`: "Absent
+     is fine — it means the owner's default at launch"), which made Save dead
+     with nothing on screen saying which field was holding it. */
+  const valid = draft.name.trim().length > 0 && draft.does.trim().length > 0;
 
   const save = async () => {
     setBusy(true);
@@ -775,7 +940,7 @@ function Editor({
 
         <Group
           label="Placement"
-          hint="Where a child runs when a lead delegates to it. Every spawn runs the same way."
+          hint="Where a child runs when a lead delegates to it. Pin one and every spawn runs that way. Leave it open and the lead decides."
         >
           {/* **Pills, not a dropdown.** Three placements with a word of
               explanation each is a thing you read once and then point at; a
@@ -783,10 +948,10 @@ function Editor({
           <div className="pickrow">
             {PLACEMENTS.map((p) => (
               <button
-                key={p.value ?? "here"}
+                key={p.value}
                 type="button"
-                aria-pressed={(draft.placement ?? "here") === p.value}
-                onClick={() => set("placement", p.value ?? "here")}
+                aria-pressed={(draft.placement ?? "lead") === p.value}
+                onClick={() => setPlacement(p.value)}
                 className="pk"
               >
                 <span className="ic">
@@ -799,69 +964,198 @@ function Editor({
           </div>
         </Group>
 
-        {draft.placement === "new" && (
+        {/* Shown whenever the child *could* get a workspace of its own — its
+            own, or the lead's to decide — and hidden only on *Same workspace*,
+            the one case where a machine can never apply. A profile may pin a
+            machine while leaving the placement open, which is a coherent thing
+            to want: wherever the lead likes, but if it gets a workspace of its
+            own it is on that machine. */}
+        {draft.placement !== "here" && (
           <Group
             label="Machine"
-            hint="Which machine its own workspace runs on."
+            hint={
+              draft.placement === "new"
+                ? "Which machine its own workspace runs on. Pin one and every spawn runs there. Leave it open and the lead decides."
+                : "Only reached if the lead gives it a workspace of its own — otherwise it runs wherever the lead does. Pin one, or leave it open and the lead decides."
+            }
           >
-            {machineOptions.length > 0 ? (
-              <div className="pickrow">
-                {machineOptions.map((m) => (
+            {machineRows.length > 0 ? (
+              <>
+                <div className="pickrows">
                   <button
-                    key={m.value ?? "any"}
                     type="button"
-                    aria-pressed={(draft.machine ?? null) === m.value}
-                    onClick={() => set("machine", m.value)}
-                    className="pk"
+                    aria-pressed={(draft.machine ?? null) === null}
+                    onClick={() => set("machine", null)}
+                    className="pr2"
                   >
-                    <span className="ic">{m.icon}</span>
-                    {m.label}
-                    {m.note && <span className="sub">{m.note}</span>}
+                    <span className="g">
+                      <CircleDashed className="h-[17px] w-[17px]" strokeWidth={1.75} />
+                    </span>
+                    <span className="tx">
+                      <b>{OPEN}</b>
+                      <s>{OPEN_FALLBACK.machine}</s>
+                    </span>
+                    {(draft.machine ?? null) === null && (
+                      <span className="g tick">
+                        <Check className="h-3.5 w-3.5" strokeWidth={2.5} />
+                      </span>
+                    )}
                   </button>
-                ))}
-              </div>
+                  {machineRows.map((m) => {
+                    const ok = runsThere(m.id);
+                    return (
+                      <button
+                        key={m.id}
+                        type="button"
+                        aria-pressed={draft.machine === m.id}
+                        data-off={ok === false ? "true" : undefined}
+                        onClick={() => set("machine", m.id)}
+                        className="pr2"
+                      >
+                        <span className="g">
+                          <Server className="h-[17px] w-[17px]" strokeWidth={1.75} />
+                        </span>
+                        <span className="tx">
+                          <b>{m.label}</b>
+                          <s>{m.says}</s>
+                        </span>
+                        {/* Marked rather than hidden, as every other picker
+                            marks it: gone from a list looks like gone. */}
+                        {ok === false && (
+                          <span className="why">
+                            {AGENT_LABEL[draft.agent as Agent] ?? draft.agent} is not installed
+                            there
+                          </span>
+                        )}
+                        {draft.machine === m.id && (
+                          <span className="g tick">
+                            <Check className="h-3.5 w-3.5" strokeWidth={2.5} />
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+                {/* Whether a machine can run an engine depends on which engine,
+                    and this profile leaves that open — so the column that would
+                    say so is honestly missing rather than quietly absent. */}
+                {draft.agent === null && (
+                  <div className="inform">
+                    <p>
+                      Whether a machine can run an engine depends on which engine, and this profile
+                      leaves that open. The lead is told at launch, not here.
+                    </p>
+                  </div>
+                )}
+              </>
             ) : (
               /* Not the pickers' "No machine to run on" block: a profile with
-                 no machine is a state this screen already produces and handles
-                 — it runs wherever the workspace that uses it runs — so this
-                 is information rather than something in the way. */
-              <p className="rounded-md border border-line bg-ground px-3 py-2 text-meta text-mute">
-                No machine yet, so this runs wherever the workspace that uses it runs. Add one
-                under Compute to pin it.
-              </p>
+                 no machine is a state this screen produces and handles — the
+                 lead names one, or Firetower picks — so this is information
+                 rather than something in the way. */
+              <div className="inform">
+                <p>
+                  <b>No machines yet.</b> That leaves this open, so a lead may name one and
+                  Firetower picks otherwise — from whichever machines exist by then. Agents run on
+                  a machine you add over ssh; Firetower does not run them on itself.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => navigate("/configuration/machines/add")}
+                  className="btn plain"
+                >
+                  <Plus className="h-3.5 w-3.5" strokeWidth={1.75} />
+                  Add a machine
+                </button>
+              </div>
             )}
           </Group>
         )}
 
         <Group
           label="Agent"
-          hint="Which engine it runs on. Every spawn uses it."
+          hint="Which engine it runs on. Pin one and every spawn uses it. Leave it open and the lead decides."
         >
-          <Select
-            ariaLabel="Agent"
-            value={draft.agent ?? null}
-            options={agentOptions}
-            onChange={(v) => set("agent", v)}
-          />
+          {/* One flat row, the open answer first: having pressed *pin an
+              engine* the only thing left to say is which, so a two-step would
+              be a mode that carries no information. It also makes Agent read
+              exactly like Placement and Machine, which is the one thing this
+              change is for — `desktop-redesign.html:4458` draws it this way. */}
+          <div className="pickrow">
+            <button
+              type="button"
+              aria-pressed={(draft.agent ?? null) === null}
+              onClick={() => set("agent", null)}
+              className="pk"
+            >
+              <span className="ic">
+                <CircleDashed className="h-4 w-4" strokeWidth={1.75} />
+              </span>
+              {OPEN}
+              <span className="sub">{OPEN_FALLBACK.agent}</span>
+            </button>
+            {agentOptions.map((o) => (
+              <button
+                key={o.value ?? "__open"}
+                type="button"
+                aria-pressed={draft.agent === o.value}
+                onClick={() => set("agent", o.value)}
+                className="pk"
+              >
+                <span className="ic">{o.icon}</span>
+                {o.label}
+              </button>
+            ))}
+          </div>
         </Group>
 
-        <Group
-          label="Subscription"
-          hint="Which subscription its engine authenticates with when it runs."
-        >
-          {accountOptions.length > 0 ? (
-            <Select
-              ariaLabel="Subscription"
-              value={draft.account ?? null}
-              options={accountOptions}
-              onChange={(v) => set("account", v)}
-            />
-          ) : (
-            <p className="rounded-md border border-line bg-ground px-3 py-2 text-meta text-mute">
-              No connected subscription for this agent. Connect one under Accounts.
-            </p>
-          )}
-        </Group>
+        {/* A subscription belongs to one engine, so with the engine open there
+            is nothing this field could hold: a visible picker here could only
+            produce a refusal. It leaves, and the sentence below says why. */}
+        {draft.agent !== null && (
+          <Group
+            label="Subscription"
+            hint="Which subscription its engine authenticates with when it runs."
+          >
+            {connected ? (
+              <div className="pickrow">
+                {accountOptions.map((o) => (
+                  <button
+                    key={o.value ?? "__default"}
+                    type="button"
+                    aria-pressed={(draft.account ?? null) === o.value}
+                    onClick={() => set("account", o.value)}
+                    className="pk"
+                  >
+                    <span className="ic">{o.icon}</span>
+                    {o.label}
+                    {o.note && <span className="sub">{o.note}</span>}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="inform">
+                <p>
+                  <b>
+                    No subscription connected for{" "}
+                    {AGENT_LABEL[draft.agent as Agent] ?? draft.agent}.
+                  </b>{" "}
+                  You can save this profile — it will run on your default for{" "}
+                  {AGENT_LABEL[draft.agent as Agent] ?? draft.agent} once one exists. A child
+                  started before then is refused at launch, with nothing to authenticate with.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => navigate("/configuration/agents")}
+                  className="btn plain"
+                >
+                  <KeyRound className="h-3.5 w-3.5" strokeWidth={1.75} />
+                  Connect {AGENT_LABEL[draft.agent as Agent] ?? draft.agent}
+                </button>
+              </div>
+            )}
+          </Group>
+        )}
 
         {controls.length > 0 && (
           <Group
@@ -900,6 +1194,46 @@ function Editor({
             </div>
           </Group>
         )}
+
+        {/* **What stands where Subscription and How it runs were.**
+            They do not grey out and they do not linger: they leave. Under a
+            flat engine row that is not self-evidently cause and effect — the
+            four engines stay put and two fields below move — so this says why
+            they went, *and names what came off with them*. Clearing is
+            otherwise invisible, and silently discarding a value somebody chose
+            is the bug this whole screen is being changed for. */}
+        {draft.agent === null && (
+          <div className="fld">
+            <div className="inform">
+              <p>
+                <b>Subscription and run settings belong to an engine</b>, so a profile that leaves
+                the engine open carries neither. A child gets your default subscription for
+                whatever engine it runs, on that engine's own settings.
+                {dropped && (dropped.account || dropped.settings > 0) && (
+                  <>
+                    {" "}
+                    Its{" "}
+                    {[
+                      dropped.account ? "pinned subscription" : null,
+                      dropped.settings > 0
+                        ? `${dropped.settings} run setting${dropped.settings === 1 ? "" : "s"}`
+                        : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" and ")}{" "}
+                    came off with the engine.
+                  </>
+                )}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* One sentence reading the three fields back as what a spawn gets.
+            The bug behind all of this is a lead reporting a build that never
+            happened; a form that says what a spawn will be is the cheapest
+            guard there is. */}
+        <WhereTo>{whatAChildGets(draft, machineRows)}</WhereTo>
 
         <Group
           label="Delegation"

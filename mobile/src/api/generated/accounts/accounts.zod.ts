@@ -16,6 +16,7 @@ export const ListAccountsResponseItem = zod.object({
   "isDefault": zod.boolean(),
   "kind": zod.string(),
   "limits": zod.array(zod.object({
+  "observedAt": zod.iso.datetime({"offset":true}).describe('When this was last heard, which is the only thing that makes the rest of\nit readable.\n\nA limit is **observed, not authoritative**: it is recorded from what an\nagent volunteered mid-session, so headroom on a subscription nothing has\nrun on for a week is a week old. A percentage without its age buys worse\ndecisions than no percentage at all. Both queries already selected the\ncolumn and threw it away.'),
   "resetsAt": zod.int().nullish(),
   "scope": zod.string(),
   "status": zod.string(),
@@ -45,6 +46,7 @@ export const CreateAccountResponse = zod.object({
   "isDefault": zod.boolean(),
   "kind": zod.string(),
   "limits": zod.array(zod.object({
+  "observedAt": zod.iso.datetime({"offset":true}).describe('When this was last heard, which is the only thing that makes the rest of\nit readable.\n\nA limit is **observed, not authoritative**: it is recorded from what an\nagent volunteered mid-session, so headroom on a subscription nothing has\nrun on for a week is a week old. A percentage without its age buys worse\ndecisions than no percentage at all. Both queries already selected the\ncolumn and threw it away.'),
   "resetsAt": zod.int().nullish(),
   "scope": zod.string(),
   "status": zod.string(),
@@ -77,6 +79,7 @@ export const UpdateAccountResponse = zod.object({
   "isDefault": zod.boolean(),
   "kind": zod.string(),
   "limits": zod.array(zod.object({
+  "observedAt": zod.iso.datetime({"offset":true}).describe('When this was last heard, which is the only thing that makes the rest of\nit readable.\n\nA limit is **observed, not authoritative**: it is recorded from what an\nagent volunteered mid-session, so headroom on a subscription nothing has\nrun on for a week is a week old. A percentage without its age buys worse\ndecisions than no percentage at all. Both queries already selected the\ncolumn and threw it away.'),
   "resetsAt": zod.int().nullish(),
   "scope": zod.string(),
   "status": zod.string(),
@@ -103,6 +106,7 @@ export const SessionAccountResponse = zod.object({
   "isDefault": zod.boolean(),
   "kind": zod.string(),
   "limits": zod.array(zod.object({
+  "observedAt": zod.iso.datetime({"offset":true}).describe('When this was last heard, which is the only thing that makes the rest of\nit readable.\n\nA limit is **observed, not authoritative**: it is recorded from what an\nagent volunteered mid-session, so headroom on a subscription nothing has\nrun on for a week is a week old. A percentage without its age buys worse\ndecisions than no percentage at all. Both queries already selected the\ncolumn and threw it away.'),
   "resetsAt": zod.int().nullish(),
   "scope": zod.string(),
   "status": zod.string(),
@@ -116,6 +120,7 @@ export const SessionAccountResponse = zod.object({
   "state": zod.string()
 })]).optional(),
   "limits": zod.array(zod.object({
+  "observedAt": zod.iso.datetime({"offset":true}).describe('When this was last heard, which is the only thing that makes the rest of\nit readable.\n\nA limit is **observed, not authoritative**: it is recorded from what an\nagent volunteered mid-session, so headroom on a subscription nothing has\nrun on for a week is a week old. A percentage without its age buys worse\ndecisions than no percentage at all. Both queries already selected the\ncolumn and threw it away.'),
   "resetsAt": zod.int().nullish(),
   "scope": zod.string(),
   "status": zod.string(),

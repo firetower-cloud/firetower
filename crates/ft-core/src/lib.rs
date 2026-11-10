@@ -1102,9 +1102,21 @@ here as a message when it hands back, between your turns, so dispatch, do what
 does not depend on it, then end your turn.
 
 To start one of your profiles, pass `role: \"<name>\"` to `spawn` — it supplies
-the instructions and may pin the agent and where it runs. For a one-off, omit
+the instructions, and it says where its children run. For a one-off, omit
 `role` and describe the work in `goal`. If you name a profile that does not
-exist, the refusal lists the ones that do.";
+exist, the refusal lists the ones that do.
+
+A profile may **commit** to an engine, a machine and a placement, or leave any
+of the three **open**. What it commits to is binding: your argument does not
+override it, and the list above marks which fields each profile leaves open so
+you can tell before you are refused. What it leaves open is yours to answer —
+`agent`, `machine` and `placement` on `spawn` — and `list_compute` says what is
+installed on which machine and what allowance each subscription has left.
+
+**Most of the time none of that is needed.** Say nothing and a child runs your
+own engine, on a machine Firetower picks that the engine is installed on, on
+the owner's default subscription. Answer an open field only when the person
+asked for something particular, or when a refusal told you to.";
 
 /// Whether there is anybody to answer a permission prompt.
 ///

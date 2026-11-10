@@ -36,10 +36,15 @@ fn shareable(alias: &str, person: usize) -> String {
     )
 }
 
-/// Where a role's child runs. A profile pins one of the two — there is no
-/// "let the lead choose" in this version: a profile sets its own placement,
-/// machine and agent, so the Manager never makes a resource call.
-pub const PLACEMENT: [&str; 2] = ["here", "new"];
+/// Where a role's child runs. A profile commits to one of the two — `here`,
+/// the lead's own workspace, or `new`, one of its own — or leaves the question
+/// open with `lead`, and whichever lead delegates to it decides.
+///
+/// `lead` is the column's own default
+/// (`migrations/server/20261029120000_roles.sql:42`) and has always been
+/// readable; this is what makes it writable too. It is a **profile-only**
+/// value: a lead passes `here` or `new` to `spawn`, never `lead`.
+pub const PLACEMENT: [&str; 3] = ["lead", "here", "new"];
 
 /// A role, as the interface and the spawn tool read it.
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -106,13 +111,18 @@ pub struct Role {
 pub struct NewRole {
     pub name: String,
     pub does: String,
-    /// Required: "here" or "new". Empty when omitted, so `check` says so.
+    /// Where a delegated child runs: "here" (the lead's workspace), "new" (its
+    /// own), or "lead" to let the lead choose. Empty when omitted, so `check`
+    /// says so.
     #[serde(default)]
     pub placement: String,
+    /// The engine it runs on. Null lets the lead choose, and a child then runs
+    /// whatever its lead names, or the lead's own engine.
     #[serde(default)]
     pub agent: Option<String>,
-    /// The machine its own workspace runs on, by host id. Required when
-    /// placement is `new`.
+    /// The machine its own workspace runs on, by host id. Null lets the lead
+    /// choose: it may name one, and otherwise Firetower picks a machine that
+    /// can run the engine.
     #[serde(default)]
     pub machine: Option<String>,
     /// The subscription its agent runs on, by account id. Omit to run on the
@@ -174,13 +184,54 @@ impl std::fmt::Display for Refused {
     }
 }
 
+impl std::error::Error for Refused {}
+
+/// A write the database refused, said as a sentence rather than dumped.
+///
+/// `roles.host_id` references `hosts(id)`, so a machine id no row answers to
+/// came back as a 500 with the constraint's name in it. The editor only ever
+/// offers real ids, but `create_profile` and `update_profile` take one from a
+/// Manager by hand — and a machine this server cannot honour being *named* is
+/// the same promise the spawn path already makes (`delegate.rs`).
+///
+/// **Read off the violation rather than checked before the write.** A `SELECT`
+/// first would race: `host_id` is `on delete set null`, so a machine removed
+/// between the look and the insert puts the raw error back — more rarely, and
+/// so more confusingly. This is the repository's own idiom for the shape
+/// (`api/accounts.rs`, on a unique violation), and it costs no round trip.
+///
+/// Only the one constraint. `roles` has four foreign keys and the other three
+/// are the server's own doing, not something a caller named, so they stay
+/// whatever they were.
+fn refused_by_constraint(e: &sqlx::Error, new: &NewRole) -> Option<Refused> {
+    let db = e.as_database_error()?;
+    if !db.is_foreign_key_violation() || db.constraint() != Some("roles_host_id_fkey") {
+        return None;
+    }
+    Some(Refused(format!(
+        "there is no machine \"{}\" — name one of yours, or leave it out and the machine is \
+         the lead's to choose",
+        new.machine.as_deref().unwrap_or_default()
+    )))
+}
+
+/// Either the refusal above, or the error as it was, with its context.
+fn written(e: sqlx::Error, new: &NewRole, doing: &'static str) -> anyhow::Error {
+    match refused_by_constraint(&e, new) {
+        Some(refused) => anyhow::Error::new(refused),
+        None => anyhow::Error::new(e).context(doing),
+    }
+}
+
 /// Everything a well-formed role must be.
 ///
-/// Shape only — everything answerable without the database. The one field that
-/// needs it is `skill_scope`, whose ids have to be skills the person saving can
-/// actually see; that is `api::roles::check_skills`, called beside this on both
-/// write paths. Said here because this is where somebody looks to find out what
-/// is validated, and the answer "not here" is only useful with the "over there".
+/// Shape only — everything answerable without the database. Two fields need it
+/// and neither is here: `skill_scope`, whose ids have to be skills the person
+/// saving can actually see, is `api::roles::check_skills`, called beside this
+/// on both write paths; and `machine`, which has to be a machine, is the
+/// foreign key itself, read back by `refused_by_constraint` at the write.
+/// Said here because this is where somebody looks to find out what is
+/// validated, and the answer "not here" is only useful with the "over there".
 pub fn check(new: &NewRole) -> Result<(), Refused> {
     let name = new.name.trim();
     if name.is_empty() {
@@ -192,34 +243,24 @@ pub fn check(new: &NewRole) -> Result<(), Refused> {
     if new.does.trim().is_empty() {
         return Err(Refused("a role needs a line saying what it does".into()));
     }
-    // A profile fully specifies where and what it runs. No "let the lead
-    // choose": the safest first version is the one where the Manager inherits a
-    // fixed shape rather than deciding the machine, the engine or the placement.
+    // Each of the three may be a commitment or left open, and open is a real
+    // answer rather than a field nobody filled in: a profile that says nothing
+    // about the placement, the machine or the engine hands that choice to
+    // whichever lead delegates to it.
     if !PLACEMENT.contains(&new.placement.as_str()) {
         return Err(Refused(
-            "placement is \"here\" (the lead's workspace) or \"new\" (its own)".into(),
+            "placement is \"here\" (the lead's workspace), \"new\" (its own), or \"lead\" \
+             (let the lead choose)"
+                .into(),
         ));
     }
+    // Open is not unvalidated. Absent lets the lead choose; a name this build
+    // does not know is a pin that could never be honoured, and saying so here
+    // is the only place anybody finds out.
     match &new.agent {
+        None => {}
         Some(agent) if ft_core::Agent::from_name(agent).is_some() => {}
         Some(agent) => return Err(Refused(format!("{agent} is not an agent Firetower runs"))),
-        None => {
-            return Err(Refused(
-                "a profile sets the agent it runs on — pick one rather than leaving it open".into(),
-            ))
-        }
-    }
-    if new.placement == "new"
-        && new
-            .machine
-            .as_deref()
-            .map(str::trim)
-            .unwrap_or("")
-            .is_empty()
-    {
-        return Err(Refused(
-            "a profile whose child gets its own workspace sets the machine it runs on".into(),
-        ));
     }
     Ok(())
 }
@@ -525,7 +566,7 @@ impl Roles {
         .bind(nonblank(&new.settings.sandbox))
         .execute(&self.pool)
         .await
-        .context("writing a role")?;
+        .map_err(|e| written(e, new, "writing a role"))?;
         Ok(id)
     }
 
@@ -572,7 +613,7 @@ impl Roles {
         .bind(nonblank(&new.settings.sandbox))
         .execute(&self.pool)
         .await
-        .context("updating a role")?;
+        .map_err(|e| written(e, new, "updating a role"))?;
         Ok(true)
     }
 
@@ -778,32 +819,49 @@ mod tests {
         assert_eq!(got, ids(&["shared"]));
     }
 
+    /// The inverse of what this used to assert, kept in one piece because half
+    /// of it is still true: **open is accepted, unknown is still refused.**
+    ///
+    /// A profile may leave the engine, the machine and the placement open —
+    /// each is a question handed to whichever lead delegates to it — and the
+    /// only thing left to refuse is a value nothing could honour.
     #[test]
-    fn a_profile_pins_its_whole_shape() {
-        // The agent is required: no "let the lead choose".
+    fn a_profile_may_leave_a_field_open_but_not_an_unknown_one() {
+        // No engine: the lead's own runs it.
         let mut r = new("reviewer");
         r.agent = None;
-        assert!(check(&r).unwrap_err().0.contains("sets the agent"));
-
-        // Placement must be one of the two; "lead" is gone.
-        let mut r = new("reviewer");
-        r.agent = Some("ClaudeCode".into());
-        r.placement = "lead".into();
-        assert!(check(&r).unwrap_err().0.contains("placement"));
-
-        // Its-own-workspace pins a machine.
-        let mut r = new("reviewer");
-        r.agent = Some("ClaudeCode".into());
-        r.placement = "new".into();
-        r.machine = None;
-        assert!(check(&r).unwrap_err().0.contains("machine"));
-
-        // Fully specified: accepted. A `here` profile needs no machine.
-        let mut r = new("reviewer");
-        r.agent = Some("ClaudeCode".into());
-        r.placement = "here".into();
         assert!(check(&r).is_ok());
 
+        // An engine by a name this build does not run is still refused, and
+        // the refusal says which name. Open must not mean unvalidated.
+        let mut r = new("reviewer");
+        r.agent = Some("Claude".into());
+        let refused = check(&r).unwrap_err().0;
+        assert!(
+            refused.contains("Claude is not an agent Firetower runs"),
+            "{refused}"
+        );
+
+        // "lead" is a placement a profile may hold: the lead decides.
+        let mut r = new("reviewer");
+        r.placement = "lead".into();
+        assert!(check(&r).is_ok());
+
+        // Anything else is not, and the refusal names all three.
+        let mut r = new("reviewer");
+        r.placement = "own".into();
+        let refused = check(&r).unwrap_err().0;
+        assert!(refused.contains("placement"), "{refused}");
+        assert!(refused.contains("lead"), "{refused}");
+
+        // Its own workspace, no machine: Firetower picks one that can run it.
+        let mut r = new("reviewer");
+        r.placement = "new".into();
+        r.machine = None;
+        assert!(check(&r).is_ok());
+
+        // And every field committed is still accepted, which is the half of
+        // the old invariant that never changed.
         let mut r = new("reviewer");
         r.agent = Some("ClaudeCode".into());
         r.placement = "new".into();

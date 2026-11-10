@@ -69,6 +69,9 @@ pub const CREATE_PROFILE: &str = "create_profile";
 pub const UPDATE_PROFILE: &str = "update_profile";
 /// List the saved profiles, so the agent builds on them rather than beside.
 pub const LIST_PROFILES: &str = "list_profiles";
+/// What can run a child, and where: machines, engines and subscriptions, as
+/// one answer rather than three lists to correlate.
+pub const LIST_COMPUTE: &str = "list_compute";
 /// Write a skill into the person's library, so they can ask for one in words
 /// rather than hand-copying a folder into the editor.
 pub const CREATE_SKILL: &str = "create_skill";
@@ -114,6 +117,31 @@ A question it has comes to you as a message; a command it needs permission \
 for goes to the person. There is no cap on how many you start or how many run \
 at once — dispatch what the work actually needs, and no more, since each one \
 costs tokens and a workspace.";
+
+/// What `list_compute` answers, and — as much of the point — when not to ask.
+///
+/// A Manager handed a quota table and a fleet list will shop around: it will
+/// spend a turn choosing between machines that are all fine, and another
+/// explaining the choice. So the anti-trigger is first and said plainly, the
+/// way a skill's description carries one.
+const LIST_COMPUTE_DESCRIPTION: &str = "\
+What can run a child, and where: every machine you can put one on, which \
+engines are installed on each, and which subscriptions you could spend on \
+each engine, with what is left of their allowance. \
+**You usually do not need this.** A child runs on your own engine and on \
+whichever machine Firetower picks unless you say otherwise, Firetower only \
+picks a machine the engine is installed on, and the subscription resolves to \
+the owner's default. Reach for this only when the person asked for a \
+particular engine, machine or subscription, or when a spawn was refused and \
+you need to know what to ask for instead — not before every spawn, and not to \
+choose between machines that are all fine. \
+Everything it returns is **the last thing each machine reported**, not a live \
+check: an allowance on a subscription nothing has run on for a week is a week \
+old, and the age is on every line so you can tell. Readiness is per machine — \
+an engine installed on one and not another is a failed start on the second, \
+not a slower one. \
+Pass `role` (and `placement`, if you know it) and the answer is scoped to the \
+one machine that child would actually run on.";
 
 const CHILDREN_DESCRIPTION: &str = "\
 The children this session started. `list` says what each is doing and \
@@ -246,7 +274,9 @@ async fn answer(
                 .join(", ");
             let agent_desc = format!(
                 "Which agent runs it — one of {agent_labels}. NOT a saved subagent — use \
-                 `role` for that. Omit for the same as you."
+                 `role` for that. Omit for the same as you, which is almost always right. \
+                 Ignored where the profile pins an engine; a name no engine has is refused \
+                 rather than quietly replaced with yours."
             );
             Some(reply(
                 id?,
@@ -278,7 +308,7 @@ async fn answer(
                                 },
                                 "role": {
                                     "type": "string",
-                                    "description": "A saved subagent to start, by name — e.g. \"reviewer\" or \"developer\" (what the person defines on the Subagents screen). It supplies the instructions and may pin the agent and placement; where it pins one, that wins over what you pass. Naming one that does not exist is refused with the ones that do. Omit for an ad-hoc child.",
+                                    "description": "A saved subagent to start, by name — e.g. \"reviewer\" or \"developer\" (what the person defines on the Agent profiles screen). It supplies the instructions, and it either commits to an engine, a machine and a placement or leaves any of them open. Where it commits to one, that is binding and your argument for that field is not used; where it leaves one open, `agent`, `machine` and `placement` are yours to answer. Naming a profile that does not exist is refused with the ones that do. Omit for an ad-hoc child.",
                                 },
                                 "placement": {
                                     "type": "string",
@@ -289,6 +319,14 @@ async fn answer(
                                     "type": "string",
                                     "enum": agent_names,
                                     "description": agent_desc,
+                                },
+                                "machine": {
+                                    "type": "string",
+                                    "description": "Which machine its own workspace runs on, by host id from `list_compute`. Only for `placement: \"new\"`, and only when the profile pins no machine. Omit unless they asked for a particular machine — Firetower picks one that can run the engine, which is almost always the right answer.",
+                                },
+                                "account": {
+                                    "type": "string",
+                                    "description": "Which subscription it spends, by account id from `list_compute`. Omit for the owner's default for whatever engine it runs, which is almost always the right answer. An account belongs to one engine; naming one for another is refused.",
                                 },
                                 "name": {
                                     "type": "string",
@@ -359,24 +397,24 @@ async fn answer(
                         },
                     }, {
                         "name": CREATE_PROFILE,
-                        "description": "Save a reusable agent profile — a persona a workspace can be started as, or a lead can delegate to. A profile fully specifies where and what it runs: there is no \"let the lead choose\", so you must settle the engine and the placement (and, for its own workspace, the machine). Unless they have already said otherwise, AGREE ON THE SHAPE BEFORE YOU CALL THIS — don't silently assume. In one short, plain-language exchange, put the choices to them with a recommended default each, and let them correct you: (1) what it does and when to reach for it; (2) its goal and how it should work (the instructions); (3) Operator or Manager — may it hand work to other profiles, and if so which; (4) which engine it runs on; (5) placement — the lead's own workspace (`here`) or its own (`new`); (6) for `new`, which machine — you cannot see the machines, so unless they hand you a host id this profile is not yours to finish: SAY THAT rather than quietly filing it as `here`, and offer `here` for now with the real placement set on Settings → Harness → Profiles; (7) kept yours, or filed in a directory a teammate can reach. You cannot set the subscription: it runs on the owner's default for the chosen engine, whatever they asked for. If they named one, create the profile and then SAY YOU COULD NOT APPLY IT and that it is set on Settings → Harness → Profiles — never let silence read as \"applied\". Take anything they already specified and don't re-ask it. Then call this once. It appears on the Profiles screen immediately, theirs to edit or delete. Check `list_profiles` first so you refine an existing one rather than duplicate it.",
+                        "description": "Save a reusable agent profile — a persona a workspace can be started as, or a lead can delegate to. Each of the three things a profile says about where it runs — the engine, the placement, and the machine for its own workspace — is either a commitment or left open for whichever lead delegates to it. Unless they have already said otherwise, AGREE ON THE SHAPE BEFORE YOU CALL THIS — don't silently assume. In one short, plain-language exchange, put the choices to them with a recommended default each, and let them correct you: (1) what it does and when to reach for it; (2) its goal and how it should work (the instructions); (3) Operator or Manager — may it hand work to other profiles, and if so which; (4) which engine it runs on, or open so each child runs on its lead's; (5) placement — the lead's own workspace (`here`), one of its own (`new`), or open so the lead decides; (6) kept yours, or filed in a directory a teammate can reach. LEAVING A FIELD OPEN IS THE DEFAULT, not a gap: omit `agent` and `placement` unless they asked for something particular, and a child then runs wherever and however its lead does. You cannot set the subscription: a profile that pins an engine runs on the owner's default for it, and one that leaves the engine open has none to set. If they named one, create the profile and then SAY YOU COULD NOT APPLY IT and that it is set on Settings → Harness → Profiles — never let silence read as \"applied\". Take anything they already specified and don't re-ask it. Then call this once. It appears on the Profiles screen immediately, theirs to edit or delete. Check `list_profiles` first so you refine an existing one rather than duplicate it.",
                         "inputSchema": {
                             "type": "object",
                             "properties": {
                                 "name": { "type": "string", "description": "What it's called and started by, e.g. \"QA\" or \"Reviewer\"." },
                                 "does": { "type": "string", "description": "One line: what it does AND when to reach for it — like a skill's description. A lead reads this to decide whether to hand it work, so include the trigger (\"after a developer hands back\") and any anti-trigger (\"not for a one-line fix\"). e.g. \"Reviews a finished branch and reports problems; use after a hand-back, not for trivial diffs.\"" },
                                 "instructions": { "type": "string", "description": "The persona, as markdown — how it should work, step by step. Composed into the agent's prompt once it's chosen (the body, not the when-to-use line)." },
-                                "agent": { "type": "string", "enum": ["ClaudeCode", "Codex", "KimiCode", "CursorAgent"], "description": "Required. The engine it runs on — a profile always pins one." },
-                                "placement": { "type": "string", "enum": ["here", "new"], "description": "Required. Where a delegated child runs: `here` shares the lead's workspace and branch, `new` gets its own." },
-                                "machine": { "type": "string", "description": "Required when placement is `new`: the host id of the machine its own workspace runs on." },
+                                "agent": { "type": "string", "enum": ["ClaudeCode", "Codex", "KimiCode", "CursorAgent"], "description": "The engine it runs on. Omit to leave it open: every child then runs on whatever its lead is running, or on the engine the lead names." },
+                                "placement": { "type": "string", "enum": ["lead", "here", "new"], "description": "Where a delegated child runs: `here` shares the lead's workspace and branch, `new` gets its own, `lead` (the default) leaves it to whichever lead delegates." },
+                                "machine": { "type": "string", "description": "The host id of the machine its own workspace runs on, for a profile that wants a particular one. Omit to leave it open, and Firetower picks a machine that can run the engine — which is the right answer unless they named a machine. `list_compute` lists the host ids." },
                                 "can_delegate": { "type": "boolean", "description": "true makes it a Manager that can hand work to other profiles; false (default) an Operator that does the work itself." },
                                 "directory": { "type": "string", "description": "A directory to file it in, by name, so a teammate can reach it. Omit for the person's own space." },
                             },
-                            "required": ["name", "does", "agent", "placement"],
+                            "required": ["name", "does"],
                         },
                     }, {
                         "name": UPDATE_PROFILE,
-                        "description": "Change a saved profile, by name — \"make the reviewer stricter\", \"run QA on Codex\". Only the fields you pass change; everything else stays. Rename with `new_name`. When what they want changed is ambiguous, confirm it before you apply — a profile is something they rely on, not a scratch edit. TWO THINGS THIS CANNOT CHANGE: the subscription, and `placement` to `new` for a profile with no machine (that is a host id you cannot see). If they ask for either, say so and point them at Settings → Harness → Profiles instead of reporting a change you did not make.",
+                        "description": "Change a saved profile, by name — \"make the reviewer stricter\", \"run QA on Codex\", \"stop pinning QA to Codex and let the lead decide\". Only the fields you pass change; everything else stays. Rename with `new_name`. To clear a pin back to open, pass that field as `null` — `agent: null` lets each child run on its lead's engine, `machine: null` lets Firetower pick one, `placement: \"lead\"` lets the lead choose. Omitting a field keeps it, so null is the only way to say \"stop pinning this\". When what they want changed is ambiguous, confirm it before you apply — a profile is something they rely on, not a scratch edit. ONE THING THIS CANNOT CHANGE: the subscription. If they ask for that, say so and point them at Settings → Harness → Profiles instead of reporting a change you did not make.",
                         "inputSchema": {
                             "type": "object",
                             "properties": {
@@ -384,9 +422,9 @@ async fn answer(
                                 "new_name": { "type": "string", "description": "A new name, to rename it." },
                                 "does": { "type": "string" },
                                 "instructions": { "type": "string" },
-                                "agent": { "type": "string", "enum": ["ClaudeCode", "Codex", "KimiCode", "CursorAgent"] },
-                                "placement": { "type": "string", "enum": ["here", "new"] },
-                                "machine": { "type": "string" },
+                                "agent": { "type": ["string", "null"], "enum": ["ClaudeCode", "Codex", "KimiCode", "CursorAgent", null], "description": "The engine it runs on. `null` clears the pin, so each child runs on its lead's engine." },
+                                "placement": { "type": "string", "enum": ["lead", "here", "new"], "description": "`lead` leaves it to whichever lead delegates." },
+                                "machine": { "type": ["string", "null"], "description": "The host id its own workspace runs on. `null` clears the pin, and Firetower picks a machine that can run the engine." },
                                 "can_delegate": { "type": "boolean" },
                             },
                             "required": ["name"],
@@ -395,6 +433,16 @@ async fn answer(
                         "name": LIST_PROFILES,
                         "description": "List the saved profiles the person can see — name, whether it's a Manager, and what it does. Read this before creating one, to build on what exists rather than make a near-duplicate.",
                         "inputSchema": { "type": "object", "properties": {} },
+                    }, {
+                        "name": LIST_COMPUTE,
+                        "description": LIST_COMPUTE_DESCRIPTION,
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "role": { "type": "string", "description": "The profile you are about to start, by name. Where it pins a placement or a machine, the answer is scoped to the one machine that child would run on instead of listing the fleet." },
+                                "placement": { "type": "string", "enum": ["here", "new"], "description": "Where that child would run, if you already know and the profile leaves it open. `here` scopes the answer to this workspace's own machine." },
+                            },
+                        },
                     }, {
                         "name": CREATE_SKILL,
                         "description": "Write a skill into the person's library — a SKILL.md and, if it needs them, bundled files — so they don't have to hand-copy what you wrote into the editor. Use it when they ask you to make them a skill (\"turn this into a skill\", \"make me a changelog skill\"). It appears on their Skills screen at once. A skill that ships a script (anything under scripts/, or a file marked executable) is held for the person's review before it can run — say so when that happens. Check list_skills first so you refine an existing one rather than duplicate it.",
@@ -468,7 +516,7 @@ async fn answer(
                 .unwrap_or(TOOL);
             let text = match name {
                 SPAWN | CHILDREN | UPDATE | PLAN | CREATE_PROFILE | UPDATE_PROFILE
-                | LIST_PROFILES | CREATE_SKILL | UPDATE_SKILL | LIST_SKILLS => {
+                | LIST_PROFILES | LIST_COMPUTE | CREATE_SKILL | UPDATE_SKILL | LIST_SKILLS => {
                     delegate(session_id, name, &id, &arguments).await
                 }
                 // Every call used to be a permission question, and an agent
@@ -768,6 +816,7 @@ mod tests {
                 CREATE_PROFILE,
                 UPDATE_PROFILE,
                 LIST_PROFILES,
+                LIST_COMPUTE,
                 CREATE_SKILL,
                 UPDATE_SKILL,
                 LIST_SKILLS

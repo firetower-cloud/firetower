@@ -157,7 +157,7 @@ pub(super) async fn mine(db: &crate::db::Db, owner: &str, id: &str) -> Result<Ac
 /// Writer, not viewer. Picking somebody's subscription spends their quota and
 /// puts their name on what it does, so being allowed to see that it exists is
 /// deliberately not enough.
-pub(super) async fn usable(
+pub(crate) async fn usable(
     db: &crate::db::Db,
     person: &str,
     id: &str,
@@ -230,6 +230,55 @@ pub(super) async fn validate(
     }
     Ok(a)
 }
+/// What is known of one subscription's allowance, oldest window first.
+pub(crate) async fn limits_of(db: &crate::db::Db, id: &str) -> Result<Vec<Limit>, sqlx::Error> {
+    sqlx::query_as::<_, Limit>(
+        "SELECT scope, status, resets_at, observed_at, \
+             used_percent::float4 AS used_percent \
+        FROM agent_account_limits WHERE account_id=$1 ORDER BY scope",
+    )
+    .bind(id)
+    .fetch_all(db.pool())
+    .await
+}
+
+/// Every subscription this person could actually spend, for a tool that offers
+/// them.
+///
+/// **Writer, not Viewer** — the bar [`usable`] sets, and for its reason:
+/// picking somebody's subscription spends their quota and puts their name on
+/// what it does, so being allowed to see that it exists is deliberately not
+/// enough. `GET /api/v1/agent-accounts` lists at Viewer because a screen
+/// saying a colleague has one is telling you it exists, which is a different
+/// act from offering it.
+///
+/// And every other gate [`validate`] applies, because a tool that lists one the
+/// spawn then refuses has offered a choice that was never there — a fresh
+/// instance of the failure this is part of removing.
+pub(crate) async fn spendable(state: &AppState, owner: &str) -> Result<Vec<Account>, ApiError> {
+    let rows = sqlx::query_as::<_, Account>(&format!(
+        "SELECT {ACCOUNT_COLUMNS} FROM agent_accounts a
+          WHERE a.enabled AND a.state = 'connected' AND {visible}
+          ORDER BY (a.user_id=$1) DESC, a.kind, a.is_default DESC, a.created_at",
+        visible = filed_where("a", 1, Level::Writer)
+    ))
+    .bind(owner)
+    .fetch_all(state.db.pool())
+    .await?;
+    let mut held = Vec::new();
+    for mut account in rows {
+        // A host-local credential cannot travel to whatever machine a child
+        // gets, so it is not one this could spend — `validate` refuses it, and
+        // offering it first would only make that refusal a surprise.
+        if !state.vault.holds(account.credential()).await? {
+            continue;
+        }
+        account.limits = limits_of(&state.db, &account.id).await?;
+        held.push(account);
+    }
+    Ok(held)
+}
+
 pub(super) async fn pin(
     state: &AppState,
     owner: &str,
@@ -265,14 +314,7 @@ pub(super) async fn list_accounts(
     .fetch_all(state.db.pool())
     .await?;
     for account in &mut rows {
-        account.limits = sqlx::query_as(
-            "SELECT account_id, scope, status, resets_at, observed_at, \
-                 used_percent::float4 AS used_percent \
-            FROM agent_account_limits WHERE account_id=$1 ORDER BY scope",
-        )
-        .bind(&account.id)
-        .fetch_all(state.db.pool())
-        .await?;
+        account.limits = limits_of(&state.db, &account.id).await?;
     }
     Ok(Json(rows))
 }
@@ -598,6 +640,15 @@ pub struct Limit {
     pub status: String,
     pub resets_at: Option<i64>,
     pub used_percent: Option<f32>,
+    /// When this was last heard, which is the only thing that makes the rest of
+    /// it readable.
+    ///
+    /// A limit is **observed, not authoritative**: it is recorded from what an
+    /// agent volunteered mid-session, so headroom on a subscription nothing has
+    /// run on for a week is a week old. A percentage without its age buys worse
+    /// decisions than no percentage at all. Both queries already selected the
+    /// column and threw it away.
+    pub observed_at: chrono::DateTime<chrono::Utc>,
 }
 #[derive(Serialize, ToSchema, sqlx::FromRow)]
 #[serde(rename_all = "camelCase")]
@@ -637,16 +688,7 @@ pub(super) async fn session_account(
     .fetch_all(state.db.pool())
     .await?;
     let limits = match &account {
-        Some(account) => {
-            sqlx::query_as::<_, Limit>(
-                "SELECT account_id, scope, status, resets_at, observed_at, \
-                 used_percent::float4 AS used_percent \
-            FROM agent_account_limits WHERE account_id=$1 ORDER BY scope",
-            )
-            .bind(&account.id)
-            .fetch_all(state.db.pool())
-            .await?
-        }
+        Some(account) => limits_of(&state.db, &account.id).await?,
         None => Vec::new(),
     };
     Ok(Json(SessionAccount {
