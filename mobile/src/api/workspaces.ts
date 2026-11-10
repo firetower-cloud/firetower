@@ -11,7 +11,7 @@
  */
 
 import type { Session } from "./generated/model";
-import { inFlight, needsYou } from "./view";
+import { BEAT, inFlight, needsYou, type Beat } from "./view";
 
 /** A workspace: a checkout on a host, and the agents working in it. */
 export type Workspace = {
@@ -109,4 +109,27 @@ export function lead(place: Workspace): Session {
      opened it to read. The desk skips those and this did not, which is one
      way the two clients could show a different transcript for the same row. */
   return match ?? place.runs.find((r) => r.agent !== "Shell") ?? place.runs[0];
+}
+
+/**
+ * The order a list of workspaces reads in. **Not sections — an order.**
+ *
+ * Grouped is the one not to ship: a workspace changes state while you are
+ * looking at it, and the row you reached for jumps sections under your thumb.
+ * Flat and status-ordered has no such frame.
+ *
+ * `Record<Beat, …>` rather than `Record<string, …>`, so adding a beat is a
+ * build error here instead of a silent `undefined` in the comparator, which
+ * would sort the new one to an arbitrary place.
+ *
+ * Shared because two surfaces draw this list — the Workspaces destination and
+ * the home's docked column, which is the same list previewed — and two copies
+ * of a comparator are two chances to disagree about what comes first.
+ */
+export const RANK: Record<Beat, number> = { blocked: 0, broken: 1, working: 2, done: 3, over: 4 };
+
+/** The same list, in that order. A copy: `sort` is in place and the caller's
+ *  array is memoised upstream. */
+export function ranked(places: Workspace[]): Workspace[] {
+  return places.slice().sort((a, b) => RANK[BEAT[lead(a).status]] - RANK[BEAT[lead(b).status]]);
 }

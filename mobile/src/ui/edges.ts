@@ -193,6 +193,41 @@ export function useEdges(want: Edges = {}): ViewStyle {
 }
 
 /**
+ * **What the system reserves at the trailing edge**, for the one thing that is
+ * allowed to cross it.
+ *
+ * The rule, and it is a rule about layers rather than about widths: *a
+ * surface's background and its own fill run to the frame; anything you read,
+ * touch or scroll stays inside the reserved 84.* The reserved space is a
+ * margin **inside** the app, not a margin outside it.
+ *
+ * `bg-ground` already satisfies the first half for free — {@link screenEdges}
+ * emits *padding*, which is inside the border box, so the page colour paints
+ * the full window width and there was never an unpainted strip. What does not
+ * satisfy it is a child that stops where the root's padding begins: the
+ * docked column at 951 ended at 867 with a divider and a fill that visibly
+ * fell 84 short of the frame, beside a floating tab pill, which reads as a
+ * dead strip the app does not own.
+ *
+ * The fix is three properties at the one call site that wants it:
+ *
+ * ```js
+ * { width: pose.panel + rail, marginRight: -rail, paddingRight: rail }
+ * ```
+ *
+ * The negative margin pulls the column's fill out into the root's padding and
+ * the padding puts its content back. The left column's width does not move —
+ * it is still `content − panel` — and neither does anything `pose.ts`
+ * measures, because `onLayout` reports a view's *frame*.
+ *
+ * Here rather than on `Pose` so this file stays the only reader of
+ * `insets.right`, which is the rule its own docblock makes.
+ */
+export function useRail(): number {
+  return useInsets().right;
+}
+
+/**
  * What the hardware reserves — or, on a dev web build with `?insets=` set,
  * what was asked for. See the note at the foot of this file.
  *

@@ -54,63 +54,20 @@
 import { useCallback, useMemo, useState } from "react";
 import { ScrollView, Text, View } from "react-native";
 import { BLEED, useEdges } from "~/ui/edges";
-import Animated from "react-native-reanimated";
-import { GestureDetector } from "react-native-gesture-handler";
 import { router } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
 import type { Session } from "~/api/generated/model";
-import { group, lead, type Workspace } from "~/api/workspaces";
-import { BEAT, BEAT_TOKEN, elapsed, minutesSince, type Beat } from "~/api/view";
+import { group, lead, ranked } from "~/api/workspaces";
 import { useSessions } from "~/data";
 import { useServer } from "~/native/current";
 import { usePending } from "~/api/pending";
 import { getListSessionsQueryKey, useAnswerRequest } from "~/api/generated/sessions/sessions";
-import { Peek, usePeekable } from "~/ui/Peek";
+import { Peek } from "~/ui/Peek";
 import { Unreachable } from "~/ui/Unreachable";
 import { Waiting } from "~/ui/Waiting";
+import { WorkspaceRow } from "~/ui/WorkspaceRow";
 import { COLUMN } from "~/ui/measure";
-import { useTheme } from "~/design/theme";
 import { size } from "~/design/tokens.generated";
-
-/**
- * The order a list of them reads in. Not sections — an order.
- *
- * `Record<Beat, …>` rather than `Record<string, …>`, so adding a beat is a
- * build error here instead of a silent `undefined` in the comparator that
- * sorts the new one to an arbitrary place.
- */
-const RANK: Record<Beat, number> = { blocked: 0, broken: 1, working: 2, done: 3, over: 4 };
-
-function Row({ place, onPeek }: { place: Workspace; onPeek: () => void }) {
-  const { color } = useTheme();
-  const speaker = lead(place);
-  const beat = BEAT[speaker.status];
-  const token = BEAT_TOKEN[beat];
-  const tone = token === "mute" ? color.dim : token === "ember" ? color["ember-ink"] : color[token];
-  const soft = beat === "done" || beat === "over";
-  const { gesture, pressed } = usePeekable(onPeek, () => router.push(`/workspace/${place.id}`));
-
-  return (
-    <GestureDetector gesture={gesture}>
-      <Animated.View
-        testID="workspace-row"
-        accessibilityRole="button"
-        className="min-h-[54px] flex-row items-center gap-3 px-5"
-        style={pressed}
-      >
-        <View className="h-2 w-2 rounded-full" style={{ backgroundColor: tone }} />
-        <Text
-          numberOfLines={1}
-          className={`min-w-0 flex-1 font-sans ${soft ? "text-dim" : "text-bone"}`}
-          style={{ fontSize: size.title, letterSpacing: size.title * -0.012 }}
-        >
-          {place.name}
-        </Text>
-        <Text className="font-sans text-meta text-mute">{elapsed(minutesSince(speaker.updatedAt))}</Text>
-      </Animated.View>
-    </GestureDetector>
-  );
-}
 
 export default function Workspaces() {
   const edges = useEdges({ gutter: BLEED });
@@ -125,14 +82,7 @@ export default function Workspaces() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [live.map((s: Session) => s.id + s.status).join()],
   );
-  const places = useMemo(
-    () =>
-      groups
-        .flatMap(([, inRepo]) => inRepo)
-        .slice()
-        .sort((a, b) => RANK[BEAT[lead(a).status]] - RANK[BEAT[lead(b).status]]),
-    [groups],
-  );
+  const places = useMemo(() => ranked(groups.flatMap(([, inRepo]) => inRepo)), [groups]);
 
   const waiting = places.filter((p) => p.runs.some((r) => r.status === "NeedsYou")).length;
   const peeked = places.find((p) => p.id === peeking) ?? null;
@@ -267,7 +217,7 @@ export default function Workspaces() {
         </View>
 
         {places.map((p) => (
-          <Row key={p.id} place={p} onPeek={() => setPeeking(p.id)} />
+          <WorkspaceRow key={p.id} place={p} onPeek={() => setPeeking(p.id)} />
         ))}
       </ScrollView>
 
