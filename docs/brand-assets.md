@@ -17,11 +17,13 @@ pnpm --dir desktop install --frozen-lockfile
 node desktop/scripts/generate-brand-assets.mjs
 ```
 
+To regenerate only the macOS bundle, add `--mac-only`. Other platform assets are left untouched.
+
 Alternatively, set `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` to a Chromium binary. The script uses the project's Tauri CLI for native icon bundles. It does not rebuild the conversation screenshots.
 
 ## Platform handling
 
-macOS uses an inset rounded white tile in the existing ICNS bundle. Windows uses the same mark in ICO and PNG sizes. The waiting tray icon keeps its orange notification badge; the taskbar's existing overlay badge is unchanged.
+macOS uses an inset rounded white tile in the existing ICNS bundle. Its tower is enlarged independently of the tile to reduce internal whitespace; the outer tile footprint stays aligned with macOS icons. Windows uses the same mark in ICO and PNG sizes. The waiting tray icon keeps its orange notification badge; the taskbar's existing overlay badge is unchanged.
 
 iOS gets opaque square light, dark and tinted images through `ios.icon`. The OS applies the mask. Android uses a transparent foreground on a white background, with a separate monochrome layer. The foreground is inset to protect the tower under adaptive masks. Light and dark splash screens use their own transparent marks and retain the app's existing page colors.
 
