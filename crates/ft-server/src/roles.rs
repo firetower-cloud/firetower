@@ -316,23 +316,26 @@ pub fn check(new: &NewRole) -> Result<(), Refused> {
     // Absent is "leave it as it is" on both of these, so only a value that was
     // actually sent is judged. Neither has an open state to allow for: every
     // rung is a commitment, which is why neither takes `PLACEMENT`'s shape.
+    // Named, not merely listed. A refusal that gives only the legal values
+    // leaves the caller to diff two lists and guess which of its arguments
+    // was at fault — the engine refusal above has always named the value, and
+    // these are read by the same agents.
     if let Some(on) = &new.on_usage_limit {
         if !ON_USAGE_LIMIT.contains(&on.as_str()) {
-            return Err(Refused(
-                "what happens at a usage limit is \"wait\" (for a person), \"same\" (the lead \
-                 may move it to another subscription for the same engine) or \"engine\" (and \
-                 to another engine)"
-                    .into(),
-            ));
+            return Err(Refused(format!(
+                "\"{on}\" is not something that can happen at a usage limit. It is \"wait\" \
+                 (for a person), \"same\" (the lead may move it to another subscription for \
+                 the same engine) or \"engine\" (and to another engine)."
+            )));
         }
     }
     if let Some(on) = &new.on_child_limit {
         if !ON_CHILD_LIMIT.contains(&on.as_str()) {
-            return Err(Refused(
-                "what a Manager does when a child runs out is \"ask\" (put the choice to the \
-                 person) or \"reroute\" (pick a subscription and carry on)"
-                    .into(),
-            ));
+            return Err(Refused(format!(
+                "\"{on}\" is not something a Manager does when a child runs out. It is \
+                 \"ask\" (put the choice to the person) or \"reroute\" (pick a subscription \
+                 and carry on)."
+            )));
         }
     }
     Ok(())
