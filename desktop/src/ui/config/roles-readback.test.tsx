@@ -45,6 +45,22 @@ describe("what a child gets", () => {
     expect(reads({})).toBe("A child gets whatever the lead asks for: its workspace, its machine, its engine.");
   });
 
+  /**
+   * **The shape every new profile opens in**, which is what made this worth a
+   * test of its own: the all-open branch returns early, and it once returned
+   * before the grant was consulted — so pressing a rung on a fresh profile
+   * changed nothing in the sentence underneath it. Every other test here
+   * happens to pin something, so every other test missed it.
+   */
+  it("still says what may happen when it runs out, with all three open", () => {
+    expect(reads({ onUsageLimit: "same" })).toBe(
+      "A child gets whatever the lead asks for: its workspace, its machine, its engine, and if it runs out its lead may move it to another subscription for that engine.",
+    );
+    expect(reads({ onUsageLimit: "engine" })).toBe(
+      "A child gets whatever the lead asks for: its workspace, its machine, its engine, and if it runs out its lead may move it to another subscription, on another engine if it has to.",
+    );
+  });
+
   it("names a pinned engine and a pinned machine", () => {
     expect(reads({ placement: "new", machine: "h_1", agent: "ClaudeCode" })).toBe(
       "A child gets a workspace of its own, on build-01, running Claude Code.",

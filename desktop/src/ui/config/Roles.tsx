@@ -600,6 +600,14 @@ function Reads({ label, children }: { label: string; children: React.ReactNode }
  *
  * Open on all three is its own sentence rather than three clauses of "whatever
  * the lead asks for", which is the same fact said three times.
+ *
+ * **The short branch still carries the grant.** It once returned before
+ * `recovery` was consulted, so a profile that had just been given a rung of
+ * *If it reaches usage limit* read back as though it had not — on the shape
+ * every new profile opens in, which makes it the common case rather than an
+ * edge. The three open fields and the grant are different facts: one is what
+ * the lead decides, the other is what the lead may later do, and leaving all
+ * three open says nothing about the second.
  */
 export function whatAChildGets(
   draft: NewRole,
@@ -609,7 +617,8 @@ export function whatAChildGets(
   if (open)
     return (
       <>
-        A child gets whatever the lead asks for: <b>its workspace, its machine, its engine</b>.
+        A child gets whatever the lead asks for: <b>its workspace, its machine, its engine</b>
+        {recovery(draft)}.
       </>
     );
   const place =
