@@ -3919,3 +3919,891 @@ async fn a_manager_set_to_reroute_still_cannot_move_a_child_told_to_wait() {
 
     state.fleet.stop_supervising(&host.id).await;
 }
+
+// ─── Reading a whole profile, and copying it ────────────────────────────────
+
+/// A skill of this owner's, live, so `skill_scope` has something real to name.
+async fn a_skill(state: &AppState, owner: &str, name: &str) -> String {
+    let org = state.db.org().await.unwrap();
+    let slug = state.access.personal_root(owner).await.unwrap();
+    state
+        .skills
+        .create(
+            &org,
+            owner,
+            &slug,
+            &crate::skills::NewSkill {
+                name: name.into(),
+                description: format!("what {name} is for"),
+                frontmatter: serde_json::json!({}),
+                body: "# Do the thing\n".into(),
+                files: vec![],
+                notes: None,
+            },
+            false,
+        )
+        .await
+        .unwrap()
+        .as_str()
+        .to_string()
+}
+
+/// **The feature, as one test: can an agent reproduce a profile it can see?**
+///
+/// Not "does the tool print more fields". A profile is configured every way a
+/// profile can be, `get_profile` is asked for it, and the values it reports
+/// are handed straight back to `create_profile` — which is exactly the round
+/// trip somebody means by "make me one like that one". Every copyable field
+/// has to survive it.
+///
+/// Both halves are asserted, because either alone passes while the feature is
+/// broken. A copy that matches proves the write side and says nothing about
+/// whether an agent could have *read* those values; text naming them proves
+/// the read side and says nothing about whether they can be written back. So
+/// the text is checked for every value the copy is built from.
+///
+/// The two that deliberately do not travel are asserted too, as **reported and
+/// defaulted** rather than silently dropped — a copy that quietly loses
+/// somebody's subscription, or quietly steals the default, is the failure this
+/// whole body of work exists to remove.
+#[tokio::test]
+async fn an_agent_can_read_a_whole_profile_and_copy_it() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let lead = a_lead_that_delegates(&state, &host, &ready, &owner, Agent::ClaudeCode).await;
+    a_skill(&state, &owner, "changelog").await;
+    let teammate = saved_profile(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Reviewer",
+            "does": "Reads the diff and argues with it",
+            "placement": "here",
+        }),
+    )
+    .await;
+    let account = a_subscription(&state, &owner, "a_pinned", Agent::ClaudeCode).await;
+
+    // Every field a profile has, set to something it would not be by
+    // accident — the same discipline `role-draft.test.ts` keeps, and for the
+    // same reason: a fixture that matches the defaults passes while the copy
+    // drops everything.
+    let original = saved_profile(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Engineer",
+            "does": "Writes the change and the tests; after a scope is agreed",
+            "placement": "new",
+            "agent": "ClaudeCode",
+            "machine": host.id.as_str(),
+            "account": account,
+            "instructions": "# Engineer\n\nWrite the change. Do not review it.",
+            "onUsageLimit": "engine",
+            "onChildLimit": "reroute",
+            "canDelegate": true,
+            "delegateScope": [teammate],
+            "skillScope": [],
+            "includeAlwaysOn": false,
+            "includeRepoDefaults": false,
+            "settings": { "model": "opus[1m]", "mode": "plan" },
+        }),
+    )
+    .await;
+    // The skill by name, which is how an agent sees one — `list_skills` shows
+    // names and shows no ids at all.
+    let found = state
+        .skills
+        .visible(&owner, crate::access::Level::Viewer)
+        .await
+        .unwrap();
+    let changelog = found.iter().find(|s| s.name == "changelog").unwrap();
+    sqlx::query("UPDATE roles SET skill_scope=$2 WHERE id=$1")
+        .bind(&original)
+        .bind(vec![changelog.id.as_str().to_string()])
+        .execute(state.db.pool())
+        .await
+        .unwrap();
+    // And the one field no tool may write, set behind the tools' back so the
+    // read has something true to report.
+    state
+        .roles
+        .set_default(&owner, &original, true)
+        .await
+        .unwrap();
+
+    // ── read ──────────────────────────────────────────────────────────────
+    let said = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "g1",
+            "get_profile",
+            serde_json::json!({ "name": "Engineer" }),
+        ),
+    )
+    .await
+    .expect("a profile its owner can see is one they can read");
+
+    for expected in [
+        "Engineer",
+        "Writes the change and the tests",
+        "Claude Code",
+        "its own workspace",
+        "Write the change. Do not review it.",
+        "Reviewer",
+        "changelog",
+        // The two grants, by the words the editor uses rather than by their
+        // stored codes — an agent reads prose, and `engine` alone says nothing.
+        "another subscription and engine",
+        "Re-route",
+        "Manager",
+    ] {
+        assert!(
+            said.contains(expected),
+            "the read has to carry {expected:?} for a copy to be possible: {said}"
+        );
+    }
+    // What cannot be copied has to be *said*, not omitted.
+    assert!(
+        said.to_lowercase().contains("subscription"),
+        "the subscription is named: {said}"
+    );
+    assert!(
+        said.contains("default"),
+        "and that it is the owner's default profile: {said}"
+    );
+
+    // ── copy ──────────────────────────────────────────────────────────────
+    let copied = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "g2",
+            "create_profile",
+            serde_json::json!({
+                "name": "Engineer (copy)",
+                "does": "Writes the change and the tests; after a scope is agreed",
+                "placement": "new",
+                "agent": "ClaudeCode",
+                "machine": host.id.as_str(),
+                "instructions": "# Engineer\n\nWrite the change. Do not review it.",
+                "on_usage_limit": "engine",
+                "on_child_limit": "reroute",
+                "can_delegate": true,
+                "delegate_scope": ["Reviewer"],
+                "skill_scope": ["changelog"],
+                "include_always_on": false,
+                "include_repo_defaults": false,
+                "settings": { "model": "opus[1m]", "mode": "plan" },
+            }),
+        ),
+    )
+    .await
+    .expect("everything the read reported can be written back");
+    assert!(copied.contains("Engineer (copy)"), "{copied}");
+
+    let before = state
+        .roles
+        .one(&owner, &original, crate::access::Level::Viewer)
+        .await
+        .unwrap()
+        .unwrap();
+    let after = state
+        .roles
+        .by_name(&owner, "Engineer (copy)")
+        .await
+        .unwrap()
+        .expect("the copy exists");
+
+    assert_eq!(after.does, before.does);
+    assert_eq!(after.placement, before.placement);
+    assert_eq!(after.agent, before.agent);
+    assert_eq!(after.machine, before.machine);
+    assert_eq!(after.instructions, before.instructions);
+    assert_eq!(after.on_usage_limit, before.on_usage_limit);
+    assert_eq!(after.on_child_limit, before.on_child_limit);
+    assert_eq!(after.can_delegate, before.can_delegate);
+    assert_eq!(after.delegate_scope, before.delegate_scope);
+    assert_eq!(after.skill_scope, before.skill_scope);
+    assert_eq!(after.include_always_on, before.include_always_on);
+    assert_eq!(after.include_repo_defaults, before.include_repo_defaults);
+    assert_eq!(after.settings, before.settings);
+
+    // And the two that do not travel, which is the point of saying so.
+    assert_eq!(
+        after.account, None,
+        "a copy runs on the owner's default, not somebody's pinned subscription"
+    );
+    assert!(
+        !after.is_default,
+        "and copying a profile does not take the default off the one it copied"
+    );
+    assert!(
+        state
+            .roles
+            .one(&owner, &original, crate::access::Level::Viewer)
+            .await
+            .unwrap()
+            .unwrap()
+            .is_default,
+        "which is still where it was"
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// Every new field refuses an unknown value **by name**.
+///
+/// One test over all of them, because the discipline is one discipline: an
+/// agent that mistyped gets told which value was wrong, the way a mistyped
+/// engine already does. A refusal that only lists the legal values leaves the
+/// agent to diff two lists and guess which of its arguments was at fault.
+#[tokio::test]
+async fn a_value_no_profile_can_hold_is_refused_by_name() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let lead = a_lead_that_delegates(&state, &host, &ready, &owner, Agent::ClaudeCode).await;
+
+    let base = |extra: serde_json::Value| {
+        let mut input = serde_json::json!({
+            "name": "Engineer",
+            "does": "Writes the change and the tests",
+            "agent": "ClaudeCode",
+        });
+        for (k, v) in extra.as_object().unwrap() {
+            input[k] = v.clone();
+        }
+        input
+    };
+    for (n, extra, expected) in [
+        (
+            "a skill nobody has",
+            serde_json::json!({ "skill_scope": ["no-such-skill"] }),
+            "no-such-skill",
+        ),
+        (
+            "a profile nobody has",
+            serde_json::json!({ "delegate_scope": ["No Such Profile"], "can_delegate": true }),
+            "No Such Profile",
+        ),
+        (
+            "a model the engine does not offer",
+            serde_json::json!({ "settings": { "model": "gpt-9" } }),
+            "gpt-9",
+        ),
+        (
+            "a rung that is not one",
+            serde_json::json!({ "on_usage_limit": "whenever" }),
+            "whenever",
+        ),
+        (
+            "a Manager answer that is not one",
+            serde_json::json!({ "on_child_limit": "sometimes" }),
+            "sometimes",
+        ),
+    ] {
+        let refused = crate::delegate::handle(
+            &state,
+            &asks(&host, &lead, n, "create_profile", base(extra)),
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+        assert!(
+            refused.contains(expected),
+            "{n}: the refusal has to name {expected:?}, not just list the legal values: {refused}"
+        );
+    }
+
+    // Run settings belong to an engine, so a profile that pins none cannot
+    // carry any — the editor does not draw the field there either.
+    let refused = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "nosettings",
+            "create_profile",
+            serde_json::json!({
+                "name": "Open",
+                "does": "Runs on whatever its lead runs",
+                "settings": { "mode": "plan" },
+            }),
+        ),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(refused.contains("belong to an engine"), "{refused}");
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// `update_profile` keeps its discipline over the new fields too.
+///
+/// Absent leaves a field alone; an explicit empty list clears one. That
+/// distinction is the whole of why `update_profile` is safe to call with one
+/// argument, and adding seven fields is exactly when it gets lost.
+#[tokio::test]
+async fn an_update_changes_only_what_it_names() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let lead = a_lead_that_delegates(&state, &host, &ready, &owner, Agent::ClaudeCode).await;
+    a_skill(&state, &owner, "changelog").await;
+    saved_profile(
+        &state,
+        &owner,
+        serde_json::json!({ "name": "Reviewer", "does": "Reads the diff", "placement": "here" }),
+    )
+    .await;
+    let id = saved_profile(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Engineer",
+            "does": "Writes the change",
+            "placement": "new",
+            "agent": "ClaudeCode",
+            "canDelegate": true,
+            "onUsageLimit": "same",
+            "onChildLimit": "reroute",
+            "includeAlwaysOn": false,
+            "settings": { "model": "opus[1m]" },
+        }),
+    )
+    .await;
+    crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "u1",
+            "update_profile",
+            serde_json::json!({
+                "name": "Engineer",
+                "skill_scope": ["changelog"],
+                "delegate_scope": ["Reviewer"],
+            }),
+        ),
+    )
+    .await
+    .expect("naming two fields changes two fields");
+
+    let after = state
+        .roles
+        .one(&owner, &id, crate::access::Level::Viewer)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(after.skill_scope.len(), 1, "the one it named");
+    assert_eq!(after.delegate_scope.len(), 1);
+    // And everything it did not name is exactly as it was.
+    assert_eq!(after.on_usage_limit, "same");
+    assert_eq!(after.on_child_limit, "reroute");
+    assert!(!after.include_always_on);
+    assert_eq!(after.settings.model.as_deref(), Some("opus[1m]"));
+    assert_eq!(after.placement, "new");
+    assert_eq!(after.does, "Writes the change");
+
+    // An explicit empty list is a real answer: this profile names nobody.
+    crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "u2",
+            "update_profile",
+            serde_json::json!({ "name": "Engineer", "delegate_scope": [] }),
+        ),
+    )
+    .await
+    .expect("clearing a team is a thing to be able to say");
+    let after = state
+        .roles
+        .one(&owner, &id, crate::access::Level::Viewer)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(after.delegate_scope.is_empty(), "cleared");
+    assert_eq!(after.skill_scope.len(), 1, "and the other one left alone");
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// A profile cannot be put on its own team.
+///
+/// `Roles.tsx` filters the profile being edited out of its own delegate
+/// picker; a tool resolving by name has to do the same, or "copy the Engineer
+/// and let it hand work to the Engineer" writes a profile that can delegate
+/// to itself — which the flat-hierarchy rule then refuses at spawn, far from
+/// where the mistake was made.
+#[tokio::test]
+async fn a_profile_is_not_put_on_its_own_team() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let lead = a_lead_that_delegates(&state, &host, &ready, &owner, Agent::ClaudeCode).await;
+    saved_profile(
+        &state,
+        &owner,
+        serde_json::json!({ "name": "Reviewer", "does": "Reads the diff", "placement": "here" }),
+    )
+    .await;
+    crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "s1",
+            "create_profile",
+            serde_json::json!({
+                "name": "Engineer",
+                "does": "Writes the change",
+                "can_delegate": true,
+                "delegate_scope": ["Engineer", "Reviewer"],
+            }),
+        ),
+    )
+    .await
+    .expect("naming itself is dropped, not refused — the rest of the team is the ask");
+    let made = state
+        .roles
+        .by_name(&owner, "Engineer")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(made.delegate_scope.len(), 1, "only the Reviewer");
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// One name, two things: **neither, and say which name was ambiguous.**
+///
+/// `d34336c8`'s rule one layer up. There, two skills sharing a name collapsed
+/// into a single bundle and the survivor ran under the loser's name carrying
+/// the loser's executable; the fix was to send neither rather than pick a
+/// winner by a rule nobody wrote down. A scope resolved by name inherits the
+/// problem exactly — `skills_one_name_per_owner` only stops *one* person
+/// owning two, and a shared skill brings a second owner's name into the set.
+///
+/// The whole call is refused rather than the entry dropped: a scope that
+/// quietly loses one is a profile that silently does less than was asked for,
+/// and on `skill_scope` that is a skill not loaded, invisible until something
+/// behaves oddly much later.
+#[tokio::test]
+async fn a_name_two_things_answer_to_is_refused_rather_than_guessed() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let lead = a_lead_that_delegates(&state, &host, &ready, &owner, Agent::ClaudeCode).await;
+    a_skill(&state, &owner, "changelog").await;
+
+    // A colleague's skill of the same name, shared so this owner can see
+    // both — which is the only way one person reaches two of one name.
+    let org = ft_core::OrgId::from_stored(state.db.org().await.unwrap());
+    let ana = state
+        .accounts
+        .create_user(&org, "ana", "ana@example.test", "member")
+        .await
+        .unwrap()
+        .0;
+    let hers = a_skill(&state, ana.id.as_str(), "changelog").await;
+    state
+        .access
+        .set_exception(
+            crate::access::FiledKind::Skill,
+            &hers,
+            &owner,
+            crate::access::Level::Viewer,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        state
+            .skills
+            .visible(&owner, crate::access::Level::Viewer)
+            .await
+            .unwrap()
+            .iter()
+            .filter(|s| s.name == "changelog")
+            .count(),
+        2,
+        "the fixture has to actually produce the collision"
+    );
+
+    let refused = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "amb",
+            "create_profile",
+            serde_json::json!({
+                "name": "Engineer",
+                "does": "Writes the change",
+                "skill_scope": ["changelog"],
+            }),
+        ),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(
+        refused.contains("changelog") && refused.contains("more than one"),
+        "it names the ambiguous name rather than picking one: {refused}"
+    );
+    assert!(
+        state
+            .roles
+            .by_name(&owner, "Engineer")
+            .await
+            .unwrap()
+            .is_none(),
+        "and nothing was written — the whole call is refused, not part of it"
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// A scope entry that no longer resolves is **reported, not omitted**.
+///
+/// Hiding it would make the read look tidier than the profile is, and an
+/// agent would copy the tidier thing and report the copy faithful. The id is
+/// all that is left of a deleted skill and is what somebody needs to clear
+/// it.
+#[tokio::test]
+async fn get_profile_says_when_a_scope_entry_is_gone() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let lead = a_lead_that_delegates(&state, &host, &ready, &owner, Agent::ClaudeCode).await;
+    let id = saved_profile(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Engineer",
+            "does": "Writes the change",
+            "placement": "here",
+        }),
+    )
+    .await;
+    // A skill that was ticked and has since been deleted — the row keeps the
+    // id, because nothing sweeps a scope when a skill goes.
+    sqlx::query("UPDATE roles SET skill_scope=$2 WHERE id=$1")
+        .bind(&id)
+        .bind(vec!["sk_longgone".to_string()])
+        .execute(state.db.pool())
+        .await
+        .unwrap();
+
+    let said = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "gone",
+            "get_profile",
+            serde_json::json!({ "name": "Engineer" }),
+        ),
+    )
+    .await
+    .unwrap();
+    assert!(
+        said.contains("sk_longgone") && said.contains("no longer exists"),
+        "the read owns up to it rather than quietly tidying: {said}"
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// **Two profiles of one name: neither is read, and neither is overwritten.**
+///
+/// The worst thing this surface can do. `Roles::by_name` takes the first
+/// match and `visible()` orders by name, so `update_profile` rewrote
+/// whichever Postgres returned first and reported success — a wrong profile
+/// silently overwritten, which is the failure this whole body of work exists
+/// to remove, on the tool whose purpose is making a second profile like an
+/// existing one.
+///
+/// All three tools that take a profile by name, because the fault was in the
+/// resolution rather than in any one of them.
+#[tokio::test]
+async fn two_profiles_of_one_name_are_read_and_written_by_neither() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let lead = a_lead_that_delegates(&state, &host, &ready, &owner, Agent::ClaudeCode).await;
+
+    let mine = saved_profile(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Engineer",
+            "does": "Mine, and the one that is not to be clobbered",
+            "placement": "here",
+        }),
+    )
+    .await;
+    // A colleague's of the same name, shared — the only way one person
+    // reaches two, and exactly what copying a profile tends to produce.
+    let org = ft_core::OrgId::from_stored(state.db.org().await.unwrap());
+    let ana = state
+        .accounts
+        .create_user(&org, "ana", "ana@example.test", "member")
+        .await
+        .unwrap()
+        .0;
+    let hers = saved_profile(
+        &state,
+        ana.id.as_str(),
+        serde_json::json!({ "name": "Engineer", "does": "Hers", "placement": "here" }),
+    )
+    .await;
+    state
+        .access
+        .set_exception(
+            crate::access::FiledKind::Role,
+            &hers,
+            &owner,
+            crate::access::Level::Writer,
+        )
+        .await
+        .unwrap();
+
+    for (tool, input) in [
+        ("get_profile", serde_json::json!({ "name": "Engineer" })),
+        (
+            "update_profile",
+            serde_json::json!({ "name": "Engineer", "does": "clobbered" }),
+        ),
+    ] {
+        let refused = crate::delegate::handle(&state, &asks(&host, &lead, tool, tool, input))
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(
+            refused.contains("Engineer") && refused.contains("more than one"),
+            "{tool}: it names the ambiguity rather than picking one: {refused}"
+        );
+    }
+    // And neither was touched.
+    assert_eq!(
+        state
+            .roles
+            .one(&owner, &mine, crate::access::Level::Viewer)
+            .await
+            .unwrap()
+            .unwrap()
+            .does,
+        "Mine, and the one that is not to be clobbered"
+    );
+    assert_eq!(
+        state
+            .roles
+            .one(&owner, &hers, crate::access::Level::Viewer)
+            .await
+            .unwrap()
+            .unwrap()
+            .does,
+        "Hers"
+    );
+
+    // `list_compute`'s `role` is the third, and it is scoped by whichever
+    // profile settles the machine — so a guess there is a confident wrong
+    // answer about the fleet.
+    let refused = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "lc",
+            "list_compute",
+            serde_json::json!({ "role": "Engineer" }),
+        ),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(refused.contains("more than one"), "{refused}");
+
+    // A name nothing answers to still leaves `list_compute` unscoped, as it
+    // always has — that half is not what was wrong.
+    assert!(crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "lc2",
+            "list_compute",
+            serde_json::json!({ "role": "No Such Profile" }),
+        ),
+    )
+    .await
+    .is_ok());
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// Dropping a profile from its own team is right; doing it in silence is not.
+#[tokio::test]
+async fn dropping_a_profile_from_its_own_team_is_said_out_loud() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let lead = a_lead_that_delegates(&state, &host, &ready, &owner, Agent::ClaudeCode).await;
+    saved_profile(
+        &state,
+        &owner,
+        serde_json::json!({ "name": "Reviewer", "does": "Reads the diff", "placement": "here" }),
+    )
+    .await;
+
+    let said = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "self",
+            "create_profile",
+            serde_json::json!({
+                "name": "Engineer",
+                "does": "Writes the change",
+                "can_delegate": true,
+                "delegate_scope": ["Engineer", "Reviewer"],
+            }),
+        ),
+    )
+    .await
+    .expect("the rest of the team is still the ask");
+    assert!(
+        said.contains("not on its own team") && said.contains("Engineer"),
+        "an argument accepted and not applied has to be said: {said}"
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// A placement that is not one is refused by name, like the other two.
+#[tokio::test]
+async fn a_placement_that_is_not_one_is_refused_by_name() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let lead = a_lead_that_delegates(&state, &host, &ready, &owner, Agent::ClaudeCode).await;
+    let refused = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "pl",
+            "create_profile",
+            serde_json::json!({
+                "name": "Engineer",
+                "does": "Writes the change",
+                "placement": "somewhere",
+            }),
+        ),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(refused.contains("somewhere"), "{refused}");
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// **`spawn` is the fourth site, and the one that costs most to get wrong.**
+///
+/// A read that picks the wrong one of two profiles wastes a call. A spawn
+/// that picks wrong starts work on the wrong profile and spends somebody's
+/// allowance doing it — QA demonstrated exactly that, a child running with
+/// `profile_id` pointing at whichever row came back first.
+///
+/// And the list in the not-found refusal, which said `Engineer, Engineer`:
+/// the truth, and it reads as a bug. One entry per name with the collision
+/// marked says both — the name is still the handle, and there is something
+/// to go and fix.
+#[tokio::test]
+async fn spawning_a_name_two_profiles_answer_to_starts_neither() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let lead = a_lead_that_delegates(&state, &host, &ready, &owner, Agent::ClaudeCode).await;
+    saved_profile(
+        &state,
+        &owner,
+        serde_json::json!({ "name": "Engineer", "does": "Mine", "placement": "here" }),
+    )
+    .await;
+    let org = ft_core::OrgId::from_stored(state.db.org().await.unwrap());
+    let ana = state
+        .accounts
+        .create_user(&org, "ana", "ana@example.test", "member")
+        .await
+        .unwrap()
+        .0;
+    let hers = saved_profile(
+        &state,
+        ana.id.as_str(),
+        serde_json::json!({ "name": "Engineer", "does": "Hers", "placement": "here" }),
+    )
+    .await;
+    state
+        .access
+        .set_exception(
+            crate::access::FiledKind::Role,
+            &hers,
+            &owner,
+            crate::access::Level::Viewer,
+        )
+        .await
+        .unwrap();
+
+    let refused = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "sp",
+            "spawn",
+            serde_json::json!({ "role": "Engineer", "goal": "do the thing" }),
+        ),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(
+        refused.contains("Engineer") && refused.contains("more than one"),
+        "it names the ambiguity rather than starting one of them: {refused}"
+    );
+    assert!(
+        state.db.children_of(&lead).await.unwrap().is_empty(),
+        "and no child was started — allowance is spent on a spawn that picks wrong"
+    );
+
+    // The team list in the *not-found* refusal: one entry per name, the
+    // collision marked rather than printed twice.
+    let listed = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "sp2",
+            "spawn",
+            serde_json::json!({ "role": "Nobody", "goal": "do the thing" }),
+        ),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(
+        listed.contains("Engineer (2 profiles share this name)"),
+        "the collision is marked: {listed}"
+    );
+    assert!(
+        !listed.contains("Engineer, Engineer"),
+        "and not printed twice, which reads as a bug: {listed}"
+    );
+
+    // An unambiguous name still spawns, which is the half not to break.
+    crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "sp3",
+            "spawn",
+            serde_json::json!({ "role": "Ada, the lead", "goal": "do the thing" }),
+        ),
+    )
+    .await
+    .expect("a name only one profile answers to is still a handle");
+
+    state.fleet.stop_supervising(&host.id).await;
+}
