@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="240" viewBox="0 0 1200 240" role="img" aria-label="Desktop and mobile clients connect over HTTPS to the control plane, which connects over SSH to worker machines.">
+  <rect width="1200" height="240" fill="#f8f8f7"/>
+  <g fill="#ffffff" stroke="#c7c6c2"><rect x="30" y="50" width="300" height="140" rx="12"/><rect x="450" y="50" width="300" height="140" rx="12"/><rect x="870" y="50" width="300" height="140" rx="12"/></g>
+  <g fill="#111110" font-family="Arial,sans-serif" text-anchor="middle"><g font-size="24" font-weight="600"><text x="180" y="110">Desktop &amp; mobile</text><text x="600" y="110">Control plane</text><text x="1020" y="110">Worker machines</text></g><g fill="#5c5b58" font-size="18"><text x="180" y="145">Start work. Review results.</text><text x="600" y="145">Your server. Your access rules.</text><text x="1020" y="145">Agents and working files.</text></g><g font-size="16"><text x="390" y="105">HTTPS</text><text x="810" y="105">SSH</text></g></g>
+  <g fill="none" stroke="#111110" stroke-width="2"><path d="M350 130h80m-8-7 8 7-8 7M770 130h80m-8-7 8 7-8 7"/></g>
+</svg>

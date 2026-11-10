@@ -1,123 +1,76 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/header-dark.png">
+  <img src=".github/assets/header-light.png" alt="Firetower — Run AI coding teams on your own infrastructure, 24/7.">
+</picture>
 
+[Download](https://usefiretower.com/docs/join) · [Self-host](https://usefiretower.com/docs/install-firetower) · [Documentation](https://usefiretower.com/docs) · [Discord](https://discord.gg/Y2HYVEhSc)
 
-<div align="center">
+Firetower is an open-source workspace for running teams of AI agents on infrastructure you control. Choose your agents, machines, instructions and skills. Follow their conversations and review the results in one place.
 
-[![Firetower — run any coding agent, on your own servers, from anywhere.](.github/assets/header.jpg)](https://usefiretower.com)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/agent-team-dark.webp">
+  <img src=".github/assets/agent-team-light.webp" alt="A lead conversation with five agent sub-workspaces in the Team panel.">
+</picture>
 
-[![License: AGPL-3.0-only](https://img.shields.io/badge/license-AGPL--3.0--only-FF4F00.svg?style=flat-square)](https://github.com/firetower-cloud/firetower/blob/main/LICENSE) [![Latest release](https://img.shields.io/github/v/release/firetower-cloud/firetower?style=flat-square&color=FF4F00)](https://github.com/firetower-cloud/firetower/releases) [![Container image](https://img.shields.io/badge/ghcr.io-firetower-FF4F00?style=flat-square)](https://github.com/firetower-cloud/firetower/pkgs/container/firetower) [![Stars](https://img.shields.io/github/stars/firetower-cloud/firetower?style=flat-square&color=FF4F00)](https://github.com/firetower-cloud/firetower/stargazers)
+*A lead agent coordinating API work, interface changes, security review, QA and documentation. Actual desktop interface with sample data.*
 
-**Firetower is a control plane for coding agents.**
+## What you can do
 
-It lets you orchestrate your favorite coding agents on your local computer or any remote server through an SSH tunnel.
+- **Run agent teams.** Give specialists their own profiles, skills and working files. Open a sub-workspace to follow its conversation.
+- **Keep work running.** Agents execute on worker machines. Close your laptop and return from another client.
+- **Bring your subscriptions.** Connect supported agent subscriptions or API credentials. Configure account fallback when usage limits are reached.
+- **Share across your company.** Share skills, profiles, subscriptions, workspaces and artifacts. Control access through people, teams and directories.
+- **Review the output.** Inspect diffs, open pull requests, and annotate artifacts and application previews.
+- **Work beyond code.** Use one or more repositories, or none. Ask for documentation, analysis, operational reports or other file-based work.
 
-Give it a server you can SSH into and a repository, describe some work, and it picks a host, cuts a branch, makes a worktree, starts tmux, launches the agent, and keeps it running.
+## Get started
 
-A repository is optional. Leave it out and you get a workspace with nothing checked out — a directory on the machine and an agent waiting in it — for the work that was never going to be a pull request. Files come back out of it as a download, and you can check a repository in later if it turns into one.
+### Join an existing installation
 
-And yes, it works with your own subscription (Claude Code, Codex, etc.).
+[Download Firetower](https://usefiretower.com/docs/join), enter your company’s Firetower address, and sign in. Desktop clients are available for macOS and Windows; mobile clients for iOS and Android.
 
-[![Read the documentation](https://img.shields.io/badge/Read_the_documentation-FF4F00?style=for-the-badge&logo=readthedocs&logoColor=white&labelColor=FF4F00)](https://usefiretower.com/docs) [![Join the community](https://img.shields.io/badge/Join_the_community-5865F2?style=for-the-badge&logo=discord&logoColor=white&labelColor=5865F2)](https://discord.gg/uVa8wsYym)
+### Host your own
 
-### 🌟 Star the repository to support us 🌟
-
-</div>
-
-## Current stage
-
-> [!NOTE]
-> People are using Firetower in production now, but you should expect bugs from time to time. Starring and sharing the repository is extremely helpful, and you can also [join the community](https://discord.gg/uVa8wsYym) to help us build faster.
-
-
-## Demo
-
-https://github.com/user-attachments/assets/6e9eb02f-4e31-4c6e-8580-6cd11cea526a
-
-
-## Why is Firetower different?
-
-Alternatives like Orca and Paseo are excellent desktop products that reach outward. Their agents run on your laptop, and remote execution is a mode bolted on afterward: a relay daemon over SSH, a headless Electron under Xvfb, a control plane that dies when you close the lid. 
-
-Firetower starts from the other end. The control plane is a server by design, it never touches the public internet, and the laptop is only a client among others. Agents run on machines that don't sleep, in isolated worktrees with real resource limits, using each developer's own subscriptions and credentials.
-
-## How it fits together
-
-```
-+-[x]- Desktop -----+  +-[x]- Mobile ------+
-|  macOS / Windows  |  |  iOS / Android    |
-+-------------------+  +-------------------+
-          |                      |
-          +----------+-----------+
-                     |
-                     |  https over Tailscale
-                     v
-                                                             +-[x]- GCP VM . 34.79.12.180 --------------+
-                                                             |  worker . tmux . git                     |
-+-[x]- FIRETOWER --------------------------+       +-------->|  * Claude Code  westlabs/ledger   2h48m  |
-|  inbox        * 2 waiting on you         |       |         |  o Codex        westlabs/api      3h34m  |
-|                                          |       |         +------------------------------------------+
-|  runs on your laptop, or on a            |--ssh--+
-|  server you already own                  |       |         +-[x]- Mac mini . 100.92.14.7 -------------+
-+------------------------------------------+       |         |  worker . tmux . git                     |
-                                                   +-------->|  o Claude Code  westlabs/web      2h01m  |
-                                                             +------------------------------------------+
-```
-
-You drive it from the desktop app on macOS and Windows, or from your phone on iOS and Android. Both reach the control plane over HTTPS on your Tailscale network, so it never has to be exposed to the public internet.
-
-The control plane can run on your local computer or a remote server. It allows you to orchestrate the agent, manage your repositories, your secrets, and user accounts.
-
-The workers can run locally or on any remote server as well. Their only job is to pull a repository, start a task into a new worktree, and run the coding agent — or, with no repository asked for, to make the directory and start the agent in it.
-
-The control plane and the worker communicate entirely through SSH, and you can close and reopen the connection at any time.
-
-## Running it
-
-To install the control plane, on a Linux server:
+Prepare a Linux server and follow the [installation guide](https://usefiretower.com/docs/install-firetower). Run:
 
 ```sh
 curl -fsSL https://usefiretower.com/install.sh | sh
 ```
 
-Everything after that happens in the desktop app: adding workers, connecting repositories, secrets, and updating Firetower itself.
+Then [add a worker machine](https://usefiretower.com/docs/machines), [connect an agent account](https://usefiretower.com/docs/accounts), and [start your first workspace](https://usefiretower.com/docs/first-run). Keep workers separate from the control-plane server.
+
+## How it works
+
+![Clients connect to the control plane over HTTPS; the control plane connects to worker machines over SSH.](.github/assets/architecture.svg)
+
+The control plane coordinates work and manages access. Workers run agents and keep their working files. Desktop and mobile apps connect as clients.
+
+A private network such as Tailscale can keep the control plane private. Closing a client does not stop an agent on a running worker. See [architecture](https://usefiretower.com/docs/architecture) for the role of each layer.
+
+## Supported tools
+
+**Agents:** Claude Code, Codex, Kimi Code and Cursor Agent.
+
+**Git hosts:** GitHub, GitHub Enterprise Server, GitLab, GitLab self-managed, Gitea and Forgejo.
+
+Connect multiple accounts and git hosts, including several instances of the same provider. For tasks and issues, see [connect your task tracker](https://usefiretower.com/docs/trackers).
 
 ## Documentation
 
-| | |
-| --- | --- |
-| [Getting started](https://usefiretower.com/docs) | The short path from nothing to a running session |
+| Start here | Work with agents | Manage your team |
+| --- | --- | --- |
+| [Requirements](https://usefiretower.com/docs/requirements) | [Agent profiles](https://usefiretower.com/docs/profiles) | [People and teams](https://usefiretower.com/docs/people) |
+| [Install Firetower](https://usefiretower.com/docs/install-firetower) | [Skills](https://usefiretower.com/docs/skills) | [Share resources](https://usefiretower.com/docs/sharing) |
+| [Key concepts](https://usefiretower.com/docs/concepts) | [Runs and sub-workspaces](https://usefiretower.com/docs/runs) | [Subscription fallback](https://usefiretower.com/docs/fallback) |
 
-## Supported git hosts
+For agents: [llms.txt](https://usefiretower.com/llms.txt) and [complete Markdown documentation](https://usefiretower.com/llms-full.txt).
 
-| | |
-| --- | --- |
-| GitHub | Supported |
-| GitHub Enterprise Server | Supported |
-| GitLab | Supported |
-| GitLab self-managed | Supported |
-| Gitea | Supported |
-| Forgejo | Supported |
+## Contributing and support
 
-Any number of them, including more than one of the same kind: a personal GitHub
-and a work one, or two GitLabs. See [Git hosts](docs/git-hosts.md).
+Firetower is under active development. Expect changes and occasional bugs. [Open an issue](https://github.com/firetower-cloud/firetower/issues) for a reproducible problem, or [join Discord](https://discord.gg/Y2HYVEhSc) to discuss an idea.
 
-## Supported agents
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before starting a contribution. If Firetower is useful to you, a star helps others find it.
 
-| | |
-| --- | --- |
-| Claude Code | Supported |
-| Codex | Supported |
-| OpenCode | Looking for contributions |
-| Grok| Looking for contributions |
-| Cursor Agent | Supported |
-| Kimi | Supported |
-| Hermes | Looking for contributions |
+## License
 
-## Licence
-
-AGPL-3.0-only. Copyright © Westlabs LLC.
-
-We chose the AGPL mainly so that an outside company can't take the community's work, repackage it under its own brand and sell it — not without publishing its sources along with it. What goes into this has worth, and we want to protect it.
-
-None of that is aimed at you. Use Firetower, run it on your own servers, fork it and change it — for yourself, your team or your company — however you want.
-
-Cursor Agent and Kimi Code are driven over ACP — see [ACP agents](docs/acp.md) to connect either.
+[AGPL-3.0-only](LICENSE). Copyright © Westlabs LLC.
