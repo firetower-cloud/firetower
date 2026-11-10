@@ -11,17 +11,31 @@ honest	ui	ok
 mixed-hosts	ui	ok
 dragged-video	ui	ok
 comment-in-code-fence	ui	ok
+# A `<!--` that opens mid-sentence and is never closed is literal text on the
+# page — the reader sees it. Eating the description on account of it is the
+# sibling of the code-fence bug, and refusing an honest body is worse than
+# missing a bypass.
+unclosed-comment-in-sentence	ui	ok
 backend-no-image	backend	ok
 fork-hosted	ui	not-hosted
 alt-text-allowlisted	ui	not-hosted
+# A decoy attribute placed before the real one. `data-src` catches a bare \b on
+# the `-`, and `srcset` catches it on the `set`; both render the fork.
+img-data-src-decoy	ui	not-hosted
+img-srcset-decoy	ui	not-hosted
 allowlisted-in-prose	ui	not-hosted
 host-suffix	ui	not-hosted
 host-userinfo	ui	not-hosted
 attachments-traversal	ui	not-hosted
 attachments-encoded-traversal	ui	not-hosted
+attachments-double-encoded	ui	not-hosted
 query-string-allowlisted	ui	not-hosted
 evidence-in-comment	ui	no-evidence
 template-untouched	ui	no-evidence
 unterminated-comment	ui	no-evidence+missing-sections
+# The same hiding trick, reached through an inline code span that appears to
+# wrap the comment opener. It does not: the renderer settles blocks before it
+# looks at anything inline, so this renders as one line of prose.
+code-span-eats-comment	ui	no-evidence+missing-sections
 fenced-everything	ui	no-evidence+missing-sections
 missing-two-sections	backend	missing-sections

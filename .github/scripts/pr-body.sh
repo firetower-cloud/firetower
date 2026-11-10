@@ -29,10 +29,15 @@
 #   * Inline code spans are dropped next, for the same reason — and because it
 #     is what lets somebody write `<!--` in a sentence without the next step
 #     eating the rest of their description.
-#   * Then HTML comments. `<!-->` and `<!--->` are complete, empty comments and
-#     GitHub renders everything after them; anything else opened with `<!--` and
-#     never closed is stripped to the end of the body, which is what the
-#     renderer does and what the check used not to do.
+#   * HTML comments are two different things and have to be treated as two.
+#     One that opens at the start of a line is a *block*, and a block that is
+#     never closed swallows the rest of the document — that is settled in the
+#     line loop, because the renderer decides blocks before it looks at
+#     anything inline, and a code span that appears to wrap such a comment does
+#     not actually wrap it. One that opens mid-line is *inline*, and an inline
+#     one that is never closed is literal text the reader can see, so it is
+#     left alone. `<!-->` and `<!--->` are complete and empty, and everything
+#     after them renders.
 #
 # Evidence is then taken from image *sources* only — the destination of a
 # markdown image, the `src` of an `<img>`, `<video>` or `<source>`, and a bare
@@ -65,7 +70,7 @@ my $body  = $ENV{BODY}  // '';
 my $title = $ENV{TITLE} // '';
 
 # --- flatten it the way the renderer does -----------------------------------
-my ($fence_char, $fence_len, @keep) = ('', 0);
+my ($fence_char, $fence_len, $in_comment, @keep) = ('', 0, 0);
 for my $line (split /^/, $body) {
     if ($fence_len) {
         if ($line =~ /^ {0,3}(`{3,}|~{3,})[ \t]*\r?\n?\z/) {
@@ -74,9 +79,19 @@ for my $line (split /^/, $body) {
         }
         next;
     }
+    if ($in_comment) { $in_comment = 0 if $line =~ /-->/; next; }
     if ($line =~ /^ {0,3}(`{3,}|~{3,})/) {
         $fence_char = substr($1, 0, 1);
         $fence_len  = length($1);
+        next;
+    }
+    # A comment that opens at the start of a line is a block, and a block that
+    # never closes runs to the end of the document. It has to be settled here,
+    # line by line, rather than left to a regex on the whole body: the renderer
+    # decides blocks before it looks at anything inline, so a code span that
+    # appears to wrap one of these does not actually wrap it.
+    if ($line =~ /^ {0,3}<!--/ && $line !~ /^ {0,3}<!--->/ && $line !~ /^ {0,3}<!-->/) {
+        $in_comment = 1 unless $line =~ /-->/;
         next;
     }
     push @keep, $line;
@@ -85,7 +100,11 @@ my $t = join '', @keep;
 
 $t =~ s/(`+)(?s:.)*?\1//g;          # inline code spans
 $t =~ s/<!--->|<!-->//g;            # GitHub's two empty comments
-$t =~ s/<!--(?s:.)*?(?:-->|\z)//g;  # the rest; never closed means to the end
+# Closed only. A `<!--` that opens in the middle of a line and is never closed
+# is literal text on the page — the reader sees `<!--` — so eating the rest of
+# the description on account of it is a failure of an honest pull request. The
+# block phase above has already dealt with the ones that really do run on.
+$t =~ s/<!--(?s:.)*?-->//g;
 
 # --- the sections the template asks for -------------------------------------
 # Up to three spaces and a space after the hashes, because that is what GFM
@@ -98,7 +117,11 @@ for my $want ('What changes', 'Why', 'How it was checked', 'What I did not do') 
 # --- what it shows ----------------------------------------------------------
 my @found;
 push @found, $1 while $t =~ /!\[[^\]]*\][ \t]*\(\s*<?([^>\s)]+)/g;
-push @found, $2 while $t =~ /<(?:img|video|source)\b[^>]*?\bsrc\s*=\s*(["']?)([^"'>\s]+)\1/gi;
+# `\b` alone matches the `src` inside `data-src`, and the lazy `[^>]*?` takes
+# the first one it can — so a decoy attribute placed before the real `src` was
+# what got read. The lookbehind is what makes it the attribute and not a
+# substring of one.
+push @found, $2 while $t =~ /<(?:img|video|source)\b[^>]*?(?<![-\w:.])src\s*=\s*(["']?)([^"'>\s]+)\1/gi;
 push @found, $1 while $t =~ m{^[ \t]*(https?://github\.com/user-attachments/assets/\S+)[ \t]*$}gmi;
 
 # Only a real target counts as a picture. The template ships three `![](…)`
@@ -110,10 +133,14 @@ my $evidence = 'none';
 if (@src) {
     $evidence = 'elsewhere';
     for my $u (@src) {
-        # A userinfo `@`, a backslash, or any spelling of `..` — including the
-        # percent-encoded ones — means the host or the path is not what it reads
-        # as. None of those are a screenshot anybody can rely on.
-        next if $u =~ /[\@\\]/ || $u =~ /\.\./ || $u =~ /%2e|%2f|%5c/i;
+        # A userinfo `@`, a backslash, or any spelling of `..` means the host or
+        # the path is not what it reads as. `%25` and the always-invalid UTF-8
+        # lead bytes are in here for the same reason one step further out: they
+        # only do anything if something downstream decodes twice or accepts an
+        # overlong sequence, which would be a bug in GitHub rather than here —
+        # but no attachment URL GitHub ever produces contains one, so refusing
+        # them costs nothing and does not have to be reasoned about again.
+        next if $u =~ /[\@\\]/ || $u =~ /\.\./ || $u =~ /%2e|%2f|%5c|%25|%c0|%c1/i;
         if ($u =~ m{^https?://(?:user-images|private-user-images)\.githubusercontent\.com/}i
          || $u =~ m{^https?://github\.com/user-attachments/assets/[^./]}i) {
             $evidence = 'hosted';
