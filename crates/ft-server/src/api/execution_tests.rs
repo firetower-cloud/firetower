@@ -4374,3 +4374,138 @@ async fn a_profile_is_not_put_on_its_own_team() {
 
     state.fleet.stop_supervising(&host.id).await;
 }
+
+/// One name, two things: **neither, and say which name was ambiguous.**
+///
+/// `d34336c8`'s rule one layer up. There, two skills sharing a name collapsed
+/// into a single bundle and the survivor ran under the loser's name carrying
+/// the loser's executable; the fix was to send neither rather than pick a
+/// winner by a rule nobody wrote down. A scope resolved by name inherits the
+/// problem exactly — `skills_one_name_per_owner` only stops *one* person
+/// owning two, and a shared skill brings a second owner's name into the set.
+///
+/// The whole call is refused rather than the entry dropped: a scope that
+/// quietly loses one is a profile that silently does less than was asked for,
+/// and on `skill_scope` that is a skill not loaded, invisible until something
+/// behaves oddly much later.
+#[tokio::test]
+async fn a_name_two_things_answer_to_is_refused_rather_than_guessed() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let lead = a_lead_that_delegates(&state, &host, &ready, &owner, Agent::ClaudeCode).await;
+    a_skill(&state, &owner, "changelog").await;
+
+    // A colleague's skill of the same name, shared so this owner can see
+    // both — which is the only way one person reaches two of one name.
+    let org = ft_core::OrgId::from_stored(state.db.org().await.unwrap());
+    let ana = state
+        .accounts
+        .create_user(&org, "ana", "ana@example.test", "member")
+        .await
+        .unwrap()
+        .0;
+    let hers = a_skill(&state, ana.id.as_str(), "changelog").await;
+    state
+        .access
+        .set_exception(
+            crate::access::FiledKind::Skill,
+            &hers,
+            &owner,
+            crate::access::Level::Viewer,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        state
+            .skills
+            .visible(&owner, crate::access::Level::Viewer)
+            .await
+            .unwrap()
+            .iter()
+            .filter(|s| s.name == "changelog")
+            .count(),
+        2,
+        "the fixture has to actually produce the collision"
+    );
+
+    let refused = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "amb",
+            "create_profile",
+            serde_json::json!({
+                "name": "Engineer",
+                "does": "Writes the change",
+                "skill_scope": ["changelog"],
+            }),
+        ),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(
+        refused.contains("changelog") && refused.contains("more than one"),
+        "it names the ambiguous name rather than picking one: {refused}"
+    );
+    assert!(
+        state
+            .roles
+            .by_name(&owner, "Engineer")
+            .await
+            .unwrap()
+            .is_none(),
+        "and nothing was written — the whole call is refused, not part of it"
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// A scope entry that no longer resolves is **reported, not omitted**.
+///
+/// Hiding it would make the read look tidier than the profile is, and an
+/// agent would copy the tidier thing and report the copy faithful. The id is
+/// all that is left of a deleted skill and is what somebody needs to clear
+/// it.
+#[tokio::test]
+async fn get_profile_says_when_a_scope_entry_is_gone() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let lead = a_lead_that_delegates(&state, &host, &ready, &owner, Agent::ClaudeCode).await;
+    let id = saved_profile(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Engineer",
+            "does": "Writes the change",
+            "placement": "here",
+        }),
+    )
+    .await;
+    // A skill that was ticked and has since been deleted — the row keeps the
+    // id, because nothing sweeps a scope when a skill goes.
+    sqlx::query("UPDATE roles SET skill_scope=$2 WHERE id=$1")
+        .bind(&id)
+        .bind(vec!["sk_longgone".to_string()])
+        .execute(state.db.pool())
+        .await
+        .unwrap();
+
+    let said = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "gone",
+            "get_profile",
+            serde_json::json!({ "name": "Engineer" }),
+        ),
+    )
+    .await
+    .unwrap();
+    assert!(
+        said.contains("sk_longgone") && said.contains("no longer exists"),
+        "the read owns up to it rather than quietly tidying: {said}"
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}

@@ -1149,6 +1149,46 @@ fn names(input: &Value, key: &str) -> Option<Vec<String>> {
     )
 }
 
+/// One name, against everything of that kind the owner can see.
+///
+/// **Neither of two, rather than a guess** — `d34336c8`'s rule, one layer up.
+/// There, two skills sharing a name collapsed into one bundle and the
+/// survivor ran under the loser's name; the fix was to send neither rather
+/// than pick a winner by a rule nobody wrote down. A scope resolved by name
+/// inherits that problem exactly, and inherits the answer with it: a name
+/// that matches two things is refused, naming it, rather than resolved to
+/// whichever the query happened to return first.
+///
+/// That commit drops the pair at the *spawn* chokepoint, where there is
+/// nobody to tell, and refuses on the write paths, where there is. This is a
+/// write path with an agent on the other end of it, so it refuses — and
+/// refuses the **whole call**, because a scope that quietly lost an entry is
+/// a profile that silently does less than was asked for. On `skill_scope`
+/// that is a skill not loaded, invisible until something behaves oddly much
+/// later.
+fn one_named<'a, T>(
+    kind: &str,
+    name: &str,
+    among: &'a [T],
+    named: impl Fn(&T) -> &str,
+    index: &str,
+) -> Result<&'a T> {
+    let mut found = among.iter().filter(|t| named(t).eq_ignore_ascii_case(name));
+    let first = found.next().with_context(|| {
+        format!(
+            "there is no {kind} called \"{name}\" you can reach. `{index}` names the ones you can."
+        )
+    })?;
+    if found.next().is_some() {
+        bail!(
+            "\"{name}\" is the name of more than one {kind} you can reach, so it does not say \
+             which you mean — two people may each have one, and picking either would be a \
+             guess. Rename one, or ask the person which they meant. Nothing was changed."
+        );
+    }
+    Ok(first)
+}
+
 /// The profiles a Manager may hand to, by name, as ids.
 ///
 /// `self_name` drops the profile being written from its own team — a name
@@ -1169,15 +1209,13 @@ async fn delegate_scope_from(
         if name.eq_ignore_ascii_case(self_name) {
             continue;
         }
-        let found = visible
-            .iter()
-            .find(|r| r.name.eq_ignore_ascii_case(name))
-            .with_context(|| {
-                format!(
-                    "there is no profile called \"{name}\" to hand work to. The ones you can \
-                     reach are listed by `list_profiles`."
-                )
-            })?;
+        let found = one_named(
+            "profile",
+            name,
+            &visible,
+            |r| r.name.as_str(),
+            "list_profiles",
+        )?;
         out.push(found.id.clone());
     }
     Ok(out)
@@ -1196,15 +1234,7 @@ async fn skill_scope_from(state: &AppState, owner: &str, wanted: &[String]) -> R
         .await?;
     let mut out = Vec::new();
     for name in wanted {
-        let found = visible
-            .iter()
-            .find(|s| s.name.eq_ignore_ascii_case(name))
-            .with_context(|| {
-                format!(
-                    "there is no skill called \"{name}\" this profile could load. \
-                     `list_skills` names the ones you can reach."
-                )
-            })?;
+        let found = one_named("skill", name, &visible, |s| s.name.as_str(), "list_skills")?;
         out.push(found.id.as_str().to_string());
     }
     Ok(out)
@@ -1639,18 +1669,29 @@ async fn get_profile(state: &AppState, request: &AgentRequest) -> Result<String>
 
 /// Profile ids as the names an agent reads and writes.
 ///
-/// Anything it cannot see is left out rather than shown as an id: a scope may
-/// name a profile shared with the owner and not with the reader, and an
-/// opaque id in a list of names is noise nobody can act on.
+/// **An entry that no longer resolves is reported, not omitted.** A deleted
+/// skill still sitting in a profile's scope is a fact about that profile, and
+/// hiding it would make the read look cleaner than the profile is — the agent
+/// would copy something tidier than what it was shown and report the copy
+/// faithful. The id is all that is left of it and is what somebody needs to
+/// clear it.
+fn resolved(ids: &[String], known: impl Fn(&str) -> Option<String>) -> Vec<String> {
+    ids.iter()
+        .map(|id| match known(id) {
+            Some(name) => name,
+            None => format!("`{id}` (no longer exists — nothing to copy)"),
+        })
+        .collect()
+}
+
 async fn named_profiles(state: &AppState, owner: &str, ids: &[String]) -> Result<Vec<String>> {
     let visible = state
         .roles
         .visible(owner, crate::access::Level::Viewer)
         .await?;
-    Ok(ids
-        .iter()
-        .filter_map(|id| visible.iter().find(|r| &r.id == id).map(|r| r.name.clone()))
-        .collect())
+    Ok(resolved(ids, |id| {
+        visible.iter().find(|r| r.id == id).map(|r| r.name.clone())
+    }))
 }
 
 /// The same for skills, and for the same reason.
@@ -1659,15 +1700,12 @@ async fn named_skills(state: &AppState, owner: &str, ids: &[String]) -> Result<V
         .skills
         .visible(owner, crate::access::Level::Viewer)
         .await?;
-    Ok(ids
-        .iter()
-        .filter_map(|id| {
-            visible
-                .iter()
-                .find(|s| s.id.as_str() == id)
-                .map(|s| s.name.clone())
-        })
-        .collect())
+    Ok(resolved(ids, |id| {
+        visible
+            .iter()
+            .find(|s| s.id.as_str() == id)
+            .map(|s| s.name.clone())
+    }))
 }
 
 /// The profiles the session's owner can see, so the agent builds on them.
