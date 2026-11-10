@@ -523,22 +523,34 @@ export default function Home() {
                 <ChevronRight color={color.dim} size={13} />
               </Pressable>
             </View>
-            <View className="px-5 pb-1.5">
-              <Text className="font-sans text-mute" style={{ fontSize: size.micro }}>
-                {blocked.length
-                  ? `${blocked.length} waiting on you · ${places.length} in all`
-                  : `${places.length} in all, none waiting`}
-              </Text>
-            </View>
-            <ScrollView
-              className="min-h-0 flex-1"
-              showsVerticalScrollIndicator={false}
-              contentContainerStyle={{ paddingBottom: 20 }}
-            >
-              {byRank.map((p) => (
-                <WorkspaceRow key={p.id} place={p} onPeek={() => setPeeking(p.id)} />
-              ))}
-            </ScrollView>
+            {/* The count waits for an answer. *0 in all, none waiting* over a
+                list that has not arrived is the same lie the destination was
+                drawing before it had a loading state — it just costs less
+                here, because the left column still has the composer on it. */}
+            {loading && places.length === 0 ? (
+              <View className="flex-1 items-center justify-center px-5">
+                <Waiting say="Reading your workspaces" />
+              </View>
+            ) : (
+              <>
+                <View className="px-5 pb-1.5">
+                  <Text className="font-sans text-mute" style={{ fontSize: size.micro }}>
+                    {blocked.length
+                      ? `${blocked.length} waiting on you · ${places.length} in all`
+                      : `${places.length} in all, none waiting`}
+                  </Text>
+                </View>
+                <ScrollView
+                  className="min-h-0 flex-1"
+                  showsVerticalScrollIndicator={false}
+                  contentContainerStyle={{ paddingBottom: 20 }}
+                >
+                  {byRank.map((p) => (
+                    <WorkspaceRow key={p.id} place={p} onPeek={() => setPeeking(p.id)} />
+                  ))}
+                </ScrollView>
+              </>
+            )}
           </View>
         </View>
         {peeked ? (
