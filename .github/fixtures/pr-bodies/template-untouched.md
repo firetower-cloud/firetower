@@ -29,7 +29,10 @@ Closes #
      your repository and you can change or delete them after a reviewer approved
      what they showed. The check refuses them for that reason, not to be awkward.
 
-     A check fails if this section has no GitHub-hosted image in it. -->
+     A check fails if the body has no GitHub-hosted image anywhere in it — it
+     reads the whole description, not only this section, and it reads the page
+     GitHub draws rather than what you typed. A picture inside a comment or a
+     code fence does not count, because a reader cannot see it either. -->
 
 | Path | Surface | Before | After |
 |---|---|---|---|

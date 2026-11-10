@@ -45,8 +45,8 @@ handler, the committed `api/openapi.json` and each client's
 
 ## If you are opening a pull request
 
-`.github/pull_request_template.md` is what it has to fill in, and two of these
-are checked rather than hoped for:
+`.github/pull_request_template.md` is what it has to fill in. Three of these
+four are checked rather than hoped for; the linked issue is a warning:
 
 * **Every commit is a Conventional Commit.** Above, and `commits.yml` fails the
   pull request otherwise.
