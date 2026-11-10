@@ -83,13 +83,22 @@ export type Band = "push" | "float" | "dock";
  *
  * **669 must not dock.** It is wider than a phone, so it invites a docked
  * panel, and docking there leaves the conversation 329 pt — narrower than the
- * 390 pt phone this design came from, and 255 once the rail is counted. The
- * entire band rule exists to stop that one move. 669 lays out in 595, which is
- * 245 short of the dock line, so it floats.
+ * 390 pt phone this design came from, and 245 once the rail is counted. The
+ * entire band rule exists to stop that one move. 669 lays out in **585**,
+ * which is 255 short of the dock line, so it floats.
+ *
+ * Those two figures were 595 and 255, which is 669 − 74 — the older `RAIL`
+ * this same docblock calls wrong two paragraphs up. At the measured 84 they
+ * are 585 and 245. **Nothing moves either way**: both float, both clear
+ * `posterColumns`' 573 for three posters and both clear `dottedChips`' 577
+ * for two chips, so this was a stale comment rather than a bug. The three
+ * figures further down this file — 595 under `posterColumns`, 468 and 220
+ * under `dottedChips` — are the same derivation and are left alone; at 84
+ * they are 585, 458 and 210, and no threshold moves there either.
  *
  * **Push is measured on the window and dock on the content, deliberately.**
- * Putting both on the laid-out width flips 669 into `push` by five points —
- * 595 against 600 — which contradicts the rule the band exists to serve.
+ * Putting both on the laid-out width flips 669 into `push` by fifteen points —
+ * 585 against 600 — which contradicts the rule the band exists to serve.
  * Putting both on the window is the 820 mistake. They are two questions.
  *
  * @param window  the window's width — the device question
