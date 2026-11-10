@@ -1,0 +1,27 @@
+# Every body in this directory, the diff it is read against, and the verdict
+# `pr-body.sh` has to reach. Each one was rendered through GitHub's own
+# markdown API first, so the expectation is what a reader actually sees and
+# not what seemed reasonable here.
+#
+# name	diff	verdicts (+ separated; `ok` means it passes)
+honest	ui	ok
+# One image on an allowed host is enough, even beside one that is not:
+# the rule is that the body carries durable evidence, not that nothing else
+# appears near it. Pinned here so it stays a decision rather than an accident.
+mixed-hosts	ui	ok
+dragged-video	ui	ok
+comment-in-code-fence	ui	ok
+backend-no-image	backend	ok
+fork-hosted	ui	not-hosted
+alt-text-allowlisted	ui	not-hosted
+allowlisted-in-prose	ui	not-hosted
+host-suffix	ui	not-hosted
+host-userinfo	ui	not-hosted
+attachments-traversal	ui	not-hosted
+attachments-encoded-traversal	ui	not-hosted
+query-string-allowlisted	ui	not-hosted
+evidence-in-comment	ui	no-evidence
+template-untouched	ui	no-evidence
+unterminated-comment	ui	no-evidence+missing-sections
+fenced-everything	ui	no-evidence+missing-sections
+missing-two-sections	backend	missing-sections
