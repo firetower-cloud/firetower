@@ -186,7 +186,16 @@ export function AddSkill({
   })();
 
   return (
+    /* **The same padded column the rest of skills is drawn in.** This replaces
+       the whole pane rather than opening over it, so it has to bring the page's
+       own measurements the way the list and the detail do — a bare `section`
+       took the pane's full width and put the back link, the heading and every
+       row flush against the window edge. `data-wide` for the same reason they
+       carry it: `Configuration.tsx` would otherwise centre a 770px page inside
+       this 1120px one. */
     <section
+      data-wide
+      className="pcol"
       onDragOver={(e) => {
         e.preventDefault();
         setOver(true);
