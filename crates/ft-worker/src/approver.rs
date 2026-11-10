@@ -495,6 +495,10 @@ async fn answer(
                             "required": ["name"],
                         },
                     }, {
+                        "name": LIST_PROFILES,
+                        "description": "List the saved profiles the person can see — name, whether it's a Manager, and what it does. Read this before creating one, to build on what exists rather than make a near-duplicate.",
+                        "inputSchema": { "type": "object", "properties": {} },
+                    }, {
                         "name": GET_PROFILE,
                         "description": GET_PROFILE_DESCRIPTION,
                         "inputSchema": {
@@ -504,10 +508,6 @@ async fn answer(
                             },
                             "required": ["name"],
                         },
-                    }, {
-                        "name": LIST_PROFILES,
-                        "description": "List the saved profiles the person can see — name, whether it's a Manager, and what it does. Read this before creating one, to build on what exists rather than make a near-duplicate.",
-                        "inputSchema": { "type": "object", "properties": {} },
                     }, {
                         "name": LIST_COMPUTE,
                         "description": LIST_COMPUTE_DESCRIPTION,
