@@ -16,12 +16,22 @@ comment-in-code-fence	ui	ok
 # sibling of the code-fence bug, and refusing an honest body is worse than
 # missing a bypass.
 unclosed-comment-in-sentence	ui	ok
+# The control for the two above, and the one that matters most: the dark-mode
+# idiom written honestly, both URLs on an allowed host. Refusing this would
+# punish people for following GitHub's own documentation.
+picture-honest-dark-mode	ui	ok
 backend-no-image	backend	ok
 fork-hosted	ui	not-hosted
 alt-text-allowlisted	ui	not-hosted
-# A decoy attribute placed before the real one. `data-src` catches a bare \b on
-# the `-`, and `srcset` catches it on the `set`; both render the fork.
+# A decoy attribute placed before the real one. A bare \b catches the `src`
+# inside `data-src`, and the lazy match ahead of it took the first thing it
+# found, so the decoy was what got read. The lookbehind is what closed it.
 img-data-src-decoy	ui	not-hosted
+# `srcset` on an `<img>` was never a way in and no code was added for it: `src`
+# there is followed by `set` rather than `=`, so the matcher walks past it to
+# the real one, and GitHub strips `srcset` from an `<img>` anyway. Kept because
+# a direction nobody is defending is the one that quietly stops being true.
+# The live version of this is `<source srcset>`, two blocks down.
 img-srcset-decoy	ui	not-hosted
 allowlisted-in-prose	ui	not-hosted
 host-suffix	ui	not-hosted
@@ -30,6 +40,13 @@ attachments-traversal	ui	not-hosted
 attachments-encoded-traversal	ui	not-hosted
 attachments-double-encoded	ui	not-hosted
 query-string-allowlisted	ui	not-hosted
+# A `<picture>` shows its first matching `<source>` and keeps the `<img>` only
+# as a fallback, and GitHub preserves `<source srcset>` without proxying it. So
+# a fork-hosted `<source>` is what a reader sees and the allowlisted `<img>`
+# behind it never loads. The `media` spelling is GitHub's own dark-mode idiom,
+# which shows the fork to every reviewer in dark mode and to nobody else.
+picture-source-shadow	ui	not-hosted
+picture-source-dark-mode	ui	not-hosted
 evidence-in-comment	ui	no-evidence
 template-untouched	ui	no-evidence
 unterminated-comment	ui	no-evidence+missing-sections

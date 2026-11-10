@@ -124,28 +124,50 @@ push @found, $1 while $t =~ /!\[[^\]]*\][ \t]*\(\s*<?([^>\s)]+)/g;
 push @found, $2 while $t =~ /<(?:img|video|source)\b[^>]*?(?<![-\w:.])src\s*=\s*(["']?)([^"'>\s]+)\1/gi;
 push @found, $1 while $t =~ m{^[ \t]*(https?://github\.com/user-attachments/assets/\S+)[ \t]*$}gmi;
 
+# A `<picture>` displays its first matching `<source>`, and the `<img>` inside
+# it is only the fallback — a `<source>` carrying neither `media` nor `type`
+# always matches, so it always wins. GitHub strips `srcset` from an `<img>`,
+# which makes that one harmless, but it keeps `<source srcset>` and does not
+# proxy it. So a fork-hosted `<source>` in front of an allowlisted `<img>` is
+# what the reviewer actually looks at, and the `<img>` behind it is evidence of
+# nothing. The `media="(prefers-color-scheme: dark)"` spelling is the one to
+# watch: it is GitHub's own documented idiom, it reads as entirely legitimate,
+# and it shows the fork to every reviewer in dark mode and nobody else.
+my @shadow;
+while ($t =~ /<source\b[^>]*?(?<![-\w:.])srcset\s*=\s*(["']?)([^"'>]+)\1/gi) {
+    for my $cand (split /\s*,\s*/, $2) {   # a srcset is a candidate list
+        $cand =~ s/^\s+//;
+        $cand =~ s/\s.*\z//;               # drop the `2x` / `640w` descriptor
+        push @shadow, $cand if length $cand;
+    }
+}
+push @found, @shadow;
+
 # Only a real target counts as a picture. The template ships three `![](…)`
 # cells and an untouched one should be told it shows nothing — not told its
 # screenshots are on the wrong host.
 my @src = grep { m{^https?://}i } @found;
 
+# One copy of the question, asked in two places. A userinfo `@`, a backslash,
+# or any spelling of `..` means the host or the path is not what it reads as.
+# `%25` and the always-invalid UTF-8 lead bytes are here for the same reason
+# one step further out: they only do anything if something downstream decodes
+# twice or accepts an overlong sequence, which would be a bug in GitHub rather
+# than here — but no attachment URL GitHub produces contains a `%` at all, so
+# refusing them costs nothing and does not have to be reasoned about again.
+sub allowed {
+    my ($u) = @_;
+    return 0 if $u =~ /[\@\\]/ || $u =~ /\.\./ || $u =~ /%2e|%2f|%5c|%25|%c0|%c1/i;
+    return 1 if $u =~ m{^https?://(?:user-images|private-user-images)\.githubusercontent\.com/}i;
+    return 1 if $u =~ m{^https?://github\.com/user-attachments/assets/[^./]}i;
+    return 0;
+}
+
 my $evidence = 'none';
 if (@src) {
     $evidence = 'elsewhere';
     for my $u (@src) {
-        # A userinfo `@`, a backslash, or any spelling of `..` means the host or
-        # the path is not what it reads as. `%25` and the always-invalid UTF-8
-        # lead bytes are in here for the same reason one step further out: they
-        # only do anything if something downstream decodes twice or accepts an
-        # overlong sequence, which would be a bug in GitHub rather than here —
-        # but no attachment URL GitHub ever produces contains one, so refusing
-        # them costs nothing and does not have to be reasoned about again.
-        next if $u =~ /[\@\\]/ || $u =~ /\.\./ || $u =~ /%2e|%2f|%5c|%25|%c0|%c1/i;
-        if ($u =~ m{^https?://(?:user-images|private-user-images)\.githubusercontent\.com/}i
-         || $u =~ m{^https?://github\.com/user-attachments/assets/[^./]}i) {
-            $evidence = 'hosted';
-            last;
-        }
+        if (allowed($u)) { $evidence = 'hosted'; last; }
     }
     if ($evidence eq 'elsewhere') {
         my %seen;
@@ -156,6 +178,10 @@ if (@src) {
         }
     }
 }
+# A shadow we do not allow takes the verdict back down, whatever the `<img>`
+# behind it says — only one of the two is ever on the screen.
+$evidence = 'elsewhere'
+    if $evidence eq 'hosted' && grep { !allowed($_) } @shadow;
 print "evidence=$evidence\n";
 
 my $linked = ($t =~ /(?:^|[^A-Za-z0-9_])#[0-9]+/ || $t =~ m{/issues/[0-9]+}
