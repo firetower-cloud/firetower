@@ -7,6 +7,10 @@
 //! connects by a key somebody makes in Linear and pastes here. The key is tried
 //! before it is stored: one that does not work is a thing to say now, not on the
 //! next screen.
+//!
+//! Trello connects the same way, with one difference: its key is two parts, the
+//! app key Firetower ships (or the install sets) and the token the person makes
+//! for it, so the field here takes only the token.
 
 use axum::{
     extract::{Path, State},
@@ -18,7 +22,10 @@ use utoipa::ToSchema;
 
 use super::{ApiError, ApiResult, ErrorCode};
 use crate::auth::Principal;
-use crate::tasks::{linear_teams, linear_viewer, TaskKind};
+use crate::tasks::{
+    linear_teams, linear_viewer, trello_board_id, trello_boards, trello_columns, trello_token,
+    trello_viewer, TaskKind,
+};
 use crate::trackers::{self, Auth, ScopeKind};
 use crate::vault::Key;
 use crate::AppState;
@@ -61,7 +68,7 @@ pub struct TrackerStatus {
     /// We hold a credential for it.
     pub connected: bool,
     pub auth: Auth,
-    /// Whether the scope picker offers repositories or teams.
+    /// Whether the scope picker offers repositories, teams or boards.
     pub scope_kind: ScopeKind,
     /// What this tracker can return, so the kind toggle offers no more.
     pub kinds: Vec<TaskKind>,
@@ -79,11 +86,11 @@ pub struct TrackerStatus {
     pub path: Option<String>,
 }
 
-/// One thing the list can be narrowed to: a repository, or a team.
+/// One thing the list can be narrowed to: a repository, a team or a board.
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskScope {
-    /// What goes on the wire: `acme/web`, or `ENG`.
+    /// What goes on the wire: `acme/web`, `ENG`, or a board's id.
     pub key: String,
     /// What a person reads.
     pub label: String,
@@ -157,7 +164,8 @@ pub(super) async fn list_trackers(
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TrackerKey {
-    /// Linear's look like `lin_api_…`.
+    /// Linear's look like `lin_api_…`. For Trello it is the token made on the
+    /// authorize page, which only works with the app key that issued it.
     pub key: String,
 }
 
@@ -201,7 +209,10 @@ pub(super) async fn set_tracker_key(
         ));
     }
 
-    let key = request.key.trim();
+    let key = match tracker.id.as_str() {
+        "trello" => trello_token(&request.key),
+        _ => request.key.trim(),
+    };
     if key.is_empty() {
         return Err(ApiError::new(ErrorCode::InvalidRequest, "a key is needed"));
     }
@@ -211,9 +222,18 @@ pub(super) async fn set_tracker_key(
     let statically = tracker
         .tracker
         .ok_or_else(|| ApiError::new(ErrorCode::InvalidRequest, "that tracker takes no key"))?;
-    let account = linear_viewer(statically, key)
-        .await
-        .map_err(|e| ApiError::new(ErrorCode::ProviderNotConnected, format!("{e:#}")))?;
+    let account = match tracker.id.as_str() {
+        "linear" => linear_viewer(statically, key).await,
+        "trello" => {
+            async {
+                let app_key = super::tasks::trello_app_key()?;
+                trello_viewer(&tracker.api_base, &app_key, key).await
+            }
+            .await
+        }
+        _ => Err(anyhow::anyhow!("that tracker takes no key")),
+    }
+    .map_err(|e| ApiError::new(ErrorCode::ProviderNotConnected, format!("{e:#}")))?;
 
     state
         .vault
@@ -261,6 +281,21 @@ pub(super) async fn disconnect_tracker(
         )
         .await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// One column of a tracker's board: a Trello list.
+///
+/// Asked of the tracker rather than worked out from a page of cards, because a
+/// page holds thirty cards: a column with nothing recent in it, or an empty
+/// one, would be missing from the board.
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskColumn {
+    /// The tracker's own key for it, and what `status` on the task list is
+    /// given to ask for this column.
+    pub key: String,
+    /// What a person reads.
+    pub label: String,
 }
 
 /// What the list can be narrowed to. The scope picker's data.
@@ -320,8 +355,104 @@ pub(super) async fn list_tracker_scopes(
                             .collect(),
                     )
                 })
-                .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e:#}")))
+                .map_err(super::tasks::provider_error)
         }
-        ScopeKind::Teams => Err(ApiError::not_found("tracker")),
+        ScopeKind::Boards if tracker.id == "trello" => {
+            let app_key =
+                super::tasks::trello_app_key().map_err(|_| ApiError::not_found("tracker"))?;
+            let credential = super::tasks::credential_for(
+                &state,
+                &principal,
+                &tracker,
+                "listing boards to pick from",
+            )
+            .await?;
+
+            trello_boards(&tracker.api_base, &app_key, &credential)
+                .await
+                .map(|boards| {
+                    Json(
+                        boards
+                            .into_iter()
+                            .map(|b| TaskScope {
+                                key: b.key,
+                                label: b.name,
+                            })
+                            .collect(),
+                    )
+                })
+                .map_err(super::tasks::provider_error)
+        }
+        ScopeKind::Teams | ScopeKind::Boards => Err(ApiError::not_found("tracker")),
+    }
+}
+
+/// Which board to read the columns of.
+#[derive(Debug, Deserialize)]
+pub(super) struct Columns {
+    pub team: Option<String>,
+}
+
+/// The columns of a board, left to right.
+///
+/// Only a tracker with boards has any; the others answer 404, which is how a
+/// client knows not to offer a board view.
+#[utoipa::path(
+    get, path = "/api/v1/trackers/{id}/columns", tag = "trackers",
+    params(
+        ("id" = String, Path, description = "Tracker id"),
+        ("team" = Option<String>, Query, description = "The board, by the tracker's own key"),
+    ),
+    responses(
+        (status = 200, body = Vec<TaskColumn>),
+        (status = 404, body = ApiError),
+        (status = 409, body = ApiError, description = "That tracker has not been connected"),
+    ),
+)]
+pub(super) async fn list_tracker_columns(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(id): Path<String>,
+    axum::extract::Query(ask): axum::extract::Query<Columns>,
+) -> ApiResult<Json<Vec<TaskColumn>>> {
+    let tracker = trackers::find(&state, &id)
+        .await
+        .ok_or_else(|| ApiError::not_found("tracker"))?;
+
+    match tracker.id.as_str() {
+        "trello" => {
+            let board = ask
+                .team
+                .as_deref()
+                .filter(|t| !t.is_empty())
+                .filter(|t| trello_board_id(t))
+                .ok_or_else(|| ApiError::not_found("board"))?;
+
+            let app_key =
+                super::tasks::trello_app_key().map_err(|_| ApiError::not_found("tracker"))?;
+            let credential = super::tasks::credential_for(
+                &state,
+                &principal,
+                &tracker,
+                "listing columns to lay out",
+            )
+            .await?;
+
+            trello_columns(&tracker.api_base, &app_key, &credential, board)
+                .await
+                .map(|columns| {
+                    Json(
+                        columns
+                            .into_iter()
+                            .map(|c| TaskColumn {
+                                key: c.key,
+                                label: c.name,
+                            })
+                            .collect(),
+                    )
+                })
+                .map_err(super::tasks::provider_error)
+        }
+        _ => Err(ApiError::not_found("tracker")),
     }
 }

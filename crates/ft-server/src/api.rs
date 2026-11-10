@@ -502,8 +502,10 @@ async fn credential_on(
         crate::tasks::TaskState,
         crate::tasks::Person,
         crate::tasks::Label,
+        crate::tasks::TaskAttachment,
         trackers::TrackerStatus,
         trackers::TaskScope,
+        trackers::TaskColumn,
         trackers::Connected,
         crate::trackers::Auth,
         crate::trackers::ScopeKind,
@@ -688,10 +690,12 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(updates::continue_run))
         .routes(routes!(updates::back_up_now))
         .routes(routes!(tasks::get_task))
+        .routes(routes!(tasks::get_task_attachment))
         .routes(routes!(trackers::list_trackers))
         .routes(routes!(trackers::set_tracker_key))
         .routes(routes!(trackers::disconnect_tracker))
         .routes(routes!(trackers::list_tracker_scopes))
+        .routes(routes!(trackers::list_tracker_columns))
         .routes(routes!(conversation::send_turn))
         .routes(routes!(
             conversation::session_controls,

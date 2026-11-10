@@ -296,6 +296,8 @@ impl Item {
                 .collect(),
             updated_at: self.updated_at,
             repo,
+            status: None,
+            attachments: Vec::new(),
         }
     }
 }

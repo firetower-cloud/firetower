@@ -213,7 +213,9 @@ async fn ask_linear<T: serde::de::DeserializeOwned>(
 
     let status = response.status();
     if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
-        bail!("Linear refused the key. It may have been revoked.");
+        return Err(
+            super::Refused("Linear refused the key. It may have been revoked.".into()).into(),
+        );
     }
 
     let answer: Answer<T> = response
@@ -441,6 +443,7 @@ struct Issue {
 
 #[derive(Deserialize)]
 struct State {
+    name: String,
     #[serde(rename = "type")]
     kind: String,
 }
@@ -465,6 +468,8 @@ impl From<Issue> for Task {
             .as_ref()
             .map(|s| !DONE.contains(&s.kind.as_str()))
             .unwrap_or(true);
+
+        let status = issue.state.as_ref().map(|s| s.name.clone());
 
         Task {
             id: format!("linear:{}", issue.identifier),
@@ -506,6 +511,8 @@ impl From<Issue> for Task {
             // Linear does not know where the work happens, so the workspace
             // form asks.
             repo: None,
+            status,
+            attachments: Vec::new(),
         }
     }
 }
@@ -665,6 +672,38 @@ mod tests {
         assert_eq!(task.labels[0].colour.as_deref(), Some("d73a4a"));
         // Nowhere to work — the workspace form asks.
         assert_eq!(task.repo, None);
+    }
+
+    #[test]
+    fn a_ticket_says_which_column_it_is_in() {
+        let issue: Issue = serde_json::from_value(json!({
+            "identifier": "ENG-123",
+            "title": "Promo codes fail to apply for EU checkout",
+            "description": "Steps to reproduce…",
+            "url": "https://linear.app/acme/issue/ENG-123/promo-codes",
+            "updatedAt": "2026-08-29T12:00:00Z",
+            "state": { "name": "In Review", "type": "started" },
+            "assignee": { "displayName": "maya", "avatarUrl": "https://…/maya.png" },
+            "labels": { "nodes": [{ "name": "bug", "color": "#d73a4a" }] },
+        }))
+        .unwrap();
+
+        let task: Task = issue.into();
+        assert_eq!(task.status.as_deref(), Some("In Review"));
+    }
+
+    #[test]
+    fn an_issue_with_no_state_has_no_status_and_is_open() {
+        let issue: Issue = serde_json::from_value(json!({
+            "identifier": "ENG-9",
+            "title": "x",
+            "url": "https://linear.app/acme/issue/ENG-9/x",
+            "updatedAt": "2026-08-29T12:00:00Z",
+        }))
+        .unwrap();
+        let task = Task::from(issue);
+        assert_eq!(task.status, None);
+        assert_eq!(task.state, TaskState::Open);
     }
 
     #[test]

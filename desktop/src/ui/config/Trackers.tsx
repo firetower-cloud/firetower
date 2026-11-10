@@ -14,7 +14,7 @@
 import { useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Check, Ticket, Unlink } from "lucide-react";
-import { HostMark, Icon, IconButton, LinearMark } from "~/components/ui";
+import { HostMark, Icon, IconButton, LinearMark, TrelloMark } from "~/components/ui";
 import type { TrackerStatus } from "~/api/generated/model";
 import {
   getListTrackersQueryKey,
@@ -91,7 +91,13 @@ function Tracker({ t, live }: { t: TrackerStatus; live: boolean }) {
   return (
     <div className="r flex-wrap">
       <span className="g">
-        {t.kind === "linear" ? <LinearMark size={16} /> : <HostMark kind={t.kind} size={16} />}
+        {t.kind === "linear" ? (
+          <LinearMark size={16} />
+        ) : t.kind === "trello" ? (
+          <TrelloMark size={16} />
+        ) : (
+          <HostMark kind={t.kind} size={16} />
+        )}
       </span>
       <span className="tx">
         <b>{t.label}</b>
@@ -119,11 +125,14 @@ function Tracker({ t, live }: { t: TrackerStatus; live: boolean }) {
            than one that names where to go. */
         <span className="said">connects under Git hosts</span>
       ) : (
-        <div className="flex items-center gap-1.5">
-          <input value={key} onChange={(e) => setKey(e.target.value)} type="password" placeholder="API key" aria-label={`API key for ${t.label}`} className="w-44 rounded-lg bg-raise px-3 py-1.5 font-mono text-meta text-bone focus:outline-none" />
-          {t.keyUrl && <a href={t.keyUrl} target="_blank" rel="noreferrer" className="text-micro text-mute underline">get one</a>}
+        <div className="flex flex-wrap items-center gap-1.5">
+          <input value={key} onChange={(e) => setKey(e.target.value)} type="password" placeholder={t.kind === "trello" ? "Token" : "API key"} aria-label={`${t.kind === "trello" ? "Token" : "API key"} for ${t.label}`} className="w-44 rounded-lg bg-raise px-3 py-1.5 font-mono text-meta text-bone focus:outline-none" />
+          {t.keyUrl && <a href={t.keyUrl} target="_blank" rel="noreferrer" className="text-micro text-mute underline">{t.kind === "trello" ? "Get a token from Trello" : "get one"}</a>}
           <button disabled={!key.trim() || !live || set.isPending} onClick={() => set.mutate({ id: t.id, data: { key: key.trim() } }, { onSuccess: (c) => { setAccount(c.account); setKey(""); refresh(); } })} className="btn plain">{set.isPending ? "Checking…" : "Connect"}</button>
           {set.error && <span className="text-meta text-brick">{why(set.error)}</span>}
+          {t.kind === "trello" && (
+            <p className="w-full text-meta text-mute">Approve read access, then copy the token Trello shows and paste it here.</p>
+          )}
         </div>
       )}
     </div>

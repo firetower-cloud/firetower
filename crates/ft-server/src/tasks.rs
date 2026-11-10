@@ -35,12 +35,37 @@ use crate::providers::Connection;
 mod gitea;
 mod gitlab;
 mod linear;
+mod trello;
 pub use gitea::Gitea;
 pub use gitlab::GitLab;
 pub use linear::{
     identifier_of, split_identifier as linear_identifier, teams as linear_teams,
     viewer as linear_viewer, Linear, Team as LinearTeam,
 };
+pub use trello::{
+    attachment as trello_attachment, boards as trello_boards,
+    card_attachments as trello_card_attachments, card_of as trello_card, columns as trello_columns,
+    is_board_id as trello_board_id, search_params as trello_search_params,
+    token_in as trello_token, viewer as trello_viewer, Board as TrelloBoard, Card as TrelloCard,
+    Column as TrelloColumn, Trello, Unserved as TrelloUnserved,
+};
+
+/// A tracker said no to the credential it was given: revoked, expired or
+/// never valid.
+///
+/// A type of its own so the API can answer it as "connect again" (409), which
+/// is what a person can act on, instead of as a server fault (500) that reads
+/// as Firetower's own breakage. It carries the sentence the person is shown.
+#[derive(Debug)]
+pub struct Refused(pub String);
+
+impl std::fmt::Display for Refused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for Refused {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -101,6 +126,44 @@ pub struct Task {
     pub updated_at: chrono::DateTime<chrono::Utc>,
     /// Where the work would happen. Known for an issue; a binding for a ticket.
     pub repo: Option<String>,
+    /// The column or workflow state it sits in, by the tracker's own name: a
+    /// Trello list, a Linear state. Git hosts have none.
+    pub status: Option<String>,
+    /// What is attached to it: the screenshot in the bug report, the PDF of
+    /// the spec, the Figma link.
+    ///
+    /// Only [`Source::one`] fills it, because only starting work wants it and
+    /// a page of thirty would otherwise cost thirty more requests. Empty for
+    /// the git hosts and Linear, which do not answer it yet.
+    #[serde(default)]
+    pub attachments: Vec<TaskAttachment>,
+}
+
+/// One thing attached to a task, as the tracker lists it.
+///
+/// A file and a link both arrive here because trackers list them together,
+/// and the two go different places when work starts: a file is brought into
+/// the workspace, a link is written into the description. `upload` is what
+/// tells them apart.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskAttachment {
+    /// The tracker's own id for it, which is how its bytes are asked for.
+    pub id: String,
+    /// What it is called, which is also what it is saved as.
+    pub name: String,
+    /// `image/png`, when the tracker knows. Decides whether it rides in the
+    /// first message as a picture or lands in the workspace as a file.
+    pub mime: Option<String>,
+    /// Its size, when the tracker knows, so one that is too big is refused
+    /// before anything is downloaded.
+    pub bytes: Option<u64>,
+    /// Where a person would open it. For a file this needs the tracker's
+    /// credential, so the bytes come through Firetower instead.
+    pub url: String,
+    /// A file somebody uploaded. `false` is a link (a Google Doc, a Figma
+    /// frame), which has no bytes to bring along.
+    pub upload: bool,
 }
 
 /// What to ask a source for.
@@ -125,6 +188,10 @@ pub struct Query {
     /// Only what this person is assigned.
     pub mine: bool,
     pub raw: Option<String>,
+    /// One column, by the key `/trackers/{id}/columns` gave it: a Trello
+    /// list's id. What the board view asks once per column. A source without
+    /// columns ignores it.
+    pub status: Option<String>,
     pub page: u32,
     /// Where the last page stopped, for a source that pages by cursor.
     ///
@@ -427,6 +494,8 @@ fn task_from(item: Item, source: &str) -> Task {
             .collect(),
         updated_at: item.updated_at,
         repo,
+        status: None,
+        attachments: Vec::new(),
     }
 }
 

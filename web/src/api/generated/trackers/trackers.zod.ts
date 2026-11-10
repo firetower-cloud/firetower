@@ -19,7 +19,7 @@ export const ListTrackersResponseItem = zod.object({
   "kinds": zod.array(zod.enum(['issue', 'pullRequest', 'ticket']).describe('What sort of thing it is.\n\nThe one field the Issues/PRs toggle reads, and the reason "filter by kind"\nis a query parameter rather than a migration when a second source lands.')).describe('What this tracker can return, so the kind toggle offers no more.'),
   "label": zod.string(),
   "path": zod.string().nullish().describe('Where that key is filed, and so who else it answers for. Set only\nalongside `secret`: the two describe the same shareable thing.'),
-  "scopeKind": zod.enum(['repos', 'teams']).describe('Whether the scope picker offers repositories or teams.'),
+  "scopeKind": zod.enum(['repos', 'teams', 'boards']).describe('Whether the scope picker offers repositories, teams or boards.'),
   "secret": zod.string().nullish().describe('The key that answers for this person, as the vault addresses it —\n`scope/name/owner`. Absent when nothing is held.\n\nA handle, so a screen can ask who can reach it and offer to file it\nsomewhere. It is the *resolved* one: their own if they have connected\none, otherwise whatever a directory they work in holds.')
 })
 export const ListTrackersResponse = zod.array(ListTrackersResponseItem)
@@ -34,6 +34,25 @@ export const DisconnectTrackerParams = zod.object({
 export const DisconnectTrackerResponse = zod.void()
 
 /**
+ * Only a tracker with boards has any; the others answer 404, which is how a
+ * client knows not to offer a board view.
+ * @summary The columns of a board, left to right.
+ */
+export const ListTrackerColumnsParams = zod.object({
+  "id": zod.string().describe('Tracker id')
+})
+
+export const ListTrackerColumnsQueryParams = zod.object({
+  "team": zod.string().optional().describe('The board, by the tracker\'s own key')
+})
+
+export const ListTrackerColumnsResponseItem = zod.object({
+  "key": zod.string().describe('The tracker\'s own key for it, and what `status` on the task list is\ngiven to ask for this column.'),
+  "label": zod.string().describe('What a person reads.')
+}).describe('One column of a tracker\'s board: a Trello list.\n\nAsked of the tracker rather than worked out from a page of cards, because a\npage holds thirty cards: a column with nothing recent in it, or an empty\none, would be missing from the board.')
+export const ListTrackerColumnsResponse = zod.array(ListTrackerColumnsResponseItem)
+
+/**
  * @summary Store a key for a tracker, once it is known to work.
  */
 export const SetTrackerKeyParams = zod.object({
@@ -41,7 +60,7 @@ export const SetTrackerKeyParams = zod.object({
 })
 
 export const SetTrackerKeyBody = zod.object({
-  "key": zod.string().describe('Linear\'s look like `lin_api_…`.')
+  "key": zod.string().describe('Linear\'s look like `lin_api_…`. For Trello it is the token made on the\nauthorize page, which only works with the app key that issued it.')
 })
 
 export const SetTrackerKeyResponse = zod.object({
@@ -56,8 +75,8 @@ export const ListTrackerScopesParams = zod.object({
 })
 
 export const ListTrackerScopesResponseItem = zod.object({
-  "key": zod.string().describe('What goes on the wire: `acme/web`, or `ENG`.'),
+  "key": zod.string().describe('What goes on the wire: `acme/web`, `ENG`, or a board\'s id.'),
   "label": zod.string().describe('What a person reads.')
-}).describe('One thing the list can be narrowed to: a repository, or a team.')
+}).describe('One thing the list can be narrowed to: a repository, a team or a board.')
 export const ListTrackerScopesResponse = zod.array(ListTrackerScopesResponseItem)
 

@@ -23,6 +23,7 @@ import type {
 
 import type {
   ApiError,
+  GetTaskAttachmentParams,
   GetTaskParams,
   ListTasksParams,
   Page,
@@ -176,6 +177,134 @@ export const useGetListTasksQueryData = () => {
   const queryClient = useQueryClient();
   return (params?: ListTasksParams,) =>
     queryClient.getQueryData<Awaited<ReturnType<typeof listTasks>>>(getListTasksQueryKey(params));
+}
+
+
+export const getGetTaskAttachmentUrl = (params: GetTaskAttachmentParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/v1/tasks/attachment?${stringifiedParams}` : `/api/v1/tasks/attachment`
+}
+
+/**
+ * Trello asks for the credential even to download an attachment, so the
+ * person's machine cannot fetch it itself. This takes the card and the
+ * attachment's id, never an address: the card's own list is read again and
+ * only an id on it is downloaded, so nothing here can be pointed elsewhere.
+ * @summary A file attached to a task, through Firetower.
+ */
+export const getTaskAttachment = async (params: GetTaskAttachmentParams, options?: Parameters<typeof http>[1]): Promise<void> => {
+
+  return http<void>(getGetTaskAttachmentUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetTaskAttachmentQueryKey = (params?: GetTaskAttachmentParams,) => {
+    return [
+    `/api/v1/tasks/attachment`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetTaskAttachmentQueryOptions = <TData = Awaited<ReturnType<typeof getTaskAttachment>>, TError = ApiError>(params: GetTaskAttachmentParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getTaskAttachment>>, TError, TData>>, request?: SecondParameter<typeof http>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetTaskAttachmentQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getTaskAttachment>>> = ({ signal }) => getTaskAttachment(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getTaskAttachment>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetTaskAttachmentQueryResult = NonNullable<Awaited<ReturnType<typeof getTaskAttachment>>>
+export type GetTaskAttachmentQueryError = ApiError
+
+
+export function useGetTaskAttachment<TData = Awaited<ReturnType<typeof getTaskAttachment>>, TError = ApiError>(
+ params: GetTaskAttachmentParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getTaskAttachment>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getTaskAttachment>>,
+          TError,
+          Awaited<ReturnType<typeof getTaskAttachment>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetTaskAttachment<TData = Awaited<ReturnType<typeof getTaskAttachment>>, TError = ApiError>(
+ params: GetTaskAttachmentParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getTaskAttachment>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getTaskAttachment>>,
+          TError,
+          Awaited<ReturnType<typeof getTaskAttachment>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetTaskAttachment<TData = Awaited<ReturnType<typeof getTaskAttachment>>, TError = ApiError>(
+ params: GetTaskAttachmentParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getTaskAttachment>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary A file attached to a task, through Firetower.
+ */
+
+export function useGetTaskAttachment<TData = Awaited<ReturnType<typeof getTaskAttachment>>, TError = ApiError>(
+ params: GetTaskAttachmentParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getTaskAttachment>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetTaskAttachmentQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+/**
+ * @summary A file attached to a task, through Firetower.
+ */
+export const useSetGetTaskAttachmentQueryData = () => {
+  const queryClient = useQueryClient();
+  return (params: GetTaskAttachmentParams | undefined,updater: Awaited<ReturnType<typeof getTaskAttachment>> | undefined | ((old: Awaited<ReturnType<typeof getTaskAttachment>> | undefined) => Awaited<ReturnType<typeof getTaskAttachment>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof getTaskAttachment>>>({ exact: $exactMatch, queryKey: getGetTaskAttachmentQueryKey(params) }, updater);
+  };
+}
+
+/**
+ * @summary A file attached to a task, through Firetower.
+ */
+export const useGetGetTaskAttachmentQueryData = () => {
+  const queryClient = useQueryClient();
+  return (params: GetTaskAttachmentParams,) =>
+    queryClient.getQueryData<Awaited<ReturnType<typeof getTaskAttachment>>>(getGetTaskAttachmentQueryKey(params));
 }
 
 

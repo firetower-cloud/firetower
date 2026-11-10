@@ -96,6 +96,23 @@ describe("reading what somebody typed", () => {
   });
 });
 
+describe("trello", () => {
+  it("a task started from a card is referenced, never closed", () => {
+    const ref = fromTask("aB3dE9fG", "https://trello.com/c/aB3dE9fG/42-x");
+    expect(ref).toMatchObject({ source: "trello", key: "aB3dE9fG", keyword: "Refs" });
+    expect(trailerFor([ref!])).toBe("Trello: https://trello.com/c/aB3dE9fG");
+  });
+
+  it("reads a trello card link and links it back in the body", () => {
+    const ref = parseReference("https://trello.com/c/aB3dE9fG/42-x");
+    expect(ref).toMatchObject({ source: "trello", key: "aB3dE9fG" });
+    expect(trailerFor([ref!])).toBe("Trello: https://trello.com/c/aB3dE9fG");
+    expect(parseReference("www.trello.com/c/aB3dE9fG/?x=1#y")).toMatchObject({ source: "trello", key: "aB3dE9fG" });
+    expect(parseReference("https://trello.com/b/aB3dE9fG/board")).toBeNull();
+    expect(parseReference("aB3dE9fG")).toBeNull();
+  });
+});
+
 describe("what gets written at the end of the body", () => {
   it("writes the keyword and the short form in the issue's own repository", () => {
     expect(trailerFor([ref()], "acme/web")).toBe("Closes #32");

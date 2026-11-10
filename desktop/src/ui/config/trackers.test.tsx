@@ -76,3 +76,37 @@ describe("the order of the list", () => {
     expect(html).toContain("GitLab (lab)");
   });
 });
+
+describe("the marks", () => {
+  it("draws trello's own mark", () => {
+    const html = draw([tracker({ id: "trello", label: "Trello", kind: "trello", auth: "apiKey", scopeKind: "boards", kinds: ["ticket"] })]);
+    expect(html).toContain('data-mark="trello"');
+  });
+});
+
+describe("connecting trello", () => {
+  const trello = tracker({
+    id: "trello",
+    label: "Trello",
+    kind: "trello",
+    auth: "apiKey",
+    scopeKind: "boards",
+    kinds: ["ticket"],
+    keyUrl: "https://trello.com/1/authorize?key=k",
+  });
+
+  it("asks for a token, says where to get one and what to do with it", () => {
+    const html = draw([trello]);
+    expect(html).toContain('placeholder="Token"');
+    expect(html).toContain('aria-label="Token for Trello"');
+    expect(html).toContain("Get a token from Trello");
+    expect(html).toContain("copy the token Trello shows and paste it here");
+    expect(html).not.toContain('placeholder="API key"');
+  });
+
+  it("keeps the plain wording for a tracker that takes a key", () => {
+    const html = draw([tracker({ id: "linear", label: "Linear", kind: "linear", auth: "apiKey", scopeKind: "teams", keyUrl: "https://linear.app/x" })]);
+    expect(html).toContain('placeholder="API key"');
+    expect(html).not.toContain("Get a token from Trello");
+  });
+});

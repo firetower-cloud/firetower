@@ -7099,6 +7099,15 @@
             }
           },
           {
+            "name": "status",
+            "in": "query",
+            "description": "One column, by the key /trackers/{id}/columns gave it",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "page",
             "in": "query",
             "description": "One-based",
@@ -7126,6 +7135,71 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Page"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/attachment": {
+      "get": {
+        "tags": [
+          "tasks"
+        ],
+        "summary": "A file attached to a task, through Firetower.",
+        "description": "Trello asks for the credential even to download an attachment, so the\nperson's machine cannot fetch it itself. This takes the card and the\nattachment's id, never an address: the card's own list is read again and\nonly an id on it is downloaded, so nothing here can be pointed elsewhere.",
+        "operationId": "get_task_attachment",
+        "parameters": [
+          {
+            "name": "url",
+            "in": "query",
+            "description": "The card, as /tasks/one was asked for it",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "query",
+            "description": "The attachment's id, as /tasks/one listed it",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The file's bytes, under its own type and name"
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
                 }
               }
             }
@@ -7674,6 +7748,71 @@
           },
           "404": {
             "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/trackers/{id}/columns": {
+      "get": {
+        "tags": [
+          "trackers"
+        ],
+        "summary": "The columns of a board, left to right.",
+        "description": "Only a tracker with boards has any; the others answer 404, which is how a\nclient knows not to offer a board view.",
+        "operationId": "list_tracker_columns",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Tracker id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "team",
+            "in": "query",
+            "description": "The board, by the tracker's own key",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TaskColumn"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "That tracker has not been connected",
             "content": {
               "application/json": {
                 "schema": {
@@ -14116,10 +14255,11 @@
       },
       "ScopeKind": {
         "type": "string",
-        "description": "What the scope picker offers for this tracker.",
+        "description": "What the scope picker offers for this tracker: repositories, teams or\nboards, whichever the tracker's own unit of work is.",
         "enum": [
           "repos",
-          "teams"
+          "teams",
+          "boards"
         ]
       },
       "Sent": {
@@ -15375,6 +15515,13 @@
               "$ref": "#/components/schemas/Person"
             }
           },
+          "attachments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskAttachment"
+            },
+            "description": "What is attached to it: the screenshot in the bug report, the PDF of\nthe spec, the Figma link.\n\nOnly [`Source::one`] fills it, because only starting work wants it and\na page of thirty would otherwise cost thirty more requests. Empty for\nthe git hosts and Linear, which do not answer it yet."
+          },
           "body": {
             "type": [
               "string",
@@ -15412,6 +15559,13 @@
           "state": {
             "$ref": "#/components/schemas/TaskState"
           },
+          "status": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The column or workflow state it sits in, by the tracker's own name: a\nTrello list, a Linear state. Git hosts have none."
+          },
           "title": {
             "type": "string"
           },
@@ -15422,6 +15576,68 @@
           "url": {
             "type": "string",
             "description": "Always somewhere to go and read it."
+          }
+        }
+      },
+      "TaskAttachment": {
+        "type": "object",
+        "description": "One thing attached to a task, as the tracker lists it.\n\nA file and a link both arrive here because trackers list them together,\nand the two go different places when work starts: a file is brought into\nthe workspace, a link is written into the description. `upload` is what\ntells them apart.",
+        "required": [
+          "id",
+          "name",
+          "url",
+          "upload"
+        ],
+        "properties": {
+          "bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Its size, when the tracker knows, so one that is too big is refused\nbefore anything is downloaded.",
+            "minimum": 0
+          },
+          "id": {
+            "type": "string",
+            "description": "The tracker's own id for it, which is how its bytes are asked for."
+          },
+          "mime": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`image/png`, when the tracker knows. Decides whether it rides in the\nfirst message as a picture or lands in the workspace as a file."
+          },
+          "name": {
+            "type": "string",
+            "description": "What it is called, which is also what it is saved as."
+          },
+          "upload": {
+            "type": "boolean",
+            "description": "A file somebody uploaded. `false` is a link (a Google Doc, a Figma\nframe), which has no bytes to bring along."
+          },
+          "url": {
+            "type": "string",
+            "description": "Where a person would open it. For a file this needs the tracker's\ncredential, so the bytes come through Firetower instead."
+          }
+        }
+      },
+      "TaskColumn": {
+        "type": "object",
+        "description": "One column of a tracker's board: a Trello list.\n\nAsked of the tracker rather than worked out from a page of cards, because a\npage holds thirty cards: a column with nothing recent in it, or an empty\none, would be missing from the board.",
+        "required": [
+          "key",
+          "label"
+        ],
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "The tracker's own key for it, and what `status` on the task list is\ngiven to ask for this column."
+          },
+          "label": {
+            "type": "string",
+            "description": "What a person reads."
           }
         }
       },
@@ -15440,7 +15656,7 @@
       },
       "TaskScope": {
         "type": "object",
-        "description": "One thing the list can be narrowed to: a repository, or a team.",
+        "description": "One thing the list can be narrowed to: a repository, a team or a board.",
         "required": [
           "key",
           "label"
@@ -15448,7 +15664,7 @@
         "properties": {
           "key": {
             "type": "string",
-            "description": "What goes on the wire: `acme/web`, or `ENG`."
+            "description": "What goes on the wire: `acme/web`, `ENG`, or a board's id."
           },
           "label": {
             "type": "string",
@@ -15628,7 +15844,7 @@
         "properties": {
           "key": {
             "type": "string",
-            "description": "Linear's look like `lin_api_…`."
+            "description": "Linear's look like `lin_api_…`. For Trello it is the token made on the\nauthorize page, which only works with the app key that issued it."
           }
         }
       },
@@ -15694,7 +15910,7 @@
           },
           "scopeKind": {
             "$ref": "#/components/schemas/ScopeKind",
-            "description": "Whether the scope picker offers repositories or teams."
+            "description": "Whether the scope picker offers repositories, teams or boards."
           },
           "secret": {
             "type": [

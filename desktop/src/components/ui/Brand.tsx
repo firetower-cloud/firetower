@@ -136,6 +136,34 @@ export function LinearMark({ size = 14, className = "" }: { size?: number; class
 }
 
 /**
+ * A board: a rounded square holding two columns of different heights.
+ *
+ * Drawn as an outline with two solid bars, in `currentColor` like the other
+ * marks. The bars differ in height because that is what a board looks like,
+ * and what keeps the glyph from reading as a pause button.
+ */
+export function TrelloMark({ size = 14, className = "" }: { size?: number; className?: string }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      data-mark="trello"
+      aria-hidden
+      className={`shrink-0 ${className}`}
+    >
+      <path
+        fillRule="evenodd"
+        d="M5 1h14a4 4 0 0 1 4 4v14a4 4 0 0 1-4 4H5a4 4 0 0 1-4-4V5a4 4 0 0 1 4-4Zm0 2a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2H5Z"
+      />
+      <rect x="6" y="6" width="5" height="12" rx="1" />
+      <rect x="13" y="6" width="5" height="7" rx="1" />
+    </svg>
+  );
+}
+
+/**
  * Firetower's own mark: the watchtower, with the beacon lit.
  *
  * The tower is drawn in `currentColor`, so it takes the colour of wherever it

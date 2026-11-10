@@ -7,7 +7,8 @@
  */
 
 /**
- * What the scope picker offers for this tracker.
+ * What the scope picker offers for this tracker: repositories, teams or
+ * boards, whichever the tracker's own unit of work is.
  */
 export type ScopeKind = typeof ScopeKind[keyof typeof ScopeKind];
 
@@ -15,4 +16,5 @@ export type ScopeKind = typeof ScopeKind[keyof typeof ScopeKind];
 export const ScopeKind = {
   repos: 'repos',
   teams: 'teams',
+  boards: 'boards',
 } as const;

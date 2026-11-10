@@ -27,9 +27,12 @@ export const ListTasksQueryParams = zod.object({
   "state": zod.enum(['open', 'closed']).optional().describe('open or closed'),
   "mine": zod.boolean().optional().describe('Only what you are assigned'),
   "q": zod.string().optional().describe('The query box, passed to the source verbatim'),
+  "status": zod.string().optional().describe('One column, by the key /trackers/{id}/columns gave it'),
   "page": zod.int().min(listTasksQueryPageMin).optional().describe('One-based'),
   "cursor": zod.string().optional().describe('Where the last page stopped, for a source that pages by cursor')
 })
+
+export const listTasksResponseTasksItemAttachmentsItemBytesMin = 0;
 
 export const listTasksResponseTotalMin = 0;
 
@@ -43,6 +46,14 @@ export const ListTasksResponse = zod.object({
   "avatar": zod.string().nullish(),
   "login": zod.string()
 })),
+  "attachments": zod.array(zod.object({
+  "bytes": zod.int().min(listTasksResponseTasksItemAttachmentsItemBytesMin).nullish().describe('Its size, when the tracker knows, so one that is too big is refused\nbefore anything is downloaded.'),
+  "id": zod.string().describe('The tracker\'s own id for it, which is how its bytes are asked for.'),
+  "mime": zod.string().nullish().describe('`image/png`, when the tracker knows. Decides whether it rides in the\nfirst message as a picture or lands in the workspace as a file.'),
+  "name": zod.string().describe('What it is called, which is also what it is saved as.'),
+  "upload": zod.boolean().describe('A file somebody uploaded. `false` is a link (a Google Doc, a Figma\nframe), which has no bytes to bring along.'),
+  "url": zod.string().describe('Where a person would open it. For a file this needs the tracker\'s\ncredential, so the bytes come through Firetower instead.')
+}).describe('One thing attached to a task, as the tracker lists it.\n\nA file and a link both arrive here because trackers list them together,\nand the two go different places when work starts: a file is brought into\nthe workspace, a link is written into the description. `upload` is what\ntells them apart.')).optional().describe('What is attached to it: the screenshot in the bug report, the PDF of\nthe spec, the Figma link.\n\nOnly [`Source::one`] fills it, because only starting work wants it and\na page of thirty would otherwise cost thirty more requests. Empty for\nthe git hosts and Linear, which do not answer it yet.'),
   "body": zod.string().nullish().describe('Seeds the first prompt, so nobody types the problem out twice.'),
   "id": zod.string().describe('Stable within its source: `github:acme/web#5138`.'),
   "key": zod.string().describe('What a person calls it. `#5138`.'),
@@ -54,12 +65,27 @@ export const ListTasksResponse = zod.object({
   "repo": zod.string().nullish().describe('Where the work would happen. Known for an issue; a binding for a ticket.'),
   "source": zod.string(),
   "state": zod.enum(['open', 'closed']),
+  "status": zod.string().nullish().describe('The column or workflow state it sits in, by the tracker\'s own name: a\nTrello list, a Linear state. Git hosts have none.'),
   "title": zod.string(),
   "updatedAt": zod.iso.datetime({"offset":true}),
   "url": zod.string().describe('Always somewhere to go and read it.')
 }).describe('One thing to work on, whatever tracks it.\n\nThe fields are the intersection every tracker has, plus the two that make a\nrow worth showing: what it is called, and when it last moved.')),
   "total": zod.int().min(listTasksResponseTotalMin).nullish().describe('How many there are in total, when the source will say.')
 })
+
+/**
+ * Trello asks for the credential even to download an attachment, so the
+ * person's machine cannot fetch it itself. This takes the card and the
+ * attachment's id, never an address: the card's own list is read again and
+ * only an id on it is downloaded, so nothing here can be pointed elsewhere.
+ * @summary A file attached to a task, through Firetower.
+ */
+export const GetTaskAttachmentQueryParams = zod.object({
+  "url": zod.string().describe('The card, as /tasks/one was asked for it'),
+  "id": zod.string().describe('The attachment\'s id, as /tasks/one listed it')
+})
+
+export const GetTaskAttachmentResponse = zod.unknown()
 
 /**
  * A workspace remembers the task it was cut for as a key and a URL — two
@@ -76,11 +102,23 @@ export const GetTaskQueryParams = zod.object({
   "url": zod.string().describe('Where a person would read it')
 })
 
+export const getTaskResponseAttachmentsItemBytesMin = 0;
+
+
+
 export const GetTaskResponse = zod.object({
   "assignees": zod.array(zod.object({
   "avatar": zod.string().nullish(),
   "login": zod.string()
 })),
+  "attachments": zod.array(zod.object({
+  "bytes": zod.int().min(getTaskResponseAttachmentsItemBytesMin).nullish().describe('Its size, when the tracker knows, so one that is too big is refused\nbefore anything is downloaded.'),
+  "id": zod.string().describe('The tracker\'s own id for it, which is how its bytes are asked for.'),
+  "mime": zod.string().nullish().describe('`image/png`, when the tracker knows. Decides whether it rides in the\nfirst message as a picture or lands in the workspace as a file.'),
+  "name": zod.string().describe('What it is called, which is also what it is saved as.'),
+  "upload": zod.boolean().describe('A file somebody uploaded. `false` is a link (a Google Doc, a Figma\nframe), which has no bytes to bring along.'),
+  "url": zod.string().describe('Where a person would open it. For a file this needs the tracker\'s\ncredential, so the bytes come through Firetower instead.')
+}).describe('One thing attached to a task, as the tracker lists it.\n\nA file and a link both arrive here because trackers list them together,\nand the two go different places when work starts: a file is brought into\nthe workspace, a link is written into the description. `upload` is what\ntells them apart.')).optional().describe('What is attached to it: the screenshot in the bug report, the PDF of\nthe spec, the Figma link.\n\nOnly [`Source::one`] fills it, because only starting work wants it and\na page of thirty would otherwise cost thirty more requests. Empty for\nthe git hosts and Linear, which do not answer it yet.'),
   "body": zod.string().nullish().describe('Seeds the first prompt, so nobody types the problem out twice.'),
   "id": zod.string().describe('Stable within its source: `github:acme/web#5138`.'),
   "key": zod.string().describe('What a person calls it. `#5138`.'),
@@ -92,6 +130,7 @@ export const GetTaskResponse = zod.object({
   "repo": zod.string().nullish().describe('Where the work would happen. Known for an issue; a binding for a ticket.'),
   "source": zod.string(),
   "state": zod.enum(['open', 'closed']),
+  "status": zod.string().nullish().describe('The column or workflow state it sits in, by the tracker\'s own name: a\nTrello list, a Linear state. Git hosts have none.'),
   "title": zod.string(),
   "updatedAt": zod.iso.datetime({"offset":true}),
   "url": zod.string().describe('Always somewhere to go and read it.')

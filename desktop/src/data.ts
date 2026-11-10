@@ -21,7 +21,7 @@ import { useSetupState } from "~/api/generated/setup/setup";
 import { useGetUpdates } from "~/api/generated/updates/updates";
 import { updatesRow } from "~/api/updates";
 import { useBuild } from "~/update";
-import { useListTrackers, useListTrackerScopes } from "~/api/generated/trackers/trackers";
+import { useListTrackerColumns, useListTrackers, useListTrackerScopes } from "~/api/generated/trackers/trackers";
 import {
   getListSessionsQueryKey,
   useGetSession,
@@ -41,6 +41,7 @@ import type {
   Repo,
   Session,
   Task,
+  TaskColumn,
   TaskScope,
 } from "~/api/generated/model";
 
@@ -417,6 +418,25 @@ export function useTrackers() {
 export function useTrackerScopes(id: string, enabled: boolean): Feed<TaskScope[]> {
   const q = useListTrackerScopes(id, { query: { enabled: enabled && !!id } });
   return { data: q.data ?? [], loading: enabled && q.isPending, error: q.error ? why(q.error) : null, trouble: trouble(q.error) };
+}
+
+/**
+ * The columns of one board, left to right, or nothing.
+ *
+ * Only asked once a board is picked: columns belong to one board, and "All
+ * boards" has no single set of them. A tracker without columns answers 404,
+ * which is an answer rather than a fault, so it is not retried; the screen
+ * reads an empty list either way and keeps to the list.
+ */
+export function useTrackerColumns(id: string, team: string | undefined, enabled = true): Feed<TaskColumn[]> {
+  const on = enabled && !!id && !!team;
+  const q = useListTrackerColumns(id, { team }, { query: { enabled: on, retry: false } });
+  return {
+    data: on && !q.error ? (q.data ?? []) : [],
+    loading: on && q.isPending,
+    error: q.error ? why(q.error) : null,
+    trouble: trouble(q.error),
+  };
 }
 
 /** One directory of a session's workspace, off the worker. */

@@ -795,6 +795,14 @@ const server = createServer(async (req, res) => {
     /* No fallback configured, said explicitly. */
     "/api/v1/sessions/s_1/fallback": { enabled: false, order: [] },
     /* What a tracker is scoped to. */
+    /* Trello's scopes are boards, keyed by board id, which search and the lists route take as they are. */
+    "/api/v1/trackers/trello/scopes": [
+      { key: "5f1b2c3d4e5f6a7b8c9d0e1f", label: "Roadmap" },
+      { key: "60a1b2c3d4e5f6a7b8c9d0e1", label: "Support inbox" },
+    ],
+    /* The lists of the picked board, left to right. Done is there and empty,
+       because a real board has columns nothing recent sits in. */
+    "/api/v1/trackers/trello/columns": TRELLO_COLUMNS,
     "/api/v1/trackers/gh_1/scopes": [
       { id: "acme/web", label: "acme/web" },
       { id: "acme/api", label: "acme/api" },
@@ -839,7 +847,12 @@ const server = createServer(async (req, res) => {
       { id: "gitea_01k", kind: "gitea", label: "Gitea", gitHost: "code.acme.dev", connected: false, configured: false, identity: null, builtin: false, maySetApplication: true, sharedApplication: false, authModes: ["token"], kinds: ["issue", "pullRequest"], changeNoun: "pull request" },
     ],
     "/api/v1/trackers": scene === "no-trackers" ? [] : TRACKERS,
-    "/api/v1/tasks": scene === "no-tasks" ? { more: false, next: null, tasks: [] } : TASKS,
+    /* Every source answered `TASKS` before Trello; only Trello has cards of its own. */
+    "/api/v1/tasks": scene === "no-tasks"
+      ? { more: false, next: null, tasks: [] }
+      : url.searchParams.get("source") === "trello"
+        ? trelloPage(url.searchParams)
+        : TASKS,
     "/api/v1/colleagues": scene === "no-people" ? [] : COLLEAGUES,
     "/api/v1/teams": scene === "no-people" ? [] : TEAMS,
     "/api/v1/directories": scene === "no-dirs" ? [] : DIRECTORIES,
@@ -904,6 +917,28 @@ const server = createServer(async (req, res) => {
   };
 
   if (path in routes) return json(res, routes[path]);
+  /* One task, with what is attached to it. Only `hJ5kL2mN` has anything:
+     a screenshot, a PDF and a Figma link, so starting from it shows a
+     picture chip, a file chip and a line under the body. */
+  if (path === "/api/v1/tasks/one") {
+    const wanted = url.searchParams.get("url") ?? "";
+    const found = [...TRELLO_CARDS, ...TASKS.tasks].find((t) => t.url === wanted);
+    if (!found) return json(res, { code: "NotFound", message: "no such task" }, 404);
+    return json(res, { ...found, attachments: TRELLO_ATTACHMENTS[found.key] ?? [] });
+  }
+  /* The bytes, by card and id, as the server serves them: only an id on that
+     card's list, and nothing for a link. */
+  if (path === "/api/v1/tasks/attachment") {
+    const key = /trello\.com\/c\/([A-Za-z0-9]+)/.exec(url.searchParams.get("url") ?? "")?.[1];
+    const found = (TRELLO_ATTACHMENTS[key] ?? []).find((a) => a.id === url.searchParams.get("id"));
+    if (!found || !found.upload) return json(res, { code: "NotFound", message: "no such attachment" }, 404);
+    res.writeHead(200, {
+      "content-type": found.mime,
+      "content-disposition": `attachment; filename="${found.name}"`,
+      "access-control-allow-origin": "*",
+    });
+    return res.end(Buffer.from(ATTACHMENT_BYTES[found.id], "base64"));
+  }
   /* The file itself. `useFileText` reads the body as bytes and decides for
      itself whether it is text, a picture or too big — so this answers with
      the text and nothing around it. */
@@ -1349,6 +1384,7 @@ const PROVIDER_KINDS = [
 const TRACKERS = [
   { id: "gh_1", kind: "github", label: "GitHub", host: "github.com", connected: true, auth: "gitProvider", kinds: ["issue", "pullRequest"], changeNoun: "pull request", scopeKind: "repos", keyUrl: null, secret: null, path: null },
   { id: "tr_linear", kind: "linear", label: "Linear", host: "linear.app", connected: false, auth: "apiKey", kinds: ["ticket"], changeNoun: "change", scopeKind: "teams", keyUrl: "https://linear.app/settings/api", secret: null, path: null },
+  { id: "trello", kind: "trello", label: "Trello", host: "trello.com", connected: true, auth: "apiKey", kinds: ["ticket"], changeNoun: "change", scopeKind: "boards", keyUrl: null, secret: null, path: null },
 ];
 
 /**
@@ -1409,6 +1445,61 @@ const DONE_RUN = {
   finishedAt: minutesAgo(21580),
   steps: RUNNING.steps.map((t) => ({ ...t, state: "done", detail: null })),
 };
+
+/**
+ * Three Trello cards, one per list, so the status in the row has three
+ * different things to say. A card has no repository; its key is the short link.
+ *
+ * **And a backlog of forty more in To do**, so a column holds more than one
+ * page and the board's Load more can be reached and pressed.
+ */
+const TRELLO_CARDS = [
+  { id: "trello:aB3dE9fG", key: "aB3dE9fG", kind: "ticket", source: "trello", state: "open", status: "To do", title: "Draft the launch checklist", repo: null, url: "https://trello.com/c/aB3dE9fG", updatedAt: minutesAgo(50), body: null, labels: [{ name: "launch", colour: null }], assignees: [] },
+  { id: "trello:hJ5kL2mN", key: "hJ5kL2mN", kind: "ticket", source: "trello", state: "open", status: "Doing", title: "Import the old support macros", repo: null, url: "https://trello.com/c/hJ5kL2mN", updatedAt: minutesAgo(180), body: "Two hundred macros, most of them duplicates.", labels: [{ name: "bug", colour: "red" }], assignees: [{ login: "ana", avatar: null }] },
+  { id: "trello:pQ8rS3tU", key: "pQ8rS3tU", kind: "ticket", source: "trello", state: "open", status: "Review", title: "Check the export against the new schema", repo: null, url: "https://trello.com/c/pQ8rS3tU", updatedAt: minutesAgo(900), body: null, labels: [], assignees: [] },
+  ...Array.from({ length: 40 }, (_, i) => {
+    const key = `bk${String(i + 1).padStart(2, "0")}Xy7z`;
+    return { id: `trello:${key}`, key, kind: "ticket", source: "trello", state: "open", status: "To do", title: `Backlog item ${i + 1}`, repo: null, url: `https://trello.com/c/${key}`, updatedAt: minutesAgo(1000 + i * 60), body: null, labels: i % 3 === 0 ? [{ name: "later", colour: null }] : [], assignees: [] };
+  }),
+];
+
+/** What is attached to a card, by its short link, as `/tasks/one` lists it. */
+const TRELLO_ATTACHMENTS = {
+  hJ5kL2mN: [
+    { id: "5f1b2c3d4e5f60718293a4b5", name: "Macro editor.png", mime: "image/png", bytes: 151, url: "https://trello.com/1/cards/5f1b2c3d4e5f60718293a4b0/attachments/5f1b2c3d4e5f60718293a4b5/download/Macro_editor.png", upload: true },
+    { id: "5f1b2c3d4e5f60718293a4b6", name: "Macro export.pdf", mime: "application/pdf", bytes: 67, url: "https://trello.com/1/cards/5f1b2c3d4e5f60718293a4b0/attachments/5f1b2c3d4e5f60718293a4b6/download/Macro_export.pdf", upload: true },
+    { id: "5f1b2c3d4e5f60718293a4b7", name: "Support macros board", mime: null, bytes: null, url: "https://www.figma.com/file/abc/Support-macros", upload: false },
+  ],
+};
+
+/** The bytes behind those files: a real picture and a minimal PDF. */
+const ATTACHMENT_BYTES = {
+  "5f1b2c3d4e5f60718293a4b5":
+    "iVBORw0KGgoAAAANSUhEUgAAAGQAAABGCAYAAAAZpBqjAAAAXklEQVR4nO3QMQEAAAjAoNm/9Eq4AZIjcKtzdGBqAzsBOwE7ATsBOwE7ATsBOwE7ATsBOwE7ATsBOwE7ATsBOwE7ATsBOwE7ATsBOwE7ATsBOwE7ATsBOwE7AbsPUZEAgXCYVwkAAAAASUVORK5CYII=",
+  "5f1b2c3d4e5f60718293a4b6": Buffer.from("%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n").toString("base64"),
+};
+
+const TRELLO_COLUMNS = [
+  { key: "5f1a0001", label: "To do" },
+  { key: "5f1a0002", label: "Doing" },
+  { key: "5f1a0003", label: "Review" },
+  { key: "5f1a0004", label: "Done" },
+];
+
+/**
+ * One page of Trello cards, as the server pages a search: thirty at a time,
+ * `more` when a full page came back, no total and no cursor. `status` asks for
+ * one column by its key, the list's id, which is what each column of the board
+ * sends.
+ */
+function trelloPage(params) {
+  const status = params.get("status");
+  const name = TRELLO_COLUMNS.find((c) => c.key === status)?.label;
+  const all = status ? TRELLO_CARDS.filter((c) => c.status === name) : TRELLO_CARDS;
+  const at = (Math.max(1, Number(params.get("page")) || 1) - 1) * 30;
+  const tasks = all.slice(at, at + 30);
+  return { more: tasks.length === 30, next: null, total: null, tasks };
+}
 
 const TASKS = {
   more: false,
