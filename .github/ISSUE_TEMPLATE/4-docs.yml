@@ -1,0 +1,31 @@
+# Small on purpose. A docs fix is the one contribution that should cost the
+# person reporting it nothing, and a long form is how you stop getting them.
+name: Documentation
+description: Something in the docs or the README is wrong, missing or misleading.
+title: "[Docs]: "
+labels: ["documentation"]
+body:
+  - type: input
+    id: where
+    attributes:
+      label: Where
+      description: The page, or the file in this repository.
+      placeholder: usefiretower.com/docs/install — or CONTRIBUTING.md, "Getting started"
+    validations:
+      required: true
+
+  - type: textarea
+    id: whats-wrong
+    attributes:
+      label: What is wrong
+      description: >-
+        What it says, and what happened when you followed it. "Misleading" is a
+        useful answer — say what you took it to mean.
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-it-should-say
+    attributes:
+      label: What it should say
+      description: If you already know. A sentence is enough, and we are happy to take it as a pull request instead.

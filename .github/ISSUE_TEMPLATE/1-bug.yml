@@ -1,0 +1,157 @@
+# The environment fields are dropdowns rather than free text, and that is the
+# whole point of them. Prose gives "mac", "macOS", "Sonoma" and "m1" for the
+# same answer and none of it is filterable. A fixed list makes "every bug on
+# Windows desktop" a search, which is the thing anybody triaging will want six
+# months from now.
+name: Bug report
+description: Something is broken. Needs a screenshot or a recording if you can see it, and the environment it happened on.
+title: "[Bug]: "
+labels: ["bug", "needs-info"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, and what Firetower did instead. One or two sentences — the detail goes below.
+      placeholder: Opening the Everything screen takes the whole app down with an error boundary.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What should have happened
+      description: >-
+        The behaviour you expected. If that is obvious to you it is still worth
+        writing — it is often where the disagreement actually is.
+      placeholder: The screen lists sessions across every server.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: >-
+        Numbered, from a state we can get to. "It happens sometimes" is a thing we
+        cannot act on.
+      placeholder: |
+        1. Sign in with at least two servers connected
+        2. Set the scope to "all" in the server strip, or open /fleet
+        3. The screen is replaced by the error boundary
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: A screenshot, or a recording
+      description: >-
+        Required if the problem is something you can see. Drag the image into this
+        box so GitHub hosts it — do not link to a branch on your own fork, because
+        those get rewritten and deleted and the issue becomes a page of broken
+        images. If the bug is genuinely invisible (a crash with no UI, a protocol
+        failure), write "not visible" and paste the logs below instead.
+      placeholder: Drag files here, or click to upload.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Firetower version
+      description: Settings → About, or `firetower --version`.
+      placeholder: 0.53.1
+    validations:
+      required: true
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where you saw it
+      description: The surface the problem appeared on.
+      options:
+        - Desktop — macOS
+        - Desktop — Windows
+        - iOS
+        - Android
+        - Web
+        - Control plane / CLI
+        - Worker
+    validations:
+      required: true
+
+  - type: dropdown
+    id: control-plane
+    attributes:
+      label: Where the control plane runs
+      options:
+        - Linux server — installed with install.sh
+        - Linux server — Docker Compose or another image
+        - macOS — Apple silicon
+        - macOS — Intel
+        - Somewhere else — said in the logs below
+    validations:
+      required: true
+
+  - type: dropdown
+    id: worker
+    attributes:
+      label: Where the worker runs
+      description: The machine the agent itself is on, which is often not the one the control plane is on.
+      options:
+        - macOS — Apple silicon
+        - macOS — Intel
+        - Linux — x86_64
+        - Linux — aarch64
+        - Somewhere else — said in the logs below
+    validations:
+      required: true
+
+  - type: dropdown
+    id: agent
+    attributes:
+      label: Which agent
+      description: Leave it alone if the problem has nothing to do with one.
+      options:
+        - Claude Code
+        - Codex
+        - OpenCode
+        - Grok
+        - Cursor Agent
+        - Kimi
+        - Hermes
+
+  - type: dropdown
+    id: git-host
+    attributes:
+      label: Which git host
+      description: Leave it alone if no repository is involved — a workspace with nothing checked out is a supported shape.
+      options:
+        - GitHub
+        - GitHub Enterprise Server
+        - GitLab
+        - GitLab self-managed
+        - Gitea
+        - Forgejo
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: >-
+        The error text, the worker log, the control plane log. Redact tokens and
+        hostnames — this is a public repository.
+      render: text
+
+  - type: checkboxes
+    id: before-you-submit
+    attributes:
+      label: Before you submit
+      options:
+        - label: I searched the open issues and this is not one of them.
+          required: true
+        - label: I am on the latest release, or I have said above which one I am on and why.
+          required: true
+        - label: I have removed any tokens, keys or private hostnames from what I pasted.
+          required: true

@@ -1,0 +1,142 @@
+# An agent, a git host or a tracker is the commonest outside contribution to
+# this repository — Grok, Cursor, Mistral Vibe, Trello, GitLab — and the
+# generic proposal form asks none of the five questions that decide one.
+#
+# The account question is the whole reason this form exists separately. #260
+# arrived as sixty files and a worker protocol bump, and said plainly in its
+# own body that no Mistral account was available, so authentication,
+# credentials and real model work were unverified. That is one line in an
+# issue, asked before the code, instead of a review that cannot conclude.
+name: Support for an agent, a git host or a task tracker
+description: OpenCode, Hermes, a GitLab dialect, another tracker. Read this one before you start — it asks the questions that decide whether it can be merged.
+title: "[Integration]: "
+labels: ["enhancement", "needs-scope"]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        **An issue is not agreement.** We label a proposal `accepted` when it is
+        one to build — wait for that before you write the implementation. The
+        fastest route to it is [Discord](https://discord.gg/uVa8wsYym).
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What do you want to connect?
+      options:
+        - A coding agent
+        - A git host
+        - A task tracker
+        - Something else
+    validations:
+      required: true
+
+  - type: input
+    id: name
+    attributes:
+      label: Its name
+      placeholder: Mistral Vibe
+    validations:
+      required: true
+
+  - type: dropdown
+    id: do-you-use-it
+    attributes:
+      label: Do you use it yourself?
+      description: >-
+        An integration maintained by somebody who runs it every day stays working.
+        One built from the documentation alone rots at the first upstream change.
+      options:
+        - Daily, against real work
+        - Now and then
+        - "No — I would like it to exist"
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: >-
+        **The next field is the one that decides this.** An integration that cannot
+        be run against a real account cannot be accepted, however good the code is —
+        we have no way to verify it and no way to keep it working. A pull request
+        has already been written here that could not clear this bar, after sixty
+        files of work.
+
+  - type: dropdown
+    id: real-account
+    attributes:
+      label: Can you test it against a real account?
+      description: >-
+        Sign-in, a real turn, credentials surviving a restart, and a genuine
+        expired-or-unentitled error. If the answer is no, say so here and ask in
+        Discord before writing anything.
+      options:
+        - "Yes — a paid account I can use for acceptance"
+        - "Yes — a free tier that reaches real models"
+        - "No, but I can get one"
+        - "No — and I understand it cannot be merged without one"
+    validations:
+      required: true
+
+  - type: textarea
+    id: how-it-connects
+    attributes:
+      label: How does it connect?
+      description: >-
+        ACP is the cheap route and most new agents take it — see
+        [docs/acp.md](https://github.com/firetower-cloud/firetower/blob/main/docs/acp.md)
+        and
+        [docs/adding-an-agent.md](https://github.com/firetower-cloud/firetower/blob/main/docs/adding-an-agent.md).
+        Say which, and link the upstream protocol documentation.
+      placeholder: >-
+        ACP v1, through the official native vibe-acp archive. Upstream docs: …
+    validations:
+      required: true
+
+  - type: textarea
+    id: authentication
+    attributes:
+      label: How does authentication work?
+      description: >-
+        API key, OAuth device flow, delegated browser sign-in, subscription. This is
+        where integrations get complicated, so it is worth settling before any code
+        exists.
+      placeholder: >-
+        Delegated browser auth — the worker returns a sign-in link the client opens.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: platforms
+    attributes:
+      label: Which platforms can you verify on?
+      description: The machine shapes a worker actually runs on. Tick the ones you can run it against yourself.
+      options:
+        - label: macOS — Apple silicon
+        - label: macOS — Intel
+        - label: Linux — x86_64
+        - label: Linux — aarch64
+
+  - type: dropdown
+    id: protocol
+    attributes:
+      label: Does it change the worker protocol?
+      description: >-
+        A protocol bump forces the server, every worker and all three clients to
+        ship together. If you think it needs one, say so now.
+      options:
+        - I do not think so
+        - "Yes — it needs a new frame, or a changed one"
+        - I do not know yet
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: before-you-submit
+    attributes:
+      label: Before you submit
+      options:
+        - label: I have read docs/adding-an-agent.md (or docs/git-hosts.md / docs/trackers.md) and this fits the shape described there.
+          required: true
+        - label: I will wait for `accepted` before writing the implementation, and I understand a pull request opened before then may be closed without review.
+          required: true

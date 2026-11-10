@@ -1,0 +1,30 @@
+# The chooser at /issues/new/choose. Discord is the first row on purpose.
+#
+# Blank issues are off, so this screen is the only door into the tracker — and
+# a door that only leads to a form is worse than the box it replaced unless it
+# also routes the questions that were never issues. #221 arrived as "Are there
+# any plans to support self-hosted GitLab?" and sat in the list looking exactly
+# like a full design proposal. That is a Discord message, and it gets an answer
+# the same day there.
+#
+# GitHub serves this file from the default branch only, so nothing on this
+# screen changes until it is merged.
+blank_issues_enabled: false
+
+contact_links:
+  - name: Ask in the community — start here
+    url: https://discord.gg/uVa8wsYym
+    about: >-
+      Not sure if it is a bug, or thinking about building something? Ask in Discord
+      first. It is faster than an issue, and it is where work gets scoped before
+      anybody writes code.
+
+  - name: Report a security vulnerability
+    url: https://github.com/firetower-cloud/firetower/security/advisories/new
+    about: >-
+      Privately, never as a public issue. Firetower holds SSH keys, agent credentials
+      and a secrets vault.
+
+  - name: Documentation and getting started
+    url: https://usefiretower.com/docs
+    about: usefiretower.com/docs — the answer to most questions is already there.
