@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.15.0](https://github.com/firetower-cloud/firetower/compare/mobile-v0.14.0...mobile-v0.15.0) (2026-11-10)
+
+
+### Features
+
+* a lead re-routes a child that ran out of allowance ([7bba0e1](https://github.com/firetower-cloud/firetower/commit/7bba0e1dfc86748f0998afb78b9db9679ca01118))
+* a lead re-routes a child that ran out of allowance (recovers [#285](https://github.com/firetower-cloud/firetower/issues/285)) ([ba6f1b9](https://github.com/firetower-cloud/firetower/commit/ba6f1b9bb02d0c98ced249b9f7e89280d6f82ba5))
+* **server:** a profile may leave its engine, machine and placement open ([3a29533](https://github.com/firetower-cloud/firetower/commit/3a29533412e417fd4edc163660a6d93cffeb079c))
+* **server:** a profile says what may happen when a child runs out ([92370cf](https://github.com/firetower-cloud/firetower/commit/92370cfc665e4fedf13abd0aead3a3e6e19608fb))
+* **server:** list_compute, and the prose that said a pin always wins ([141a82b](https://github.com/firetower-cloud/firetower/commit/141a82b407fcb67344d54636afae9c92dc5e59b5))
+
+
+### Bug Fixes
+
+* **brand:** align the README and app icons with the new identity ([ff28a25](https://github.com/firetower-cloud/firetower/commit/ff28a254451835c380b516a9dc8911f5817d9b6e))
+* **mobile:** adopt the monochrome Firetower app icon ([83c56e3](https://github.com/firetower-cloud/firetower/commit/83c56e3c324f3dc87ac8a1284a32eef390d238c2))
+
 ## [0.14.0](https://github.com/firetower-cloud/firetower/compare/mobile-v0.13.0...mobile-v0.14.0) (2026-11-09)
 
 

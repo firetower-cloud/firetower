@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.29.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.28.1...desktop-v0.29.0) (2026-11-10)
+
+
+### Features
+
+* a lead re-routes a child that ran out of allowance ([7bba0e1](https://github.com/firetower-cloud/firetower/commit/7bba0e1dfc86748f0998afb78b9db9679ca01118))
+* a lead re-routes a child that ran out of allowance (recovers [#285](https://github.com/firetower-cloud/firetower/issues/285)) ([ba6f1b9](https://github.com/firetower-cloud/firetower/commit/ba6f1b9bb02d0c98ced249b9f7e89280d6f82ba5))
+* **desktop:** the profile editor says what may happen when a child runs out ([4763c52](https://github.com/firetower-cloud/firetower/commit/4763c52040da59987c9058ef7e8615d53a1c0fdf))
+* **desktop:** the profile editor says which fields are open ([5e77d8d](https://github.com/firetower-cloud/firetower/commit/5e77d8d5628d51b0ce82c1f34dc89e94ab55e976))
+* **server:** a profile may leave its engine, machine and placement open ([3a29533](https://github.com/firetower-cloud/firetower/commit/3a29533412e417fd4edc163660a6d93cffeb079c))
+* **server:** a profile says what may happen when a child runs out ([92370cf](https://github.com/firetower-cloud/firetower/commit/92370cfc665e4fedf13abd0aead3a3e6e19608fb))
+* **server:** list_compute, and the prose that said a pin always wins ([141a82b](https://github.com/firetower-cloud/firetower/commit/141a82b407fcb67344d54636afae9c92dc5e59b5))
+
+
+### Bug Fixes
+
+* **brand:** align the README and app icons with the new identity ([ff28a25](https://github.com/firetower-cloud/firetower/commit/ff28a254451835c380b516a9dc8911f5817d9b6e))
+* **desktop:** a pinned subscription survives a cold open ([5ddd260](https://github.com/firetower-cloud/firetower/commit/5ddd260944949629816589aba00f98fa2d2c0998))
+* **desktop:** a shared profile reads its own workspace as its own ([242557e](https://github.com/firetower-cloud/firetower/commit/242557efd4f2fbbe369c4f57390e3082d1aab251))
+* **desktop:** adopt the monochrome Firetower app icon ([9c6f2ab](https://github.com/firetower-cloud/firetower/commit/9c6f2ab402525d86bcb8bb324c38f75275799e5a))
+* **desktop:** give the skill import screen the page's padding ([80216b5](https://github.com/firetower-cloud/firetower/commit/80216b5a08700882c40fd5b59ac597373f48bff7))
+* **desktop:** give the skill import screen the page's padding ([8579b62](https://github.com/firetower-cloud/firetower/commit/8579b622aa4921dcc6582a42413badffac1b827d))
+* **desktop:** the read-back keeps the grant when all three fields are open ([89174a4](https://github.com/firetower-cloud/firetower/commit/89174a44d4022eb05900e903be1eed341e161a20))
+
 ## [0.28.1](https://github.com/firetower-cloud/firetower/compare/desktop-v0.28.0...desktop-v0.28.1) (2026-11-09)
 
 
