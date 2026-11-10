@@ -187,8 +187,14 @@ export function Picker({
           people get stuck in. */}
       <Pressable className="flex-1 bg-black/60" onPress={leave} />
       <GestureDetector gesture={drag}>
+      {/* **`float`, not `panel`.** This is one of the five surfaces that sit
+          over the page, and coverage §7 names it: in dark they were filled
+          with the page's own colour and separated by a shadow that renders
+          nothing below ~1% luminance, so every one measured ΔE 0.00 against
+          the page. The other four were swept to `--p-float` and this one was
+          not — `bg-panel` has been here since the first client. */}
       <Animated.View
-        className="rounded-t-2xl border-t border-line bg-panel"
+        className="rounded-t-2xl border-t border-line bg-float"
         style={[
           { paddingBottom: insets.bottom + 8, marginLeft: insets.left, marginRight: insets.right, maxHeight: "72%" },
           slide,
