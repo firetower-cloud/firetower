@@ -31,6 +31,38 @@ server performs recovery even when no browser is open, and does not wait for a
 running turn or an unanswered approval to clear first. Each target is attempted
 at most once per saved order; a switching error disables automatic recovery.
 
+## A lead moving a child
+
+Recovery above is the server acting for a person who is not there. It is not
+the only party that can act: a child started by a Manager died on a limit, and
+the Manager is a separate session on a separate allowance that is still
+running and is told what happened. It can read every subscription's remaining
+allowance with `list_compute` and move the child onto one with `children`'s
+`switch`, at the moment of the failure rather than from a list written in
+advance.
+
+Two profiles have to agree, and both default to today's behaviour.
+
+**The child's profile** grants the latitude, under *If it reaches usage limit*:
+*Wait for human action* (the default — nobody moves it without a person), *Let
+the lead pick another subscription* (one for the engine it already runs), or
+*Let the lead pick another subscription and engine*. The third is how the
+acknowledgement of a destination agent's default permissions gets given: by a
+person, in advance, once — a lead has read no prose and cannot give one, so
+without it a cross-agent move is refused. All three are enforced by the server,
+not only drawn.
+
+**The Manager's own profile** decides whether it spends that latitude, under
+*When a child runs out*: *Re-route it* picks one and carries on, *Ask me first*
+stops and puts the choice to the person as a question with one option per
+subscription, each carrying its limit, its reset and how old that reading is.
+
+A move within one engine continues the child's own conversation, and its lead
+is told. A move to another engine starts a new conversation in the same
+workspace, as a hand-off between agents always has — and that continuation is
+still the same lead's child, so the lead can steer it and is told when it hands
+back.
+
 ## Limits
 
 Claude Code's structured `rate_limit_event` and Codex's
