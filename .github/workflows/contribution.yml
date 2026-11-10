@@ -1,6 +1,6 @@
 # A pull request has to show what it changed.
 #
-# A reviewer cannot see a screen from a diff. #283 moves a List/Board toggle, a
+# A reviewer cannot see a screen from a diff. #283 adds a List/Board toggle, a
 # column on every task row and attachment chips in the composer, across desktop
 # and mobile — 84 files — and carries no picture of any of it, so the only way
 # to review it is to build it. #260 does have screenshots, and they are served
@@ -237,10 +237,15 @@ jobs:
           fi
 
           if [ "$fails" -eq 0 ]; then
+            case "$evidence" in
+              hosted)    shown="an image GitHub is hosting" ;;
+              elsewhere) shown="images, none of them GitHub-hosted" ;;
+              *)         shown="none" ;;
+            esac
             say "### ✓ the pull request shows its work"
             say ""
             say "$(plural "$files" file), +$added lines. $ui under \`web/\`, \`desktop/\` or \`mobile/\`."
-            say "Evidence: $evidence. Sections: all four present. Linked issue: $linked."
+            say "Evidence: $shown. Sections: all four present. Linked issue: $linked."
             say ""
           fi
 
