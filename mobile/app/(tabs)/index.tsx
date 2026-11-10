@@ -55,6 +55,7 @@ import { usePending } from "~/api/pending";
 import { useAnswerRequest } from "~/api/generated/sessions/sessions";
 import { Peek, usePeekable } from "~/ui/Peek";
 import { Servers } from "~/ui/Servers";
+import { Unreachable } from "~/ui/Unreachable";
 import { StartBox, type Chip, type Pick_ } from "~/ui/StartBox";
 import { Waiting } from "~/ui/Waiting";
 import { COLUMN, dottedChips, posterColumns } from "~/ui/measure";
@@ -241,11 +242,8 @@ export default function Home() {
     </View>
   );
 
-  /* **Not answering.** Said as its own screen rather than as an empty list:
-     reading "nothing is running" when the server is unreachable is the lie
-     that costs the most trust. The guidance is the phone's own — a Firetower
-     is never on the public internet, so a phone reaches one over a mesh VPN,
-     and *is Tailscale on* is the question that actually fixes it. */
+  /* **Not answering.** Said as its own screen rather than as an empty list —
+     see `Unreachable`, which the Workspaces destination draws too. */
   if (error && live.length === 0) {
     return (
       <View
@@ -254,28 +252,7 @@ export default function Home() {
         style={edges}
       >
         {header}
-        <View className="flex-1 items-center justify-center gap-2.5 px-9">
-          <Text className="text-center font-medium text-bone" style={{ fontSize: size.display, lineHeight: size.display * 1.18 }}>
-            {here?.org ?? "That server"} is not answering.
-          </Text>
-          <Text
-            className="max-w-[30ch] text-center font-sans text-dim"
-            style={{ fontSize: size.read, lineHeight: size.read * 1.6 }}
-          >
-            A Firetower is never on the public internet, so this phone reaches one over your mesh
-            VPN. Is Tailscale on?
-          </Text>
-          <Pressable
-            testID="retry"
-            onPress={refresh}
-            className="mt-2.5 rounded-full bg-raise px-5 py-2.5"
-            android_ripple={{ color: color.overlay }}
-          >
-            <Text className="font-sans text-dim" style={{ fontSize: size.body }}>
-              Try again
-            </Text>
-          </Pressable>
-        </View>
+        <Unreachable org={here?.org ?? "That server"} onRetry={refresh} />
         {servers ? <Servers onClose={() => setServers(false)} /> : null}
       </View>
     );
@@ -351,7 +328,12 @@ export default function Home() {
           {rest > 0 ? (
             <Pressable
               testID="more-waiting"
-              onPress={() => router.push("/workspaces")}
+              /* **`navigate`, not `push`.** Workspaces is a destination now,
+                 and pushing one puts a second copy on the stack with a back
+                 chevron the tab has no use for — the same screen arriving two
+                 ways with two back behaviours, while the system tab bar
+                 lights the wrong item. */
+              onPress={() => router.navigate("/(tabs)/workspaces")}
               className="h-11 flex-row items-center rounded-full border border-line px-4"
               android_ripple={{ color: color.overlay }}
             >

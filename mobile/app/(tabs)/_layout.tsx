@@ -1,13 +1,41 @@
 /**
- * Four tabs and a stack. No drawer.
+ * Five tabs and a stack. No drawer.
  *
- * **Dashboard, Tasks, Artifacts, You** — and three of the four are the desk's
- * own words for the same objects: `Dashboard`, `Tasks` and `Artifacts` are its
- * ⌘1, ⌘2 and ⌘3, same object, same word, same glyph. A phone does not get a
- * different name for a thing the desk already named.
+ * **Dashboard, Workspaces, Tasks, Artifacts, You** — and four of the five are
+ * the desk's own words for the same objects: `Dashboard`, `Tasks` and
+ * `Artifacts` are its ⌘1, ⌘2 and ⌘3, same object, same word, same glyph. A
+ * phone does not get a different name for a thing the desk already named.
  *
- * Two of those are changes, and both are the redesign catching up with what
- * the desk deleted:
+ * ## Why the fifth does not break that rule
+ *
+ * It was four, and the argument for four was this one — so the fifth was
+ * checked against it rather than waved through. **The desk already has this
+ * list and already calls it Workspaces**: `desktop/src/ui/RailPanel.tsx:265`
+ * draws `<Head name="Workspaces">`, and the component behind it is
+ * `function Workspaces()`. It is the Dashboard destination's *rail panel* —
+ * the 252pt column beside ⌘1, opened with ⌘\.
+ *
+ * So the honest statement of the change is narrower than "a fifth tab": **the
+ * desk's Dashboard panel becomes the phone's second destination.** No desk
+ * concept is renamed and none is invented. A phone has no rail to hang a panel
+ * off, and at 390, 466 and 669 there is no width to dock one into either —
+ * which is the band rule in `measure.ts`, not a preference — so the thing the
+ * desk keeps as a panel needs a *place* here.
+ *
+ * **Nothing is renamed to make room.** Dashboard stays Dashboard; calling it
+ * *Home* now that a second tab holds the list is exactly the move this file
+ * forbids, because the desk does not say Home. Its job is unchanged anyway:
+ * start work, and say what is waiting.
+ *
+ * **What it costs, which is real.** Five is the ceiling. iOS shows at most
+ * five before it replaces the last with *More…* and buries everything past it
+ * in a list; Material's bottom navigation is specified for three to five. The
+ * **sixth destination is now impossible**, and the next thing the phone wants
+ * a place for has to displace something rather than join it.
+ *
+ * ## The two the redesign deleted
+ *
+ * Both are the redesign catching up with what the desk deleted:
  *
  * - **Not `Inbox`.** The desk retired `Fleet.tsx`, which its own delta table
  *   calls *the unified inbox as a screen*. A phone still calling it the Inbox
@@ -27,7 +55,7 @@
  * moment you switch above it. `mobile/STYLE.md` still describes the old four
  * and is stale on this; see the note there.
  *
- * The fourth slot is the person, because a phone has no foot of a rail to put
+ * The last slot is the person, because a phone has no foot of a rail to put
  * them at.
  *
  * The tab bar gets no ember. It is furniture, and ember answers one question.
@@ -100,12 +128,24 @@ function Signed() {
         <NativeTabs.Trigger.Label>Dashboard</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
 
+      {/* The second slot, between the Dashboard and Tasks, because it is the
+          Dashboard's own panel on the desk and it reads as belonging beside
+          it. `square.stack` because the thing is a stack of places: the three
+          glyphs already spoken for are a house, a checklist and a square on a
+          circle, and nothing in that set reads as a list. `list.bullet` was
+          the alternative and it names the shape of the screen rather than
+          what is on it. */}
+      <NativeTabs.Trigger name="workspaces">
+        <NativeTabs.Trigger.Icon sf="square.stack" md="layers" />
+        <NativeTabs.Trigger.Label>Workspaces</NativeTabs.Trigger.Label>
+      </NativeTabs.Trigger>
+
       <NativeTabs.Trigger name="tasks">
         <NativeTabs.Trigger.Icon sf="checklist" md="checklist" />
         <NativeTabs.Trigger.Label>Tasks</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
 
-      {/* ⌘3 on the desk, the third slot here. A destination rather than a
+      {/* ⌘3 on the desk, the fourth slot here. A destination rather than a
           pushed route: artifacts outlive the workspace that made them —
           `artifacts` has foreign keys to `users` and `organizations` and to
           nothing else — so the library is yours, not a workspace's. */}
