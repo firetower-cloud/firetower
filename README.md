@@ -112,6 +112,15 @@ and a work one, or two GitLabs. See [Git hosts](docs/git-hosts.md).
 | Kimi | Supported |
 | Hermes | Looking for contributions |
 
+## Contributing
+
+[CONTRIBUTING.md](CONTRIBUTING.md) is the whole of it — the toolchain, and how a
+change gets in. The short version: talk to us in the
+[community](https://discord.gg/uVa8wsYym) first, open an issue from the
+[chooser](https://github.com/firetower-cloud/firetower/issues/new/choose), and
+wait for it to be labelled `accepted` before you build it. A fix under about
+fifty lines, with a screenshot, needs no issue at all.
+
 ## Licence
 
 AGPL-3.0-only. Copyright © Westlabs LLC.
