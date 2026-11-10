@@ -3,7 +3,7 @@
 Running Firetower needs Docker and one compose file — that is the
 [README](README.md). Building it needs a toolchain, and that is this.
 
-## Before you start
+## How a change gets in
 
 > [!WARNING]
 > **Talk to us before you write anything beyond a small fix.**
@@ -14,6 +14,88 @@ Running Firetower needs Docker and one compose file — that is the
 > you, or that we won't merge. Adding a feature also isn't always the right
 > answer — often the better fix is a smaller one, or none at all — and that is
 > a much easier conversation to have before the code exists than after.
+
+Four steps, and the third is the one that did not exist before.
+
+1. **Talk to us in the [Discord](https://discord.gg/uVa8wsYym).** It is faster
+   than an issue, and it is where work gets shaped before anybody writes code.
+2. **Open an issue** from
+   [the chooser](https://github.com/firetower-cloud/firetower/issues/new/choose)
+   — there is a form for a bug, for a proposal, for an agent or a git host or a
+   tracker, and for the docs. The forms ask up front for the things we would
+   otherwise have to ask for in a comment a week later.
+3. **Wait for a maintainer to label it `accepted`.** An issue is not agreement.
+   An open proposal is a question; `accepted` is the answer, and it means we
+   have settled what the thing is and that we want it built.
+4. **Then build it**, and open a pull request that links the issue.
+
+Step 3 is the one this guide used to be missing, and its absence is expensive.
+Two of the largest pull requests open here today each opened an issue first,
+exactly as this page asked — and then wrote thousands of lines before anybody
+had agreed what they were. One is 84 files and ends by asking which half should
+be cut. The advice was followed and the outcome did not change, because the
+advice stopped one step short.
+
+**The carve-out, because none of that should stand in the way of a good small
+fix: a change under roughly fifty lines, with a screenshot if you can see it,
+needs no issue at all.** Open the pull request. #256 — two files, the crash on
+screen with its error text, the root cause traced to the pull request that
+caused it, and a regression test that fails without the change — should never
+have needed one, and we would rather have ten of those than one more large
+pull request nobody agreed to.
+
+If you skip all of it and arrive with the code already written, we will read
+it, and we may still take it. But a pull request opened against an issue
+nobody accepted may be closed without review, and that is a worse position for
+you than for us.
+
+### What a pull request has to show
+
+[`.github/pull_request_template.md`](.github/pull_request_template.md) is
+prefilled when you open one, and it asks for five things:
+
+* **What changes** — grouped by surface, two sentences a bullet. If you need a
+  paragraph, it is probably two pull requests.
+* **Why** — with `Closes #`, pointing at an issue labelled `accepted`.
+* **Screenshots** — a row per user path you touched, before and after, on every
+  surface it appears on. The rule is below, in full.
+* **How it was checked** — what you actually ran. `just gen-check`, `just test`,
+  and whether you put it in front of a real control plane and a real worker.
+  "Tested locally" tells a reviewer nothing.
+* **What I did not do** — deliberate omissions and known gaps. On a pull request
+  of any size this is never "nothing", and it is what tells a reviewer where to
+  look hardest.
+
+Every commit on the branch has to be a Conventional Commit — see
+[Commit messages](#commit-messages). That one is a reword, never a code change.
+
+### The screenshot rule
+
+**A change under `web/`, `desktop/` or `mobile/` needs a picture of every user
+path it touches, and `.github/workflows/contribution.yml` fails the pull request
+without one.** Not one hero shot of the happy path. A screen you changed, a
+screen you added, and a screen you only *might* have disturbed all get a row. A
+change that lands on more than one surface shows all of them — a desktop
+screenshot is not evidence about the phone — and a flow that only reads as a
+flow gets a recording instead.
+
+**Drag the images into the comment box so that GitHub hosts them. Do not link a
+branch on your own fork.** GitHub does not proxy those: the page points straight
+at your repository, so the picture a reviewer approved can be changed or deleted
+afterwards by somebody who is not us, and a deleted fork turns the pull request
+into a page of broken images. The check accepts
+`user-images.githubusercontent.com`, `private-user-images.githubusercontent.com`
+and `github.com/user-attachments/assets/`, and refuses everything else for that
+reason rather than to be awkward.
+
+What the check cannot do, so that you hear it here rather than find it later: no
+check can tell a real screenshot of the changed screen from a 1×1 pixel. What it
+buys is evidence that is still there, and still the same picture, six months
+after somebody approved it. Whether it shows the right thing is a person
+reading it.
+
+Everything else the check has to say — the size of the diff, a missing linked
+issue — is a warning and never a failure.
 
 ## Request for contribution
 
