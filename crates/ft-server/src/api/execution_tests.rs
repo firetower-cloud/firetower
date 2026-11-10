@@ -3079,9 +3079,21 @@ async fn list_compute_answers_machines_engines_and_subscriptions_together() {
             .await
             .unwrap();
     }
+    /* Eleven and a half minutes, not eleven — and the half is the whole
+    point. `how_long_ago` floors `seconds / 60` on *this process's* clock
+    while `observed_at` is written by `now()` on *Postgres'*, so a reading
+    placed exactly on a minute boundary reports 10 or 11 depending on which
+    of the two is a fraction ahead at the moment the test runs. That made
+    this assertion fail about one run in a hundred under load.
+
+    The flake is in the fixture, so that is what moves: placing the reading
+    in the middle of its minute leaves thirty seconds of slack in either
+    direction and keeps the assertion exact. The rounding itself is not
+    touched — a cause inferred from one failure's output is not grounds for
+    changing what every reader of this tool is told. */
     sqlx::query(
         "INSERT INTO agent_account_limits(account_id,scope,status,used_percent,observed_at)
-         VALUES('a_good','five_hour','allowed',24,now() - interval '11 minutes')",
+         VALUES('a_good','five_hour','allowed',24,now() - interval '11 minutes 30 seconds')",
     )
     .execute(state.db.pool())
     .await
@@ -3777,6 +3789,133 @@ async fn a_spawned_child_carries_the_profile_it_was_started_as() {
     .await
     .expect("an ad-hoc child starts");
     assert_eq!(child_of(&state, &lead, "c3").await.profile_id, None);
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// A Manager told to re-route still cannot move a child told to wait.
+///
+/// **It is refused by construction today, and that is exactly why this is
+/// here.** `reroute` never reads the lead's `on_child_limit`, because that
+/// setting says whether a Manager asks the person first and asking ends in
+/// the same call once they have answered — so there is nothing to check. A
+/// property that holds because nobody wrote the branch is stronger than a
+/// test today and weaker than one tomorrow: this fails the moment somebody
+/// adds a lead-side branch that reads the Manager's own setting as
+/// permission, which is the plausible mistake.
+///
+/// The grant is the child's and only the child's. Both halves are asserted:
+/// the `wait` child is refused however the Manager is set, and the `same`
+/// child is not refused *for this reason* — the engine check beyond it is a
+/// different test.
+#[tokio::test]
+async fn a_manager_set_to_reroute_still_cannot_move_a_child_told_to_wait() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    ready.store(true, Ordering::SeqCst);
+    state
+        .db
+        .mark_host_online(
+            &host.id,
+            "test",
+            4,
+            8192,
+            &ft_core::DockerState::running("27.0.3"),
+        )
+        .await
+        .unwrap();
+    // A Manager that re-routes on its own, rather than the fixture's default.
+    let manager = saved_profile(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Ada, the lead",
+            "does": "Breaks work up and hands it out",
+            "placement": "here",
+            "canDelegate": true,
+            "onChildLimit": "reroute",
+        }),
+    )
+    .await;
+    let lead = lead_running(&state, &host, &owner, Agent::ClaudeCode, &manager).await;
+    assert_eq!(
+        state
+            .roles
+            .one(&owner, &manager, crate::access::Level::Viewer)
+            .await
+            .unwrap()
+            .unwrap()
+            .on_child_limit,
+        "reroute",
+        "the lead really is set to the permissive answer"
+    );
+    let account = a_subscription(&state, &owner, "a_other", Agent::ClaudeCode).await;
+
+    saved_profile(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Careful",
+            "does": "Does work nobody may move",
+            "placement": "here",
+            "agent": "ClaudeCode",
+            "onUsageLimit": "wait",
+        }),
+    )
+    .await;
+    let waits = a_child_that_ran_out(&state, &host, &lead, "r1", "Careful").await;
+
+    let refused = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "rw",
+            "children",
+            serde_json::json!({ "action": "switch", "id": waits.id.as_str(), "account": account }),
+        ),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(
+        refused.contains("wait for human action"),
+        "the Manager's own setting does not widen the child's grant: {refused}"
+    );
+
+    // And the other half: the same Manager against a child that does allow
+    // it gets past this gate. Whatever happens after is another test's.
+    saved_profile(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Movable",
+            "does": "Does work a lead may move",
+            "placement": "here",
+            "agent": "ClaudeCode",
+            "onUsageLimit": "same",
+        }),
+    )
+    .await;
+    let movable = a_child_that_ran_out(&state, &host, &lead, "r2", "Movable").await;
+    let said = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "rm",
+            "children",
+            serde_json::json!({ "action": "switch", "id": movable.id.as_str(), "account": account }),
+        ),
+    )
+    .await;
+    let told = match &said {
+        Ok(ok) => ok.clone(),
+        Err(e) => e.to_string(),
+    };
+    assert!(
+        !told.contains("wait for human action"),
+        "a child that allows it is not refused by the grant: {told}"
+    );
 
     state.fleet.stop_supervising(&host.id).await;
 }
