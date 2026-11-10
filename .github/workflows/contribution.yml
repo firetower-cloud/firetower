@@ -1,0 +1,250 @@
+# A pull request has to show what it changed.
+#
+# A reviewer cannot see a screen from a diff. #283 moves a List/Board toggle, a
+# column on every task row and attachment chips in the composer, across desktop
+# and mobile — 84 files — and carries no picture of any of it, so the only way
+# to review it is to build it. #260 does have screenshots, and they are served
+# from a branch of the contributor's own fork: GitHub does not proxy those, so
+# what a reviewer approved can be rewritten or deleted afterwards by somebody
+# who is not us, and a deleted fork turns the pull request into a page of
+# broken images. Both are cheap to catch here and expensive to find later.
+#
+# So a change under `web/`, `desktop/` or `mobile/` fails unless the body
+# carries an image GitHub itself is hosting, and a body missing the template's
+# sections fails. Size and a missing linked issue are warnings and never more
+# than that — a large pull request is a conversation, not an error.
+#
+# A failure here is never a failure of the code. It is the description, and a
+# description is edited in place: `edited` is in the trigger list precisely so
+# that fixing the body re-runs this and turns it green without a push.
+#
+# Said plainly, so nobody discovers it later: no regex can tell a real
+# screenshot of the changed screen from a 1×1 pixel, or from an image lifted
+# out of another pull request. What this buys is durable, immutable evidence —
+# a picture that is still the picture six months after it was approved.
+# Whether it shows the right thing stays a human judgement, and always will.
+#
+# It posts no comment and sets no label, and it holds `contents: read` and
+# nothing else. That is deliberate. Commenting is the only part of this that
+# would need a writable token, and wanting one on a fork's pull request is how
+# a repository ends up on the `_target` variant of this trigger — the one that
+# runs in the base repository's context, holding its secrets, and is then asked
+# to check out the fork's code. A job summary and a red check get nearly all of
+# the value and leave this workflow unable to do any harm at all.
+name: contribution
+
+on:
+  pull_request:
+    # `edited` is the one commits.yml does not need and this cannot do without.
+    # A commit check re-runs on a push; a body check has to re-run when the body
+    # changes, or a contributor who fixes the description is left looking at a
+    # red X with no way to clear it.
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+jobs:
+  shows-its-work:
+    name: the pull request shows its work
+    runs-on: ubuntu-latest
+    steps:
+      # The whole history, because the question is "what is on this branch and
+      # not on its base" and a shallow clone cannot answer that.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+
+      - name: the body shows what changed
+        env:
+          # Both of these are written by whoever opened the pull request, which
+          # on a fork is anybody at all. They arrive through `env:` and are only
+          # ever read as data — never pasted into this script with `${{ }}`,
+          # which would run a contributor's title as shell. commits.yml set the
+          # pattern; this keeps it.
+          BODY: ${{ github.event.pull_request.body }}
+          TITLE: ${{ github.event.pull_request.title }}
+          BASE: ${{ github.event.pull_request.base.ref }}
+        run: |
+          set -euo pipefail
+
+          printf '%s' "$BODY" > /tmp/body.raw.md
+          printf '%s' "$TITLE" > /tmp/title.txt
+
+          # A comment is invisible on the rendered page, so it cannot be
+          # evidence and it cannot be a section either.
+          perl -0pe 's/<!--.*?-->//gs' /tmp/body.raw.md > /tmp/body.md
+
+          # Three dots: this branch against where it left its base, which is
+          # the diff a reviewer reads — not against the base as it is now.
+          git diff --name-only "origin/$BASE...HEAD" > /tmp/files.txt
+          git diff --numstat  "origin/$BASE...HEAD" > /tmp/numstat.txt
+
+          files=$(wc -l < /tmp/files.txt | tr -d ' ')
+          added=$(awk '$1 ~ /^[0-9]+$/ { n += $1 } END { print n + 0 }' /tmp/numstat.txt)
+
+          # The three directories a person can see the result of.
+          grep -E '^(web|desktop|mobile)/' /tmp/files.txt > /tmp/ui.txt || true
+          ui=$(wc -l < /tmp/ui.txt | tr -d ' ')
+
+          # GitHub's own user-content hosts, and only those. An image anywhere
+          # else is served live from wherever it lives, by whoever owns it.
+          hosted='user-images\.githubusercontent\.com|private-user-images\.githubusercontent\.com|github\.com/user-attachments/assets/'
+
+          # A picture with a target. The template's own `![](…)` rows are not
+          # one, which is why this asks for the scheme rather than the bang.
+          pictured='!\[[^]]*\][[:space:]]*\([[:space:]]*(https?:|\.{0,2}/)|<img[^>]+src=|<video'
+
+          if grep -qiE "$hosted" /tmp/body.md; then
+            evidence=hosted
+          elif grep -qiE "$pictured" /tmp/body.md; then
+            evidence=elsewhere
+          else
+            evidence=none
+          fi
+
+          # Every missing section in one run. Finding them one at a time costs
+          # a round trip each, and the author is reading this once.
+          : > /tmp/missing.txt
+          for section in "What changes" "Why" "How it was checked" "What I did not do"; do
+            if ! grep -qiE "^[[:space:]]*#{1,6}[[:space:]]*$section" /tmp/body.md; then
+              printf '%s\n' "$section" >> /tmp/missing.txt
+            fi
+          done
+
+          linked=no
+          if grep -qE '(^|[^A-Za-z0-9_])#[0-9]+|/issues/[0-9]+' /tmp/body.md /tmp/title.txt; then
+            linked=yes
+          fi
+
+          : > /tmp/verdict.md
+          say() { printf '%s\n' "$1" >> /tmp/verdict.md; }
+          plural() { if [ "$1" -eq 1 ]; then printf '%s %s' "$1" "$2"; else printf '%s %ss' "$1" "$2"; fi; }
+          fails=0
+
+          if [ "$ui" -gt 0 ] && [ "$evidence" = none ]; then
+            fails=$((fails + 1))
+            echo "::error::this pull request changes what people see, and shows none of it"
+            say "### ✕ this pull request changes what people see, and shows none of it"
+            say ""
+            say "A failure here is never a failure of the code."
+            say ""
+            say "It touches $(plural "$files" file). These are the ones people look at:"
+            say ""
+            say '```'
+            head -n 10 /tmp/ui.txt >> /tmp/verdict.md
+            if [ "$ui" -gt 10 ]; then say "...and $((ui - 10)) more"; fi
+            say '```'
+            say ""
+            say "There is no image in the body that GitHub is hosting."
+            say ""
+            say "Add a row to the Screenshots table for every user path you changed — before"
+            say "and after, on every surface it appears on. Drag the images into the box so"
+            say "GitHub hosts them rather than linking a branch on your fork."
+            say ""
+            say "This is the only check here that is not about the code. It exists because a"
+            say "reviewer cannot see a screen from a diff, and because \"it looks right\" is not"
+            say "something anybody can verify later."
+            say ""
+          elif [ "$ui" -gt 0 ] && [ "$evidence" = elsewhere ]; then
+            fails=$((fails + 1))
+            echo "::error::the images here are ones that can be changed after they are approved"
+            say "### ✕ the images here are ones that can be changed after they are approved"
+            say ""
+            say "A failure here is never a failure of the code."
+            say ""
+            say "This pull request touches $(plural "$ui" file) under \`web/\`, \`desktop/\` or \`mobile/\`,"
+            say "and the body does carry images — but none of them are on a host GitHub"
+            say "controls:"
+            say ""
+            say '```'
+            grep -oiE 'https?://[^][()<>"'"'"'[:space:]]+' /tmp/body.md \
+              | grep -viE "$hosted" \
+              | head -n 5 >> /tmp/verdict.md || true
+            say '```'
+            say ""
+            say "GitHub does not proxy those. The page points straight at the repository they"
+            say "live in, so whoever owns it can change the picture a reviewer approved, or"
+            say "delete it — and a deleted fork turns this into a page of broken images. #256"
+            say "and #260 are both built that way today."
+            say ""
+            say "Drag the file into the comment box instead and GitHub rehosts it. That link"
+            say "is immutable and outlives the fork. The three hosts this accepts are:"
+            say ""
+            say '```'
+            say "user-images.githubusercontent.com"
+            say "private-user-images.githubusercontent.com"
+            say "github.com/user-attachments/assets/"
+            say '```'
+            say ""
+            say "It refuses the others for that reason, and not to be awkward."
+            say ""
+          fi
+
+          if [ -s /tmp/missing.txt ]; then
+            fails=$((fails + 1))
+            echo "::error::the body is missing $(plural "$(wc -l < /tmp/missing.txt | tr -d ' ')" section) the template asks for"
+            say "### ✕ the body is missing sections the template asks for"
+            say ""
+            say "A failure here is never a failure of the code."
+            say ""
+            say "Missing:"
+            say ""
+            say '```'
+            sed 's/^/## /' /tmp/missing.txt >> /tmp/verdict.md
+            say '```'
+            say ""
+            say "They are in \`.github/pull_request_template.md\` — paste the headings back in"
+            say "and fill them. \"What I did not do\" is the one people delete; it is never"
+            say "\"nothing\" on a pull request of any size, and it is what tells a reviewer"
+            say "where to look hardest."
+            say ""
+          fi
+
+          if [ "$files" -gt 30 ] || [ "$added" -gt 1500 ]; then
+            echo "::warning::$files files and +$added lines — large enough that it will sit open"
+            say "### ⚠ $files files and +$added lines"
+            say ""
+            say "Past about 30 files or 1,500 lines a pull request stops being reviewable in"
+            say "one sitting and starts sitting open. Say in a comment which commits could"
+            say "land on their own, or ask in Discord how to split it — #283 is 84 files and"
+            say "ends by asking which half should be cut, and that was a cheaper question"
+            say "before the code than after."
+            say ""
+            say "This is a warning. It does not fail."
+            say ""
+          fi
+
+          if [ "$linked" = no ]; then
+            echo "::warning::nothing here links an issue"
+            say "### ⚠ nothing here links an issue"
+            say ""
+            say "Put \`Closes #123\` in the Why section. The issue wants the \`accepted\` label —"
+            say "that label is the only thing that says a maintainer agreed to this before the"
+            say "code existed, and a pull request without one may be closed without review."
+            say ""
+            say "A fix under about fifty lines with a screenshot needs no issue at all. If that"
+            say "is what this is, ignore this."
+            say ""
+            say "This check cannot read the label. It holds \`contents: read\` and nothing else,"
+            say "so it can see that an issue is linked and not what state it is in. This is a"
+            say "warning. It does not fail."
+            say ""
+          fi
+
+          if [ "$fails" -eq 0 ]; then
+            say "### ✓ the pull request shows its work"
+            say ""
+            say "$(plural "$files" file), +$added lines. $ui under \`web/\`, \`desktop/\` or \`mobile/\`."
+            say "Evidence: $evidence. Sections: all four present. Linked issue: $linked."
+            say ""
+          fi
+
+          cat /tmp/verdict.md >> "$GITHUB_STEP_SUMMARY"
+          cat /tmp/verdict.md
+
+          if [ "$fails" -ne 0 ]; then
+            echo "What failed above is the description, not the diff."
+            echo "Edit the pull request body and this re-runs on its own."
+            exit 1
+          fi
