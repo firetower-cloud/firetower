@@ -1,6 +1,6 @@
 {
   "name": "firetower-web",
-  "version": "0.53.1",
+  "version": "0.54.0",
   "private": true,
   "packageManager": "pnpm@11.21.0",
   "scripts": {

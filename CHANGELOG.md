@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.54.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.53.1...firetower-v0.54.0) (2026-11-10)
+
+
+### Features
+
+* a lead re-routes a child that ran out of allowance ([7bba0e1](https://github.com/firetower-cloud/firetower/commit/7bba0e1dfc86748f0998afb78b9db9679ca01118))
+* a lead re-routes a child that ran out of allowance (recovers [#285](https://github.com/firetower-cloud/firetower/issues/285)) ([ba6f1b9](https://github.com/firetower-cloud/firetower/commit/ba6f1b9bb02d0c98ced249b9f7e89280d6f82ba5))
+* **desktop:** the profile editor says which fields are open ([5e77d8d](https://github.com/firetower-cloud/firetower/commit/5e77d8d5628d51b0ce82c1f34dc89e94ab55e976))
+* **server:** a lead may move a spent child onto another subscription ([20473f4](https://github.com/firetower-cloud/firetower/commit/20473f4e381099e403de32c466baa284f0bac0a2))
+* **server:** a profile may leave its engine, machine and placement open ([3a29533](https://github.com/firetower-cloud/firetower/commit/3a29533412e417fd4edc163660a6d93cffeb079c))
+* **server:** a profile says what may happen when a child runs out ([92370cf](https://github.com/firetower-cloud/firetower/commit/92370cfc665e4fedf13abd0aead3a3e6e19608fb))
+* **server:** an agent can read a whole profile, and write one back ([e53f199](https://github.com/firetower-cloud/firetower/commit/e53f19911d7a0b105688460bafe52fec80144a26))
+* **server:** list_compute, and the prose that said a pin always wins ([141a82b](https://github.com/firetower-cloud/firetower/commit/141a82b407fcb67344d54636afae9c92dc5e59b5))
+* **server:** pick a machine that can run the engine, and say so when none can ([1937162](https://github.com/firetower-cloud/firetower/commit/1937162ad1c35663a300a0a9278bba15ae82dfe7))
+
+
+### Bug Fixes
+
+* **brand:** align the README and app icons with the new identity ([ff28a25](https://github.com/firetower-cloud/firetower/commit/ff28a254451835c380b516a9dc8911f5817d9b6e))
+* **server:** an unknown machine is refused by name, not dumped as a 500 ([065df60](https://github.com/firetower-cloud/firetower/commit/065df604aba5e1e4c98bbba5d623f7e7efbca5b0))
+* **server:** neither of two profiles of one name is read or overwritten ([eb8e8d2](https://github.com/firetower-cloud/firetower/commit/eb8e8d2b0a02d069eb620ce5d88ca2f0d663b92b))
+* **server:** neither of two profiles sharing a name, rather than a guess ([44a016e](https://github.com/firetower-cloud/firetower/commit/44a016e3312262cd656769403f08680098b16251))
+* **server:** spawn resolves a profile name the same way as the other three ([e32b939](https://github.com/firetower-cloud/firetower/commit/e32b93953d7a864899a931603a8ccc7b255c8e7c))
+
 ## [0.53.1](https://github.com/firetower-cloud/firetower/compare/firetower-v0.53.0...firetower-v0.53.1) (2026-11-09)
 
 
