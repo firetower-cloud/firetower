@@ -1166,19 +1166,16 @@ fn names(input: &Value, key: &str) -> Option<Vec<String>> {
 /// a profile that silently does less than was asked for. On `skill_scope`
 /// that is a skill not loaded, invisible until something behaves oddly much
 /// later.
-fn one_named<'a, T>(
+fn at_most_one<'a, T>(
     kind: &str,
     name: &str,
     among: &'a [T],
     named: impl Fn(&T) -> &str,
-    index: &str,
-) -> Result<&'a T> {
+) -> Result<Option<&'a T>> {
     let mut found = among.iter().filter(|t| named(t).eq_ignore_ascii_case(name));
-    let first = found.next().with_context(|| {
-        format!(
-            "there is no {kind} called \"{name}\" you can reach. `{index}` names the ones you can."
-        )
-    })?;
+    let Some(first) = found.next() else {
+        return Ok(None);
+    };
     if found.next().is_some() {
         bail!(
             "\"{name}\" is the name of more than one {kind} you can reach, so it does not say \
@@ -1186,7 +1183,65 @@ fn one_named<'a, T>(
              guess. Rename one, or ask the person which they meant. Nothing was changed."
         );
     }
-    Ok(first)
+    Ok(Some(first))
+}
+
+/// The same, where there being none is itself a refusal.
+fn one_named<'a, T>(
+    kind: &str,
+    name: &str,
+    among: &'a [T],
+    named: impl Fn(&T) -> &str,
+    index: &str,
+) -> Result<&'a T> {
+    at_most_one(kind, name, among, named)?.with_context(|| {
+        format!(
+            "there is no {kind} called \"{name}\" you can reach. `{index}` names the ones you can."
+        )
+    })
+}
+
+/// The one profile of this name the owner can see, for the three tools that
+/// take a profile by name.
+///
+/// **`Roles::by_name` takes the first match and says nothing**, and
+/// `visible()` orders by name, so two profiles called `Engineer` meant
+/// `get_profile` read one without mentioning the other existed and
+/// `update_profile` rewrote whichever Postgres returned first and reported
+/// success. A wrong profile silently overwritten is the worst thing this
+/// surface can do.
+///
+/// Pre-existing, and not left alone: `get_profile` is new and resolves the
+/// same way, so shipping it would have added a second reader to the fault —
+/// and **copying is what this feature is for**, which is precisely how a
+/// second profile of one name comes to exist. The rule is the one the scopes
+/// already keep, which is `d34336c8`'s: neither of two, named, nothing
+/// changed.
+///
+/// `by_name` itself is untouched. It is the right shape for the places that
+/// genuinely want "if there is one", and narrowing it here costs nothing that
+/// widening its signature across the suite would have bought.
+async fn profile_named(
+    state: &AppState,
+    owner: &str,
+    wanted: &str,
+) -> Result<Option<crate::roles::Role>> {
+    let visible = state
+        .roles
+        .visible(owner, crate::access::Level::Viewer)
+        .await?;
+    Ok(at_most_one("profile", wanted.trim(), &visible, |r| r.name.as_str())?.cloned())
+}
+
+/// And where not finding one is a refusal rather than an answer.
+async fn the_profile_named(
+    state: &AppState,
+    owner: &str,
+    wanted: &str,
+) -> Result<crate::roles::Role> {
+    profile_named(state, owner, wanted)
+        .await?
+        .with_context(|| format!("you have no profile called \"{wanted}\""))
 }
 
 /// The profiles a Manager may hand to, by name, as ids.
@@ -1199,14 +1254,22 @@ async fn delegate_scope_from(
     owner: &str,
     wanted: &[String],
     self_name: &str,
-) -> Result<Vec<String>> {
+) -> Result<(Vec<String>, bool)> {
     let visible = state
         .roles
         .visible(owner, crate::access::Level::Viewer)
         .await?;
     let mut out = Vec::new();
+    let mut dropped_self = false;
     for name in wanted {
+        /* A profile may not be on its own team, and the drop is right —
+        `Roles.tsx` filters it out of the picker too, and refusing the whole
+        call over it would throw away the rest of the ask. The *silence*
+        was wrong: an argument accepted and not applied, with nothing said,
+        is the discard this whole body of work exists to remove. It is
+        reported in the ack. */
         if name.eq_ignore_ascii_case(self_name) {
+            dropped_self = true;
             continue;
         }
         let found = one_named(
@@ -1218,7 +1281,7 @@ async fn delegate_scope_from(
         )?;
         out.push(found.id.clone());
     }
-    Ok(out)
+    Ok((out, dropped_self))
 }
 
 /// The skills a profile loads on top of its two switches, by name, as ids.
@@ -1256,22 +1319,35 @@ async fn skill_scope_from(state: &AppState, owner: &str, wanted: &[String]) -> R
 /// that does not is refused rather than dropped — a tick grants a skill
 /// rather than filtering one, and a save that quietly kept less than was
 /// asked for is a profile that does not do what the agent reported.
+///
+/// Returns what the caller asked for and did not get, for the ack to say.
 async fn resolve_scopes(
     state: &AppState,
     owner: &str,
     input: &Value,
     new: &mut crate::roles::NewRole,
     fallback: (&[String], &[String]),
-) -> Result<()> {
+) -> Result<Option<String>> {
+    let mut dropped_self = false;
     new.delegate_scope = match names(input, "delegate_scope") {
-        Some(wanted) => delegate_scope_from(state, owner, &wanted, &new.name).await?,
+        Some(wanted) => {
+            let (ids, dropped) = delegate_scope_from(state, owner, &wanted, &new.name).await?;
+            dropped_self = dropped;
+            ids
+        }
         None => fallback.0.to_vec(),
     };
     new.skill_scope = match names(input, "skill_scope") {
         Some(wanted) => skill_scope_from(state, owner, &wanted).await?,
         None => fallback.1.to_vec(),
     };
-    Ok(())
+    Ok(dropped_self.then(|| {
+        format!(
+            "It is not on its own team: \"{}\" was dropped from `delegate_scope`, because a \
+             profile cannot hand work to itself.",
+            new.name.trim()
+        )
+    }))
 }
 
 /// The run settings a profile pins, checked against what its engine offers.
@@ -1362,16 +1438,17 @@ async fn create_profile(state: &AppState, request: &AgentRequest) -> Result<Stri
     let session = authoring_session(state, request).await?;
     let owner = session.owner.as_str();
     let mut new = new_role_from(&request.input)?;
-    resolve_scopes(state, owner, &request.input, &mut new, (&[], &[])).await?;
+    let dropped = resolve_scopes(state, owner, &request.input, &mut new, (&[], &[])).await?;
     crate::roles::check(&new).map_err(|e| anyhow::anyhow!("{e}"))?;
     let org = state.db.org().await?;
     let (slug, whose) = owner_of(state, &session).await?;
     let id = state.roles.create(&org, owner, &slug, &new).await?;
     let where_it_is = file_profile(state, id.as_str(), &request.input, owner, &whose).await?;
     Ok(format!(
-        "Created the \"{}\" profile in {where_it_is} — {}. {} It's on the Profiles screen now.",
+        "Created the \"{}\" profile in {where_it_is} — {}.{} {} It's on the Profiles screen now.",
         new.name.trim(),
         profile_shape(&new),
+        dropped.map(|d| format!(" {d}")).unwrap_or_default(),
         subscription_note(&new),
     ))
 }
@@ -1381,11 +1458,7 @@ async fn update_profile(state: &AppState, request: &AgentRequest) -> Result<Stri
     let session = authoring_session(state, request).await?;
     let owner = session.owner.as_str();
     let wanted = text(&request.input, "name").context("name the profile to change")?;
-    let existing = state
-        .roles
-        .by_name(owner, &wanted)
-        .await?
-        .with_context(|| format!("you have no profile called \"{wanted}\""))?;
+    let existing = the_profile_named(state, owner, &wanted).await?;
     // Only what was named changes; everything else stays as it is.
     let get_str =
         |key: &str, now: &str| text(&request.input, key).unwrap_or_else(|| now.to_string());
@@ -1443,7 +1516,7 @@ async fn update_profile(state: &AppState, request: &AgentRequest) -> Result<Stri
         name,
         directory: None,
     };
-    resolve_scopes(
+    let dropped = resolve_scopes(
         state,
         owner,
         &request.input,
@@ -1461,9 +1534,10 @@ async fn update_profile(state: &AppState, request: &AgentRequest) -> Result<Stri
     }
     let moved = refile(state, &session, existing.id.as_str(), &request.input).await?;
     Ok(format!(
-        "Updated the \"{}\" profile — {}.{} {}",
+        "Updated the \"{}\" profile — {}.{}{} {}",
         new.name.trim(),
         profile_shape(&new),
+        dropped.map(|d| format!(" {d}")).unwrap_or_default(),
         moved.map(|m| format!(" {m}")).unwrap_or_default(),
         match new.agent.is_some() {
             true =>
@@ -1521,13 +1595,10 @@ async fn get_profile(state: &AppState, request: &AgentRequest) -> Result<String>
     let session = authoring_session(state, request).await?;
     let owner = session.owner.as_str();
     let wanted = text(&request.input, "name").context("name the profile to read")?;
-    // The same resolution and the same not-found wording `update_profile`
-    // uses, so a name that works for one works for the other.
-    let role = state
-        .roles
-        .by_name(owner, &wanted)
-        .await?
-        .with_context(|| format!("you have no profile called \"{wanted}\""))?;
+    // The same resolution and the same wording `update_profile` uses, so a
+    // name that works for one works for the other — including a name that
+    // answers to two profiles, which neither of them will guess at.
+    let role = the_profile_named(state, owner, &wanted).await?;
 
     let mut out = vec![format!("**{}** — {}", role.name, role.does)];
     out.push(String::new());
@@ -1804,8 +1875,13 @@ async fn list_compute(state: &AppState, request: &AgentRequest) -> Result<String
     // When the caller has already said something that settles the machine, the
     // answer is about that machine. A fleet listing would invite it to choose
     // one the child could never land on.
+    // A name matching nothing leaves the answer unscoped, as it always has —
+    // `spawn` refuses that name by name a moment later, listing the ones that
+    // exist. A name matching *two* is refused here: scoping the fleet to the
+    // wrong profile's machine is a confident wrong answer, and which of the
+    // two was meant is exactly what nobody can know.
     let role = match text(&request.input, "role") {
-        Some(wanted) => state.roles.by_name(owner, &wanted).await?,
+        Some(wanted) => profile_named(state, owner, &wanted).await?,
         None => None,
     };
     let placement = role

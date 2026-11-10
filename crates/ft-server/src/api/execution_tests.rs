@@ -4509,3 +4509,193 @@ async fn get_profile_says_when_a_scope_entry_is_gone() {
 
     state.fleet.stop_supervising(&host.id).await;
 }
+
+/// **Two profiles of one name: neither is read, and neither is overwritten.**
+///
+/// The worst thing this surface can do. `Roles::by_name` takes the first
+/// match and `visible()` orders by name, so `update_profile` rewrote
+/// whichever Postgres returned first and reported success — a wrong profile
+/// silently overwritten, which is the failure this whole body of work exists
+/// to remove, on the tool whose purpose is making a second profile like an
+/// existing one.
+///
+/// All three tools that take a profile by name, because the fault was in the
+/// resolution rather than in any one of them.
+#[tokio::test]
+async fn two_profiles_of_one_name_are_read_and_written_by_neither() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let lead = a_lead_that_delegates(&state, &host, &ready, &owner, Agent::ClaudeCode).await;
+
+    let mine = saved_profile(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Engineer",
+            "does": "Mine, and the one that is not to be clobbered",
+            "placement": "here",
+        }),
+    )
+    .await;
+    // A colleague's of the same name, shared — the only way one person
+    // reaches two, and exactly what copying a profile tends to produce.
+    let org = ft_core::OrgId::from_stored(state.db.org().await.unwrap());
+    let ana = state
+        .accounts
+        .create_user(&org, "ana", "ana@example.test", "member")
+        .await
+        .unwrap()
+        .0;
+    let hers = saved_profile(
+        &state,
+        ana.id.as_str(),
+        serde_json::json!({ "name": "Engineer", "does": "Hers", "placement": "here" }),
+    )
+    .await;
+    state
+        .access
+        .set_exception(
+            crate::access::FiledKind::Role,
+            &hers,
+            &owner,
+            crate::access::Level::Writer,
+        )
+        .await
+        .unwrap();
+
+    for (tool, input) in [
+        ("get_profile", serde_json::json!({ "name": "Engineer" })),
+        (
+            "update_profile",
+            serde_json::json!({ "name": "Engineer", "does": "clobbered" }),
+        ),
+    ] {
+        let refused = crate::delegate::handle(&state, &asks(&host, &lead, tool, tool, input))
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(
+            refused.contains("Engineer") && refused.contains("more than one"),
+            "{tool}: it names the ambiguity rather than picking one: {refused}"
+        );
+    }
+    // And neither was touched.
+    assert_eq!(
+        state
+            .roles
+            .one(&owner, &mine, crate::access::Level::Viewer)
+            .await
+            .unwrap()
+            .unwrap()
+            .does,
+        "Mine, and the one that is not to be clobbered"
+    );
+    assert_eq!(
+        state
+            .roles
+            .one(&owner, &hers, crate::access::Level::Viewer)
+            .await
+            .unwrap()
+            .unwrap()
+            .does,
+        "Hers"
+    );
+
+    // `list_compute`'s `role` is the third, and it is scoped by whichever
+    // profile settles the machine — so a guess there is a confident wrong
+    // answer about the fleet.
+    let refused = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "lc",
+            "list_compute",
+            serde_json::json!({ "role": "Engineer" }),
+        ),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(refused.contains("more than one"), "{refused}");
+
+    // A name nothing answers to still leaves `list_compute` unscoped, as it
+    // always has — that half is not what was wrong.
+    assert!(crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "lc2",
+            "list_compute",
+            serde_json::json!({ "role": "No Such Profile" }),
+        ),
+    )
+    .await
+    .is_ok());
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// Dropping a profile from its own team is right; doing it in silence is not.
+#[tokio::test]
+async fn dropping_a_profile_from_its_own_team_is_said_out_loud() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let lead = a_lead_that_delegates(&state, &host, &ready, &owner, Agent::ClaudeCode).await;
+    saved_profile(
+        &state,
+        &owner,
+        serde_json::json!({ "name": "Reviewer", "does": "Reads the diff", "placement": "here" }),
+    )
+    .await;
+
+    let said = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "self",
+            "create_profile",
+            serde_json::json!({
+                "name": "Engineer",
+                "does": "Writes the change",
+                "can_delegate": true,
+                "delegate_scope": ["Engineer", "Reviewer"],
+            }),
+        ),
+    )
+    .await
+    .expect("the rest of the team is still the ask");
+    assert!(
+        said.contains("not on its own team") && said.contains("Engineer"),
+        "an argument accepted and not applied has to be said: {said}"
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// A placement that is not one is refused by name, like the other two.
+#[tokio::test]
+async fn a_placement_that_is_not_one_is_refused_by_name() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let lead = a_lead_that_delegates(&state, &host, &ready, &owner, Agent::ClaudeCode).await;
+    let refused = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "pl",
+            "create_profile",
+            serde_json::json!({
+                "name": "Engineer",
+                "does": "Writes the change",
+                "placement": "somewhere",
+            }),
+        ),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(refused.contains("somewhere"), "{refused}");
+
+    state.fleet.stop_supervising(&host.id).await;
+}

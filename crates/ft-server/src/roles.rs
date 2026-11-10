@@ -299,11 +299,11 @@ pub fn check(new: &NewRole) -> Result<(), Refused> {
     // about the placement, the machine or the engine hands that choice to
     // whichever lead delegates to it.
     if !PLACEMENT.contains(&new.placement.as_str()) {
-        return Err(Refused(
-            "placement is \"here\" (the lead's workspace), \"new\" (its own), or \"lead\" \
-             (let the lead choose)"
-                .into(),
-        ));
+        return Err(Refused(format!(
+            "\"{}\" is not a placement. It is \"here\" (the lead's workspace), \"new\" (its \
+             own), or \"lead\" (let the lead choose).",
+            new.placement
+        )));
     }
     // Open is not unvalidated. Absent lets the lead choose; a name this build
     // does not know is a pin that could never be honoured, and saying so here
