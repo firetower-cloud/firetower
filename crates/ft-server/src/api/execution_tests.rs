@@ -3919,3 +3919,237 @@ async fn a_manager_set_to_reroute_still_cannot_move_a_child_told_to_wait() {
 
     state.fleet.stop_supervising(&host.id).await;
 }
+
+// ─── Reading a whole profile, and copying it ────────────────────────────────
+
+/// A skill of this owner's, live, so `skill_scope` has something real to name.
+async fn a_skill(state: &AppState, owner: &str, name: &str) -> String {
+    let org = state.db.org().await.unwrap();
+    let slug = state.access.personal_root(owner).await.unwrap();
+    state
+        .skills
+        .create(
+            &org,
+            owner,
+            &slug,
+            &crate::skills::NewSkill {
+                name: name.into(),
+                description: format!("what {name} is for"),
+                frontmatter: serde_json::json!({}),
+                body: "# Do the thing\n".into(),
+                files: vec![],
+                notes: None,
+            },
+            false,
+        )
+        .await
+        .unwrap()
+        .as_str()
+        .to_string()
+}
+
+/// **The feature, as one test: can an agent reproduce a profile it can see?**
+///
+/// Not "does the tool print more fields". A profile is configured every way a
+/// profile can be, `get_profile` is asked for it, and the values it reports
+/// are handed straight back to `create_profile` — which is exactly the round
+/// trip somebody means by "make me one like that one". Every copyable field
+/// has to survive it.
+///
+/// Both halves are asserted, because either alone passes while the feature is
+/// broken. A copy that matches proves the write side and says nothing about
+/// whether an agent could have *read* those values; text naming them proves
+/// the read side and says nothing about whether they can be written back. So
+/// the text is checked for every value the copy is built from.
+///
+/// The two that deliberately do not travel are asserted too, as **reported and
+/// defaulted** rather than silently dropped — a copy that quietly loses
+/// somebody's subscription, or quietly steals the default, is the failure this
+/// whole body of work exists to remove.
+#[tokio::test]
+async fn an_agent_can_read_a_whole_profile_and_copy_it() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let lead = a_lead_that_delegates(&state, &host, &ready, &owner, Agent::ClaudeCode).await;
+    a_skill(&state, &owner, "changelog").await;
+    let teammate = saved_profile(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Reviewer",
+            "does": "Reads the diff and argues with it",
+            "placement": "here",
+        }),
+    )
+    .await;
+    let account = a_subscription(&state, &owner, "a_pinned", Agent::ClaudeCode).await;
+
+    // Every field a profile has, set to something it would not be by
+    // accident — the same discipline `role-draft.test.ts` keeps, and for the
+    // same reason: a fixture that matches the defaults passes while the copy
+    // drops everything.
+    let original = saved_profile(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Engineer",
+            "does": "Writes the change and the tests; after a scope is agreed",
+            "placement": "new",
+            "agent": "ClaudeCode",
+            "machine": host.id.as_str(),
+            "account": account,
+            "instructions": "# Engineer\n\nWrite the change. Do not review it.",
+            "onUsageLimit": "engine",
+            "onChildLimit": "reroute",
+            "canDelegate": true,
+            "delegateScope": [teammate],
+            "skillScope": [],
+            "includeAlwaysOn": false,
+            "includeRepoDefaults": false,
+            "settings": { "model": "opus", "mode": "plan" },
+        }),
+    )
+    .await;
+    // The skill by name, which is how an agent sees one — `list_skills` shows
+    // names and shows no ids at all.
+    let found = state
+        .skills
+        .visible(&owner, crate::access::Level::Viewer)
+        .await
+        .unwrap();
+    let changelog = found.iter().find(|s| s.name == "changelog").unwrap();
+    sqlx::query("UPDATE roles SET skill_scope=$2 WHERE id=$1")
+        .bind(&original)
+        .bind(vec![changelog.id.as_str().to_string()])
+        .execute(state.db.pool())
+        .await
+        .unwrap();
+    // And the one field no tool may write, set behind the tools' back so the
+    // read has something true to report.
+    state
+        .roles
+        .set_default(&owner, &original, true)
+        .await
+        .unwrap();
+
+    // ── read ──────────────────────────────────────────────────────────────
+    let said = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "g1",
+            "get_profile",
+            serde_json::json!({ "name": "Engineer" }),
+        ),
+    )
+    .await
+    .expect("a profile its owner can see is one they can read");
+
+    for expected in [
+        "Engineer",
+        "Writes the change and the tests",
+        "Claude Code",
+        "its own workspace",
+        "Write the change. Do not review it.",
+        "Reviewer",
+        "changelog",
+        // The two grants, by the words the editor uses rather than by their
+        // stored codes — an agent reads prose, and `engine` alone says nothing.
+        "another subscription and engine",
+        "Re-route",
+        "Manager",
+    ] {
+        assert!(
+            said.contains(expected),
+            "the read has to carry {expected:?} for a copy to be possible: {said}"
+        );
+    }
+    // What cannot be copied has to be *said*, not omitted.
+    assert!(
+        said.to_lowercase().contains("subscription"),
+        "the subscription is named: {said}"
+    );
+    assert!(
+        said.contains("default"),
+        "and that it is the owner's default profile: {said}"
+    );
+
+    // ── copy ──────────────────────────────────────────────────────────────
+    let copied = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "g2",
+            "create_profile",
+            serde_json::json!({
+                "name": "Engineer (copy)",
+                "does": "Writes the change and the tests; after a scope is agreed",
+                "placement": "new",
+                "agent": "ClaudeCode",
+                "machine": host.id.as_str(),
+                "instructions": "# Engineer\n\nWrite the change. Do not review it.",
+                "on_usage_limit": "engine",
+                "on_child_limit": "reroute",
+                "can_delegate": true,
+                "delegate_scope": ["Reviewer"],
+                "skill_scope": ["changelog"],
+                "include_always_on": false,
+                "include_repo_defaults": false,
+                "settings": { "model": "opus", "mode": "plan" },
+            }),
+        ),
+    )
+    .await
+    .expect("everything the read reported can be written back");
+    assert!(copied.contains("Engineer (copy)"), "{copied}");
+
+    let before = state
+        .roles
+        .one(&owner, &original, crate::access::Level::Viewer)
+        .await
+        .unwrap()
+        .unwrap();
+    let after = state
+        .roles
+        .by_name(&owner, "Engineer (copy)")
+        .await
+        .unwrap()
+        .expect("the copy exists");
+
+    assert_eq!(after.does, before.does);
+    assert_eq!(after.placement, before.placement);
+    assert_eq!(after.agent, before.agent);
+    assert_eq!(after.machine, before.machine);
+    assert_eq!(after.instructions, before.instructions);
+    assert_eq!(after.on_usage_limit, before.on_usage_limit);
+    assert_eq!(after.on_child_limit, before.on_child_limit);
+    assert_eq!(after.can_delegate, before.can_delegate);
+    assert_eq!(after.delegate_scope, before.delegate_scope);
+    assert_eq!(after.skill_scope, before.skill_scope);
+    assert_eq!(after.include_always_on, before.include_always_on);
+    assert_eq!(after.include_repo_defaults, before.include_repo_defaults);
+    assert_eq!(after.settings, before.settings);
+
+    // And the two that do not travel, which is the point of saying so.
+    assert_eq!(
+        after.account, None,
+        "a copy runs on the owner's default, not somebody's pinned subscription"
+    );
+    assert!(
+        !after.is_default,
+        "and copying a profile does not take the default off the one it copied"
+    );
+    assert!(
+        state
+            .roles
+            .one(&owner, &original, crate::access::Level::Viewer)
+            .await
+            .unwrap()
+            .unwrap()
+            .is_default,
+        "which is still where it was"
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}
