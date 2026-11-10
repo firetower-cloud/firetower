@@ -53,10 +53,19 @@ on:
 permissions:
   contents: read
 
+# `edited` costs a contributor one API call and nothing else, so a body being
+# tidied in half a dozen passes starts half a dozen runs of both jobs — one of
+# which clones the whole 24 MB history to answer a question about the diff.
+# Only the last edit is the one anybody wants an answer about.
+concurrency:
+  group: contribution-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   shows-its-work:
     name: the pull request shows its work
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       # The whole history, because the question is "what is on this branch and
       # not on its base" and a shallow clone cannot answer that.
@@ -89,6 +98,7 @@ jobs:
   fixtures:
     name: the body reader still reads them right
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
