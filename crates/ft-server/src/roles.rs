@@ -46,6 +46,23 @@ fn shareable(alias: &str, person: usize) -> String {
 /// value: a lead passes `here` or `new` to `spawn`, never `lead`.
 pub const PLACEMENT: [&str; 3] = ["lead", "here", "new"];
 
+/// What a lead may do about a child of this profile that has run out of
+/// allowance, in order of how much latitude each grants.
+///
+/// **A ladder, not a two-state field.** None of the three means "not decided",
+/// so none of them is *Let the lead choose* and none wears the open mark: a
+/// profile saying `wait` has decided, firmly, that nobody moves its children
+/// without a person. The field two above it in the form already grades three
+/// ways for the same reason — `Mode` is ask-before-writing, ask-before-running,
+/// don't-ask.
+pub const ON_USAGE_LIMIT: [&str; 3] = ["wait", "same", "engine"];
+
+/// Whether a Manager spends that latitude itself, or stops and puts the choice
+/// to the person. Meaningless on a profile that cannot delegate, and kept
+/// anyway — a profile that stops being a Manager and becomes one again should
+/// not have quietly lost the answer somebody gave.
+pub const ON_CHILD_LIMIT: [&str; 2] = ["ask", "reroute"];
+
 /// A role, as the interface and the spawn tool read it.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -75,6 +92,15 @@ pub struct Role {
     pub settings: ft_core::controls::Preferred,
     /// Composed into the child's instructions.
     pub instructions: String,
+    /// What a lead may do about a child of this profile that has run out of
+    /// allowance: `wait` (nobody moves it without a person), `same` (the lead
+    /// may move it to another subscription for the same engine) or `engine`
+    /// (and to another engine).
+    pub on_usage_limit: String,
+    /// Whether this Manager re-routes a spent child itself (`reroute`) or
+    /// stops and asks the person which subscription to spend (`ask`). Only
+    /// read when `can_delegate`.
+    pub on_child_limit: String,
     /// A Manager (true) gets the spawn tool and may hand work to any profile it
     /// can see; an Operator (false) does the work and reports back.
     pub can_delegate: bool,
@@ -134,6 +160,23 @@ pub struct NewRole {
     pub settings: ft_core::controls::Preferred,
     #[serde(default)]
     pub instructions: String,
+    /// What a lead may do about a child of this profile that has run out:
+    /// `wait`, `same` or `engine`.
+    ///
+    /// **Absent means leave it as it is** — on an update, whatever is stored;
+    /// on a create, `wait`. `Option` for the same reason `include_always_on`
+    /// is: this is a whole-object write, and a client that has never heard of
+    /// the field must not be able to revoke a grant somebody made by omitting
+    /// it.
+    #[serde(default)]
+    pub on_usage_limit: Option<String>,
+    /// Whether this Manager re-routes a spent child itself (`reroute`) or
+    /// asks the person first (`ask`).
+    ///
+    /// **Absent means leave it as it is**, for the reason `on_usage_limit`
+    /// gives.
+    #[serde(default)]
+    pub on_child_limit: Option<String>,
     /// Whether it is a Manager. Defaults to an Operator.
     #[serde(default)]
     pub can_delegate: bool,
@@ -173,6 +216,14 @@ pub struct NewRole {
 /// set rather than nothing is the whole of that migration's compatibility
 /// story, and this is the one place the server repeats it.
 const INHERITS: bool = true;
+
+/// What a *new* profile is when it says nothing about either limit field:
+/// exactly what every profile does today, which is what makes the
+/// `profile_usage_limit` migration a pair of defaults and nothing else. Named
+/// here, like `INHERITS`, because these have to agree with the column
+/// defaults and this is the one place the server repeats them.
+const WAITS_FOR_A_PERSON: &str = "wait";
+const ASKS_THE_PERSON: &str = "ask";
 
 /// Why a role was refused, in a sentence somebody can act on.
 #[derive(Debug)]
@@ -261,6 +312,28 @@ pub fn check(new: &NewRole) -> Result<(), Refused> {
         None => {}
         Some(agent) if ft_core::Agent::from_name(agent).is_some() => {}
         Some(agent) => return Err(Refused(format!("{agent} is not an agent Firetower runs"))),
+    }
+    // Absent is "leave it as it is" on both of these, so only a value that was
+    // actually sent is judged. Neither has an open state to allow for: every
+    // rung is a commitment, which is why neither takes `PLACEMENT`'s shape.
+    if let Some(on) = &new.on_usage_limit {
+        if !ON_USAGE_LIMIT.contains(&on.as_str()) {
+            return Err(Refused(
+                "what happens at a usage limit is \"wait\" (for a person), \"same\" (the lead \
+                 may move it to another subscription for the same engine) or \"engine\" (and \
+                 to another engine)"
+                    .into(),
+            ));
+        }
+    }
+    if let Some(on) = &new.on_child_limit {
+        if !ON_CHILD_LIMIT.contains(&on.as_str()) {
+            return Err(Refused(
+                "what a Manager does when a child runs out is \"ask\" (put the choice to the \
+                 person) or \"reroute\" (pick a subscription and carry on)"
+                    .into(),
+            ));
+        }
     }
     Ok(())
 }
@@ -392,6 +465,7 @@ const FIELDS: &str = "r.id, r.path::text AS path, r.name, r.does, \
                       r.pref_model, r.pref_effort, r.pref_mode, r.pref_sandbox, r.instructions, \
                       r.can_delegate, r.delegate_scope, r.skill_scope, \
                       r.include_always_on, r.include_repo_defaults, \
+                      r.on_usage_limit, r.on_child_limit, \
                       r.created_at, r.updated_at";
 
 fn read(row: sqlx::postgres::PgRow) -> Result<Role> {
@@ -414,6 +488,8 @@ fn read(row: sqlx::postgres::PgRow) -> Result<Role> {
             sandbox: row.get("pref_sandbox"),
         },
         instructions: row.get("instructions"),
+        on_usage_limit: row.get("on_usage_limit"),
+        on_child_limit: row.get("on_child_limit"),
         can_delegate: row.get("can_delegate"),
         delegate_scope: row.get("delegate_scope"),
         include_always_on: row.get("include_always_on"),
@@ -537,9 +613,10 @@ impl Roles {
                (id, org_id, path, created_by, name, slug, does, \
                 placement, agent, host_id, agent_account_id, instructions, can_delegate, \
                 delegate_scope, skill_scope, include_always_on, include_repo_defaults, \
+                on_usage_limit, on_child_limit, \
                 pref_model, pref_effort, pref_mode, pref_sandbox) \
              VALUES ($1, $2, $3::ltree, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, \
-                     $16, $17, $18, $19, $20, $21)",
+                     $16, $17, $18, $19, $20, $21, $22, $23)",
         )
         .bind(id.as_str())
         .bind(org)
@@ -560,6 +637,11 @@ impl Roles {
         // absent switch resolves to the column's default.
         .bind(new.include_always_on.unwrap_or(INHERITS))
         .bind(new.include_repo_defaults.unwrap_or(INHERITS))
+        // Nothing to leave alone on a row that does not exist yet, so an
+        // absent grant resolves to the column's default — which is the whole
+        // of the migration and the whole of the compatibility story.
+        .bind(new.on_usage_limit.as_deref().unwrap_or(WAITS_FOR_A_PERSON))
+        .bind(new.on_child_limit.as_deref().unwrap_or(ASKS_THE_PERSON))
         .bind(nonblank(&new.settings.model))
         .bind(nonblank(&new.settings.effort))
         .bind(nonblank(&new.settings.mode))
@@ -591,7 +673,9 @@ impl Roles {
                can_delegate=$9, delegate_scope=$10, skill_scope=$11, \
                include_always_on=COALESCE($12, include_always_on), \
                include_repo_defaults=COALESCE($13, include_repo_defaults), \
-               pref_model=$14, pref_effort=$15, pref_mode=$16, pref_sandbox=$17, \
+               on_usage_limit=COALESCE($14, on_usage_limit), \
+               on_child_limit=COALESCE($15, on_child_limit), \
+               pref_model=$16, pref_effort=$17, pref_mode=$18, pref_sandbox=$19, \
                updated_at=now() WHERE id=$1",
         )
         .bind(id)
@@ -607,6 +691,11 @@ impl Roles {
         .bind(&new.skill_scope)
         .bind(new.include_always_on)
         .bind(new.include_repo_defaults)
+        // `COALESCE`d for the reason the two switches above are: this is a
+        // whole-object write, and an absent grant has to mean "leave it" —
+        // otherwise every save by a client that predates the field revokes it.
+        .bind(&new.on_usage_limit)
+        .bind(&new.on_child_limit)
         .bind(nonblank(&new.settings.model))
         .bind(nonblank(&new.settings.effort))
         .bind(nonblank(&new.settings.mode))
@@ -645,6 +734,8 @@ mod tests {
             machine: None,
             account: None,
             instructions: "Report findings as path:line.".into(),
+            on_usage_limit: None,
+            on_child_limit: None,
             can_delegate: false,
             delegate_scope: vec![],
             include_always_on: Some(true),
@@ -669,6 +760,8 @@ mod tests {
             account: None,
             settings: Default::default(),
             instructions: String::new(),
+            on_usage_limit: "wait".into(),
+            on_child_limit: "ask".into(),
             can_delegate: false,
             delegate_scope: vec![],
             include_always_on: true,

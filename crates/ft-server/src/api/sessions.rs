@@ -4137,6 +4137,8 @@ mod tests {
             account: None,
             settings: Default::default(),
             instructions: String::new(),
+            on_usage_limit: "wait".into(),
+            on_child_limit: "ask".into(),
             can_delegate: false,
             delegate_scope: vec![],
             include_always_on: true,

@@ -750,6 +750,12 @@ fn new_role_from(input: &Value) -> Result<crate::roles::NewRole> {
         placement: text(input, "placement").unwrap_or_else(|| "lead".into()),
         agent: text(input, "agent"),
         machine: text(input, "machine"),
+        // Not settable from a tool, and absent is the honest value: what a
+        // lead may do to a child that runs out is a grant of somebody's
+        // allowance, and the person makes it on the Profiles screen. A new
+        // profile gets the column default, which is today's behaviour.
+        on_usage_limit: None,
+        on_child_limit: None,
         account: None,
         instructions: text(input, "instructions").unwrap_or_default(),
         can_delegate: input
@@ -932,6 +938,12 @@ async fn update_profile(state: &AppState, request: &AgentRequest) -> Result<Stri
         placement: get_str("placement", &existing.placement),
         agent: unpinnable("agent", &existing.agent),
         machine: unpinnable("machine", &existing.machine),
+        // `None` leaves both exactly as they are — see `include_always_on`
+        // below for why that is the only reading that does not edit a profile
+        // nobody asked to edit. An agent must not be able to widen what a lead
+        // may do to its children, nor to revoke a grant by saving a name.
+        on_usage_limit: None,
+        on_child_limit: None,
         account: existing.account.clone(),
         instructions: get_str("instructions", &existing.instructions),
         can_delegate: request
@@ -1859,6 +1871,8 @@ mod tests {
             machine: None,
             account: None,
             instructions: "Report findings as path:line.".into(),
+            on_usage_limit: "wait".into(),
+            on_child_limit: "ask".into(),
             can_delegate: false,
             delegate_scope: vec![],
             include_always_on: true,

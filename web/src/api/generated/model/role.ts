@@ -68,6 +68,19 @@ export interface Role {
   /** Whether the person asking may edit or delete it. */
   mayWrite: boolean;
   name: string;
+  /**
+     * Whether this Manager re-routes a spent child itself (`reroute`) or
+     * stops and asks the person which subscription to spend (`ask`). Only
+     * read when `can_delegate`.
+     */
+  onChildLimit: string;
+  /**
+     * What a lead may do about a child of this profile that has run out of
+     * allowance: `wait` (nobody moves it without a person), `same` (the lead
+     * may move it to another subscription for the same engine) or `engine`
+     * (and to another engine).
+     */
+  onUsageLimit: string;
   path: string;
   /** `lead` (let the lead choose) | `here` | `new`. */
   placement: string;

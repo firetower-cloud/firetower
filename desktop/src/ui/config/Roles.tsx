@@ -138,6 +138,14 @@ const BLANK: Settled = {
   account: null,
   settings: {},
   instructions: "",
+  /* Today's behaviour, both of them — a new profile grants no latitude over
+     its children and a new Manager asks before it spends anybody's allowance.
+     Sent rather than left off, for the reason the two switches below are: an
+     absent field means "leave it as it is", which on a profile that does not
+     exist is the same answer, but the form draws these and a draft that
+     omitted them would draw one thing and save another. */
+  onUsageLimit: "wait",
+  onChildLimit: "ask",
   canDelegate: false,
   delegateScope: [],
   skillScope: [],
@@ -339,6 +347,8 @@ export function toDraft(r: Role): Settled {
     account: r.account ?? null,
     settings: r.settings ?? {},
     instructions: r.instructions,
+    onUsageLimit: r.onUsageLimit,
+    onChildLimit: r.onChildLimit,
     canDelegate: r.canDelegate,
     delegateScope: r.delegateScope ?? [],
     skillScope: r.skillScope ?? [],
