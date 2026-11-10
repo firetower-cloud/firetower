@@ -24,6 +24,8 @@ export const ListRolesResponseItem = zod.object({
   "mayShare": zod.boolean().describe('Whether they may move it into a directory, or out of one.'),
   "mayWrite": zod.boolean().describe('Whether the person asking may edit or delete it.'),
   "name": zod.string(),
+  "onChildLimit": zod.string().describe('Whether this Manager re-routes a spent child itself (`reroute`) or\nstops and asks the person which subscription to spend (`ask`). Only\nread when `can_delegate`.'),
+  "onUsageLimit": zod.string().describe('What a lead may do about a child of this profile that has run out of\nallowance: `wait` (nobody moves it without a person), `same` (the lead\nmay move it to another subscription for the same engine) or `engine`\n(and to another engine).'),
   "path": zod.string(),
   "placement": zod.string().describe('`lead` (let the lead choose) | `here` | `new`.'),
   "settings": zod.object({
@@ -49,6 +51,8 @@ export const CreateRoleBody = zod.object({
   "instructions": zod.string().optional(),
   "machine": zod.string().nullish().describe('The machine its own workspace runs on, by host id. Null lets the lead\nchoose: it may name one, and otherwise Firetower picks a machine that\ncan run the engine.'),
   "name": zod.string(),
+  "onChildLimit": zod.string().nullish().describe('Whether this Manager re-routes a spent child itself (`reroute`) or\nasks the person first (`ask`).\n\n**Absent means leave it as it is**, for the reason `on_usage_limit`\ngives.'),
+  "onUsageLimit": zod.string().nullish().describe('What a lead may do about a child of this profile that has run out:\n`wait`, `same` or `engine`.\n\n**Absent means leave it as it is** — on an update, whatever is stored;\non a create, `wait`. `Option` for the same reason `include_always_on`\nis: this is a whole-object write, and a client that has never heard of\nthe field must not be able to revoke a grant somebody made by omitting\nit.'),
   "placement": zod.string().optional().describe('Where a delegated child runs: "here" (the lead\'s workspace), "new" (its\nown), or "lead" to let the lead choose. Empty when omitted, so `check`\nsays so.'),
   "settings": zod.object({
   "effort": zod.string().nullish(),
@@ -75,6 +79,8 @@ export const CreateRoleResponse = zod.object({
   "mayShare": zod.boolean().describe('Whether they may move it into a directory, or out of one.'),
   "mayWrite": zod.boolean().describe('Whether the person asking may edit or delete it.'),
   "name": zod.string(),
+  "onChildLimit": zod.string().describe('Whether this Manager re-routes a spent child itself (`reroute`) or\nstops and asks the person which subscription to spend (`ask`). Only\nread when `can_delegate`.'),
+  "onUsageLimit": zod.string().describe('What a lead may do about a child of this profile that has run out of\nallowance: `wait` (nobody moves it without a person), `same` (the lead\nmay move it to another subscription for the same engine) or `engine`\n(and to another engine).'),
   "path": zod.string(),
   "placement": zod.string().describe('`lead` (let the lead choose) | `here` | `new`.'),
   "settings": zod.object({
@@ -103,6 +109,8 @@ export const UpdateRoleBody = zod.object({
   "instructions": zod.string().optional(),
   "machine": zod.string().nullish().describe('The machine its own workspace runs on, by host id. Null lets the lead\nchoose: it may name one, and otherwise Firetower picks a machine that\ncan run the engine.'),
   "name": zod.string(),
+  "onChildLimit": zod.string().nullish().describe('Whether this Manager re-routes a spent child itself (`reroute`) or\nasks the person first (`ask`).\n\n**Absent means leave it as it is**, for the reason `on_usage_limit`\ngives.'),
+  "onUsageLimit": zod.string().nullish().describe('What a lead may do about a child of this profile that has run out:\n`wait`, `same` or `engine`.\n\n**Absent means leave it as it is** — on an update, whatever is stored;\non a create, `wait`. `Option` for the same reason `include_always_on`\nis: this is a whole-object write, and a client that has never heard of\nthe field must not be able to revoke a grant somebody made by omitting\nit.'),
   "placement": zod.string().optional().describe('Where a delegated child runs: "here" (the lead\'s workspace), "new" (its\nown), or "lead" to let the lead choose. Empty when omitted, so `check`\nsays so.'),
   "settings": zod.object({
   "effort": zod.string().nullish(),
@@ -129,6 +137,8 @@ export const UpdateRoleResponse = zod.object({
   "mayShare": zod.boolean().describe('Whether they may move it into a directory, or out of one.'),
   "mayWrite": zod.boolean().describe('Whether the person asking may edit or delete it.'),
   "name": zod.string(),
+  "onChildLimit": zod.string().describe('Whether this Manager re-routes a spent child itself (`reroute`) or\nstops and asks the person which subscription to spend (`ask`). Only\nread when `can_delegate`.'),
+  "onUsageLimit": zod.string().describe('What a lead may do about a child of this profile that has run out of\nallowance: `wait` (nobody moves it without a person), `same` (the lead\nmay move it to another subscription for the same engine) or `engine`\n(and to another engine).'),
   "path": zod.string(),
   "placement": zod.string().describe('`lead` (let the lead choose) | `here` | `new`.'),
   "settings": zod.object({

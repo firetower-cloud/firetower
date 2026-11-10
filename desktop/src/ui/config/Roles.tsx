@@ -15,6 +15,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   Check,
   ChevronDown,
+  Clock,
   ChevronLeft,
   CircleDashed,
   FolderGit2,
@@ -26,6 +27,8 @@ import {
   ShieldCheck,
   Plus,
   KeyRound,
+  MessageSquare,
+  RefreshCw,
   Search,
   Server,
   Sparkles,
@@ -114,6 +117,44 @@ const PLACEMENTS: { value: string; icon: LucideIcon; label: string; note: string
   { value: "new", icon: GitBranchPlus, label: "Its own workspace", note: "a fresh branch" },
 ];
 
+/**
+ * What a lead may do about a child of this profile that has run out, in order
+ * of how much latitude each grants.
+ *
+ * **Three rungs and no dashed ring.** The two-state rule governs one axis —
+ * who decides a value, the profile or the lead — and on that axis a middle is
+ * a lie. This field is not on it: none of the three means "not decided", so
+ * none of them is *Let the lead choose*. A profile that says to wait has
+ * decided, firmly. *How it runs* two fields above already grades three ways
+ * for the same reason, and the strings are the owner's own.
+ */
+const ON_LIMIT: { value: string; icon: LucideIcon; label: string; note?: string }[] = [
+  { value: "wait", icon: Clock, label: "Wait for human action" },
+  {
+    value: "same",
+    icon: KeyRound,
+    label: "Let the lead pick another subscription",
+    note: "If the agent runs on Claude Code, it won't pick a subscription on Codex",
+  },
+  {
+    value: "engine",
+    icon: RefreshCw,
+    label: "Let the lead pick another subscription and engine",
+    note: "For example, allow to switch from Codex to Claude Code",
+  },
+];
+
+/** And the Manager's own half: whether it spends that latitude or asks first. */
+const ON_CHILD_LIMIT: { value: string; icon: LucideIcon; label: string; note: string }[] = [
+  { value: "reroute", icon: RefreshCw, label: "Re-route it", note: "picks one and carries on" },
+  {
+    value: "ask",
+    icon: MessageSquare,
+    label: "Ask me first",
+    note: "stops and puts the choice to you",
+  },
+];
+
 /** A mark for each run control, so its picker reads like the others. */
 const CONTROL_ICON: Record<ControlKind, LucideIcon> = {
   model: Cpu,
@@ -138,6 +179,14 @@ const BLANK: Settled = {
   account: null,
   settings: {},
   instructions: "",
+  /* Today's behaviour, both of them — a new profile grants no latitude over
+     its children and a new Manager asks before it spends anybody's allowance.
+     Sent rather than left off, for the reason the two switches below are: an
+     absent field means "leave it as it is", which on a profile that does not
+     exist is the same answer, but the form draws these and a draft that
+     omitted them would draw one thing and save another. */
+  onUsageLimit: "wait",
+  onChildLimit: "ask",
   canDelegate: false,
   delegateScope: [],
   skillScope: [],
@@ -339,6 +388,8 @@ export function toDraft(r: Role): Settled {
     account: r.account ?? null,
     settings: r.settings ?? {},
     instructions: r.instructions,
+    onUsageLimit: r.onUsageLimit,
+    onChildLimit: r.onChildLimit,
     canDelegate: r.canDelegate,
     delegateScope: r.delegateScope ?? [],
     skillScope: r.skillScope ?? [],
@@ -549,6 +600,14 @@ function Reads({ label, children }: { label: string; children: React.ReactNode }
  *
  * Open on all three is its own sentence rather than three clauses of "whatever
  * the lead asks for", which is the same fact said three times.
+ *
+ * **The short branch still carries the grant.** It once returned before
+ * `recovery` was consulted, so a profile that had just been given a rung of
+ * *If it reaches usage limit* read back as though it had not — on the shape
+ * every new profile opens in, which makes it the common case rather than an
+ * edge. The three open fields and the grant are different facts: one is what
+ * the lead decides, the other is what the lead may later do, and leaving all
+ * three open says nothing about the second.
  */
 export function whatAChildGets(
   draft: NewRole,
@@ -558,7 +617,8 @@ export function whatAChildGets(
   if (open)
     return (
       <>
-        A child gets whatever the lead asks for: <b>its workspace, its machine, its engine</b>.
+        A child gets whatever the lead asks for: <b>its workspace, its machine, its engine</b>
+        {recovery(draft)}.
       </>
     );
   const place =
@@ -580,9 +640,38 @@ export function whatAChildGets(
     : ", running the engine the lead names";
   return (
     <>
-      A child gets <b>{place + machine + engine}</b>.
+      A child gets <b>{place + machine + engine}</b>
+      {recovery(draft)}.
     </>
   );
+}
+
+/**
+ * And what happens if that child runs out of allowance, as a clause of the
+ * same sentence.
+ *
+ * A clause rather than a sentence of its own, and appended rather than
+ * replacing what is already read back: the three things a child *gets* and
+ * the one thing that may later be *done about it* are one fact about one
+ * spawn, and the form's own reason for saying any of it is that a lead
+ * reporting work that never happened is this whole area's bug.
+ *
+ * `wait` adds nothing. It is what every profile does and what the sentence
+ * has always implied by saying nothing, so spending a clause on it would make
+ * the common shape read as the exceptional one.
+ */
+function recovery(draft: NewRole): string {
+  const engine = draft.agent ? (AGENT_LABEL[draft.agent as Agent] ?? draft.agent) : null;
+  switch (draft.onUsageLimit) {
+    case "same":
+      return engine
+        ? `, and if it runs out its lead may move it to another ${engine} subscription`
+        : ", and if it runs out its lead may move it to another subscription for that engine";
+    case "engine":
+      return ", and if it runs out its lead may move it to another subscription, on another engine if it has to";
+    default:
+      return "";
+  }
 }
 
 /**
@@ -1109,6 +1198,50 @@ function Editor({
           </div>
         </Group>
 
+        {/* **Above Subscription, below Agent.** Agent and How it runs are how
+            a child behaves; Subscription and what follows it are which
+            subscription pays. Grouping the pair that answers each question
+            puts the two fields that leave with the engine next to each other
+            too, so the note that replaces them stands in one place rather
+            than between two survivors. */}
+        {controls.length > 0 && (
+          <Group
+            label="How it runs"
+            hint="Pin the model and run settings, or leave any on the engine's default. These override what you last used when a workspace starts as this profile."
+          >
+            <div className="flex flex-col gap-3">
+              {controls.map((c) => {
+                const Icon = CONTROL_ICON[c.kind];
+                const options: Opt[] = [
+                  {
+                    value: null,
+                    icon: <Icon className="h-4 w-4" strokeWidth={1.75} />,
+                    label: "Engine default",
+                    note: "Whatever the agent starts on.",
+                  },
+                  ...c.choices.map((ch) => ({
+                    value: ch.value,
+                    icon: <Icon className="h-4 w-4" strokeWidth={1.75} />,
+                    label: ch.label,
+                    note: ch.note ?? undefined,
+                  })),
+                ];
+                return (
+                  <div key={c.kind} className="flex flex-col gap-1.5">
+                    <span className="text-micro font-medium text-mute">{c.fallback}</span>
+                    <Select
+                      ariaLabel={c.fallback}
+                      value={draft.settings?.[c.kind] ?? null}
+                      options={options}
+                      onChange={(v) => setSetting(c.kind, v)}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          </Group>
+        )}
+
         {/* A subscription belongs to one engine, so with the engine open there
             is nothing this field could hold: a visible picker here could only
             produce a refusal. It leaves, and the sentence below says why. */}
@@ -1157,44 +1290,6 @@ function Editor({
           </Group>
         )}
 
-        {controls.length > 0 && (
-          <Group
-            label="How it runs"
-            hint="Pin the model and run settings, or leave any on the engine's default. These override what you last used when a workspace starts as this profile."
-          >
-            <div className="flex flex-col gap-3">
-              {controls.map((c) => {
-                const Icon = CONTROL_ICON[c.kind];
-                const options: Opt[] = [
-                  {
-                    value: null,
-                    icon: <Icon className="h-4 w-4" strokeWidth={1.75} />,
-                    label: "Engine default",
-                    note: "Whatever the agent starts on.",
-                  },
-                  ...c.choices.map((ch) => ({
-                    value: ch.value,
-                    icon: <Icon className="h-4 w-4" strokeWidth={1.75} />,
-                    label: ch.label,
-                    note: ch.note ?? undefined,
-                  })),
-                ];
-                return (
-                  <div key={c.kind} className="flex flex-col gap-1.5">
-                    <span className="text-micro font-medium text-mute">{c.fallback}</span>
-                    <Select
-                      ariaLabel={c.fallback}
-                      value={draft.settings?.[c.kind] ?? null}
-                      options={options}
-                      onChange={(v) => setSetting(c.kind, v)}
-                    />
-                  </div>
-                );
-              })}
-            </div>
-          </Group>
-        )}
-
         {/* **What stands where Subscription and How it runs were.**
             They do not grey out and they do not linger: they leave. Under a
             flat engine row that is not self-evidently cause and effect — the
@@ -1228,6 +1323,53 @@ function Editor({
             </div>
           </div>
         )}
+
+        {/* **This one does not leave when the engine does**, and that is the
+            property the whole field turns on. Subscription and How it runs go
+            because they are *values belonging to an engine* — an account is
+            for one engine and a model name is one engine's. A grant of
+            latitude is not a value: "its lead may move it to another
+            subscription" is as true of a child running whatever its lead runs
+            as of one pinned to Claude Code. */}
+        <Group
+          label="If it reaches usage limit"
+          hint="What a lead may do about a child of this profile that has hit its usage limit. It is a grant, not a guarantee — the Manager has to be allowed too."
+        >
+          <div className="ladder">
+            {ON_LIMIT.map((o) => (
+              <button
+                key={o.value}
+                type="button"
+                aria-pressed={(draft.onUsageLimit ?? "wait") === o.value}
+                onClick={() => set("onUsageLimit", o.value)}
+                className="pk"
+              >
+                <span className="ic">
+                  <o.icon className="h-4 w-4" strokeWidth={1.75} />
+                </span>
+                <span className="tx">
+                  {o.label}
+                  {o.note && <span className="sub">{o.note}</span>}
+                </span>
+              </button>
+            ))}
+          </div>
+          {/* The consequence where it is being chosen, and only for the two
+              rungs that have one. Waiting is what everything does today and
+              needs no explaining. */}
+          {draft.onUsageLimit === "same" && (
+            <WhereTo className="aside">
+              Nothing about what the child may <i>do</i> changes — same engine, same permissions.
+              Only whose allowance pays for the rest of it.
+            </WhereTo>
+          )}
+          {draft.onUsageLimit === "engine" && (
+            <WhereTo className="aside">
+              Choosing this <b>is</b> the acknowledgement that a different engine brings its own
+              default permissions. Given here, once, instead of at the moment somebody is waiting.
+            </WhereTo>
+          )}
+        </Group>
 
         {/* One sentence reading the three fields back as what a spawn gets.
             The bug behind all of this is a lead reporting a build that never
@@ -1270,6 +1412,41 @@ function Editor({
             searchPlaceholder="Search profiles…"
             allNote="Any profile you can reach — and any you add later."
           />
+        )}
+
+        {/* The Manager's own half, under Can delegate with the delegates list,
+            because it is a fact about handing work out rather than about this
+            profile's own children. Meaningless on an Operator, so it is not
+            drawn for one — and not cleared either: a profile made an Operator
+            and then a Manager again keeps the answer somebody gave. */}
+        {draft.canDelegate && (
+          <Group
+            label="When a child runs out"
+            hint="Whether this Manager re-routes a spent child on its own, or stops and asks you which subscription to use."
+          >
+            <div className="pickrow">
+              {ON_CHILD_LIMIT.map((o) => (
+                <button
+                  key={o.value}
+                  type="button"
+                  aria-pressed={(draft.onChildLimit ?? "ask") === o.value}
+                  onClick={() => set("onChildLimit", o.value)}
+                  className="pk"
+                >
+                  <span className="ic">
+                    <o.icon className="h-4 w-4" strokeWidth={1.75} />
+                  </span>
+                  {o.label}
+                  <span className="sub">{o.note}</span>
+                </button>
+              ))}
+            </div>
+            <WhereTo className="aside">
+              <b>Both have to agree.</b> A Manager set to <i>Re-route it</i> still cannot move a
+              child whose own profile says <i>Wait for human action</i> — the profile grants the
+              latitude and this decides whether the Manager uses it.
+            </WhereTo>
+          </Group>
         )}
 
         <SkillSources r={skills} onChange={(patch) => setDraft((d) => ({ ...d, ...patch }))} />

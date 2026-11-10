@@ -736,7 +736,7 @@ pub(super) async fn switch_account(
 /// `continue_with_account`, before it relaunches on the account chosen here —
 /// so the turn is ended and the questions are voided by the thing being asked
 /// for, rather than being made somebody's prerequisite for asking.
-async fn switch_for(
+pub(crate) async fn switch_for(
     state: &AppState,
     owner: &str,
     id: SessionId,

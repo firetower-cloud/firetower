@@ -147,7 +147,16 @@ const CHILDREN_DESCRIPTION: &str = "\
 The children this session started. `list` says what each is doing and \
 whether it is waiting on someone. `steer` sends `message` into one child's \
 conversation mid-run, without stopping it. `stop` ends the turn a child is \
-in; what it has done so far stays.";
+in; what it has done so far stays. `switch` moves a child that has run out of \
+allowance onto another subscription and carries it on from where it stopped. \
+ONLY WHEN A LIMIT ACTUALLY STOPPED IT — `list` says so, and a child still \
+working on a subscription that merely looks close to its limit must be left \
+alone; moving it spends somebody else's allowance to solve a problem that has \
+not happened. Read the limits in `list_compute` before you choose, and do not \
+move it onto an account that is itself blocked or whose reading is old enough \
+to be worth doubting — `list_compute` gives the age of every one. A child \
+whose profile says to wait for a person is refused, and so is a subscription \
+on another engine unless its profile allows that too.";
 
 /// What `update` does, as a child reads it. Only a child may call it — the
 /// control plane refuses it from a lead — so the text speaks to a child
@@ -345,14 +354,18 @@ async fn answer(
                         "inputSchema": {
                             "type": "object",
                             "properties": {
-                                "action": { "type": "string", "enum": ["list", "steer", "stop"] },
+                                "action": { "type": "string", "enum": ["list", "steer", "stop", "switch"] },
                                 "id": {
                                     "type": "string",
-                                    "description": "The child's session id, from spawn or list. For steer and stop.",
+                                    "description": "The child's session id, from spawn or list. For steer, stop and switch.",
                                 },
                                 "message": {
                                     "type": "string",
                                     "description": "For steer: what to tell the child. Lands in its conversation as a message from you.",
+                                },
+                                "account": {
+                                    "type": "string",
+                                    "description": "For switch: which subscription to move the child onto, by account id from `list_compute`. It must be one the child's profile allows — same engine, unless that profile allows an engine change as well.",
                                 },
                             },
                             "required": ["action"],

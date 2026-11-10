@@ -12377,6 +12377,20 @@
           "name": {
             "type": "string"
           },
+          "onChildLimit": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Whether this Manager re-routes a spent child itself (`reroute`) or\nasks the person first (`ask`).\n\n**Absent means leave it as it is**, for the reason `on_usage_limit`\ngives."
+          },
+          "onUsageLimit": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What a lead may do about a child of this profile that has run out:\n`wait`, `same` or `engine`.\n\n**Absent means leave it as it is** — on an update, whatever is stored;\non a create, `wait`. `Option` for the same reason `include_always_on`\nis: this is a whole-object write, and a client that has never heard of\nthe field must not be able to revoke a grant somebody made by omitting\nit."
+          },
           "placement": {
             "type": "string",
             "description": "Where a delegated child runs: \"here\" (the lead's workspace), \"new\" (its\nown), or \"lead\" to let the lead choose. Empty when omitted, so `check`\nsays so."
@@ -13962,6 +13976,8 @@
           "placement",
           "settings",
           "instructions",
+          "onUsageLimit",
+          "onChildLimit",
           "canDelegate",
           "delegateScope",
           "includeAlwaysOn",
@@ -14043,6 +14059,14 @@
           },
           "name": {
             "type": "string"
+          },
+          "onChildLimit": {
+            "type": "string",
+            "description": "Whether this Manager re-routes a spent child itself (`reroute`) or\nstops and asks the person which subscription to spend (`ask`). Only\nread when `can_delegate`."
+          },
+          "onUsageLimit": {
+            "type": "string",
+            "description": "What a lead may do about a child of this profile that has run out of\nallowance: `wait` (nobody moves it without a person), `same` (the lead\nmay move it to another subscription for the same engine) or `engine`\n(and to another engine)."
           },
           "path": {
             "type": "string"

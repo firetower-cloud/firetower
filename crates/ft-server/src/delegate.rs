@@ -513,6 +513,25 @@ async fn spawn(state: &AppState, request: &AgentRequest) -> Result<String> {
     .await
     .map_err(|e| anyhow::anyhow!("{}", e.message))?;
 
+    /* What it was started as, recorded on the child — which nothing did
+    before, so `Session::profile_id` was null on every delegated child
+    however plainly a profile had been named.
+
+    It had no reader until now: the instructions reach the child through
+    `brief`, and the profile's own fields are resolved here rather than
+    looked up later. A profile now also says what a lead may do about a
+    child of its that runs out, and that is read off the *child* at the
+    moment it is spent — so without this the grant could never be found and
+    every switch would be refused.
+
+    Set here rather than passed as `req.profile`, which is the other way
+    in: that one composes a persona as well, and a delegated child is
+    briefed by `brief`. Recording the fact must not also change what the
+    child is told. */
+    if let Some(role) = &role {
+        state.db.set_profile(&child.id, role.id.as_str()).await?;
+    }
+
     Ok(started(&child, shares))
 }
 
@@ -732,8 +751,158 @@ async fn children(state: &AppState, request: &AgentRequest) -> Result<String> {
                 ))
             }
         }
-        other => bail!("action must be list, steer or stop, not \"{other}\""),
+        "switch" => {
+            let id = text(&request.input, "id").context("`id` says which child")?;
+            let child = mine
+                .iter()
+                .find(|c| c.id.as_str() == id)
+                .with_context(|| format!("{id} is not a child of this session"))?;
+            let account = text(&request.input, "account").context(
+                "`account` says which subscription to move it to, by id from `list_compute`",
+            )?;
+            reroute(state, &lead, child, &account).await
+        }
+        other => bail!("action must be list, steer, stop or switch, not \"{other}\""),
     }
+}
+
+/// Move a spent child onto another subscription, if its profile allows it.
+///
+/// **The grant is the child's profile, and it is checked here rather than
+/// drawn.** `on_usage_limit` is a profile saying how much latitude a lead has
+/// over its children: `wait` means nobody moves it without a person, and a
+/// field that only the editor enforced would be advice. The Manager's own
+/// `on_child_limit` is not checked here and must not be — it says whether this
+/// Manager re-routes on its own or puts the choice to the person first, and
+/// the second of those ends in exactly this call once they have answered.
+///
+/// Cross-engine is the third rung, and the reason it is a rung at all: a
+/// different engine brings its own default permissions, which
+/// `accounts.rs` refuses to cross without an explicit acknowledgement. A
+/// lead cannot give one — it has read no prose and nobody asked it. The
+/// person choosing *Let the lead pick another subscription and engine*, in
+/// advance, **is** that acknowledgement, so that is the one setting under
+/// which this passes the flag.
+async fn reroute(
+    state: &AppState,
+    lead: &ft_core::Session,
+    child: &ft_core::Session,
+    account: &str,
+) -> Result<String> {
+    let owner = lead.owner.as_str();
+    let allowed = match &child.profile_id {
+        Some(profile) => state
+            .roles
+            .one(owner, profile, crate::access::Level::Viewer)
+            .await?
+            .map(|r| r.on_usage_limit)
+            .unwrap_or_else(|| "wait".into()),
+        // A child started with no profile granted nothing, because there was
+        // nothing to grant it with. Said as the profile's absence rather than
+        // as a bare refusal, so the lead knows what would change the answer.
+        None => {
+            bail!(
+                "{} was not started as a profile, so nothing says a lead may move it. Only a \
+                 child whose profile allows it can be switched; this one waits for a person.",
+                child.name
+            )
+        }
+    };
+    if allowed == "wait" {
+        bail!(
+            "{}'s profile says to wait for human action when it runs out, so it is not yours to \
+             move. Tell the person it is waiting on them, and on which subscription.",
+            child.name
+        );
+    }
+
+    let target = crate::api::accounts::usable(&state.db, owner, account)
+        .await
+        .map_err(|e| anyhow::anyhow!("{}", e.message))?;
+    let kind = Agent::from_name(&target.kind).with_context(|| {
+        format!(
+            "\"{}\" runs an engine this build does not know",
+            target.name
+        )
+    })?;
+    if kind != child.agent && allowed != "engine" {
+        bail!(
+            "the \"{}\" subscription is a {} one and {} runs {}. Its profile allows a subscription \
+             change, not an engine change, so name a {} subscription instead.",
+            target.name,
+            kind.label(),
+            child.name,
+            child.agent.label(),
+            child.agent.label(),
+        );
+    }
+
+    let moved_to = crate::api::accounts::switch_for(
+        state,
+        owner,
+        child.id.clone(),
+        crate::api::accounts::SwitchAccount {
+            account_id: target.id.clone(),
+            // Only on the rung that was chosen for it. Everywhere else the
+            // engine already matches, so the flag would be answering a
+            // question nobody asked.
+            accept_permission_change: allowed == "engine",
+        },
+    )
+    .await
+    .map_err(|e| anyhow::anyhow!("{}", e.message))?
+    .0
+    .session_id;
+    // A cross-engine hand-over continues in a session of its own, which the
+    // lead has to be given the id of — the one it knew has stopped.
+    let carried_on = moved_to != child.id.as_str();
+
+    /* And the lead's conversation is told, not just the lead's tool result.
+    A Manager that moves somebody's allowance onto another subscription and
+    mentions it nowhere is the quiet version of the discarded argument this
+    whole area exists to remove — and a tool result is read by the agent,
+    not by the person watching it work.
+
+    The child's own check-in channel rather than a surface of its own: this
+    *is* a child reporting its state mid-task, which is what `update` is,
+    and the conversation already draws it as a card naming the child. It
+    arrives when the lead next stops, like every other delivery, so it
+    costs the lead no interruption mid-turn.
+
+    Only when the child carried on in place. A cross-engine hand-over
+    starts a continuation that now inherits this child's lineage, so that
+    one is a child of the same lead and reaches it the ordinary way. */
+    if !carried_on {
+        let moved = format!(
+            "Moved onto the \"{}\" subscription after running out, and carrying on from where I \
+             stopped.",
+            target.name
+        );
+        state
+            .db
+            .queue_delivery(&lead.id, Some(&child.id), &update_body(child, &moved, None))
+            .await?;
+        state.fleet.drain_deliveries(&lead.id).await;
+    }
+
+    Ok(match carried_on {
+        false => format!(
+            "Moved {} ({}) onto {} and carried it on. It picks up where it stopped; what it had \
+             done stays.",
+            child.name, child.id, target.name
+        ),
+        // Said plainly, because the id it was holding is no longer the one to
+        // steer or stop: a different engine cannot resume another's
+        // conversation, so the work continues in a new one beside it.
+        true => format!(
+            "Moved {} onto {} ({}). A different engine cannot pick up another's conversation, so \
+             it carries on as {moved_to} in the same workspace — still your child, and it hands \
+             back to you. Steer and stop that id from now on.",
+            child.name,
+            target.name,
+            Agent::from_name(&target.kind).map_or(target.kind.as_str(), |a| a.label()),
+        ),
+    })
 }
 
 /// Build the fields of a profile from a tool call's arguments.
@@ -750,6 +919,12 @@ fn new_role_from(input: &Value) -> Result<crate::roles::NewRole> {
         placement: text(input, "placement").unwrap_or_else(|| "lead".into()),
         agent: text(input, "agent"),
         machine: text(input, "machine"),
+        // Not settable from a tool, and absent is the honest value: what a
+        // lead may do to a child that runs out is a grant of somebody's
+        // allowance, and the person makes it on the Profiles screen. A new
+        // profile gets the column default, which is today's behaviour.
+        on_usage_limit: None,
+        on_child_limit: None,
         account: None,
         instructions: text(input, "instructions").unwrap_or_default(),
         can_delegate: input
@@ -932,6 +1107,12 @@ async fn update_profile(state: &AppState, request: &AgentRequest) -> Result<Stri
         placement: get_str("placement", &existing.placement),
         agent: unpinnable("agent", &existing.agent),
         machine: unpinnable("machine", &existing.machine),
+        // `None` leaves both exactly as they are — see `include_always_on`
+        // below for why that is the only reading that does not edit a profile
+        // nobody asked to edit. An agent must not be able to widen what a lead
+        // may do to its children, nor to revoke a grant by saving a name.
+        on_usage_limit: None,
+        on_child_limit: None,
         account: existing.account.clone(),
         instructions: get_str("instructions", &existing.instructions),
         can_delegate: request
@@ -1859,6 +2040,8 @@ mod tests {
             machine: None,
             account: None,
             instructions: "Report findings as path:line.".into(),
+            on_usage_limit: "wait".into(),
+            on_child_limit: "ask".into(),
             can_delegate: false,
             delegate_scope: vec![],
             include_always_on: true,

@@ -46,6 +46,8 @@ const EVERY_FIELD: Role & Record<keyof Role, unknown> = {
   account: "aa_1",
   settings: { model: "opus", effort: "high", mode: "ask", sandbox: "off" },
   instructions: "Report findings as path:line.",
+  onUsageLimit: "engine",
+  onChildLimit: "reroute",
   canDelegate: true,
   delegateScope: ["role_2"],
   includeAlwaysOn: false,

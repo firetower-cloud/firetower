@@ -1608,6 +1608,32 @@
     }
   }
 
+  /* **The consequence of a choice, said beside the choice.**
+     The same glyph and the same voice as a read-back, and deliberately not
+     the same box: a read-back is a statement about the whole form and earns
+     a card, while this is a footnote on the row above it. Two cards stacked
+     read as two conclusions, and the second one is not.
+
+     Top-aligned, because these run to two lines where a read-back rarely
+     does, and a centred glyph beside a wrapped paragraph points at nothing. */
+  .whereto.aside {
+    margin-top: 10px;
+    padding: 0 2px;
+    background: none;
+    align-items: flex-start;
+  }
+  .whereto.aside .g {
+    margin-top: 1px;
+  }
+  .whereto.aside p {
+    max-width: 58ch;
+    font-size: 0.875rem;
+    color: var(--color-dim);
+  }
+  .whereto.aside p b {
+    color: var(--color-text);
+  }
+
   /* Rows from a server that is not answering. Readable, obviously stale. */
   .stale {
     opacity: 0.45;
@@ -3884,6 +3910,43 @@ html:not([data-platform="macos"]) {
   }
   .pk[aria-pressed="true"]:focus-visible {
     box-shadow: inset 0 0 0 2px var(--color-panel);
+  }
+
+  /* ── The same pills, read down ──────────────────────────────────────
+     A ladder: one choice per row, full width, at every size.
+
+     `.pickrow` wraps, which is right when the labels are two or three words
+     and wrong here — these labels are sentences ("Let the lead pick another
+     subscription and engine"), and the third wrapped onto its own line at
+     640px anyway. A row that is sometimes beside its neighbour and sometimes
+     under it reads as an accident; a ladder reads as an order, which is what
+     three graded permissions are.
+
+     Still `.pk`, not a new control: the hover, the pressed fill and the inset
+     focus ring a pressed pill needs are the same question answered once, and
+     this only changes how the row is laid out. */
+  .ladder {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .ladder .pk {
+    width: 100%;
+    height: auto;
+    min-height: 44px;
+    padding: 9px 13px;
+    text-align: left;
+  }
+  .ladder .pk .tx {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 1px;
+  }
+  /* Beneath the label rather than after it — the sub-line is a sentence of
+     its own here, not the parenthetical a pill's `.sub` is. */
+  .ladder .pk .sub {
+    display: block;
   }
 
   /* ── The same choice as a vertical list ─────────────────────────────
