@@ -96,6 +96,7 @@ pub(crate) async fn handle(state: &AppState, request: &AgentRequest) -> Result<S
         "create_profile" => create_profile(state, request).await,
         "update_profile" => update_profile(state, request).await,
         "list_profiles" => list_profiles(state, request).await,
+        "get_profile" => get_profile(state, request).await,
         "list_compute" => list_compute(state, request).await,
         "create_skill" => create_skill(state, request).await,
         "update_skill" => update_skill(state, request).await,
@@ -910,41 +911,40 @@ fn new_role_from(input: &Value) -> Result<crate::roles::NewRole> {
     let name = text(input, "name").context("a profile needs a name")?;
     let does = text(input, "does")
         .context("a profile needs a line saying what it does and when to reach for it")?;
+    let agent = text(input, "agent");
     Ok(crate::roles::NewRole {
-        name,
         does,
         // Absent means open, which is the column's own default and the honest
         // answer for a caller that was never asked where a child should run.
         // `check` still refuses a value that is none of the three.
         placement: text(input, "placement").unwrap_or_else(|| "lead".into()),
-        agent: text(input, "agent"),
         machine: text(input, "machine"),
-        // Not settable from a tool, and absent is the honest value: what a
-        // lead may do to a child that runs out is a grant of somebody's
-        // allowance, and the person makes it on the Profiles screen. A new
-        // profile gets the column default, which is today's behaviour.
-        on_usage_limit: None,
-        on_child_limit: None,
+        // Absent means the column default, which is today's behaviour at both
+        // ends: nobody may move a child of this profile, and this profile as
+        // a Manager asks before it moves one of its own.
+        on_usage_limit: text(input, "on_usage_limit"),
+        on_child_limit: text(input, "on_child_limit"),
+        // **The one field no tool writes.** A subscription is somebody's
+        // money, and absent is the right answer for a copy anyway: it resolves
+        // to the owner's default for whatever engine the child runs.
         account: None,
         instructions: text(input, "instructions").unwrap_or_default(),
         can_delegate: input
             .get("can_delegate")
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        // Filled in by `resolve_scopes`, which needs the database to turn the
+        // names an agent reads into the ids a row holds.
         delegate_scope: vec![],
-        // **Not settable from here, deliberately.** A tick on `skill_scope`
-        // grants a skill rather than filtering one, so an agent that could set
-        // it could widen its own children's reach — which is the thing scope
-        // exists to prevent — and it names skills by id, which nothing shows
-        // it. The two switches default on instead, so a profile an agent
-        // writes loads the owner's usual set rather than nothing at all.
         skill_scope: vec![],
-        // Not settable from here either, for the same reason, and said as
-        // `None` rather than `Some(true)`: "the agent has no opinion about
-        // these" is the fact, and `create` resolves it to the column default.
-        include_always_on: None,
-        include_repo_defaults: None,
-        settings: Default::default(),
+        // Absent stays `None` rather than becoming `Some(true)`: "the caller
+        // has no opinion" is the fact, and `create` resolves it to the
+        // column default.
+        include_always_on: input.get("include_always_on").and_then(Value::as_bool),
+        include_repo_defaults: input.get("include_repo_defaults").and_then(Value::as_bool),
+        settings: settings_from(input, agent.as_deref())?.unwrap_or_default(),
+        agent,
+        name,
         // Resolved and filed separately below: the agent names a directory, not
         // an id, so the service's `directory` field is left out here.
         directory: None,
@@ -1042,6 +1042,272 @@ fn profile_shape(new: &crate::roles::NewRole) -> String {
     )
 }
 
+/// Move a profile that already exists, when the caller named where.
+///
+/// `create_profile` has always been able to file one; changing where it lives
+/// was the sharing sheet's job alone, which made "copy that profile into the
+/// backend directory" two steps with no way to say the second. A named
+/// directory moves it; an explicit `null` moves it back to the owner's own
+/// space. Absent, like every other field here, leaves it where it is.
+///
+/// The same `transfer` the sheet performs and the same Writer check
+/// `file_profile` makes, so nothing about who may file what is decided twice.
+async fn refile(
+    state: &AppState,
+    session: &Session,
+    role_id: &str,
+    input: &Value,
+) -> Result<Option<String>> {
+    let Some(asked) = input.get("directory") else {
+        return Ok(None);
+    };
+    let owner = session.owner.as_str();
+    let (slug, whose) = owner_of(state, session).await?;
+    let from = state
+        .access
+        .path_of(crate::access::FiledKind::Role, role_id)
+        .await?
+        .context("the profile could not be found to file it")?;
+
+    let (root_kind, root, said) = match text(input, "directory") {
+        Some(name) => {
+            let org = state.db.org().await?;
+            let target = state
+                .access
+                .directory_by_slug(&org, &name)
+                .await?
+                .with_context(|| format!("there is no directory called \"{name}\""))?;
+            let may = matches!(
+                state.access.level_on(owner, target.id.as_str()).await?,
+                Some(level) if level >= crate::access::Level::Writer
+            );
+            if !may {
+                bail!(
+                    "you cannot file a profile in the \"{}\" directory",
+                    target.slug
+                );
+            }
+            let said = format!("Moved it into the \"{}\" directory.", target.slug);
+            (ft_core::path::DIRECTORY, target.slug.clone(), said)
+        }
+        // Only an explicit null reaches here — `text` also rejects a blank
+        // string, and taking a profile out of a directory on a typo would be
+        // a sharing change nobody asked for.
+        None if asked.is_null() => (
+            ft_core::path::PERSONAL,
+            slug,
+            "Moved it back into your own space.".to_string(),
+        ),
+        None => return Ok(None),
+    };
+    if from.to_string() == from.moved_to(root_kind, &root).to_string() {
+        return Ok(None);
+    }
+    state
+        .access
+        .transfer(
+            &state.vault,
+            crate::access::FiledKind::Role,
+            role_id,
+            &from.moved_to(root_kind, &root),
+            &whose,
+        )
+        .await?;
+    Ok(Some(said))
+}
+
+/* ── The fields both write tools now take ───────────────────────────────────
+`create_profile` and `update_profile` resolve these the same way, so they
+resolve them here. Each refuses an unknown value **by name**: an agent that
+mistyped a skill gets told which one, the way a mistyped engine already
+does, rather than a list of everything it could have meant.
+
+**Names, not ids.** `list_profiles` and `list_skills` show names and no ids
+at all, and `update_profile` already resolves the profile it edits by name
+— so a tool that demanded ids would demand something nothing shows an
+agent. A name is the handle everywhere else in this surface and it is the
+handle here. */
+
+/// A list of strings under `key`, or `None` when the caller said nothing.
+///
+/// An explicit empty list is a real answer — "this profile names nobody" —
+/// and has to be told apart from an absent one, which on an update means
+/// leave it alone.
+fn names(input: &Value, key: &str) -> Option<Vec<String>> {
+    let items = input.get(key)?;
+    if items.is_null() {
+        return Some(Vec::new());
+    }
+    Some(
+        items
+            .as_array()?
+            .iter()
+            .filter_map(Value::as_str)
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect(),
+    )
+}
+
+/// The profiles a Manager may hand to, by name, as ids.
+///
+/// `self_name` drops the profile being written from its own team — a name
+/// that resolves to itself is a profile that may delegate to itself, which
+/// `Roles.tsx` already filters out of the picker.
+async fn delegate_scope_from(
+    state: &AppState,
+    owner: &str,
+    wanted: &[String],
+    self_name: &str,
+) -> Result<Vec<String>> {
+    let visible = state
+        .roles
+        .visible(owner, crate::access::Level::Viewer)
+        .await?;
+    let mut out = Vec::new();
+    for name in wanted {
+        if name.eq_ignore_ascii_case(self_name) {
+            continue;
+        }
+        let found = visible
+            .iter()
+            .find(|r| r.name.eq_ignore_ascii_case(name))
+            .with_context(|| {
+                format!(
+                    "there is no profile called \"{name}\" to hand work to. The ones you can \
+                     reach are listed by `list_profiles`."
+                )
+            })?;
+        out.push(found.id.clone());
+    }
+    Ok(out)
+}
+
+/// The skills a profile loads on top of its two switches, by name, as ids.
+///
+/// Refused rather than filtered, which is what `api::roles::check_skills`
+/// does on the other write path and for the same reason: a profile is read by
+/// everybody who can reach it, so a save that quietly kept less than was asked
+/// for is a profile that does not do what the agent reported it does.
+async fn skill_scope_from(state: &AppState, owner: &str, wanted: &[String]) -> Result<Vec<String>> {
+    let visible = state
+        .skills
+        .visible(owner, crate::access::Level::Viewer)
+        .await?;
+    let mut out = Vec::new();
+    for name in wanted {
+        let found = visible
+            .iter()
+            .find(|s| s.name.eq_ignore_ascii_case(name))
+            .with_context(|| {
+                format!(
+                    "there is no skill called \"{name}\" this profile could load. \
+                     `list_skills` names the ones you can reach."
+                )
+            })?;
+        out.push(found.id.as_str().to_string());
+    }
+    Ok(out)
+}
+
+/// The two name lists, turned into the ids a row holds.
+///
+/// Apart from `new_role_from` because these are the only two fields that need
+/// the database, and keeping that function pure keeps the shape of a profile
+/// an agent asked for answerable without one.
+///
+/// **Absent and empty are different answers.** Absent is "the caller said
+/// nothing", which on an update leaves what is stored; an explicit `[]` or
+/// `null` is "this profile names nobody", which for a team means any profile
+/// its owner can reach. `fallback` is what absent means to the caller.
+///
+/// The authorisation is the one `api::roles::check_skills` makes on the HTTP
+/// path: a name has to resolve to something *this owner* can see, and one
+/// that does not is refused rather than dropped — a tick grants a skill
+/// rather than filtering one, and a save that quietly kept less than was
+/// asked for is a profile that does not do what the agent reported.
+async fn resolve_scopes(
+    state: &AppState,
+    owner: &str,
+    input: &Value,
+    new: &mut crate::roles::NewRole,
+    fallback: (&[String], &[String]),
+) -> Result<()> {
+    new.delegate_scope = match names(input, "delegate_scope") {
+        Some(wanted) => delegate_scope_from(state, owner, &wanted, &new.name).await?,
+        None => fallback.0.to_vec(),
+    };
+    new.skill_scope = match names(input, "skill_scope") {
+        Some(wanted) => skill_scope_from(state, owner, &wanted).await?,
+        None => fallback.1.to_vec(),
+    };
+    Ok(())
+}
+
+/// The run settings a profile pins, checked against what its engine offers.
+///
+/// **Only for a profile that pins an engine.** A model name and a permission
+/// mode belong to one engine, so a profile that leaves the engine open can
+/// carry neither — the editor does not draw the field there, and a tool that
+/// accepted one would store a value no child could ever use.
+///
+/// One engine's list cannot be enumerated here: Codex reports its models over
+/// its own protocol, so `for_agent` is given none and offers no model control
+/// at all. A setting this build cannot enumerate is passed through rather than
+/// refused — refusing it would make a Codex profile with a pinned model
+/// impossible to copy, which is the thing this feature is for.
+fn settings_from(
+    input: &Value,
+    agent: Option<&str>,
+) -> Result<Option<ft_core::controls::Preferred>> {
+    use ft_core::controls::ControlKind;
+    let Some(asked) = input.get("settings") else {
+        return Ok(None);
+    };
+    if asked.is_null() {
+        return Ok(Some(Default::default()));
+    }
+    let asked = asked
+        .as_object()
+        .context("`settings` is an object of model, effort, mode and sandbox")?;
+    let engine = agent
+        .and_then(ft_core::Agent::from_name)
+        .context("run settings belong to an engine, so pin `agent` as well or leave them out")?;
+    let offered = ft_core::controls::for_agent(engine, Vec::new(), Vec::new());
+
+    // One key, checked against the control its engine offers for it.
+    let one = |key: &str, kind: ControlKind| -> Result<Option<String>> {
+        let Some(value) = asked.get(key).and_then(Value::as_str).map(str::trim) else {
+            return Ok(None);
+        };
+        if value.is_empty() {
+            return Ok(None);
+        }
+        if let Some(control) = offered.iter().find(|c| c.kind == kind) {
+            if !control.choices.iter().any(|c| c.value == value) {
+                bail!(
+                    "{} does not offer \"{value}\" for {key}. It offers: {}.",
+                    engine.label(),
+                    control
+                        .choices
+                        .iter()
+                        .map(|c| c.value.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+            }
+        }
+        Ok(Some(value.to_string()))
+    };
+
+    Ok(Some(ft_core::controls::Preferred {
+        model: one("model", ControlKind::Model)?,
+        effort: one("effort", ControlKind::Effort)?,
+        mode: one("mode", ControlKind::Mode)?,
+        sandbox: one("sandbox", ControlKind::Sandbox)?,
+    }))
+}
+
 /// What to say about the subscription, which this tool still cannot pin.
 ///
 /// Two sentences rather than one: with the engine open there is no subscription
@@ -1065,7 +1331,8 @@ fn subscription_note(new: &crate::roles::NewRole) -> &'static str {
 async fn create_profile(state: &AppState, request: &AgentRequest) -> Result<String> {
     let session = authoring_session(state, request).await?;
     let owner = session.owner.as_str();
-    let new = new_role_from(&request.input)?;
+    let mut new = new_role_from(&request.input)?;
+    resolve_scopes(state, owner, &request.input, &mut new, (&[], &[])).await?;
     crate::roles::check(&new).map_err(|e| anyhow::anyhow!("{e}"))?;
     let org = state.db.org().await?;
     let (slug, whose) = owner_of(state, &session).await?;
@@ -1101,18 +1368,20 @@ async fn update_profile(state: &AppState, request: &AgentRequest) -> Result<Stri
         Some(Value::Null) => None,
         _ => text(&request.input, key).or_else(|| now.clone()),
     };
-    let new = crate::roles::NewRole {
-        name: get_str("new_name", &existing.name),
+    let name = get_str("new_name", &existing.name);
+    let agent = unpinnable("agent", &existing.agent);
+    let mut new = crate::roles::NewRole {
         does: get_str("does", &existing.does),
         placement: get_str("placement", &existing.placement),
-        agent: unpinnable("agent", &existing.agent),
         machine: unpinnable("machine", &existing.machine),
-        // `None` leaves both exactly as they are — see `include_always_on`
-        // below for why that is the only reading that does not edit a profile
-        // nobody asked to edit. An agent must not be able to widen what a lead
-        // may do to its children, nor to revoke a grant by saving a name.
-        on_usage_limit: None,
-        on_child_limit: None,
+        /* Named or left alone, like everything else here — and `None` is
+        still what "left alone" is, because `Roles::update` `COALESCE`s
+        both. There is no clearing to offer: neither has an unset state,
+        and every value is a commitment the profile is making. */
+        on_usage_limit: text(&request.input, "on_usage_limit"),
+        on_child_limit: text(&request.input, "on_child_limit"),
+        // **Never from here.** The one field a tool does not write, so an
+        // update carries whatever the person set on the Profiles screen.
         account: existing.account.clone(),
         instructions: get_str("instructions", &existing.instructions),
         can_delegate: request
@@ -1120,20 +1389,38 @@ async fn update_profile(state: &AppState, request: &AgentRequest) -> Result<Stri
             .get("can_delegate")
             .and_then(Value::as_bool)
             .unwrap_or(existing.can_delegate),
-        delegate_scope: existing.delegate_scope.clone(),
-        // Carried, not settable — see `new_role_from`. An agent changing a
-        // profile must not be able to widen what its children load, nor to
-        // quietly switch off a source somebody chose on the Profiles screen.
-        skill_scope: existing.skill_scope.clone(),
-        // `None` leaves them exactly as they are, which is what "carried, not
-        // settable" means — and unlike reading them off `existing` and writing
-        // them back, it cannot lose a change somebody made on the Profiles
-        // screen between the read above and this write.
-        include_always_on: None,
-        include_repo_defaults: None,
-        settings: existing.settings.clone(),
+        // Both resolved below, against what is stored when the call says
+        // nothing about them.
+        delegate_scope: vec![],
+        skill_scope: vec![],
+        // `None` leaves them exactly as they are, and unlike reading them off
+        // `existing` and writing them back it cannot lose a change somebody
+        // made on the Profiles screen between the read above and this write.
+        include_always_on: request
+            .input
+            .get("include_always_on")
+            .and_then(Value::as_bool),
+        include_repo_defaults: request
+            .input
+            .get("include_repo_defaults")
+            .and_then(Value::as_bool),
+        // Against the engine as it will be after this write, not as it was:
+        // a call that moves the profile to Codex and pins a model has to be
+        // judged on Codex.
+        settings: settings_from(&request.input, agent.as_deref())?
+            .unwrap_or_else(|| existing.settings.clone()),
+        agent,
+        name,
         directory: None,
     };
+    resolve_scopes(
+        state,
+        owner,
+        &request.input,
+        &mut new,
+        (&existing.delegate_scope, &existing.skill_scope),
+    )
+    .await?;
     crate::roles::check(&new).map_err(|e| anyhow::anyhow!("{e}"))?;
     if !state
         .roles
@@ -1142,10 +1429,12 @@ async fn update_profile(state: &AppState, request: &AgentRequest) -> Result<Stri
     {
         bail!("you cannot change the \"{wanted}\" profile");
     }
+    let moved = refile(state, &session, existing.id.as_str(), &request.input).await?;
     Ok(format!(
-        "Updated the \"{}\" profile — {}. {}",
+        "Updated the \"{}\" profile — {}.{} {}",
         new.name.trim(),
         profile_shape(&new),
+        moved.map(|m| format!(" {m}")).unwrap_or_default(),
         match new.agent.is_some() {
             true =>
                 "Its subscription is untouched: that one is set on Settings → Harness → \
@@ -1177,6 +1466,208 @@ pub(crate) fn left_open(role: &crate::roles::Role) -> String {
         true => String::new(),
         false => format!(" — you choose its {}", open.join(" and ")),
     }
+}
+
+/// Everything one profile is, so an agent can reproduce it.
+///
+/// **The test of this is a round trip, not a field count.** `list_profiles` is
+/// the index and stays the index; this is the detail, and what makes it worth
+/// having is that every value it reports can be handed straight back to
+/// `create_profile`. So it names things the way those tools take them — a
+/// profile and a skill by name, an engine by the name `spawn` accepts — rather
+/// than by the ids the database holds, which nothing shows an agent anyway.
+///
+/// Prose, like `list_profiles` and `list_compute`, because that is what this
+/// surface returns.
+///
+/// **What cannot be copied is said, not omitted.** Two fields are deliberately
+/// unwritable — the subscription, which is somebody's money, and the default,
+/// where setting one unsets another — and a read that quietly left them out
+/// would let an agent report a faithful copy of something it had silently
+/// changed. That is the exact failure the last two changes here existed to
+/// remove, so they are reported *and* their absence from a copy is spelled
+/// out.
+async fn get_profile(state: &AppState, request: &AgentRequest) -> Result<String> {
+    let session = authoring_session(state, request).await?;
+    let owner = session.owner.as_str();
+    let wanted = text(&request.input, "name").context("name the profile to read")?;
+    // The same resolution and the same not-found wording `update_profile`
+    // uses, so a name that works for one works for the other.
+    let role = state
+        .roles
+        .by_name(owner, &wanted)
+        .await?
+        .with_context(|| format!("you have no profile called \"{wanted}\""))?;
+
+    let mut out = vec![format!("**{}** — {}", role.name, role.does)];
+    out.push(String::new());
+
+    // Where it is filed, which is what decides who else can reach it.
+    out.push(format!(
+        "- Filed in: {}",
+        match role.path.split('/').next() {
+            Some("d") => role
+                .path
+                .split('/')
+                .nth(1)
+                .map(|d| format!("the \"{d}\" directory"))
+                .unwrap_or_else(|| "a directory".into()),
+            _ => "your own space".into(),
+        }
+    ));
+    out.push(format!(
+        "- Engine: {}",
+        match role.agent.as_deref() {
+            Some(a) => ft_core::Agent::from_name(a)
+                .map(|e| format!("{} (`agent: \"{a}\"`)", e.label()))
+                .unwrap_or_else(|| format!("{a} — a name this build does not run")),
+            None => "open — a child runs whatever its lead runs".into(),
+        }
+    ));
+    out.push(format!(
+        "- Placement: {}",
+        match role.placement.as_str() {
+            // The words `profile_shape` acks a write with, so one idea has
+            // one phrase across this surface.
+            "here" => "sharing the lead's workspace (`placement: \"here\"`)",
+            "new" => "its own workspace (`placement: \"new\"`)",
+            _ => "open — the lead decides (`placement: \"lead\"`)",
+        }
+    ));
+    out.push(format!(
+        "- Machine: {}",
+        match role.machine.as_deref() {
+            Some(id) => format!("`{id}`"),
+            None => "open — Firetower picks one that can run the engine".into(),
+        }
+    ));
+    if !role.settings.is_empty() {
+        let mut said = Vec::new();
+        for (key, value) in [
+            ("model", &role.settings.model),
+            ("effort", &role.settings.effort),
+            ("mode", &role.settings.mode),
+            ("sandbox", &role.settings.sandbox),
+        ] {
+            if let Some(value) = value {
+                said.push(format!("{key}: \"{value}\""));
+            }
+        }
+        out.push(format!("- Run settings: {}", said.join(", ")));
+    } else {
+        out.push("- Run settings: none pinned — the engine's own defaults".into());
+    }
+    out.push(format!(
+        "- If it reaches usage limit: {}",
+        match role.on_usage_limit.as_str() {
+            "same" =>
+                "its lead may pick another subscription for the same engine (`on_usage_limit: \"same\"`)",
+            "engine" =>
+                "its lead may pick another subscription and engine (`on_usage_limit: \"engine\"`)",
+            _ => "wait for human action (`on_usage_limit: \"wait\"`)",
+        }
+    ));
+    out.push(format!(
+        "- Hands work off: {}",
+        match role.can_delegate {
+            false => "no — an Operator, it does the work itself".into(),
+            true => {
+                let team = named_profiles(state, owner, &role.delegate_scope).await?;
+                format!(
+                    "yes — a Manager, handing to {}",
+                    match team.is_empty() {
+                        true => "any profile its owner can reach".into(),
+                        false => team.join(", "),
+                    }
+                )
+            }
+        }
+    ));
+    if role.can_delegate {
+        out.push(format!(
+            "- When a child runs out: {}",
+            match role.on_child_limit.as_str() {
+                "reroute" => "Re-route it itself (`on_child_limit: \"reroute\"`)",
+                _ => "ask the person first (`on_child_limit: \"ask\"`)",
+            }
+        ));
+    }
+    let skills = named_skills(state, owner, &role.skill_scope).await?;
+    out.push(format!(
+        "- Skills it loads: {}{}{}",
+        match role.include_always_on {
+            true => "your always-on set",
+            false => "not your always-on set",
+        },
+        match role.include_repo_defaults {
+            true => ", the repository's defaults",
+            false => ", not the repository's defaults",
+        },
+        match skills.is_empty() {
+            true => ", and nothing named".to_string(),
+            false => format!(", and: {}", skills.join(", ")),
+        }
+    ));
+    out.push(String::new());
+    out.push("Instructions:".into());
+    out.push(match role.instructions.trim().is_empty() {
+        true => "(none)".into(),
+        false => role.instructions.trim().to_string(),
+    });
+
+    /* The two that do not travel. Named with what they are *now*, so the
+    agent can tell the person what it could not bring, and with what a copy
+    gets instead — which for the subscription is the right answer anyway. */
+    out.push(String::new());
+    out.push("**Two things a copy does not carry, and you cannot set:**".into());
+    out.push(format!(
+        "- Subscription: {}. No tool can pin one — it is somebody's money, and it is set on Settings → Harness → Profiles. A copy runs on the owner's default for its engine, which is usually what you want; say so rather than letting it pass unmentioned.",
+        match &role.account {
+            Some(_) => "this profile pins a particular one",
+            None => "the owner's default for its engine, resolved when it launches",
+        }
+    ));
+    out.push(format!(
+        "- Default for new workspaces: {}. Setting one unsets another, so no tool does it; the person flips it on the Profiles screen.",
+        match role.is_default {
+            true => "this is it",
+            false => "not this one",
+        }
+    ));
+    Ok(out.join("\n"))
+}
+
+/// Profile ids as the names an agent reads and writes.
+///
+/// Anything it cannot see is left out rather than shown as an id: a scope may
+/// name a profile shared with the owner and not with the reader, and an
+/// opaque id in a list of names is noise nobody can act on.
+async fn named_profiles(state: &AppState, owner: &str, ids: &[String]) -> Result<Vec<String>> {
+    let visible = state
+        .roles
+        .visible(owner, crate::access::Level::Viewer)
+        .await?;
+    Ok(ids
+        .iter()
+        .filter_map(|id| visible.iter().find(|r| &r.id == id).map(|r| r.name.clone()))
+        .collect())
+}
+
+/// The same for skills, and for the same reason.
+async fn named_skills(state: &AppState, owner: &str, ids: &[String]) -> Result<Vec<String>> {
+    let visible = state
+        .skills
+        .visible(owner, crate::access::Level::Viewer)
+        .await?;
+    Ok(ids
+        .iter()
+        .filter_map(|id| {
+            visible
+                .iter()
+                .find(|s| s.id.as_str() == id)
+                .map(|s| s.name.clone())
+        })
+        .collect())
 }
 
 /// The profiles the session's owner can see, so the agent builds on them.
@@ -1356,15 +1847,11 @@ async fn list_compute(state: &AppState, request: &AgentRequest) -> Result<String
             .collect();
         let last = here.iter().map(|p| p.checked_at).max();
         out.push_str(&match (runs.is_empty(), last) {
-            (true, _) => "    it has reported no engines\n".to_string(),
+            (true, _) => " it has reported no engines\n".to_string(),
             (false, Some(at)) => {
-                format!(
-                    "    runs {}, as of {}\n",
-                    runs.join(" and "),
-                    how_long_ago(at)
-                )
+                format!(" runs {}, as of {}\n", runs.join(" and "), how_long_ago(at))
             }
-            (false, None) => format!("    runs {}\n", runs.join(" and ")),
+            (false, None) => format!(" runs {}\n", runs.join(" and ")),
         });
     }
 
@@ -1404,13 +1891,13 @@ async fn list_compute(state: &AppState, request: &AgentRequest) -> Result<String
         out.push_str(&format!("- {}\n", engine.label()));
         if theirs.is_empty() {
             out.push_str(
-                "    none you can spend. A child on it runs on whatever that machine is signed \
+                " none you can spend. A child on it runs on whatever that machine is signed \
                  in as, or is refused at launch.\n",
             );
         }
         for account in theirs {
             out.push_str(&format!(
-                "    · {} ({}) — {}{}connected · {}\n",
+                " · {} ({}) — {}{}connected · {}\n",
                 account.name,
                 account.id,
                 if account.is_default {
@@ -1991,7 +2478,7 @@ mod tests {
 
     #[test]
     fn a_silent_child_falls_back_to_its_note_and_then_to_saying_so() {
-        let noted = hand_back_body(&child("qa", None), Some("   "), Some("47 pass, 1 fail"));
+        let noted = hand_back_body(&child("qa", None), Some(" "), Some("47 pass, 1 fail"));
         assert!(noted.contains("47 pass, 1 fail"));
         let mute = hand_back_body(&child("qa", None), None, None);
         assert!(mute.contains("(it said nothing)"));

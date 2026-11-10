@@ -4005,7 +4005,7 @@ async fn an_agent_can_read_a_whole_profile_and_copy_it() {
             "skillScope": [],
             "includeAlwaysOn": false,
             "includeRepoDefaults": false,
-            "settings": { "model": "opus", "mode": "plan" },
+            "settings": { "model": "opus[1m]", "mode": "plan" },
         }),
     )
     .await;
@@ -4096,7 +4096,7 @@ async fn an_agent_can_read_a_whole_profile_and_copy_it() {
                 "skill_scope": ["changelog"],
                 "include_always_on": false,
                 "include_repo_defaults": false,
-                "settings": { "model": "opus", "mode": "plan" },
+                "settings": { "model": "opus[1m]", "mode": "plan" },
             }),
         ),
     )
