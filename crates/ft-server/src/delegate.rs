@@ -244,14 +244,45 @@ async fn spawn(state: &AppState, request: &AgentRequest) -> Result<String> {
             None => visible,
         }
     };
+    /* **The fourth place a profile is resolved by name, and the one that
+    costs most to get wrong.** A read that picks the wrong one of two
+    wastes a call; a spawn that picks wrong starts work on the wrong
+    profile and spends somebody's allowance doing it. Same rule as the
+    other three — `at_most_one` — against `team` rather than through
+    `profile_named`, because the list is already narrowed to what this
+    Manager may hand to and resolving outside it would widen its scope.
+
+    Not found is untouched: that message is good and was never the
+    defect. */
     let role = match text(&request.input, "role") {
-        Some(wanted) => match team
-            .iter()
-            .find(|r| r.name.eq_ignore_ascii_case(wanted.trim()))
-        {
+        Some(wanted) => match at_most_one("subagent", wanted.trim(), &team, |r| r.name.as_str())? {
             Some(found) => Some(found.clone()),
             None => {
-                let names: Vec<String> = team.iter().map(|r| r.name.clone()).collect();
+                /* One entry per name, with a collision marked rather than
+                printed twice. `Engineer, Engineer` is the truth and reads
+                as a bug, which costs the reader more than it tells them;
+                de-duplicating in silence would hide a thing a lead can
+                act on. Marked says both, and the refusal above carries
+                the consequence if they name it anyway. Grouped the way
+                the resolution matches, so what is listed once is what
+                resolves once. */
+                let mut counted: Vec<(String, usize)> = Vec::new();
+                for r in &team {
+                    match counted
+                        .iter_mut()
+                        .find(|(n, _)| n.eq_ignore_ascii_case(&r.name))
+                    {
+                        Some((_, seen)) => *seen += 1,
+                        None => counted.push((r.name.clone(), 1)),
+                    }
+                }
+                let names: Vec<String> = counted
+                    .into_iter()
+                    .map(|(name, seen)| match seen {
+                        1 => name,
+                        seen => format!("{name} ({seen} profiles share this name)"),
+                    })
+                    .collect();
                 bail!(
                     "no subagent called \"{wanted}\". {}",
                     if names.is_empty() {

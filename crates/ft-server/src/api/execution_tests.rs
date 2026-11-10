@@ -4699,3 +4699,111 @@ async fn a_placement_that_is_not_one_is_refused_by_name() {
 
     state.fleet.stop_supervising(&host.id).await;
 }
+
+/// **`spawn` is the fourth site, and the one that costs most to get wrong.**
+///
+/// A read that picks the wrong one of two profiles wastes a call. A spawn
+/// that picks wrong starts work on the wrong profile and spends somebody's
+/// allowance doing it — QA demonstrated exactly that, a child running with
+/// `profile_id` pointing at whichever row came back first.
+///
+/// And the list in the not-found refusal, which said `Engineer, Engineer`:
+/// the truth, and it reads as a bug. One entry per name with the collision
+/// marked says both — the name is still the handle, and there is something
+/// to go and fix.
+#[tokio::test]
+async fn spawning_a_name_two_profiles_answer_to_starts_neither() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let lead = a_lead_that_delegates(&state, &host, &ready, &owner, Agent::ClaudeCode).await;
+    saved_profile(
+        &state,
+        &owner,
+        serde_json::json!({ "name": "Engineer", "does": "Mine", "placement": "here" }),
+    )
+    .await;
+    let org = ft_core::OrgId::from_stored(state.db.org().await.unwrap());
+    let ana = state
+        .accounts
+        .create_user(&org, "ana", "ana@example.test", "member")
+        .await
+        .unwrap()
+        .0;
+    let hers = saved_profile(
+        &state,
+        ana.id.as_str(),
+        serde_json::json!({ "name": "Engineer", "does": "Hers", "placement": "here" }),
+    )
+    .await;
+    state
+        .access
+        .set_exception(
+            crate::access::FiledKind::Role,
+            &hers,
+            &owner,
+            crate::access::Level::Viewer,
+        )
+        .await
+        .unwrap();
+
+    let refused = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "sp",
+            "spawn",
+            serde_json::json!({ "role": "Engineer", "goal": "do the thing" }),
+        ),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(
+        refused.contains("Engineer") && refused.contains("more than one"),
+        "it names the ambiguity rather than starting one of them: {refused}"
+    );
+    assert!(
+        state.db.children_of(&lead).await.unwrap().is_empty(),
+        "and no child was started — allowance is spent on a spawn that picks wrong"
+    );
+
+    // The team list in the *not-found* refusal: one entry per name, the
+    // collision marked rather than printed twice.
+    let listed = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "sp2",
+            "spawn",
+            serde_json::json!({ "role": "Nobody", "goal": "do the thing" }),
+        ),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(
+        listed.contains("Engineer (2 profiles share this name)"),
+        "the collision is marked: {listed}"
+    );
+    assert!(
+        !listed.contains("Engineer, Engineer"),
+        "and not printed twice, which reads as a bug: {listed}"
+    );
+
+    // An unambiguous name still spawns, which is the half not to break.
+    crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "sp3",
+            "spawn",
+            serde_json::json!({ "role": "Ada, the lead", "goal": "do the thing" }),
+        ),
+    )
+    .await
+    .expect("a name only one profile answers to is still a handle");
+
+    state.fleet.stop_supervising(&host.id).await;
+}
