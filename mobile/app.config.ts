@@ -59,6 +59,11 @@ const config: ExpoConfig = {
   backgroundColor: "#ffffff",
   ios: {
     bundleIdentifier: "com.usefiretower.app",
+    icon: {
+      light: "./assets/icon.png",
+      dark: "./assets/icon-dark.png",
+      tinted: "./assets/icon-tinted.png",
+    },
     /* **The other half of the build claim.** With this false the app runs in
        compatibility mode on the Duo's inner display: it gets a phone-sized
        window in the middle of a larger screen and *none* of the three poses
@@ -100,7 +105,11 @@ const config: ExpoConfig = {
   },
   android: {
     package: "com.usefiretower.app",
-    adaptiveIcon: { backgroundColor: "#0b0b0c", foregroundImage: "./assets/icon.png" },
+    adaptiveIcon: {
+      backgroundColor: "#ffffff",
+      foregroundImage: "./assets/android-icon-foreground.png",
+      monochromeImage: "./assets/android-icon-monochrome.png",
+    },
   },
   icon: "./assets/icon.png",
   plugins: [
@@ -120,7 +129,7 @@ const config: ExpoConfig = {
         backgroundColor: "#ffffff",
         resizeMode: "contain",
         imageWidth: 160,
-        dark: { backgroundColor: "#0b0b0c" },
+        dark: { image: "./assets/splash-icon-dark.png", backgroundColor: "#0b0b0c" },
       },
     ],
     /* Release builds are shrunk. Without this a local `assembleRelease` is
