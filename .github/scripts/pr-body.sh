@@ -1,58 +1,44 @@
 #!/usr/bin/env sh
-# What a pull request body actually says, once GitHub has rendered it.
+# What a pull request body actually says — as GitHub renders it, not as we
+# imagine it.
 #
 # Called by the `contribution` workflow with the branch's changed files; the
 # body and title arrive in `$BODY` and `$TITLE`. Prints its verdict, writes the
 # same thing to the job summary, and exits 1 if the pull request fails.
 #
-# It lives in a file rather than inside the workflow because the part of this
-# that reads a body has now been wrong three times, and every one of the three
-# was found by running it rather than by reading it: an allowlisted hostname
-# written in prose counted as a screenshot; the host allowlist matched anywhere
-# in the body rather than the image's own source, so `alt="<allowlisted>"` on a
-# fork-hosted `<img>` passed; and an HTML comment that was never closed hid the
-# whole description from the check while GitHub hid it from the reader too. A
-# thing that keeps being wrong needs a test, and a test needs something it can
-# call. `.github/scripts/pr-body-test.sh` is that test.
+# This used to parse the markdown itself — fences, code spans, HTML comments,
+# block versus inline, the lot — and six separate passes over it found six
+# divergences. Every one of the six was the same shape: the gap between what we
+# parsed and what GitHub puts on the page. A fork-hosted image hiding behind an
+# allowlisted `alt`. A `<!--` nobody closed. A `<picture>` whose `<source>`
+# covers the `<img>` the check was reading. And, in the other direction, four
+# honest shapes refused — setext headings, `## **bold**` headings, a raw `<h2>`,
+# a reference-style image — each of which renders perfectly for a reader while
+# the check told the author their description was missing.
 #
-# The parsing is one perl pass, not a pipeline of greps, for a reason found the
-# hard way: GNU grep and ugrep disagree about enough of this that the same body
-# reached different verdicts on a laptop and on `ubuntu-latest`. A check whose
-# answer depends on which grep is installed is not a check.
+# So it stopped guessing. The body goes to GitHub's own `/markdown` endpoint and
+# what comes back is the HTML the pull request page shows. Sections are the
+# headings in it; evidence is the images in it. There is no second renderer to
+# disagree with the first, which is the whole of the idea — the class of bug
+# goes with it, and so does the ugrep-versus-GNU-grep problem underneath it.
 #
-# What the perl does is flatten the body the way GitHub's renderer does, and
-# then ask two questions of what is left:
+# What did NOT change is the policy, and it should not: the host allowlist
+# anchored at the start of each URL, `..`, `@`, `\` and their percent-encodings
+# refused, and a `<source>` we do not allow disqualifying the `<img>` behind it.
+# Those survived five rounds of review on their own merits. Only the reading of
+# the body moved.
 #
-#   * Fenced code is dropped. An image inside a fence renders as the characters
-#     `![s](…)`, not as a picture, and a heading inside one is not a heading. An
-#     unterminated fence runs to the end, as CommonMark says.
-#   * Inline code spans are dropped next, for the same reason — and because it
-#     is what lets somebody write `<!--` in a sentence without the next step
-#     eating the rest of their description.
-#   * HTML comments are two different things and have to be treated as two.
-#     One that opens at the start of a line is a *block*, and a block that is
-#     never closed swallows the rest of the document — that is settled in the
-#     line loop, because the renderer decides blocks before it looks at
-#     anything inline, and a code span that appears to wrap such a comment does
-#     not actually wrap it. One that opens mid-line is *inline*, and an inline
-#     one that is never closed is literal text the reader can see, so it is
-#     left alone. `<!-->` and `<!--->` are complete and empty, and everything
-#     after them renders.
+# **It fails open.** If the endpoint is slow, down, or says anything other than
+# 200, the check passes and says plainly in the summary that it could not run
+# and why. This is advisory — a red cross here has never blocked a merge — and
+# an outage at GitHub must never read as a contributor's mistake.
 #
-# Evidence is then taken from image *sources* only — the destination of a
-# markdown image, the `src` of an `<img>`, `<video>` or `<source>`, and a bare
-# GitHub attachment URL alone on its line, which is what dragging a video in
-# produces and what the README already uses. A URL mentioned in prose is not a
-# screenshot. Each source is matched against the allowlist anchored at its own
-# start, so a host that merely contains an allowed one — a suffix, a prefix, a
-# userinfo `@`, a query string, a path segment — is not it. `..` is refused
-# outright: `github.com/user-attachments/assets/../../someone/repo/raw/main/a.png`
-# is served by github.com and comes from the fork.
-#
-# One thing it does not do: a reference-style image, `![a][ref]` with the URL
-# defined further down, is not read as a source. That fails rather than passes,
-# so it is a false failure and not a hole — and the fix is the one the message
-# already asks for, which is to drag the file in.
+# What that costs, said here rather than discovered later: failing open means
+# the check can be made not to run. Burning the hourly API budget on edit
+# events would do it, and so would picking a bad minute. That is a real trade
+# and it is the right one — this is a signal, and a signal that cries wolf
+# through a GitHub incident is worse than one that can be stepped around by
+# somebody who has already decided to.
 set -eu
 
 if [ "$#" -ne 2 ]; then
@@ -65,88 +51,125 @@ numstat=$2
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
-perl > "$work/facts" <<'PERL'
-my $body  = $ENV{BODY}  // '';
+# --- ask GitHub what this body looks like -----------------------------------
+
+perl > "$work/payload.json" <<'PERL'
+my $b = $ENV{BODY} // '';
+$b =~ s/\\/\\\\/g;
+$b =~ s/"/\\"/g;
+$b =~ s/\r/\\r/g;
+$b =~ s/\n/\\n/g;
+$b =~ s/\t/\\t/g;
+$b =~ s/([\x00-\x1f])/sprintf('\\u%04x', ord($1))/ge;
+print '{"text":"' . $b . '","mode":"gfm","context":"firetower-cloud/firetower"}';
+PERL
+
+token=${GH_TOKEN:-${GITHUB_TOKEN:-}}
+if [ -n "$token" ]; then
+    set -- -H "Authorization: Bearer $token"
+else
+    set --
+fi
+
+status=$(curl -sS -o "$work/rendered.html" -w '%{http_code}' \
+    -X POST https://api.github.com/markdown \
+    -H 'Accept: application/vnd.github+json' \
+    -H 'X-GitHub-Api-Version: 2022-11-28' \
+    "$@" \
+    --max-time 20 --retry 2 --retry-delay 1 --retry-all-errors \
+    --data-binary "@$work/payload.json" 2>"$work/curl.err") || status=000
+
+if [ "$status" != "200" ]; then
+    {
+        echo "### ⚠ this check could not run"
+        echo
+        echo "It asks GitHub to render the pull request body and reads the result, so that"
+        echo "it is looking at the same page a reviewer is. That request did not come back:"
+        echo
+        echo '```'
+        echo "POST https://api.github.com/markdown  ->  $status"
+        sed -n '1,3p' "$work/curl.err" 2>/dev/null || true
+        echo '```'
+        echo
+        echo "So it is passing. Nothing is wrong with this pull request as far as anybody"
+        echo "here knows — the check simply has no opinion this time. Re-run it from the"
+        echo "Checks tab, or edit the body, and it will try again."
+    } | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
+    echo "::warning::the contribution check could not reach GitHub's renderer and is passing"
+    exit 0
+fi
+
+# --- read the page ----------------------------------------------------------
+
+perl - "$work/rendered.html" > "$work/facts" <<'PERL'
+my $h = do { local $/; open my $fh, '<', $ARGV[0] or die "$!"; <$fh> };
+$h = '' unless defined $h;
 my $title = $ENV{TITLE} // '';
 
-# --- flatten it the way the renderer does -----------------------------------
-my ($fence_char, $fence_len, $in_comment, @keep) = ('', 0, 0);
-for my $line (split /^/, $body) {
-    if ($fence_len) {
-        if ($line =~ /^ {0,3}(`{3,}|~{3,})[ \t]*\r?\n?\z/) {
-            my $c = substr($1, 0, 1);
-            $fence_len = 0 if $c eq $fence_char && length($1) >= $fence_len;
-        }
-        next;
-    }
-    if ($in_comment) { $in_comment = 0 if $line =~ /-->/; next; }
-    if ($line =~ /^ {0,3}(`{3,}|~{3,})/) {
-        $fence_char = substr($1, 0, 1);
-        $fence_len  = length($1);
-        next;
-    }
-    # A comment that opens at the start of a line is a block, and a block that
-    # never closes runs to the end of the document. It has to be settled here,
-    # line by line, rather than left to a regex on the whole body: the renderer
-    # decides blocks before it looks at anything inline, so a code span that
-    # appears to wrap one of these does not actually wrap it.
-    if ($line =~ /^ {0,3}<!--/ && $line !~ /^ {0,3}<!--->/ && $line !~ /^ {0,3}<!-->/) {
-        $in_comment = 1 unless $line =~ /-->/;
-        next;
-    }
-    push @keep, $line;
+sub untag { my ($x) = @_; $x =~ s/<[^>]*>//gs; return $x; }
+sub unent {
+    my ($x) = @_;
+    $x =~ s/&lt;/</g;  $x =~ s/&gt;/>/g;  $x =~ s/&quot;/"/g;
+    $x =~ s/&#0*39;/'/g; $x =~ s/&#x0*27;/'/gi;
+    $x =~ s/&amp;/&/g;   # last, or everything above decodes twice
+    return $x;
 }
-my $t = join '', @keep;
 
-$t =~ s/(`+)(?s:.)*?\1//g;          # inline code spans
-$t =~ s/<!--->|<!-->//g;            # GitHub's two empty comments
-# Closed only. A `<!--` that opens in the middle of a line and is never closed
-# is literal text on the page — the reader sees `<!--` — so eating the rest of
-# the description on account of it is a failure of an honest pull request. The
-# block phase above has already dealt with the ones that really do run on.
-$t =~ s/<!--(?s:.)*?-->//g;
+# GitHub proxies an off-site image through camo, and the proxy URL carries the
+# original hex-encoded in its last path segment. Showing somebody a camo hash
+# when they asked what their picture loads from is no answer at all.
+sub pretty {
+    my ($u) = @_;
+    if ($u =~ m{^https?://camo\.githubusercontent\.com/[^/]+/([0-9a-fA-F]+)}) {
+        my $hex = $1;
+        if (length($hex) % 2 == 0) {
+            my $decoded = pack 'H*', $hex;
+            return $decoded if $decoded =~ m{^https?://};
+        }
+    }
+    return $u;
+}
 
 # --- the sections the template asks for -------------------------------------
-# Up to three spaces and a space after the hashes, because that is what GFM
-# calls a heading. Four spaces is an indented code block and `##Thing` is a
-# paragraph that happens to start with two hashes.
+# Whatever GitHub calls a heading is a heading: an ATX one, a setext one, a
+# bolded one, a raw <h2> somebody wrote by hand. All four arrive here as the
+# same tag, which is the point of asking the renderer instead of the text.
+my @headings;
+while ($h =~ m{<h([1-6])\b[^>]*>(.*?)</h\1>}gis) {
+    my $t = unent(untag($2));
+    $t =~ s/\A\s+//; $t =~ s/\s+\z//; $t =~ s/\s+/ /g;
+    push @headings, lc $t;
+}
 for my $want ('What changes', 'Why', 'How it was checked', 'What I did not do') {
-    print "missing=$want\n" unless $t =~ /^ {0,3}\#{1,6}[ \t]+\Q$want\E/mi;
+    my $w = lc $want;
+    print "missing=$want\n" unless grep { index($_, $w) == 0 } @headings;
 }
 
 # --- what it shows ----------------------------------------------------------
-my @found;
-push @found, $1 while $t =~ /!\[[^\]]*\][ \t]*\(\s*<?([^>\s)]+)/g;
-# `\b` alone matches the `src` inside `data-src`, and the lazy `[^>]*?` takes
-# the first one it can — so a decoy attribute placed before the real `src` was
-# what got read. The lookbehind is what makes it the attribute and not a
-# substring of one.
-push @found, $2 while $t =~ /<(?:img|video|source)\b[^>]*?(?<![-\w:.])src\s*=\s*(["']?)([^"'>\s]+)\1/gi;
-push @found, $1 while $t =~ m{^[ \t]*(https?://github\.com/user-attachments/assets/\S+)[ \t]*$}gmi;
-
-# A `<picture>` displays its first matching `<source>`, and the `<img>` inside
-# it is only the fallback — a `<source>` carrying neither `media` nor `type`
-# always matches, so it always wins. GitHub strips `srcset` from an `<img>`,
-# which makes that one harmless, but it keeps `<source srcset>` and does not
-# proxy it. So a fork-hosted `<source>` in front of an allowlisted `<img>` is
-# what the reviewer actually looks at, and the `<img>` behind it is evidence of
-# nothing. The `media="(prefers-color-scheme: dark)"` spelling is the one to
-# watch: it is GitHub's own documented idiom, it reads as entirely legitimate,
-# and it shows the fork to every reviewer in dark mode and nobody else.
-my @shadow;
-while ($t =~ /<source\b[^>]*?(?<![-\w:.])srcset\s*=\s*(["']?)([^"'>]+)\1/gi) {
-    for my $cand (split /\s*,\s*/, $2) {   # a srcset is a candidate list
-        $cand =~ s/^\s+//;
-        $cand =~ s/\s.*\z//;               # drop the `2x` / `640w` descriptor
-        push @shadow, $cand if length $cand;
+# Only what the page loads. An allowed host written in the alt text, in a query
+# string or in the sentence above the picture is not where the picture is from.
+my (@found, @shadow);
+while ($h =~ m{<(img|source|video)\b([^>]*)>}gis) {
+    my ($tag, $attrs) = (lc $1, $2);
+    my @urls;
+    if ($attrs =~ m{(?<![-\w:.])src\s*=\s*(["'])(.*?)\1}is) {
+        push @urls, unent($2);
     }
+    if ($attrs =~ m{(?<![-\w:.])srcset\s*=\s*(["'])(.*?)\1}is) {
+        for my $cand (split /\s*,\s*/, unent($2)) {   # a srcset is a candidate list
+            $cand =~ s/\A\s+//;
+            $cand =~ s/\s.*\z//;                      # drop the `2x` / `640w` descriptor
+            push @urls, $cand if length $cand;
+        }
+    }
+    @urls = grep { m{^https?://}i } @urls;
+    push @found, @urls;
+    # A <source> overrides the <img> or <video> it sits beside — a <picture>
+    # shows its first matching <source> and keeps the <img> only as a fallback,
+    # and a <source> with neither `media` nor `type` always matches. So what a
+    # <source> points at is what the reader sees.
+    push @shadow, @urls if $tag eq 'source';
 }
-push @found, @shadow;
-
-# Only a real target counts as a picture. The template ships three `![](…)`
-# cells and an untouched one should be told it shows nothing — not told its
-# screenshots are on the wrong host.
-my @src = grep { m{^https?://}i } @found;
 
 # One copy of the question, asked in two places. A userinfo `@`, a backslash,
 # or any spelling of `..` means the host or the path is not what it reads as.
@@ -164,28 +187,32 @@ sub allowed {
 }
 
 my $evidence = 'none';
-if (@src) {
+if (@found) {
     $evidence = 'elsewhere';
-    for my $u (@src) {
+    for my $u (@found) {
         if (allowed($u)) { $evidence = 'hosted'; last; }
     }
-    if ($evidence eq 'elsewhere') {
-        my %seen;
-        for my $u (@src) {
-            next if $seen{$u}++;
-            print "refused=$u\n";
-            last if keys(%seen) >= 5;
-        }
-    }
 }
-# A shadow we do not allow takes the verdict back down, whatever the `<img>`
+# A shadow we do not allow takes the verdict back down whatever the picture
 # behind it says — only one of the two is ever on the screen.
 $evidence = 'elsewhere'
     if $evidence eq 'hosted' && grep { !allowed($_) } @shadow;
+
+if ($evidence eq 'elsewhere') {
+    my %seen;
+    for my $u (@found) {
+        my $p = pretty($u);
+        next if $seen{$p}++;
+        print "refused=$p\n";
+        last if keys(%seen) >= 5;
+    }
+}
 print "evidence=$evidence\n";
 
-my $linked = ($t =~ /(?:^|[^A-Za-z0-9_])#[0-9]+/ || $t =~ m{/issues/[0-9]+}
-            || $title =~ /(?:^|[^A-Za-z0-9_])#[0-9]+/) ? 'yes' : 'no';
+my $text = unent(untag($h));
+my $linked = ($text =~ /(?:^|[^A-Za-z0-9_])#[0-9]+/
+           || $h =~ m{/issues/[0-9]+}
+           || $title =~ /(?:^|[^A-Za-z0-9_])#[0-9]+/) ? 'yes' : 'no';
 print "linked=$linked\n";
 PERL
 
@@ -201,10 +228,21 @@ added=$(awk '$1 ~ /^[0-9]+$/ { n += $1 } END { print n + 0 }' "$numstat")
 grep -E '^(web|desktop|mobile)/' "$files_list" > "$work/ui" || true
 ui=$(wc -l < "$work/ui" | tr -d ' ')
 
+# The verdict first and the warnings under it, because the answer is what
+# somebody opened this to read.
 : > "$work/verdict"
-say() { printf '%s\n' "$1" >> "$work/verdict"; }
+: > "$work/warnings"
+out="$work/verdict"
+say() { printf '%s\n' "$1" >> "$out"; }
 plural() { if [ "$1" -eq 1 ]; then printf '%s %s' "$1" "$2"; else printf '%s %ss' "$1" "$2"; fi; }
 fails=0
+
+ui_files() {
+    say '```'
+    head -n 10 "$work/ui" >> "$out"
+    if [ "$ui" -gt 10 ]; then say "...and $((ui - 10)) more"; fi
+    say '```'
+}
 
 if [ "$ui" -gt 0 ] && [ "$evidence" = none ]; then
     fails=$((fails + 1))
@@ -213,21 +251,24 @@ if [ "$ui" -gt 0 ] && [ "$evidence" = none ]; then
     say ""
     say "A failure here is never a failure of the code."
     say ""
-    say "It touches $(plural "$files" file). These are the ones people look at:"
+    if [ "$ui" -eq 1 ]; then
+        say "It touches $(plural "$files" file). This is the one people look at:"
+    else
+        say "It touches $(plural "$files" file). These are the ones people look at:"
+    fi
     say ""
-    say '```'
-    head -n 10 "$work/ui" >> "$work/verdict"
-    if [ "$ui" -gt 10 ]; then say "...and $((ui - 10)) more"; fi
-    say '```'
+    ui_files
     say ""
-    say "There is no image in the pull request body that GitHub is hosting."
+    say "GitHub rendered the body and there is no image in it."
     say ""
     say "Add a row to the Screenshots table for every user path you changed — before"
     say "and after, on every surface it appears on. Drag the images into the box so"
     say "GitHub hosts them rather than linking a branch on your fork."
     say ""
-    say "A picture inside a code fence or an HTML comment does not count, because it"
-    say "is not one — the reader sees the characters, or nothing at all."
+    say "This check reads the page GitHub draws, not the markdown you typed, so a"
+    say "picture inside a comment or a code fence does not count — the reader cannot"
+    say "see it either. If one is missing and you cannot think why, open the pull"
+    say "request's Conversation tab: whatever is on that page is what this read."
     say ""
     say "This is the only check here that is not about the code. It exists because a"
     say "reviewer cannot see a screen from a diff, and because \"it looks right\" is not"
@@ -240,25 +281,33 @@ elif [ "$ui" -gt 0 ] && [ "$evidence" = elsewhere ]; then
     say ""
     say "A failure here is never a failure of the code."
     say ""
-    say "This pull request touches $(plural "$ui" file) under \`web/\`, \`desktop/\` or"
-    say "\`mobile/\`, and the body does carry images — but no image here is *served by*"
-    say "a host GitHub controls. What each picture actually loads from:"
+    if [ "$ui" -eq 1 ]; then
+        say "It touches $(plural "$files" file). This is the one people look at:"
+    else
+        say "It touches $(plural "$files" file). These are the ones people look at:"
+    fi
+    say ""
+    ui_files
+    say ""
+    say "The body does carry pictures, and no picture on the rendered page is served"
+    say "by a host GitHub controls. What each one actually loads from:"
     say ""
     say '```'
-    cat "$work/refused" >> "$work/verdict"
+    cat "$work/refused" >> "$out"
     say '```'
     say ""
-    say "GitHub does not proxy those. The page points straight at the repository they"
-    say "live in, so whoever owns it can change the picture a reviewer approved, or"
-    say "delete it — and a deleted fork turns this into a page of broken images. #256"
-    say "and #260 are both built that way today."
+    say "Those stay under somebody else's control. The owner can change the picture a"
+    say "reviewer approved, or delete it — and a deleted fork turns this into a page of"
+    say "broken images. #256 and #260 are both built that way today. An off-site image"
+    say "GitHub caches through its proxy is the same problem one step along: the cache"
+    say "is refilled from wherever it came from."
     say ""
     say "What counts is where the image loads from, not what is written near it. An"
-    say "allowed host in the alt text, in the query string or in the sentence above"
-    say "the picture is not where the picture comes from."
+    say "allowed host in the alt text, in the query string or in the sentence above the"
+    say "picture is not where the picture comes from."
     say ""
-    say "Drag the file into the comment box instead and GitHub rehosts it. That link"
-    say "is immutable and outlives the fork. The three it accepts are:"
+    say "Drag the file into the comment box instead and GitHub rehosts it. That link is"
+    say "immutable and outlives the fork. The three it accepts are:"
     say ""
     say '```'
     say "https://user-images.githubusercontent.com/..."
@@ -280,7 +329,7 @@ if [ -s "$work/missing" ]; then
     say "Missing:"
     say ""
     say '```'
-    sed 's/^/## /' "$work/missing" >> "$work/verdict"
+    sed 's/^/## /' "$work/missing" >> "$out"
     say '```'
     say ""
     say "They are in \`.github/pull_request_template.md\` — paste the headings back in"
@@ -288,12 +337,16 @@ if [ -s "$work/missing" ]; then
     say "\"nothing\" on a pull request of any size, and it is what tells a reviewer"
     say "where to look hardest."
     say ""
-    say "A heading inside an HTML comment or a code fence is not one. If your body"
-    say "looks right to you and this says otherwise, check for a \`<!--\` you never"
-    say "closed: GitHub hides everything after it, from the check and from the"
-    say "reader both."
+    say "This reads the headings off the page GitHub draws, so any heading it draws"
+    say "counts — \`##\`, an underlined one, a bolded one, a hand-written \`<h2>\`. If a"
+    say "heading looks right to you and this cannot find it, it is almost always"
+    say "raw HTML earlier in the body: GitHub stops reading markdown after an HTML"
+    say "block, and everything under it comes out as plain text. Leave a blank line"
+    say "between the HTML and the next heading and both come back."
     say ""
 fi
+
+out="$work/warnings"
 
 if [ "$files" -gt 30 ] || [ "$added" -gt 1500 ]; then
     echo "::warning::$files files and +$added lines — large enough that it will sit open"
@@ -326,6 +379,7 @@ if [ "$linked" = no ]; then
     say ""
 fi
 
+out="$work/verdict"
 if [ "$fails" -eq 0 ]; then
     case "$evidence" in
         hosted)    shown="an image GitHub is hosting" ;;
@@ -339,10 +393,11 @@ if [ "$fails" -eq 0 ]; then
     say ""
 fi
 
+cat "$work/verdict" "$work/warnings" > "$work/summary"
 if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
-    cat "$work/verdict" >> "$GITHUB_STEP_SUMMARY"
+    cat "$work/summary" >> "$GITHUB_STEP_SUMMARY"
 fi
-cat "$work/verdict"
+cat "$work/summary"
 
 if [ "$fails" -ne 0 ]; then
     echo "What failed above is the description, not the diff."

@@ -1,18 +1,25 @@
 #!/usr/bin/env sh
 # Runs every body in `.github/fixtures/pr-bodies` past `pr-body.sh`.
 #
-# Three bugs in the body reader have been found so far and all three were found
-# by running it, never by reading it. So the bodies that found them are kept,
-# with the verdict each one has to reach, and this runs on every pull request
-# alongside the check itself. A regex in `pr-body.sh` that is loosened by
-# accident fails here first.
+# Every bug the body reader has had was found by running it against a body,
+# never by reading it — six of them, across six passes. So the bodies that
+# found them are kept, with the verdict each one has to reach, and this runs on
+# every pull request alongside the check itself. Something loosened by accident
+# fails here first.
 #
-# Every expectation in `expected.tsv` was rendered through GitHub's own
-# markdown API before it was written down. That matters more than it sounds:
-# the whole family of bugs is the difference between what a check reads and
-# what a reader sees, so agreeing with ourselves proves nothing.
+# Rather more than half of these are honest bodies that have to keep passing.
+# That is deliberate: four of the six were false failures, and a false failure
+# costs a contributor where a missed bypass costs a review.
 #
-# Run it from anywhere; it finds the fixtures beside itself.
+# Every expectation in `expected.tsv` is derived from GitHub's own renderer, by
+# POSTing the body to `/markdown` and reading the HTML that comes back. Twice a
+# fixture has been the thing that was wrong rather than the code, and both
+# times it was because somebody wrote down what they expected instead of
+# asking.
+#
+# This talks to the network, because `pr-body.sh` does — it is the same call on
+# the same path, which is the point. Set `GH_TOKEN` to avoid the unauthenticated
+# rate limit. Run it from anywhere; it finds the fixtures beside itself.
 set -eu
 
 here=$(dirname "$0")
