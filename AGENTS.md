@@ -43,6 +43,23 @@ which is most of the red builds on this repository. If you changed a Rust
 handler, the committed `api/openapi.json` and each client's
 `src/api/generated/` have to be what the generator now produces.
 
+## If you are opening a pull request
+
+`.github/pull_request_template.md` is what it has to fill in, and two of these
+are checked rather than hoped for:
+
+* **Every commit is a Conventional Commit.** Above, and `commits.yml` fails the
+  pull request otherwise.
+* **Link the issue, and it should be labelled `accepted`.** `Closes #123` in the
+  Why section. An issue is not agreement; `accepted` is. A fix under roughly
+  fifty lines with a screenshot needs no issue at all.
+* **Screenshot every user path you touched** when the change is under `web/`,
+  `desktop/` or `mobile/` — before and after, a row per path, on every surface
+  it appears on. Drag the images in so GitHub hosts them; a link to a branch on
+  a fork is refused. `contribution.yml` fails the pull request without one.
+* **Say what you did not do.** Deliberate omissions and known gaps. On a pull
+  request of any size this is never "nothing".
+
 ## What not to do
 
 * **Don't edit `CHANGELOG.md`, `version.txt`, `.release-please-manifest.json`
