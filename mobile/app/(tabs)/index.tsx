@@ -222,7 +222,16 @@ export default function Home() {
   const header = (
     /* `z-index: 20` in the drawing, the same rung as the composer:
        both are chrome the content scrolls under, and both have to sit
-       above it to do that. */
+       above it to do that.
+
+       **`pt-0.5` stays, and it is 2 pt on top of the root's own air rather
+       than instead of it.** It was the whole of the air above this chip on
+       any surface that reserves nothing — the Duo's inner display sat the
+       server chip 2 pt from the frame — and the fix for that is `TOP_AIR` in
+       `edges.ts`, a floor on the root's resolved total, because fourteen
+       screen roots go through that hook and only one of them is this one.
+       Raising the 2 here instead would have fixed the home and left Tasks,
+       Artifacts, You and Workspaces exactly as they were. */
     <View className="flex-row items-center px-2 pb-2 pt-0.5" style={[COLUMN, { zIndex: 20 }]}>
       <ServerChip
         org={here?.org ?? "—"}
