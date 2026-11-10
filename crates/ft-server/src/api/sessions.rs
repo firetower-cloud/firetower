@@ -1105,6 +1105,27 @@ pub(super) async fn persona_for(
     if profile.can_delegate {
         text.push('\n');
         text.push_str(ft_core::DELEGATION_GUIDANCE);
+        /* And this Manager's own answer to the question the guidance leaves
+        to it. Said here rather than in the shared text because it is the
+        one part of delegating that is per-profile: the guidance explains
+        both ways, and this is which of them this profile was told to take.
+        Only for a Manager, like everything else in this block. */
+        text.push_str(match profile.on_child_limit.as_str() {
+            "reroute" => {
+                "\n\n**When a child runs out, re-route it yourself.** Read `list_compute`, \
+                 pick a subscription with allowance left, and `switch` the child onto it \
+                 without stopping to ask. Say in your next note which child you moved and \
+                 onto what — moving somebody's allowance and not mentioning it is the thing \
+                 this is here to avoid."
+            }
+            // `ask` and anything a newer build writes: the careful direction.
+            _ => {
+                "\n\n**When a child runs out, ask before you move it.** Put the choice to the \
+                 person as a question with one option per subscription, and carry each one's \
+                 limit, when it resets and how old the reading is into that option's \
+                 description. Then `switch` the child onto the one they pick."
+            }
+        });
         // Its team: what the owner can see, minus itself, narrowed to the
         // profile's `delegate_scope` when it has one. An off-team profile is
         // never named here, so the agent cannot ask for it — the scope is
@@ -4038,9 +4059,31 @@ pub(super) async fn continue_with_account(
         .workspace_id
         .clone()
         .ok_or_else(|| ApiError::new(ErrorCode::InvalidRequest, "this session has no workspace"))?;
-    // A hand-over between agents, not a delegation: the new run is a root
-    // like the one it continues, and nobody is told when it hands back.
-    let next = start_another_agent(state.clone(), owner.to_string(), workspace, req, None).await?;
+    /* A hand-over between agents, not a delegation — so the continuation
+    inherits the lineage of **what it continues** rather than being given a
+    new one. A root carries on as a root; a child carries on as a child of
+    the same lead, for the same reason it was delegated.
+
+    `None` said the first half of that and only accidentally satisfied the
+    second: every caller was a person switching a session of their own, so
+    the original was always a root and there was never a parent to lose. A
+    lead may now move a spent child across engines, and the same `None`
+    would have ended the delegation — the lead would stop seeing the child
+    in `children`, could no longer steer or stop it, and would never be told
+    when it handed back. A Manager reporting work it then never hears about
+    is the failure this whole area exists to remove.
+
+    The reason is carried too, so the continuation says what it was
+    delegated for rather than appearing beside its siblings unexplained. */
+    let lineage = session.parent_id.clone().map(|parent| Lineage {
+        parent,
+        reason: session.spawn_reason.clone(),
+        // Not the original's: `req` deduplicates one tool call, and this is
+        // not that call arriving again. A fresh continuation is a new row.
+        req: None,
+    });
+    let next =
+        start_another_agent(state.clone(), owner.to_string(), workspace, req, lineage).await?;
     Ok(next.id)
 }
 
