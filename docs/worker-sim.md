@@ -38,6 +38,11 @@ from a distance and are not alike at all.
 This runs on machines that are themselves live Firetower workers, where the
 host's tmux server is holding somebody's real work. So:
 
+* **The API is bound to loopback.** A published port with no host address
+  binds `0.0.0.0`, and this control plane has an administrator whose password
+  is in `run.sh` — so without `127.0.0.1:` it would be a known credential on an
+  admin API offered to every machine on the network, from a host that is often
+  somebody's live worker.
 * **The Compose project is `ft-worker-sim`, hardcoded.** Not taken from the
   environment, not derived from the directory. A project name is the namespace
   for volumes as well as containers, and `firetower` (a deployment) and
@@ -54,6 +59,22 @@ host's tmux server is holding somebody's real work. So:
 * **No tmux command runs outside a `docker exec`** into a container the script
   resolved. The container's tmux server is not the host's, and that distinction
   is the whole safety model.
+
+## Two things worth knowing about rebuilding it
+
+**A recreated container is a new machine, and Firetower says so.** The host
+keys are made on the machine's first start — not baked into the image, where
+they would be a private key every container built from it shares — so a
+container that is replaced answers with different ones, and the control plane
+refuses it: *worker answered with a different host key than last time*. That
+refusal is `StrictHostKeyChecking` doing its job. `up` answers it the way an
+operator would, by forgetting that one host's key before it reconnects.
+
+**The worker binary goes with the container, not with the volume.** Recreating
+the worker loses the install under `~/.firetower`, which is correct — it is a
+different machine — and `up` reinstalls it. `down` and `up` is therefore a
+fresh machine with the same name and the same sessions pointed at it, which is
+a useful thing to be able to make.
 
 ## What it cannot simulate
 

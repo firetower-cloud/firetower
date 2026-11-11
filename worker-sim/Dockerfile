@@ -22,7 +22,10 @@ RUN useradd --create-home --shell /bin/bash firetower
 
 # Keys only. There is no password on this account and nothing should be able to
 # guess its way in even on a container network.
-RUN mkdir -p /run/sshd /home/firetower/.ssh \
+#
+# The host keys live under /etc/ssh/keys, which is a volume: see the entrypoint
+# below for why they are not made here.
+RUN mkdir -p /run/sshd /etc/ssh/keys /home/firetower/.ssh \
     && chown firetower:firetower /home/firetower/.ssh \
     && chmod 700 /home/firetower/.ssh \
     && printf '%s\n' \
@@ -30,12 +33,24 @@ RUN mkdir -p /run/sshd /home/firetower/.ssh \
         'PermitRootLogin no' \
         'PubkeyAuthentication yes' \
         'AcceptEnv LANG LC_*' \
+        'HostKey /etc/ssh/keys/ssh_host_ed25519_key' \
+        'HostKey /etc/ssh/keys/ssh_host_rsa_key' \
         > /etc/ssh/sshd_config.d/worker-sim.conf
 
-# Host keys are made at build time, so a restart is the same machine as far as
-# `StrictHostKeyChecking=accept-new` is concerned — which is what a reboot is.
-RUN ssh-keygen -A
+# This machine's identity, made the first time it starts and kept on a volume
+# after that.
+#
+# **Not `RUN ssh-keygen -A`.** A host key baked into an image is a private key
+# every container built from it shares and anybody holding the image has — and
+# an image like this one gets copied around and rebuilt from a cache. Made at
+# start-up instead, into a volume, which is also what keeps the two properties
+# this harness needs: a `docker kill` and `docker start` is the *same* machine,
+# because the keys are still there, and `StrictHostKeyChecking=accept-new` on
+# the control plane does not refuse it; a container recreated from scratch is
+# genuinely a new one and says so.
+COPY start.sh /usr/local/bin/worker-sim-start
+RUN chmod 755 /usr/local/bin/worker-sim-start
 
 EXPOSE 22
 # In the foreground as PID 1, so `docker kill` is the power cut it claims to be.
-CMD ["/usr/sbin/sshd", "-D", "-e"]
+CMD ["/usr/local/bin/worker-sim-start"]

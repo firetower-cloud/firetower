@@ -152,12 +152,23 @@ preflight() {
 
 TOKEN=""
 
+# One call, with the body on **stdin** rather than in the arguments.
+#
+# `curl -d '{"password":"…"}'` puts that password in this machine's process
+# list, where anything running as anybody can read it for as long as the call
+# takes. `-d @-` is the same request with the body coming down a pipe. The
+# token goes in a header, which is an argument too — so it is a short-lived
+# session token rather than the password, and the password itself never
+# appears in an argv here.
 api() {
     local method="$1" path="$2" body="${3:-}"
     local args=(-sS -X "$method" "$API$path" -H 'content-type: application/json')
     [ -n "$TOKEN" ] && args+=(-H "authorization: Bearer $TOKEN")
-    [ -n "$body" ] && args+=(-d "$body")
-    curl "${args[@]}"
+    if [ -n "$body" ]; then
+        printf '%s' "$body" | curl "${args[@]}" -d @-
+    else
+        curl "${args[@]}"
+    fi
 }
 
 # A tiny JSON reader, so this needs nothing installed. Values here are ids,
@@ -241,6 +252,24 @@ wait_for_api() {
     done
     printf '\n'
     die "the control plane never answered $API/readyz. Try: $0 logs control"
+}
+
+# Forget what this machine's ssh key used to be.
+#
+# A container that is recreated — a rebuilt image, `down` and `up` again — is
+# genuinely a new machine and answers with new host keys, and the control plane
+# refuses it: `worker answered with a different host key than last time`, which
+# is `StrictHostKeyChecking` doing exactly its job. A fleet wants that refusal.
+# A harness that rebuilds the machine on purpose wants the operator's answer to
+# it, which is to forget the old entry and learn the new one.
+#
+# Narrow on purpose: one host, by name, in the control plane's own
+# `known_hosts`. Nothing here touches the key of anything else, and nothing
+# here runs against a machine outside this project.
+forget_host_key() {
+    local control="$1"
+    docker exec "$control" \
+        ssh-keygen -R worker -f /home/firetower/ssh/known_hosts >/dev/null 2>&1 || true
 }
 
 install_worker_binary() {
@@ -339,6 +368,8 @@ cmd_up() {
     wait_for_api
     sign_in
     finish_setup
+    resolve control
+    forget_host_key "$TARGET"
     resolve worker
     install_worker_binary "$TARGET"
     register_machine
@@ -489,10 +520,11 @@ cmd_down() {
     fi
 
     if [ "$volumes" -eq 1 ]; then
-        # Named one by one on purpose: these are this project's four, and a
+        # Named one by one on purpose: these are this project's own, and a
         # volume whose label does not say so is left alone.
         local volume
-        for volume in "${PROJECT}_postgres" "${PROJECT}_cargo" "${PROJECT}_target" "${PROJECT}_home"; do
+        for volume in "${PROJECT}_postgres" "${PROJECT}_cargo" "${PROJECT}_target" \
+                      "${PROJECT}_home" "${PROJECT}_sshd"; do
             if [ "$(docker volume inspect -f '{{index .Labels "com.docker.compose.project"}}' "$volume" 2>/dev/null)" = "$PROJECT" ]; then
                 say "removing volume $volume"
                 docker volume rm "$volume" >/dev/null

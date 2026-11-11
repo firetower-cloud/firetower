@@ -63,7 +63,8 @@ services:
       # is what opens that, exactly as `just dev` does for the web app.
       FIRETOWER_DEV: "true"
       # Deterministic, so `run.sh` can sign in without reading a password out
-      # of the log. This control plane is reachable from this machine only.
+      # of the log. It is a working credential, which is why the port below is
+      # bound to loopback and nowhere else.
       #
       # An account seeded this way is marked as needing a new password and
       # every endpoint refuses until it has one, so `run.sh up` replaces it on
@@ -80,10 +81,17 @@ services:
       - target:/target
       - home:/home/firetower
     ports:
+      # **Loopback, explicitly.** A published port with no host address binds
+      # 0.0.0.0, and this control plane has an administrator whose password is
+      # written in `run.sh` — so without the `127.0.0.1` this is a known
+      # credential on an admin API offered to every machine on the network,
+      # from a host that is often somebody's live worker. It said it was
+      # reachable from this machine only; it was not, until this line.
+      #
       # 14400 rather than 4400: the dev stack and a real deployment both want
       # 4400, and this has to be able to run beside either. Override with
       # SIM_API_PORT if something already has it.
-      - "${SIM_API_PORT:-14400}:4400"
+      - "127.0.0.1:${SIM_API_PORT:-14400}:4400"
     command: cargo run -p ft-cli -- serve
     labels:
       com.firetower.session: "${FIRETOWER_SESSION:-}"
@@ -100,6 +108,12 @@ services:
       # clearing it is part of what makes a restart a reboot rather than a
       # process restart. On a real Linux host systemd does the same thing.
       - /tmp
+    volumes:
+      # This machine's ssh identity, made on its first start rather than baked
+      # into the image — where it would be a private key shared by every
+      # container built from it. On a volume so that stopping and starting the
+      # container is the same machine, which is what a reboot is.
+      - sshd:/etc/ssh/keys
     labels:
       com.firetower.session: "${FIRETOWER_SESSION:-}"
 
@@ -108,3 +122,4 @@ volumes:
   cargo:
   target:
   home:
+  sshd:
