@@ -42,7 +42,6 @@ import { Composer } from "~/ui/Composer";
 import { Sheen } from "~/ui/Sheen";
 import { Signal } from "~/ui/Signal";
 import { Transcript } from "~/ui/Transcript";
-import { ArtifactCard } from "~/ui/ArtifactCard";
 import { Overview } from "~/ui/Overview";
 import { ImagesFrom } from "~/ui/WorkspaceImage";
 import { Waiting } from "~/ui/Waiting";
@@ -143,22 +142,6 @@ function Conversation({ place, address }: { place: Workspace; address: string })
   );
 
   /**
-   * The artifacts this session published.
-   *
-   * Owned by a person rather than by the workspace — `reclaim.rs` deletes a
-   * workspace within a minute of its last session ending and the cascade
-   * takes the conversation with it, so these rows deliberately sit outside
-   * it. That is why they are fetched separately rather than folded into the
-   * conversation.
-   *
-   * **Grouped at the end rather than anchored inline.** The desktop places
-   * each card at its `firstSeenLine`; the phone's fold does not carry a line
-   * number onto an `Item`, and threading one through would change a contract
-   * shared with two other clients. The end of the transcript is the fallback
-   * the server already documents for rows with no line, so it is the same
-   * behaviour rather than a new one.
-   */
-  /**
    * The team around this workspace, one level up and one level down.
    *
    * The manager is this session when it leads and the session that started it
@@ -220,11 +203,40 @@ function Conversation({ place, address }: { place: Workspace; address: string })
   const beside = pose.docked && railOpen;
   const floating = rail === "float" && railOpen;
 
+  /**
+   * The artifacts around this workspace, which is two sets rather than one.
+   *
+   * Owned by a person rather than by the workspace — `reclaim.rs` deletes a
+   * workspace within a minute of its last session ending and the cascade
+   * takes the conversation with it, so these rows deliberately sit outside
+   * it. That is why they are fetched separately rather than folded into the
+   * conversation.
+   *
+   * `artifacts` is the whole family's and belongs to `Overview`: the panel's
+   * list is the index of everything this team produced, and a member's card
+   * is one tap from the manager's page there.
+   *
+   * `mine` is the transcript's, and it is narrower because the transcript
+   * says *when*. Anchoring is done by `firstSeenLine`, which is a position in
+   * the producing session's own log — so a member's line read against these
+   * rows lands somewhere arbitrary and confident, and left unanchored it
+   * piles up at the end of the conversation, which is the symptom that was
+   * reported, in the sessions that have the most artifacts. The desk shows
+   * `fromSessionId === session.id` here for the same reason.
+   */
   const { data: everyArtifact } = useListArtifacts();
   const family = useMemo(() => new Set([managerId, ...team.map((t) => t.id)]), [managerId, team]);
   const artifacts = useMemo(
     () => (everyArtifact ?? []).filter((a) => a.fromSessionId && family.has(a.fromSessionId)),
     [everyArtifact, family],
+  );
+  /* One line, and the one to take out if a member's card should be anchored
+     here after all — there is no field on the phone today linking a task to
+     the session that ran it, so anchoring one properly is its own piece of
+     work rather than a wider filter. */
+  const mine = useMemo(
+    () => artifacts.filter((a) => a.fromSessionId === speaker.id),
+    [artifacts, speaker.id],
   );
 
   const { conversation, echo, unecho, settle, unsettle, remember, stopping, reread, older } =
@@ -465,43 +477,43 @@ function Conversation({ place, address }: { place: Workspace; address: string })
             </View>
           ) : null}
 
-          {conversation.items.length > 0 ? (
-            <>
-              {/* Which workspace the pictures in the agent's prose are read
-                  from. Without this a `![shot](docs/shot.png)` has nowhere to
-                  look. */}
-              <ImagesFrom.Provider value={{ session: speaker.id }}>
-                <Transcript items={conversation.items} tasks={conversation.tasks} />
-              </ImagesFrom.Provider>
+          {/* Why there is nothing to read, when there is nothing to read.
+              Inverted from a branch that wrapped the transcript, because the
+              transcript below now draws the artifact cards too and has to be
+              reached whether or not a conversation arrived — an artifact is
+              owned by a person and outlives the workspace that made it, so a
+              session whose transcript has gone can still have published one.
+              `place` sends every card to the end when there is no row to
+              anchor it to, which is this case. */}
+          {conversation.items.length === 0 ? (
+            conversation.trouble ? (
+              <Text className="mt-2 font-sans text-meta text-brick">{conversation.trouble}</Text>
+            ) : !conversation.arrived ? (
+              /* Before this branch existed the fall-through below ran while
+                 the snapshot was still crossing the wire, so a conversation
+                 that was merely long was reported as one that had never
+                 happened. An empty transcript is only empty once something has
+                 come back to say so. */
+              <Waiting say="Loading the conversation" />
+            ) : bringup.some((l) => l.state !== "pending") ? null : (
+              /* Nothing said and nothing coming up: a workspace that is simply
+                 waiting for you to open the conversation. */
+              <Text className="mt-2 font-sans text-meta text-mute">Nothing has been said yet.</Text>
+            )
+          ) : null}
 
-            </>
-          ) : conversation.trouble ? (
-            <Text className="mt-2 font-sans text-meta text-brick">{conversation.trouble}</Text>
-          ) : !conversation.arrived ? (
-            /* Before this branch existed the fall-through below ran while the
-               snapshot was still crossing the wire, so a conversation that was
-               merely long was reported as one that had never happened. An
-               empty transcript is only empty once something has come back to
-               say so. */
-            <Waiting say="Loading the conversation" />
-          ) : bringup.some((l) => l.state !== "pending") ? null : (
-            /* Nothing said and nothing coming up: a workspace that is simply
-               waiting for you to open the conversation. */
-            <Text className="mt-2 font-sans text-meta text-mute">Nothing has been said yet.</Text>
-          )}
-
-          {/* Outside the conditional above on purpose. An artifact is owned by
-              a person and outlives the workspace that made it, so a session
-              whose transcript is empty — or has not arrived — can still have
-              published one. Nesting these in the transcript branch hid them
-              exactly when the card was the only thing worth seeing. */}
-          {artifacts.map((a) => (
-            <ArtifactCard
-              key={a.id}
-              artifact={a}
-              onOpen={() => router.push({ pathname: "/workspace/artifact", params: { id: a.id } })}
+          {/* Which workspace the pictures in the agent's prose are read from.
+              Without this a `![shot](docs/shot.png)` has nowhere to look. */}
+          <ImagesFrom.Provider value={{ session: speaker.id }}>
+            <Transcript
+              items={conversation.items}
+              tasks={conversation.tasks}
+              /* This session's own, placed by `firstSeenLine`. The family's
+                 set stays with `Overview`, above. */
+              artifacts={mine}
+              onOpenArtifact={(id) => router.push({ pathname: "/workspace/artifact", params: { id } })}
             />
-          ))}
+          </ImagesFrom.Provider>
 
           {/* A gap that admits it is one. Before `foldAll` this was the
               silent case: the transcript stopped at whatever line could not

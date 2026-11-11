@@ -360,7 +360,7 @@ export default function Home() {
         <Heading text="Recent artifacts" all={() => router.push("/artifacts")} />
         <View className="flex-row gap-4 px-5">
           {posters.map((a) => (
-            <View key={a.id} className="min-w-0 flex-1">
+            <View key={a.id} className="mt-4 min-w-0 flex-1">
               <ArtifactCard artifact={a} onOpen={() => router.push(`/workspace/artifact?id=${a.id}`)} />
             </View>
           ))}

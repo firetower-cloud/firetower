@@ -80,7 +80,7 @@ export default function Artifacts() {
             /* Two at a phone's width, three from 620 — a grid reflows and a
                column does not. Measured rather than fixed at 47%, which was
                two columns at every width the Duo has. */
-            <View key={a.id} style={{ width: `${100 / libraryColumns(pose.content) - 2}%` }}>
+            <View key={a.id} className="mt-4" style={{ width: `${100 / libraryColumns(pose.content) - 2}%` }}>
               <ArtifactCard
                 artifact={a}
                 onOpen={() => router.push({ pathname: "/workspace/artifact", params: { id: a.id } })}

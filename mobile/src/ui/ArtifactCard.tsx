@@ -17,6 +17,13 @@
  *
  * The border goes around the thumbnail and not around the tile and its label,
  * which is the choice `WorkspaceImage` already makes for a picture in prose.
+ *
+ * **No vertical margin of its own.** It carried `mt-4` and nothing below,
+ * which was fine while the only place it went was the end of a transcript and
+ * butted straight into the next message once it could be drawn inline. Whoever
+ * places it says what room it gets — three positions in `Transcript`, a grid
+ * in the library — because the three do not want the same rhythm and one of
+ * them wants it on both sides.
  */
 import { useState } from "react";
 import { Image, Pressable, Text, View } from "react-native";
@@ -37,7 +44,7 @@ export function ArtifactCard({ artifact, onOpen }: { artifact: Artifact; onOpen:
   const showing = artifact.hasPoster && !broken;
 
   return (
-    <Pressable testID="artifact-card" onPress={onOpen} className="mt-4" android_ripple={{ color: color.overlay }}>
+    <Pressable testID="artifact-card" onPress={onOpen} android_ripple={{ color: color.overlay }}>
       <View className="w-full overflow-hidden rounded-card border border-line bg-float" style={{ aspectRatio: RATIO }}>
         {showing ? (
           <Image
