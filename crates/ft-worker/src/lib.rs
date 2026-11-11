@@ -2065,6 +2065,11 @@ You are in the directory that holds them, not inside one of them.              P
                         let _ = out.send(ToServer::AgentUnwatched { session_id: id }).await;
                     }
                     Ok(structured::Ended::SocketClosed) => {
+                        // Watched, then lost. Which is a different question
+                        // from the `Err` arm below, where there was never
+                        // anything to watch — see that arm for why the same
+                        // probe answers both and why the answers differ.
+
                         // EOF is ambiguous: a watcher can lose its socket while
                         // the agent keeps writing. Only an explicit negative
                         // tmux probe proves that the supervised agent is gone.
@@ -2078,7 +2083,12 @@ You are in the directory that holds them, not inside one of them.              P
                         // change is about.
                         match tmux::Tmux::for_session(id.as_str()).checked_exists().await {
                             Ok(false) => {
-                                let _ = out.send(ToServer::AgentClosed { session_id: id }).await;
+                                let _ = out
+                                    .send(ToServer::AgentClosed {
+                                        session_id: id,
+                                        gone: ft_proto::Gone::Exited,
+                                    })
+                                    .await;
                             }
                             Ok(true) => {
                                 let _ = out.send(ToServer::AgentUnwatched { session_id: id }).await;
@@ -2094,8 +2104,74 @@ You are in the directory that holds them, not inside one of them.              P
                         // in a terminal has no agent to watch, and the control
                         // plane asks about all of them rather than remembering
                         // which is which.
+                        //
+                        // It is also the arm a `WatchAgent` takes after the
+                        // machine has restarted, because then there is no
+                        // agent socket to connect to at all — and this arm
+                        // used to answer that with `AgentUnwatched`, which the
+                        // control plane reads, correctly for its own case, as
+                        // "the agent is still there" and does nothing about.
+                        // A browser resubscribed, watched again, got the same
+                        // answer, and twelve sessions sat under a spinner that
+                        // said "Working — nothing heard for 18000s" with no
+                        // way out of it. That is the whole of the bug this
+                        // probe is here to close.
+                        //
+                        // So the same question the sibling arm asks, with the
+                        // same `=` target — asked loosely it was answered by
+                        // the session's own shell, which reported a dead agent
+                        // as alive. Only a definite negative says anything:
+                        // tmux is the agent's parent, so a worker that
+                        // restarted, a dropped network and a closed laptop all
+                        // leave the session standing, and an unreadable probe
+                        // is an unknown that must leave a live agent alone.
                         tracing::debug!(session = %id, "no conversation to follow: {e:#}");
-                        let _ = out.send(ToServer::AgentUnwatched { session_id: id }).await;
+                        match tmux::Tmux::for_session(id.as_str()).checked_exists().await {
+                            // And only for a session this agent has already
+                            // spoken in. `since_line` is the control plane's
+                            // own cursor into this conversation, so anything
+                            // above zero is proof that an agent was here and
+                            // said something.
+                            //
+                            // A session at zero is one nothing has ever been
+                            // heard from, and the ordinary reason for that is
+                            // that it is still being built — no tmux session
+                            // yet, because the agent is started after the
+                            // worktrees are. A control plane restarting asks
+                            // about every live session on the machine, builds
+                            // included, and without this a workspace being
+                            // fetched on a perfectly healthy worker would be
+                            // stranded forty seconds before its agent came up.
+                            // There is no way back from that: a stranded
+                            // session may not go to `Working`, so the agent
+                            // would run on behind a status saying its machine
+                            // had restarted.
+                            Ok(false) if since_line > 0 => {
+                                let _ = out
+                                    .send(ToServer::AgentClosed {
+                                        session_id: id,
+                                        gone: ft_proto::Gone::Stranded,
+                                    })
+                                    .await;
+                            }
+                            // There is a session there, so this is a watcher
+                            // that could not attach rather than an agent that
+                            // is gone — a terminal-only session is the usual
+                            // one.
+                            Ok(true) => {
+                                let _ = out.send(ToServer::AgentUnwatched { session_id: id }).await;
+                            }
+                            // Gone, but nothing was ever heard from it. See
+                            // above: that is a session on its way up, not one
+                            // left behind.
+                            Ok(false) => {
+                                let _ = out.send(ToServer::AgentUnwatched { session_id: id }).await;
+                            }
+                            Err(error) => {
+                                tracing::warn!(session = %id, "nothing to watch and tmux liveness is unknown: {error:#}");
+                                let _ = out.send(ToServer::AgentUnwatched { session_id: id }).await;
+                            }
+                        }
                     }
                 }
             }),
@@ -4277,7 +4353,7 @@ mod watcher_tests {
         let exited = SessionId::new();
         assert!(matches!(
             disconnect(exited.clone(), true).await,
-            ToServer::AgentClosed { session_id } if session_id == exited
+            ToServer::AgentClosed { session_id, gone } if session_id == exited && gone == ft_proto::Gone::Exited
         ));
 
         let still_running = SessionId::new();
@@ -4285,6 +4361,58 @@ mod watcher_tests {
             disconnect(still_running.clone(), false).await,
             ToServer::AgentUnwatched { session_id } if session_id == still_running
         ));
+    }
+
+    /// The arm the incident took, and the two things that must come out of it.
+    ///
+    /// After a machine restarts there is no agent socket to connect to, so
+    /// `WatchAgent` fails before it has watched anything — and that arm used to
+    /// answer `AgentUnwatched`, which the control plane reads as "the agent is
+    /// still there". Nothing then ever said otherwise, and the session sat
+    /// under a spinner for five hours.
+    ///
+    /// No tmux session is started here on purpose: that is the state a reboot
+    /// leaves, and it is also the only way to ask this question without
+    /// touching the tmux server this machine is running real work on.
+    #[tokio::test]
+    async fn a_watch_that_finds_no_agent_strands_only_a_session_already_heard_from() {
+        async fn watch(id: &SessionId, since_line: u64) -> ToServer {
+            let dir = tempfile::tempdir().unwrap();
+            let worker = Worker::open(dir.path()).await.unwrap();
+            let (tx, mut heard) = mpsc::channel(8);
+            let out = Out::merged(tx);
+            worker.watch_agent(id, since_line, &out).await;
+            tokio::time::timeout(std::time::Duration::from_secs(3), heard.recv())
+                .await
+                .expect("the watcher should report that it found nothing")
+                .expect("the worker should send an event")
+        }
+
+        // A conversation the control plane already holds lines from: an agent
+        // was here, and tmux says it is not any more.
+        let stranded = SessionId::new();
+        assert!(
+            matches!(
+                watch(&stranded, 412).await,
+                ToServer::AgentClosed { session_id, gone }
+                    if session_id == stranded && gone == ft_proto::Gone::Stranded
+            ),
+            "a machine that restarted has to be reported, not left to a spinner"
+        );
+
+        // And one nothing has ever been heard from, which is what a workspace
+        // still being built looks like when a control plane restarts and asks
+        // about everything live. Stranding that would be unrecoverable: the
+        // agent comes up seconds later and may not move to `Working` from
+        // there.
+        let coming_up = SessionId::new();
+        assert!(
+            matches!(
+                watch(&coming_up, 0).await,
+                ToServer::AgentUnwatched { session_id } if session_id == coming_up
+            ),
+            "a session on its way up is not a session left behind"
+        );
     }
 }
 

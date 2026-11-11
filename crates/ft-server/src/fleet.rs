@@ -2729,8 +2729,8 @@ impl Fleet {
                                 ).await;
                             }
                         }
-                        Ok(ToServer::AgentClosed { session_id }) => {
-                            replying.agent_closed(&session_id).await;
+                        Ok(ToServer::AgentClosed { session_id, gone }) => {
+                            replying.agent_closed(&session_id, gone).await;
                         }
                         Ok(ToServer::AgentUnwatched { session_id }) => {
                             // The agent is still there. So what it is blocked
@@ -3738,7 +3738,16 @@ impl Fleet {
 
     /// A real process exit is different from losing its watcher. Persist a
     /// terminal status so historical permissions cannot survive this boundary.
-    async fn agent_closed(&self, session_id: &SessionId) {
+    ///
+    /// `gone` decides which status, and nothing else about this changes with
+    /// it: the questions are void either way, a child's unread result goes
+    /// back on its queue either way, and the progress entry — `in_turn` and
+    /// all — is dropped either way. That last one matters for a machine that
+    /// restarted: a lead that died mid-turn leaves `in_turn` true behind it,
+    /// and `drain_deliveries` refuses a lead that is mid-turn, so without this
+    /// cleanup a recovered lead would never be handed what its children
+    /// finished while it was down.
+    async fn agent_closed(&self, session_id: &SessionId, gone: ft_proto::Gone) {
         // Share the replay publication lock until the terminal status is durable.
         let mut readers = self.progress.write().await;
         self.asked.write().await.remove(session_id.as_str());
@@ -3765,7 +3774,25 @@ impl Fleet {
                 )
             })
         {
-            announce_status(&self.db, &self.events, session_id, SessionStatus::Failed, Some("The agent process exited. Restart it to continue; pending permissions were cancelled.")).await;
+            let (status, note) = match gone {
+                // Its process ended. Which may be a crash, a `/exit`, or an
+                // upgrade recreating the container under it — all of them
+                // things that happened to the agent.
+                ft_proto::Gone::Exited => (
+                    SessionStatus::Failed,
+                    "The agent exited. Any permission questions were cancelled.",
+                ),
+                // Nothing happened to the agent. The floor went: tmux is its
+                // parent, and the worker found no tmux session to ask about.
+                // `Stranded` rather than `Failed` because the workspace, the
+                // branch and whatever was already written are all still on the
+                // machine — see `SessionStatus::Stranded`.
+                ft_proto::Gone::Stranded => (
+                    SessionStatus::Stranded,
+                    "The machine restarted. The workspace is still there.",
+                ),
+            };
+            announce_status(&self.db, &self.events, session_id, status, Some(note)).await;
         }
         drop(readers);
         // Whatever a child handed back and this agent was given on the way out
@@ -5341,6 +5368,63 @@ mod tests {
         );
     }
 
+    /// Criterion 7: a lead that died mid-turn still drains.
+    ///
+    /// `in_turn` is set from the agent's own output and cleared by the line
+    /// that ends the turn — a line that never came, because the machine went
+    /// down in the middle of it. The control plane does not restart with the
+    /// machine, so it is still holding that `true` when the worker reconnects,
+    /// and `drain_deliveries` refuses a lead that is mid-turn. The cleanup in
+    /// `agent_closed` is what clears it, which is why stranding is routed
+    /// through there rather than through a path of its own.
+    #[tokio::test]
+    async fn a_lead_that_went_down_mid_turn_is_still_handed_what_its_team_finished() {
+        let mut it = lead_with_a_worker().await;
+
+        // Mid-turn, as the reader would have left it.
+        it.fleet.ensure_reader(&it.lead).await;
+        it.fleet
+            .progress
+            .write()
+            .await
+            .get_mut(it.lead.as_str())
+            .expect("the reader is there")
+            .in_turn = true;
+
+        it.fleet
+            .db
+            .queue_delivery(&it.lead, None, "what the child found")
+            .await
+            .unwrap();
+        it.fleet.drain_deliveries(&it.lead).await;
+        assert!(
+            it.turns_sent().is_empty(),
+            "a lead in the middle of a turn is told when the turn ends"
+        );
+
+        // The machine restarted, and the worker said so.
+        it.fleet
+            .agent_closed(&it.lead, ft_proto::Gone::Stranded)
+            .await;
+        assert_eq!(
+            it.fleet.db.session_status(&it.lead).await.unwrap(),
+            Some(SessionStatus::Stranded)
+        );
+        // Whatever was in flight to it went back on the queue, and the turn it
+        // was in the middle of went with its process.
+        assert_eq!(it.waiting().await, ["what the child found"]);
+        it.fleet
+            .db
+            .queue_delivery(&it.lead, None, "what the child found")
+            .await
+            .unwrap();
+
+        it.fleet.drain_deliveries(&it.lead).await;
+        let sent = it.turns_sent();
+        assert_eq!(sent.len(), 1, "the stale turn no longer blocks it");
+        assert!(sent[0].contains("what the child found"), "{sent:?}");
+    }
+
     /// And if the first never arrives, both are still accounted for.
     #[tokio::test]
     async fn a_failure_while_a_second_result_waits_loses_neither() {
@@ -5545,7 +5629,9 @@ mod tests {
         it.fleet.drain_deliveries(&it.lead).await;
         assert_eq!(it.turns_sent().len(), 1);
 
-        it.fleet.agent_closed(&it.lead).await;
+        it.fleet
+            .agent_closed(&it.lead, ft_proto::Gone::Exited)
+            .await;
 
         assert_eq!(
             it.waiting().await,
@@ -5817,7 +5903,9 @@ mod tests {
             "the original permission must remain answerable after restart"
         );
 
-        restarted.agent_closed(&session).await;
+        restarted
+            .agent_closed(&session, ft_proto::Gone::Exited)
+            .await;
         let after_exit = Fleet::new(db.clone());
         assert!(after_exit.asked(&session).await.is_empty(), "a real process exit must invalidate historical permissions across another server restart");
         db.record_local_event(
