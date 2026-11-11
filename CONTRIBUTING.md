@@ -259,6 +259,32 @@ release's `.env.example` against the previous one, so it names a key added
 *since* the machine was installed and never one that was already there and
 never written.
 
+## A worker you can break
+
+Testing a worker means doing things to a machine that you cannot do to the one
+you are working on: pulling its plug, restarting its worker process, watching a
+fleet reconnect. `worker-sim` is a Linux machine in a container for exactly
+that — Postgres, a control plane built from your checkout, and an sshd the
+control plane reaches the way it reaches any machine.
+
+```sh
+just sim up                      # the stack, up and registered
+just sim kill worker             # a power cut: tmux and every agent in it die
+just sim start worker            # the reboot: /tmp cleared, nothing running
+just sim restart-worker worker   # the worker process only, tmux surviving
+just sim down                    # take it away
+```
+
+It runs in a Compose project of its own, `ft-worker-sim`, for the reason the
+top of `compose.yaml` explains at length: a project name is the namespace for
+volumes as well as containers, and this has to be able to run beside both the
+dev stack and a real deployment without either of them noticing.
+
+[docs/worker-sim.md](docs/worker-sim.md) is the rest — what each command
+simulates on a real machine, what it cannot simulate (macOS, a genuine power
+cut, an agent that is signed in), how long each step takes, and how to get a
+browser onto the control plane it starts.
+
 ## Docker inside a session
 
 A session can run `docker compose up` when the machine has Docker. It is the

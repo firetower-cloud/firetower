@@ -1,0 +1,454 @@
+#!/usr/bin/env bash
+#
+# A Linux worker in a container, and the ways to break it.
+#
+#   ./worker-sim/run.sh up                      the stack, up and registered
+#   ./worker-sim/run.sh kill worker             a power cut
+#   ./worker-sim/run.sh start worker            the reboot
+#   ./worker-sim/run.sh restart-worker worker   the worker process only
+#   ./worker-sim/run.sh down                    take it away
+#
+# `docs/worker-sim.md` is the whole of it: what each command simulates, what
+# this cannot simulate, and how to get a browser onto the control plane it
+# starts.
+#
+# ── Why this is written so defensively ───────────────────────────────────────
+#
+# It is run on machines that are themselves live Firetower workers, where the
+# host's tmux server is holding somebody's real work and the host's
+# `firetower-worker` is serving it. A command that widens by one character —
+# a label filter that matches another project, a `kill` with no target, a
+# `compose down` that resolves to the wrong project — does not fail loudly: it
+# takes the fleet down, and with it the channel anybody would use to say stop.
+#
+# So, as behaviour rather than as convention:
+#
+#   * the Compose project is hardcoded, and the environment cannot redirect it;
+#   * every destructive action names exactly one container, resolved to an id
+#     and proved to carry this project's label before anything happens;
+#   * no command here defaults to a target. A missing argument is a usage
+#     message and a non-zero exit;
+#   * nothing is pruned, ever, by anything;
+#   * no tmux command runs outside a `docker exec` into a container this script
+#     resolved.
+set -euo pipefail
+
+# ── The project, and nothing else ────────────────────────────────────────────
+
+# Hardcoded. Not `${COMPOSE_PROJECT_NAME:-…}`, not derived from the directory
+# name: `firetower` and `firetower-dev` are both taken, by a real deployment
+# and by the dev stack, and a project name is the namespace for volumes as well
+# as containers. Resolving to either of those would mean this script's teardown
+# removing somebody's database.
+readonly PROJECT=ft-worker-sim
+
+# Firetower sets COMPOSE_PROJECT_NAME for everything a session runs, and a
+# `-p` flag beats it — but `COMPOSE_FILE` and `COMPOSE_PROFILES` have no flag
+# that shadows them as safely, so the environment is taken out of the question
+# instead of argued with.
+unset COMPOSE_PROJECT_NAME COMPOSE_FILE COMPOSE_PROFILES COMPOSE_ENV_FILES
+
+readonly HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly REPO="$(cd "$HERE/.." && pwd)"
+readonly API_PORT="${SIM_API_PORT:-14400}"
+readonly API="http://localhost:$API_PORT"
+readonly ADMIN_USER=admin
+readonly ADMIN_PASSWORD=worker-sim-admin
+# What the machine is called in the fleet. `run.sh up` is idempotent on it.
+readonly MACHINE=worker-sim
+
+say()  { printf '  %s\n' "$*"; }
+step() { printf '\n  \033[1m%s\033[0m\n' "$*"; }
+die()  { printf '\n  error: %s\n\n' "$*" >&2; exit 1; }
+
+compose() { docker compose -p "$PROJECT" -f "$HERE/compose.yaml" "$@"; }
+
+usage() {
+    sed -n '3,10p' "${BASH_SOURCE[0]}" | sed 's/^#\{0,1\} \{0,1\}//'
+    printf '\n  every command:\n\n'
+    printf '    up                       bring it up, install the worker, wait until the machine is ready\n'
+    printf '    status                   what is running, and what the control plane makes of the machine\n'
+    printf '    kill <container>         a power cut: SIGKILL to the container. tmux and every agent in it die\n'
+    printf '    start <container>        the reboot: the same container again, with /tmp cleared\n'
+    printf '    restart-worker <container>   the worker process only. tmux survives, so nothing may be stranded\n'
+    printf '    logs <container>         follow one container, read-only\n'
+    printf '    psql                     a prompt on the control plane database\n'
+    printf '    ui                       build the interface and say where to point a browser\n'
+    printf '    agent <name>             fetch an agent onto the machine (claude-code, codex)\n'
+    printf '    down [--volumes]         remove this project'"'"'s containers, and its build caches with --volumes\n\n'
+    printf '  <container> is a service name — worker, control, postgres — or a full\n'
+    printf '  ft-worker-sim-* container name. There is no default: a command that\n'
+    printf '  destroys something has to say what.\n\n'
+}
+
+# ── Resolving a target, which is the whole safety model ──────────────────────
+
+# Sets TARGET to exactly one container id, or stops the script.
+#
+# **Through a variable rather than through stdout, and this is not style.**
+# `id="$(resolve "$1")"` puts the refusal inside a command substitution, where
+# `exit` ends a subshell and not this script — and bash gives a `local x=$(…)`
+# assignment the exit status of `local`, so `set -e` does not see the failure
+# either. Written that way, `run.sh kill` with no argument printed nothing,
+# exited 0, and would have gone on to act on an empty target. That is the exact
+# shape of the accident this file exists to make impossible, so the refusal
+# happens in this shell.
+#
+# The label filter below only *enumerates candidates*; it never reaches a
+# command that acts. Each candidate is then inspected for this project's label
+# and matched on its exact name or its exact Compose service, and TARGET is set
+# only if exactly one container answered. A name that matches two containers,
+# or none, or one in another project, stops everything rather than being
+# guessed at — `docker kill` takes whatever it is handed, so the proof has to
+# happen before it is handed anything.
+TARGET=""
+resolve() {
+    TARGET=""
+    local want="${1:-}"
+    [ -n "$want" ] || die "name a container — worker, control or postgres. Nothing here has a default target."
+
+    local found=() id name service project
+    while read -r id; do
+        [ -n "$id" ] || continue
+        name="$(docker inspect -f '{{.Name}}' "$id" 2>/dev/null | sed 's|^/||')" || continue
+        project="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "$id" 2>/dev/null)" || continue
+        service="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.service"}}' "$id" 2>/dev/null)" || continue
+        [ "$project" = "$PROJECT" ] || continue
+        if [ "$want" = "$name" ] || [ "$want" = "$service" ]; then
+            found+=("$id")
+        fi
+    done < <(docker ps -aq --filter "label=com.docker.compose.project=$PROJECT")
+
+    if [ "${#found[@]}" -eq 0 ]; then
+        die "no container called '$want' in project $PROJECT. Try: $0 status"
+    fi
+    if [ "${#found[@]}" -gt 1 ]; then
+        die "'$want' matches ${#found[@]} containers in $PROJECT. Name one exactly."
+    fi
+    TARGET="${found[0]}"
+}
+
+# The name and project of a resolved id, printed before anything happens to it.
+# Nothing in this script destroys something it has not first said out loud.
+preflight() {
+    local what="$1" id="$2"
+    local name project
+    name="$(docker inspect -f '{{.Name}}' "$id" | sed 's|^/||')"
+    project="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "$id")"
+    [ "$project" = "$PROJECT" ] || die "refusing: $name is in project '$project', not $PROJECT"
+    say "about to: $what"
+    say "  container  $name"
+    say "  project    $project (verified)"
+}
+
+# ── The API, which is how a machine gets registered ─────────────────────────
+
+TOKEN=""
+
+api() {
+    local method="$1" path="$2" body="${3:-}"
+    local args=(-sS -X "$method" "$API$path" -H 'content-type: application/json')
+    [ -n "$TOKEN" ] && args+=(-H "authorization: Bearer $TOKEN")
+    [ -n "$body" ] && args+=(-d "$body")
+    curl "${args[@]}"
+}
+
+# A tiny JSON reader, so this needs nothing installed. Values here are ids,
+# names and states — no quotes, no nesting — and `jq` is used when it is there.
+field() {
+    local key="$1"
+    if command -v jq >/dev/null 2>&1; then
+        jq -r ".$key // empty" 2>/dev/null
+    else
+        sed -n "s/.*\"$key\":\"\([^\"]*\)\".*/\1/p" | head -1
+    fi
+}
+
+sign_in() {
+    local answer
+    answer="$(api POST /api/v1/auth/login \
+        "{\"username\":\"$ADMIN_USER\",\"password\":\"$ADMIN_PASSWORD\"}")"
+    TOKEN="$(printf '%s' "$answer" | field token)"
+    [ -n "$TOKEN" ] || die "could not sign in to $API: $answer"
+}
+
+# A fresh install wants its organisation named before anything can be filed in
+# it. Skipped when it has been.
+finish_setup() {
+    local state
+    state="$(api GET /api/v1/setup)"
+    case "$state" in
+        *'"needsOrganization":true'*)
+            api POST /api/v1/setup/organization '{"name":"Worker sim"}' >/dev/null
+            api POST /api/v1/setup/complete '' >/dev/null
+            say "named the organisation"
+            ;;
+    esac
+}
+
+# ── up ───────────────────────────────────────────────────────────────────────
+
+wait_for_api() {
+    local waited=0
+    printf '  waiting for the control plane'
+    # It compiles the checkout on the first run, which is minutes rather than
+    # seconds — so this waits a long time before giving up, and says why.
+    while [ "$waited" -lt 900 ]; do
+        if curl -fsS "$API/readyz" >/dev/null 2>&1; then
+            printf ' — up after %ss\n' "$waited"
+            return 0
+        fi
+        printf '.'
+        sleep 3
+        waited=$((waited + 3))
+    done
+    printf '\n'
+    die "the control plane never answered $API/readyz. Try: $0 logs control"
+}
+
+install_worker_binary() {
+    local worker="$1"
+    step "Building the worker for Linux, in the control plane's own toolchain"
+    # In the container, so this is a Linux binary whatever you are running on,
+    # and in the same profile as the control plane so the two share every
+    # dependency artifact in the `target` volume. Debug on purpose: this is a
+    # binary to test the protocol against, not a release.
+    compose exec -T control \
+        cargo build -p ft-cli --no-default-features --bin firetower-worker
+    compose exec -T control \
+        sh -c 'cd /target/debug && tar -czf - firetower-worker' > "$HERE/.worker.tar.gz"
+    say "$(du -h "$HERE/.worker.tar.gz" | cut -f1) tarball"
+
+    step "Installing it on the machine, the way the control plane would"
+    local key
+    key="$(api GET /api/v1/ssh-key | field publicKey)"
+    [ -n "$key" ] || die "the control plane would not say what its ssh key is"
+    # The installer goes in as a file because `--from -` already owns stdin.
+    docker cp "$REPO/install/worker.sh" "$worker:/tmp/worker.sh" >/dev/null
+    docker exec -i -u firetower "$worker" \
+        sh /tmp/worker.sh --from - --skip-packages --authorize "$key" \
+        < "$HERE/.worker.tar.gz"
+    rm -f "$HERE/.worker.tar.gz"
+}
+
+register_machine() {
+    local answer id
+    answer="$(api POST /api/v1/hosts \
+        "{\"name\":\"$MACHINE\",\"compute\":{\"type\":\"Server\",\"host\":\"worker\",\"user\":\"firetower\",\"key\":{\"type\":\"Default\"}}}")"
+    id="$(printf '%s' "$answer" | field id)"
+    if [ -z "$id" ]; then
+        # Already added is the ordinary answer to running `up` twice.
+        id="$(api GET /api/v1/hosts | tr ',' '\n' | grep -A2 "\"$MACHINE\"" || true)"
+        id="$(api GET /api/v1/hosts | sed -n 's/.*{"id":"\([^"]*\)"[^}]*"name":"'"$MACHINE"'".*/\1/p' | head -1)"
+        [ -n "$id" ] || die "could not add the machine, and it is not already there: $answer"
+        say "the machine was already registered"
+    else
+        say "registered $MACHINE"
+    fi
+    printf '%s' "$id"
+}
+
+wait_until_online() {
+    local waited=0 state
+    printf '  waiting for %s to report ready' "$MACHINE"
+    while [ "$waited" -lt 180 ]; do
+        state="$(api GET /api/v1/hosts | sed -n 's/.*"name":"'"$MACHINE"'","state":"\([^"]*\)".*/\1/p' | head -1)"
+        [ -n "$state" ] || state="$(api GET /api/v1/hosts | field state)"
+        if [ "$state" = "Online" ]; then
+            printf ' — Online after %ss\n' "$waited"
+            return 0
+        fi
+        printf '.'
+        sleep 2
+        waited=$((waited + 2))
+    done
+    printf '\n'
+    say "it is still '$state'. The machine is added either way — see: $0 status"
+    return 1
+}
+
+cmd_up() {
+    command -v docker >/dev/null 2>&1 || die "docker is not on PATH"
+    step "Bringing up $PROJECT"
+    say "project    $PROJECT"
+    say "api        $API"
+    compose up -d --build
+    wait_for_api
+    sign_in
+    finish_setup
+    resolve worker
+    install_worker_binary "$TARGET"
+    local id
+    id="$(register_machine)"
+    wait_until_online || true
+    step "Ready"
+    say "control plane   $API  ($ADMIN_USER / $ADMIN_PASSWORD)"
+    say "machine         $MACHINE  ($id)"
+    say "a power cut     $0 kill worker"
+    say "the reboot      $0 start worker"
+    printf '\n'
+}
+
+# ── The breakages ───────────────────────────────────────────────────────────
+
+cmd_kill() {
+    resolve "${1:-}"
+    preflight "docker kill (a power cut: SIGKILL to pid 1, nothing is asked to stop)" "$TARGET"
+    docker kill "$TARGET" >/dev/null
+    say "killed. tmux and every agent in it are gone; the workspace on disk is not."
+    say "bring it back with: $0 start ${1}"
+}
+
+cmd_start() {
+    resolve "${1:-}"
+    preflight "docker start (the reboot: the same container, with /tmp cleared)" "$TARGET"
+    docker start "$TARGET" >/dev/null
+    say "started. The control plane reconnects on its own backoff."
+}
+
+cmd_restart_worker() {
+    resolve "${1:-}"
+    local id="$TARGET"
+    preflight "docker exec pkill -x firetower-worker (the worker process only)" "$id"
+    # Inside the container, which is the only place a process is killed by
+    # anything in this file. `pkill -x` is an exact name in that container's own
+    # pid namespace; the host's worker is in another namespace and cannot be
+    # reached from here.
+    #
+    # The worker is sshd's child, so killing it drops the control plane's
+    # connection and the supervisor dials again and starts a new one. tmux is
+    # not its child and does not notice — which is the case that must leave
+    # every agent exactly where it was.
+    if docker exec "$id" pkill -x firetower-worker; then
+        say "the worker process is gone. tmux is untouched:"
+        docker exec -u firetower "$id" tmux ls 2>&1 | sed 's/^/    /' || true
+        say "nothing here may be stranded — that is acceptance criterion 2."
+    else
+        say "no firetower-worker was running in that container."
+    fi
+}
+
+# ── Looking ─────────────────────────────────────────────────────────────────
+
+cmd_status() {
+    step "$PROJECT"
+    compose ps || true
+    if curl -fsS "$API/readyz" >/dev/null 2>&1; then
+        sign_in
+        step "The fleet, as the control plane sees it"
+        api GET /api/v1/hosts | tr '}' '}\n' | sed 's/^,//' | sed 's/^/  /'
+        step "Sessions"
+        api GET /api/v1/sessions | tr '}' '}\n' | sed 's/^,//' | sed 's/^/  /'
+    else
+        say "the control plane is not answering on $API"
+    fi
+    printf '\n'
+}
+
+cmd_logs() {
+    resolve "${1:-}"
+    docker logs -f --tail 100 "$TARGET"
+}
+
+cmd_psql() {
+    resolve postgres
+    docker exec -it "$TARGET" psql -U firetower -d firetower
+}
+
+cmd_agent() {
+    local name="${1:-}"
+    [ -n "$name" ] || die "name an agent: claude-code, codex"
+    resolve worker
+    say "fetching $name onto the machine (a download; it is not signed in by this)"
+    docker exec -u firetower "$TARGET" \
+        /home/firetower/.firetower/worker/bin/firetower-worker agents add "$name"
+}
+
+cmd_ui() {
+    step "The interface, compiled into the control plane"
+    # The binary embeds `web/out` at compile time, so the export has to exist
+    # before the control plane is built — and `web/out` is committed empty.
+    if [ ! -f "$REPO/web/out/index.html" ]; then
+        say "building web/out (a minute or two, once)"
+        (cd "$REPO/web" && pnpm install --frozen-lockfile >/dev/null && pnpm build >/dev/null)
+    fi
+    # Nothing in the Rust sources changed, so cargo would not rebuild on its
+    # own. This is the file that reads the folder.
+    touch "$REPO/crates/ft-server/src/web.rs"
+    compose up -d --force-recreate control
+    wait_for_api
+    step "Open it"
+    say "$API  ($ADMIN_USER / $ADMIN_PASSWORD)"
+    say "the desktop app is the surface the recovery card is on — see docs/worker-sim.md"
+    printf '\n'
+}
+
+# ── down ────────────────────────────────────────────────────────────────────
+
+# Deliberately not `docker compose down`.
+#
+# That command resolves a project from flags, the file and the environment, and
+# its blast radius is whatever it resolved — which is the failure this whole
+# file is shaped against. So the teardown enumerates this project's containers,
+# removes them one at a time by id, and then removes the network and volumes it
+# can prove belong to it. There is no prune here and there is no filter that
+# reaches a command which acts.
+cmd_down() {
+    local volumes=0
+    [ "${1:-}" = "--volumes" ] && volumes=1
+
+    step "Removing $PROJECT"
+    local ids=() id
+    while read -r id; do
+        [ -n "$id" ] && ids+=("$id")
+    done < <(docker ps -aq --filter "label=com.docker.compose.project=$PROJECT")
+
+    if [ "${#ids[@]}" -eq 0 ]; then
+        say "nothing of this project is here"
+    fi
+    for id in "${ids[@]:-}"; do
+        [ -n "$id" ] || continue
+        preflight "docker rm -f (one container, by id)" "$id"
+        docker rm -f "$id" >/dev/null
+    done
+
+    # The network, by its exact name, and only once its label agrees.
+    local net="${PROJECT}_default"
+    if [ "$(docker network inspect -f '{{index .Labels "com.docker.compose.project"}}' "$net" 2>/dev/null)" = "$PROJECT" ]; then
+        say "removing network $net"
+        docker network rm "$net" >/dev/null
+    fi
+
+    if [ "$volumes" -eq 1 ]; then
+        # Named one by one on purpose: these are this project's four, and a
+        # volume whose label does not say so is left alone.
+        local volume
+        for volume in "${PROJECT}_postgres" "${PROJECT}_cargo" "${PROJECT}_target" "${PROJECT}_home"; do
+            if [ "$(docker volume inspect -f '{{index .Labels "com.docker.compose.project"}}' "$volume" 2>/dev/null)" = "$PROJECT" ]; then
+                say "removing volume $volume"
+                docker volume rm "$volume" >/dev/null
+            fi
+        done
+    else
+        say "build caches kept, so the next 'up' is quick. '$0 down --volumes' takes them."
+    fi
+    printf '\n'
+}
+
+# ── The one entry point ─────────────────────────────────────────────────────
+
+case "${1:-}" in
+    up)             shift; cmd_up "$@" ;;
+    down)           shift; cmd_down "$@" ;;
+    status)         shift; cmd_status "$@" ;;
+    kill)           shift; cmd_kill "${1:-}" ;;
+    start)          shift; cmd_start "${1:-}" ;;
+    restart-worker) shift; cmd_restart_worker "${1:-}" ;;
+    logs)           shift; cmd_logs "${1:-}" ;;
+    psql)           shift; cmd_psql ;;
+    agent)          shift; cmd_agent "${1:-}" ;;
+    ui)             shift; cmd_ui ;;
+    # No default that does anything. A bare invocation is a usage message.
+    ""|-h|--help|help) usage; exit 2 ;;
+    *)              printf '\n  unknown command: %s\n' "$1" >&2; usage; exit 2 ;;
+esac

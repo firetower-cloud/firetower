@@ -280,6 +280,20 @@ session-check:
     printf '  %d passed, %d failed, %d skipped\n\n' "$passed" "$failed" "$skipped"
     [ "$failed" -eq 0 ]
 
+# A Linux worker in a container, and the ways to break it.
+#
+#   just sim up                      the stack, up and registered
+#   just sim kill worker             a power cut
+#   just sim start worker            the reboot
+#   just sim restart-worker worker   the worker process only, tmux surviving
+#   just sim down                    take it away
+#
+# Its own Compose project — `ft-worker-sim` — so it cannot touch the dev
+# stack's volumes or a deployment's. `docs/worker-sim.md` says what each
+# command simulates and what it cannot. A bare `just sim` prints the list.
+sim *ARGS:
+    ./worker-sim/run.sh {{ARGS}}
+
 # Give the space back to the filesystem. Only worth it after db-clean.
 db-vacuum:
     docker compose exec -T postgres psql -U "${POSTGRES_USER:-firetower}" -d "${POSTGRES_DB:-firetower}" -c "VACUUM FULL;"
