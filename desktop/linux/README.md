@@ -64,6 +64,48 @@ the version it resolved — read it before trusting any screenshot. Pointing the
 image at an older base is one line and turns this into a test of the engine
 rather than of the application, which is a worthwhile separate run.
 
+## The top edge of the window is tao's, and the corners there do not go diagonal
+
+Worth knowing before anybody reports it as a bug, because it is a limitation
+we accepted rather than one we missed.
+
+The window is `decorations: false` with a title bar the application draws, so
+`ui/Resize.tsx` puts transparent strips around the edges that call
+`startResizeDragging`. There are **five** of them — the left, right and bottom
+edges and the two bottom corners — and **none along the top**.
+
+The reason is that tao 0.35.3 already resizes an undecorated, resizable,
+unmaximised window from a `scale_factor * 5`px border of its own, in GTK,
+below the DOM. Its `hit_test` sets the `TOP` bit for any pointer inside the
+top 5px, so a 4px strip of ours could only ever cover ground tao already had
+— while being in the DOM, it also swallowed the top 4px of *Minimise*,
+*Maximise* and *Close*. tao's border does not: its press handler returns
+`Propagation::Proceed`, so the click reaches the page as well as starting a
+drag. Measured on the installed `.deb`: a click at the centre of *Close* did
+not close the window at `y=0` or `y=2`, and did at `y=4` — the first row
+outside the strip and still inside tao's border.
+
+So the two things to expect at the top of the window:
+
+* **The top edge resizes**, from its first 5px, and that is tao.
+* **The top corners resize diagonally from a 5px square only.** Further in
+  than that, a drag at the top-left or top-right is a *top edge* drag: tao
+  wins the press for the whole of its border and `hit_test` returns `TOP`
+  rather than `TOPLEFT` once you are 5px in. The cursor agrees — tao sets it
+  from the same hit test — so the pointer no longer promises a diagonal it
+  will not deliver, which it did when we drew 16px-wide corners there.
+
+Dragging a **bottom** corner, or the top edge and a side in turn, is the way
+to resize two axes at once. The bottom corners are 16px for that reason. Doing
+better at the top means beating tao to the press, which is a change in tao or
+a GTK event filter under the webview, and neither is an experimental tier's
+job.
+
+On Windows the top edge is the shell's too, for a different reason:
+`WM_NCHITTEST` answers `HTTOP` across the full width of the top `SM_CYFRAME`
+pixels of an undecorated window with a shadow. That dead zone over the window
+buttons is Windows' own and pre-dates any of this.
+
 ## What it can tell you, and what it cannot
 
 **It can** answer whether the application builds, bundles, installs, launches,

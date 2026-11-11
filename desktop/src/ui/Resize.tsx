@@ -2,10 +2,10 @@
  * The window's edges, where the window has no frame.
  *
  * `decorations: false` plus a title bar we draw ourselves means there is no
- * frame to grab. Eight transparent strips stand in for one, each calling
+ * frame to grab. Five transparent strips stand in for one, each calling
  * `startResizeDragging`, which is `gtk_window_begin_resize_drag` underneath:
  * the window manager takes the pointer and does the rest. Measured under Xvfb
- * and openbox, all eight drive a pixel-exact resize.
+ * and openbox, all five drive a pixel-exact resize.
  *
  * **There is already a 5px border under this one, and it is not ours.**
  * tao 0.35.3 resizes an undecorated, resizable, unmaximised window from a
@@ -15,10 +15,47 @@
  * these strips are not the difference between resizable and not. What they
  * add is the part that makes it usable: **16px bottom corners**, which are
  * the two people actually reach for and which tao gives 5px of; 6px rather
- * than 5 at the sides; and a top edge carved back to 4px so the *Close*
- * button keeps more of its corner. Both fire for a press within 5px of the
+ * than 5 at the sides and the bottom. Both fire for a press within 5px of the
  * edge — one `begin_resize_drag` each, and no misbehaviour in any drag
  * measured.
+ *
+ * **There is nothing along the top, and that is the whole of this file's
+ * history.** There used to be a 4px `North` strip and two 16x4 top corners.
+ * They cost the top 4px of all three window buttons — `elementFromPoint` at
+ * the centre of *Close*, 2px down, returned the strip, and the click did not
+ * close the window — and they bought nothing, because tao's border is 5px and
+ * a 4px strip sits entirely inside it. `hit_test` sets the `TOP` bit for
+ * `cy < top + 5`, so every pixel those three strips covered was already
+ * tao's, and tao's press handler returns `Propagation::Proceed`: it begins
+ * its resize drag *and* lets the press through to the page, which is why a
+ * click at `y=4` closed the window while the same click at `y=2` did not.
+ * Only a DOM element on top of the button could swallow it, and that was
+ * ours. So the top is tao's alone now, the buttons are clickable from their
+ * first row down, and the reach at the top edge is unchanged.
+ *
+ * **Which leaves one thing the top corners cannot do, on purpose.** tao wins
+ * every press in its own 5px, so a 16px-wide corner there would never have
+ * resized diagonally beyond the first 5 of those pixels — measured: a pure
+ * horizontal drag 8px in from the top-left moved nothing at all, and a
+ * diagonal one moved only vertically, while the cursor said `nwse-resize`.
+ * What is left is honest: in tao's 5x5 the cursor is diagonal and the drag
+ * genuinely is (`hit_test` returns `TOPLEFT`), and across the rest of the top
+ * edge both the cursor and the drag say top edge. **A diagonal drag from the
+ * top corners is a 5px target, and that is as good as it gets without
+ * beating tao to the press.** Dragging the bottom corners, or the top edge
+ * and a side in turn, is the way to do it; the two bottom corners are 16px
+ * for exactly that reason. `desktop/linux/README.md` says this where somebody
+ * trying it on real hardware will read it.
+ *
+ * On Windows the same removal is right for the same reason and one more:
+ * `platform_impl/windows/event_loop.rs`'s `WM_NCHITTEST` answers `HTTOP`
+ * across the full width of the top `SM_CYFRAME` pixels of an undecorated
+ * window with a shadow, which is what this one is — so the top edge is the
+ * shell's there too, and *that* dead zone over the buttons is Windows',
+ * pre-dates this file and is not ours to remove. The other five strips are
+ * the only resize reach the sides and the bottom have on Windows at all,
+ * because an undecorated shadowed window has no non-client area for the
+ * system to put a border in.
  *
  * A consequence worth knowing: because tao's border is below the webview, a
  * modal scrim cannot cover it. With a dialog up these strips are unreachable
@@ -33,13 +70,10 @@
  *
  * The geometry is not arbitrary:
  *
- * - **6px** at the left, right and bottom; **4px** at the top, which is shared
- *   with the 40px title bar and the top of the three window buttons in it.
- * - **16px** corners, except the two at the top, which are the height of the
- *   top edge rather than square. A 16px square at the top right would take a
- *   bite out of *Close*, and a mis-grab there resizes a window instead of
- *   closing one. (tao's 5x5 at that corner is below us and stays whatever we
- *   draw, so the bite is 5px deep however careful this is.)
+ * - **6px** at the left, right and bottom, against tao's 5.
+ * - **16px** corners, at the bottom only. The two people reach for.
+ * - **Nothing above `y=4`** at the sides either, so the 6px the right-hand
+ *   strip takes never reaches the row the window buttons are on.
  * - **Nothing at all while maximised.** There is nothing to resize, and it
  *   gives the close button its corner back for the throw-to-the-corner
  *   gesture that only works when the window is maximised. tao's own border is
@@ -68,6 +102,7 @@ import { tauriWindow } from "~/drag";
 type Direction = "North" | "South" | "East" | "West" | "NorthEast" | "NorthWest" | "SouthEast" | "SouthWest";
 
 const EDGE = 6;
+/** Where the side strips start, which is below tao's 5px top border. */
 const TOP = 4;
 const CORNER = 16;
 
@@ -75,16 +110,18 @@ const CORNER = 16;
    edges rather than under them — a corner that loses to an edge is a corner
    that resizes one axis, which is the hardest kind of wrong to notice.
 
+   **No `North`, `NorthWest` or `NorthEast`, deliberately.** The reason is the
+   long one at the top of this file, and it is the kind of absence a
+   well-meaning tidy-up completes: three of the eight directions are missing
+   and the table looks unfinished. It is not. Anything drawn along the top is
+   a dead zone over the window buttons in exchange for reach tao already has.
+
    Exported for the test that holds these numbers: they are the whole of the
-   design here, and the top corners being the height of the top edge is the
-   one a well-meaning tidy-up would square off. */
+   design here. */
 export const STRIPS: { d: Direction; cursor: CSSProperties["cursor"]; box: CSSProperties }[] = [
-  { d: "North", cursor: "ns-resize", box: { left: CORNER, right: CORNER, top: 0, height: TOP } },
   { d: "South", cursor: "ns-resize", box: { left: CORNER, right: CORNER, bottom: 0, height: EDGE } },
   { d: "West", cursor: "ew-resize", box: { top: TOP, bottom: CORNER, left: 0, width: EDGE } },
   { d: "East", cursor: "ew-resize", box: { top: TOP, bottom: CORNER, right: 0, width: EDGE } },
-  { d: "NorthWest", cursor: "nwse-resize", box: { left: 0, top: 0, width: CORNER, height: TOP } },
-  { d: "NorthEast", cursor: "nesw-resize", box: { right: 0, top: 0, width: CORNER, height: TOP } },
   { d: "SouthWest", cursor: "nesw-resize", box: { left: 0, bottom: 0, width: CORNER, height: CORNER } },
   { d: "SouthEast", cursor: "nwse-resize", box: { right: 0, bottom: 0, width: CORNER, height: CORNER } },
 ];
