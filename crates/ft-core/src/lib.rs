@@ -1118,6 +1118,15 @@ own engine, on a machine Firetower picks that the engine is installed on, on
 the owner's default subscription. Answer an open field only when the person
 asked for something particular, or when a refusal told you to.
 
+### If you have just been restarted
+
+Run `children` before you spawn anything. A machine that restarts takes every
+agent on it with it, and bringing you back hands you this conversation to read
+— including the part where you handed work out. Those children exist, in the
+database, with their branches and their workspaces; `spawn` has no memory of
+having been called, so acting on the conversation alone starts your whole team
+a second time. `children` is the live answer, and it is the only one.
+
 ### A child that runs out of allowance
 
 A child can stop because its subscription hit a usage limit. You are a

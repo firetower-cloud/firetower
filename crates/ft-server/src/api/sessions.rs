@@ -1030,6 +1030,20 @@ pub(crate) async fn create_session_as(
     Ok(session)
 }
 
+/// How much of a family to bring back.
+#[derive(Debug, Default, Deserialize, utoipa::IntoParams)]
+pub(super) struct Scope {
+    /// Bring the agents this one started back with it.
+    ///
+    /// Off by default, so what this endpoint has always done is what it still
+    /// does — a relaunch after an upgrade, or a `Failed` session somebody
+    /// typed into, must not start anything nobody asked for. The recovery card
+    /// asks for it, because a lead brought back alone waits on a team that is
+    /// not there.
+    #[serde(default)]
+    family: bool,
+}
+
 /// Start this session's agent again, in the workspace it already has.
 ///
 /// A session outlives the process running it. The worktree, the branch, the
@@ -1045,7 +1059,10 @@ pub(crate) async fn create_session_as(
 /// the conversation up rather than begin one.
 #[utoipa::path(
     post, path = "/api/v1/sessions/{id}/relaunch", tag = "sessions",
-    params(("id" = String, Path, description = "Session id")),
+    params(
+        ("id" = String, Path, description = "Session id"),
+        ("family" = Option<bool>, Query, description = "Bring the agents this one started back with it"),
+    ),
     responses(
         (status = 200, body = Done),
         (status = 404, body = ApiError),
@@ -1056,6 +1073,7 @@ pub(super) async fn relaunch_session(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
     Path(id): Path<String>,
+    Query(scope): Query<Scope>,
 ) -> ApiResult<Json<Done>> {
     let id = SessionId::from_stored(id);
     let owner = owner(&principal)?.to_string();
@@ -1066,6 +1084,15 @@ pub(super) async fn relaunch_session(
         .ok_or_else(|| ApiError::not_found("session"))?;
 
     super::accounts::ensure_not_switching(&state.db, &id).await?;
+    if scope.family {
+        let brought_back = recover_family(&state, &session, &owner).await?;
+        return Ok(Json(Done {
+            detail: match brought_back {
+                1 => format!("{} is starting again", session.agent.label()),
+                n => format!("{n} agents are starting again"),
+            },
+        }));
+    }
     relaunch(&state, &session, &owner).await?;
 
     Ok(Json(Done {
@@ -1390,18 +1417,91 @@ pub(crate) async fn relaunch(
         // note that said only "it did not restart" left that person with
         // nothing to act on but the button, so the answer was to press it
         // again.
-        let note = format!(
-            "The agent did not restart: {error:#}. Its selected account and workspace are \
-             preserved; retry the restart."
-        );
+        let note = format!("Didn't restart: {error:#}. The workspace and account are unchanged.");
+        // A session that was stranded stays stranded, and this is the one
+        // place that decides it. An attempt that would not start has changed
+        // nothing: the worktree, the branch and the edits the agent had
+        // already written are all still on the machine, so "still stopped,
+        // that attempt did not take" is the honest reading — and `Failed`
+        // would say the opposite twice over, by telling the control plane the
+        // session holds nothing and by making the next keystroke restart it.
+        let status = if session.status == ft_core::SessionStatus::Stranded {
+            ft_core::SessionStatus::Stranded
+        } else {
+            ft_core::SessionStatus::Failed
+        };
         state
             .fleet
-            .set_status(&session.id, ft_core::SessionStatus::Failed, Some(&note))
+            .set_status(&session.id, status, Some(&note))
             .await;
         return Err(error.into());
     }
 
+    // What its children finished while it was down.
+    //
+    // A lead comes back with its memory, a correct view of its team and its
+    // children's results sitting unclaimed in `deliveries` — and nothing to
+    // read them, because a delivery goes out when a turn ends and this agent
+    // has not had one. So it sat silent until somebody typed, which for a
+    // machine that restarted under four leads is four people-shaped
+    // interventions to finish work that was already done.
+    //
+    // Spawned, and after a pause, for the reason `conversation::send_turn`
+    // pauses after a relaunch of its own: the supervisor binds the agent's
+    // socket a moment after this call answers, and a turn written into a
+    // socket nobody has bound yet is lost. Nothing is riding on the pause
+    // being long enough — `drain_deliveries` claims rows atomically and puts
+    // them back if the send fails, and the next status this session reports
+    // drains again.
+    let fleet = state.fleet.clone();
+    let id = session.id.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        fleet.drain_deliveries(&id).await;
+    });
+
     Ok(())
+}
+
+/// Bring a whole family back: the agents it started, then the lead.
+///
+/// **The team first and the lead last**, which is the whole reason this is one
+/// operation rather than a button pressed four times. A lead that comes back
+/// alone reads its history, finds that it delegated the work, and waits for
+/// reports nobody is writing; a lead that comes back last finds its children
+/// already running and their finished work waiting for it.
+///
+/// Only children that are actually stranded are touched. A child still
+/// working — on another machine, or one that never went down — is left
+/// exactly where it is, because restarting a running agent is the one thing
+/// this operation must never do.
+///
+/// A child that will not come back is not a reason to abandon the rest:
+/// partial is the ordinary shape of this. Its reason goes in its own note,
+/// where the workspace it belongs to shows it. The lead's own failure is the
+/// request's failure, because that is the one somebody pressed.
+pub(crate) async fn recover_family(
+    state: &AppState,
+    session: &Session,
+    owner: &str,
+) -> Result<usize, ApiError> {
+    let children = state.db.children_of(&session.id).await.unwrap_or_default();
+    let mut brought_back = 0;
+    for child in children
+        .iter()
+        .filter(|c| c.status == ft_core::SessionStatus::Stranded)
+    {
+        match relaunch(state, child, owner).await {
+            Ok(()) => brought_back += 1,
+            Err(e) => tracing::warn!(
+                session = %child.id,
+                "recovering a child with its lead: {}",
+                e.message
+            ),
+        }
+    }
+    relaunch(state, session, owner).await?;
+    Ok(brought_back + 1)
 }
 
 /// Another agent, in a workspace that is already there.
