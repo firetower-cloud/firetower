@@ -18,7 +18,27 @@
  */
 import { describe, expect, it } from "vitest";
 import type { Session } from "~/api/generated/model";
-import { founder, group, isChild, lead, leadPlace, opens, placeOf, runAt } from "~/api/workspaces";
+import {
+  asking,
+  childLine,
+  childrenElsewhere,
+  familyOf,
+  founder,
+  group,
+  isChild,
+  lastMoved,
+  lead,
+  leadPlace,
+  opens,
+  placeBeat,
+  placeOf,
+  ranked,
+  rowLabel,
+  runAt,
+  waitingAgents,
+  type Workspace,
+} from "~/api/workspaces";
+import { BEAT } from "~/api/view";
 
 /** Enough of a session for `group` and `lead`. */
 const run = (over: Partial<Session> & { id: string }): Session =>
@@ -461,5 +481,232 @@ describe("the row the Team panel marks", () => {
       expect(opened.bare, `opened at ${address}`).toEqual(opened.marked);
       expect(opened.marked).toHaveLength(1);
     }
+  });
+});
+
+/**
+ * A row that stands for a family.
+ *
+ * Both lists hide a workspace started by an agent in another workspace, so the
+ * lead's row is the only place that child exists on the phone — and
+ * `STYLE.md` gives ember three surfaces here of which only the inbox row is
+ * built. Everything below is what stops hiding a row stranding the agent in
+ * it: the mark, the order, the line and the count.
+ */
+describe("a row that stands for a family", () => {
+  /** A lead, and the workspaces its agent started elsewhere. */
+  const fleet = (lead: Partial<Session>, ...kids: Partial<Session>[]): Workspace[] => {
+    const sessions = [
+      run({ id: "s_lead", workspaceId: "w_lead", name: "Worker crash resilience", ...lead }),
+      ...kids.map((kid, i) =>
+        run({
+          id: `s_kid${i}`,
+          workspaceId: `w_kid${i}`,
+          parentId: "s_lead",
+          name: `Worker crash resilience / kid${i}`,
+          ...kid,
+        }),
+      ),
+    ];
+    return group(sessions).groups.flatMap(([, inRepo]) => inRepo);
+  };
+  const leadOf = (places: Workspace[]) => places.find((p) => p.id === "w_lead")!;
+
+  describe("the mark it wears", () => {
+    it("takes its blocked child's ember while its own agent is idle", () => {
+      const places = fleet({ status: "Ready" }, { status: "NeedsYou" });
+      const parent = leadOf(places);
+      /* What the row drew before: the place's own agents, which have nothing
+         to say about an agent in another checkout. */
+      expect(BEAT[lead(parent).status]).toBe("done");
+      expect(placeBeat(parent, places)).toBe("blocked");
+    });
+
+    it("puts working above broken: a place is at rest only when nothing is going", () => {
+      const places = fleet({ status: "Working" }, { status: "Failed" });
+      expect(placeBeat(leadOf(places), places)).toBe("working");
+    });
+
+    it("is the place's own beat when it leads nobody", () => {
+      const places = fleet({ status: "Working" });
+      expect(placeBeat(leadOf(places), places)).toBe("working");
+    });
+
+    it("finds nothing family-wide in a list its children have been taken out of", () => {
+      const places = fleet({ status: "Ready" }, { status: "NeedsYou" });
+      const rows = places.filter((p) => !isChild(p, places));
+      /* The reason every family-wide call is handed the whole fleet and not
+         the rows: filter first and the child is not there to be found. */
+      expect(placeBeat(leadOf(places), rows)).toBe("done");
+    });
+  });
+
+  describe("who it is answerable for", () => {
+    it("gathers its own runs and its children's", () => {
+      const places = fleet({ status: "Working" }, { status: "NeedsYou" }, { status: "Ready" });
+      expect(familyOf(leadOf(places), places).map((r) => r.id)).toEqual(["s_lead", "s_kid0", "s_kid1"]);
+    });
+
+    it("counts only the children with checkouts of their own", () => {
+      /* A subagent started *in* the lead's workspace is already one of its
+         runs. Counting it here is how the desk once announced the same agent
+         twice, on a machine it was not on. */
+      const places = group([
+        run({ id: "s_lead", workspaceId: "w_lead", name: "Worker crash resilience" }),
+        run({ id: "s_here", workspaceId: "w_lead", parentId: "s_lead", name: "Worker crash resilience" }),
+        run({ id: "s_away", workspaceId: "w_away", parentId: "s_lead", name: "Worker crash resilience / away" }),
+      ]).groups.flatMap(([, inRepo]) => inRepo);
+      const parent = leadOf(places);
+      expect(parent.runs.map((r) => r.id)).toEqual(["s_lead", "s_here"]);
+      expect(childrenElsewhere(parent, places).map((p) => p.id)).toEqual(["w_away"]);
+    });
+
+    it("finds a question asked in a child's workspace", () => {
+      const places = fleet({ status: "Ready" }, { status: "NeedsYou" }, { status: "Working" });
+      expect(asking(leadOf(places), places).map((r) => r.id)).toEqual(["s_kid0"]);
+    });
+  });
+
+  describe("what it is called, and how old it reads", () => {
+    it("drops the lead's name from a child's while the lead is on the list", () => {
+      const places = fleet({ status: "Working" }, { status: "Working" });
+      const kid = places.find((p) => p.id === "w_kid0")!;
+      expect(kid.name).toBe("Worker crash resilience / kid0");
+      expect(rowLabel(kid, places)).toBe("kid0");
+      expect(rowLabel(leadOf(places), places)).toBe("Worker crash resilience");
+    });
+
+    it("keeps the whole name when the lead is gone, because nothing else carries it", () => {
+      const places = fleet({ status: "Working" }, { status: "Working" }).filter((p) => p.id !== "w_lead");
+      const kid = places[0];
+      expect(isChild(kid, places)).toBe(false);
+      expect(rowLabel(kid, places)).toBe("Worker crash resilience / kid0");
+    });
+
+    it("ages from the whole family, not from an idle lead", () => {
+      const places = fleet(
+        { status: "Ready", updatedAt: "2026-11-08T07:00:00Z" },
+        { status: "Working", updatedAt: "2026-11-08T10:00:00Z" },
+      );
+      expect(lastMoved(familyOf(leadOf(places), places))).toBe("2026-11-08T10:00:00Z");
+    });
+  });
+
+  describe("the line it carries for them", () => {
+    const line = (lead: Partial<Session>, ...kids: Partial<Session>[]) => {
+      const places = fleet(lead, ...kids);
+      return childLine(leadOf(places), places);
+    };
+
+    it("says nothing at all when it leads nobody", () => {
+      expect(line({ status: "Working" })).toBeNull();
+    });
+
+    it("names the one child that is waiting", () => {
+      expect(line({ status: "Ready" }, { status: "NeedsYou" }, { status: "Working" })).toEqual({
+        tone: "blocked",
+        text: "kid0 is waiting on you",
+        count: "2 agents",
+      });
+    });
+
+    it("counts them when more than one is waiting — which one it is stops mattering", () => {
+      expect(line({ status: "Ready" }, { status: "NeedsYou" }, { status: "NeedsYou" })).toEqual({
+        tone: "blocked",
+        text: "2 waiting on you",
+        count: "2 agents",
+      });
+    });
+
+    it("names the one that failed, under anything still working", () => {
+      expect(line({ status: "Working" }, { status: "Failed" })).toEqual({
+        tone: "broken",
+        text: "kid0 failed",
+        count: "1 agent",
+      });
+    });
+
+    it("keeps a blocked child above a broken one", () => {
+      expect(line({ status: "Ready" }, { status: "Failed" }, { status: "NeedsYou" })?.text).toBe(
+        "kid1 is waiting on you",
+      );
+    });
+
+    it("says working in dim, because three agents working is not a state to feel", () => {
+      expect(line({ status: "Ready" }, { status: "Working" }, { status: "Working" })).toEqual({
+        tone: "quiet",
+        text: "all working",
+        count: "2 agents",
+      });
+      expect(line({ status: "Ready" }, { status: "Working" }, { status: "Ready" })).toEqual({
+        tone: "quiet",
+        text: "1 working",
+        count: "2 agents",
+      });
+    });
+
+    it("gives the count the line to itself when there is nothing to report", () => {
+      expect(line({ status: "Ready" }, { status: "Ready" }, { status: "Ready" })).toEqual({
+        tone: "quiet",
+        text: "2 agents",
+        count: null,
+      });
+    });
+  });
+
+  describe("where it sorts", () => {
+    /* A lead whose own agent is idle, a workspace that is simply working, and
+       the child that is waiting for somebody. */
+    const mixed = () =>
+      group([
+        run({ id: "s_busy", workspaceId: "w_busy", name: "Connectors V2", status: "Working" }),
+        run({ id: "s_lead", workspaceId: "w_lead", name: "Worker crash resilience", status: "Ready" }),
+        run({
+          id: "s_kid",
+          workspaceId: "w_kid",
+          parentId: "s_lead",
+          name: "Worker crash resilience / security",
+          status: "NeedsYou",
+        }),
+      ]).groups.flatMap(([, inRepo]) => inRepo);
+
+    it("keeps a parent with a blocked child at the top rather than sinking it to the bottom", () => {
+      /* The whole point. Ranked on its own agents the lead is `done` — rank 3,
+         below the working one — so hiding the child would make a waiting agent
+         *quieter* than it was with a row of its own. */
+      const places = mixed();
+      const rows = ranked(places).filter((p) => !isChild(p, places));
+      expect(rows.map((p) => p.id)).toEqual(["w_lead", "w_busy"]);
+    });
+
+    it("is ranked before the children are taken out, never after", () => {
+      /* Filtered first, `familyOf` has nothing to find and the lead falls back
+         to the bottom — the same list, in the wrong order. */
+      const places = mixed();
+      const rows = places.filter((p) => !isChild(p, places));
+      expect(ranked(rows).map((p) => p.id)).toEqual(["w_busy", "w_lead"]);
+    });
+  });
+
+  describe("how many are waiting", () => {
+    it("counts agents, not workspaces", () => {
+      const places = group([
+        run({ id: "s_one", workspaceId: "w_1", status: "NeedsYou" }),
+        run({ id: "s_two", workspaceId: "w_1", status: "NeedsYou" }),
+      ]).groups.flatMap(([, inRepo]) => inRepo);
+      expect(places).toHaveLength(1);
+      expect(waitingAgents(places)).toBe(2);
+    });
+
+    it("still counts a child whose row has been hidden", () => {
+      const places = fleet({ status: "Ready" }, { status: "NeedsYou" });
+      expect(places.filter((p) => !isChild(p, places))).toHaveLength(1);
+      expect(waitingAgents(places)).toBe(1);
+    });
+
+    it("leaves finished and broken out of it: a badge counts questions", () => {
+      const places = fleet({ status: "HandedBack" }, { status: "Failed" });
+      expect(waitingAgents(places)).toBe(0);
+    });
   });
 });

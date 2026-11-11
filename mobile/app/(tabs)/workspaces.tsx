@@ -57,12 +57,11 @@ import { BLEED, useEdges } from "~/ui/edges";
 import { router } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
 import type { Session } from "~/api/generated/model";
-import { group, lead, ranked } from "~/api/workspaces";
+import { group, isChild, lead, ranked, waitingAgents } from "~/api/workspaces";
 import { useSessions } from "~/data";
 import { useServer } from "~/native/current";
-import { usePending } from "~/api/pending";
-import { getListSessionsQueryKey, useAnswerRequest } from "~/api/generated/sessions/sessions";
-import { Peek } from "~/ui/Peek";
+import { getListSessionsQueryKey } from "~/api/generated/sessions/sessions";
+import { Peek, useAnswering } from "~/ui/Peek";
 import { Unreachable } from "~/ui/Unreachable";
 import { Waiting } from "~/ui/Waiting";
 import { WorkspaceRow } from "~/ui/WorkspaceRow";
@@ -82,41 +81,49 @@ export default function Workspaces() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [live.map((s: Session) => s.id + s.status).join()],
   );
-  const places = useMemo(() => ranked(groups.flatMap(([, inRepo]) => inRepo)), [groups]);
+  /** Every workspace there is, children included. Nothing family-wide works
+   *  without it — see `familyOf`. */
+  const every = useMemo(() => groups.flatMap(([, inRepo]) => inRepo), [groups]);
+  /**
+   * The rows: parents only, in the family's order.
+   *
+   * **Ranked first and filtered after**, because `ranked` sorts on
+   * `placeBeat` and a family cannot be read out of a list its children have
+   * been taken out of. A child started by an agent in another workspace is a
+   * real checkout with a real agent in it, and it keeps that — it simply
+   * stops having a row, and its lead's row answers for it.
+   */
+  const places = useMemo(() => ranked(every).filter((p) => !isChild(p, every)), [every]);
 
-  const waiting = places.filter((p) => p.runs.some((r) => r.status === "NeedsYou")).length;
+  /* Agents, not places, and the whole fleet rather than the rows drawn from
+     it — see `waitingAgents`. */
+  const waiting = waitingAgents(every);
   const peeked = places.find((p) => p.id === peeking) ?? null;
 
-  /**
-   * What the peeked workspace is blocked on, read without opening it.
-   *
-   * One bounded request on long-press and nothing ongoing — see
-   * `api/pending.ts`. Without it the peek can preview but not answer, which
-   * is coverage §5's **P4** and the whole reason the component exists.
-   */
   /**
    * **The session id, not the workspace id.**
    *
    * `Workspace.id` is `session.workspaceId ?? session.id` — so for anything
-   * that belongs to a workspace it is the *workspace's* id, and
-   * `getConversation` wants a *session's*. Passing `peeked.id` meant the fetch
-   * asked for a conversation that does not exist, `pending` never resolved,
-   * and the Allow/No buttons never rendered — while the ember dot showed,
-   * because `blocked` is read off the runs and was right all along.
+   * that belongs to a workspace it is the *workspace's* id, and the routes
+   * below want a *session's*. Passing `peeked.id` to the conversation meant
+   * asking for one that does not exist, which is how the peek once drew an
+   * ember dot over buttons that never arrived.
    *
    * `lead()` is what picks the run whose transcript a person means, and it is
-   * what `[id].tsx` opens and answers against. The peek has to agree with the
-   * screen it is a preview of, or it answers a different session than the one
-   * it is showing.
+   * what `[id].tsx` opens against. The peek has to agree with the screen it is
+   * a preview of, or it opens a different session than the one it is showing.
    */
   const blockedRun = peeked?.runs.find((r) => r.status === "NeedsYou");
   /* **The blocked run, not the lead.** `lead()` answers "whose transcript do
      I open" and reports the *busy* run when a workspace has one running
      beside one that is stopped — so it is the wrong target for a question.
-     The run that is asking is the run to read and the run to answer. */
+     The run that is asking is the run to read and the run to answer.
+
+     This place's own, deliberately: it is what *What it changed* opens, and
+     a parent's diff is the parent's. The family's questions are `useAnswering`
+     below, which is a different question with a different answer. */
   const speakerId = peeked ? (blockedRun?.id ?? lead(peeked).id) : null;
-  const pending = usePending(speakerId, !!blockedRun);
-  const answer = useAnswerRequest();
+  const answering = useAnswering(peeked, every);
 
   const refresh = useCallback(
     () => cache.invalidateQueries({ queryKey: getListSessionsQueryKey() }),
@@ -208,40 +215,40 @@ export default function Workspaces() {
       {head}
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ ...COLUMN, paddingBottom: 30 }}>
+        {/* **"In all" keeps counting every workspace**, children included.
+            Fourteen checkouts exist, fourteen hold a host, and ending a parent
+            ends what it started — so the number to carry around is the fleet's
+            and not the list's. Each parent row says how many it stands for. */}
         <View className="px-5 pb-2 pt-1.5">
           <Text className="font-medium text-dim" style={{ fontSize: size.meta }}>
             {waiting
-              ? `${waiting} waiting on you · ${places.length} in all`
-              : `${places.length} in all, none waiting`}
+              ? `${waiting} waiting on you · ${every.length} in all`
+              : `${every.length} in all, none waiting`}
           </Text>
         </View>
 
         {places.map((p) => (
-          <WorkspaceRow key={p.id} place={p} onPeek={() => setPeeking(p.id)} />
+          <WorkspaceRow key={p.id} place={p} places={every} onPeek={() => setPeeking(p.id)} />
         ))}
       </ScrollView>
 
       {peeked ? (
         <Peek
           place={peeked}
+          places={every}
           onClose={() => setPeeking(null)}
           onOpen={() => router.push(`/workspace/${peeked.id}`)}
+          /* Where the children went. A child was one tap from this list and is
+             now three — open the parent, find the panel, read the Team — so
+             the peek pays it back: a long press and a tap, to all of them. */
+          onChildren={() => router.push(`/workspace/overview?id=${peeked.id}`)}
           /* `repo.tsx` reads its param with `useSession`, so this is the
              session id — unlike `/workspace/{id}`, which resolves a workspace.
              Two routes, two kinds of id, one field name. */
           onChanges={() => router.push(`/workspace/repo?id=${speakerId}`)}
-          pending={pending.asked}
-          reading={pending.reading}
-          onAnswer={(yes) => {
-            if (!pending.asked || !speakerId) return;
-            answer.mutate({
-              id: speakerId,
-              data: {
-                req: pending.asked.req,
-                decision: yes ? { decision: "Allow" } : { decision: "Deny", reason: null },
-              },
-            });
-          }}
+          asks={answering.asks}
+          waiting={answering.waiting}
+          onAnswer={answering.onAnswer}
           onEnd={() => setPeeking(null)}
         />
       ) : null}

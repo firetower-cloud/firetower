@@ -35,7 +35,23 @@ const RANK: Record<string, number> = {
   Ended: 6,
 };
 
-function Legend({ children, lit = false, note }: { children: string; lit?: boolean; note?: string }) {
+function Legend({
+  children,
+  lit = false,
+  note,
+  hot,
+}: {
+  children: string;
+  lit?: boolean;
+  note?: string;
+  /**
+   * The part of the note that wants a person, in ember.
+   *
+   * On a roster of eight, how many of them are waiting is the first thing you
+   * need and the last thing a list of eight two-line rows will tell you.
+   */
+  hot?: string;
+}) {
   const { color } = useTheme();
   return (
     <View className="flex-row items-baseline gap-2 px-4 pb-2 pt-4">
@@ -45,7 +61,12 @@ function Legend({ children, lit = false, note }: { children: string; lit?: boole
       >
         {children}
       </Text>
-      {note ? <Text className="font-mono text-micro text-mute">{note}</Text> : null}
+      {note ? (
+        <Text className="font-mono text-micro text-mute">
+          {note}
+          {hot ? <Text style={{ color: color["ember-ink"] }}>{`, ${hot}`}</Text> : null}
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -92,12 +113,17 @@ function Member({
           <Text className="font-sans text-micro text-mute">{elapsed(minutesSince(session.updatedAt))}</Text>
         </View>
         <View className="flex-row items-center gap-2">
+          {/* **What it asked, when it is asking.** `STATUS_LABEL` on eight
+              rows reads "Asked a question / Working / Working", which sends
+              you to look without saying what at — and now that a child has no
+              row of its own, this panel is where you go. The note is already
+              on the session and the peek already reads it. */}
           <Text
             numberOfLines={1}
             className="min-w-0 shrink font-sans text-meta"
             style={{ color: tone === "mute" ? color.dim : color[tone === "ember" ? "ember-soft" : tone] }}
           >
-            {STATUS_LABEL[session.status]}
+            {(session.status === "NeedsYou" ? session.note : null) || STATUS_LABEL[session.status]}
           </Text>
           <AgentMark agent={session.agent} size={11} tone={color.mute} />
         </View>
@@ -194,6 +220,9 @@ export function Overview({
   );
   const hasTeam = !!lead || roster.length > 0;
   const done = plan.filter((s) => String(s.status) === "Completed").length;
+  /* The roster, not the roster plus the manager: it is the same set the row
+     that opened this panel counts — *the 8 agents it started*. */
+  const waiting = roster.filter((m) => m.status === "NeedsYou").length;
 
   /**
    * Where a team row goes, which is the desk's answer and nothing added to it.
@@ -236,7 +265,12 @@ export function Overview({
     <View>
       {hasTeam ? (
         <View className="border-b border-line-soft pb-2">
-          <Legend>Team</Legend>
+          <Legend
+            note={roster.length ? `${roster.length} ${roster.length === 1 ? "agent" : "agents"}` : undefined}
+            hot={waiting ? `${waiting} waiting` : undefined}
+          >
+            Team
+          </Legend>
           <View className="px-1">
             <Member
               session={manager}

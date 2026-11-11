@@ -11,14 +11,17 @@
  * Shared because the rail and the dashboard both draw it, and reading the fleet
  * twice over should not mean reading it two different ways.
  *
- * **A subset of the desk's copy, deliberately.** `desktop/src/api/workspaces.ts`
- * also exports `familyOf`, `placeBeat`, `speaksFor`, `flat`, `rowLabel`,
- * `childrenElsewhere` and `childrenWorking`; each of those answers for a
- * surface the phone has not got — a rail that hides delegated children under
- * one mark, an end-workspace confirmation that counts what goes with it.
- * Everything that says what a *place* is, and whose it is, is the same code
- * under the same names. Add from there rather than inventing beside it, and
- * when a third reason arrives, extract the package the README promises.
+ * **Most of the desk's copy, and the same code under the same names.** The
+ * phone's lists now hide a delegated child under its lead exactly as the
+ * desk's rail does, so `familyOf`, `placeBeat`, `rowLabel` and
+ * `childrenElsewhere` came across from `desktop/src/api/workspaces.ts` rather
+ * than being derived a second time beside them — a second answer to *what is
+ * this place answerable for* is how two screens come to disagree about one
+ * workspace. `speaksFor`, `flat` and `childrenWorking` are still only the
+ * desk's, and `asking`, `lastMoved` and `childLine` are only the phone's:
+ * what a row says about its children is a row's business, and the desk's rail
+ * has no room for a second line. When a third client wants any of it, extract
+ * the package the README promises.
  */
 
 import type { Session } from "./generated/model";
@@ -191,6 +194,177 @@ export function isChild(place: Workspace, places: Workspace[]): boolean {
 }
 
 /**
+ * What a row is called where its lead is shown right above it — or, here,
+ * where its lead is the only row shown at all.
+ *
+ * A child is named "<lead> / <what>" so it still reads on its own: in a flat
+ * list, in search, on the child's own page. Said under its lead, that prefix
+ * is said twice, so drop it and show just the part that differs. Only when the
+ * lead is actually on this list — a flat view keeps the full name, which is
+ * the only thing carrying the association there.
+ */
+export function rowLabel(place: Workspace, places: Workspace[]): string {
+  const above = leadPlace(place, places);
+  const prefix = above ? `${above.name} / ` : "";
+  return prefix && place.name.startsWith(prefix) ? place.name.slice(prefix.length) : place.name;
+}
+
+/**
+ * The places this one started **elsewhere** and has not ended: the children
+ * that have checkouts of their own, and therefore rows of their own.
+ *
+ * Elsewhere only, and the word is load-bearing. A child started *in* this
+ * workspace is already one of `place.runs` — counting those as well is how the
+ * desk once announced the same agent twice, on a machine it was not on.
+ *
+ * **The desk's returns the number; this returns the children.** Same question,
+ * and `.length` is the desk's answer. The phone's row has to *name* one of
+ * them when one of them is blocked, which a count cannot do, and deriving the
+ * set twice under two names is how the two would drift.
+ */
+export function childrenElsewhere(place: Workspace, places: Workspace[]): Workspace[] {
+  const mine = new Set(place.runs.map((r) => r.id));
+  return places.filter((other) => other.id !== place.id && !!other.leadOf && mine.has(other.leadOf));
+}
+
+/**
+ * Every agent a place is answerable for: the runs in it, and the runs of any
+ * workspace one of them started.
+ *
+ * `places` is the *whole* list, not the one a screen happens to be drawing. A
+ * child with a workspace of its own is now hidden from both lists — it belongs
+ * under its lead — which is precisely why the lead's row has to speak for it.
+ * Handed the list it is already drawing, this finds nothing, because the thing
+ * it is looking for is the thing that list left out.
+ *
+ * One hop is the whole of the tree: delegation is flat by construction, and
+ * `delegate.rs` refuses a child that tries to spawn.
+ */
+export function familyOf(place: Workspace, places: Workspace[]): Session[] {
+  return [...place.runs, ...childrenElsewhere(place, places).flatMap((other) => other.runs)];
+}
+
+/**
+ * Which beat a place wears when more than one is true of it. First wins.
+ *
+ * - **blocked** first. Ember is spent on being stopped-and-stuck and on
+ *   nothing else, and a sibling still working does not make an unanswered
+ *   question any less unanswered.
+ * - **working** next: a place is at rest only when nothing in it is going.
+ * - **broken**, then **done** — both at rest, and a failure is the louder of
+ *   the two: it will not finish on its own, whatever else here did.
+ * - **over** only when every one of them has ended.
+ */
+const PRECEDENCE: Beat[] = ["blocked", "working", "broken", "done", "over"];
+
+/** The one of these whose beat comes first. Ties keep the order they arrived
+ *  in, which is the place's own runs before anything it delegated. */
+function loudest(runs: Session[]): Session {
+  let best = runs[0];
+  let rank = PRECEDENCE.indexOf(BEAT[best.status]);
+  for (const run of runs.slice(1)) {
+    const at = PRECEDENCE.indexOf(BEAT[run.status]);
+    if (at < rank) [best, rank] = [run, at];
+  }
+  return best;
+}
+
+/**
+ * What a place reads as, in one beat — the whole of it, family included.
+ *
+ * A row drew `BEAT[lead(place).status]`, which is the place's *own* agents. So
+ * a manager sitting idle painted its row sage — *finished, nothing owed* —
+ * while an agent it had delegated to was stopped waiting for an answer. That
+ * was survivable while the child had a row of its own two lines below. Once
+ * the child is hidden under it, this row is the only place that agent exists.
+ *
+ * `doing()` is still the right question for a *word* — "working", "your move".
+ * This is the question for a colour, and for the order the list reads in.
+ */
+export function placeBeat(place: Workspace, places: Workspace[]): Beat {
+  return BEAT[loudest(familyOf(place, places)).status];
+}
+
+/**
+ * Every agent of the family that is stopped waiting for an answer.
+ *
+ * `NeedsYou` alone, not `needsYou`: the wider grouping covers finished and
+ * broken as well, and neither of those has an answer to give. This is what the
+ * peek offers buttons for, and what the lists count.
+ */
+export function asking(place: Workspace, places: Workspace[]): Session[] {
+  return familyOf(place, places).filter((r) => r.status === "NeedsYou");
+}
+
+/**
+ * How many agents across a fleet are stopped waiting for an answer.
+ *
+ * **Agents, not places**, and the whole list rather than the rows drawn from
+ * it. It was `places.filter(p => p.runs.some(needsYou)).length`, which
+ * under-counted a workspace holding two blocked runs — and once a delegated
+ * child stopped having a row, counting the rows would have lost it entirely.
+ *
+ * `NeedsYou` alone: the wider `needsYou` covers finished and broken as well,
+ * and this is the number that will one day set the app icon badge. A badge
+ * counts questions, not checkouts.
+ */
+export function waitingAgents(places: Workspace[]): number {
+  return places.flatMap((p) => p.runs).filter((r) => r.status === "NeedsYou").length;
+}
+
+/** When the family last moved. A row's age is the whole family's, so an idle
+ *  parent does not read 3h while something under it moved a minute ago. */
+export function lastMoved(runs: Session[]): string {
+  return runs.reduce((latest, r) => (r.updatedAt > latest ? r.updatedAt : latest), runs[0]?.updatedAt ?? "");
+}
+
+/** What a parent row says about what it leads, in two slots. */
+export type ChildLine = {
+  /** `blocked` and `broken` take colour; `quiet` is everything else. */
+  tone: "blocked" | "broken" | "quiet";
+  /** The phrase, on the left. Gives way first. */
+  text: string;
+  /** How many it stands for, on the right. Never gives way — unless it is
+   *  already the phrase, which is what `null` says. */
+  count: string | null;
+};
+
+/**
+ * The one line a parent row carries for its children: **the loudest true thing
+ * about them**, and nothing else.
+ *
+ * It names the child when exactly one of them is blocked or broken and counts
+ * them when more are — which one it is only matters for the two states
+ * somebody has to act on. Three agents working is not a state to feel, so it
+ * is said in dim and the colour budget stays where `STYLE.md` puts it.
+ *
+ * Eight children is a count and never a list. There is no width at which eight
+ * names fit, and the row that tries is the row that drops the age.
+ */
+export function childLine(place: Workspace, places: Workspace[]): ChildLine | null {
+  const kids = childrenElsewhere(place, places);
+  if (kids.length === 0) return null;
+
+  const beats = kids.map((kid) => placeBeat(kid, places));
+  const of = (beat: Beat) => kids.filter((_, i) => beats[i] === beat);
+  const blocked = of("blocked");
+  const broken = of("broken");
+  const working = of("working");
+  const count = `${kids.length} ${kids.length === 1 ? "agent" : "agents"}`;
+  const says = (tone: ChildLine["tone"], text: string): ChildLine => ({ tone, text, count });
+
+  if (blocked.length === 1) return says("blocked", `${rowLabel(blocked[0], places)} is waiting on you`);
+  if (blocked.length > 1) return says("blocked", `${blocked.length} waiting on you`);
+  if (broken.length === 1) return says("broken", `${rowLabel(broken[0], places)} failed`);
+  if (broken.length > 1) return says("broken", `${broken.length} failed`);
+  if (working.length === kids.length) return says("quiet", kids.length === 1 ? "working" : "all working");
+  if (working.length > 0) return says("quiet", `${working.length} working`);
+  /* Nothing to report about them, so the count takes the line on its own
+     rather than being stranded against the right edge with a blank beside it. */
+  return { tone: "quiet", text: count, count: null };
+}
+
+/**
  * The place an id in the address belongs to.
  *
  * The id may name the workspace or any one run in it — a second agent is
@@ -320,8 +494,18 @@ export function runAt(place: Workspace, address: string): Session {
  */
 export const RANK: Record<Beat, number> = { blocked: 0, broken: 1, working: 2, done: 3, over: 4 };
 
-/** The same list, in that order. A copy: `sort` is in place and the caller's
- *  array is memoised upstream. */
+/**
+ * The same list, in that order. A copy: `sort` is in place and the caller's
+ * array is memoised upstream.
+ *
+ * **On `placeBeat`, which is the family's, not `BEAT[lead(a).status]`.** Both
+ * lists hide a delegated child under its lead, so a blocked child would
+ * otherwise get *quieter* by being hidden: its own row is gone and its lead,
+ * ranked on its own idle agents, sinks to the bottom with the finished ones.
+ * It needs no new argument — the whole list is already what it is handed, and
+ * the hiding happens after. **So hand it everything and filter after**, or
+ * `familyOf` goes looking for children in a list they have been taken out of.
+ */
 export function ranked(places: Workspace[]): Workspace[] {
-  return places.slice().sort((a, b) => RANK[BEAT[lead(a).status]] - RANK[BEAT[lead(b).status]]);
+  return places.slice().sort((a, b) => RANK[placeBeat(a, places)] - RANK[placeBeat(b, places)]);
 }

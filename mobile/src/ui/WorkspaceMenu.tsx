@@ -44,6 +44,7 @@ export function WorkspaceMenu({
   conversation,
   runs,
   onReread,
+  delegated = 0,
   open,
   onClose,
   onEnded,
@@ -53,6 +54,14 @@ export function WorkspaceMenu({
   conversation?: Conversation;
   /** Every run of this workspace, not just the one being read. */
   runs?: { id: string; agent: string; status: string }[];
+  /**
+   * How many agents this workspace started **elsewhere** and has not ended.
+   *
+   * They go with it, and since their rows are now folded under this
+   * workspace's on both lists, the question is the last place anybody is told
+   * so. `childrenElsewhere` is what counts them; only a list of places can.
+   */
+  delegated?: number;
   /** Read the whole transcript again, from nothing. */
   onReread?: () => void;
   open: boolean;
@@ -188,7 +197,9 @@ export function WorkspaceMenu({
            The worktree goes with it. */
         Alert.alert(
           "End this workspace?",
-          "The agent stops and its worktree is removed from the host. Anything not committed goes with it.",
+          delegated > 0
+            ? `The agent stops, and so ${delegated === 1 ? "does the agent" : `do the ${delegated} agents`} it started elsewhere. Their worktrees go from the host with this one, and anything not committed goes with them.`
+            : "The agent stops and its worktree is removed from the host. Anything not committed goes with it.",
           [
             { text: "Keep it", style: "cancel" },
             {
