@@ -2,9 +2,11 @@
  * Sessions, read as the places they work in.
  *
  * The API returns sessions; a person thinks in workspaces. A workspace is a
- * checkout on a host with any number of agents in it, and the first session of
- * one carries the workspace's own id — so grouping by `workspaceId` and taking
- * the name from the first run gives back the shape somebody actually has.
+ * checkout on a host with any number of agents in it, and every run in one
+ * carries its `workspaceId` — so grouping by that gives back the shape
+ * somebody actually has, and `founder()` says which of those runs the place
+ * is named after. Not whichever sorted first: that was a bug for as long as
+ * this file has existed, and the comment here used to assert it.
  *
  * Shared because the rail and the dashboard both draw it, and reading the fleet
  * twice over should not mean reading it two different ways.
@@ -59,6 +61,39 @@ export function doing(place: Workspace): "waiting" | "working" | "idle" {
   return "idle";
 }
 
+/**
+ * The run that founded the place: the one it is named after, and the one a
+ * list means when it opens a workspace.
+ *
+ * **`r.id === place.id` was the whole of this, and it almost never matched.**
+ * `group()` files a place under `workspaceId ?? id`, so that test only finds
+ * the founder of a workspace with no id of its own. For every real workspace
+ * it found nothing, the place kept whichever run sorted to the front — needs
+ * you first, then newest — and three things followed from it: the Workspaces
+ * list and the home named a workspace after a subagent in it, a child
+ * workspace never nested under its lead, and opening a workspace lit a
+ * child's row in the Team panel as the one you were reading.
+ *
+ * Found by shape instead: the run in this place that was not started by
+ * another run in it. A subagent sharing the checkout has its lead here, so it
+ * is skipped; the lead itself — or an agent a person started — has no parent
+ * here and qualifies. Oldest when several do, which is also the answer once
+ * the founder has ended and only what it delegated is left: the oldest run
+ * still here is the best the place can say for itself.
+ */
+export function founder(place: Workspace): Session | undefined {
+  const own = new Set(place.runs.map((r) => r.id));
+  let eldest: Session | undefined;
+  for (const run of place.runs) {
+    /* A place with no workspace of its own is filed under this run's id,
+       which says outright that it founded it. */
+    if (run.id === place.id) return run;
+    if (run.parentId && own.has(run.parentId)) continue;
+    if (!eldest || run.createdAt < eldest.createdAt) eldest = run;
+  }
+  return eldest;
+}
+
 export function group(sessions: Session[]): Repositories {
   const byRepo = new Map<string, Map<string, Workspace>>();
 
@@ -97,12 +132,12 @@ export function group(sessions: Session[]): Repositories {
   // own, and a place is never under itself.
   for (const places of byRepo.values()) {
     for (const place of places.values()) {
-      const founder = place.runs.find((r) => r.id === place.id);
+      const first = founder(place);
       // Named after its founder, not whichever run was seen first: a workspace
       // with a same-workspace child in it must keep the lead's name, not take
-      // the child's. Only when the founder is still around to say.
-      if (founder) place.name = founder.name;
-      const asked = founder?.parentId ?? undefined;
+      // the child's.
+      if (first) place.name = first.name;
+      const asked = first?.parentId ?? undefined;
       place.leadOf = asked && !place.runs.some((r) => r.id === asked) ? asked : undefined;
     }
   }
@@ -250,17 +285,22 @@ export function lead(place: Workspace): Session {
  * the screen follows it — which is what lets a subagent sharing the manager's
  * checkout open its own transcript rather than the page you are already on.
  *
- * `lead()` otherwise: an address that names the place is a request for the
- * place, and the run that speaks for it is the one to read.
+ * `founder()` otherwise: an address that names the place is a request for the
+ * place, and the run the place is named after is the one to read.
  *
- * **The `r.id !== place.id` guard is not defensive, it is the whole care.**
- * A workspace whose sessions carry no `workspaceId` is filed under its
- * founding run's id, so there `place.id` *is* a run id — and honouring it
- * would quietly put the founder on screen in place of `lead()` for every
- * workspace opened from a list.
+ * **It was `lead()`, and that is what lit the wrong row in the Team panel.**
+ * `lead()` answers *which run does this row describe* — the loudest one, so a
+ * row's single dot and single line agree. Open a workspace whose subagent is
+ * working and that is the subagent, so the panel marked the subagent's row as
+ * where you are while the header above it carried the workspace's name, and
+ * the parent's own row grew a chevron offering to open what was already
+ * meant to be on screen. Which run is loudest is not who the place *is*.
+ *
+ * `lead()` stays as the last resort for a place with nothing in it to found
+ * it, which `group()` cannot produce — the type wants a `Session` either way.
  */
 export function runAt(place: Workspace, address: string): Session {
-  return place.runs.find((r) => r.id === address && r.id !== place.id) ?? lead(place);
+  return place.runs.find((r) => r.id === address) ?? founder(place) ?? lead(place);
 }
 
 /**

@@ -18,7 +18,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { Session } from "~/api/generated/model";
-import { group, isChild, lead, leadPlace, opens, placeOf, runAt } from "~/api/workspaces";
+import { founder, group, isChild, lead, leadPlace, opens, placeOf, runAt } from "~/api/workspaces";
 
 /** Enough of a session for `group` and `lead`. */
 const run = (over: Partial<Session> & { id: string }): Session =>
@@ -167,6 +167,71 @@ describe("leads and children", () => {
     expect(place.runs[0].id, "the needs-you child sorts to the front").toBe("s_2");
     expect(place.name).toBe("Quota meter rounding");
   });
+
+  /**
+   * **And the same when the workspace has an id of its own**, which is every
+   * workspace the control plane makes.
+   *
+   * The founder was looked up as `r.id === place.id`, and that can only match
+   * a place filed under one of its own runs — so for a real `workspaceId` it
+   * found nobody and the name fell to whichever run sorted first. `w_1` was
+   * then called after the subagent that happened to be asking something: on
+   * the phone that is the header over the workspace, the row in the
+   * Workspaces list, and the chip on the home.
+   */
+  it("finds the founder when the place is not filed under one of its runs", () => {
+    const all = [
+      run({ id: "s_1", workspaceId: "w_1", name: "auth refactor", createdAt: "2026-11-08T09:12:00Z" }),
+      run({
+        id: "s_k1",
+        workspaceId: "w_1",
+        parentId: "s_1",
+        status: "NeedsYou",
+        name: "Quota band thresholds",
+        createdAt: "2026-11-08T10:50:00Z",
+      }),
+    ];
+    const place = places(all)[0];
+    expect(place.runs[0].id, "the needs-you child sorts to the front").toBe("s_k1");
+    expect(founder(place)?.id).toBe("s_1");
+    expect(place.name).toBe("auth refactor");
+  });
+
+  /** With the founder ended and out of the list, what is left are the agents
+   *  it delegated to. The oldest of them is the best the place can say for
+   *  itself — the same answer the desk already gave for a place's age. */
+  it("takes the oldest run still here when the founder has ended", () => {
+    const all = [
+      run({ id: "s_k1", workspaceId: "w_1", parentId: "s_gone", status: "NeedsYou", createdAt: "2026-11-08T10:50:00Z" }),
+      run({ id: "s_k2", workspaceId: "w_1", parentId: "s_gone", createdAt: "2026-11-08T10:05:00Z" }),
+    ];
+    expect(founder(places(all)[0])?.id).toBe("s_k2");
+  });
+
+  /**
+   * What else the founder decides: whether a workspace is a child of another.
+   *
+   * `leadOf` is read off the founder too, so the same failed lookup left it
+   * undefined for every workspace with an id of its own — and a delegated
+   * child, which is exactly the thing that has one, never drew under its lead
+   * in the Workspaces list.
+   */
+  it("nests a delegated child under its lead, both with ids of their own", () => {
+    const all = [
+      run({ id: "s_1", workspaceId: "w_1", name: "Schedules.", createdAt: "2026-11-08T09:12:00Z" }),
+      run({
+        id: "s_2",
+        workspaceId: "w_2",
+        parentId: "s_1",
+        name: "Schedules. / schedules-tests",
+        createdAt: "2026-11-08T10:05:00Z",
+      }),
+    ];
+    const ps = places(all);
+    expect(ps.map((p) => p.id)).toEqual(["w_1", "w_2"]);
+    expect(ps.map((p) => isChild(p, ps))).toEqual([false, true]);
+    expect(leadPlace(ps[1], ps)?.id).toBe("w_1");
+  });
 });
 
 /**
@@ -280,9 +345,9 @@ describe("what a team row opens", () => {
  */
 describe("runAt", () => {
   const place = places([
-    run({ id: "s_1", workspaceId: "w_1" }),
-    run({ id: "s_2", workspaceId: "w_1", parentId: "s_1", status: "NeedsYou" }),
-    run({ id: "s_3", workspaceId: "w_1", parentId: "s_1" }),
+    run({ id: "s_1", workspaceId: "w_1", createdAt: "2026-11-08T09:12:00Z" }),
+    run({ id: "s_2", workspaceId: "w_1", parentId: "s_1", status: "NeedsYou", createdAt: "2026-11-08T10:50:00Z" }),
+    run({ id: "s_3", workspaceId: "w_1", parentId: "s_1", createdAt: "2026-11-08T10:45:00Z" }),
   ])[0];
 
   it("shows the run the address names", () => {
@@ -291,25 +356,110 @@ describe("runAt", () => {
     expect(runAt(place, "s_1").id).toBe("s_1");
   });
 
-  it("falls back to the run that speaks for the place", () => {
-    expect(runAt(place, "w_1").id).toBe(lead(place).id);
-    expect(runAt(place, "s_departed").id).toBe(lead(place).id);
+  /**
+   * **And an address that names the place opens the place's own agent.**
+   *
+   * This was `lead()`, and `lead()` answers a different question: which run a
+   * row's one dot and one line describe — the loudest. In a workspace with a
+   * subagent working in it that is the subagent, so opening the parent from
+   * any list put a child's transcript on screen, and the Team panel went on
+   * to mark the child's row as the one you were reading. Which run is loudest
+   * is not who the place *is*.
+   */
+  it("falls back to the run that founded the place", () => {
+    expect(lead(place).id, "the loudest run here is a subagent").toBe("s_3");
+    expect(runAt(place, "w_1").id).toBe("s_1");
+    expect(runAt(place, "s_departed").id).toBe("s_1");
   });
 
   /**
-   * The guard that keeps this from changing every other screen.
-   *
    * A workspace whose sessions carry no `workspaceId` is filed under its
    * founding run's id, so `place.id` is a run id there — and every list in
-   * the app opens a workspace by `place.id`. Honouring that as an address
-   * would put the founder on screen instead of `lead()`.
+   * the app opens a workspace by `place.id`.
+   *
+   * That used to be guarded against, so such an address fell through to
+   * `lead()` rather than "honouring" the founder. The guard is gone with the
+   * reason for it: the founder is what a list means, and here the two
+   * readings of the address are the same run anyway.
    */
-  it("still leads with the speaking run when the place is filed under a run", () => {
+  it("opens a place filed under one of its runs at that run", () => {
     const solo = places([
       run({ id: "s_a", status: "NeedsYou" }),
       run({ id: "s_b", workspaceId: "s_a" }),
     ])[0];
     expect(solo.id).toBe("s_a");
-    expect(runAt(solo, "s_a").id, "the address is the place's, not the founder's").toBe("s_b");
+    expect(lead(solo).id, "the loudest is the one working beside it").toBe("s_b");
+    expect(runAt(solo, "s_a").id).toBe("s_a");
+  });
+});
+
+/**
+ * **The row the Team panel marks, over a round trip.**
+ *
+ * Reported as: *"when I open a sub workspace, and then I open the parent, the
+ * sub workspace stays Active even though the displayed one is the parent."*
+ * Two correct renders is not that claim — the claim is about a sequence, so
+ * this walks one, by the addresses the app actually pushes.
+ *
+ * `panel` below is what the two routes do between them and nothing else:
+ * `placeOf` for the workspace, `runAt` for the run in it, the session one
+ * level up for the manager, everyone under that manager for the roster.
+ * `app/workspace/[id].tsx` and `app/workspace/overview.tsx` both derive it
+ * exactly so, and `ui/Overview.tsx` marks `m.id === session.id`.
+ */
+describe("the row the Team panel marks", () => {
+  /* The mock's `team` scene, which is the shape on the report: a lead and
+     three subagents in its own checkout, one asking, one working. */
+  const fleet = [
+    run({ id: "s_1", workspaceId: "w_1", name: "auth refactor", createdAt: "2026-11-08T09:12:00Z" }),
+    run({ id: "s_k1", workspaceId: "w_1", parentId: "s_1", status: "NeedsYou", createdAt: "2026-11-08T10:50:00Z" }),
+    run({ id: "s_k2", workspaceId: "w_1", parentId: "s_1", createdAt: "2026-11-08T10:45:00Z" }),
+    run({ id: "s_k3", workspaceId: "w_1", parentId: "s_1", status: "HandedBack", createdAt: "2026-11-08T09:55:00Z" }),
+  ];
+
+  const panel = (address: string) => {
+    const ps = places(fleet.filter((s) => s.status !== "Ended"));
+    const place = placeOf(ps, address, fleet.find((s) => s.id === address)?.workspaceId)!;
+    const reading = runAt(place, address);
+    const manager = fleet.find((s) => s.id === reading.parentId) ?? reading;
+    const rows = [manager, ...fleet.filter((s) => s.parentId === manager.id)];
+    return {
+      heading: place.name,
+      marked: rows.filter((m) => m.id === reading.id).map((m) => m.id),
+      bare: rows.filter((m) => !opens(m, reading)).map((m) => m.id),
+    };
+  };
+
+  it("marks the parent's own row when a list opens the parent", () => {
+    const opened = panel("w_1");
+    expect(opened.marked).toEqual(["s_1"]);
+    // The header over it says the same thing, which it did not either.
+    expect(opened.heading).toBe("auth refactor");
+  });
+
+  it("keeps the mark on the row being read, right round the trip", () => {
+    /* Address, and the row that must carry the mark. The parent arrives two
+       ways — by its workspace id from a list, and by its session id from the
+       manager row — and both have to land on the parent. */
+    const trip: [string, string][] = [
+      ["w_1", "s_1"],
+      ["s_k3", "s_k3"],
+      ["s_1", "s_1"],
+      ["s_k2", "s_k2"],
+      ["w_1", "s_1"],
+    ];
+    for (const [address, row] of trip) {
+      expect(panel(address).marked, `opened at ${address}`).toEqual([row]);
+    }
+  });
+
+  /** One row is raised and one row has no chevron, and the panel is only
+   *  honest while they are the same row. */
+  it("marks the row that has no chevron, and nothing else", () => {
+    for (const address of ["w_1", "s_1", "s_k1", "s_k2", "s_k3"]) {
+      const opened = panel(address);
+      expect(opened.bare, `opened at ${address}`).toEqual(opened.marked);
+      expect(opened.marked).toHaveLength(1);
+    }
   });
 });
