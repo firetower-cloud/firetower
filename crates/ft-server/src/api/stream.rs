@@ -382,13 +382,25 @@ async fn follow_conversation(
         //
         // The endpoint this replaced had this by accident: it reopened the
         // stream every two seconds, and reopening restarted the watcher.
+        //
+        // **Only while there is something to watch.** `!= Ended` was too
+        // narrow, and the cost showed up on exactly the sessions this is for:
+        // for an agent that really is gone, the resubscribe asks the worker to
+        // watch, the worker answers that there is nothing there, the fleet
+        // drops the broadcast, this task ends and says `reset` again — a loop
+        // that runs for as long as the tab is open, against a session nothing
+        // will ever be written into. A session at rest with its agent gone is
+        // at rest: the next thing that happens to it is somebody pressing
+        // something, and that re-establishes the stream on its own.
+        let still_running =
+            |s: &ft_core::Session| !s.status.is_finished() && s.status != SessionStatus::Stranded;
         if state
             .db
             .session_of(&owner, &session_id)
             .await
             .ok()
             .flatten()
-            .is_some_and(|s| s.status != SessionStatus::Ended)
+            .is_some_and(|s| still_running(&s))
         {
             let _ = out
                 .send(ServerFrame::Reset {

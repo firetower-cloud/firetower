@@ -2370,10 +2370,27 @@ impl Db {
             // direct write, so an event could put a finished session back to
             // work and disagree with the model; now both paths run through
             // here, so it is enforced in one place for both.
+            //
+            // And the second clause, for the same reason and against a
+            // specific event: a worker that reconnects replays everything the
+            // control plane missed, which after a machine restarts includes
+            // the last `StatusChanged { Working }` from before the crash. That
+            // event is new to this database, so the `ON CONFLICT` above does
+            // not stop it — and applied to a session that has since been found
+            // stranded it would put the spinner straight back, with nothing
+            // left to correct it.
+            //
+            // `Stranded` leaves for a restart somebody asked for, or to be let
+            // go of; the same two moves `can_transition_to` allows, held here
+            // as well because this is the only place a worker's word reaches
+            // the row. It does not stand in the way of a real recovery:
+            // `relaunch` sets `Starting` itself, from this process, and the
+            // agent's own `Working` then arrives against a `Starting` row.
             sqlx::query(
                 "UPDATE sessions SET status = $1, note = $2, updated_at = $3
                   WHERE id = $4
                     AND status <> 'Ended'
+                    AND (status <> 'Stranded' OR $1 IN ('Starting', 'Ended'))
                     AND workspace_id IN (SELECT id FROM workspaces WHERE forgotten_at IS NULL)",
             )
             .bind(serde_json::to_string(status)?.trim_matches('"'))
