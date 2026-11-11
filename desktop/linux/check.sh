@@ -237,9 +237,24 @@ start_display() {
   fact "wm name: $(xprop -root -notype _NET_WM_NAME 2>&1 | head -1)"
 }
 
+# The run's shared secret for the collector, made once and kept in $OUT.
+#
+# The collector writes files named by whatever posts to it, so it refuses a
+# submission that does not carry this. In a file rather than an environment
+# variable because the collector and the probe build are separate phases and
+# either can be run on its own — `check.sh probe_runs` has to agree with the
+# collector a previous `check.sh probes` started.
+probe_secret() {
+  local keep="$OUT/probe-secret"
+  if [ ! -s "$keep" ]; then
+    (umask 077; head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n' > "$keep")
+  fi
+  cat "$keep"
+}
+
 start_probe_collector() {
   pkill -f "probe.mjs" 2>/dev/null
-  node /src/linux/probe.mjs "$PROBE_PORT" "$OUT" > "$OUT/logs/probe-collector.log" 2>&1 &
+  node /src/linux/probe.mjs "$PROBE_PORT" "$OUT" "$(probe_secret)" > "$OUT/logs/probe-collector.log" 2>&1 &
   sleep 0.5
 }
 
@@ -424,6 +439,9 @@ JSON
   # that found nothing. Served from the bundle, it is `'self'` and allowed.
   {
     echo "window.__FT_PROBE_PORT__=${PROBE_PORT};window.__FT_PROBE_PHASE__='${1:-probe}';"
+    # `const`, so `probe.js` closes over it instead of reading it off
+    # `window`: a secret on the global object is readable by the page.
+    echo "const FT_PROBE_SECRET='$(probe_secret)';"
     cat /src/linux/probe.js
   } > "$APP/dist/probe.js"
   # Inside `</body>`, not appended after `</html>`. Tauri parses and

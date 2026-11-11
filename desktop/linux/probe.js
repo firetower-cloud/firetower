@@ -15,6 +15,14 @@
  */
 (() => {
   const PORT = Number(window.__FT_PROBE_PORT__ || 4499);
+  /* The run's secret, from the prelude `check.sh` writes above this file —
+     lexically, rather than on `window`, so a page in this window cannot read
+     it off the global object. The collector refuses a submission without it:
+     it writes files, and an artifact rendered in this window is somebody
+     else's HTML. */
+  const WHERE = `http://127.0.0.1:${PORT}/probe?s=${encodeURIComponent(
+    typeof FT_PROBE_SECRET === "string" ? FT_PROBE_SECRET : "",
+  )}`;
   const out = { phase: window.__FT_PROBE_PHASE__ || "unknown" };
 
   const guard = (name, f) => {
@@ -270,7 +278,7 @@
     const body = JSON.stringify(report, null, 2);
     console.log("FT_PROBE " + body);
     try {
-      await fetch(`http://127.0.0.1:${PORT}/probe`, {
+      await fetch(WHERE, {
         method: "POST",
         /* `text/plain` and not `application/json`: it is CORS-safelisted, so
            the request goes straight out instead of asking for a preflight
@@ -306,7 +314,7 @@
     /* if the bridge is not there either, the fetch below is the only channel */
   }
 
-  fetch(`http://127.0.0.1:${PORT}/probe`, {
+  fetch(WHERE, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ phase: `${out.phase}-alive`, readyState: document.readyState }),
