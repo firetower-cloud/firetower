@@ -11,6 +11,14 @@ use anyhow::{bail, Context, Result};
 use std::path::Path;
 use tokio::process::Command;
 
+/// How long `has-session` is given before the answer is called unknown.
+///
+/// Generous, because a slow answer is still an answer and a machine under
+/// load is the ordinary condition of a worker. Finite, because the only thing
+/// worse than a slow probe is one that never returns: it is awaited on the
+/// path that decides whether an agent is gone.
+const PROBE_LIMIT: std::time::Duration = std::time::Duration::from_secs(10);
+
 /// One agent, running or not.
 #[derive(Debug, Clone)]
 pub struct Tmux {
@@ -215,12 +223,31 @@ impl Tmux {
     /// Check existence without treating a failed tmux probe as proof of
     /// absence. Watcher EOF may indicate an agent exit, but only a known
     /// `has-session` miss is enough evidence to close its conversation.
+    ///
+    /// Bounded, because the question is asked on the path that decides whether
+    /// a session is reported gone and `has-session` talks to a server that can
+    /// stop answering: a tmux under heavy load, a filesystem that has wedged,
+    /// a socket a process is holding without reading. An unbounded probe there
+    /// is not a slow answer, it is a watcher task parked for the life of the
+    /// worker and a session whose liveness is never resolved either way. A
+    /// probe that runs out of time is an *unknown* — the same as any other
+    /// unreadable answer — so the conservative path is the one it takes.
     pub(crate) async fn checked_exists(&self) -> Result<bool> {
-        let output = Command::new("tmux")
-            .args(["has-session", "-t", &self.target()])
-            .output()
-            .await
-            .context("checking the tmux session")?;
+        let output = tokio::time::timeout(
+            PROBE_LIMIT,
+            Command::new("tmux")
+                .args(["has-session", "-t", &self.target()])
+                .output(),
+        )
+        .await
+        .with_context(|| {
+            format!(
+                "tmux did not answer about {} within {}s",
+                self.name,
+                PROBE_LIMIT.as_secs()
+            )
+        })?
+        .context("checking the tmux session")?;
 
         checked_exists_output(
             &self.name,
@@ -431,6 +458,18 @@ fn checked_exists_output(
 /// and is not an answer about ours, and anything unrecognised stays an
 /// unknown — the whole value of this function is that it is the one place that
 /// decides, and it decides by recognising rather than by assuming.
+///
+/// **A socket can go while the server it belongs to lives**, which on its own
+/// would make this a guess: something sweeping `/tmp` could take it with the
+/// agents still running. What makes it an answer is *where it is asked from*.
+/// Both callers have already failed to reach the agent through its own socket
+/// — the watcher's, which is a different file in the same directory — so by
+/// the time this is read, two sockets are unreachable at once. That is the
+/// signature of a temporary directory that was emptied, which is a reboot;
+/// and in the case it is not, the agent is already unreachable for turns,
+/// permissions and everything else the product does with it. A session nobody
+/// can send a word to is one to offer a restart for, whichever way it got
+/// there.
 fn said_no_server(stderr: &str) -> bool {
     stderr.starts_with("no server running on ")
         || (stderr.starts_with("error connecting to ")
