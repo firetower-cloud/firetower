@@ -310,27 +310,37 @@ function Poster({
 }
 
 /**
- * A fragment rather than a `View`, and that is load-bearing.
+ * The rows are flat subviews, and everything above them is exactly one.
  *
- * The transcript now grows at the top as well as the bottom, and the scroller
+ * The transcript grows at the top as well as the bottom, and the scroller
  * above it keeps somebody's place through that with
- * `maintainVisibleContentPosition` — which pins the first *direct subview* of
- * the scroll content. Wrapped in a `View`, every row was one subview's
- * children rather than subviews, so prepending moved everything inside a box
- * whose own origin never changed: nothing to pin to, and the reader was thrown
- * down the page by a page they had asked for. Flattened, each row is its own
- * subview and the pinning has something to hold.
+ * `maintainVisibleContentPosition` — which anchors on a *direct subview* of
+ * the scroll content and shifts the offset by however far that same view
+ * moved. Two halves of the bargain, and both are kept here:
  *
- * The `Fragment` around each row is the same bargain kept: it pairs a row with
- * whatever card was published at it without putting a box around either, so
- * both stay subviews of the scroller. A card moving from above the transcript
- * to inline — which is what paging history in does to it — is then one layout
- * pass, and the row somebody is reading stays pinned through it.
+ * - **Every row is its own subview.** Wrapped in a `View`, the rows were one
+ *   subview's children rather than subviews, so prepending moved everything
+ *   inside a box whose own origin never changed: nothing to anchor on. Hence
+ *   the fragment, and the `Fragment` around each row — which pairs a row with
+ *   whatever card was published at it without putting a box around either.
+ * - **Everything above the first row is one subview**, so the scroller can be
+ *   told never to anchor there. History is inserted *below* all of it, so a
+ *   leading view never moves, and anchoring on one computes a correction of
+ *   zero — the reader keeps the offset and the whole page lands on top of
+ *   them. Measured: a card above the window, which is tall and sits exactly
+ *   where somebody scrolls to ask for history, threw the rows down by 6,800pt
+ *   and cascaded five more pages in. The branch line, the bring-up and the
+ *   history spinner are all the same hazard, smaller. So they go in the one
+ *   box with the cards, the caller passes them as `lead`, and the scroller
+ *   says `minIndexForVisible: 1`: never anchor above the transcript, always
+ *   anchor on a row. Keeping it to one box is what keeps that index true
+ *   whichever of those leading things is on screen.
  */
 export function Transcript({
   items,
   tasks = [],
   artifacts,
+  lead,
   onOpenArtifact,
 }: {
   items: Item[];
@@ -344,6 +354,14 @@ export function Transcript({
    * and confident. See the filter in `app/workspace/[id].tsx`.
    */
   artifacts: Artifact[];
+  /**
+   * Whatever the screen draws above the transcript — the branch, the bring-up,
+   * the history spinner, why there is nothing to read. Passed in rather than
+   * drawn by the caller so it lands in the same box as the cards above the
+   * window: one leading subview, which is what `minIndexForVisible: 1` on the
+   * scroller means. See above.
+   */
+  lead?: React.ReactNode;
   onOpenArtifact: (id: string) => void;
 }) {
   /* The main rail only: a subagent's work belongs to the card that owns it,
@@ -353,24 +371,30 @@ export function Transcript({
 
   return (
     <>
-      {/* Published before anything on screen, so above the transcript rather
-          than below it: the window is the last few exchanges, and an artifact
-          older than all of them is not the newest thing that happened.
+      {/* The one leading subview. `collapsable={false}` because a `View` that
+          only lays its children out is flattened away, and a flattened box is
+          four subviews again and the wrong index to start counting from. */}
+      <View testID="transcript-lead" collapsable={false}>
+        {lead}
 
-          With one line to say so. Above the oldest message and under the
-          request for earlier history, a poster with no word on it reads as
-          pinned — or as the newest thing at the top of a reversed list. Said
-          once rather than per card, and only for this position: once a card
-          moves inline the position says it. Its own subview rather than a box
-          around the run, so the cards stay subviews too — see above. */}
-      {placed.before.length > 0 ? (
-        <Text className="mb-2 mt-4 font-sans text-meta text-mute">
-          Published before the messages below.
-        </Text>
-      ) : null}
-      {placed.before.map((artifact) => (
-        <Poster key={artifact.id} artifact={artifact} where="before" onOpen={onOpenArtifact} />
-      ))}
+        {/* Published before anything on screen, so above the transcript rather
+            than below it: the window is the last few exchanges, and an artifact
+            older than all of them is not the newest thing that happened.
+
+            With one line to say so. Above the oldest message and under the
+            request for earlier history, a poster with no word on it reads as
+            pinned — or as the newest thing at the top of a reversed list. Said
+            once rather than per card, and only for this position: once a card
+            moves inline the position says it. */}
+        {placed.before.length > 0 ? (
+          <Text className="mb-2 mt-4 font-sans text-meta text-mute">
+            Published before the messages below.
+          </Text>
+        ) : null}
+        {placed.before.map((artifact) => (
+          <Poster key={artifact.id} artifact={artifact} where="before" onOpen={onOpenArtifact} />
+        ))}
+      </View>
 
       {rows.map((row, i) => (
         <Fragment key={row.type === "group" ? row.id : row.item.id}>

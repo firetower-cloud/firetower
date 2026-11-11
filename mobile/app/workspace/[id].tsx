@@ -439,8 +439,22 @@ function Conversation({ place, address }: { place: Workspace; address: string })
              instead of the offset, which is the one thing that makes reading
              backwards feel like reading rather than like fighting the list.
              Native on both platforms; there is no JS frame in which the jump
-             could be visible. */
-          maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+             could be visible.
+
+             **Index 1, not 0, and that is the whole of it.** The scroller
+             anchors on the first subview at or past the reader's offset and
+             moves the offset by however far that same view moved. History is
+             inserted at the head of the *rows*, so anything above them — the
+             branch, the bring-up, the spinner, a card published before the
+             window — never moves, and anchoring on one of those computes a
+             correction of zero: the page lands on top of the reader instead
+             of above them, and since the offset is then still near the top
+             `older()` fires again. Measured at 6,800pt and five pages from
+             one flick, with a card above the window as the anchor. Starting
+             at 1 says never anchor above the transcript, always anchor on a
+             row. It holds because `Transcript` draws all of that leading
+             content as exactly one subview — which is what `lead` is for. */
+          maintainVisibleContentPosition={{ minIndexForVisible: 1 }}
           onContentSizeChange={() => atEnd && scroller.current?.scrollToEnd({ animated: true })}
           /* Pull to read it again from nothing.
              A conversation holds on to whatever it first folded and claims to
@@ -459,49 +473,6 @@ function Conversation({ place, address }: { place: Workspace; address: string })
             />
           }
         >
-          <Text className="mb-3 font-mono text-meta text-mute">
-            {speaker.branch ?? place.branch}
-          </Text>
-
-          {/* The bring-up sits above the transcript and scrolls away once the
-              agent is talking, which is the right amount of attention for it. */}
-          <Bringup lines={bringup} />
-
-          {/* The history arriving. Sits above the transcript because that is
-              where it is going, and says nothing when there is nothing left to
-              read — a conversation short enough to arrive whole should never
-              show a hint that it was cut. */}
-          {conversation.loadingOlder ? (
-            <View className="items-center py-3">
-              <ActivityIndicator size="small" color={color.mute} />
-            </View>
-          ) : null}
-
-          {/* Why there is nothing to read, when there is nothing to read.
-              Inverted from a branch that wrapped the transcript, because the
-              transcript below now draws the artifact cards too and has to be
-              reached whether or not a conversation arrived — an artifact is
-              owned by a person and outlives the workspace that made it, so a
-              session whose transcript has gone can still have published one.
-              `place` sends every card to the end when there is no row to
-              anchor it to, which is this case. */}
-          {conversation.items.length === 0 ? (
-            conversation.trouble ? (
-              <Text className="mt-2 font-sans text-meta text-brick">{conversation.trouble}</Text>
-            ) : !conversation.arrived ? (
-              /* Before this branch existed the fall-through below ran while
-                 the snapshot was still crossing the wire, so a conversation
-                 that was merely long was reported as one that had never
-                 happened. An empty transcript is only empty once something has
-                 come back to say so. */
-              <Waiting say="Loading the conversation" />
-            ) : bringup.some((l) => l.state !== "pending") ? null : (
-              /* Nothing said and nothing coming up: a workspace that is simply
-                 waiting for you to open the conversation. */
-              <Text className="mt-2 font-sans text-meta text-mute">Nothing has been said yet.</Text>
-            )
-          ) : null}
-
           {/* Which workspace the pictures in the agent's prose are read from.
               Without this a `![shot](docs/shot.png)` has nowhere to look. */}
           <ImagesFrom.Provider value={{ session: speaker.id }}>
@@ -511,6 +482,65 @@ function Conversation({ place, address }: { place: Workspace; address: string })
               /* This session's own, placed by `firstSeenLine`. The family's
                  set stays with `Overview`, above. */
               artifacts={mine}
+              /* Everything that belongs above the conversation, handed over
+                 rather than drawn here, so it joins the cards published
+                 before the window inside the transcript's single leading
+                 subview. That is what lets the scroller above say
+                 `minIndexForVisible: 1` and mean "anchor on a row" — see the
+                 note on it. Drawn here they were four more subviews above the
+                 insertion point, and any of them under the reader's thumb
+                 when a page landed was a correction of zero. */
+              lead={
+                <>
+                  <Text className="mb-3 font-mono text-meta text-mute">
+                    {speaker.branch ?? place.branch}
+                  </Text>
+
+                  {/* The bring-up sits above the transcript and scrolls away once
+                      the agent is talking, which is the right amount of attention
+                      for it. */}
+                  <Bringup lines={bringup} />
+
+                  {/* The history arriving. Sits above the transcript because that
+                      is where it is going, and says nothing when there is nothing
+                      left to read — a conversation short enough to arrive whole
+                      should never show a hint that it was cut. */}
+                  {conversation.loadingOlder ? (
+                    <View className="items-center py-3">
+                      <ActivityIndicator size="small" color={color.mute} />
+                    </View>
+                  ) : null}
+
+                  {/* Why there is nothing to read, when there is nothing to read.
+                      Inverted from a branch that wrapped the transcript, because
+                      the transcript below now draws the artifact cards too and has
+                      to be reached whether or not a conversation arrived — an
+                      artifact is owned by a person and outlives the workspace that
+                      made it, so a session whose transcript has gone can still have
+                      published one. `place` sends every card to the end when there
+                      is no row to anchor it to, which is this case. */}
+                  {conversation.items.length === 0 ? (
+                    conversation.trouble ? (
+                      <Text className="mt-2 font-sans text-meta text-brick">
+                        {conversation.trouble}
+                      </Text>
+                    ) : !conversation.arrived ? (
+                      /* Before this branch existed the fall-through below ran
+                         while the snapshot was still crossing the wire, so a
+                         conversation that was merely long was reported as one that
+                         had never happened. An empty transcript is only empty once
+                         something has come back to say so. */
+                      <Waiting say="Loading the conversation" />
+                    ) : bringup.some((l) => l.state !== "pending") ? null : (
+                      /* Nothing said and nothing coming up: a workspace that is
+                         simply waiting for you to open the conversation. */
+                      <Text className="mt-2 font-sans text-meta text-mute">
+                        Nothing has been said yet.
+                      </Text>
+                    )
+                  ) : null}
+                </>
+              }
               onOpenArtifact={(id) => router.push({ pathname: "/workspace/artifact", params: { id } })}
             />
           </ImagesFrom.Provider>
