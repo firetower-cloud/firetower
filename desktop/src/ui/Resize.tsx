@@ -1,18 +1,30 @@
 /**
- * The window's edges, where the window has no edges.
+ * The window's edges, where the window has no frame.
  *
  * `decorations: false` plus a title bar we draw ourselves means there is no
- * frame, and on Linux that is the whole affordance gone: GTK draws no
- * client-side resize grip for an undecorated window, so a person can move the
- * window, maximise it by double-clicking the bar, and never make it narrower
- * than the size it opened at. The window *is* resizable — the window manager
- * honours `_NET_WM_ACTION_RESIZE` and clamps at the configured 880x560 — so
- * this is a missing handle, not a missing capability.
+ * frame to grab. Eight transparent strips stand in for one, each calling
+ * `startResizeDragging`, which is `gtk_window_begin_resize_drag` underneath:
+ * the window manager takes the pointer and does the rest. Measured under Xvfb
+ * and openbox, all eight drive a pixel-exact resize.
  *
- * Eight transparent strips, each calling `startResizeDragging`, which is
- * `gtk_window_begin_resize_drag` underneath: the window manager takes the
- * pointer and does the rest. Measured under Xvfb + openbox, all eight drove a
- * pixel-exact resize.
+ * **There is already a 5px border under this one, and it is not ours.**
+ * tao 0.35.3 resizes an undecorated, resizable, unmaximised window from a
+ * `scale_factor * 5`px border of its own, in GTK, below the DOM
+ * (`platform_impl/linux/event_loop.rs`, `connect_button_press_event` →
+ * `hit_test`) — and sets the resize cursor on motion while it is at it. So
+ * these strips are not the difference between resizable and not. What they
+ * add is the part that makes it usable: **16px bottom corners**, which are
+ * the two people actually reach for and which tao gives 5px of; 6px rather
+ * than 5 at the sides; and a top edge carved back to 4px so the *Close*
+ * button keeps more of its corner. Both fire for a press within 5px of the
+ * edge — one `begin_resize_drag` each, and no misbehaviour in any drag
+ * measured.
+ *
+ * A consequence worth knowing: because tao's border is below the webview, a
+ * modal scrim cannot cover it. With a dialog up these strips are unreachable
+ * — `z-40` is under the `z-[60]` overlay — and the window still resizes from
+ * its outer 5px, which also dismisses the dialog the way any press outside it
+ * does.
  *
  * **Siblings of the title bar, not children of it.** `drag.ts` starts a *move*
  * from anything inside the bar that is not a control, and a strip nested in
@@ -26,10 +38,13 @@
  * - **16px** corners, except the two at the top, which are the height of the
  *   top edge rather than square. A 16px square at the top right would take a
  *   bite out of *Close*, and a mis-grab there resizes a window instead of
- *   closing one.
+ *   closing one. (tao's 5x5 at that corner is below us and stays whatever we
+ *   draw, so the bite is 5px deep however careful this is.)
  * - **Nothing at all while maximised.** There is nothing to resize, and it
  *   gives the close button its corner back for the throw-to-the-corner
- *   gesture that only works when the window is maximised.
+ *   gesture that only works when the window is maximised. tao's own border is
+ *   off while maximised too, for the same reason, so the corner is genuinely
+ *   the button's.
  *
  * The right-hand strip is the one real cost and it was chosen with open eyes:
  * the sheet is flush to that edge and its scroller is `.scroll-slim`, also
@@ -38,11 +53,10 @@
  * answer if anybody reports it is a scrollbar gutter under
  * `[data-platform="linux"]`, not a thinner strip.
  *
- * `z-40` is above the chrome and the sheet and below a dialog, which means a
- * modal's scrim covers the edges while it is up. That is the prototype's
- * choice: a window being resized under an open dialog is not a gesture
- * anybody makes, and a strip above the scrim would be a strip above the one
- * thing asking to be answered.
+ * `z-40` is above the chrome and the sheet and below a dialog, which is the
+ * prototype's number: a strip above a modal's scrim would be a strip above
+ * the one thing asking to be answered. What that costs is written above, and
+ * it is small because tao's border is not ours to cover.
  */
 import { useEffect, useState } from "react";
 import type { CSSProperties, MouseEvent as ReactMouseEvent } from "react";
