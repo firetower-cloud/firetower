@@ -1,9 +1,0 @@
-[Desktop Entry]
-Categories=
-Comment=Firetower, as a desktop application
-Exec=firetower-desktop
-StartupWMClass=firetower-desktop
-Icon=firetower-desktop
-Name=Firetower
-Terminal=false
-Type=Application
