@@ -416,10 +416,30 @@ fn main() {
 /// `keyring` 3.6 hands up from each backend written down. They run on all
 /// three CI legs.
 ///
-/// The errors below are not invented. Each is the message the backend emits
-/// for the situation named, carried in the `keyring::Error` variant that
-/// backend uses for it: `NoStorageAccess` where the store exists and will not
-/// open, `PlatformFailure` where the platform call itself failed.
+/// The errors below are not invented, and the variant each is carried in was
+/// read out of `keyring` 3.6.3 rather than assumed — which is worth saying,
+/// because the obvious guess is wrong. `NoStorageAccess` does **not** mean
+/// "the store exists and will not open". All three backends reserve it for a
+/// short list and send everything else, including most of the refusals this
+/// file is about, to `PlatformFailure`:
+///
+/// | backend | what reaches `NoStorageAccess` |
+/// |---|---|
+/// | `macos.rs` | four codes: `-25291`, `-25292`, `-25294`, `-25295` |
+/// | `windows.rs` | one: `ERROR_NO_SUCH_LOGON_SESSION` (1312) |
+/// | `secret_service.rs` | three: `Locked`, `NoResult`, `Prompt` |
+///
+/// So a locked macOS keychain (`-25308`), a Credential Manager answering
+/// `ERROR_ACCESS_DENIED`, and no Secret Service on the bus at all
+/// (`Unavailable`, or a `Dbus` call that failed) all arrive as
+/// `PlatformFailure`. Each backend decodes its writes and deletions through
+/// the same function it decodes a read with, so the same is true below the
+/// line as above it.
+///
+/// Which is why the test that matters most is not any of the ones naming a
+/// variant: it is the one asserting that the **default** is `Unknown`.
+/// `keyring::Error` is `#[non_exhaustive]`, and this file cannot be rewritten
+/// every time a backend grows a case.
 #[cfg(test)]
 mod tests {
     use super::{removed, said, Done, Said};
@@ -445,8 +465,10 @@ mod tests {
     fn linux_without_a_secret_service_is_not_an_absent_credential() {
         // The common Linux case, and the one QA drove end to end: a minimal
         // desktop, a tiling window manager or an ssh session, where nothing
-        // owns the name on the bus at all.
-        let answer = said(Err(keyring::Error::NoStorageAccess(boxed(
+        // owns the name on the bus at all. `Unavailable` and a failed `Dbus`
+        // call are both outside the three the backend treats as the store
+        // being shut, so this arrives as a platform call that failed.
+        let answer = said(Err(keyring::Error::PlatformFailure(boxed(
             "DBus error: The name org.freedesktop.secrets was not provided by any .service files",
         ))));
         assert!(matches!(answer, Said::Unknown { .. }), "{answer:?}");
@@ -455,7 +477,8 @@ mod tests {
     #[test]
     fn a_locked_linux_keyring_is_not_an_absent_credential() {
         // gnome-keyring installed, login keyring never unlocked. The prompt
-        // is declined or there is no prompter to show it.
+        // is declined or there is no prompter to show it. `Error::Locked` is
+        // one of the three that *is* read as the store being shut.
         let answer = said(Err(keyring::Error::NoStorageAccess(boxed(
             "DBus error: org.freedesktop.Secret.Error.IsLocked: Cannot get secret of a locked object",
         ))));
@@ -526,15 +549,32 @@ mod tests {
         assert_eq!(removed(Ok(())), Done::Done);
         assert_eq!(removed(Err(keyring::Error::NoEntry)), Done::Done);
 
+        // Deletion is decoded by the same function each backend decodes a
+        // read with, so the variants are the same ones, and both arms of each
+        // platform are here for the same reason they are above.
         for refusal in [
-            removed(Err(keyring::Error::NoStorageAccess(boxed(
+            // No Secret Service on the bus, and a keyring that is merely locked.
+            removed(Err(keyring::Error::PlatformFailure(boxed(
                 "DBus error: The name org.freedesktop.secrets was not provided by any .service files",
             )))),
+            removed(Err(keyring::Error::NoStorageAccess(boxed(
+                "org.freedesktop.Secret.Error.IsLocked: Cannot get secret of a locked object",
+            )))),
+            // A locked macOS keychain, and one that is not there at all.
             removed(Err(keyring::Error::PlatformFailure(boxed(
                 "SecKeychainItemDelete: User interaction is not allowed. (-25308)",
             )))),
             removed(Err(keyring::Error::NoStorageAccess(boxed(
+                "SecKeychainItemDelete: No keychain is available. You may need to restart your computer. (-25291)",
+            )))),
+            // `CredDeleteW` refused by policy — `ERROR_ACCESS_DENIED` goes to
+            // the catch-all, not to `NoStorageAccess`; 1312 is the one that
+            // does not.
+            removed(Err(keyring::Error::PlatformFailure(boxed(
                 "Windows error 5: Access is denied.",
+            )))),
+            removed(Err(keyring::Error::NoStorageAccess(boxed(
+                "Windows error 1312: A specified logon session does not exist. It may already have been terminated.",
             )))),
         ] {
             assert!(matches!(refusal, Done::Refused { .. }), "{refusal:?}");
