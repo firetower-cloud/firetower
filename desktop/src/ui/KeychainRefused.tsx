@@ -146,8 +146,23 @@ export function KeychainRefused() {
               </>
             ) : (
               <>
-                {nowhere.blocker} You are signed in now, and this will work until you quit — the next
-                launch will ask for your password again.
+                {nowhere.blocker} You are signed in now, and this will work until you quit.{" "}
+                {unkept.stale ? (
+                  /* The ordinary promise is that the next launch asks for a
+                     password. It only holds if this machine managed to write
+                     down that the sign-in it just replaced is not to be used
+                     — and when that write failed too, the honest thing is the
+                     opposite warning. */
+                  <>
+                    <strong className="text-text">
+                      It could not record that you had replaced the sign-in it already had
+                    </strong>
+                    , so the next launch may come back as the account you have just replaced rather than
+                    asking for your password.
+                  </>
+                ) : (
+                  <>The next launch will ask for your password again.</>
+                )}
               </>
             )}
             {/* A numbered list rather than a sentence, for the reason the

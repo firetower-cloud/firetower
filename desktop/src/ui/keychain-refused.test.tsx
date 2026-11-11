@@ -15,7 +15,7 @@ import { renderToStaticMarkup } from "react-dom/server";
    is under test here — `because` is, since it decides which of the two
    stories the card tells. */
 const standing = vi.hoisted(() => ({
-  unkept: { serverId: "s_acme", because: "signIn" } as Record<string, unknown>,
+  unkept: { serverId: "s_acme", because: "signIn", stale: false } as Record<string, unknown>,
 }));
 vi.mock("~/servers", () => ({
   unkeptSignIn: () => standing.unkept,
@@ -26,7 +26,7 @@ vi.mock("~/servers", () => ({
 
 /** The card as it renders on `where`, with the module graph rebuilt so
     `platform.ts` reads the stubbed navigator rather than a cached answer. */
-async function refusedOn(where: string, unkept: Record<string, unknown> = { because: "signIn" }) {
+async function refusedOn(where: string, unkept: Record<string, unknown> = { because: "signIn", stale: false }) {
   standing.unkept = { serverId: "s_acme", ...unkept };
   vi.resetModules();
   vi.stubGlobal("navigator", { userAgentData: { platform: where } });
@@ -49,7 +49,7 @@ describe("there is nowhere to keep the sign-in", () => {
 
   it("says the session will not survive, on all three", async () => {
     for (const where of ["Linux", "macOS", "Windows"]) {
-      expect(await refusedOn(where)).toContain("the next launch will ask for your password again");
+      expect(await refusedOn(where)).toContain("The next launch will ask for your password again");
     }
   });
 
@@ -126,6 +126,23 @@ describe("saying only what actually happened", () => {
     // And it must not say the reassuring thing.
     expect(unsure).not.toContain("no good to anybody");
     expect(unsure).not.toContain("has been ended with your Firetower");
+  });
+
+  it("does not promise a password field when it could not record the replacement", async () => {
+    /* The ordinary sign-in card says the next launch will ask for a password.
+       That only holds if this machine wrote down that the sign-in it just
+       replaced is not to be used — and when that write failed too, an older
+       credential is still in the keychain and still permitted. */
+    const ordinary = await refusedOn("Linux", { because: "signIn", stale: false });
+    expect(ordinary).toContain("The next launch will ask for your password again");
+    expect(ordinary).not.toContain("may come back as the account you have just replaced");
+
+    const stale = await refusedOn("Linux", { because: "signIn", stale: true });
+    expect(stale).toContain("could not record that you had replaced the sign-in it already had");
+    expect(stale).toContain("may come back as the account you have just replaced");
+    expect(stale).not.toContain("The next launch will ask for your password again");
+    // Still the ordinary two buttons: the session is the person's either way.
+    expect(stale).toContain("Use it for this session");
   });
 
   it("owns up to a sign-out it could not make stick, naming the store", async () => {

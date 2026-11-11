@@ -466,35 +466,40 @@ mod tests {
     fn a_locked_macos_keychain_is_not_an_absent_credential() {
         // `errSecInteractionNotAllowed`, -25308: the item is there and the
         // keychain will not hand it over without a prompt it cannot show.
-        // This is the path QA can drive natively on this fleet.
-        let answer = said(Err(keyring::Error::NoStorageAccess(boxed(
+        // QA confirmed this exact string against real Keychain Services, and
+        // that it reaches `PlatformFailure` — -25308 is not one of the four
+        // codes `macos.rs` maps to `NoStorageAccess`.
+        let locked = said(Err(keyring::Error::PlatformFailure(boxed(
             "SecKeychainFindGenericPassword: User interaction is not allowed. (-25308)",
         ))));
-        assert!(matches!(answer, Said::Unknown { .. }), "{answer:?}");
+        assert!(matches!(locked, Said::Unknown { .. }), "{locked:?}");
 
-        // And the refusal that arrives as a platform call failing rather than
-        // as the store being shut: `errSecAuthFailed`, -25293.
-        let denied = said(Err(keyring::Error::PlatformFailure(boxed(
-            "SecKeychainFindGenericPassword: The user name or passphrase you entered is not correct. (-25293)",
+        // `errSecNotAvailable`, -25291 — one of the four that does arrive as
+        // the store being shut. Both arms, because both exist.
+        let shut = said(Err(keyring::Error::NoStorageAccess(boxed(
+            "SecKeychainFindGenericPassword: No keychain is available. You may need to restart your computer. (-25291)",
         ))));
-        assert!(matches!(denied, Said::Unknown { .. }), "{denied:?}");
+        assert!(matches!(shut, Said::Unknown { .. }), "{shut:?}");
     }
 
     #[test]
     fn a_closed_windows_credential_manager_is_not_an_absent_credential() {
         // A policy has shut Credential Manager: `CredRead` fails with
-        // `ERROR_ACCESS_DENIED` (5). **Not** `ERROR_NOT_FOUND` (1168), which
-        // is the one `keyring` turns into `NoEntry` — so the two are a single
-        // digit apart in the platform and must not be a single answer here.
-        let shut = said(Err(keyring::Error::NoStorageAccess(boxed(
+        // `ERROR_ACCESS_DENIED` (5), which `windows.rs` sends to the
+        // catch-all — **not** `ERROR_NOT_FOUND` (1168), the one and only code
+        // it turns into `NoEntry`. The two are a few digits apart in the
+        // platform and must never be one answer here.
+        let shut = said(Err(keyring::Error::PlatformFailure(boxed(
             "Windows error 5: Access is denied.",
         ))));
         assert!(matches!(shut, Said::Unknown { .. }), "{shut:?}");
 
-        let broken = said(Err(keyring::Error::PlatformFailure(boxed(
+        // `ERROR_NO_SUCH_LOGON_SESSION` (1312) is the single code it does
+        // read as the store being unreachable.
+        let gone = said(Err(keyring::Error::NoStorageAccess(boxed(
             "Windows error 1312: A specified logon session does not exist. It may already have been terminated.",
         ))));
-        assert!(matches!(broken, Said::Unknown { .. }), "{broken:?}");
+        assert!(matches!(gone, Said::Unknown { .. }), "{gone:?}");
     }
 
     /// `keyring::Error` is `#[non_exhaustive]`, so the question is not whether

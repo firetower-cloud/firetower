@@ -134,7 +134,7 @@ describe("a keychain that refuses the token", () => {
     S.remember(server() as never);
     await settle();
 
-    expect(S.unkeptSignIn()).toEqual({ serverId: "s_acme", because: "signIn" });
+    expect(S.unkeptSignIn()).toEqual({ serverId: "s_acme", because: "signIn", stale: false });
   });
 
   it("says so for a replaced password too", async () => {
@@ -148,7 +148,7 @@ describe("a keychain that refuses the token", () => {
     S.updateToken("s_acme", "ft_live_newer");
     await settle();
 
-    expect(S.unkeptSignIn()).toEqual({ serverId: "s_acme", because: "signIn" });
+    expect(S.unkeptSignIn()).toEqual({ serverId: "s_acme", because: "signIn", stale: false });
     expect(S.servers()[0]?.token).toBe("ft_live_newer");
     expect(onDisk()).not.toContain("ft_live_newer");
   });
@@ -164,7 +164,7 @@ describe("a keychain that refuses the token", () => {
 
     S.updateToken("s_acme", "ft_live_newer");
     await settle();
-    expect(S.unkeptSignIn()).toEqual({ serverId: "s_acme", because: "signIn" });
+    expect(S.unkeptSignIn()).toEqual({ serverId: "s_acme", because: "signIn", stale: false });
   });
 });
 
@@ -221,16 +221,35 @@ describe("what authorises restoring a credential", () => {
     expect(next.servers()[0]?.token).toBe("");
   });
 
-  it("is granted once to a row written before it was recorded", async () => {
-    // A registry an older build left: no `kept` at all.
+  it("is never granted by a row that predates it, however good the credential", async () => {
+    /* **The upgrade exception, deliberately removed.** A row with no `kept`
+       used to be adopted the first time a read confirmed a credential. QA
+       showed it cannot be made safe: the registry an older build's *failed*
+       sign-out leaves behind — token blanked, row kept, credential still in
+       the keychain — is byte-identical to a legitimately remembered one, so
+       no code can tell them apart, and the silent sign-in was reachable from
+       the shipping build. Everybody signs in once on upgrade instead. */
     disk.set(KEY, JSON.stringify([server({ token: "" })]));
     shell.bridge.secrets.get.mockResolvedValue(held(TOKEN));
     const S = await fresh();
     await S.hydrate();
 
-    expect(S.servers()[0]?.token).toBe(TOKEN);
-    // And it is an ordinary row from now on.
-    expect(rowFor()?.kept).toBe(true);
+    expect(S.servers()[0]?.token).toBe("");
+    // And the row stops being ambiguous.
+    expect(rowFor()?.kept).toBe(false);
+    // The address is kept; it is a password that is being asked for.
+    expect(S.servers()[0]?.url).toBe("https://ft.acme.example");
+  });
+
+  it("is not granted by what an old failed sign-out left, which looks the same", async () => {
+    // Exactly the state `a75f92d3`'s `signedOut()` produced when its keychain
+    // deletion was refused.
+    disk.set(KEY, JSON.stringify([server({ token: "" })]));
+    shell.bridge.secrets.get.mockResolvedValue(held("token_the_person_declined"));
+    const S = await fresh();
+    await S.hydrate();
+
+    expect(S.servers()[0]?.token).toBe("");
   });
 
   it("is withdrawn when the keychain says the credential has gone", async () => {
@@ -682,5 +701,275 @@ describe("nothing a token is in ever reaches the disk", () => {
 
     expect(S.unconfirmedRevocations()).toEqual(["s_acme"]);
     expect(everything()).not.toContain(TOKEN);
+  });
+});
+
+/**
+ * **Bug 1.** A sign-in has to reach the app, not only the card.
+ *
+ * The headline flow of the Linux tier: a machine with no OS keychain. The
+ * sign-in succeeded, the mock recorded authenticated requests — and the window
+ * stayed on the password field with a card over it saying *"You are signed in
+ * now"*. `remember()` writes the row before attempting the store, which is
+ * right and has to stay: the row must never claim a permission nothing has
+ * granted, and the legacy plaintext has to leave the file before anything is
+ * awaited. What was missing is that `keep()` put the token in memory and told
+ * nobody, so the only `changed()` anyone heard was the one fired *before* it.
+ */
+describe("a sign-in on a machine with no keychain", () => {
+  /** What the window has been told, as it would hold it. */
+  const watching = (S: Awaited<ReturnType<typeof fresh>>) => {
+    let seen = S.servers();
+    S.onServers(() => (seen = S.servers()));
+    return () => seen;
+  };
+
+  it("reaches the app, and the card is over the app rather than the door", async () => {
+    refuse();
+    const S = await fresh();
+    await S.hydrate();
+    const window$ = watching(S);
+
+    S.remember(server() as never);
+    await settle();
+
+    // The window has been told about the session, not only about the refusal.
+    expect(window$()[0]?.token).toBe(TOKEN);
+    expect(S.unkeptSignIn()).toEqual({ serverId: "s_acme", because: "signIn", stale: false });
+    // And nothing was written anywhere for it.
+    expect(everything()).not.toContain(TOKEN);
+  });
+
+  it("reaches the app when the keychain works, too", async () => {
+    const S = await fresh();
+    await S.hydrate();
+    const window$ = watching(S);
+
+    S.remember(server() as never);
+    await settle();
+
+    expect(window$()[0]?.token).toBe(TOKEN);
+    expect(window$()[0]?.kept).toBe(true);
+  });
+
+  it("tells the window before it tells the card, so the card is never alone", async () => {
+    /* The ordering the bug was: `changed()` fired once, with no token, and
+       the next thing to fire was the card's own watcher. */
+    refuse();
+    const S = await fresh();
+    await S.hydrate();
+
+    const order: string[] = [];
+    S.onServers(() => order.push(`servers:${S.servers()[0]?.token || "none"}`));
+    S.onUnkept(() => order.push("card"));
+
+    S.remember(server() as never);
+    await settle();
+
+    expect(order).toContain(`servers:${TOKEN}`);
+    expect(order.indexOf(`servers:${TOKEN}`)).toBeLessThan(order.indexOf("card"));
+  });
+});
+
+/**
+ * **R1.** A refusal that could not be written down is still a refusal.
+ *
+ * `retireMarker()` turned the old `firetower.signedOut` list into `kept:
+ * false` and then removed the key — ignoring whether the write had gone. A
+ * quota failure while *adding* a field followed by a removal that frees space
+ * is an ordinary storage sequence, and it erased the only record of a refusal
+ * in the very launch that then signed back in.
+ */
+describe("retiring the old refusal marker", () => {
+  const signedOutOnTheOldBuild = () => {
+    disk.set(KEY, JSON.stringify([server({ token: "", kept: true })]));
+    disk.set(OUT_KEY, JSON.stringify(["s_acme"]));
+    shell.bridge.secrets.get.mockResolvedValue(held("token_A"));
+  };
+
+  it("keeps the marker, and refuses anyway, when the replacement will not write", async () => {
+    signedOutOnTheOldBuild();
+    unwritable.add(KEY);
+
+    const S = await fresh();
+    await S.hydrate();
+
+    // Not signed in, which is the whole point.
+    expect(S.servers()[0]?.token).toBe("");
+    // The marker is still there, because it is the only record there is.
+    expect(JSON.parse(disk.get(OUT_KEY) ?? "[]")).toEqual(["s_acme"]);
+  });
+
+  it("and the next launch, which can write, records it properly", async () => {
+    signedOutOnTheOldBuild();
+    unwritable.add(KEY);
+    const blocked = await fresh();
+    await blocked.hydrate();
+
+    unwritable.clear();
+    const S = await fresh();
+    await S.hydrate();
+
+    expect(S.servers()[0]?.token).toBe("");
+    expect(rowFor()?.kept).toBe(false);
+    expect(disk.get(OUT_KEY)).toBeUndefined();
+  });
+});
+
+/**
+ * **R2.** Replacement and disconnect have to read their own writes too.
+ *
+ * `signedOut()` learned this; the other two mutation paths had not. A positive
+ * permission bit that could not be set to false is still true, and the card
+ * went on promising a password field at the next launch while an older
+ * credential sat in the keychain waiting to answer for it.
+ */
+describe("a replacement or a disconnect that could not be recorded", () => {
+  const signedInProperly = async () => {
+    const S = await fresh();
+    S.remember(server({ token: "token_A" }) as never);
+    await settle();
+    expect(rowFor()?.kept).toBe(true);
+    return S;
+  };
+
+  it("does not promise a password field it cannot deliver", async () => {
+    const S = await signedInProperly();
+
+    // The replacement: the registry will not take the denial and the keychain
+    // will not take the new token.
+    unwritable.add(KEY);
+    refuse();
+    S.remember(server({ token: "token_B" }) as never);
+    await settle();
+
+    expect(S.unkeptSignIn()).toEqual({ serverId: "s_acme", because: "signIn", stale: true });
+    expect(S.servers()[0]?.token).toBe("token_B");
+  });
+
+  it("says the ordinary thing when the denial did go down", async () => {
+    const S = await signedInProperly();
+    refuse();
+    S.remember(server({ token: "token_B" }) as never);
+    await settle();
+
+    expect(S.unkeptSignIn()).toEqual({ serverId: "s_acme", because: "signIn", stale: false });
+    expect(rowFor()?.kept).toBe(false);
+  });
+
+  it("falls back to denying the row when it cannot remove it", async () => {
+    const S = await signedInProperly();
+    /* Removal is the better outcome and is tried first; a row that stays but
+       grants nothing is the next best thing. */
+    let refusedOnce = false;
+    const held$ = disk.set.bind(disk);
+    vi.stubGlobal("window", {
+      localStorage: {
+        getItem: (k: string) => disk.get(k) ?? null,
+        setItem: (k: string, v: string) => {
+          // Only the removal: the shorter denial write is allowed through.
+          if (k === KEY && JSON.parse(v).length === 0 && !refusedOnce) {
+            refusedOnce = true;
+            throw new Error("QuotaExceededError");
+          }
+          held$(k, v);
+        },
+        removeItem: (k: string) => void disk.delete(k),
+      },
+    });
+    shell.bridge.secrets.delete.mockResolvedValue(refusedBy("keyring is locked"));
+
+    S.forget("s_acme");
+    await settle();
+
+    expect(refusedOnce).toBe(true);
+    expect(rowFor()?.kept).toBe(false);
+    // Recorded, so nothing is owed to the person.
+    expect(S.unkeptSignIn()).toBe(null);
+  });
+
+  it("owns up to a disconnect that neither store would take", async () => {
+    const S = await signedInProperly();
+    unwritable.add(KEY);
+    shell.bridge.secrets.delete.mockResolvedValue(refusedBy("keyring is locked"));
+
+    S.forget("s_acme");
+    await settle();
+
+    expect(S.unkeptSignIn()).toEqual({ serverId: "s_acme", because: "signOut" });
+  });
+
+  it("is silent about a disconnect whose credential was actually deleted", async () => {
+    const S = await signedInProperly();
+    unwritable.add(KEY);
+
+    S.forget("s_acme");
+    await settle();
+
+    expect(shell.bridge.secrets.delete).toHaveBeenCalledWith("s_acme");
+    expect(S.unkeptSignIn()).toBe(null);
+  });
+});
+
+/**
+ * **R4.** A login page is a 200, and it is not a revocation.
+ *
+ * An authentication proxy answering `302 /login` is enough: `fetch` follows
+ * the redirect, turns the POST into a GET, and hands back a perfectly good
+ * `200` with somebody else's HTML in it. `answer.ok` was true, the pending
+ * revocation was cleared, and the card told the person the copy in that file
+ * was no good to anybody while the logout handler had never run.
+ */
+describe("what counts as a revocation", () => {
+  const legacyOnly = () => {
+    disk.set(KEY, JSON.stringify([server()]));
+    refuse();
+  };
+
+  it("is the one status the endpoint documents, and nothing else", async () => {
+    legacyOnly();
+    // What a proxy's login page looks like once `fetch` has followed it.
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, redirected: true }));
+    const S = await fresh();
+    await S.hydrate();
+    await settle();
+
+    expect(S.unkeptSignIn()).toEqual({ serverId: "s_acme", because: "legacy", revoked: "unconfirmed" });
+    expect(S.unconfirmedRevocations()).toEqual(["s_acme"]);
+  });
+
+  it("refuses to follow the redirect at all", async () => {
+    legacyOnly();
+    const S = await fresh();
+    await S.hydrate();
+    await settle();
+
+    const [, init] = (fetch as unknown as { mock: { calls: [string, RequestInit][] } }).mock.calls[0];
+    expect(init.redirect).toBe("error");
+  });
+
+  it("still confirms the answer the endpoint really gives", async () => {
+    legacyOnly();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 204 }));
+    const S = await fresh();
+    await S.hydrate();
+    await settle();
+
+    expect(S.unkeptSignIn()).toEqual({ serverId: "s_acme", because: "legacy", revoked: "confirmed" });
+  });
+
+  it("does not store a legacy token over a newer one the keychain already has", async () => {
+    /* A plaintext copy in the file and a credential already in the keychain:
+       the copy is superseded, so storing it would overwrite something newer.
+       It is ended instead, and the row still grants nothing. */
+    disk.set(KEY, JSON.stringify([server()]));
+    shell.bridge.secrets.get.mockResolvedValue(held("newer_token"));
+    const S = await fresh();
+    await S.hydrate();
+    await settle();
+
+    expect(shell.bridge.secrets.set).not.toHaveBeenCalled();
+    expect(S.servers()[0]?.token).toBe("");
+    expect(S.unkeptSignIn()?.because).toBe("legacy");
   });
 });

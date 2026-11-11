@@ -91,7 +91,10 @@ const keychain = () => bridge.secrets;
  *
  * - `signIn` — somebody is holding a password they have just typed and the
  *   keychain would not take the token. The session works, in memory, and the
- *   card offers to go on with it.
+ *   card offers to go on with it. `stale` is whether an *older* credential for
+ *   the same server can still restore at the next launch, which is true only
+ *   when the row could not be written either — and which turns the card's
+ *   promise of a password field into a warning.
  * - `legacy` — a token an older build had already written to this disk, which
  *   could not be moved anywhere safe. There is no session to offer. `revoked`
  *   says whether the server has **confirmed** that credential is finished
@@ -102,7 +105,7 @@ const keychain = () => bridge.secrets;
  *   back at the next launch and they need to hear that from us.
  */
 export type Unkept =
-  | { serverId: string; because: "signIn" }
+  | { serverId: string; because: "signIn"; stale: boolean }
   | { serverId: string; because: "legacy"; revoked: "unconfirmed" | "confirmed" }
   | { serverId: string; because: "signOut" };
 
@@ -222,6 +225,14 @@ async function keep(serverId: string, token: string): Promise<boolean> {
   /* In memory first and unconditionally: the session works whether or not the
      write below does. */
   tokens.set(serverId, token);
+  /* **And said out loud, which is the line a sign-in went missing without.**
+     `remember` writes the row before calling this, so the `changed()` that
+     write fires happens while `tokens` is still empty for this server — the
+     window takes a tokenless row, draws that server's door, and on the path
+     where the store then fails nothing else ever tells it the token arrived.
+     The card said "You are signed in now" over the password field, and on a
+     machine with no keychain that is every sign-in there is. */
+  changed();
   /* A browser tab has no secure store and keeps the token in the registry,
      which `write` has already done. */
   if (!kc) return true;
@@ -240,7 +251,13 @@ async function keep(serverId: string, token: string): Promise<boolean> {
     permit(serverId);
     return true;
   }
-  owe({ serverId, because: "signIn" });
+  /* Whether an *older* credential for this server can still restore. The
+     row is written `kept: false` before the store is attempted, so normally
+     it cannot — but that write can fail, and then the row goes on permitting
+     whatever the keychain was already holding. Saying "the next launch will
+     ask for your password again" in that state is a promise this machine
+     cannot keep. */
+  owe({ serverId, because: "signIn", stale: rows().find((s) => s.serverId === serverId)?.kept === true });
   return false;
 }
 
@@ -336,7 +353,10 @@ export async function hydrate() {
      revoke. */
   if (legacy.size) write(rows());
 
-  retireMarker();
+  /* Servers the old marker refuses and whose refusal could not be written
+     down. The row still says what it said, so nothing but this stops them
+     being restored in this launch. */
+  const stuck = retireMarker();
 
   /* Taken whole, before the first await, each row with the era it was in. */
   const snapshot = rows().map((row) => ({ row, at: eraOf(row.serverId) }));
@@ -350,7 +370,7 @@ export async function hydrate() {
       const said = await kc.get(row.serverId);
       if (!current(row, at)) continue;
 
-      if (row.kept === false) {
+      if (stuck.has(row.serverId) || row.kept === false) {
         /* Signed out of here, and nothing has been stored since. Nothing is
            restored whatever the keychain is holding — and if it is holding
            something, this is the launch that takes it out, which is the retry
@@ -359,24 +379,33 @@ export async function hydrate() {
         continue;
       }
 
-      if (said.says === "held") {
-        tokens.set(row.serverId, said.token);
-        /* A row from a build that did not record permission is adopted the
-           first time a read actually confirms a credential. One launch, and
-           then it is an ordinary row. */
-        if (row.kept !== true) permit(row.serverId);
-        changed();
+      const old = legacy.get(row.serverId);
+      if (old !== undefined) {
+        /* Deliberately reached on every answer. Whether anything is stored is
+           not the question — this is a plaintext credential in a
+           world-readable file, and the only thing that settles what to do
+           with it is whether the keychain will take it. So we ask it to, and
+           the answer decides. */
+        await migrate(row, at, old, said.says === "held");
         continue;
       }
 
-      const old = legacy.get(row.serverId);
-      if (old !== undefined) {
-        /* Deliberately reached on `absent` **and** on `unknown`. Whether
-           anything is stored is not the question — this is a plaintext
-           credential in a world-readable file, and the only thing that
-           settles what to do with it is whether the keychain will take it.
-           So we ask it to, and the answer decides. */
-        await migrate(row, at, old);
+      if (said.says === "held") {
+        if (row.kept !== true) {
+          /* **A read proves possession, not permission.** This used to adopt
+             the row — write `kept: true` and sign in — on the reasoning that
+             a build which never recorded permission should not sign everybody
+             out on upgrade. It cannot be made safe: the state an older
+             build's *failed* sign-out leaves behind is byte-identical to a
+             legitimately remembered one, so no code can tell them apart, and
+             the one silent sign-in this whole file exists to prevent was
+             reachable from the shipping build. Fresh authentication, and the
+             row stops being ambiguous from here on. */
+          forbid(row.serverId);
+          continue;
+        }
+        tokens.set(row.serverId, said.token);
+        changed();
         continue;
       }
 
@@ -400,9 +429,12 @@ export async function hydrate() {
   } finally {
     clearTimeout(stopWaiting);
     /* Belt as well as braces: the plaintext came out above, and this catches
-       a row added by something else while this was running. `kept` survives
-       the spread, so this grants and revokes nothing. */
-    window.localStorage.setItem(KEY, JSON.stringify(rows().map((s) => ({ ...s, token: "" }))));
+       a row added by something else while this was running. Through `write`,
+       which strips every token on this platform and *catches* — a raw
+       `setItem` here threw straight out of `hydrate` on a registry that would
+       not take a write, which `main.tsx` calls without a catch. `kept`
+       survives the spread, so this grants and revokes nothing. */
+    write(rows());
     settle();
     changed();
   }
@@ -417,12 +449,15 @@ export async function hydrate() {
  * last contents still mean what they said, so they are turned into the
  * `kept: false` they should always have been, and the key goes.
  */
-function retireMarker() {
+function retireMarker(): Set<string> {
   const WAS = "firetower.signedOut";
+  /** Servers it refuses that this launch could not write a refusal for. */
+  const stuck = new Set<string>();
+
   let held: string[] | null = null;
   try {
     const raw = window.localStorage.getItem(WAS);
-    if (raw === null) return;
+    if (raw === null) return stuck;
     const parsed: unknown = JSON.parse(raw);
     held = Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string") : null;
   } catch {
@@ -432,12 +467,27 @@ function retireMarker() {
   }
 
   const out = held ?? rows().map((s) => s.serverId);
-  write(rows().map((s) => (out.includes(s.serverId) ? { ...s, token: "", kept: false } : s)));
+  const recorded = write(rows().map((s) => (out.includes(s.serverId) ? { ...s, token: "", kept: false } : s)));
+
+  if (!recorded) {
+    /* **The replacement did not go down, so the original stays up.** Removing
+       the marker here and letting hydration carry on was the same mistake
+       this file is built against, with a particularly unkind shape: a quota
+       failure while *adding* a field, followed by a removal that frees space
+       and therefore succeeds, erases the only record of a refusal — and the
+       launch that did it is the one that signs back in. The marker is left
+       where it is, and the servers it names are refused for this launch
+       whatever their rows still say. */
+    for (const id of out) stuck.add(id);
+    return stuck;
+  }
+
   try {
     window.localStorage.removeItem(WAS);
   } catch {
     /* It will be read again next launch and mean the same thing. */
   }
+  return stuck;
 }
 
 /**
@@ -453,9 +503,19 @@ function retireMarker() {
  * open — which a security review measured, and which is the one place this
  * client's memory-only claim did not hold.
  */
-async function migrate(row: Connected, at: number, token: string) {
+async function migrate(row: Connected, at: number, token: string, superseded: boolean) {
   const kc = keychain();
   if (!kc) return;
+
+  if (superseded) {
+    /* The keychain is already holding a credential for this server, so this
+       copy in the file is not the current one and storing it would overwrite
+       something newer. It is still a plaintext credential on a world-readable
+       disk, so it is ended rather than left alone — and the row grants no
+       restoration either way, because it carries no permission. */
+    endLegacy(row, token);
+    return;
+  }
 
   const stored = await kc.set(row.serverId, token);
   if (!current(row, at)) return;
@@ -537,12 +597,13 @@ async function tryRevoking(serverId: string) {
  * Tell a server one of its tokens is finished with, and find out whether it
  * listened.
  *
- * **The answer is read.** This used to `await fetch(...)` and look at nothing:
- * a 500 did not throw, an offline machine was caught and discarded, and a
- * hanging request had no deadline — so the card announced that the session had
- * been ended on every one of those, while the token still answered 200 and its
- * bytes were still in a `0644` file. Three measured rows of a table said
- * "session ended" and two of them were false.
+ * **The answer is read, and read narrowly.** This used to `await fetch(...)`
+ * and look at nothing: a 500 did not throw, an offline machine was caught and
+ * discarded, and a hanging request had no deadline — so the card announced
+ * that the session had been ended on every one of those, while the token
+ * still answered 200 and its bytes were still in a `0644` file. Then
+ * `answer.ok` turned out to be too generous as well: a proxy's login page is
+ * a perfectly good `200`. Only the one status the endpoint documents counts.
  */
 async function revoked(url: string, token: string): Promise<boolean> {
   try {
@@ -550,8 +611,18 @@ async function revoked(url: string, token: string): Promise<boolean> {
       method: "POST",
       headers: { authorization: `Bearer ${token}` },
       signal: AbortSignal.timeout(REVOKE_PATIENCE),
+      /* **A redirect is a refusal here, not a detour.** `fetch` follows one
+         by default and turns a POST into a GET on the way, so an
+         authentication proxy answering `302 /login` produced a `200` with an
+         HTML login page in it — `answer.ok`, and the card went on to tell
+         somebody the credential in that file was no good to anybody while the
+         logout handler had never run. It does not take a malicious server;
+         a proxy in front of one is enough. */
+      redirect: "error",
     });
-    return answer.ok;
+    /* The endpoint answers `204` and nothing else (`auth.rs`). Any other
+       success is somebody else's page. */
+    return answer.status === 204;
   } catch {
     /* Unreachable, refused, or past the deadline. Not revoked. */
     return false;
@@ -620,10 +691,15 @@ export function remember(server: Connected) {
 
 /** A changed password answers with a new token; keep it, drop the old. */
 export function updateToken(serverId: string, token: string) {
+  /* The same `kept: false`-first order as `remember`, and the same reason:
+     until something has been stored, the row must grant nothing. `keep`
+     reports whether the row still says otherwise. */
   write(rows().map((s) => (s.serverId === serverId ? { ...s, token, kept: false } : s)));
   void keep(serverId, token);
 }
 
+/**
+ * The token this Mac holds for a server is no longer good.
 /**
  * The token this Mac holds for a server is no longer good.
  *
@@ -671,16 +747,32 @@ export function signedOut(serverId: string) {
 }
 
 export function forget(serverId: string) {
-  moved(serverId);
+  const at = moved(serverId);
   tokens.delete(serverId);
+
+  /* **Recorded before the deletion is started, and graded.** Taking the row
+     out is the best outcome: with no row there is nothing for `hydrate` to
+     read and nothing that could grant permission. If that write will not go,
+     the smaller one might — a row that stays but says `kept: false` grants
+     nothing either. Only if neither lands does the old permission survive,
+     and then this is as unsafe as a sign-out that could not be recorded.
+
+     Re-connecting to the same Firetower arrives at the same `serverId`, and
+     the row it writes is `kept: false` until something is actually stored, so
+     an orphan a refused deletion left in the keychain cannot answer for that
+     sign-in either. */
+  const removed = write(rows().filter((s) => s.serverId !== serverId));
+  const denied = removed || forbid(serverId);
+
   const kc = keychain();
-  /* No marker to leave behind: the row goes, and with it the only thing that
-     could have granted permission. Re-connecting to the same Firetower
-     arrives at the same `serverId`, and the row it writes is `kept: false`
-     until something is actually stored — so an orphan a refused deletion left
-     in the keychain cannot answer for that sign-in either. */
-  if (kc) void kc.delete(serverId);
-  write(rows().filter((s) => s.serverId !== serverId));
+  if (!kc) {
+    if (!denied) owe({ serverId, because: "signOut" });
+    return;
+  }
+  void kc.delete(serverId).then((gone) => {
+    if (gone.says === "done") return;
+    if (!denied && eraOf(serverId) === at) owe({ serverId, because: "signOut" });
+  });
 }
 
 const watchers = new Set<() => void>();
