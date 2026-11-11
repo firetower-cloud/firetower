@@ -198,7 +198,14 @@ const BAND_ORDER = { waiting: 0, working: 1, idle: 2 } as const;
    Its precedence is blocked › working › broken › done rather than broken
    first — ember is spent on being stuck and on nothing else. Taken whole on
    the merge; the duplicate is gone. */
-const BEAT_ORDER = { blocked: 0, working: 1, broken: 2, done: 3, over: 4 } as const;
+const BEAT_ORDER = {
+  blocked: 0,
+  stopped: 1,
+  working: 2,
+  broken: 3,
+  done: 4,
+  over: 5,
+} as const;
 const worstFirst = (every: Workspace[]) => (a: Workspace, b: Workspace) =>
   BAND_ORDER[doing(a)] - BAND_ORDER[doing(b)] ||
   BEAT_ORDER[placeBeat(a, every)] - BEAT_ORDER[placeBeat(b, every)];

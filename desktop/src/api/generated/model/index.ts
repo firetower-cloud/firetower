@@ -199,6 +199,7 @@ export * from './reached.ts';
 export * from './reachedDirectory.ts';
 export * from './reaches.ts';
 export * from './readiness.ts';
+export * from './relaunchSessionParams.ts';
 export * from './release.ts';
 export * from './remoteRepo.ts';
 export * from './rename.ts';

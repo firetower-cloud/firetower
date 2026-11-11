@@ -60,6 +60,7 @@ import type {
   PreviewAnnotation,
   Proposal,
   PullRequest,
+  RelaunchSessionParams,
   RenameSession,
   Sent,
   Session,
@@ -3361,12 +3362,20 @@ export const usePushSession = <TError = ApiError,
       > => {
       return useMutation(getPushSessionMutationOptions(options), queryClient);
     }
-    export const getRelaunchSessionUrl = (id: string,) => {
+    export const getRelaunchSessionUrl = (id: string,
+    params?: RelaunchSessionParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `/api/v1/sessions/${id}/relaunch`
+  return stringifiedParams.length > 0 ? `/api/v1/sessions/${id}/relaunch?${stringifiedParams}` : `/api/v1/sessions/${id}/relaunch`
 }
 
 /**
@@ -3383,9 +3392,10 @@ export const usePushSession = <TError = ApiError,
  * the conversation up rather than begin one.
  * @summary Start this session's agent again, in the workspace it already has.
  */
-export const relaunchSession = async (id: string, options?: Parameters<typeof http>[1]): Promise<Done> => {
+export const relaunchSession = async (id: string,
+    params?: RelaunchSessionParams, options?: Parameters<typeof http>[1]): Promise<Done> => {
 
-  return http<Done>(getRelaunchSessionUrl(id),
+  return http<Done>(getRelaunchSessionUrl(id,params),
   {
     ...options,
     method: 'POST'
@@ -3415,9 +3425,9 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof relaunchSession>>, RelaunchSessionMutationVariables> = (props) => {
-          const {id} = props ?? {};
+          const {id,params} = props ?? {};
 
-          return  relaunchSession(id,requestOptions)
+          return  relaunchSession(id,params,requestOptions)
         }
 
 
@@ -3430,7 +3440,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type RelaunchSessionMutationResult = NonNullable<Awaited<ReturnType<typeof relaunchSession>>>
 
     export type RelaunchSessionMutationError = ApiError
-    export type RelaunchSessionMutationVariables = {id: string}
+    export type RelaunchSessionMutationVariables = {id: string;params?: RelaunchSessionParams}
 
     /**
  * @summary Start this session's agent again, in the workspace it already has.

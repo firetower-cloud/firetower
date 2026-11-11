@@ -87,12 +87,16 @@ export function familyOf(place: Workspace, places: Workspace[]): Session[] {
  * - **blocked** first. Ember is spent on being stopped-and-stuck and on
  *   nothing else (`beat.test.ts`), and a sibling still working does not make
  *   an unanswered question any less unanswered.
+ * - **stopped** second, for the reason blocked is first: a machine that
+ *   restarted will not resolve itself, and a lead that came back cleanly while
+ *   one of its team has not is waiting for a report that is never coming. It
+ *   has to say so on the surface somebody glances at.
  * - **working** next: a place is at rest only when nothing in it is going.
  * - **broken**, then **done** — both at rest, and a failure is the louder of
  *   the two: it will not finish on its own, whatever else here did.
  * - **over** only when every one of them has ended.
  */
-const PRECEDENCE: Beat[] = ["blocked", "working", "broken", "done", "over"];
+const PRECEDENCE: Beat[] = ["blocked", "stopped", "working", "broken", "done", "over"];
 
 /** The one of these whose beat comes first. Ties keep the order they arrived
  *  in, which is the place's own runs before anything it delegated. */

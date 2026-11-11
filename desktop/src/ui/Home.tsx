@@ -60,7 +60,7 @@ const say = (n: number) => WORDS[n] ?? String(n);
  * roll up to ended — and a beat this does not name sorts last rather than
  * first, which is what `indexOf`'s `-1` would have done.
  */
-const AGENT_ORDER: Beat[] = ["broken", "blocked", "done", "working"];
+const AGENT_ORDER: Beat[] = ["broken", "stopped", "blocked", "done", "working"];
 const rank = (beat: Beat) => {
   const at = AGENT_ORDER.indexOf(beat);
   return at < 0 ? AGENT_ORDER.length : at;
