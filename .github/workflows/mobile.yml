@@ -216,7 +216,18 @@ jobs:
           sudo udevadm trigger --name-match=kvm
 
       # Pixel 7, which is 412 x 915 dp — the Android baseline this project
-      # designs against.
+      # designs against. It boots in about thirty seconds on this runner.
+      #
+      # **Every line of `script` is its own command.** The action runs them
+      # one at a time through `sh -c`, so a trailing `\` does not continue
+      # onto the next line — it hands the first half of a command to a shell
+      # and throws the rest away. The two long lines below are long for that
+      # reason.
+      #
+      # The `curl` builds Metro's graph before the app asks for it: a cold
+      # bundle is tens of seconds and `launchApp` does not wait that
+      # patiently. Best effort — the entry path is Expo's own and may be
+      # renamed, and missing it only costs the first launch its patience.
       - uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
           api-level: 34
@@ -227,22 +238,21 @@ jobs:
           emulator-options: -no-window -no-snapshot -noaudio -no-boot-anim -camera-back none
           script: |
             adb install -r apk/*.apk
-            # Build the graph before the app asks for it. A cold bundle is
-            # tens of seconds and `launchApp` does not wait that patiently.
-            # Best effort: the entry path is Expo's own and may be renamed,
-            # and a miss here only costs the first launch its patience.
-            curl -fsS -m 600 -o /dev/null \
-              "http://localhost:8081/.expo/.virtual-metro-entry.bundle?platform=android&dev=true" || true
-            maestro test mobile/e2e/launch.yaml \
-              -e ADDRESS=10.0.2.2:4411 -e USER=admin -e PASS=smoke
+            curl -fsS -m 600 -o /dev/null "http://localhost:8081/.expo/.virtual-metro-entry.bundle?platform=android&dev=true" || true
+            maestro test mobile/e2e/launch.yaml -e ADDRESS=10.0.2.2:4411 -e USER=admin -e PASS=smoke --debug-output ${{ runner.temp }}/maestro --flatten-debug-output
 
       # The screenshots are half the point: Maestro matches text and cannot
       # see an icon, so whether the tab bar has glyphs in it is something a
       # person reads off the artifact. `always()`, because a failed run is
       # the one whose pictures are worth having.
+      #
+      # `--debug-output` rather than Maestro's default `~/.maestro/tests`,
+      # because `upload-artifact` does not expand `~` and would have found
+      # nothing; `--flatten-debug-output` drops the per-run timestamp
+      # directory, which is what makes the artifact's contents predictable.
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: firetower-android-smoke
-          path: ~/.maestro/tests/**
+          path: ${{ runner.temp }}/maestro/**
           if-no-files-found: warn
