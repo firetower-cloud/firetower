@@ -36,7 +36,7 @@ const CADENCES: { kind: Cadence["kind"]; label: string; note?: string }[] = [
   { kind: "daily", label: "Every day" },
   { kind: "weekdays", label: "Weekdays", note: "Monday to Friday" },
   { kind: "weekly", label: "Every week", note: "Choose a day" },
-  { kind: "monthly", label: "Every month", note: "Choose a date" },
+  { kind: "monthly", label: "Every month", note: "A date, or a weekday" },
   { kind: "custom", label: "Custom", note: "Cron expression" },
 ];
 
@@ -59,8 +59,31 @@ export function NewSchedule({ from, onClose }: { from: Example | null; onClose: 
 
   const [kind, setKind] = useState<Cadence["kind"]>(from?.cadence.kind ?? "weekdays");
   const [at, setAt] = useState(("at" in (from?.cadence ?? {}) ? (from!.cadence as { at: string }).at : "") || "08:30");
-  const [day, setDay] = useState<Weekday>("monday");
-  const [dayOfMonth, setDayOfMonth] = useState(1);
+  const [day, setDay] = useState<Weekday>(
+    from?.cadence.kind === "weekly"
+      ? from.cadence.day
+      : from?.cadence.kind === "monthly" && from.cadence.on.kind === "nth"
+        ? from.cadence.on.day
+        : "monday",
+  );
+  const [dayOfMonth, setDayOfMonth] = useState(
+    from?.cadence.kind === "monthly" && from.cadence.on.kind === "day" ? from.cadence.on.day : 1,
+  );
+  /**
+   * **A month has two ways of saying which day**, and only one of them is a
+   * date. "The first Monday" is not a day of the month — cron *ors* the
+   * day-of-month field against day-of-week, so the obvious expression means
+   * "the first week, or any Monday", which is every Monday. The server
+   * compiles the nth-weekday form instead, and the control has to be able to
+   * ask for it or an example that says "first Monday" would quietly become
+   * the 1st.
+   */
+  const [monthly, setMonthly] = useState<"day" | "nth">(
+    from?.cadence.kind === "monthly" ? from.cadence.on.kind : "day",
+  );
+  const [nth, setNth] = useState(
+    from?.cadence.kind === "monthly" && from.cadence.on.kind === "nth" ? from.cadence.on.nth : 1,
+  );
   const [expr, setExpr] = useState("0 7 * * 1-5");
 
   /* The schedule's own zone, defaulted to this computer's because that is
@@ -76,13 +99,17 @@ export function NewSchedule({ from, onClose }: { from: Example | null; onClose: 
       case "weekly":
         return { kind: "weekly", at, day };
       case "monthly":
-        return { kind: "monthly", at, on: { kind: "day", day: dayOfMonth } };
+        return {
+          kind: "monthly",
+          at,
+          on: monthly === "nth" ? { kind: "nth", nth, day } : { kind: "day", day: dayOfMonth },
+        };
       case "custom":
         return { kind: "custom", expr };
       default:
         return { kind: "weekdays", at };
     }
-  }, [kind, at, day, dayOfMonth, expr]);
+  }, [kind, at, day, dayOfMonth, expr, monthly, nth]);
 
   /**
    * **The server reads it back.** No client parses cron: the read-back and
@@ -269,18 +296,58 @@ export function NewSchedule({ from, onClose }: { from: Example | null; onClose: 
                 </select>
               )}
               {kind === "monthly" && (
-                <select
-                  className="s-pill"
-                  value={dayOfMonth}
-                  onChange={(e) => setDayOfMonth(Number(e.target.value))}
-                  aria-label="Which date"
-                >
-                  {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => (
-                    <option key={d} value={d}>
-                      {d}
-                    </option>
-                  ))}
-                </select>
+                <>
+                  <select
+                    className="s-pill"
+                    value={monthly}
+                    onChange={(e) => setMonthly(e.target.value as "day" | "nth")}
+                    aria-label="How the day is chosen"
+                  >
+                    <option value="day">on a date</option>
+                    <option value="nth">on a weekday</option>
+                  </select>
+                  {monthly === "day" ? (
+                    <select
+                      className="s-pill"
+                      value={dayOfMonth}
+                      onChange={(e) => setDayOfMonth(Number(e.target.value))}
+                      aria-label="Which date"
+                    >
+                      {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => (
+                        <option key={d} value={d}>
+                          {d}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <>
+                      <select
+                        className="s-pill"
+                        value={nth}
+                        onChange={(e) => setNth(Number(e.target.value))}
+                        aria-label="Which one"
+                      >
+                        {["first", "second", "third", "fourth", "last"].map((word, i) => (
+                          <option key={word} value={i + 1}>
+                            {word}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        className="s-pill"
+                        value={day}
+                        onChange={(e) => setDay(e.target.value as Weekday)}
+                        aria-label="Which weekday"
+                      >
+                        {DAYS.map((d) => (
+                          <option key={d} value={d}>
+                            {d[0].toUpperCase() + d.slice(1)}
+                          </option>
+                        ))}
+                      </select>
+                    </>
+                  )}
+                </>
               )}
               {kind === "custom" ? (
                 /* Mono, because a cron expression is read character by
