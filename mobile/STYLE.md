@@ -360,6 +360,36 @@ and the thing you type into.
 
 Nothing lives under the transcript except the composer and what belongs to it.
 
+## An artifact's card goes where it was published
+
+The end of the transcript is the loudest place on a phone — it is directly
+above the composer, and whatever is there reads as the newest thing that
+happened. So a card appended after the conversation says *this was just made*
+about a poster from an hour ago, which is how every artifact on this screen
+came to be reported as a bug.
+
+Anchored by log line, which is the only thing that can carry it: `firstSeenLine`
+is stamped once, when the artifact is first published, and it survives the file
+being renamed, copied or edited again. Three positions and no fourth — inline
+after the row the conversation had reached, above the transcript when it is
+older than every line in the loaded window, and the end only when there is no
+position to claim. The window is the last few exchanges, so the second of those
+is common rather than a corner, and it is the one that needs a word: `Published
+before the messages below.`
+
+**Inline, the card hangs off the hairline**, and this is one of the places
+being a phone changes the answer. The desk draws tool work at the gutter and
+has no rail for a card to cut; here the edit above and the folded run below
+both hang from one, and a poster run out to both edges crosses it — after
+which the group underneath reads as belonging to the card rather than to the
+turn. On the rail it takes the same 12pt indent as everything else that turn
+did, and it cannot be mistaken for the agent's own illustration, because the
+agent's prose and the screenshots it pastes both start at the gutter.
+
+**416pt is the widest it goes**, matching the desk. Nothing changes at phone
+width; what it stops is a 316pt-tall poster on the inner display, which is a
+third of the screen for one card.
+
 ## Gestures replace keycaps
 
 `.keycap` is desk furniture. Its job — *the app tells you what it can do, where
