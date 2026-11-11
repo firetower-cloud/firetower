@@ -77,6 +77,118 @@ pub fn log_path(workspace: &Path, session_id: &str) -> PathBuf {
     dir_for(workspace).join(format!("agent-{session_id}.ndjson"))
 }
 
+/// Where a supervisor's claim on one session lives.
+///
+/// In the workspace, beside the log, and **not** in `/tmp`: the whole point of
+/// it is to be true when the sockets are not there.
+pub fn lock_path(workspace: &Path, session_id: &str) -> PathBuf {
+    dir_for(workspace).join(format!("agent-{session_id}.lock"))
+}
+
+/// Take this session's claim, held for as long as the file is open.
+///
+/// **The one question that cannot be answered wrongly by a missing socket.**
+/// Everything else a worker can ask about a running agent goes through
+/// `/tmp` — tmux's socket and this supervisor's — and `/tmp` is swept on a
+/// running machine as well as emptied at boot. A sweep takes the sockets and
+/// leaves the processes, so every probe says "gone" about an agent that is
+/// still editing files and still spending somebody's allowance. Starting
+/// another one then puts two agents in one worktree, neither aware of the
+/// other, which is worse than the stuck session this whole area is about.
+///
+/// An advisory lock cannot say that. It is held by an open file description,
+/// so it is released by the kernel when the holder dies — a crash, a SIGKILL,
+/// a power cut — and by nothing else. Alive means held; held means do not
+/// start a second one.
+///
+/// Returned rather than stored: keep it alive and the claim stands; drop it
+/// and it is given back.
+pub fn hold(workspace: &Path, session_id: &str) -> Result<std::fs::File> {
+    let at = lock_path(workspace, session_id);
+    if let Some(parent) = at.parent() {
+        std::fs::create_dir_all(parent).with_context(|| format!("making {}", parent.display()))?;
+    }
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&at)
+        .with_context(|| format!("opening {}", at.display()))?;
+    match take(&file) {
+        Took::Held => Ok(file),
+        Took::Busy => {
+            anyhow::bail!("an agent is already running in this workspace for {session_id}")
+        }
+        Took::Failed(e) => Err(e).with_context(|| format!("claiming {}", at.display())),
+    }
+}
+
+/// What asking for the lock answered.
+enum Took {
+    Held,
+    Busy,
+    Failed(std::io::Error),
+}
+
+/// `flock(LOCK_EX | LOCK_NB)`, which is the whole mechanism.
+///
+/// `libc` rather than `File::try_lock`: that is the same call underneath and
+/// reads better, but it is stable only since 1.89 and this workspace builds
+/// against 1.85. Not worth moving everybody's compiler for one line.
+///
+/// The lock belongs to the open file description, so the kernel releases it
+/// when the last descriptor on it closes — which for a process that is killed,
+/// crashes or loses power is at once, and for one that is merely unreachable
+/// is never. That asymmetry is the point of using it at all.
+fn take(file: &std::fs::File) -> Took {
+    use std::os::fd::AsRawFd;
+    // SAFETY: a borrowed descriptor that outlives the call, and a flag pair
+    // the man page defines together.
+    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+        return Took::Held;
+    }
+    let why = std::io::Error::last_os_error();
+    match why.raw_os_error() {
+        Some(code) if code == libc::EWOULDBLOCK => Took::Busy,
+        _ => Took::Failed(why),
+    }
+}
+
+/// Whether somebody is holding this session's claim.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Holding {
+    /// A supervisor has it, so an agent is alive whatever the sockets say.
+    Yes,
+    /// Nobody has it.
+    No,
+    /// There is no claim to test, or it could not be read. A session started
+    /// by a worker older than this has no lock file at all, so this is the
+    /// ordinary answer for one and must not be read as either of the others.
+    Unknown,
+}
+
+/// Ask, without taking it.
+///
+/// Taken and released immediately, which is the only way to ask: an advisory
+/// lock has no "who holds this" to read. Opened read-write because a lock on
+/// a read-only descriptor is refused on some platforms.
+pub fn holding(workspace: &Path, session_id: &str) -> Holding {
+    let at = lock_path(workspace, session_id);
+    if !at.exists() {
+        return Holding::Unknown;
+    }
+    let Ok(file) = std::fs::OpenOptions::new().write(true).open(&at) else {
+        return Holding::Unknown;
+    };
+    match take(&file) {
+        // Taken, which means nobody had it. Released by this function
+        // returning: the descriptor closes with the file.
+        Took::Held => Holding::No,
+        Took::Busy => Holding::Yes,
+        Took::Failed(_) => Holding::Unknown,
+    }
+}
+
 /// Where the profile's system prompt waits for the supervisor that reads it.
 ///
 /// On disk rather than in the environment because the environment reaches the

@@ -233,21 +233,34 @@ impl Tmux {
     /// probe that runs out of time is an *unknown* — the same as any other
     /// unreadable answer — so the conservative path is the one it takes.
     pub(crate) async fn checked_exists(&self) -> Result<bool> {
-        let output = tokio::time::timeout(
-            PROBE_LIMIT,
-            Command::new("tmux")
-                .args(["has-session", "-t", &self.target()])
-                .output(),
-        )
-        .await
-        .with_context(|| {
-            format!(
-                "tmux did not answer about {} within {}s",
-                self.name,
-                PROBE_LIMIT.as_secs()
-            )
-        })?
-        .context("checking the tmux session")?;
+        // `kill_on_drop`, because the timeout below drops this future and
+        // tokio leaves a child running when it does. A probe is only ever
+        // abandoned for hanging, so without this the hung ones accumulate:
+        // one tmux client per probe, each holding the connection that made
+        // the last one hang.
+        let probe = Command::new("tmux")
+            .args(["has-session", "-t", &self.target()])
+            .kill_on_drop(true)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .context("asking tmux")?;
+
+        let output = match tokio::time::timeout(PROBE_LIMIT, probe.wait_with_output()).await {
+            Ok(output) => output.context("checking the tmux session")?,
+            Err(_) => {
+                // Said rather than left to the drop: a child reaped here is
+                // one that cannot become a zombie, and an unanswered probe is
+                // an unknown — which leaves a live agent alone, as every other
+                // unreadable answer does.
+                anyhow::bail!(
+                    "tmux did not answer about {} within {}s",
+                    self.name,
+                    PROBE_LIMIT.as_secs()
+                )
+            }
+        };
 
         checked_exists_output(
             &self.name,

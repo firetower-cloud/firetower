@@ -91,6 +91,15 @@ a useful thing to be able to make.
   worker's SQLite runs `synchronous = Normal`, so a machine that genuinely
   loses power can come back having lost the last lines of both. A container
   restart always comes back whole.
+* **A `/tmp` sweep on a running machine**, which is the one failure that looks
+  like a reboot and is not: the sockets go and the processes stay.
+  `systemd-tmpfiles` does it on a live system, and every way of asking after an
+  agent — tmux's socket and the supervisor's — goes through `/tmp`. The harness
+  can empty `/tmp` by restarting the container, but not while the agents in it
+  carry on. What answers that case is not the probe: it is the supervisor's own
+  lock on the workspace, which the kernel releases only when the process
+  holding it dies, so a launch refuses while an agent is alive however
+  unreachable it has become. See `agentd::hold`.
 * **An agent doing work.** The machine comes up with no agent installed.
   `just sim agent claude-code` fetches one — a download, nothing more — but an
   agent that actually runs a turn has to be signed in, which means a

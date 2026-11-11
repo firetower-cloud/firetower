@@ -2519,7 +2519,7 @@ You are in the directory that holds them, not inside one of them.              P
         // already running" *about a corpse*, so the one route back was the one
         // route that could never be taken, and every attempt marked the run
         // failed again. Three sessions sat like that, each looking crashed.
-        match standing(&tmux, &id).await {
+        match standing(&tmux, &id, &path).await {
             Standing::Fresh => {}
             Standing::Running => {
                 tracing::info!(session = %id, "the agent is already running; nothing to start");
@@ -3739,7 +3739,26 @@ fn undelivered_report(what: &str, present: Result<bool>) -> (&'static str, Strin
 /// [`Tmux::target`] — so a session with a shell open is no longer reported
 /// `Abandoned` on the strength of that shell, and the kill that answer leads
 /// to no longer takes the shell with it.
-async fn standing(tmux: &Tmux, id: &SessionId) -> Standing {
+///
+/// **The claim is asked first, and it is the only answer that cannot be wrong
+/// in the dangerous direction.** Both questions below are asked through
+/// `/tmp`: tmux's socket and the supervisor's. A machine sweeping old files
+/// out of `/tmp` — which `systemd-tmpfiles` does on a *running* system, not
+/// only at boot — takes those sockets and leaves the processes, and then both
+/// answers say "gone" about an agent that is still editing files. Starting
+/// another one puts two agents in one worktree, neither aware of the other.
+/// The claim is an advisory lock held by the supervisor itself: the kernel
+/// releases it when that process dies and at no other time. See
+/// `agentd::hold`.
+///
+/// `Unknown` falls through to the old questions, because a session started by
+/// a worker older than this one has no claim to hold and must still be
+/// recoverable.
+async fn standing(tmux: &Tmux, id: &SessionId, workspace: &Path) -> Standing {
+    match agentd::holding(workspace, id.as_str()) {
+        agentd::Holding::Yes => return Standing::Running,
+        agentd::Holding::No | agentd::Holding::Unknown => {}
+    }
     if !tmux.exists().await {
         return Standing::Fresh;
     }
@@ -5409,24 +5428,74 @@ mod tests {
     async fn a_tmux_session_with_no_agent_in_it_is_not_mistaken_for_a_running_one() {
         let id = SessionId::new();
         let tmux = tmux::Tmux::for_session(id.as_str());
+        let dir = TempDir::new().unwrap();
 
         // Nothing yet.
-        assert_eq!(standing(&tmux, &id).await, Standing::Fresh);
+        assert_eq!(standing(&tmux, &id, dir.path()).await, Standing::Fresh);
 
         // A pane with no agent in it: a shell, exactly what tmux keeps when an
         // agent exits and nothing tears the session down.
-        let dir = TempDir::new().unwrap();
         tmux.start(dir.path(), "sleep 30", &[]).await.unwrap();
         assert!(tmux.exists().await, "the fixture should be there");
 
         assert_eq!(
-            standing(&tmux, &id).await,
+            standing(&tmux, &id, dir.path()).await,
             Standing::Abandoned,
             "a session with nothing listening is one to replace, not to refuse"
         );
 
         cleanup(&id).await;
-        assert_eq!(standing(&tmux, &id).await, Standing::Fresh);
+        assert_eq!(standing(&tmux, &id, dir.path()).await, Standing::Fresh);
+    }
+
+    /// Two agents in one worktree, which is the failure a launch must refuse
+    /// over even when every other answer says the first one is gone.
+    ///
+    /// The scenario is not a reboot: it is `/tmp` being swept on a *running*
+    /// machine, which takes tmux's socket and the supervisor's and leaves the
+    /// processes. Both questions `standing` used to ask go through those
+    /// sockets, so both say "nothing here" about an agent that is still
+    /// editing files and still spending somebody's allowance — and the launch
+    /// that follows puts a second agent on the same branch.
+    ///
+    /// The claim is held by the supervisor's own process, so the kernel gives
+    /// it back when that process dies and at no other time. Nothing in `/tmp`
+    /// is involved in asking.
+    #[tokio::test]
+    async fn an_agent_whose_sockets_went_is_still_an_agent() {
+        let id = SessionId::new();
+        let tmux = tmux::Tmux::for_session(id.as_str());
+        let dir = TempDir::new().unwrap();
+
+        // No claim written at all: a session from a worker older than this,
+        // which has to stay recoverable.
+        assert_eq!(
+            standing(&tmux, &id, dir.path()).await,
+            Standing::Fresh,
+            "an unknown claim must fall through to the old questions"
+        );
+
+        // A supervisor holding its session, with nothing in /tmp to show for
+        // it — no tmux session, no socket.
+        let held = agentd::hold(dir.path(), id.as_str()).expect("the claim is free");
+        assert_eq!(
+            standing(&tmux, &id, dir.path()).await,
+            Standing::Running,
+            "an agent that is alive is alive, whatever the sockets say"
+        );
+        assert!(
+            agentd::hold(dir.path(), id.as_str()).is_err(),
+            "and a second supervisor cannot take it either"
+        );
+
+        // And when that process goes — this is a drop; for a real one it is
+        // the kernel at exit — the claim is free and the session recoverable.
+        drop(held);
+        assert_eq!(
+            standing(&tmux, &id, dir.path()).await,
+            Standing::Fresh,
+            "the lock is released by the holder dying and by nothing else"
+        );
     }
 
     /// A second agent in a workspace inherits where its repositories are.
