@@ -19,6 +19,12 @@ docker build -f "$here/Dockerfile.check" -t "$image" "$here"
 
 mkdir -p "$here/shots"
 
+# Both are empty in one of the two forms below, and `${a[@]+"${a[@]}"}` is
+# what expands an empty array to nothing rather than to an error: macOS ships
+# bash 3.2, where `"${a[@]}"` on an empty array is unbound under `set -u`, so
+# the plain spelling killed `run.sh` and `run.sh build` before a container
+# started. This is the only bash on a Mac that needs no install, so it is the
+# one this has to run on.
 entry=()
 args=("$@")
 if [ "${1:-}" = "--shell" ]; then args=(); entry=(--entrypoint /bin/bash); fi
@@ -42,5 +48,5 @@ exec docker run --rm "${tty[@]}" \
   -v ft-linux-node-modules:/work/desktop/node_modules \
   -v ft-linux-pnpm-store:/pnpm-store \
   -e npm_config_store_dir=/pnpm-store \
-  "${entry[@]}" \
+  ${entry[@]+"${entry[@]}"} \
   "$image" ${args[@]+"${args[@]}"}
