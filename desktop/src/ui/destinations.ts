@@ -1,5 +1,5 @@
 /**
- * The six places you can be.
+ * The seven places you can be.
  *
  * The index used to live in `config/panes.ts` as twelve panes in seven groups
  * behind a Configuration screen, and in `Rail.tsx` as three nav links. Both
@@ -11,6 +11,21 @@
  * them reads cleanly and is one fewer icon, but there is no honest name for
  * the pair that is not a category word, and it buries reachability a level
  * down. If six ever feels like too many, that is the first merge to make.
+ *
+ * **Schedules is appended at `⌘7`, not inserted.** Order is the keyboard's
+ * order, and the numbers below are written down so they do not move:
+ * inserting after Tasks renumbers four destinations and shifts four icons,
+ * and that remap would be paid by everybody, every day. The grouping cost is
+ * paid once, by somebody reading the rail for the first time, and it is
+ * smaller than it looks — the rail reads top to bottom as what is happening,
+ * then what is set up, and a schedule is the most set-up-and-leave object in
+ * the product.
+ *
+ * It is a destination rather than a pane under Customize, which was asked for
+ * twice and declined twice. What was refused was Schedules living *inside*
+ * Customize, not Schedules living near it. The merge above stays available,
+ * and taking it here would spend the escape hatch on the seventh rather than
+ * the eighth.
  *
  * Labels do not rest under the icons. They double the rail's width to say what
  * hover, focus and the tooltip already say, and six destinations are few
@@ -33,10 +48,10 @@
  * drawn inside the page by `config/SettingsIndex.tsx` — and the update signal
  * is a mark on the avatar, which `ProfileMenu.tsx` explains.
  */
-import { type LucideIcon, FolderGit2, House, ListTodo, Puzzle, Server, Shapes } from "lucide-react";
+import { type LucideIcon, Clock, FolderGit2, House, ListTodo, Puzzle, Server, Shapes } from "lucide-react";
 import { paneAt } from "~/ui/config/panes";
 
-export type DestinationId = "home" | "tasks" | "artifacts" | "customize" | "repos" | "machines";
+export type DestinationId = "home" | "tasks" | "artifacts" | "customize" | "repos" | "machines" | "schedules";
 
 export type Destination = {
   id: DestinationId;
@@ -44,12 +59,12 @@ export type Destination = {
   icon: LucideIcon;
   /** Where pressing it lands. The panel beside it offers the rest. */
   href: string;
-  /** `⌘1`–`⌘6`. Required, now that the two keyless doors have gone: a place
+  /** `⌘1`–`⌘7`. Required, now that the two keyless doors have gone: a place
    *  in the rail with no number was the thing that made them read as doors. */
   key: string;
 };
 
-/** The six. Order is the keyboard's order, so ⌘3 is always Artifacts. */
+/** The seven. Order is the keyboard's order, so ⌘3 is always Artifacts. */
 export const DESTINATIONS: Destination[] = [
   { id: "home", label: "Dashboard", icon: House, href: "/", key: "1" },
   { id: "tasks", label: "Tasks", icon: ListTodo, href: "/tasks", key: "2" },
@@ -57,6 +72,7 @@ export const DESTINATIONS: Destination[] = [
   { id: "customize", label: "Customize", icon: Puzzle, href: "/configuration/skills", key: "4" },
   { id: "repos", label: "Repositories", icon: FolderGit2, href: "/configuration/repositories", key: "5" },
   { id: "machines", label: "Machines", icon: Server, href: "/configuration/machines", key: "6" },
+  { id: "schedules", label: "Schedules", icon: Clock, href: "/schedules", key: "7" },
 ];
 
 /**

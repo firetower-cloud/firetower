@@ -3,12 +3,30 @@ import { SETTINGS, SETTINGS_HOME, SETTINGS_PANES } from "~/ui/config/panes";
 import { DESTINATIONS, destinationAt } from "./destinations";
 
 describe("the rail's own shape", () => {
-  /* Six, and nothing under them. Settings and Updates used to be two doors
+  /* Seven, and nothing under them. Settings and Updates used to be two doors
      below a rule, keyless because they were doors rather than destinations;
      they are rows in the profile menu now and nothing else. */
-  test("six destinations, each on its own number", () => {
-    expect(DESTINATIONS).toHaveLength(6);
-    expect(DESTINATIONS.map((d) => d.key)).toEqual(["1", "2", "3", "4", "5", "6"]);
+  test("seven destinations, each on its own number", () => {
+    expect(DESTINATIONS).toHaveLength(7);
+    expect(DESTINATIONS.map((d) => d.key)).toEqual(["1", "2", "3", "4", "5", "6", "7"]);
+  });
+
+  /**
+   * **Appended, not inserted.** The numbers are written down so they do not
+   * move, and this is what stops a later destination being slipped into the
+   * middle: ⌘3 is always Artifacts, and the six that were here keep the keys
+   * they had.
+   */
+  test("Schedules is seventh and nothing was renumbered", () => {
+    expect(DESTINATIONS.map((d) => [d.id, d.key])).toEqual([
+      ["home", "1"],
+      ["tasks", "2"],
+      ["artifacts", "3"],
+      ["customize", "4"],
+      ["repos", "5"],
+      ["machines", "6"],
+      ["schedules", "7"],
+    ]);
   });
 
   /* What the keyless doors used to prove, from the other side: a place in the
@@ -51,6 +69,15 @@ describe("which destination a path is in", () => {
     expect(destinationAt("/")).toBe("home");
     expect(destinationAt("/tasks")).toBe("tasks");
     expect(destinationAt("/artifacts")).toBe("artifacts");
+  });
+
+  /* And the seventh, including one schedule opened — the rail stays lit on
+     Schedules while any of its routes is open, the way it stays lit on
+     Customize while you read one skill. */
+  test("every schedules route is the Schedules destination", () => {
+    expect(destinationAt("/schedules")).toBe("schedules");
+    expect(destinationAt("/schedules/sch_1")).toBe("schedules");
+    expect(destinationAt("/schedules/runs")).toBe("schedules");
   });
 
   /* A detail screen keeps its destination's rail mark: you are still in

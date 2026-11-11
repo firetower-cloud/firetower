@@ -10,6 +10,7 @@
 import { Home } from "~/ui/Home";
 import { TasksPage } from "~/ui/TasksPage";
 import { ArtifactsPage } from "~/ui/ArtifactsPage";
+import { SchedulesPage } from "~/ui/schedules/SchedulesPage";
 import { Workbench } from "~/ui/Workbench";
 import { Configuration } from "~/ui/Configuration";
 import { Updates } from "~/ui/Updates";
@@ -33,6 +34,13 @@ export function Routes({ backend, onSwitch, onForgot }: { backend: Backend; onSw
      link that named an artifact opened the list of them. The id is read
      here and the page opens it. */
   if (path.startsWith("/artifacts")) return <ArtifactsPage open={askedFor(path, 1)} />;
+  /* `/schedules`, `/schedules/runs` and `/schedules/<id>`. One screen with
+     three faces rather than three routes, because the panel beside it moves
+     between them without the destination changing. */
+  if (path.startsWith("/schedules")) {
+    const asked = askedFor(path, 1);
+    return <SchedulesPage open={asked === "runs" ? null : asked} runs={asked === "runs"} />;
+  }
   if (path.startsWith("/configuration")) return <Configuration backend={backend} onForgot={onForgot} />;
   if (path.startsWith("/updates")) return <Updates />;
   if (path.startsWith("/account")) return <Account backend={backend} onForgot={onForgot} />;
