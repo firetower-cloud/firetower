@@ -1466,6 +1466,21 @@ pub struct Fleet {
     /// In memory, like `typed` above and for the same reason — a thing in
     /// flight rather than a thing to keep.
     delivering: Arc<RwLock<HashMap<String, Held>>>,
+    /// Sessions a start is in flight for, so there is never a second one.
+    ///
+    /// The worker's launch takes the tmux session named for a session id, so
+    /// two starts racing is not two agents — it is the second one tearing
+    /// down the first while it is still coming up, and a workspace left with
+    /// whichever won. A press, a double click, a retry after a slow first and
+    /// two people in the same conversation all produce it.
+    ///
+    /// In memory rather than on the row: it is a thing in flight, and a
+    /// control plane that restarts mid-launch should not inherit a claim
+    /// nothing will ever release. A plain mutex rather than the async one
+    /// beside it, because nothing here waits while holding it — and because
+    /// that is what lets the claim be released by `Drop` instead of by every
+    /// caller remembering to.
+    starting: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
 }
 
 /// One child's result, on its way to a lead and not yet accounted for.
@@ -1478,6 +1493,23 @@ struct Held {
     /// re-queue one that had already arrived.
     host: HostId,
     body: String,
+}
+
+/// The right to start one session's agent, held for as long as it is starting.
+///
+/// See [`Fleet::claim_start`]. Nothing can be done with it; holding it is the
+/// whole of what it is for, and dropping it is what gives it back.
+pub struct Starting {
+    starting: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
+    session_id: String,
+}
+
+impl Drop for Starting {
+    fn drop(&mut self) {
+        if let Ok(mut held) = self.starting.lock() {
+            held.remove(&self.session_id);
+        }
+    }
 }
 
 /// A word to a supervisor between attempts.
@@ -1542,6 +1574,7 @@ impl Fleet {
             vault: None,
             delegate: Arc::new(RwLock::new(None)),
             delivering: Arc::new(RwLock::new(HashMap::new())),
+            starting: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
         }
     }
 
@@ -1597,6 +1630,24 @@ impl Fleet {
                 tracing::warn!(session = %session_id, "refusing a delegation call: {e:#}");
             }
         }
+    }
+
+    /// Claim the right to start this session's agent, if nothing else holds it.
+    ///
+    /// `None` means a start is already in flight and this one must not go.
+    /// Tested and taken under one lock, which is what makes it a claim rather
+    /// than a check: two requests arriving together both read "not starting"
+    /// if the read and the insert are separate statements.
+    ///
+    /// The claim is released when what it answers with is dropped — including
+    /// by the `?` in the middle of a launch, and including by a panic. A claim
+    /// that leaked would be a session nothing could ever start again.
+    pub fn claim_start(&self, session_id: &SessionId) -> Option<Starting> {
+        let mut held = self.starting.lock().ok()?;
+        held.insert(session_id.to_string()).then(|| Starting {
+            starting: self.starting.clone(),
+            session_id: session_id.to_string(),
+        })
     }
 
     /// A child handed back: tell its lead, between the lead's turns.

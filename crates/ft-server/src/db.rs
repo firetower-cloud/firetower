@@ -2413,20 +2413,35 @@ impl Db {
             // `Stranded` leaves for a restart somebody asked for, or to be let
             // go of; the same two moves `can_transition_to` allows, held here
             // as well because this is the only place a worker's word reaches
-            // the row. It does not stand in the way of a real recovery:
-            // `relaunch` sets `Starting` itself, from this process, and the
-            // agent's own `Working` then arrives against a `Starting` row.
+            // the row.
+            //
+            // **And `Starting` only when this process is the one saying it.**
+            // That is the whole of the consent: `Stranded` is the state that
+            // holds "nothing restarts an agent unless a person asked", and
+            // `Starting` is its only doorway — so a worker must not be able to
+            // open it. A replayed pre-crash `StatusChanged { Starting }` —
+            // from a relaunch that was in flight when the machine went — would
+            // otherwise walk a session out of `Stranded`, and the `Working`
+            // behind it in the same replay is then an ordinary, legal move. The
+            // transition table cannot express this, because it does not know
+            // who is asking; here, `from` is exactly that.
+            //
+            // It does not stand in the way of a real recovery: `relaunch` sets
+            // `Starting` itself, from this process, with no host behind it.
             sqlx::query(
                 "UPDATE sessions SET status = $1, note = $2, updated_at = $3
                   WHERE id = $4
                     AND status <> 'Ended'
-                    AND (status <> 'Stranded' OR $1 IN ('Starting', 'Ended'))
+                    AND (status <> 'Stranded'
+                         OR $1 = 'Ended'
+                         OR ($1 = 'Starting' AND $5))
                     AND workspace_id IN (SELECT id FROM workspaces WHERE forgotten_at IS NULL)",
             )
             .bind(serde_json::to_string(status)?.trim_matches('"'))
             .bind(note.as_deref())
             .bind(at)
             .bind(session_id.as_str())
+            .bind(from.is_none())
             .execute(&mut *tx)
             .await?;
         }

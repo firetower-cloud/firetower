@@ -4969,6 +4969,72 @@ async fn an_agent_at_work(it: &Machine, title: &str) -> ft_core::SessionId {
     id
 }
 
+/// A stranded session belonging to somebody else, in the same lead's family.
+///
+/// Its own account, so the caller has writer on nothing of theirs — which is
+/// the shape of the escalation: a lead is shared, its children are not, and a
+/// child carries the subscription its own owner pinned to it.
+async fn someone_elses_child(it: &Machine, title: &str) -> ft_core::SessionId {
+    let org = ft_core::OrgId::from_stored(it.state.db.org().await.unwrap());
+    let ana = it
+        .state
+        .accounts
+        .create_user(&org, "ana", "ana@example.test", "member")
+        .await
+        .unwrap()
+        .0;
+    let id = ft_core::SessionId::new();
+    it.state
+        .db
+        .insert_session(
+            &id,
+            &it.host.id,
+            ana.id.as_str(),
+            None,
+            title,
+            "do the work",
+            None,
+            None,
+            "ClaudeCode",
+            ft_core::WorkspaceSize::Medium,
+            ft_core::Share::Equal,
+            &[],
+            None,
+        )
+        .await
+        .unwrap();
+    it.state
+        .db
+        .record_agent_line(&id, 1, r#"{"type":"assistant"}"#)
+        .await
+        .unwrap();
+    it.state
+        .fleet
+        .set_status(&id, ft_core::SessionStatus::Working, None)
+        .await;
+    id
+}
+
+/// How many times the worker has been told to start this session's agent.
+///
+/// Off the wire, because that is the only place the answer is: a refusal that
+/// happens after the launch frame has gone is not a refusal. Counted rather
+/// than asked as a yes or no, because a child is started once when it is
+/// spawned — so what a test about *not* starting it has to show is that the
+/// number did not move.
+fn starts_of(launched: &Launches, id: &ft_core::SessionId) -> usize {
+    launched
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|s| &s.session_id == id)
+        .count()
+}
+
+fn it_started(launched: &Launches, id: &ft_core::SessionId) -> bool {
+    starts_of(launched, id) > 0
+}
+
 async fn status_of(state: &AppState, id: &ft_core::SessionId) -> ft_core::SessionStatus {
     state
         .db
@@ -5150,6 +5216,28 @@ async fn a_stale_replay_cannot_un_strand_and_a_real_recovery_still_can() {
         "a pre-crash event must not put a stranded session back to work"
     );
 
+    // And not through the doorway either. `Starting` is the one status that
+    // leaves `Stranded`, so a worker saying it — a relaunch that was in flight
+    // when the machine went, replayed — would walk the session out and leave
+    // the `Working` behind it in the same replay an ordinary legal move.
+    it.says
+        .send(ToServer::Event {
+            seq: 2,
+            session_id: session.clone(),
+            kind: ft_core::EventKind::StatusChanged {
+                status: ft_core::SessionStatus::Starting,
+                note: None,
+            },
+            at: chrono::Utc::now() - chrono::TimeDelta::minutes(4),
+        })
+        .unwrap();
+    recorded(&it.state, &session, 4).await;
+    assert_eq!(
+        status_of(&it.state, &session).await,
+        ft_core::SessionStatus::Stranded,
+        "only the control plane may say a stranded session is starting"
+    );
+
     // Now the recovery somebody pressed, which is the only way out: the
     // control plane sets `Starting` itself, and the agent's own `Working`
     // arrives against that.
@@ -5181,7 +5269,7 @@ async fn a_stale_replay_cannot_un_strand_and_a_real_recovery_still_can() {
 
     it.says
         .send(ToServer::Event {
-            seq: 2,
+            seq: 3,
             session_id: session.clone(),
             kind: ft_core::EventKind::StatusChanged {
                 status: ft_core::SessionStatus::Working,
@@ -5403,6 +5491,155 @@ async fn ending_a_stranded_workspace_keeps_its_conversation() {
         .await
         .unwrap();
     assert_eq!(lines, 1, "the conversation is still there to read");
+
+    it.state.fleet.stop_supervising(&it.host.id).await;
+}
+
+/// The consent model, through the side door a lead already has a key to.
+///
+/// `children` with `switch` moves a child onto another subscription, and the
+/// switch stops the agent and starts it again — through `switch_for`,
+/// `continue_with_account` and then `relaunch`. Stopping an agent that is
+/// already absent *succeeds*, so a child whose machine restarted would have
+/// come back with no person anywhere in the operation: the lead survived
+/// somewhere else, read its own history, and rerouted quota.
+///
+/// Prior permission to move somebody's allowance is not permission to recover
+/// from a machine failure, and the second is the one this release made a
+/// decision about. Refused at the switch so the answer says what to do, and
+/// refused again at the launch, which is where it is enforced.
+#[tokio::test]
+async fn a_lead_cannot_bring_a_stranded_child_back_by_switching_its_subscription() {
+    let (state, _principal, host, ready, owner, launched) = watched_fixture().await;
+    let lead = a_lead_that_delegates(&state, &host, &ready, &owner, Agent::ClaudeCode).await;
+    let account = a_subscription(&state, &owner, "a_other", Agent::ClaudeCode).await;
+    saved_profile(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Engineer",
+            "does": "Writes the change and the tests",
+            "placement": "here",
+            "agent": "ClaudeCode",
+            // The rung that lets a lead reroute without asking anybody.
+            "onUsageLimit": "same",
+        }),
+    )
+    .await;
+    let child = a_child_that_ran_out(&state, &host, &lead, "sp1", "Engineer").await;
+    // Everything else about this switch is in order: the machine has the
+    // agent, the account is usable, the profile allows the reroute. The one
+    // thing wrong with it is the thing under test.
+    says_it_has(&state, &host, &[(Agent::ClaudeCode, true)]).await;
+
+    // And then the machine under it restarted.
+    state
+        .fleet
+        .set_status(&child.id, ft_core::SessionStatus::Stranded, None)
+        .await;
+    // It was started once, when it was spawned. That is the number that must
+    // not move.
+    let started_once = starts_of(&launched, &child.id);
+
+    let refused = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "sw1",
+            "children",
+            serde_json::json!({ "action": "switch", "id": child.id.as_str(), "account": account }),
+        ),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(
+        refused.contains("Bring it back first"),
+        "it says what a person has to do, and that the lead cannot: {refused}"
+    );
+    assert_eq!(
+        status_of(&state, &child.id).await,
+        ft_core::SessionStatus::Stranded,
+        "nothing started, and the state that holds the consent still holds it"
+    );
+    assert_eq!(
+        starts_of(&launched, &child.id),
+        started_once,
+        "no second agent was launched for it"
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// Criterion 1 of the security review: one press on a lead reaches exactly as
+/// far as the person pressing it can.
+///
+/// `children_of` answers for the control plane acting on a lead's behalf — its
+/// own doc says it is never for a handler acting for a person — so a family
+/// recovery that trusted it started children the caller had no business
+/// starting, on the subscriptions pinned to them. The endpoint had checked one
+/// session: the one they named.
+#[tokio::test]
+async fn a_family_recovery_only_starts_the_children_the_caller_may_operate() {
+    let it = a_machine().await;
+    it.ready.store(true, Ordering::SeqCst);
+    it.state
+        .db
+        .mark_host_online(
+            &it.host.id,
+            "test",
+            4,
+            8192,
+            &ft_core::DockerState::running("27.0.3"),
+        )
+        .await
+        .unwrap();
+
+    let lead = an_agent_at_work(&it, "the lead").await;
+    let mine = an_agent_at_work(&it, "a child of mine").await;
+    let theirs = someone_elses_child(&it, "a child somebody else owns").await;
+    for child in [&mine, &theirs] {
+        it.state
+            .db
+            .set_lineage(child, &lead, Some("split the work"), None)
+            .await
+            .unwrap();
+    }
+    for session in [&lead, &mine, &theirs] {
+        it.says
+            .send(ToServer::AgentClosed {
+                session_id: session.clone(),
+                gone: ft_proto::Gone::Stranded,
+            })
+            .unwrap();
+        settles_at(&it.state, session, ft_core::SessionStatus::Stranded).await;
+    }
+
+    let Json(done) = sessions::relaunch_session(
+        State(it.state.clone()),
+        Extension(it.principal.clone()),
+        Path(lead.as_str().to_string()),
+        Query(serde_json::from_value(serde_json::json!({ "family": true })).unwrap()),
+    )
+    .await
+    .expect("the family comes back");
+
+    assert!(
+        it_started(&it.launched, &mine),
+        "the child this person may operate came back"
+    );
+    assert!(
+        !it_started(&it.launched, &theirs),
+        "and the one they may not was not started on somebody else's subscription"
+    );
+    assert_eq!(
+        status_of(&it.state, &theirs).await,
+        ft_core::SessionStatus::Stranded,
+        "it is left exactly where it was"
+    );
+    // Said out loud, because the button offered a number.
+    assert_eq!(done.detail, "2 starting again. 1 isn’t yours to start.");
 
     it.state.fleet.stop_supervising(&it.host.id).await;
 }

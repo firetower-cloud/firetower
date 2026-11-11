@@ -118,7 +118,10 @@ impl SessionStatus {
             //   consent structural, and it is what stops a stale pre-crash
             //   `StatusChanged { Working }` — replayed by the worker on its
             //   next reconnect — from quietly un-stranding one. `Db::write_event`
-            //   holds the same rule in SQL for the same reason.
+            //   holds the same rule in SQL, and holds one more that cannot be
+            //   written here: `Starting` is the doorway out, so only the
+            //   control plane itself may say it. This table knows which moves
+            //   exist and not who is asking for one.
             // - not `Failed`, because a recovery that would not start has
             //   changed nothing: the worktree, the branch and the uncommitted
             //   edits are all still there. The reason goes in the note and the

@@ -798,7 +798,18 @@ pub(super) async fn send_turn(
     // relaunch either works or leaves the same state behind, and the next
     // message is somebody deciding to try again rather than a loop.
     if session.status == ft_core::SessionStatus::Failed {
-        crate::api::sessions::relaunch(&state, &session, &who).await?;
+        // `Recovering::No`, and the gate above is why it can be: this fires
+        // for `Failed` and for nothing else. A machine that restarted leaves
+        // `Stranded`, which typing into deliberately does not restart — twelve
+        // agents coming back because somebody pressed a key in one of them is
+        // the thing this feature exists to not do.
+        crate::api::sessions::relaunch(
+            &state,
+            &session,
+            &who,
+            crate::api::sessions::Recovering::No,
+        )
+        .await?;
         // Long enough for the supervisor to bind its socket, which is all this
         // is waiting for — the agent behind it can still be starting, because
         // what we send lands on a pipe it will read when it is ready. If it is

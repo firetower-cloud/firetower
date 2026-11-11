@@ -1085,15 +1085,20 @@ pub(super) async fn relaunch_session(
 
     super::accounts::ensure_not_switching(&state.db, &id).await?;
     if scope.family {
-        let brought_back = recover_family(&state, &session, &owner).await?;
+        let done = recover_family(&state, &session, &owner).await?;
         return Ok(Json(Done {
-            detail: match brought_back {
-                1 => format!("{} is starting again", session.agent.label()),
-                n => format!("{n} agents are starting again"),
+            detail: match (done.started, done.not_yours) {
+                (1, 0) => format!("{} is starting again", session.agent.label()),
+                (n, 0) => format!("{n} agents are starting again"),
+                // Said rather than quietly done: the button offered a number,
+                // and this is where it turns out to have been somebody else's
+                // to press.
+                (n, 1) => format!("{n} starting again. 1 isn’t yours to start."),
+                (n, k) => format!("{n} starting again. {k} aren’t yours to start."),
             },
         }));
     }
-    relaunch(&state, &session, &owner).await?;
+    relaunch(&state, &session, &owner, Recovering::Yes).await?;
 
     Ok(Json(Done {
         detail: format!("{} is starting again", session.agent.label()),
@@ -1279,6 +1284,30 @@ async fn carry_preferences(
     }
 }
 
+/// Whether this start is a recovery somebody pressed.
+///
+/// `Stranded` exists to hold one decision: **nothing restarts an agent unless
+/// a person asked.** Only the recovery endpoint may answer [`Recovering::Yes`]
+/// here, and only an authenticated request reaches it — so the rule is a
+/// property of the call rather than something every caller has to remember.
+///
+/// It is asked at the launch rather than at each entry, because the ways in
+/// are not one. A lead rerouting a child's subscription reaches `relaunch`
+/// through `children` → `reroute` → `switch_for` → `continue_with_account`,
+/// and stopping an agent that is already absent *succeeds* — so that path
+/// would have written `Starting` and launched the child, with no person
+/// anywhere in it. Prior permission to move somebody's quota is not permission
+/// to recover from a machine failure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Recovering {
+    /// Somebody pressed the recovery on this session, or on the lead it
+    /// belongs to.
+    Yes,
+    /// Anything else: an upgrade restarting an agent, a subscription change,
+    /// a message typed into a failed session.
+    No,
+}
+
 /// The work behind [`relaunch_session`], so a turn can do it without a request.
 ///
 /// Everything is resolved fresh rather than remembered: the credential comes
@@ -1289,6 +1318,7 @@ pub(crate) async fn relaunch(
     state: &AppState,
     session: &Session,
     owner: &str,
+    recovering: Recovering,
 ) -> Result<(), ApiError> {
     if session.forgotten_at.is_some() {
         return Err(ApiError::new(
@@ -1297,6 +1327,34 @@ pub(crate) async fn relaunch(
         ));
     }
 
+    // The one door out of `Stranded`, and it is held here. See [`Recovering`].
+    if session.status == ft_core::SessionStatus::Stranded && recovering == Recovering::No {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            "that machine restarted under this agent. Bring it back first, and then this.",
+        ));
+    }
+
+    // And no two starts of one session at once.
+    //
+    // A second press — a double click, two people, a retry after a slow
+    // first — launches a second agent into the same workspace while the
+    // first is still coming up, and the worker's launch takes the tmux
+    // session for that id: the second start tears down the one that was
+    // already running. The claim is held across the whole of this and
+    // released on every exit.
+    let Some(_starting) = state.fleet.claim_start(&session.id) else {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            format!("{} is already starting", session.agent.label()),
+        ));
+    };
+    launch(state, session, owner).await
+}
+
+/// Everything a relaunch does once it is allowed to, so the claim above is
+/// released whichever way it ends.
+async fn launch(state: &AppState, session: &Session, owner: &str) -> Result<(), ApiError> {
     let host = state
         .db
         .host_by_id(&session.host_id)
@@ -1480,19 +1538,36 @@ pub(crate) async fn relaunch(
 /// partial is the ordinary shape of this. Its reason goes in its own note,
 /// where the workspace it belongs to shows it. The lead's own failure is the
 /// request's failure, because that is the one somebody pressed.
+///
+/// **Every child is checked against the caller, not against the lead.**
+/// `owner` here is whoever made the request, and the endpoint checked only the
+/// session they named; `children_of` answers for the control plane acting on a
+/// lead's behalf and says so in its own doc, so using it in a handler is how
+/// somebody with writer on a lead and nothing but viewer on a child comes to
+/// start that child's agent — on the subscription pinned to it. One press on a
+/// lead must not reach further than the person pressing it can.
 pub(crate) async fn recover_family(
     state: &AppState,
     session: &Session,
     owner: &str,
-) -> Result<usize, ApiError> {
+) -> Result<Recovered, ApiError> {
     let children = state.db.children_of(&session.id).await.unwrap_or_default();
-    let mut brought_back = 0;
+    let mut recovered = Recovered::default();
     for child in children
         .iter()
         .filter(|c| c.status == ft_core::SessionStatus::Stranded)
     {
-        match relaunch(state, child, owner).await {
-            Ok(()) => brought_back += 1,
+        // The same question the endpoint asked about the lead, asked again
+        // about each child. Skipped rather than fatal: part of a family coming
+        // back is the ordinary outcome here, and the count is what the answer
+        // says so the interface can be honest about having done less than the
+        // button offered.
+        let Some(child) = state.db.session_to_work_in(owner, &child.id).await? else {
+            recovered.not_yours += 1;
+            continue;
+        };
+        match relaunch(state, &child, owner, Recovering::Yes).await {
+            Ok(()) => recovered.started += 1,
             Err(e) => tracing::warn!(
                 session = %child.id,
                 "recovering a child with its lead: {}",
@@ -1500,8 +1575,18 @@ pub(crate) async fn recover_family(
             ),
         }
     }
-    relaunch(state, session, owner).await?;
-    Ok(brought_back + 1)
+    relaunch(state, session, owner, Recovering::Yes).await?;
+    recovered.started += 1;
+    Ok(recovered)
+}
+
+/// What a family recovery actually did.
+#[derive(Debug, Default, Clone, Copy)]
+pub(crate) struct Recovered {
+    /// Agents started again, the lead included.
+    pub started: usize,
+    /// Stranded children the caller may not operate, so they were left alone.
+    pub not_yours: usize,
 }
 
 /// Another agent, in a workspace that is already there.
@@ -4078,7 +4163,12 @@ pub(super) async fn continue_with_account(
         // Keep the target selected on an uncertain launch: the worker may have
         // received it even if its acknowledgment was lost. Never misattribute
         // its later usage to the previous account.
-        relaunch(state, session, owner).await?;
+        //
+        // `Recovering::No`: a subscription change is not a recovery, and this
+        // is the path a *lead* reaches by rerouting a child's quota. Stopping
+        // an agent that is already gone succeeds, so without this a stranded
+        // child would be started again with nobody having asked.
+        relaunch(state, session, owner, Recovering::No).await?;
         for control in controls {
             // Claude Code's model is sent below instead, from the replay. Both
             // say the same thing when this snapshot's reader has seen the log,

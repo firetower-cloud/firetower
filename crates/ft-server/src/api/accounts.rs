@@ -770,6 +770,24 @@ pub(crate) async fn switch_for(
     if session.status == ft_core::SessionStatus::Ended {
         return Err(invalid("this workspace has ended"));
     }
+    // And a machine that restarted is not a subscription problem.
+    //
+    // A switch stops the agent and starts it again on the chosen account —
+    // and stopping an agent that is already absent *succeeds*, so a stranded
+    // session would come back here with nobody having pressed the one thing
+    // that is allowed to bring it back. That matters most on the path a lead
+    // takes: `children` with `switch` reaches this without a person in it at
+    // all, and permission to move somebody's quota is not permission to
+    // recover from a machine failure.
+    //
+    // Refused here so the answer says what to do; refused again in
+    // `sessions::relaunch`, which is where it is actually enforced, because
+    // this is not the only way in.
+    if session.status == ft_core::SessionStatus::Stranded {
+        return Err(invalid(
+            "that machine restarted under this agent. Bring it back first, and then switch it.",
+        ));
+    }
     let already_handed_off: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM agent_account_switches WHERE session_id=$1 AND next_session_id IS NOT NULL AND state='continued')")
         .bind(id.as_str()).fetch_one(state.db.pool()).await?;
     if already_handed_off {
