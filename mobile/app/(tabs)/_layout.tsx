@@ -111,6 +111,15 @@ function Signed() {
       tintColor={color.bone}
       iconColor={{ default: color.mute, selected: color.bone }}
       labelStyle={{ default: { color: color.mute }, selected: { color: color.bone } }}
+      /* Android only, and iOS ignores it. The default is `auto`, which is
+         `BottomNavigationView`'s old rule: at four destinations it draws the
+         selected label and leaves the other three as bare glyphs. That is a
+         different tab bar from the one above this comment — "every trigger
+         has an icon as well as a label" — and a different one from iOS, where
+         all four are always named. Material 3 asks for persistent labels
+         between three and five destinations, so `labeled` is both the
+         platform's current advice and what the rest of the app already does. */
+      labelVisibilityMode="labeled"
     >
       <NativeTabs.Trigger name="index">
         <NativeTabs.Trigger.Icon sf="house" md="home" />
