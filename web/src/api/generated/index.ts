@@ -12,6 +12,7 @@ export * from './organization/organization';
 export * from './providers/providers';
 export * from './repos/repos';
 export * from './roles/roles';
+export * from './schedules/schedules';
 export * from './secrets/secrets';
 export * from './sessions/sessions';
 export * from './setup/setup';

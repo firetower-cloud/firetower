@@ -20,6 +20,7 @@ pub mod normalise;
 pub mod path;
 pub mod quota;
 pub mod releases;
+pub mod schedule;
 pub mod session;
 mod status;
 pub mod turn;
@@ -27,7 +28,8 @@ pub mod turn;
 pub use grants::{Level, SubjectKind};
 pub use ids::{
     ArtifactId, ArtifactVersionId, DeliveryId, DirectoryId, HostId, OrgId, RepoId, RoleId,
-    SessionId, SkillId, SkillVersionId, TeamId, UserId, WorkspaceId,
+    ScheduleId, ScheduleRunId, SessionId, SkillId, SkillVersionId, TeamId, TriggerId, UserId,
+    WorkspaceId,
 };
 pub use path::{slug, ResourcePath};
 pub use session::{

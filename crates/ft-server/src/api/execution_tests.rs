@@ -5142,3 +5142,1020 @@ async fn spawning_a_name_two_profiles_answer_to_starts_neither() {
 
     state.fleet.stop_supervising(&host.id).await;
 }
+
+// ── schedules ──────────────────────────────────────────────────────────
+
+use chrono::{DateTime, Utc};
+use ft_core::schedule::{Cadence, PausedReason, RunSource, ScheduleRunState};
+
+/// A cadence the form can produce, so a test says what it is about rather than
+/// repeating four fields.
+fn weekdays_at(at: &str) -> Cadence {
+    Cadence::Weekdays { at: at.into() }
+}
+
+fn a_schedule(name: &str, cadence: Cadence) -> super::schedules::NewSchedule {
+    serde_json::from_value(serde_json::json!({
+        "name": name,
+        "prompt": "check every dependency for a newer version",
+        "cadence": cadence,
+        "timezone": "Europe/Paris",
+    }))
+    .unwrap()
+}
+
+async fn create(
+    state: &AppState,
+    principal: &crate::auth::Principal,
+    new: super::schedules::NewSchedule,
+) -> Result<ft_core::schedule::Schedule, ApiError> {
+    super::schedules::create_schedule(
+        State(state.clone()),
+        Extension(principal.clone()),
+        Json(new),
+    )
+    .await
+    .map(|(_, Json(s))| s)
+}
+
+/// **Criterion 43: it is inactive until a person approves it, and never runs
+/// before.**
+///
+/// Asserted on the trigger as well as on the row, because "off" has to mean
+/// the clock is not armed: a trigger with a `next_fire_at` is one the sweep
+/// would act on.
+#[tokio::test]
+async fn a_new_schedule_is_off_with_no_clock_until_somebody_approves_it() {
+    let (state, principal, _, _, owner) = fixture().await;
+    let made = create(&state, &principal, a_schedule("Dependency audit", weekdays_at("08:30")))
+        .await
+        .expect("a schedule a person wrote");
+
+    assert!(!made.active);
+    assert!(made.approved_at.is_none());
+    assert!(made.paused_reason.is_none(), "nothing gave up — it is new");
+    assert_eq!(made.triggers.len(), 1);
+    assert!(
+        made.triggers[0].next_fire_at.is_none(),
+        "an unapproved schedule has no armed clock"
+    );
+    assert!(
+        made.triggers[0].next_fires.is_empty(),
+        "and no next run to promise"
+    );
+    assert_eq!(state.db.schedules_due(Utc::now(), 20).await.unwrap().len(), 0);
+
+    // And approving arms it.
+    let Json(on) = super::schedules::approve_schedule(
+        State(state.clone()),
+        Extension(principal.clone()),
+        Path(made.id.as_str().to_string()),
+    )
+    .await
+    .expect("a person may approve");
+    assert!(on.active);
+    assert!(on.approved_at.is_some());
+    assert!(on.triggers[0].next_fire_at.is_some());
+    assert_eq!(on.triggers[0].next_fires.len(), 3, "the next three, from the server");
+    let _ = owner;
+}
+
+/// **Criterion 12, through the API rather than the form.**
+#[tokio::test]
+async fn a_cadence_closer_together_than_fifteen_minutes_is_refused_on_write() {
+    let (state, principal, _, _, _) = fixture().await;
+    let refused = create(
+        &state,
+        &principal,
+        a_schedule(
+            "Too often",
+            Cadence::Custom {
+                expr: "*/5 * * * *".into(),
+            },
+        ),
+    )
+    .await
+    .expect_err("five minutes is under the floor");
+
+    assert!(matches!(refused.code, ErrorCode::InvalidRequest));
+    assert!(
+        refused.message.contains("15 minutes"),
+        "and it says why: {}",
+        refused.message
+    );
+    assert!(
+        state.db.schedules_of("").await.unwrap_or_default().is_empty(),
+        "nothing was written down"
+    );
+}
+
+/// **Criteria 9 and 10: the read-back and the next three come from the
+/// server.**
+#[tokio::test]
+async fn the_server_reads_a_cadence_back_and_says_when_it_would_fire() {
+    let (state, principal, _, _, _) = fixture().await;
+    let Json(answer) = super::schedules::read_cadence(
+        State(state.clone()),
+        Extension(principal),
+        Json(
+            serde_json::from_value(serde_json::json!({
+                "cadence": { "kind": "weekly", "at": "07:00", "day": "monday" },
+                "timezone": "Europe/Paris",
+            }))
+            .unwrap(),
+        ),
+    )
+    .await
+    .expect("a cadence the form can produce");
+
+    assert_eq!(answer.expr, "0 7 * * 1");
+    assert!(answer.reads.contains("07:00"), "{}", answer.reads);
+    assert_eq!(answer.next_fires.len(), 3);
+    assert!(answer.next_fires.windows(2).all(|p| p[1] > p[0]), "in order");
+}
+
+/// **Criterion 14: `bypassPermissions` is not reachable from this surface.**
+///
+/// Refused rather than quietly rewritten, so somebody sending it is told.
+#[tokio::test]
+async fn a_schedule_cannot_be_asked_to_bypass_permissions() {
+    let (state, principal, _, _, _) = fixture().await;
+    let mut new = a_schedule("Dangerous", weekdays_at("08:30"));
+    new.settings.mode = Some("bypassPermissions".into());
+    let refused = create(&state, &principal, new)
+        .await
+        .expect_err("not from here");
+    assert!(matches!(refused.code, ErrorCode::InvalidRequest));
+    assert!(refused.message.contains("bypassPermissions"));
+
+    // And the default is the shipped "never ask", which denies rather than
+    // bypasses.
+    let made = create(&state, &principal, a_schedule("Ordinary", weekdays_at("08:30")))
+        .await
+        .unwrap();
+    let row = state.db.schedule(&made.id).await.unwrap().unwrap();
+    assert_eq!(row.pins["settings"]["mode"], serde_json::json!("dontAsk"));
+}
+
+/// **The four control fields are pinned explicitly**, which is the
+/// `carry_preferences` trap: an unset field is filled from whatever that
+/// person was last working with, so `settings: {}` would mean "whatever they
+/// were doing at 5pm yesterday" rather than "the defaults".
+#[tokio::test]
+async fn what_a_schedule_runs_is_pinned_rather_than_resolved_at_launch() {
+    let (state, principal, _, _, _) = fixture().await;
+    let mut new = a_schedule("Pinned", weekdays_at("08:30"));
+    new.settings.model = Some("claude-opus-5".into());
+    new.settings.effort = Some("xhigh".into());
+    let made = create(&state, &principal, new).await.unwrap();
+
+    let row = state.db.schedule(&made.id).await.unwrap().unwrap();
+    assert_eq!(row.pins["settings"]["model"], "claude-opus-5");
+    assert_eq!(row.pins["settings"]["effort"], "xhigh");
+    assert!(row.pins["skills"].is_array(), "the list, resolved now");
+
+    // And the spec a run is started from carries the two values that are not
+    // controls on this surface.
+    let spec = crate::schedules::launch::spec_of(&row).expect("it reads back as a launch");
+    assert_eq!(spec.size, ft_core::WorkspaceSize::Medium);
+    assert_eq!(spec.share, ft_core::Share::Yields, "Equal is the default, so it is set");
+    assert!(spec.host_id.is_none(), "a policy, never a machine");
+    assert!(spec.workspace_id.is_none(), "every run starts a new workspace");
+}
+
+/// **Criterion 54: editing clears the approval.**
+#[tokio::test]
+async fn editing_a_schedule_takes_it_off_until_somebody_approves_again() {
+    let (state, principal, _, _, _) = fixture().await;
+    let made = create(&state, &principal, a_schedule("Audit", weekdays_at("08:30")))
+        .await
+        .unwrap();
+    let _ = super::schedules::approve_schedule(
+        State(state.clone()),
+        Extension(principal.clone()),
+        Path(made.id.as_str().to_string()),
+    )
+    .await
+    .unwrap();
+
+    let Json(edited) = super::schedules::update_schedule(
+        State(state.clone()),
+        Extension(principal.clone()),
+        Path(made.id.as_str().to_string()),
+        Json(a_schedule("Audit", weekdays_at("09:30"))),
+    )
+    .await
+    .expect("a person may edit their own");
+
+    assert!(!edited.active);
+    assert!(edited.approved_at.is_none(), "the approval is gone");
+    assert_eq!(edited.revision, 2, "and the revision moved");
+    assert_eq!(state.db.schedules_due(Utc::now(), 20).await.unwrap().len(), 0);
+}
+
+/// A session an agent is working in, running as a saved profile — which is
+/// what the "proposed by" card names.
+async fn an_agent_at_work(
+    state: &AppState,
+    host: &Host,
+    owner: &str,
+) -> ft_core::SessionId {
+    let profile = saved_profile(
+        state,
+        owner,
+        serde_json::json!({
+            "name": "Ada, the lead",
+            "does": "Breaks work up and hands it out",
+            "placement": "here",
+            "canDelegate": true,
+        }),
+    )
+    .await;
+    lead_running(state, host, owner, Agent::ClaudeCode, &profile).await
+}
+
+/// Make a schedule due, the way one becomes due.
+///
+/// Arms each trigger to **a real occurrence of its own cadence** that has
+/// already passed, which is what `next_fire_at` holds a moment after a fire
+/// time goes by. An arbitrary timestamp would not do: the sweep asks the
+/// cadence which occurrences lie between where the clock stood and now, so a
+/// value that is not an occurrence is a clock standing somewhere the cadence
+/// never put it.
+async fn due_since(state: &AppState, id: &ft_core::ScheduleId, before: DateTime<Utc>) {
+    for trigger in state.db.triggers_of(id).await.unwrap() {
+        let clock = crate::schedules::clock_of(&trigger.config).expect("the trigger reads back");
+        let was = clock
+            .previous_before(before)
+            .expect("every cadence has a last occurrence");
+        state
+            .db
+            .set_next_fire_at(&trigger.id, Some(was))
+            .await
+            .unwrap();
+    }
+}
+
+/// Where a schedule's clock stands.
+async fn clock_at(state: &AppState, id: &ft_core::ScheduleId) -> Option<DateTime<Utc>> {
+    state.db.triggers_of(id).await.unwrap()[0].next_fire_at
+}
+
+async fn runs_of(state: &AppState, id: &ft_core::ScheduleId) -> Vec<ft_core::schedule::ScheduleRun> {
+    state
+        .db
+        .runs_of(id, 50)
+        .await
+        .unwrap()
+        .iter()
+        .map(super::schedules::as_run)
+        .collect()
+}
+
+/// An approved, armed schedule, for the sweep tests.
+async fn armed(
+    state: &AppState,
+    principal: &crate::auth::Principal,
+    name: &str,
+) -> ft_core::schedule::Schedule {
+    let made = create(state, principal, a_schedule(name, weekdays_at("08:30")))
+        .await
+        .unwrap();
+    let _ = super::schedules::approve_schedule(
+        State(state.clone()),
+        Extension(principal.clone()),
+        Path(made.id.as_str().to_string()),
+    )
+    .await
+    .unwrap();
+    made
+}
+
+/// **Criterion 20 and 21: the boundary is the process's start time.**
+///
+/// Due before this process started is `missed` and is never run late. Due
+/// *after* it started — which includes during the start-up settle — still
+/// runs. Taken literally, "never run anything already in the past" would have
+/// the sweep's own ninety-second delay destroy every occurrence inside it.
+#[tokio::test]
+async fn an_occurrence_due_before_this_process_started_is_missed_and_one_after_is_not() {
+    let (state, principal, _, _, _) = fixture().await;
+    let booted = Utc::now();
+
+    let old = armed(&state, &principal, "Before the boot").await;
+    due_since(&state, &old.id, booted).await;
+    crate::schedules::sweep(&state, booted).await.unwrap();
+
+    let history = runs_of(&state, &old.id).await;
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].state, ScheduleRunState::Missed);
+    assert!(
+        history[0]
+            .detail
+            .as_deref()
+            .unwrap_or_default()
+            .contains("never made up"),
+        "the line says so rather than leaving a word: {:?}",
+        history[0].detail
+    );
+
+    // And one due *since* we started is claimed rather than missed — which is
+    // the case a literal reading of "never run anything already in the past"
+    // would have lost, including every occurrence inside the start-up settle.
+    let fresh = armed(&state, &principal, "After the boot").await;
+    due_since(&state, &fresh.id, Utc::now()).await;
+    let long_ago = clock_at(&state, &fresh.id)
+        .await
+        .expect("armed")
+        - chrono::TimeDelta::seconds(1);
+    crate::schedules::sweep(&state, long_ago).await.unwrap();
+
+    let history = runs_of(&state, &fresh.id).await;
+    assert_eq!(history.len(), 1);
+    assert_ne!(
+        history[0].state,
+        ScheduleRunState::Missed,
+        "due since we started, so it runs — however long the sweep took to reach it"
+    );
+}
+
+/// **Criterion 22: never twice for one occurrence.**
+///
+/// The unique index is the claim, and a second pass over the same moment finds
+/// it taken. This is the whole of the locking.
+#[tokio::test]
+async fn one_occurrence_is_never_claimed_twice() {
+    let (state, principal, _, _, _) = fixture().await;
+    let made = armed(&state, &principal, "Once only").await;
+    due_since(&state, &made.id, Utc::now()).await;
+    let moment = clock_at(&state, &made.id).await.expect("armed");
+    let booted = moment - chrono::TimeDelta::seconds(1);
+
+    crate::schedules::sweep(&state, booted).await.unwrap();
+    // Wound back to the same moment, which is what a second process reading
+    // the row before the first one wrote it would see.
+    state
+        .db
+        .set_next_fire_at(&state.db.triggers_of(&made.id).await.unwrap()[0].id, Some(moment))
+        .await
+        .unwrap();
+    crate::schedules::sweep(&state, booted).await.unwrap();
+
+    let at_that_moment = runs_of(&state, &made.id)
+        .await
+        .into_iter()
+        .filter(|r| r.fire_at == moment)
+        .count();
+    assert_eq!(at_that_moment, 1, "one agent per fire time");
+}
+
+/// **Criterion 23: an occurrence behind a run still in flight is skipped, with
+/// the reason recorded.**
+///
+/// Claimed and recorded rather than silently omitted, so the history says a
+/// run was due and why it did not happen.
+#[tokio::test]
+async fn an_occurrence_behind_a_running_one_is_skipped_and_says_so() {
+    let (state, principal, _, _, _) = fixture().await;
+    let made = armed(&state, &principal, "Overlapping").await;
+
+    // A run of this schedule, claimed and never launched, which is what the
+    // overlap check reads as in flight.
+    state
+        .db
+        .claim_run(
+            &ft_core::ScheduleRunId::new(),
+            &made.id,
+            None,
+            Utc::now() - chrono::TimeDelta::minutes(30),
+            1,
+            "cron",
+            "claimed",
+            None,
+        )
+        .await
+        .unwrap();
+
+    due_since(&state, &made.id, Utc::now()).await;
+    let booted = clock_at(&state, &made.id).await.unwrap() - chrono::TimeDelta::seconds(1);
+    crate::schedules::sweep(&state, booted).await.unwrap();
+
+    let skipped = runs_of(&state, &made.id)
+        .await
+        .into_iter()
+        .find(|r| r.state == ScheduleRunState::Skipped)
+        .expect("the occurrence was recorded, not dropped");
+    assert!(
+        skipped
+            .detail
+            .as_deref()
+            .unwrap_or_default()
+            .contains("still going"),
+        "{:?}",
+        skipped.detail
+    );
+}
+
+/// **Criteria 38 and 42: a hand-started run is marked `manual` and the clock
+/// does not move.**
+///
+/// The pause rule reads only scheduled runs, so three presses that each asked
+/// something must not pause a schedule that has never failed on its own clock.
+#[tokio::test]
+async fn run_now_is_marked_manual_and_leaves_the_clock_where_it_is() {
+    let (state, principal, _, _, _) = fixture().await;
+    let made = armed(&state, &principal, "By hand").await;
+    let before = state.db.triggers_of(&made.id).await.unwrap()[0].next_fire_at;
+
+    let _ = super::schedules::run_schedule_now(
+        State(state.clone()),
+        Extension(principal.clone()),
+        Path(made.id.as_str().to_string()),
+    )
+    .await
+    .expect("a person may start one now");
+
+    let after = state.db.triggers_of(&made.id).await.unwrap()[0].next_fire_at;
+    assert_eq!(before, after, "the clock is untouched");
+
+    let run = runs_of(&state, &made.id).await.pop().expect("a run exists");
+    assert_eq!(run.source, RunSource::Manual);
+
+    // And it is outside the window the rule reads at all.
+    assert!(
+        state
+            .db
+            .runs_for_streak(&made.id, 50)
+            .await
+            .unwrap()
+            .is_empty(),
+        "ignored entirely, which is what the filter in the query means"
+    );
+}
+
+/// Write a terminal run straight into the history, the way a test forces a
+/// streak rather than waiting three days for one.
+#[allow(clippy::too_many_arguments)]
+async fn record(
+    state: &AppState,
+    id: &ft_core::ScheduleId,
+    minutes_ago: i64,
+    state_word: &str,
+    outcome: Option<&str>,
+    error_code: Option<&str>,
+) {
+    let run = ft_core::ScheduleRunId::new();
+    state
+        .db
+        .claim_run(
+            &run,
+            id,
+            None,
+            Utc::now() - chrono::TimeDelta::minutes(minutes_ago),
+            1,
+            "cron",
+            "claimed",
+            None,
+        )
+        .await
+        .unwrap();
+    state
+        .db
+        .settle_run(&run, state_word, outcome, Some("forced"), None, error_code, false)
+        .await
+        .unwrap();
+}
+
+/// **Criterion 35 and 36, end to end: three failures pauses, and the clock
+/// stops with it.**
+#[tokio::test]
+async fn three_failures_pause_the_schedule_and_disarm_its_clock() {
+    let (state, principal, _, _, _) = fixture().await;
+    let made = armed(&state, &principal, "Keeps failing").await;
+
+    for ago in [30, 20] {
+        record(&state, &made.id, ago, "failed", None, Some("ActionFailed")).await;
+    }
+    crate::schedules::settle::after_terminal(&state, &made.id)
+        .await
+        .unwrap();
+    assert!(
+        state.db.schedule(&made.id).await.unwrap().unwrap().active,
+        "two is not three"
+    );
+
+    record(&state, &made.id, 10, "failed", None, Some("ActionFailed")).await;
+    crate::schedules::settle::after_terminal(&state, &made.id)
+        .await
+        .unwrap();
+
+    let row = state.db.schedule(&made.id).await.unwrap().unwrap();
+    assert!(!row.active);
+    assert_eq!(
+        row.paused_reason.as_deref(),
+        Some("three_failures"),
+        "the rule, and nothing else"
+    );
+    assert!(
+        state.db.triggers_of(&made.id).await.unwrap()[0]
+            .next_fire_at
+            .is_none(),
+        "a paused schedule's trigger is out of the due index entirely"
+    );
+    assert_eq!(state.db.schedules_due(Utc::now(), 20).await.unwrap().len(), 0);
+}
+
+/// **Criterion 36a: three unreachable machines do not pause a schedule, and
+/// five do.**
+///
+/// The case the rule earns its shape on, asserted through the stored column
+/// rather than over the pure function — because this is where `error_code`
+/// being the `ErrorCode` verbatim has to hold.
+#[tokio::test]
+async fn an_unreachable_machine_is_bounded_by_five_and_not_by_three() {
+    let (state, principal, _, _, _) = fixture().await;
+    let made = armed(&state, &principal, "Shut laptop").await;
+
+    for ago in [50, 40, 30] {
+        record(&state, &made.id, ago, "failed", None, Some("HostUnreachable")).await;
+    }
+    crate::schedules::settle::after_terminal(&state, &made.id)
+        .await
+        .unwrap();
+    assert!(
+        state.db.schedule(&made.id).await.unwrap().unwrap().active,
+        "a laptop shut for three days is not a broken schedule"
+    );
+
+    for ago in [20, 10] {
+        record(&state, &made.id, ago, "failed", None, Some("HostUnreachable")).await;
+    }
+    crate::schedules::settle::after_terminal(&state, &made.id)
+        .await
+        .unwrap();
+
+    let row = state.db.schedule(&made.id).await.unwrap().unwrap();
+    assert!(!row.active);
+    assert_eq!(
+        row.paused_reason.as_deref(),
+        Some("five_runs"),
+        "the five bound, which is what the old exception bought"
+    );
+}
+
+/// **Criterion 37: a month of refusals neither pauses a healthy schedule nor
+/// absolves a broken one.**
+#[tokio::test]
+async fn refusals_are_stepped_over_rather_than_resetting_a_streak() {
+    let (state, principal, _, _, _) = fixture().await;
+    let made = armed(&state, &principal, "Full disk").await;
+
+    for ago in (10..50).step_by(2) {
+        record(&state, &made.id, ago as i64, "refused", None, Some("NoCapacity")).await;
+    }
+    crate::schedules::settle::after_terminal(&state, &made.id)
+        .await
+        .unwrap();
+    let row = state.db.schedule(&made.id).await.unwrap().unwrap();
+    assert!(row.active, "a week of refusals must not pause a healthy schedule");
+
+    let Json(read) = super::schedules::one_schedule(
+        State(state.clone()),
+        Extension(principal.clone()),
+        Path(made.id.as_str().to_string()),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        read.streak,
+        ft_core::schedule::Streak::default(),
+        "and visibly does not move it toward pausing"
+    );
+}
+
+/// **Criterion 39: the column holds the rule, and the page can say the shape.**
+///
+/// Two failures and three questions is `five_runs` — neither "kept failing"
+/// nor "kept needing you" — and the counts a client needs to say so come back
+/// derived rather than stored.
+#[tokio::test]
+async fn a_mixed_streak_stores_only_the_rule_and_reports_both_populations() {
+    let (state, principal, _, _, _) = fixture().await;
+    let made = armed(&state, &principal, "Rebase the ledger").await;
+
+    record(&state, &made.id, 50, "failed", None, Some("ActionFailed")).await;
+    record(&state, &made.id, 40, "finished", Some("needs_you"), None).await;
+    record(&state, &made.id, 30, "failed", None, Some("ActionFailed")).await;
+    record(&state, &made.id, 20, "finished", Some("needs_you"), None).await;
+    record(&state, &made.id, 10, "finished", Some("needs_you"), None).await;
+    crate::schedules::settle::after_terminal(&state, &made.id)
+        .await
+        .unwrap();
+
+    let Json(read) = super::schedules::one_schedule(
+        State(state.clone()),
+        Extension(principal),
+        Path(made.id.as_str().to_string()),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(read.paused_reason, Some(PausedReason::FiveRuns));
+    assert_eq!(read.streak.counted, 5);
+    assert_eq!(read.streak.failures, 2);
+    assert_eq!(read.streak.questions, 3);
+    assert!(
+        read.streak.failures > 0 && read.streak.questions > 0,
+        "which is how a page knows to say \"kept failing and asking\" without being told"
+    );
+}
+
+/// **Criterion 42c: there is no counter column.**
+///
+/// Asserted against the catalogue rather than against a struct, because the
+/// thing that must not exist is the column — a stored counter would have three
+/// writers and would need a backfill, to cache an answer an append-only table
+/// already holds.
+#[tokio::test]
+async fn no_counter_column_exists_on_schedules() {
+    let (state, _, _, _, _) = fixture().await;
+    let columns: Vec<String> = sqlx::query_scalar(
+        "SELECT column_name FROM information_schema.columns
+          WHERE table_name = 'schedules' AND table_schema = current_schema()",
+    )
+    .fetch_all(state.db.pool())
+    .await
+    .unwrap();
+
+    assert!(!columns.is_empty(), "the table is there to be checked");
+    for absent in ["consecutive_failures", "keep_at_most", "catch_up_within"] {
+        assert!(
+            !columns.iter().any(|c| c == absent),
+            "`{absent}` is deliberately absent and must not arrive as a default"
+        );
+    }
+}
+
+/// **Criterion 40: answering afterwards does not turn it back on**, and
+/// neither does anything else — only a person.
+#[tokio::test]
+async fn nothing_turns_a_paused_schedule_back_on_by_itself() {
+    let (state, principal, _, _, _) = fixture().await;
+    let made = armed(&state, &principal, "Kept asking").await;
+
+    for ago in [50, 40, 30, 20, 10] {
+        record(&state, &made.id, ago, "finished", Some("needs_you"), None).await;
+    }
+    crate::schedules::settle::after_terminal(&state, &made.id)
+        .await
+        .unwrap();
+    assert!(!state.db.schedule(&made.id).await.unwrap().unwrap().active);
+
+    // A run that completes afterwards clears the streak — and the schedule
+    // stays off, because `after_terminal` only ever pauses.
+    record(&state, &made.id, 1, "finished", Some("clean"), None).await;
+    crate::schedules::settle::after_terminal(&state, &made.id)
+        .await
+        .unwrap();
+    let row = state.db.schedule(&made.id).await.unwrap().unwrap();
+    assert!(!row.active, "Firetower never turns a schedule back on");
+
+    // And a person can.
+    let Json(back) = super::schedules::resume_schedule(
+        State(state.clone()),
+        Extension(principal),
+        Path(made.id.as_str().to_string()),
+    )
+    .await
+    .unwrap();
+    assert!(back.active);
+    assert!(back.paused_reason.is_none(), "turning it on clears the rule");
+}
+
+/// **Criterion 32: no cap anywhere, and the count is drawn in both switch
+/// states.**
+#[tokio::test]
+async fn the_count_of_kept_workspaces_is_reported_whether_or_not_clean_runs_are_deleted() {
+    let (state, principal, _, _, _) = fixture().await;
+    for (name, delete) in [("Deletes", true), ("Keeps", false)] {
+        let mut new = a_schedule(name, weekdays_at("08:30"));
+        new.delete_clean_runs = delete;
+        let made = create(&state, &principal, new).await.unwrap();
+        let Json(read) = super::schedules::one_schedule(
+            State(state.clone()),
+            Extension(principal.clone()),
+            Path(made.id.as_str().to_string()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(read.workspaces_kept, 0, "{name}: a count, in both states");
+    }
+}
+
+/// **Criterion 17 and 27: with no repository the switch is off and stays off.**
+///
+/// `session_work` answers an empty list for a workspace with nothing checked
+/// out, so "nothing uncommitted" is vacuously true — a clean-run rule would
+/// read a bare workspace as the safe case and delete every file the agent
+/// made. The server refuses to store the switch on, whether or not the form
+/// remembered to hide it.
+#[tokio::test]
+async fn a_schedule_with_no_repository_never_deletes_anything() {
+    let (state, principal, _, _, _) = fixture().await;
+    let mut new = a_schedule("Bare agent", weekdays_at("08:30"));
+    new.delete_clean_runs = true;
+    new.repo_id = None;
+    let made = create(&state, &principal, new).await.unwrap();
+
+    assert!(
+        !made.delete_clean_runs,
+        "the dangerous case, not the safe one — git never saw the directory"
+    );
+    assert!(made.repo_id.is_none());
+}
+
+/// A schedule naming somebody else's repository is refused, for the same
+/// reason a session is: the lookup takes the person.
+#[tokio::test]
+async fn a_schedule_cannot_be_pointed_at_another_persons_repository() {
+    let (state, principal, _, _, _) = fixture().await;
+    let (_, hers) = somebody_elses_repository(&state, "ana").await;
+    let mut new = a_schedule("Not mine", weekdays_at("08:30"));
+    new.repo_id = Some(hers.id.clone());
+
+    let refused = create(&state, &principal, new)
+        .await
+        .expect_err("not theirs to put on a clock");
+    assert!(matches!(refused.code, ErrorCode::RepoNotConnected));
+}
+
+/// **Criterion 48 and 50: a launch refused for capacity is `refused`, carries
+/// its `ErrorCode`, and takes no strike.**
+///
+/// Forced with an empty fleet, which is the refusal the floor produces by a
+/// different road — what this asserts is the mapping, which is the part the
+/// scheduler owns.
+#[tokio::test]
+async fn a_refused_launch_is_recorded_refused_and_moves_nothing() {
+    let (state, principal, host, _, _) = fixture().await;
+    // An empty fleet, which is what a refusal for capacity looks like from the
+    // scheduler's side whatever emptied it — the floor narrowing to nothing is
+    // the same `NoCapacity` by a different road, and the mapping is what this
+    // is about.
+    state.fleet.stop_supervising(&host.id).await;
+    state.db.set_drained(&host.id, true).await.ok();
+
+    let made = armed(&state, &principal, "No machine").await;
+    let row = state.db.schedule(&made.id).await.unwrap().unwrap();
+
+    // Awaited rather than swept, so this asserts the mapping rather than
+    // racing the task the sweep starts it on. The claim is the same one the
+    // sweep would have written.
+    let claim = state
+        .db
+        .claim_run(
+            &ft_core::ScheduleRunId::new(),
+            &made.id,
+            None,
+            Utc::now(),
+            1,
+            "cron",
+            "claimed",
+            None,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    crate::schedules::launch::start(&state, &row, &claim)
+        .await
+        .expect("a refusal is an outcome, not an error");
+
+    let history = runs_of(&state, &made.id).await;
+    let run = history
+        .iter()
+        .find(|r| r.state.is_terminal())
+        .unwrap_or_else(|| panic!("the occurrence was settled; history is {history:#?}"))
+        .clone();
+    assert_eq!(run.state, ScheduleRunState::Refused, "nothing was started");
+    assert_eq!(
+        run.error_code.as_deref(),
+        Some("NoCapacity"),
+        "the ErrorCode verbatim, because the rule needs a predicate and detail is prose"
+    );
+    assert!(!run.workspace_kept);
+    assert!(
+        run.detail.as_deref().unwrap_or_default().starts_with("Refused."),
+        "{:?}",
+        run.detail
+    );
+
+    // And it is transparent: the schedule is still on and the streak is empty.
+    let row = state.db.schedule(&made.id).await.unwrap().unwrap();
+    assert!(row.active, "a refusal is not a failure");
+}
+
+/// **Criterion 24: a long gap produces one row naming the period.**
+#[tokio::test]
+async fn a_schedule_left_alone_for_a_year_gets_one_history_row_rather_than_thousands() {
+    let (state, principal, _, _, _) = fixture().await;
+    let made = create(
+        &state,
+        &principal,
+        a_schedule(
+            "Every quarter hour",
+            Cadence::Custom {
+                expr: "*/15 * * * *".into(),
+            },
+        ),
+    )
+    .await
+    .unwrap();
+    let _ = super::schedules::approve_schedule(
+        State(state.clone()),
+        Extension(principal.clone()),
+        Path(made.id.as_str().to_string()),
+    )
+    .await
+    .unwrap();
+
+    due_since(&state, &made.id, Utc::now() - chrono::TimeDelta::days(365)).await;
+    crate::schedules::sweep(&state, Utc::now() - chrono::TimeDelta::days(366))
+        .await
+        .unwrap();
+
+    let history = runs_of(&state, &made.id).await;
+    assert_eq!(history.len(), 1, "one row, not thirty-five thousand");
+    assert_eq!(history[0].state, ScheduleRunState::Missed);
+    let line = history[0].detail.as_deref().unwrap_or_default();
+    assert!(line.contains("runs did not happen"), "{line}");
+    assert!(line.contains("between"), "it names the period: {line}");
+
+    // And the clock landed after the gap rather than inside it.
+    let next = state.db.triggers_of(&made.id).await.unwrap()[0]
+        .next_fire_at
+        .expect("the clock advanced");
+    assert!(next > Utc::now() - chrono::TimeDelta::minutes(20));
+}
+
+/// **Criterion 56: a disabled owner stops the schedule.**
+///
+/// `set_disabled` ends their browser sessions and nothing else, so without
+/// this gate their schedules would fire forever and nothing in the launch path
+/// would notice. It pauses as well as refusing, so that re-enabling the person
+/// does not silently re-arm six months of automation.
+#[tokio::test]
+async fn a_disabled_owner_stops_their_schedules() {
+    let (state, principal, _, _, _) = fixture().await;
+    // A colleague, because the administrator who runs the fixture is the only
+    // one and `set_disabled` rightly refuses to lock an installation out.
+    let (them, _) = somebody_elses_repository(&state, "ana").await;
+    let id = ft_core::ScheduleId::new();
+    super::schedules::write_one(
+        &state,
+        &them,
+        &them,
+        &id,
+        a_schedule("Runs as somebody", weekdays_at("08:30")),
+        true,
+    )
+    .await
+    .unwrap();
+    state.db.approve_schedule(&id, &them).await.unwrap();
+    state.db.set_schedule_active(&id, true, None).await.unwrap();
+    let made = state.db.schedule(&id).await.unwrap().unwrap();
+
+    state
+        .accounts
+        .set_disabled(&ft_core::UserId::from_stored(them.clone()), true)
+        .await
+        .unwrap();
+    let _ = &principal;
+
+    due_since(&state, &made.id, Utc::now()).await;
+    let booted = clock_at(&state, &made.id).await.unwrap() - chrono::TimeDelta::seconds(1);
+    crate::schedules::sweep(&state, booted).await.unwrap();
+    for _ in 0..100 {
+        if !state.db.schedule(&made.id).await.unwrap().unwrap().active {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+
+    let row = state.db.schedule(&made.id).await.unwrap().unwrap();
+    assert!(!row.active);
+    assert_eq!(row.paused_reason.as_deref(), Some("owner_disabled"));
+
+    let run = runs_of(&state, &made.id)
+        .await
+        .into_iter()
+        .find(|r| r.state.is_terminal())
+        .expect("it was recorded");
+    assert_eq!(run.state, ScheduleRunState::Refused, "nothing was started, no secret read");
+}
+
+/// **Criteria 43–46, over MCP: an agent proposes and the row is off.**
+#[tokio::test]
+async fn an_agent_proposes_a_schedule_that_has_never_run() {
+    let (state, principal, host, ready, owner) = fixture().await;
+    ready.store(true, Ordering::SeqCst);
+    let lead = an_agent_at_work(&state, &host, &owner).await;
+
+    let said = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "p1",
+            "propose_schedule",
+            serde_json::json!({
+                "name": "Close the loop on stale branches",
+                "prompt": "List every branch with no commit in 30 days. Delete nothing.",
+                "cadence": "monthly",
+                "at": "09:00",
+                "dayOfMonth": 1,
+                "timezone": "Europe/Paris",
+            }),
+        ),
+    )
+    .await
+    .expect("an agent may propose one");
+
+    assert!(said.contains("off"), "it says so to the agent: {said}");
+    let Json(library) = super::schedules::list_schedules(
+        State(state.clone()),
+        Extension(principal.clone()),
+    )
+    .await
+    .unwrap();
+    let proposed = library
+        .iter()
+        .find(|s| s.name == "Close the loop on stale branches")
+        .expect("it is in the library immediately");
+    assert!(!proposed.active);
+    assert!(proposed.approved_at.is_none());
+    assert!(proposed.made.by_agent, "and the row says where it came from");
+    assert!(proposed.made.from_session_id.is_some(), "with a link back");
+    assert_eq!(state.db.schedules_due(Utc::now(), 20).await.unwrap().len(), 0);
+
+    // **Criterion 45: it may not approve, and it may not resume.**
+    for forbidden in ["approve_schedule", "resume_schedule", "update_schedule", "delete_schedule"] {
+        let refused = crate::delegate::handle(
+            &state,
+            &asks(
+                &host,
+                &lead,
+                "p2",
+                forbidden,
+                serde_json::json!({ "name": "Close the loop on stale branches" }),
+            ),
+        )
+        .await;
+        assert!(
+            refused.is_err(),
+            "`{forbidden}` is not something a session can ask Firetower for"
+        );
+    }
+
+    // **Criterion 47: and there is no tool that ends a workspace.**
+    for absent in ["end_workspace", "destroy_session", "delete_workspace", "end_session"] {
+        assert!(
+            crate::delegate::handle(
+                &state,
+                &asks(&host, &lead, "p3", absent, serde_json::json!({})),
+            )
+            .await
+            .is_err(),
+            "`{absent}` must not exist"
+        );
+    }
+}
+
+/// An agent may pause one, and may not turn it back on.
+#[tokio::test]
+async fn an_agent_may_stop_a_schedule_and_not_start_one() {
+    let (state, principal, host, ready, owner) = fixture().await;
+    ready.store(true, Ordering::SeqCst);
+    let lead = an_agent_at_work(&state, &host, &owner).await;
+    let made = armed(&state, &principal, "Noisy").await;
+
+    let said = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "s1",
+            "pause_schedule",
+            serde_json::json!({ "name": "Noisy" }),
+        ),
+    )
+    .await
+    .expect("an agent may stop one");
+    assert!(said.contains("cannot turn it back on"), "{said}");
+
+    let row = state.db.schedule(&made.id).await.unwrap().unwrap();
+    assert!(!row.active);
+    assert!(
+        row.paused_reason.is_none(),
+        "somebody paused this, which reads differently from a schedule that gave up"
+    );
+}

@@ -8,8 +8,8 @@ use crate::access::{filed_where, filed_within, reachable, Level};
 use anyhow::{Context, Result};
 use ft_core::{
     path::ResourcePath, session::Checkout, Agent, AgentMode, AgentPresence, Compute, Event,
-    EventKind, Host, HostId, HostState, Repo, RepoId, Session, SessionId, SessionStatus,
-    WorkspaceId, WorkspaceSize,
+    EventKind, Host, HostId, HostState, Repo, RepoId, ScheduleId, ScheduleRunId, Session,
+    SessionId, SessionStatus, TriggerId, WorkspaceId, WorkspaceSize,
 };
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Row};
@@ -2751,6 +2751,676 @@ impl Db {
 
         rows.into_iter().map(event_from_row).collect()
     }
+
+    // ── schedules ──────────────────────────────────────────────────────
+
+    /// Every schedule of one person's, newest change first.
+    ///
+    /// Theirs, in SQL. A schedule is not shared — no `path`, no `filed_where`
+    /// — so the question collapses to "is it mine" exactly as it does for a
+    /// repository, and the predicate says that much and no more.
+    pub async fn schedules_of(&self, person: &str) -> Result<Vec<ScheduleRow>> {
+        Ok(sqlx::query(&format!(
+            "SELECT {SCHEDULE_COLUMNS} FROM schedules s
+              WHERE s.owner_id = $1
+              ORDER BY s.updated_at DESC"
+        ))
+        .bind(person)
+        .fetch_all(&self.pool)
+        .await?
+        .iter()
+        .map(schedule_from_row)
+        .collect())
+    }
+
+    /// One schedule of theirs. `None` when it is somebody else's, which is the
+    /// same answer as it not existing.
+    pub async fn schedule_of(&self, person: &str, id: &ScheduleId) -> Result<Option<ScheduleRow>> {
+        Ok(sqlx::query(&format!(
+            "SELECT {SCHEDULE_COLUMNS} FROM schedules s WHERE s.id = $1 AND s.owner_id = $2"
+        ))
+        .bind(id.as_str())
+        .bind(person)
+        .fetch_optional(&self.pool)
+        .await?
+        .as_ref()
+        .map(schedule_from_row))
+    }
+
+    /// One schedule, with nobody asking — for the sweep, which has an owner id
+    /// on the row rather than a person making a request.
+    pub async fn schedule(&self, id: &ScheduleId) -> Result<Option<ScheduleRow>> {
+        Ok(sqlx::query(&format!(
+            "SELECT {SCHEDULE_COLUMNS} FROM schedules s WHERE s.id = $1"
+        ))
+        .bind(id.as_str())
+        .fetch_optional(&self.pool)
+        .await?
+        .as_ref()
+        .map(schedule_from_row))
+    }
+
+    /// Write a schedule down. Inactive and unapproved: turning it on is a
+    /// separate act, which is the whole of the propose-but-not-activate rule.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn insert_schedule(
+        &self,
+        id: &ScheduleId,
+        owner: &str,
+        created_by: &str,
+        from_session_id: Option<&str>,
+        name: &str,
+        spec: &serde_json::Value,
+        pins: &serde_json::Value,
+        delete_clean_runs: bool,
+    ) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO schedules
+               (id, org_id, owner_id, created_by, from_session_id, name, spec, pins,
+                delete_clean_runs)
+             VALUES ($1, (SELECT org_id FROM users WHERE id = $2), $2, $3, $4, $5, $6, $7, $8)",
+        )
+        .bind(id.as_str())
+        .bind(owner)
+        .bind(created_by)
+        .bind(from_session_id)
+        .bind(name)
+        .bind(spec)
+        .bind(pins)
+        .bind(delete_clean_runs)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Replace what a schedule runs, and clear its approval.
+    ///
+    /// **An edit bumps the revision and un-approves.** A schedule an agent
+    /// proposed and a person approved is an authorization over a particular
+    /// text; changing the text means the next occurrence is refused until
+    /// somebody looks again. A run already in flight carries the revision it
+    /// started on and is untouched.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn update_schedule(
+        &self,
+        id: &ScheduleId,
+        name: &str,
+        spec: &serde_json::Value,
+        pins: &serde_json::Value,
+        delete_clean_runs: bool,
+    ) -> Result<i32> {
+        Ok(sqlx::query_scalar(
+            "UPDATE schedules
+                SET name = $2, spec = $3, pins = $4, delete_clean_runs = $5,
+                    revision = revision + 1, approved_by = NULL, approved_at = NULL,
+                    updated_at = now()
+              WHERE id = $1
+              RETURNING revision",
+        )
+        .bind(id.as_str())
+        .bind(name)
+        .bind(spec)
+        .bind(pins)
+        .bind(delete_clean_runs)
+        .fetch_one(&self.pool)
+        .await?)
+    }
+
+    /// Turn a schedule on, or off, and say which rule did it.
+    ///
+    /// `paused_reason` is `None` for a person — "you paused this" and "this
+    /// gave up" have to read differently, and the absence is the cheapest way
+    /// to tell them apart. Turning one *on* always clears it.
+    pub async fn set_schedule_active(
+        &self,
+        id: &ScheduleId,
+        active: bool,
+        paused_reason: Option<&str>,
+    ) -> Result<()> {
+        sqlx::query(
+            "UPDATE schedules
+                SET active = $2, paused_reason = CASE WHEN $2 THEN NULL ELSE $3 END,
+                    updated_at = now()
+              WHERE id = $1",
+        )
+        .bind(id.as_str())
+        .bind(active)
+        .bind(paused_reason)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Stop a schedule, once, and say so only if it was running.
+    ///
+    /// The compare-and-set the sweep needs: two passes reaching the same
+    /// conclusion must pause once, and the second must not re-announce it.
+    /// Zero rows means somebody else got there first, which is fine.
+    pub async fn pause_schedule(&self, id: &ScheduleId, reason: &str) -> Result<bool> {
+        let changed = sqlx::query(
+            "UPDATE schedules
+                SET active = false, paused_reason = $2, updated_at = now()
+              WHERE id = $1 AND active",
+        )
+        .bind(id.as_str())
+        .bind(reason)
+        .execute(&self.pool)
+        .await?
+        .rows_affected();
+        Ok(changed > 0)
+    }
+
+    /// Approve one, as somebody.
+    pub async fn approve_schedule(&self, id: &ScheduleId, by: &str) -> Result<()> {
+        sqlx::query(
+            "UPDATE schedules
+                SET approved_by = $2, approved_at = now(), updated_at = now()
+              WHERE id = $1",
+        )
+        .bind(id.as_str())
+        .bind(by)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn delete_schedule(&self, id: &ScheduleId) -> Result<()> {
+        sqlx::query("DELETE FROM schedules WHERE id = $1")
+            .bind(id.as_str())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    // ── triggers ───────────────────────────────────────────────────────
+
+    pub async fn triggers_of(&self, schedule: &ScheduleId) -> Result<Vec<TriggerRow>> {
+        Ok(sqlx::query(
+            "SELECT id, schedule_id, kind, config, enabled, next_fire_at
+               FROM schedule_triggers WHERE schedule_id = $1 ORDER BY created_at",
+        )
+        .bind(schedule.as_str())
+        .fetch_all(&self.pool)
+        .await?
+        .iter()
+        .map(trigger_from_row)
+        .collect())
+    }
+
+    pub async fn insert_trigger(
+        &self,
+        id: &TriggerId,
+        schedule: &ScheduleId,
+        kind: &str,
+        config: &serde_json::Value,
+        next_fire_at: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO schedule_triggers (id, schedule_id, kind, config, next_fire_at)
+             VALUES ($1, $2, $3, $4, $5)",
+        )
+        .bind(id.as_str())
+        .bind(schedule.as_str())
+        .bind(kind)
+        .bind(config)
+        .bind(next_fire_at)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Replace every trigger on a schedule.
+    ///
+    /// An edit rewrites them rather than patching: a cadence is one thing a
+    /// person changes as a whole, and matching old rows to new ones would be a
+    /// diff nobody asked for.
+    pub async fn replace_triggers(&self, schedule: &ScheduleId) -> Result<()> {
+        sqlx::query("DELETE FROM schedule_triggers WHERE schedule_id = $1")
+            .bind(schedule.as_str())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Where a trigger's clock stands.
+    ///
+    /// `None` takes it out of the due index entirely, which is what a paused
+    /// schedule's triggers hold — the partial index then stays the size of the
+    /// active set rather than of the library.
+    pub async fn set_next_fire_at(
+        &self,
+        id: &TriggerId,
+        at: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> Result<()> {
+        sqlx::query("UPDATE schedule_triggers SET next_fire_at = $2, updated_at = now() WHERE id = $1")
+            .bind(id.as_str())
+            .bind(at)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Which triggers want a run.
+    ///
+    /// **The only query the clock runs.** `$1` is `now`, passed in rather than
+    /// `now()`, so no query depends on the database session's `TimeZone`; `$2`
+    /// is a cap rather than a batch size — a backlog is worked off over
+    /// several passes.
+    ///
+    /// `busy` is computed here rather than asked per row, so the overlap skip
+    /// costs nothing extra. A schedule with a live run is still listed,
+    /// because it has to be recorded as skipped rather than silently omitted.
+    pub async fn schedules_due(
+        &self,
+        now: chrono::DateTime<chrono::Utc>,
+        at_once: i64,
+    ) -> Result<Vec<DueTrigger>> {
+        let rows = sqlx::query(
+            "SELECT t.id AS trigger_id, t.schedule_id, t.kind, t.config, t.next_fire_at,
+                    s.owner_id, s.revision,
+                    -- \"Still going\" is `SessionStatus::in_flight()` — Starting
+                    -- or Working, and nothing else. A run parked at a question
+                    -- is not in flight and does not block tomorrow; a run
+                    -- still launching is.
+                    EXISTS (SELECT 1 FROM schedule_runs r
+                             LEFT JOIN sessions x ON x.id = r.session_id
+                             WHERE r.schedule_id = s.id
+                               AND (r.state = 'claimed'
+                                 OR (r.state = 'running'
+                                     AND x.status IN ('Starting', 'Working')))) AS busy
+               FROM schedule_triggers t
+               JOIN schedules s ON s.id = t.schedule_id
+              WHERE t.enabled
+                AND s.active
+                AND s.approved_at IS NOT NULL
+                AND t.next_fire_at IS NOT NULL
+                AND t.next_fire_at <= $1
+              ORDER BY t.next_fire_at
+              LIMIT $2",
+        )
+        .bind(now)
+        .bind(at_once)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .iter()
+            .map(|r| DueTrigger {
+                trigger_id: TriggerId::from_stored(r.get::<String, _>("trigger_id")),
+                schedule_id: ScheduleId::from_stored(r.get::<String, _>("schedule_id")),
+                kind: r.get("kind"),
+                config: r.get("config"),
+                due_at: r.get("next_fire_at"),
+                owner_id: r.get("owner_id"),
+                revision: r.get("revision"),
+                busy: r.get("busy"),
+            })
+            .collect())
+    }
+
+    // ── runs ───────────────────────────────────────────────────────────
+
+    /// Take an occurrence, or find somebody already has.
+    ///
+    /// **This is the whole of the locking.** `unique (schedule_id, fire_at)`
+    /// is the lock and the insert is the claim: two passes, or two processes,
+    /// or a pass that overlaps its own tick produce one agent either way.
+    /// `None` means somebody else got there first, which is the same
+    /// `Ok(0) => {}` `reclaim::sweep` treats as fine.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn claim_run(
+        &self,
+        id: &ScheduleRunId,
+        schedule: &ScheduleId,
+        trigger: Option<&TriggerId>,
+        fire_at: chrono::DateTime<chrono::Utc>,
+        revision: i32,
+        source: &str,
+        state: &str,
+        detail: Option<&str>,
+    ) -> Result<Option<ScheduleRunId>> {
+        let taken: Option<String> = sqlx::query_scalar(
+            "INSERT INTO schedule_runs
+               (id, schedule_id, trigger_id, fire_at, revision, state, source, detail, ended_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8,
+                     CASE WHEN $6 IN ('claimed', 'running') THEN NULL ELSE now() END)
+                 ON CONFLICT (schedule_id, fire_at) DO NOTHING
+               RETURNING id",
+        )
+        .bind(id.as_str())
+        .bind(schedule.as_str())
+        .bind(trigger.map(|t| t.as_str()))
+        .bind(fire_at)
+        .bind(revision)
+        .bind(state)
+        .bind(source)
+        .bind(detail)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(taken.map(ScheduleRunId::from_stored))
+    }
+
+    /// The session this run is about to become, written before the launch is
+    /// attempted — see `api::sessions::Launch::id`.
+    pub async fn set_run_session(
+        &self,
+        id: &ScheduleRunId,
+        session: &SessionId,
+    ) -> Result<()> {
+        sqlx::query("UPDATE schedule_runs SET session_id = $2 WHERE id = $1")
+            .bind(id.as_str())
+            .bind(session.as_str())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// A session exists and is running. Compare-and-set: zero rows means
+    /// somebody else moved it on.
+    pub async fn run_launched(
+        &self,
+        id: &ScheduleRunId,
+        session: &SessionId,
+        host_name: &str,
+    ) -> Result<bool> {
+        let moved = sqlx::query(
+            "UPDATE schedule_runs
+                SET state = 'running', session_id = $2, host_name = $3, launched_at = now(),
+                    workspace_kept = true
+              WHERE id = $1 AND state = 'claimed'",
+        )
+        .bind(id.as_str())
+        .bind(session.as_str())
+        .bind(host_name)
+        .execute(&self.pool)
+        .await?
+        .rows_affected();
+        Ok(moved > 0)
+    }
+
+    /// How a run ended. Compare-and-set on the states that can still move, so
+    /// two passes reaching the same conclusion settle it once.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn settle_run(
+        &self,
+        id: &ScheduleRunId,
+        state: &str,
+        outcome: Option<&str>,
+        detail: Option<&str>,
+        summary: Option<&str>,
+        error_code: Option<&str>,
+        workspace_kept: bool,
+    ) -> Result<bool> {
+        let moved = sqlx::query(
+            "UPDATE schedule_runs
+                SET state = $2, outcome = $3, detail = $4,
+                    summary = COALESCE($5, summary), error_code = $6,
+                    workspace_kept = $7, ended_at = now()
+              WHERE id = $1 AND state IN ('claimed', 'running')",
+        )
+        .bind(id.as_str())
+        .bind(state)
+        .bind(outcome)
+        .bind(detail)
+        .bind(summary)
+        .bind(error_code)
+        .bind(workspace_kept)
+        .execute(&self.pool)
+        .await?
+        .rows_affected();
+        Ok(moved > 0)
+    }
+
+    /// The workspace has gone. The line stays — the summary was copied before
+    /// the teardown, which is the whole reason it is a copy.
+    pub async fn run_workspace_gone(&self, id: &ScheduleRunId) -> Result<()> {
+        sqlx::query("UPDATE schedule_runs SET workspace_kept = false WHERE id = $1")
+            .bind(id.as_str())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Note an observation against a run without settling it.
+    ///
+    /// For the overrun rule, which counts observations of one run that has not
+    /// finished rather than runs. The run is untouched otherwise: nothing in
+    /// this product ends a session for taking too long.
+    pub async fn set_run_detail(&self, id: &ScheduleRunId, detail: &str) -> Result<()> {
+        sqlx::query("UPDATE schedule_runs SET detail = $2 WHERE id = $1")
+            .bind(id.as_str())
+            .bind(detail)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// The history a page draws, newest first.
+    pub async fn runs_of(&self, schedule: &ScheduleId, limit: i64) -> Result<Vec<RunRow>> {
+        Ok(sqlx::query(&format!(
+            "SELECT {RUN_COLUMNS} FROM schedule_runs r
+              WHERE r.schedule_id = $1
+              ORDER BY r.fire_at DESC
+              LIMIT $2"
+        ))
+        .bind(schedule.as_str())
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?
+        .iter()
+        .map(run_from_row)
+        .collect())
+    }
+
+    /// Every run, across every schedule of one person's. The All runs page.
+    pub async fn runs_for(&self, person: &str, limit: i64) -> Result<Vec<(String, RunRow)>> {
+        Ok(sqlx::query(&format!(
+            "SELECT {RUN_COLUMNS}, s.name AS schedule_name
+               FROM schedule_runs r
+               JOIN schedules s ON s.id = r.schedule_id
+              WHERE s.owner_id = $1
+              ORDER BY r.fire_at DESC
+              LIMIT $2"
+        ))
+        .bind(person)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?
+        .iter()
+        .map(|r| (r.get::<String, _>("schedule_name"), run_from_row(r)))
+        .collect())
+    }
+
+    /// The window the pause rule reads.
+    ///
+    /// **Scheduled runs only.** A run somebody started by hand is not
+    /// transparent — it is not in the list at all, which is what "ignored
+    /// entirely" means, and filtering here rather than in Rust means the
+    /// window holds fifty runs the rule can actually read.
+    pub async fn runs_for_streak(
+        &self,
+        schedule: &ScheduleId,
+        limit: i64,
+    ) -> Result<Vec<RunRow>> {
+        Ok(sqlx::query(&format!(
+            "SELECT {RUN_COLUMNS} FROM schedule_runs r
+              WHERE r.schedule_id = $1 AND r.source <> 'manual'
+              ORDER BY r.fire_at DESC
+              LIMIT $2"
+        ))
+        .bind(schedule.as_str())
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?
+        .iter()
+        .map(run_from_row)
+        .collect())
+    }
+
+    /// How many runs there have ever been, and how many still hold a
+    /// workspace.
+    ///
+    /// The second is read from `workspace_kept` rather than from
+    /// `session_id is not null`: that goes null the moment `reclaim` purges a
+    /// deleted run, so a count reading it would quietly fall to zero exactly
+    /// as the real number climbed.
+    pub async fn run_counts(&self, schedule: &ScheduleId) -> Result<(u32, u32)> {
+        let row = sqlx::query(
+            "SELECT count(*) AS total,
+                    count(*) FILTER (WHERE workspace_kept) AS kept
+               FROM schedule_runs WHERE schedule_id = $1",
+        )
+        .bind(schedule.as_str())
+        .fetch_one(&self.pool)
+        .await?;
+        Ok((
+            row.get::<i64, _>("total") as u32,
+            row.get::<i64, _>("kept") as u32,
+        ))
+    }
+
+    /// Runs the sweep still has something to do about.
+    ///
+    /// A scan of `schedule_runs_live`, which is the size of the fleet's live
+    /// work rather than of all history.
+    pub async fn live_runs(&self) -> Result<Vec<LiveRun>> {
+        let rows = sqlx::query(
+            "SELECT r.id, r.schedule_id, r.session_id, r.state, r.detail, r.fire_at,
+                    r.claimed_at, r.launched_at, r.source,
+                    s.owner_id, s.delete_clean_runs,
+                    extract(epoch FROM s.max_runtime)::bigint AS max_runtime_secs,
+                    extract(epoch FROM s.needs_you_within)::bigint AS needs_you_secs
+               FROM schedule_runs r
+               JOIN schedules s ON s.id = r.schedule_id
+              WHERE r.state IN ('claimed', 'running')
+              ORDER BY r.claimed_at",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .iter()
+            .map(|r| LiveRun {
+                id: ScheduleRunId::from_stored(r.get::<String, _>("id")),
+                schedule_id: ScheduleId::from_stored(r.get::<String, _>("schedule_id")),
+                session_id: r
+                    .get::<Option<String>, _>("session_id")
+                    .map(SessionId::from_stored),
+                state: r.get("state"),
+                detail: r.get("detail"),
+                fire_at: r.get("fire_at"),
+                claimed_at: r.get("claimed_at"),
+                launched_at: r.get("launched_at"),
+                source: r.get("source"),
+                owner_id: r.get("owner_id"),
+                delete_clean_runs: r.get("delete_clean_runs"),
+                max_runtime_secs: r.get::<Option<i64>, _>("max_runtime_secs").unwrap_or(7200),
+                needs_you_secs: r.get::<Option<i64>, _>("needs_you_secs").unwrap_or(900),
+            })
+            .collect())
+    }
+
+    /// Whether a session with this id exists at all.
+    ///
+    /// The one question minting the id early makes answerable: `insert_session`
+    /// is the first thing in a launch that commits, so a claim naming a session
+    /// that is not there means nothing ran and no credential was read.
+    pub async fn session_exists(&self, id: &SessionId) -> Result<bool> {
+        Ok(
+            sqlx::query_scalar::<_, bool>("SELECT EXISTS (SELECT 1 FROM sessions WHERE id = $1)")
+                .bind(id.as_str())
+                .fetch_one(&self.pool)
+                .await?,
+        )
+    }
+
+    /// Whether a subscription can be spent: it is theirs, it is on, and it is
+    /// connected.
+    ///
+    /// `None` when there is no such account of theirs, which is what an
+    /// account deleted since approval looks like. The name comes back with it,
+    /// because a refusal that cannot say which subscription is a refusal
+    /// nobody can act on.
+    pub async fn account_spendable(
+        &self,
+        person: &str,
+        account_id: &str,
+    ) -> Result<Option<(String, bool)>> {
+        Ok(sqlx::query(
+            "SELECT name, (enabled AND state = 'connected') AS spendable
+               FROM agent_accounts WHERE id = $1 AND user_id = $2",
+        )
+        .bind(account_id)
+        .bind(person)
+        .fetch_optional(&self.pool)
+        .await?
+        .map(|r| (r.get("name"), r.get("spendable"))))
+    }
+
+    /// Whether a subscription is at its usage limit.
+    ///
+    /// The same predicate `fallback_tick` uses, so the two cannot disagree
+    /// about what "blocked" means. **Observed rather than authoritative** —
+    /// the table's own comment says so, and headroom on a subscription nothing
+    /// has run on for a week is a week old. This catches the common case and
+    /// is not a cap.
+    pub async fn account_at_its_limit(&self, account_id: &str) -> Result<bool> {
+        Ok(sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS (SELECT 1 FROM agent_account_limits l
+                             WHERE l.account_id = $1
+                               AND l.status IN ('blocked', 'rejected')
+                               AND (l.resets_at IS NULL
+                                 OR l.resets_at > extract(epoch FROM now())))",
+        )
+        .bind(account_id)
+        .fetch_one(&self.pool)
+        .await?)
+    }
+
+    /// Whether every pinned skill version still resolves.
+    ///
+    /// Fails closed: a version that has gone is a run that would read
+    /// something other than what was approved, and substituting the current
+    /// one is exactly the substitution pinning exists to prevent.
+    pub async fn skill_versions_resolve(&self, ids: &[String]) -> Result<bool> {
+        if ids.is_empty() {
+            return Ok(true);
+        }
+        let found: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM skill_versions WHERE id = ANY($1)",
+        )
+        .bind(ids)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(found as usize == ids.len())
+    }
+
+    /// Hold the scheduler's pass against a second control plane.
+    ///
+    /// Not needed for correctness — the unique index stops a double launch and
+    /// every settle step is a compare-and-set. What it buys is that two
+    /// control planes degrade to one scheduler and one idle loop, which is a
+    /// sentence somebody can write down, rather than to two schedulers that
+    /// happen not to collide, which is a sentence that stops being true the
+    /// first time somebody adds a step that is not idempotent.
+    ///
+    /// The precedent and the argument are `vault.rs`'s one advisory lock. A
+    /// session-level lock rather than a transaction one, because the pass is
+    /// many statements and holding a transaction open across a launch would
+    /// hold a pool connection for two minutes.
+    pub async fn take_scheduler_lock(&self) -> Result<Option<SchedulerLock>> {
+        let mut conn = self.pool.acquire().await?;
+        let got: bool = sqlx::query_scalar(
+            "SELECT pg_try_advisory_lock(hashtext(current_schema() || $1)::bigint)",
+        )
+        .bind(SCHEDULER_LOCK)
+        .fetch_one(&mut *conn)
+        .await?;
+        match got {
+            true => Ok(Some(SchedulerLock { conn })),
+            false => Ok(None),
+        }
+    }
 }
 
 /// One row of the event log.
@@ -3093,6 +3763,211 @@ fn control_kind(kind: ft_core::controls::ControlKind) -> String {
         .ok()
         .and_then(|v| v.as_str().map(str::to_string))
         .unwrap_or_default()
+}
+
+// ── schedules ──────────────────────────────────────────────────────────
+
+/// What every read of a schedule selects.
+///
+/// A `const` rather than a literal repeated in three queries, for the reason
+/// `HOST_COLUMNS` is: the intervals are selected as epoch seconds rather than
+/// as `interval`, so nothing here has to decode Postgres's own interval type
+/// to answer "how long may a run take".
+const SCHEDULE_COLUMNS: &str = "s.id, s.owner_id, s.created_by, s.from_session_id, s.name, \
+     s.spec, s.pins, s.approved_by, s.approved_at, s.revision, s.active, s.paused_reason, \
+     s.delete_clean_runs, s.created_at, s.updated_at, \
+     extract(epoch FROM s.max_runtime)::bigint AS max_runtime_secs, \
+     extract(epoch FROM s.needs_you_within)::bigint AS needs_you_secs";
+
+const RUN_COLUMNS: &str = "r.id, r.schedule_id, r.trigger_id, r.fire_at, r.revision, r.state, \
+     r.outcome, r.detail, r.summary, r.session_id, r.host_name, r.source, r.error_code, \
+     r.workspace_kept, r.claimed_at, r.launched_at, r.ended_at";
+
+/// The key the scheduler's advisory lock is taken on.
+///
+/// **Derived from the schema**, because an advisory lock is per *database* and
+/// not per schema. In a deployment that is the same thing — one database, one
+/// `public`, one scheduler, which is the whole point of taking it. Where it is
+/// not the same thing, two installations sharing one Postgres server under
+/// different schemas are different installations, and one must not stop the
+/// other's clock. (It is also what lets the sweep be tested at all: the suite
+/// gives every test its own schema in one database.)
+///
+/// `hashtext` is stable within a major version and the key is never stored, so
+/// a change across an upgrade costs nothing — at worst one pass runs while an
+/// old process still holds the previous key, which is the degradation this
+/// lock is insurance against rather than a new one.
+const SCHEDULER_LOCK: &str = "firetower:schedules";
+
+/// A held advisory lock, released when it is dropped.
+///
+/// Holds its own connection, because a session-level lock belongs to the
+/// connection that took it. Dropping it returns the connection to the pool —
+/// and Postgres releases the lock when the session ends, so even a process
+/// that dies mid-pass does not leave the scheduler wedged.
+pub struct SchedulerLock {
+    conn: sqlx::pool::PoolConnection<sqlx::Postgres>,
+}
+
+impl SchedulerLock {
+    /// Give it back, rather than waiting for the connection to be recycled.
+    pub async fn release(mut self) {
+        let _ = sqlx::query(
+            "SELECT pg_advisory_unlock(hashtext(current_schema() || $1)::bigint)",
+        )
+        .bind(SCHEDULER_LOCK)
+        .execute(&mut *self.conn)
+        .await;
+    }
+}
+
+/// One schedule's row, as stored.
+///
+/// Separate from [`ft_core::schedule::Schedule`], which is what a client
+/// reads: that one carries the triggers, the streak and the counts, and
+/// assembling it is three more reads. This is the row.
+#[derive(Debug, Clone)]
+pub struct ScheduleRow {
+    pub id: ScheduleId,
+    pub owner_id: String,
+    pub created_by: String,
+    pub from_session_id: Option<String>,
+    pub name: String,
+    pub spec: serde_json::Value,
+    pub pins: serde_json::Value,
+    pub approved_by: Option<String>,
+    pub approved_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub revision: i32,
+    pub active: bool,
+    pub paused_reason: Option<String>,
+    pub delete_clean_runs: bool,
+    pub max_runtime_secs: i64,
+    pub needs_you_secs: i64,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+fn schedule_from_row(r: &sqlx::postgres::PgRow) -> ScheduleRow {
+    ScheduleRow {
+        id: ScheduleId::from_stored(r.get::<String, _>("id")),
+        owner_id: r.get("owner_id"),
+        created_by: r.get("created_by"),
+        from_session_id: r.get("from_session_id"),
+        name: r.get("name"),
+        spec: r.get("spec"),
+        pins: r.get("pins"),
+        approved_by: r.get("approved_by"),
+        approved_at: r.get("approved_at"),
+        revision: r.get("revision"),
+        active: r.get("active"),
+        paused_reason: r.get("paused_reason"),
+        delete_clean_runs: r.get("delete_clean_runs"),
+        // Defaulted rather than unwrapped: the column is `not null` with a
+        // default, so this only fires for a build reading a row it wrote
+        // itself, and a panic in the sweep over an interval is a poor trade.
+        max_runtime_secs: r.get::<Option<i64>, _>("max_runtime_secs").unwrap_or(7200),
+        needs_you_secs: r.get::<Option<i64>, _>("needs_you_secs").unwrap_or(900),
+        created_at: r.get("created_at"),
+        updated_at: r.get("updated_at"),
+    }
+}
+
+/// One trigger's row.
+#[derive(Debug, Clone)]
+pub struct TriggerRow {
+    pub id: TriggerId,
+    pub schedule_id: ScheduleId,
+    pub kind: String,
+    pub config: serde_json::Value,
+    pub enabled: bool,
+    pub next_fire_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+fn trigger_from_row(r: &sqlx::postgres::PgRow) -> TriggerRow {
+    TriggerRow {
+        id: TriggerId::from_stored(r.get::<String, _>("id")),
+        schedule_id: ScheduleId::from_stored(r.get::<String, _>("schedule_id")),
+        kind: r.get("kind"),
+        config: r.get("config"),
+        enabled: r.get("enabled"),
+        next_fire_at: r.get("next_fire_at"),
+    }
+}
+
+/// A trigger that wants a run, and whether its schedule is already busy.
+#[derive(Debug, Clone)]
+pub struct DueTrigger {
+    pub trigger_id: TriggerId,
+    pub schedule_id: ScheduleId,
+    pub kind: String,
+    pub config: serde_json::Value,
+    pub due_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub owner_id: String,
+    pub revision: i32,
+    /// Whether a run of this schedule is still in flight. A run parked at a
+    /// question is not.
+    pub busy: bool,
+}
+
+/// One run's row, as stored.
+#[derive(Debug, Clone)]
+pub struct RunRow {
+    pub id: ScheduleRunId,
+    pub schedule_id: ScheduleId,
+    pub fire_at: chrono::DateTime<chrono::Utc>,
+    pub revision: i32,
+    pub state: String,
+    pub outcome: Option<String>,
+    pub detail: Option<String>,
+    pub summary: Option<String>,
+    pub session_id: Option<SessionId>,
+    pub host_name: Option<String>,
+    pub source: String,
+    pub error_code: Option<String>,
+    pub workspace_kept: bool,
+    pub launched_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub ended_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+fn run_from_row(r: &sqlx::postgres::PgRow) -> RunRow {
+    RunRow {
+        id: ScheduleRunId::from_stored(r.get::<String, _>("id")),
+        schedule_id: ScheduleId::from_stored(r.get::<String, _>("schedule_id")),
+        fire_at: r.get("fire_at"),
+        revision: r.get("revision"),
+        state: r.get("state"),
+        outcome: r.get("outcome"),
+        detail: r.get("detail"),
+        summary: r.get("summary"),
+        session_id: r
+            .get::<Option<String>, _>("session_id")
+            .map(SessionId::from_stored),
+        host_name: r.get("host_name"),
+        source: r.get("source"),
+        error_code: r.get("error_code"),
+        workspace_kept: r.get("workspace_kept"),
+        launched_at: r.get("launched_at"),
+        ended_at: r.get("ended_at"),
+    }
+}
+
+/// A run the sweep still has something to do about, with the two deadlines
+/// from its schedule already in hand.
+#[derive(Debug, Clone)]
+pub struct LiveRun {
+    pub id: ScheduleRunId,
+    pub schedule_id: ScheduleId,
+    pub session_id: Option<SessionId>,
+    pub state: String,
+    pub detail: Option<String>,
+    pub fire_at: chrono::DateTime<chrono::Utc>,
+    pub claimed_at: chrono::DateTime<chrono::Utc>,
+    pub launched_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub source: String,
+    pub owner_id: String,
+    pub delete_clean_runs: bool,
+    pub max_runtime_secs: i64,
+    pub needs_you_secs: i64,
 }
 
 /// A connection string without its password, for a message someone will paste.

@@ -3679,6 +3679,517 @@
         }
       }
     },
+    "/api/v1/schedule-runs": {
+      "get": {
+        "tags": [
+          "schedules"
+        ],
+        "summary": "Every run from every schedule of yours, newest first.",
+        "operationId": "all_runs",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "How many to return. Twenty is what the page draws.",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RunOf"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/schedules": {
+      "get": {
+        "tags": [
+          "schedules"
+        ],
+        "summary": "Every schedule of yours, newest change first.",
+        "operationId": "list_schedules",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Schedule"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "schedules"
+        ],
+        "summary": "Write one down. **Inactive and unapproved**, whoever asked.",
+        "description": "Turning it on is a separate act, which is the whole of \"an agent may\npropose but may not activate\" — and it is the same code path for a person,\nso there is one rule rather than two.",
+        "operationId": "create_schedule",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewSchedule"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Schedule"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "the cadence fires too often, or is not one",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "that repository isn't connected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/schedules/cadence": {
+      "post": {
+        "tags": [
+          "schedules"
+        ],
+        "summary": "What a cadence would do.",
+        "description": "Here rather than in the client, which is the whole of criterion 10: there\nis one cron implementation in the product, and the row renders what it is\ntold.",
+        "operationId": "read_cadence",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CadenceQuestion"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CadenceAnswer"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "it fires too often, or is not a cadence",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/schedules/{id}": {
+      "get": {
+        "tags": [
+          "schedules"
+        ],
+        "summary": "One schedule of yours.",
+        "operationId": "one_schedule",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Schedule id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Schedule"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "schedules"
+        ],
+        "summary": "Delete it.",
+        "description": "**Never stops a run.** One in flight finishes and its workspace stays. The\nhistory goes, because the summary table is the only record of it.",
+        "operationId": "delete_schedule",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Schedule id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "schedules"
+        ],
+        "summary": "Change what it runs.",
+        "description": "**An edit clears the approval and bumps the revision**, so the next\noccurrence is refused until a person approves again — a schedule an agent\nproposed and somebody approved is an authorization over a particular text.\nA run already in flight carries the revision it started on and is\nuntouched.",
+        "operationId": "update_schedule",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Schedule id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewSchedule"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Schedule"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/schedules/{id}/approve": {
+      "post": {
+        "tags": [
+          "schedules"
+        ],
+        "summary": "Approve it and turn it on.",
+        "description": "The one act an agent may not do. A person doing it is what makes a proposal\nan ordinary schedule — the row afterwards is identical to one somebody\nwrote.",
+        "operationId": "approve_schedule",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Schedule id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Schedule"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/schedules/{id}/pause": {
+      "post": {
+        "tags": [
+          "schedules"
+        ],
+        "summary": "Stop future runs. **Never touches a run in flight** — that is a separate\ncontrol, and the two are different questions.",
+        "operationId": "pause_schedule",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Schedule id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Schedule"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/schedules/{id}/resume": {
+      "post": {
+        "tags": [
+          "schedules"
+        ],
+        "summary": "Turn it back on.",
+        "description": "Only ever a person. **Answering a question after a schedule has paused does\nnot resume it**, and nothing else does either: Firetower never turns a\nschedule back on.",
+        "operationId": "resume_schedule",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Schedule id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Schedule"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "it has not been approved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/schedules/{id}/run": {
+      "post": {
+        "tags": [
+          "schedules"
+        ],
+        "summary": "Start one now.",
+        "description": "**The clock is not moved**, and the run is marked `manual` — the pause rule\nreads only scheduled runs, so three presses that each asked something must\nnot pause a schedule that has never failed on its own clock.",
+        "operationId": "run_schedule_now",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Schedule id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StartedRun"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/schedules/{id}/runs": {
+      "get": {
+        "tags": [
+          "schedules"
+        ],
+        "summary": "This schedule's runs, newest first.",
+        "operationId": "schedule_runs",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Schedule id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "How many to return. Twenty is what the page draws.",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ScheduleRun"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/secrets": {
       "get": {
         "tags": [
@@ -9317,6 +9828,154 @@
           }
         }
       },
+      "Cadence": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "Every day at `at`, which is `HH:MM` on a 24-hour clock.\n\nA string rather than two integers because it is what the control sends\nand what the row renders, and because \"07:00\" survives a round trip\nthrough JSON without a leading zero going missing.",
+            "required": [
+              "at",
+              "kind"
+            ],
+            "properties": {
+              "at": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "daily"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Monday to Friday.",
+            "required": [
+              "at",
+              "kind"
+            ],
+            "properties": {
+              "at": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "weekdays"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "One day a week.",
+            "required": [
+              "at",
+              "day",
+              "kind"
+            ],
+            "properties": {
+              "at": {
+                "type": "string"
+              },
+              "day": {
+                "$ref": "#/components/schemas/Weekday"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "weekly"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "One day a month, by date or by weekday.",
+            "required": [
+              "at",
+              "on",
+              "kind"
+            ],
+            "properties": {
+              "at": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "monthly"
+                ]
+              },
+              "on": {
+                "$ref": "#/components/schemas/MonthlyOn"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A cron expression, written by hand.\n\nFive fields, the form everybody writes. Validated on write, and refused\nwhen it would fire more often than every fifteen minutes.",
+            "required": [
+              "expr",
+              "kind"
+            ],
+            "properties": {
+              "expr": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "custom"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "How often a schedule runs, as the person expressed it.\n\nKept beside the cron expression it compiles to rather than derived back out\nof it: \"every weekday at 08:30\" and `30 8 * * 1-5` are the same instruction,\nand only one of them is a control an edit form can redraw. Reversing a cron\nexpression into a cadence is guesswork that gets it wrong for the\nexpressions a person wrote by hand.\n\n**No client parses cron.** The server compiles this, computes the next\nthree fire times and writes the plain-English read-back, so there is one\ncron implementation in the product rather than two that disagree about\ndaylight saving in March."
+      },
+      "CadenceAnswer": {
+        "type": "object",
+        "description": "The answer: what it means, and when it would fire.",
+        "required": [
+          "expr",
+          "reads",
+          "nextFires"
+        ],
+        "properties": {
+          "expr": {
+            "type": "string"
+          },
+          "nextFires": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          "reads": {
+            "type": "string"
+          }
+        }
+      },
+      "CadenceQuestion": {
+        "type": "object",
+        "description": "What a cadence would do, before anything is written down.\n\nThe create form needs the read-back and the next three fire times while\nsomebody is still typing, and it must not compute them itself.",
+        "required": [
+          "cadence",
+          "timezone"
+        ],
+        "properties": {
+          "cadence": {
+            "$ref": "#/components/schemas/Cadence"
+          },
+          "timezone": {
+            "type": "string"
+          }
+        }
+      },
       "Capacity": {
         "type": "object",
         "description": "What a machine has, and what of it is being used.\n\nReported by the worker rather than asked of the host record, for the same\nreason [`DockerState`] is: these are facts about the machine a worker is\nrunning on, and a container, a server and a server-with-a-container arrive\nat them differently. A worker in a container reports the container's\nceiling where it has one, which is what its sessions actually get.\n\nMegabytes throughout. Bytes would be exact and would also be a `u64` of\ndigits nobody reads; the interface rounds to gigabytes anyway, and a\nmegabyte is under a pixel of any meter drawn from this.",
@@ -11999,6 +12658,57 @@
           }
         }
       },
+      "MonthlyOn": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "The 1st, the 15th, the last.",
+            "required": [
+              "day",
+              "kind"
+            ],
+            "properties": {
+              "day": {
+                "type": "integer",
+                "format": "int32",
+                "minimum": 0
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "day"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "The first Monday, the third Friday.",
+            "required": [
+              "nth",
+              "day",
+              "kind"
+            ],
+            "properties": {
+              "day": {
+                "$ref": "#/components/schemas/Weekday"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "nth"
+                ]
+              },
+              "nth": {
+                "type": "integer",
+                "format": "int32",
+                "minimum": 0
+              }
+            }
+          }
+        ],
+        "description": "Which day of the month, for a monthly cadence."
+      },
       "NameOrganization": {
         "type": "object",
         "required": [
@@ -12443,6 +13153,89 @@
           }
         }
       },
+      "NewSchedule": {
+        "type": "object",
+        "description": "What the API accepts to write one down.",
+        "required": [
+          "name",
+          "prompt",
+          "cadence",
+          "timezone"
+        ],
+        "properties": {
+          "accountId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "agent": {
+            "$ref": "#/components/schemas/Agent"
+          },
+          "base": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The branch each run starts from. Only meaningful with a repository."
+          },
+          "cadence": {
+            "$ref": "#/components/schemas/Cadence"
+          },
+          "deleteCleanRuns": {
+            "type": "boolean",
+            "description": "Whether a clean run's workspace is deleted. Ignored without a\nrepository, where nothing is ever deleted automatically."
+          },
+          "fromSessionId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The conversation that asked for this, when an agent did."
+          },
+          "name": {
+            "type": "string"
+          },
+          "profile": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "repoId": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RepoId",
+                "description": "Omit for a bare agent. Several things are different without one — see\n`deleteCleanRuns`."
+              }
+            ]
+          },
+          "settings": {
+            "$ref": "#/components/schemas/Preferred",
+            "description": "Model, effort, permissions and sandbox. **Pinned explicitly** — see\n[`pins_for`]."
+          },
+          "skills": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "The skills each run reads. `null` takes the repository's defaults *at\ncreation* and pins the result."
+          },
+          "timezone": {
+            "type": "string",
+            "description": "An IANA name. Required, and not defaulted to the server's own zone:\n\"09:00\" means nothing without saying whose nine."
+          }
+        }
+      },
       "NewSession": {
         "type": "object",
         "description": "What the API accepts to launch one.",
@@ -12738,6 +13531,17 @@
           }
         }
       },
+      "Outcome": {
+        "type": "string",
+        "description": "How a finished run ended.\n\n**Four, not three.** `Unknown` is \"could not tell\": classifying a run needs\na live round trip to the machine, and one that went away after the run\nfinished cannot be asked. The workspace is kept either way — that is the\nright action — but the history line must not claim it was kept *because*\nsomething was uncommitted, which would be a guess stated as a fact.",
+        "enum": [
+          "clean",
+          "kept",
+          "needs_you",
+          "overran",
+          "unknown"
+        ]
+      },
       "Page": {
         "type": "object",
         "required": [
@@ -12772,6 +13576,16 @@
             "minimum": 0
           }
         }
+      },
+      "PausedReason": {
+        "type": "string",
+        "description": "Which rule stopped a schedule.\n\n**The rule, and nothing else.** Not a composed sentence and not a tally:\nthe streak is the leading part of the history the page already draws, so it\ncounts the failures and the questions itself and says the exact shape —\nincluding the mixed case, which no single rule name covers. A sentence\nstored here would be a second copy of that, free to disagree with it.\n\nNull — `None` — is a person. \"You paused this\" and \"this gave up\" have to\nread differently, and the absence is the cheapest way to tell them apart.",
+        "enum": [
+          "three_failures",
+          "five_runs",
+          "overran",
+          "owner_disabled"
+        ]
       },
       "Pending": {
         "type": "object",
@@ -13177,6 +13991,42 @@
           },
           "title": {
             "type": "string"
+          }
+        }
+      },
+      "Provenance": {
+        "type": "object",
+        "description": "Who wrote a schedule.",
+        "required": [
+          "byAgent",
+          "who",
+          "at"
+        ],
+        "properties": {
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "byAgent": {
+            "type": "boolean",
+            "description": "`false` for a person."
+          },
+          "fromSessionId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The conversation that asked for it, when an agent did. Copied text, not\na link that `reclaim` will empty."
+          },
+          "fromWorkspaceName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "who": {
+            "type": "string",
+            "description": "The person, or the profile the agent was running as."
           }
         }
       },
@@ -14126,6 +14976,33 @@
           "exception"
         ]
       },
+      "RunOf": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ScheduleRun"
+          },
+          {
+            "type": "object",
+            "required": [
+              "scheduleName"
+            ],
+            "properties": {
+              "scheduleName": {
+                "type": "string"
+              }
+            }
+          }
+        ],
+        "description": "One run of one schedule, with the schedule's name beside it."
+      },
+      "RunSource": {
+        "type": "string",
+        "description": "What started a run.",
+        "enum": [
+          "cron",
+          "manual"
+        ]
+      },
       "RunState": {
         "type": "string",
         "enum": [
@@ -14136,6 +15013,257 @@
           "succeeded",
           "failed",
           "cancelled"
+        ]
+      },
+      "Schedule": {
+        "type": "object",
+        "description": "A schedule, as a client reads it.",
+        "required": [
+          "id",
+          "name",
+          "prompt",
+          "active",
+          "revision",
+          "triggers",
+          "deleteCleanRuns",
+          "workspacesKept",
+          "streak",
+          "runsTotal",
+          "made",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "active": {
+            "type": "boolean",
+            "description": "Whether it is on. Off and `pausedReason: null` is a person's doing."
+          },
+          "approvedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Null until a person turns it on. The whole of \"an agent may propose but\nnot activate\"."
+          },
+          "base": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deleteCleanRuns": {
+            "type": "boolean",
+            "description": "Whether a clean run's workspace is deleted.\n\nAlways false, and not offered as a control, when there is no\nrepository: `session_work` answers an empty list for a workspace with\nnothing checked out, so \"nothing uncommitted\" is vacuously true and a\nclean-run rule would read a bare workspace as the safe case and delete\nevery file the agent made."
+          },
+          "id": {
+            "$ref": "#/components/schemas/ScheduleId"
+          },
+          "lastRun": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ScheduleRun"
+              }
+            ]
+          },
+          "made": {
+            "$ref": "#/components/schemas/Provenance"
+          },
+          "name": {
+            "type": "string"
+          },
+          "pausedReason": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PausedReason"
+              }
+            ]
+          },
+          "prompt": {
+            "type": "string",
+            "description": "What it asks for."
+          },
+          "repoId": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RepoId",
+                "description": "Which repository, if any. A schedule with none is a bare agent, and\nseveral things about it are different — see `deleteCleanRuns`."
+              }
+            ]
+          },
+          "repoSlug": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "runsTotal": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "streak": {
+            "$ref": "#/components/schemas/Streak"
+          },
+          "triggers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Trigger"
+            }
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "workspacesKept": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many of this schedule's runs are still holding a workspace.\n\nDrawn in both switch states. With no cap this is the only thing that\nsays whether somebody's machines are filling.",
+            "minimum": 0
+          }
+        }
+      },
+      "ScheduleId": {
+        "type": "string",
+        "description": "Identifies a schedule — a durable authorization to start an agent with nobody present."
+      },
+      "ScheduleRun": {
+        "type": "object",
+        "description": "One occurrence, and what became of it.",
+        "required": [
+          "id",
+          "scheduleId",
+          "fireAt",
+          "revision",
+          "state",
+          "source",
+          "workspaceKept"
+        ],
+        "properties": {
+          "detail": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The sentence a person reads. Written once."
+          },
+          "endedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "errorCode": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The `ErrorCode`, verbatim, when a launch failed or was refused."
+          },
+          "fireAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Which occurrence this is."
+          },
+          "hostName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Where it ran. Copied, so the history can still say so after the machine\nhas been retired."
+          },
+          "id": {
+            "$ref": "#/components/schemas/ScheduleRunId"
+          },
+          "launchedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "outcome": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Outcome"
+              }
+            ]
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Which approved revision ran. \"Why did it do that\" is asked after the\nschedule has been changed, so the answer has to be on the run."
+          },
+          "scheduleId": {
+            "$ref": "#/components/schemas/ScheduleId"
+          },
+          "sessionId": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SessionId",
+                "description": "The workspace, while there is one to open."
+              }
+            ]
+          },
+          "source": {
+            "$ref": "#/components/schemas/RunSource"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ScheduleRunState"
+          },
+          "summary": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The agent's own summary, copied before the workspace was torn down."
+          },
+          "workspaceKept": {
+            "type": "boolean",
+            "description": "Whether this run is still holding a workspace.\n\nA real field rather than `session_id.is_some()`: that goes null the\nmoment `reclaim` purges a deleted run, so a count reading it would\nquietly fall to zero exactly as the real number climbed."
+          }
+        }
+      },
+      "ScheduleRunId": {
+        "type": "string",
+        "description": "Identifies one occurrence of a schedule. Append-only: the history outlives the workspace."
+      },
+      "ScheduleRunState": {
+        "type": "string",
+        "description": "What a run is, and how it ended.\n\nEight states rather than three, because \"nothing was started\" is several\ndifferent sentences and a person reads the sentence rather than the word.\n\n**Not `RunState`.** `updates::RunState` already owns that name in the\ncontract, and two schemas of one name there means the second quietly\nbecomes the first — the generated clients would have typed a schedule's\nrun with an upgrade's states and nothing would have said so.",
+        "enum": [
+          "claimed",
+          "running",
+          "finished",
+          "skipped",
+          "refused",
+          "failed",
+          "missed",
+          "lost"
         ]
       },
       "ScopeKind": {
@@ -15216,6 +16344,18 @@
         ],
         "description": "Where an agent can run.\n\nThree kinds, and they are not a ladder — each is the right answer sometimes.\nPoking at a repository by hand wants the first; leaving an agent running for\nan hour wants the third.\nWhich private key ssh should offer when reaching a server.\n\nThis used to be one field, `identity_file`: a path on the machine running the\ncontrol plane. That was right while the control plane ran on the operator's\nown machine, and stopped being right in a container — the path is read\ninside the container, `~/.ssh/id_ed25519` names a file that exists on their\nmachine and not in this one, and no path they can type would bridge the two.\n\nSo a host now says *which* key rather than *where* it is, and only one of\nthese is still a path."
       },
+      "StartedRun": {
+        "type": "object",
+        "description": "Which run a press of Run now started.\n\n**Not `Done`.** `sessions::Done` already owns that name in the contract,\nand two schemas of one name there means the second quietly becomes the\nfirst — the generated client would have typed this as `{ detail }` and\nnothing would have said so until a field read `undefined`.",
+        "required": [
+          "runId"
+        ],
+        "properties": {
+          "runId": {
+            "type": "string"
+          }
+        }
+      },
       "Step": {
         "type": "string",
         "description": "One stage of bringing a session up.\n\nThe point of naming them is that the whole list is knowable *before* any of\nit runs — so a session can show what it is going to do the moment it is\ncreated, rather than assembling a shape out of events as they arrive. A step\nnobody has reached yet is still worth showing.",
@@ -15259,6 +16399,42 @@
               "type": "string"
             },
             "description": "Lines that were skipped, and why — said rather than swallowed, because\na variable that silently never arrives is a long afternoon."
+          }
+        }
+      },
+      "Streak": {
+        "type": "object",
+        "description": "The streak, counted off the run history at read time.\n\n**Derived, never stored.** A column would have had three writers and would\nhave needed a backfill, all to cache an answer an append-only table already\nholds. This is what lets one rule read three ways: `five_runs` is neither\n*kept failing* nor *kept needing you*, and the page says which by counting.\n\nZero everywhere is a schedule with nothing against it, which is the\nordinary case and is what a healthy schedule reports.",
+        "required": [
+          "counted",
+          "failures",
+          "questions",
+          "unreachable"
+        ],
+        "properties": {
+          "counted": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Runs that joined the streak, of any kind.",
+            "minimum": 0
+          },
+          "failures": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Of those, the ones that count as a failure — `failed`, for a reason\nother than a machine that could not be reached.",
+            "minimum": 0
+          },
+          "questions": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Of those, the ones that stopped to ask.",
+            "minimum": 0
+          },
+          "unreachable": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Runs that joined without being either: a machine that could not be\nreached says nothing about the schedule's health, so it contributes to\nthe five and not to the three.",
+            "minimum": 0
           }
         }
       },
@@ -15728,6 +16904,71 @@
             "description": "The key that answers for this person, as the vault addresses it —\n`scope/name/owner`. Absent when nothing is held.\n\nA handle, so a screen can ask who can reach it and offer to file it\nsomewhere. It is the *resolved* one: their own if they have connected\none, otherwise whatever a directory they work in holds."
           }
         }
+      },
+      "Trigger": {
+        "type": "object",
+        "description": "One trigger, with everything the row needs to render it.",
+        "required": [
+          "id",
+          "kind",
+          "cadence",
+          "timezone",
+          "enabled",
+          "expr",
+          "reads"
+        ],
+        "properties": {
+          "cadence": {
+            "$ref": "#/components/schemas/Cadence"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "expr": {
+            "type": "string",
+            "description": "The compiled expression, for somebody who wants to see it."
+          },
+          "id": {
+            "$ref": "#/components/schemas/TriggerId"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/TriggerKind"
+          },
+          "nextFireAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "nextFires": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "The next three, computed by the server. Empty when the schedule is off\nor the trigger is disabled: there is no next run to name."
+          },
+          "reads": {
+            "type": "string",
+            "description": "What the cadence means, in words. Written by the server — see\n[`Cadence`]."
+          },
+          "timezone": {
+            "type": "string",
+            "description": "An IANA name, never an offset: an offset is wrong twice a year."
+          }
+        }
+      },
+      "TriggerId": {
+        "type": "string",
+        "description": "Identifies one trigger on a schedule. A cron today; a webhook or an API call later."
+      },
+      "TriggerKind": {
+        "type": "string",
+        "description": "What kind of thing starts a run.\n\nA cron is the only one that exists. The others are the stated future, and\nthey are in this enum rather than in a comment because\n`schedule_runs.source` records which kind fired a run and the history has\nto be able to say so about a kind this build does not have yet.",
+        "enum": [
+          "cron"
+        ]
       },
       "Turn": {
         "type": "object",
@@ -16833,6 +18074,18 @@
             "description": "The ephemeral client secret, `ek_…`. Not the key, and not a secret this\ninstall stores: it is minted, handed over and forgotten."
           }
         }
+      },
+      "Weekday": {
+        "type": "string",
+        "enum": [
+          "monday",
+          "tuesday",
+          "wednesday",
+          "thursday",
+          "friday",
+          "saturday",
+          "sunday"
+        ]
       },
       "WorkSummary": {
         "type": "object",

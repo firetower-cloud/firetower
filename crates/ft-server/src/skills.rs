@@ -3169,6 +3169,27 @@ impl Skills {
         .context("reading somebody's default skills")
     }
 
+    /// The version each of these skills is on right now.
+    ///
+    /// For a caller that has to pin what it resolved and check later that the
+    /// pins still resolve — a schedule approved against a set of versions must
+    /// fail closed when one has gone rather than reading whatever is current.
+    /// A skill with no current version contributes nothing, which is the same
+    /// thing a session gets from it.
+    pub async fn current_versions(&self, skills: &[String]) -> Result<Vec<String>> {
+        if skills.is_empty() {
+            return Ok(Vec::new());
+        }
+        sqlx::query_scalar(
+            "SELECT current_version_id FROM skills \
+              WHERE id = ANY($1) AND current_version_id IS NOT NULL",
+        )
+        .bind(skills)
+        .fetch_all(&self.pool)
+        .await
+        .context("reading the versions a set of skills is on")
+    }
+
     // ── what a session is running ───────────────────────────────────────
 
     /// The skills a session is reading, in the version it pinned.

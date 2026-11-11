@@ -2111,6 +2111,27 @@ pub(crate) struct Removal {
     pub workspace: bool,
 }
 
+impl Removal {
+    /// End the whole workspace, and never force.
+    ///
+    /// For a caller with nobody present. **Forcing is an operator's judgement
+    /// and not a timer's** — it marks the session `Ended` here without the
+    /// machine being told, which is what puts the workspace in front of
+    /// `reclaim::sweep`, and the sweep deletes the conversation inside the
+    /// minute. A machine that is merely away is worth waiting for, and
+    /// deciding that it is not is a thing somebody looks at.
+    ///
+    /// A constructor rather than a public `force` field, so that "a schedule
+    /// never forces" is a property of the type rather than something every
+    /// caller has to remember.
+    pub(crate) fn the_workspace() -> Self {
+        Self {
+            force: false,
+            workspace: true,
+        }
+    }
+}
+
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Done {
