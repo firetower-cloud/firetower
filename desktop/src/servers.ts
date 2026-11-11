@@ -40,6 +40,72 @@ const KEY = "firetower.servers";
 const tokens = new Map<string, string>();
 const keychain = () => bridge.secrets;
 
+/**
+ * The server whose token the OS keychain would not take, if nobody has been
+ * told yet.
+ *
+ * **There is no fallback and there must not be one.** A credential in
+ * `localStorage`, in IndexedDB, in a file beside the app, or encrypted under a
+ * key stored next to it, is a credential anything running as this user can
+ * read: WebKitGTK writes `localStorage` at `0644` under `0755` directories,
+ * and a second process under the same uid read a token straight out of it. So
+ * a refused write leaves the token in `tokens` and nowhere else — the session
+ * works, and does not survive the window closing.
+ *
+ * Which is why somebody has to be told at the moment it happens, while they
+ * are still holding the password. By the next launch we no longer know whether
+ * the keyring broke or the entry simply was not there, and the harm has
+ * already happened.
+ *
+ * **Not a Linux state.** A locked keychain on macOS and a Credential Manager
+ * a policy has closed on Windows arrive here too, silently, today. Linux is
+ * only where it happens most: a minimal desktop, a tiling window manager and
+ * anything reached over ssh frequently have no Secret Service on the bus at
+ * all.
+ */
+let owed: string | null = null;
+const unkeptWatchers = new Set<() => void>();
+
+/** Which sign-in could not be kept and has not been admitted to yet. */
+export function unkeptSignIn(): string | null {
+  return owed;
+}
+
+/** Said. The next refused write asks again. */
+export function unkeptSaid() {
+  owed = null;
+  unkeptChanged();
+}
+
+export function onUnkept(fn: () => void) {
+  unkeptWatchers.add(fn);
+  return () => void unkeptWatchers.delete(fn);
+}
+
+function unkeptChanged() {
+  unkeptWatchers.forEach((w) => w());
+}
+
+/**
+ * Put a token where the OS keeps secrets, and own up when it will not go.
+ *
+ * Every path that holds a token goes through here — a first sign-in, a
+ * replaced password, and the one-time move of a token out of an old build's
+ * registry file — because the failure is the same on all three and it was only
+ * ever handled on none of them.
+ */
+function keep(serverId: string, token: string): Promise<void> {
+  const kc = keychain();
+  if (!kc) return Promise.resolve();
+  /* In memory first and unconditionally: the session works whether or not the
+     write below does. */
+  tokens.set(serverId, token);
+  return kc.set(serverId, token).catch(() => {
+    owed = serverId;
+    unkeptChanged();
+  });
+}
+
 /** Read the keychain before anything draws. A no-op in a browser tab. */
 export async function hydrate() {
   const kc = keychain();
@@ -47,11 +113,8 @@ export async function hydrate() {
   for (const s of rows()) {
     const held = await kc.get(s.serverId).catch(() => null);
     if (held) tokens.set(s.serverId, held);
-    else if (s.token) {
-      // Made by a build that kept the token in the file: move it once.
-      await kc.set(s.serverId, s.token).catch(() => {});
-      tokens.set(s.serverId, s.token);
-    }
+    // Made by a build that kept the token in the file: move it once.
+    else if (s.token) await keep(s.serverId, s.token);
   }
   // The file never holds a token again.
   window.localStorage.setItem(KEY, JSON.stringify(rows().map((s) => ({ ...s, token: "" }))));
@@ -81,21 +144,13 @@ function write(list: Connected[]) {
 
 export function remember(server: Connected) {
   const rest = rows().filter((s) => s.serverId !== server.serverId);
-  const kc = keychain();
-  if (kc) {
-    tokens.set(server.serverId, server.token);
-    void kc.set(server.serverId, server.token).catch(() => {});
-  }
+  void keep(server.serverId, server.token);
   write([...rest, server]);
 }
 
 /** A changed password answers with a new token; keep it, drop the old. */
 export function updateToken(serverId: string, token: string) {
-  const kc = keychain();
-  if (kc) {
-    tokens.set(serverId, token);
-    void kc.set(serverId, token).catch(() => {});
-  }
+  void keep(serverId, token);
   write(rows().map((s) => (s.serverId === serverId ? { ...s, token } : s)));
 }
 

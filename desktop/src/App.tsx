@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Titlebar } from "~/ui/Titlebar";
 import { Resize } from "~/ui/Resize";
+import { KeychainRefused } from "~/ui/KeychainRefused";
 import { Rail } from "~/ui/Rail";
 import { Routes } from "~/Routes";
 import { Posters } from "~/artifacts/posters";
@@ -124,6 +125,11 @@ export function App() {
           title bar and not inside it: nested, one mousedown would start a
           move and a resize at once. */}
       <Resize />
+      {/* Draws nothing until the OS keychain refuses a token, which can happen
+          on any of the three platforms and on Linux happens most. Above the
+          door as well as the app, because the sign-in it is about can be the
+          one that just happened on either. */}
+      <KeychainRefused />
 
       <div className="relative flex min-h-0 flex-1">
         {/* The style page first, and before the door. It is a dev build's
