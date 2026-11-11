@@ -12,9 +12,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 
 /* A refusal is standing, for the one server. The registry itself is not what
-   is under test here. */
+   is under test here — `because` is, since it decides which of the two
+   stories the card tells. */
+const standing = vi.hoisted(() => ({ because: "signIn" as "signIn" | "legacy" }));
 vi.mock("~/servers", () => ({
-  unkeptSignIn: () => "s_acme",
+  unkeptSignIn: () => ({ serverId: "s_acme", because: standing.because }),
   unkeptSaid: () => {},
   onUnkept: () => () => {},
   signedOut: () => {},
@@ -22,7 +24,8 @@ vi.mock("~/servers", () => ({
 
 /** The card as it renders on `where`, with the module graph rebuilt so
     `platform.ts` reads the stubbed navigator rather than a cached answer. */
-async function refusedOn(where: string) {
+async function refusedOn(where: string, because: "signIn" | "legacy" = "signIn") {
+  standing.because = because;
   vi.resetModules();
   vi.stubGlobal("navigator", { userAgentData: { platform: where } });
   const { KeychainRefused } = await import("./KeychainRefused");
@@ -61,5 +64,35 @@ describe("there is nowhere to keep the sign-in", () => {
       expect(card).not.toContain("x-apple.systempreferences");
       expect(card).not.toContain("ms-settings");
     }
+  });
+});
+
+/**
+ * The other story the card has to tell.
+ *
+ * A token an older build had already written into this machine's
+ * `localStorage` and that cannot be moved into the keychain. `servers.ts` ends
+ * that sign-in rather than run a session on a credential sitting in a
+ * world-readable file — so there is nothing to offer for this session, and the
+ * card that says there is would be the only untrue sentence on the screen.
+ */
+describe("an old build's sign-in that could not be moved", () => {
+  it("does not offer a session it has already ended", async () => {
+    for (const where of ["Linux", "macOS", "Windows"]) {
+      const card = await refusedOn(where, "legacy");
+      expect(card).not.toContain("You are signed in now");
+      expect(card).not.toContain("Use it for this session");
+      // And no Back either: there is nothing left to go back from.
+      expect(card).not.toContain(">Back<");
+      expect(card).toContain("Sign in again");
+    }
+  });
+
+  it("says where the sign-in had been, and that it is over", async () => {
+    const card = await refusedOn("Linux", "legacy");
+    expect(card).toContain("An older version of Firetower had kept your sign-in in a file");
+    expect(card).toContain("you will need to sign in again");
+    // The platform's own blocker is still the first thing said.
+    expect(card).toContain("no keyring running on this machine");
   });
 });
