@@ -44,7 +44,12 @@ import { offWord, pauseTag, stoppedByFiretower } from "./words";
 export function SchedulesPage({ open, runs }: { open?: string | null; runs?: boolean }) {
   const library = useListSchedules();
   const everything = useMemo(() => library.data ?? [], [library.data]);
-  const [making, setMaking] = useState<Example | null | false>(false);
+  /* `?new=1` is how the panel's own row opens the sheet: it is over this
+     screen, so the row has to land here and then open it. Read once, on the
+     way in — afterwards the sheet is this component's state like any other. */
+  const [making, setMaking] = useState<Example | null | false>(() =>
+    typeof window !== "undefined" && window.location.hash.includes("new=1") ? null : false,
+  );
 
   const opened = open ? everything.find((s) => s.id === open) : undefined;
   if (open && opened) {
