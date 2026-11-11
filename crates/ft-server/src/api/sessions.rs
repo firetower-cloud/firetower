@@ -441,12 +441,27 @@ pub(crate) async fn create_session_as(
     // out, which is still a workspace and still a session.
     let mut repos: Vec<(ft_core::Repo, Option<String>)> = Vec::new();
     for asked in &wanted {
-        let found = state.db.repo(&asked.repo_id).await?.ok_or_else(|| {
-            ApiError::new(
-                ErrorCode::RepoNotConnected,
-                "that repository isn't connected",
-            )
-        })?;
+        // **The owner's, or it is not connected as far as this is concerned.**
+        // `Db::repo` answers for any id in the installation, and what happens
+        // next is a checkout, that repository's setup script, and `repo_env`
+        // reading its vault secrets into the worker's environment — so an id
+        // from a request has to be looked up as somebody's. Not a check added
+        // beside the lookup, which is a check the next caller has to
+        // remember: the lookup is the one that takes the person.
+        //
+        // The same function serves every caller, including the ones with
+        // nobody present, which is why it takes an owner id rather than a
+        // `Principal`.
+        let found = state
+            .db
+            .repo_of(&owner, &asked.repo_id)
+            .await?
+            .ok_or_else(|| {
+                ApiError::new(
+                    ErrorCode::RepoNotConnected,
+                    "that repository isn't connected",
+                )
+            })?;
         repos.push((found, asked.base.clone()));
     }
 
@@ -3209,12 +3224,20 @@ pub(super) async fn add_repo(
     let id = SessionId::from_stored(id);
     let (session, host) = working_context(&state, &principal, &id).await?;
 
-    let repo = state.db.repo(&req.repo_id).await?.ok_or_else(|| {
-        ApiError::new(
-            ErrorCode::RepoNotConnected,
-            "that repository isn't connected",
-        )
-    })?;
+    // `working_context` above answered that the *session* is theirs. Nothing
+    // answered that the repository is, and `repo_env` below reads its secrets
+    // — the same secrets, through a different door from bring-up. One id from
+    // the request body, looked up as the person who sent it.
+    let repo = state
+        .db
+        .repo_of(owner(&principal)?, &req.repo_id)
+        .await?
+        .ok_or_else(|| {
+            ApiError::new(
+                ErrorCode::RepoNotConnected,
+                "that repository isn't connected",
+            )
+        })?;
 
     if session.checkouts.iter().any(|c| c.slug == repo.slug) {
         return Err(ApiError::new(

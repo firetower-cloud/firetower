@@ -1271,11 +1271,50 @@ impl Db {
         Ok(())
     }
 
+    /// A repository by id, with nobody asking.
+    ///
+    /// For the paths that legitimately have no person: the id came from a row
+    /// we wrote rather than from a request. Anything handed an id by somebody
+    /// wants [`Db::repo_of`] — this one answers for any id in the
+    /// installation, which is the whole of what made three handlers reachable
+    /// with somebody else's.
     pub async fn repo(&self, id: &RepoId) -> Result<Option<Repo>> {
         let row = sqlx::query(&format!(
             "SELECT {REPO_COLUMNS} FROM repos r WHERE r.id = $1"
         ))
         .bind(id.as_str())
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(repo_from_row))
+    }
+
+    /// One person's repository, by id. `None` when it is not theirs.
+    ///
+    /// [`Db::repos_of`]'s predicate, for a single row. Three handlers took an
+    /// id from a request and looked it up with [`Db::repo`], which asks only
+    /// that the row exist — and two of them then read that repository's vault
+    /// secrets into a worker's environment. The predicate belongs in the
+    /// lookup rather than at each call site: a fourth caller arriving later
+    /// has to choose a function, and the one it will reach for is the one that
+    /// takes the person it already has.
+    ///
+    /// **`None` rather than a refusal**, matching `api::repos`' own note:
+    /// somebody else's repository is not something you are being refused, it
+    /// is something that does not exist as far as you are concerned. Telling
+    /// the two apart tells a member which codebases their colleagues work on.
+    ///
+    /// The predicate in SQL rather than filtering [`Db::repo`]'s answer the
+    /// way `api::repos::mine` does, because `mine` reads the slug off a
+    /// `Principal` and not every caller has one: a scheduled run has an owner
+    /// id and nobody present.
+    pub async fn repo_of(&self, person: &str, id: &RepoId) -> Result<Option<Repo>> {
+        let row = sqlx::query(&format!(
+            "SELECT {REPO_COLUMNS} FROM repos r
+              WHERE r.id = $1
+                AND r.path <@ ('u.' || (SELECT slug FROM principals WHERE id = $2))::ltree"
+        ))
+        .bind(id.as_str())
+        .bind(person)
         .fetch_optional(&self.pool)
         .await?;
         Ok(row.map(repo_from_row))
@@ -3077,6 +3116,99 @@ mod tests {
     /// to — the same account the first boot creates.
     async fn db_with_user() -> (Db, String) {
         Db::open_for_test_owned().await.unwrap()
+    }
+
+    /// A second account, for the questions that only have an answer when
+    /// there are two people.
+    async fn a_colleague(db: &Db, username: &str) -> String {
+        let accounts = crate::accounts::Accounts::new(db.pool().clone());
+        let org = ft_core::OrgId::from_stored(db.org().await.unwrap());
+        accounts
+            .create_user(&org, username, &format!("{username}@example.com"), "member")
+            .await
+            .unwrap()
+            .0
+            .id
+            .as_str()
+            .to_string()
+    }
+
+    /// **The predicate three handlers were missing.**
+    ///
+    /// `repo_of` answers for the person who asked, so an id belonging to
+    /// somebody else is `None` — which is what makes it safe to hand it an id
+    /// straight out of a request body. `repo` deliberately still answers for
+    /// both, because the paths that call it have no person to ask about.
+    #[tokio::test]
+    async fn a_repository_is_only_found_by_the_person_whose_it_is() {
+        let (db, mine) = db_with_user().await;
+        let theirs = a_colleague(&db, "colleague").await;
+
+        let ours = db
+            .ensure_repo(
+                "ours",
+                "git@example.com:a/ours.git",
+                None,
+                None,
+                &mine,
+                None,
+            )
+            .await
+            .unwrap();
+        let hers = db
+            .ensure_repo(
+                "hers",
+                "git@example.com:b/hers.git",
+                None,
+                None,
+                &theirs,
+                None,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            db.repo_of(&mine, &ours.id).await.unwrap().map(|r| r.id),
+            Some(ours.id.clone()),
+            "my own, found"
+        );
+        assert!(
+            db.repo_of(&mine, &hers.id).await.unwrap().is_none(),
+            "somebody else's does not exist as far as I am concerned"
+        );
+        assert!(
+            db.repo_of(&theirs, &ours.id).await.unwrap().is_none(),
+            "and the question is not one-sided"
+        );
+        assert!(
+            db.repo(&hers.id).await.unwrap().is_some(),
+            "the unfiltered lookup still answers, for the paths with nobody to ask about"
+        );
+    }
+
+    /// Nobody is a person, and `None` is the only safe answer.
+    ///
+    /// With authentication off there is no owner, and every other repository
+    /// read in this product already refuses for the same reason. A lookup that
+    /// fell open here would make the unfiltered one reachable again by passing
+    /// an empty string.
+    #[tokio::test]
+    async fn a_repository_belongs_to_nobody_who_is_not_somebody() {
+        let (db, mine) = db_with_user().await;
+        let ours = db
+            .ensure_repo(
+                "ours",
+                "git@example.com:a/ours.git",
+                None,
+                None,
+                &mine,
+                None,
+            )
+            .await
+            .unwrap();
+
+        assert!(db.repo_of("", &ours.id).await.unwrap().is_none());
+        assert!(db.repo_of("u_nobody", &ours.id).await.unwrap().is_none());
     }
 
     /// Publish a page, as the real path does.

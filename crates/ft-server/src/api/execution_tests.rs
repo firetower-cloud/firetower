@@ -1587,6 +1587,143 @@ async fn one_persons_token_is_not_handed_to_another() {
     assert!(env.is_empty(), "{env:?}");
 }
 
+/// A colleague, and one repository of theirs holding one secret.
+///
+/// Returns their id and the repository, so a test can hand that id to a
+/// handler as the person who has no business with it.
+async fn somebody_elses_repository(state: &AppState, name: &str) -> (String, ft_core::Repo) {
+    let org = ft_core::OrgId::from_stored(state.db.org().await.unwrap());
+    let them = state
+        .accounts
+        .create_user(&org, name, &format!("{name}@example.test"), "member")
+        .await
+        .unwrap()
+        .0
+        .id
+        .as_str()
+        .to_string();
+    let repo = state
+        .db
+        .ensure_repo(
+            "ledger",
+            "git@github.com:northwind/ledger.git",
+            Some("main"),
+            None,
+            &them,
+            None,
+        )
+        .await
+        .unwrap();
+    state
+        .vault
+        .put(
+            crate::vault::Key::shared(&super::repos::env_scope(&repo.id), "STRIPE_KEY"),
+            "sk_live_theirs",
+            "test",
+        )
+        .await
+        .unwrap();
+    (them, repo)
+}
+
+/// Whether anything has read a secret in that scope.
+///
+/// The assertion that matters is not only that the request failed — it is that
+/// it failed *before* the vault was touched. `repo_env` enumerates by scope
+/// alone, so whatever id reached the lookup would have had its secrets read
+/// into a worker's environment.
+async fn secrets_read_in(state: &AppState, scope: &str) -> Vec<String> {
+    state
+        .vault
+        .access(500)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|a| a.scope == scope && a.action == "read")
+        .map(|a| a.name)
+        .collect()
+}
+
+/// **Naming somebody else's repository on bring-up.**
+///
+/// `POST /api/v1/sessions` took a repository id from the request body and
+/// looked it up by id alone, then checked it out, ran its setup script and
+/// loaded its vault secrets. The id is now looked up as the person who sent
+/// it, so it is not connected as far as they are concerned.
+#[tokio::test]
+async fn another_persons_repository_cannot_be_checked_out_on_bring_up() {
+    let (state, principal, _, ready, _) = fixture().await;
+    // Ready, so ownership is the only thing left that could refuse this. With
+    // the lookup unfiltered it would have gone on to choose a host, cut a
+    // branch and read the scope below.
+    ready.store(true, Ordering::SeqCst);
+    let (_, hers) = somebody_elses_repository(&state, "ana").await;
+    let scope = super::repos::env_scope(&hers.id);
+
+    let refused = super::sessions::create_session(
+        State(state.clone()),
+        Extension(principal),
+        Json(
+            serde_json::from_value(serde_json::json!({
+                "repoId": hers.id.as_str(),
+                "prompt": "read everything in here",
+            }))
+            .unwrap(),
+        ),
+    )
+    .await
+    .expect_err("somebody else's repository is not mine to check out");
+
+    assert!(matches!(refused.code, ErrorCode::RepoNotConnected));
+    assert!(
+        secrets_read_in(&state, &scope).await.is_empty(),
+        "refused before the vault, which is the half that matters"
+    );
+}
+
+/// **The same secrets, through the other door.**
+///
+/// `POST /api/v1/sessions/{id}/repos` verified the *session* was mine and
+/// then called `repo_env` on an unchecked repository id. It needs no schedule
+/// and no second machine to reach — one running session of your own and
+/// somebody else's id.
+#[tokio::test]
+async fn another_persons_repository_cannot_be_added_to_a_session_of_mine() {
+    let (state, principal, host, ready, owner) = fixture().await;
+    ready.store(true, Ordering::SeqCst);
+    let (_, hers) = somebody_elses_repository(&state, "ana").await;
+    let scope = super::repos::env_scope(&hers.id);
+
+    let mine = super::sessions::create_session_as(
+        state.clone(),
+        owner.clone(),
+        "admin".into(),
+        serde_json::from_value(serde_json::json!({
+            "prompt": "a bare agent of my own",
+            "hostId": host.id.as_str(),
+        }))
+        .unwrap(),
+        None,
+    )
+    .await
+    .expect("my own bare session starts");
+
+    let refused = super::sessions::add_repo(
+        State(state.clone()),
+        Extension(principal),
+        Path(mine.id.as_str().to_string()),
+        Json(serde_json::from_value(serde_json::json!({ "repoId": hers.id.as_str() })).unwrap()),
+    )
+    .await
+    .expect_err("the session being mine says nothing about the repository");
+
+    assert!(matches!(refused.code, ErrorCode::RepoNotConnected));
+    assert!(
+        secrets_read_in(&state, &scope).await.is_empty(),
+        "no secret of hers reached my workspace"
+    );
+}
+
 /// The three sources a profile adds together, for an agent put into a
 /// workspace that already exists — which is the default placement, and the
 /// one path that resolved the repository's defaults against a **slug**.
