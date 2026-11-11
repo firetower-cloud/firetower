@@ -1109,6 +1109,7 @@ dependencies = [
  "objc2-app-kit",
  "objc2-foundation",
  "reqwest 0.12.28",
+ "serde",
  "serde_json",
  "tauri",
  "tauri-build",
