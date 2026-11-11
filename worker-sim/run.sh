@@ -372,9 +372,9 @@ cmd_ui() {
         say "building web/out (a minute or two, once)"
         (cd "$REPO/web" && pnpm install --frozen-lockfile >/dev/null && pnpm build >/dev/null)
     fi
-    # Nothing in the Rust sources changed, so cargo would not rebuild on its
-    # own. This is the file that reads the folder.
-    touch "$REPO/crates/ft-server/src/web.rs"
+    # No `touch` needed to make that stick: `crates/ft-server/build.rs` watches
+    # `web/out` precisely so that building the interface rebuilds the binary
+    # that carries it.
     compose up -d --force-recreate control
     wait_for_api
     step "Open it"
