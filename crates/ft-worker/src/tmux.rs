@@ -389,9 +389,7 @@ fn checked_exists_output(
     }
 
     let stderr = stderr.trim();
-    if exit_code == Some(1)
-        && (said_absent(name, stderr) || stderr.starts_with("no server running on "))
-    {
+    if exit_code == Some(1) && (said_absent(name, stderr) || said_no_server(stderr)) {
         return Ok(false);
     }
 
@@ -404,6 +402,40 @@ fn checked_exists_output(
             stderr
         }
     )
+}
+
+/// Whether tmux said there is no server at all, rather than refusing to say.
+///
+/// Which is the same fact about a session as `said_absent`, reached from the
+/// other end: nothing is listening on that socket, so nothing is running under
+/// it. And it is the answer the case this whole path exists for actually
+/// produces — a machine that has just rebooted has no tmux server, because
+/// tmux had not been started again yet.
+///
+/// Two wordings, because `no server running on …` is not the only one:
+/// tmux 3.3a — Debian bookworm's, and so most Linux hosts — answers
+/// `error connecting to /tmp/tmux-1000/default (No such file or directory)`.
+/// Only the first was read, and the consequence was the whole feature: on a
+/// rebooted machine the probe came back *unreadable*, an unreadable probe is
+/// an unknown, and an unknown leaves a dead agent reported alive. Found by
+/// running it in a container; it cannot be found on a developer's Mac, where a
+/// tmux server is almost always already up and the answer is `NAME not found`
+/// instead.
+///
+/// `(Connection refused)` is the same fact with the socket file still there —
+/// a server that died without cleaning up after itself, which is what a crash
+/// leaves behind on a machine that does not clear its temporary directory at
+/// boot. macOS is that machine.
+///
+/// Nothing else. `(Permission denied)` is a server somebody else is running
+/// and is not an answer about ours, and anything unrecognised stays an
+/// unknown — the whole value of this function is that it is the one place that
+/// decides, and it decides by recognising rather than by assuming.
+fn said_no_server(stderr: &str) -> bool {
+    stderr.starts_with("no server running on ")
+        || (stderr.starts_with("error connecting to ")
+            && (stderr.ends_with("(No such file or directory)")
+                || stderr.ends_with("(Connection refused)")))
 }
 
 /// Whether tmux said this session is not there, rather than refusing to say.
@@ -543,6 +575,46 @@ mod tests {
             "can't find session: firetower-s_test"
         )
         .is_err());
+    }
+
+    /// The wording a rebooted machine actually produces.
+    ///
+    /// This is the one that was missing, and it was the whole feature: with no
+    /// tmux server at all, tmux 3.3a says `error connecting to … (No such file
+    /// or directory)` rather than `no server running on …`, so a machine that
+    /// had just restarted answered the probe unreadably and every agent on it
+    /// went on being reported alive. Verified against tmux 3.3a in the
+    /// container harness, where `has-session` exits 1 with exactly this.
+    #[test]
+    fn no_tmux_server_at_all_is_an_answer_whichever_way_it_is_worded() {
+        for wording in [
+            // tmux 3.4 and later.
+            "no server running on /tmp/tmux-1000/default",
+            // Debian bookworm's 3.3a, and so most Linux hosts.
+            "error connecting to /tmp/tmux-1000/default (No such file or directory)",
+            // A socket left behind by a server that died: macOS, which does
+            // not clear its temporary directory at every boot.
+            "error connecting to /var/folders/x/y/T/tmux-501/default (Connection refused)",
+        ] {
+            assert!(
+                !checked_exists_output("firetower-s_test", false, Some(1), wording).unwrap(),
+                "{wording:?} means there is no session"
+            );
+        }
+
+        // And a server that is there and will not talk to us is not an answer
+        // about anything. A probe that cannot be read has to stay an unknown,
+        // because an unknown leaves a live agent alone.
+        for unknown in [
+            "error connecting to /tmp/tmux-0/default (Permission denied)",
+            "error connecting to /tmp/tmux-1000/default (Connection timed out)",
+            "failed to connect to server: resource temporarily unavailable",
+        ] {
+            assert!(
+                checked_exists_output("firetower-s_test", false, Some(1), unknown).is_err(),
+                "{unknown:?} is not an answer"
+            );
+        }
     }
 
     /// Asking exactly changes the sentence, and the sentence is parsed.
