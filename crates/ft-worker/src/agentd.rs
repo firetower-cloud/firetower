@@ -13,8 +13,18 @@
 //!    typed an hour from now goes down the same pipe as the first one.
 //! 2. **Write the log before anybody reads it.** Every line the agent prints is
 //!    appended to `agent.ndjson` and flushed *before* it is offered to a
-//!    subscriber, so a session nobody is watching loses nothing. That file is
-//!    the durable record; this process is not.
+//!    subscriber, so nothing a subscriber has seen is missing from the file and
+//!    a session nobody is watching loses nothing to this process ending.
+//!
+//!    That is an ordering guarantee and not a durability one, and the
+//!    difference is a power cut. `flush` empties this process's buffer into the
+//!    kernel's; nothing here calls `sync_all`, and the worker's own SQLite runs
+//!    `synchronous = Normal` — so a machine that loses power can come back
+//!    having lost the tail of both. What survives a *restart* is the whole
+//!    file; what survives a plug being pulled is whatever the kernel had
+//!    already written. Said plainly because recovery is read from this file:
+//!    an agent brought back reads its own log, and a missing tail is a turn it
+//!    does not know it took.
 //! 3. **Answer the permission tool**, which the agent starts for itself and
 //!    which has no other way back to us.
 //!
