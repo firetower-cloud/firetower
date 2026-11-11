@@ -79,7 +79,10 @@ export const STRIPS: { d: Direction; cursor: CSSProperties["cursor"]; box: CSSPr
  *
  * There is no maximise event to subscribe to, so this hangs off `onResized`,
  * which maximising and restoring both raise. `isMaximized` is a round trip to
- * the shell, which is why the answer is held rather than asked for on render.
+ * the shell, and a resize *drag* raises one event per frame — so the ask is
+ * held back until the window has been still for a moment. Without that, a
+ * person dragging an edge pays for sixty of them a second to be told what they
+ * already know.
  */
 function useMaximized() {
   const [maxed, setMaxed] = useState(false);
@@ -87,6 +90,7 @@ function useMaximized() {
   useEffect(() => {
     let gone = false;
     let drop: (() => void) | undefined;
+    let settling: ReturnType<typeof setTimeout> | undefined;
 
     void (async () => {
       const w = await tauriWindow();
@@ -96,13 +100,17 @@ function useMaximized() {
         if (!gone) setMaxed(now);
       };
       void read();
-      drop = await w.onResized(() => void read());
+      drop = await w.onResized(() => {
+        clearTimeout(settling);
+        settling = setTimeout(() => void read(), 150);
+      });
       // Unmounted while that was in flight: nothing will call the cleanup again.
       if (gone) drop();
     })();
 
     return () => {
       gone = true;
+      clearTimeout(settling);
       drop?.();
     };
   }, []);
