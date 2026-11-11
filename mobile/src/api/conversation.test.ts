@@ -275,6 +275,61 @@ describe("a page of history", () => {
 });
 
 /**
+ * Which line of the agent's log each item came from.
+ *
+ * Carried on the item because the conversation is a window and the artifacts
+ * beside it are not: a card is anchored by the log line it was published at,
+ * and the only thing that can say where that line is on screen is the item
+ * the same line opened. The number is already on every `ConversationEvent`
+ * and was being dropped on the floor — see `place` in `./steps`.
+ */
+describe("where in the log an item was", () => {
+  it("stamps the line that opened it", () => {
+    const read = apply(nothing, event(5141, "ItemStarted", { item: "a", kind: "AgentMessage" }));
+    expect(read.items[0].lineNo).toBe(5141);
+  });
+
+  it("carries the line onto a page of history", () => {
+    // `prepend` folds its page through `apply`, so reading backwards gets this
+    // for nothing — which is what lets a card that was above the transcript
+    // find its row once the page it belongs to arrives.
+    const tail = foldAll(nothing, [event(90, "ItemStarted", { item: "late", kind: "AgentMessage" })]);
+    const paged = prepend({ ...tail, firstLine: 90, hasMore: true }, {
+      events: [event(12, "ItemStarted", { item: "early", kind: "AgentMessage" })],
+      firstLine: 12,
+      hasMore: false,
+    });
+
+    expect(paged.items.map((i) => i.lineNo)).toEqual([12, 90]);
+  });
+
+  it("keeps the line it was opened at when the line is replayed", () => {
+    // A resume replays the start of the item it was cut inside. The item is
+    // the same item at the same line, and a card anchored to it must not move
+    // because somebody backgrounded the app.
+    const started = apply(nothing, event(7, "ItemStarted", { item: "a", kind: "AgentMessage" }));
+    const again = apply(started, event(7, "ItemStarted", { item: "a", kind: "AgentMessage" }));
+    expect(again.items[0].lineNo).toBe(7);
+  });
+
+  it("has no line for a message that has not been anywhere yet", () => {
+    // What the composer draws before the round trip finishes. `place` reads a
+    // row of these as reaching nothing rather than as reaching line zero,
+    // which is the difference between a card at the end and every card
+    // captioned as older than a message sent ten seconds ago.
+    const typed = {
+      ...nothing,
+      items: [{ id: "typed-1", kind: "UserMessage", text: "Look", output: "" }],
+    } as typeof nothing;
+    expect(typed.items[0].lineNo).toBeUndefined();
+
+    // And the agent's echo of it, which replaces the optimistic copy, does.
+    const echoed = apply(typed, event(31, "ItemStarted", { item: "message-1", kind: "UserMessage" }));
+    expect(echoed.items.map((i) => i.lineNo)).toEqual([31]);
+  });
+});
+
+/**
  * A subagent the agent left running outlives the turn that spawned it.
  *
  * `working` drives the composer's stop button and the "Working" line under the
