@@ -1,0 +1,58 @@
+# The app starts, and the furniture is there.
+#
+# The only flow in here that is not about a feature. It exists because every
+# other gate this repository has is a compiler — types, tests over pure
+# functions, a contract diff, and a Gradle build that links the Android app
+# without ever starting it. All of them were green on a build whose tab bar
+# threw on its first render, and the Android app showed a blank screen on
+# every device. Nothing compiles an app's first frame.
+#
+# So this asserts the one thing no compiler can: the process came up, the
+# router resolved, and the four destinations are on screen. The icons beside
+# them it cannot read — Maestro matches text — which is what the screenshots
+# are for, the same bargain `answer.yaml` makes about the composer's height.
+#
+#   maestro test e2e/launch.yaml -e ADDRESS=10.0.2.2:4411 -e USER=admin -e PASS=…
+#
+# `desktop/scripts/mock-server.mjs` answers enough of the contract to stand in
+# for a Firetower, which is what lets this run with no Postgres and no worker
+# anywhere near it. That is how `.github/workflows/mobile.yml` runs it.
+appId: com.usefiretower.app
+---
+# Connecting is the only way to the tab bar, and that is not incidental: with
+# no server `(tabs)/_layout` returns a `Redirect` before a single trigger is
+# built, so a flow that launched and stopped at the connect screen would have
+# watched this very bug go straight past it.
+- runFlow: connect.yaml
+
+# The bar. Four labels is four triggers that each came through the icon
+# converter — the step that threw, once, for every `md` name it was given.
+- assertVisible: "Dashboard"
+- assertVisible: "Tasks"
+- assertVisible: "Artifacts"
+- assertVisible: "You"
+- takeScreenshot: launch-tab-bar
+
+# And each destination mounts.
+#
+# What is asserted after each tap is a *sibling tab's* label, not anything on
+# the page that opened. That is deliberate and it is the whole trick: a screen
+# that throws during render takes the tree down with it, tab bar included, so
+# the bar still being there is the assertion that the page rendered. Asserting
+# on the page's own contents instead would tie this flow to whatever the mock
+# happens to answer, and a boot check that fails when a fixture changes is one
+# somebody turns off.
+- tapOn: "Tasks"
+- assertVisible: "Dashboard"
+- takeScreenshot: launch-tasks
+
+- tapOn: "Artifacts"
+- assertVisible: "Dashboard"
+- takeScreenshot: launch-artifacts
+
+- tapOn: "You"
+- assertVisible: "Dashboard"
+- takeScreenshot: launch-you
+
+- tapOn: "Dashboard"
+- assertVisible: "You"
