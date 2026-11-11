@@ -27,6 +27,38 @@ const WHICH = "firetower.current";
 const WAS = "firetower.scope";
 
 /**
+ * Which server this window is on, given what it last heard.
+ *
+ * The asked-for one where it is still here, and otherwise the first there is.
+ * **Pure, exported and tested, because the answer `null` while servers exist
+ * is a window with nothing in it** — `Window` draws no body for a server it
+ * cannot find, which is right when there are none and a bug every other time.
+ * It was reachable: the registry announces a new row before anything names
+ * it, so every sign-in passed through a render where the choice was stale.
+ */
+export function serverOn(real: { serverId: string }[], asked: string | null): string | null {
+  if (asked && real.some((s) => s.serverId === asked)) return asked;
+  return real[0]?.serverId ?? null;
+}
+
+/**
+ * What the window draws under its title bar.
+ *
+ * Here rather than inline so that the one answer that must never happen —
+ * `nothing` with servers in the registry — is something a test can ask for
+ * directly. `style` is a dev-build screen and is decided by the caller.
+ */
+export function bodyFor(
+  real: { serverId: string; token: string }[],
+  on: string | null,
+  path: string,
+): "connect" | "door" | "app" | "nothing" {
+  if (path.startsWith("/connect") || real.length === 0) return "connect";
+  if (real.some((s) => s.serverId === on && !s.token)) return "door";
+  return real.some((s) => s.serverId === on) ? "app" : "nothing";
+}
+
+/**
  * The window, before the keychain has said anything.
  *
  * **The chrome, and nothing under it.** `hydrate` runs behind the first frame
@@ -148,27 +180,36 @@ function Window() {
   const style = import.meta.env.DEV && path.startsWith("/style");
   const connecting = path.startsWith("/connect");
 
+  /* **Resolved during the render that needs it, not by an effect afterwards.**
+     A choice naming a server this Mac no longer has — or no choice yet,
+     which is every sign-in, because the row is announced before `onDone`
+     names it — used to leave `here` null for a render, and the branch for
+     that draws *nothing*: a window with a title bar and an empty body. An
+     effect then corrected it, which made the blank a flicker rather than a
+     state, and only while the effect actually ran. Falling back here means
+     there is no such render: with any server at all, one of them is the one
+     this window is on. */
+  const on = serverOn(real$, which);
   const asBackend = (id: string | null): Backend | null => {
     const real = id ? real$.find((s) => s.serverId === id) : undefined;
     return real ? liveBackend(real) : null;
   };
-  const here = asBackend(which);
-  /* A choice naming a server this Mac no longer has falls back to the next
-     one; with no server at all there is only connecting. */
+  const here = asBackend(on);
+  /* Written down so the correction survives a relaunch. */
   useEffect(() => {
-    if (!here) setWhich(real$[0]?.serverId ?? null);
-  }, [which, here, real$]);
+    if (on !== which) setWhich(on);
+  }, [on, which]);
   const none = real$.length === 0;
   /* A server this Mac is still connected to whose token has stopped working:
      a password replaced in a browser ends every other session, and so does an
      administrator resetting one. The address is still right, so what is owed
      is a password field for *that* server, not the whole app drawn around a
      refusal repeated in every pane. */
-  const adrift = real$.find((s) => s.serverId === which && !s.token) ?? null;
+  const adrift = real$.find((s) => s.serverId === on && !s.token) ?? null;
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-ground text-text">
-      <Titlebar serverId={which} onSwitch={pick} />
+      <Titlebar serverId={on} onSwitch={pick} />
       {/* The window's own edges, where there is no frame to grab. Beside the
           title bar and not inside it: nested, one mousedown would start a
           move and a resize at once. */}
