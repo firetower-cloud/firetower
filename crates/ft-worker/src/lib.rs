@@ -178,8 +178,16 @@ struct Sending {
 /// How often a worker says what its machine is doing.
 ///
 /// Slow enough that `df` and `docker system df` cost nothing measurable, and
-/// fast enough that a meter follows a build starting. The numbers it carries
-/// are drawn as meters that move; they are not decisions anything waits on.
+/// fast enough that a meter follows a build starting.
+///
+/// **One of these numbers is now a decision something waits on.** It used to
+/// say here that none of them were — that they were drawn as meters that move
+/// and nothing else — and that stopped being true when the control plane
+/// began refusing a launch on a machine that is low on disk: `disk_total_mb`
+/// and `disk_used_mb` are read in `create_session_as`, against a floor, and a
+/// run is refused rather than started. So this cadence is load-bearing, and
+/// making the reporting lazier would make that refusal decide on a reading
+/// older than it looks. The rest of `Capacity` is still only ever drawn.
 const REPORT_EVERY: std::time::Duration = std::time::Duration::from_secs(5);
 /// How often to look for an agent that has rotated its own credential.
 ///

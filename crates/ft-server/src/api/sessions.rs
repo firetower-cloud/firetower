@@ -30,6 +30,34 @@ use utoipa::ToSchema;
 /// that "it didn't work" arrives while you still remember asking for it.
 const RECONNECT_GRACE: std::time::Duration = std::time::Duration::from_secs(30);
 
+/// How much room a machine must have left before it is given more work.
+///
+/// **Headroom, not a percentage.** A worktree's size is an absolute quantity,
+/// so "will the next one fit" is an absolute question. Ten per cent of a 4 TB
+/// build server is 400 GB and means nothing; ten per cent of a 40 GB VM is
+/// 4 GB and is not enough for one dependency install.
+///
+/// Ten is several times the largest ordinary worktree — a checkout plus
+/// whatever its setup script produces is commonly 0.5–2 GB — and it leaves
+/// room for the agents already running. Refusing to start is only worth doing
+/// if it protects the work in flight; a floor set at the size of one worktree
+/// would admit the twentieth run and break the nineteen before it.
+///
+/// Where it is wrong: a small VM, where 10 GB is a third of the machine and
+/// work that would have fitted is refused. That is the safe direction —
+/// refusing a run that would have fitted costs one run, admitting one that
+/// does not costs everybody on the machine — but it is a real cost and it is
+/// stated rather than discovered. Deliberately not configurable: one
+/// documented number is explainable, and a per-host override is a column, a
+/// control and a support answer.
+///
+/// And it measures the filesystem the Docker daemon keeps images on, "which
+/// on most workers is also" the one the worktrees are on — [`ft_core::Capacity`]'s
+/// own words. On a machine with Docker on a separate volume this is the wrong
+/// disk. Not fixable from here, and the first thing to check if somebody
+/// reports a refusal that makes no sense on a machine with plenty of room.
+const DISK_FLOOR_MB: u64 = 10_240;
+
 /// Sessions, newest first.
 ///
 /// Without `limit` this returns everything, which is what the dashboard wants —
@@ -505,6 +533,50 @@ pub(crate) async fn create_session_as(
         .iter()
         .filter(|h| h.state == ft_core::HostState::Online && !h.drained)
         .collect();
+
+    // Whether a machine has room for another worktree.
+    //
+    // **Capacity is not authorization**, and the two sit in different places
+    // for a reason: authorization is about the person and is settled before a
+    // host is chosen, while "is there room" is a fact about one machine that
+    // is not knowable until one is being picked. So the floor belongs here,
+    // beside `drained`, in the one function every launch goes through — a
+    // schedule is the fastest way to a full disk and not the only one, and a
+    // full machine breaks everybody on it rather than whoever filled it.
+    //
+    // Read once for the whole list: `capacity_of` takes the fleet's lock, and
+    // a `find` would take it per candidate.
+    //
+    // **Fail open — unknown is unknown, not low.** A host with no reading is
+    // still a candidate, which is the same answer this function already gives
+    // twenty lines down about a machine that has never said which engines it
+    // has: never having said is not the same as having said no, and refusing
+    // on silence would empty the fleet of a fresh install. What that costs is
+    // bounded, because a reading cannot go quietly stale — `Fleet.capacity`
+    // has no timestamp, but a worker that stops talking is disconnected at
+    // `SILENCE` and an offline host is already out of `up`. So a reading in
+    // front of this is absent or it is about a minute old; it is never older.
+    let mut room = std::collections::HashMap::new();
+    for h in &hosts {
+        let free = state
+            .fleet
+            .capacity_of(&h.id)
+            .await
+            .map(|c| c.disk_total_mb.saturating_sub(c.disk_used_mb));
+        room.insert(
+            h.id.as_str().to_string(),
+            free.is_none_or(|mb| mb >= DISK_FLOOR_MB),
+        );
+    }
+    let has_room = |id: &ft_core::HostId| room.get(id.as_str()).copied().unwrap_or(true);
+
+    // Narrowed separately from `up` rather than folded into it, so the refusal
+    // below can tell "every machine is low on disk" from "no machine can run
+    // this engine". They are different problems with different answers, and
+    // one must never borrow the other's sentence: that line on a fleet merely
+    // missing an engine would send somebody to look at a disk that is fine.
+    let roomy: Vec<&ft_core::Host> = up.iter().copied().filter(|h| has_room(&h.id)).collect();
+
     let host = match &req.host_id {
         // Named explicitly, so a drained one is still refused below rather
         // than silently swapped for another.
@@ -516,12 +588,17 @@ pub(crate) async fn create_session_as(
         // A machine that has never reported is still a candidate: never having
         // said is not the same as having said no, and refusing on silence
         // would empty the fleet of a fresh install.
-        None => up
+        //
+        // Low on disk narrows the list the same way the engine does, so an
+        // installation with several machines routes around a full one by
+        // itself and is only refused when every candidate is low.
+        None => roomy
             .iter()
             .copied()
             .find(|h| installed(&h.id, req.agent) == Some(true))
             .or_else(|| {
-                up.iter()
+                roomy
+                    .iter()
                     .copied()
                     .find(|h| installed(&h.id, req.agent).is_none())
             }),
@@ -546,6 +623,13 @@ pub(crate) async fn create_session_as(
         // for reasons that have nothing to do with the engine — it is retired,
         // or it is somebody else's — and the vague answer there is deliberate.
         match (req.host_id.is_none(), up.is_empty()) {
+            // Machines are up and nobody named one, and the disk predicate is
+            // what emptied the list. Only then: `roomy` is checked before the
+            // engine sentence precisely so this cannot be said about a fleet
+            // whose disks are fine.
+            (true, false) if roomy.is_empty() => {
+                ApiError::new(ErrorCode::NoCapacity, "No machine had room on disk.")
+            }
             (true, false) => ApiError::new(
                 ErrorCode::NoCapacity,
                 format!(
@@ -562,6 +646,23 @@ pub(crate) async fn create_session_as(
         return Err(ApiError::new(
             ErrorCode::NoCapacity,
             format!("{} is draining and isn't taking new work", host.name),
+        ));
+    }
+
+    // A machine was asked for by name, so it is refused by name rather than
+    // silently swapped for another — the person asked for that one, and moving
+    // their work is not a kindness. Nothing reaches this from the branch
+    // above, which only ever picks a machine with room; it is here for the
+    // named path, the same shape and the same place `drained` refuses in.
+    //
+    // Past tense, and the sentence is written once here rather than composed
+    // again by each caller: a scheduled run's history line is this message
+    // under the word `Refused`, and a reading that was low a moment ago is not
+    // a present fact anything can claim afterwards.
+    if !has_room(&host.id) {
+        return Err(ApiError::new(
+            ErrorCode::NoCapacity,
+            format!("{} was low on disk.", host.name),
         ));
     }
 

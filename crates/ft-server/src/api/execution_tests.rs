@@ -30,6 +30,12 @@ struct Worker {
     /// worker writes — so a test can assert on those rather than stopping at
     /// `skill_pins` and inferring the rest.
     launched: Launches,
+    /// What this machine says about its disk, if it says anything.
+    ///
+    /// `None` is a worker that has never reported, which is a real state and
+    /// the one the disk floor fails open on — so it is the default here too
+    /// rather than a convenient zero.
+    capacity: Option<ft_core::Capacity>,
 }
 
 /// What the control plane told the worker to start.
@@ -44,10 +50,36 @@ impl Transport for Worker {
         let ready = self.ready.clone();
         let probe = self.probe.clone();
         let launched = self.launched.clone();
+        let capacity = self.capacity;
         tokio::spawn(async move {
             let (r, w) = tokio::io::split(theirs);
-            let mut codec = Codec::new(r, w);
-            while let Ok(frame) = codec.read::<ToWorker>().await {
+            let (mut reader, writer) = Codec::new(r, w).split();
+            let writer = Arc::new(tokio::sync::Mutex::new(writer));
+            // A worker reports its machine on a timer of its own rather than
+            // when asked — `REPORT_EVERY`, with the first tick on connect.
+            // Here it is quick and unending, so a test never races the first
+            // reading.
+            //
+            // Not during the handshake: the control plane reads `Hello` with
+            // one codec and builds a second for the serve loop, so a frame
+            // written into that gap is read by neither.
+            if let Some(said) = capacity {
+                let writer = writer.clone();
+                tokio::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+                    loop {
+                        let frame = ToServer::Usage {
+                            capacity: said,
+                            workspaces: Default::default(),
+                        };
+                        if writer.lock().await.write(&frame).await.is_err() {
+                            return;
+                        }
+                        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+                    }
+                });
+            }
+            while let Ok(frame) = reader.read::<ToWorker>().await {
                 let response = match frame {
                     ToWorker::Hello { .. } => Some(ToServer::Hello {
                         protocol: PROTOCOL_VERSION,
@@ -98,7 +130,7 @@ impl Transport for Worker {
                     _ => None,
                 };
                 if let Some(response) = response {
-                    if codec.write(&response).await.is_err() {
+                    if writer.lock().await.write(&response).await.is_err() {
                         break;
                     }
                 }
@@ -150,6 +182,7 @@ async fn watched_fixture() -> (
                 ready: ready.clone(),
                 probe: None,
                 launched: launched.clone(),
+                capacity: None,
             }),
         )
         .await;
@@ -562,6 +595,7 @@ async fn connecting_a_host_path_defers_validation_to_the_execution_machine() {
                 ready,
                 probe: None,
                 launched: Default::default(),
+                capacity: None,
             }),
         )
         .await;
@@ -1349,6 +1383,7 @@ async fn an_empty_repository_is_connected_rather_than_refused() {
                     empty: true,
                 }),
                 launched: Default::default(),
+                capacity: None,
             }),
         )
         .await;
@@ -2717,6 +2752,7 @@ async fn another_machine(state: &AppState, owner: &str, name: &str) -> Host {
                 ready: Arc::new(AtomicBool::new(true)),
                 probe: None,
                 launched: Default::default(),
+                capacity: None,
             }),
         )
         .await;
@@ -2748,6 +2784,168 @@ async fn says_it_has(state: &AppState, host: &Host, found: &[(Agent, bool)]) {
         })
         .collect();
     state.db.record_presence(&host.id, &reported).await.unwrap();
+}
+
+/// What a machine says about its disk, by reconnecting it saying so.
+///
+/// Through the protocol rather than by writing into `Fleet.capacity`, because
+/// the thing the floor rests on is that a reading cannot be stale while the
+/// host is selectable — and that property belongs to the connection, not to
+/// the map.
+async fn says_its_disk(state: &AppState, host: &Host, total_mb: u64, used_mb: u64) {
+    state.fleet.stop_supervising(&host.id).await;
+    state
+        .fleet
+        .supervise(
+            host.id.clone(),
+            Arc::new(Worker {
+                ready: Arc::new(AtomicBool::new(true)),
+                probe: None,
+                launched: Default::default(),
+                capacity: Some(ft_core::Capacity {
+                    disk_total_mb: total_mb,
+                    disk_used_mb: used_mb,
+                    ..Default::default()
+                }),
+            }),
+        )
+        .await;
+    for _ in 0..100 {
+        if state.fleet.capacity_of(&host.id).await.is_some() {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    panic!("the worker never said what its disk was doing");
+}
+
+/// Start a bare workspace as somebody, the way every caller of the launch path
+/// reaches the host filter.
+async fn launch_on(
+    state: &AppState,
+    owner: &str,
+    host: Option<&Host>,
+) -> Result<ft_core::Session, ApiError> {
+    let mut req = serde_json::json!({ "prompt": "look at the dependency updates" });
+    if let Some(h) = host {
+        req["hostId"] = serde_json::json!(h.id.as_str());
+    }
+    super::sessions::create_session_as(
+        state.clone(),
+        owner.to_string(),
+        "admin".into(),
+        serde_json::from_value(req).unwrap(),
+        None,
+    )
+    .await
+}
+
+/// **A machine asked for by name is refused by name.**
+///
+/// The same shape and the same place `drained` refuses in: the person asked
+/// for that one, and silently moving their work to another is not a kindness.
+#[tokio::test]
+async fn a_named_machine_low_on_disk_is_refused_naming_it() {
+    let (state, _, host, _, owner) = fixture().await;
+    says_its_disk(&state, &host, 60_000, 58_000).await;
+
+    let refused = launch_on(&state, &owner, Some(&host))
+        .await
+        .expect_err("2 GB is under the floor");
+
+    assert!(matches!(refused.code, ErrorCode::NoCapacity));
+    assert_eq!(refused.message, format!("{} was low on disk.", host.name));
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// **Nobody named one, so the candidate list narrowed and emptied.**
+///
+/// It names no machine because there is no one machine to name — every
+/// candidate was low. This is the fleet-wide sentence, and it is produced
+/// only by the disk predicate.
+#[tokio::test]
+async fn every_candidate_low_on_disk_refuses_without_naming_a_machine() {
+    let (state, _, host, _, owner) = fixture().await;
+    says_it_has(&state, &host, &[(Agent::ClaudeCode, true)]).await;
+    says_its_disk(&state, &host, 60_000, 59_000).await;
+
+    let refused = launch_on(&state, &owner, None)
+        .await
+        .expect_err("the only machine is full");
+
+    assert!(matches!(refused.code, ErrorCode::NoCapacity));
+    assert_eq!(refused.message, "No machine had room on disk.");
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// **Criterion 49: the two refusals never borrow each other's sentence.**
+///
+/// A fleet whose disks are fine and whose machines cannot run the engine is a
+/// different problem with a different answer. Sending somebody to look at a
+/// disk that is fine is the specific failure this separation prevents, which
+/// is why `roomy` is checked before the engine sentence and not folded into
+/// the same list.
+#[tokio::test]
+async fn a_fleet_missing_an_engine_is_not_told_its_disks_are_full() {
+    let (state, _, host, _, owner) = fixture().await;
+    says_it_has(&state, &host, &[(Agent::ClaudeCode, false)]).await;
+    says_its_disk(&state, &host, 60_000, 1_000).await;
+
+    let refused = launch_on(&state, &owner, None)
+        .await
+        .expect_err("nothing can run the engine");
+
+    assert!(
+        !refused.message.contains("disk"),
+        "the disk is fine and the message must not mention it: {}",
+        refused.message
+    );
+    assert!(refused.message.contains("No machine can run"));
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// **Fail open: unknown is unknown, not low.**
+///
+/// A machine that has never reported is still a candidate — the same answer
+/// this function already gives about a machine that has never said which
+/// engines it has. Refusing on silence would empty the fleet of a fresh
+/// install, which is every install for its first second.
+#[tokio::test]
+async fn a_machine_that_has_not_said_what_its_disk_is_doing_still_takes_work() {
+    let (state, _, host, ready, owner) = fixture().await;
+    ready.store(true, Ordering::SeqCst);
+    says_it_has(&state, &host, &[(Agent::ClaudeCode, true)]).await;
+    assert!(
+        state.fleet.capacity_of(&host.id).await.is_none(),
+        "the fixture's worker reports nothing, which is the state under test"
+    );
+
+    launch_on(&state, &owner, None)
+        .await
+        .expect("silence is not a refusal");
+}
+
+/// **A fleet with one full machine and one with room routes around it.**
+///
+/// Strictly better than refusing, and free: the narrowing is the filter that
+/// was already there. Only when every candidate is low does anybody see a
+/// refusal.
+#[tokio::test]
+async fn a_full_machine_is_passed_over_for_one_with_room() {
+    let (state, _, full, _, owner) = fixture().await;
+    let spacious = another_machine(&state, &owner, "wren").await;
+    says_it_has(&state, &full, &[(Agent::ClaudeCode, true)]).await;
+    says_it_has(&state, &spacious, &[(Agent::ClaudeCode, true)]).await;
+    says_its_disk(&state, &full, 60_000, 59_500).await;
+    says_its_disk(&state, &spacious, 60_000, 1_000).await;
+
+    let started = launch_on(&state, &owner, None)
+        .await
+        .expect("one machine has room");
+
+    assert_eq!(started.host_id, spacious.id, "it took the one with room");
+    state.fleet.stop_supervising(&full.id).await;
+    state.fleet.stop_supervising(&spacious.id).await;
 }
 
 /// Criterion 21: the machine is picked for the engine, not taken in order.
