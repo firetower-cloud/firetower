@@ -154,17 +154,61 @@ Nothing under test touches them; they only have to resolve.
 maestro --device <udid> test e2e/connect.yaml \
   -e ADDRESS=192.168.1.40:4400 -e USER=admin -e PASS=…
 maestro --device <udid> test e2e/answer.yaml
+maestro --device <udid> test e2e/launch.yaml \
+  -e ADDRESS=192.168.1.40:4400 -e USER=admin -e PASS=…
 ```
 
-Two flows, and they are deliberately the only two: connecting, and writing to
-an agent. Both cross the network, the keychain and the socket, which is
-exactly what a unit test would have to pretend about — everything else in
+Three flows. Two of them are about a feature — connecting, and writing to an
+agent — and both cross the network, the keychain and the socket, which is
+exactly what a unit test would have to pretend about. Everything else in
 `pnpm test` is a pure function over the contract precisely so that these can
 stay small.
 
 `maestro` picks the first device it finds, which on a machine with an Android
 emulator running is the wrong one. Pass `--device` with the simulator's UDID
 from `xcrun simctl list devices`.
+
+#### `launch.yaml`, and why a third flow
+
+The third is not about a feature. It starts the app and asserts the four tab
+destinations are on screen, and it exists because **nothing else in this
+repository runs the app at all**. `pnpm test` is pure functions over a
+stubbed `react-native`; `pnpm tsc` is types; the `android` job in CI compiles
+and links an APK and then uploads it. An app can pass all three and render
+nothing.
+
+It did. `NativeTabs.Trigger.Icon md="home"` throws on Android unless
+`expo-symbols` is installed to resolve the glyph, the throw happens while the
+tab bar is being built, and React takes the whole tree down with it — a blank
+screen on every Android device, under seven green checks. The type that would
+have objected (`md: AndroidSymbol`) is declared in the package that was
+missing, and `skipLibCheck` in `expo/tsconfig.base` means an unresolved import
+inside `node_modules` is silence rather than an error.
+
+Two things about how it is written are deliberate:
+
+- **It connects.** With no server `(tabs)/_layout` returns a `Redirect`
+  before it builds a single trigger, so a flow that launched the app and
+  stopped at the connect screen would have watched that bug go past.
+- **After each tap it asserts a *sibling tab's* label**, never anything on
+  the page that opened. A screen that throws during render takes the tab bar
+  with it, so the bar still being there is the assertion that the page
+  rendered — and it does not tie a boot check to whatever a fixture happens
+  to answer.
+
+CI runs it on an Android emulator against `desktop/scripts/mock-server.mjs`,
+which answers enough of the contract to get past the connect screen with no
+Postgres and no worker. Locally that works too, and is the quickest way to
+run the flow without a real Firetower:
+
+```sh
+node ../desktop/scripts/mock-server.mjs 4411 &
+maestro test e2e/launch.yaml -e ADDRESS=10.0.2.2:4411 -e USER=admin -e PASS=smoke
+```
+
+`10.0.2.2` is the host as an Android emulator sees it; on an iOS simulator,
+which shares the host's loopback, it is `localhost:4411`. The mock takes any
+password.
 
 #### Supplying the safe-area insets, in a browser
 
@@ -221,4 +265,8 @@ workspace that most needs them. That case lives in the mock's `team` scene
 (`curl -X POST 'http://localhost:4455/__reset?scene=team'`), and the patch
 serves the two conversations it needs to tell a right answer from a wrong one.
 
-These need a booted simulator, so they are not in the pull-request workflow.
+`connect.yaml` and `answer.yaml` need a booted simulator and a real
+Firetower, so they are not in the pull-request workflow. `launch.yaml` is —
+on Android, against the mock, in the `smoke` job of
+`.github/workflows/mobile.yml`. The difference is only what each one needs,
+not what each one is worth.
