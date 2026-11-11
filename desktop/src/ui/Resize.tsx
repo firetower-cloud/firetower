@@ -73,10 +73,11 @@ const CORNER = 16;
 
 /* Edges first, corners second, so the corners paint over the ends of the
    edges rather than under them — a corner that loses to an edge is a corner
-   that resizes one axis, which is the hardest kind of wrong to notice. */
-/* Exported for the test that holds the geometry: the numbers are the whole of
-   the design here, and the top corners being the height of the top edge is
-   the one a well-meaning tidy-up would square off. */
+   that resizes one axis, which is the hardest kind of wrong to notice.
+
+   Exported for the test that holds these numbers: they are the whole of the
+   design here, and the top corners being the height of the top edge is the
+   one a well-meaning tidy-up would square off. */
 export const STRIPS: { d: Direction; cursor: CSSProperties["cursor"]; box: CSSProperties }[] = [
   { d: "North", cursor: "ns-resize", box: { left: CORNER, right: CORNER, top: 0, height: TOP } },
   { d: "South", cursor: "ns-resize", box: { left: CORNER, right: CORNER, bottom: 0, height: EDGE } },
