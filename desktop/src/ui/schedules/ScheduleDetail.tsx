@@ -40,6 +40,7 @@ import {
   approveSchedule,
   useScheduleRuns,
 } from "~/api/generated/schedules/schedules";
+import { destroySession, sessionWork } from "~/api/generated/sessions/sessions";
 import type { Schedule, ScheduleRun } from "~/api/generated/model";
 import { BackToSchedules, RunNowButton, saysWhen } from "./SchedulesPage";
 import { RunMark, keptWhy, ran, runLine, took } from "./view";
@@ -98,11 +99,35 @@ export function ScheduleDetail({ schedule }: { schedule: Schedule }) {
             </p>
           </div>
           <div className="acts">
+            {/* **Stopping a run and pausing the clock are two controls**, and
+                this one is only here while a run is going. Pausing never
+                touches a run in flight — the schedule that paused itself with
+                a run still going is the shape of the overrun stop, and it is
+                why these cannot be one button.
+
+                It ends the agent in this run, not the workspace: what it
+                leaves behind is the thing somebody opens afterwards to find
+                out why it would not finish. */}
             {live ? (
               <button
                 className="btn plain"
                 title="Stops this run and any agents it started. The workspace stays."
-                onClick={() => live.sessionId && navigate(`/sessions/${live.sessionId}`)}
+                onClick={async () => {
+                  if (!live.sessionId) return;
+                  const work = await sessionWork(live.sessionId).catch(() => []);
+                  const uncommitted = work.reduce((n, c) => n + (c.uncommitted ?? 0), 0);
+                  const sure = await confirm({
+                    title: "Stop this run?",
+                    body: uncommitted
+                      ? `The agent stops and its workspace stays, with ${uncommitted} uncommitted file${uncommitted === 1 ? "" : "s"} in it. The schedule is unchanged and will run again at its usual time.`
+                      : "The agent stops and its workspace stays. The schedule is unchanged and will run again at its usual time.",
+                    action: "Stop the run",
+                  });
+                  if (!sure) return;
+                  await destroySession(live.sessionId, { workspace: false });
+                  history.refetch();
+                  await refresh();
+                }}
               >
                 <Icon of={Square} size={14} />
                 Stop the run
