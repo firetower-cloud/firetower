@@ -49,7 +49,15 @@ if (typeof window !== "undefined") {
   window.addEventListener("focus", release);
 }
 
-async function tauriWindow() {
+/**
+ * This window, or `null` in a browser tab.
+ *
+ * Exported for `ui/Resize.tsx`, which is the other half of "which parts of the
+ * page are the window": the bar moves it, the eight strips around it resize
+ * it, and both need the same handle. Imported lazily so a browser build never
+ * pulls the native API in.
+ */
+export async function tauriWindow() {
   const w = window as unknown as { __TAURI_INTERNALS__?: unknown };
   if (!w.__TAURI_INTERNALS__) return null;
   const { getCurrentWindow } = await import("@tauri-apps/api/window");

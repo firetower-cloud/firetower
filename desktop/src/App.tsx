@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Titlebar } from "~/ui/Titlebar";
+import { Resize } from "~/ui/Resize";
 import { Rail } from "~/ui/Rail";
 import { Routes } from "~/Routes";
 import { Posters } from "~/artifacts/posters";
@@ -119,6 +120,10 @@ export function App() {
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-ground text-text">
       <Titlebar serverId={which} onSwitch={pick} />
+      {/* The window's own edges, where there is no frame to grab. Beside the
+          title bar and not inside it: nested, one mousedown would start a
+          move and a resize at once. */}
+      <Resize />
 
       <div className="relative flex min-h-0 flex-1">
         {/* The style page first, and before the door. It is a dev build's
