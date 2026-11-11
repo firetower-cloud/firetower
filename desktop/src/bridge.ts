@@ -80,6 +80,18 @@ export interface Bridge {
    */
   shoot(url: string): Promise<ArrayBuffer | null>;
   /**
+   * Whether this shell can photograph a page at all.
+   *
+   * **Here, in the shell's surface, because nothing above this line can find
+   * it out.** `capture.rs` compiles to `SUPPORTED = false` anywhere but macOS and
+   * Windows, so on Linux capture is not unreliable, it is absent — and the
+   * only other way to learn that is to call `shoot` and count the refusals,
+   * which is slow, needs two of them, and says "this page would not render"
+   * when the truth is "this machine cannot render any". A build-time fact the
+   * interface has to act on is exactly what this file is for.
+   */
+  canShoot(): Promise<boolean>;
+  /**
    * An artifact's HTML, read natively so a secure webview can show it.
    *
    * A browser tab (`null`) loads the artifact URL straight into the iframe and
@@ -130,6 +142,7 @@ const browser: Bridge = {
     return suggested;
   },
   shoot: async () => null,
+  canShoot: async () => false,
   loadArtifact: null,
   secrets: null,
 };
@@ -170,6 +183,7 @@ function tauri(): Bridge | null {
       }
     },
     loadArtifact: (url) => invoke("load_artifact", { url }) as Promise<string>,
+    canShoot: () => invoke("capture_supported").then((v) => v !== false),
     shoot: async (url) => {
       const bytes = await invoke("capture_poster", { url });
       /* Tauri hands a `Response` back as an ArrayBuffer, but a failure that

@@ -67,21 +67,33 @@ export function ArtifactsPage({ open: asked = null }: { open?: string | null }) 
      the pictures arrive. A library of them reads as *loading*, and then as
      broken. The list is the view that never needed a picture. */
   const posters = useExpectPoster();
-  const [look, setLook] = useState<Look>(() => {
+  /* The view somebody chose, if anybody ever did. `null` is "nobody has". */
+  const [chosen, setChosen] = useState<Look | null>(() => {
     try {
       const held = window.localStorage.getItem(LOOK_KEY);
       if (held === "grid" || held === "list") return held;
     } catch {
       /* A window told to keep nothing opens on the default. */
     }
-    /* Read once, and only where nobody has chosen: a view already on screen
-       must not move under the person holding it. */
-    return posters ? "grid" : "list";
+    return null;
   });
+  /* **Derived, not frozen at mount, and that is the fix for the bug this
+     screen shipped with.** It used to read `posters` once in the initialiser
+     above — and the shell's answer about whether anything can be photographed
+     arrives a tick after launch, so on Linux the initialiser always ran while
+     nobody had asked yet, always chose the grid, and the library opened as
+     seven identical grey plates for the whole session. Reading it live costs
+     the thing the old comment was protecting — a view that does not move under
+     the person holding it — and buys the view being right on the first launch,
+     which is what it is for. The only motion it can produce is in the app's
+     first frames, behind the list's own pending state, or at the moment two
+     captures fail in a row, which is the moment the sentence below appears
+     saying why. Once anybody picks, nothing moves again. */
+  const look: Look = chosen ?? (posters ? "grid" : "list");
   /* Persisted when it is *chosen* and not when it is defaulted, so "nobody has
      chosen" is still true at the next launch. */
   const choose = (next: Look) => {
-    setLook(next);
+    setChosen(next);
     try {
       window.localStorage.setItem(LOOK_KEY, next);
     } catch {

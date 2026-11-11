@@ -78,6 +78,19 @@ pub async fn capture_poster(
     shoot(app, url).await.map(tauri::ipc::Response::new)
 }
 
+/// Whether this build can photograph a page at all.
+///
+/// A constant, and the renderer cannot see it: `platform` below compiles to
+/// `SUPPORTED = false` anywhere but macOS and Windows, so on Linux capture is
+/// not failing intermittently, it is impossible. The library used to work that
+/// out by counting refusals — two in a row, a poll apart, and only ever one of
+/// them actually arrived — and then draw a grid of grey plates for the whole
+/// session. Asking is both quicker and the truth.
+#[tauri::command]
+pub fn capture_supported() -> bool {
+    platform::SUPPORTED
+}
+
 async fn shoot(app: tauri::AppHandle, url: String) -> Result<Vec<u8>, String> {
     // Before a window is opened, not after it has rendered.
     //

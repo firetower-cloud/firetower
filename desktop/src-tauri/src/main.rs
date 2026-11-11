@@ -317,6 +317,7 @@ fn main() {
             close,
             save_download,
             capture::capture_poster,
+            capture::capture_supported,
             secret_get,
             secret_set,
             secret_delete,
