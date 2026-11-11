@@ -92,7 +92,7 @@ export function Detail({ id, framed }: { id: string; framed?: boolean }) {
         >
           <Text
             className="px-5 pt-1 font-medium text-bone"
-            style={{ fontSize: 23, letterSpacing: 23 * -0.018 }}
+            style={{ fontSize: size.display, letterSpacing: size.display * -0.018 }}
           >
             {it.name}
           </Text>
@@ -151,11 +151,15 @@ export function Detail({ id, framed }: { id: string; framed?: boolean }) {
                 <RunMark run={r} />
               </View>
               <View className="min-w-0 flex-1">
-                <Text className="font-sans text-body" style={{ fontSize: 15.5, lineHeight: 22 }}>
+                {/* **Reading gets its own size.** A run's line is the reason
+                    to open this screen, and it is read at arm's length in one
+                    column — so it takes `read` where the desk's list takes
+                    its own smaller step. */}
+                <Text className="font-sans text-body" style={{ fontSize: size.read, lineHeight: size.read * 1.4 }}>
                   {runLine(r)}
                 </Text>
                 <View className="flex-row gap-3.5 pt-0.5">
-                  <Text className="font-sans text-mute tabular-nums" style={{ fontSize: 13.5 }}>
+                  <Text className="font-sans text-mute tabular-nums" style={{ fontSize: size.micro }}>
                     {new Date(r.fireAt).toLocaleString(undefined, {
                       day: "numeric",
                       month: "short",
