@@ -18,7 +18,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { Session } from "~/api/generated/model";
-import { group, isChild, lead, leadPlace, placeOf } from "~/api/workspaces";
+import { group, isChild, lead, leadPlace, opens, placeOf, runAt } from "~/api/workspaces";
 
 /** Enough of a session for `group` and `lead`. */
 const run = (over: Partial<Session> & { id: string }): Session =>
@@ -170,11 +170,11 @@ describe("leads and children", () => {
 });
 
 /**
- * Which workspace a row opens.
+ * Which workspace an address is in.
  *
  * The Team panel's rows name **sessions**; `app/workspace/[id].tsx` finds its
- * place by `Workspace.id`. So a tap has to resolve one to the other, and the
- * id it is handed may be the workspace's, a run's, or a run that has since
+ * place by `Workspace.id`. So the route has to resolve one to the other, and
+ * the id it is handed may be the workspace's, a run's, or a run that has since
  * ended — which is why the lookup takes `belongsTo` as well.
  */
 describe("placeOf", () => {
@@ -208,10 +208,11 @@ describe("placeOf", () => {
     expect(placeOf(places([]), "s_3", "s_1")).toBeUndefined();
   });
 
-  /** What a Team row does on tap: a member off in a workspace of its own
-   *  opens that one, and a subagent sharing the manager's checkout resolves
-   *  back to the workspace you are already reading — so its row stays put. */
-  it("sends a member to its own place and a subagent back to the manager's", () => {
+  /** Every member a Team row can name has a place the route can find: the one
+   *  off in a workspace of its own lands in that, the subagent sharing the
+   *  manager's checkout lands in the shared one — and `runAt` is then what
+   *  keeps it from showing the manager's transcript in place of its own. */
+  it("finds a place for every member a team row can name", () => {
     const team = [
       run({ id: "s_lead", workspaceId: "w_lead" }),
       run({ id: "s_here", workspaceId: "w_lead", parentId: "s_lead" }),
@@ -220,5 +221,95 @@ describe("placeOf", () => {
     const ps = places(team);
     expect(placeOf(ps, "s_away", "w_away")?.id).toBe("w_away");
     expect(placeOf(ps, "s_here", "w_lead")?.id).toBe("w_lead");
+    expect(runAt(placeOf(ps, "s_here")!, "s_here").id).toBe("s_here");
+  });
+});
+
+/**
+ * **Every row but the one you are reading opens. That is the whole rule.**
+ *
+ * It shipped twice with a resolution step in front of it — session to
+ * workspace, and no row at all unless that landed somewhere other than here —
+ * and both times rows went silently dead on a device: no chevron, no press, a
+ * name under a thumb doing nothing. The roster below is every shape that
+ * failed it, in the one arrangement the mock's `team` scene actually draws:
+ * a manager with its subagents in its own checkout, where *every* member
+ * resolved back to the workspace being read and the panel was furniture.
+ *
+ * So the assertion is not that the happy path yields a handler. It is that
+ * exactly one row does not.
+ */
+describe("what a team row opens", () => {
+  const manager = run({ id: "s_lead", workspaceId: "w_lead" });
+  const roster = [
+    /* In the manager's own checkout, with no workspace of its own. */
+    run({ id: "s_here", workspaceId: "w_lead", parentId: "s_lead" }),
+    /* The row you are reading. */
+    run({ id: "s_reading", workspaceId: "w_lead", parentId: "s_lead" }),
+    /* Delegated into a workspace of its own. */
+    run({ id: "s_away", workspaceId: "w_away", parentId: "s_lead" }),
+    /* Finished, and gone from the running list the places are built from. */
+    run({ id: "s_gone", workspaceId: "w_lead", parentId: "s_lead", status: "Ended" }),
+  ];
+  const reading = roster[1];
+
+  it("leaves exactly one row — the one you are reading — without a handler", () => {
+    const panel = [manager, ...roster];
+    expect(panel.filter((m) => !opens(m, reading)).map((m) => m.id)).toEqual(["s_reading"]);
+  });
+
+  it("opens each of the others at the session it names", () => {
+    const panel = [manager, ...roster].filter((m) => m.id !== reading.id);
+    expect(panel.map((m) => opens(m, reading))).toEqual(["s_lead", "s_here", "s_away", "s_gone"]);
+  });
+
+  it("asks nothing about where the member works", () => {
+    // The shared checkout and the ended run are the two that used to resolve
+    // to nowhere. Neither is a question this gets to ask any more.
+    expect(opens(roster[0], reading)).toBe("s_here");
+    expect(opens(roster[3], reading)).toBe("s_gone");
+  });
+});
+
+/**
+ * And what the route does with that address.
+ *
+ * Three subagents in one checkout are three rows and one workspace, so an
+ * address that only named the workspace would open the same transcript three
+ * times — the dead row again, wearing a navigation.
+ */
+describe("runAt", () => {
+  const place = places([
+    run({ id: "s_1", workspaceId: "w_1" }),
+    run({ id: "s_2", workspaceId: "w_1", parentId: "s_1", status: "NeedsYou" }),
+    run({ id: "s_3", workspaceId: "w_1", parentId: "s_1" }),
+  ])[0];
+
+  it("shows the run the address names", () => {
+    expect(runAt(place, "s_3").id).toBe("s_3");
+    expect(runAt(place, "s_2").id).toBe("s_2");
+    expect(runAt(place, "s_1").id).toBe("s_1");
+  });
+
+  it("falls back to the run that speaks for the place", () => {
+    expect(runAt(place, "w_1").id).toBe(lead(place).id);
+    expect(runAt(place, "s_departed").id).toBe(lead(place).id);
+  });
+
+  /**
+   * The guard that keeps this from changing every other screen.
+   *
+   * A workspace whose sessions carry no `workspaceId` is filed under its
+   * founding run's id, so `place.id` is a run id there — and every list in
+   * the app opens a workspace by `place.id`. Honouring that as an address
+   * would put the founder on screen instead of `lead()`.
+   */
+  it("still leads with the speaking run when the place is filed under a run", () => {
+    const solo = places([
+      run({ id: "s_a", status: "NeedsYou" }),
+      run({ id: "s_b", workspaceId: "s_a" }),
+    ])[0];
+    expect(solo.id).toBe("s_a");
+    expect(runAt(solo, "s_a").id, "the address is the place's, not the founder's").toBe("s_b");
   });
 });

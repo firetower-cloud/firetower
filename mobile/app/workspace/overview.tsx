@@ -21,7 +21,7 @@ import { ChevronLeft } from "lucide-react-native";
 import type { Session } from "~/api/generated/model";
 import { useListArtifacts } from "~/api/generated/artifacts/artifacts";
 import { useConversation } from "~/api/conversation";
-import { group, lead } from "~/api/workspaces";
+import { group, placeOf, runAt } from "~/api/workspaces";
 import { useSession, useSessions } from "~/data";
 import { Overview } from "~/ui/Overview";
 import { Waiting } from "~/ui/Waiting";
@@ -34,16 +34,18 @@ export default function OverviewScreen() {
   const edges = useEdges({ gutter: BLEED });
   const { data: sessions, loading } = useSessions();
 
-  /* Every place there is. The screen wants one of them; the Team panel wants
-     the list, because a member row names a *session* and this route takes a
-     *workspace* — `placeOf` is what resolves one to the other. */
-  const places = useMemo(
-    () => group(sessions.filter((s) => s.status !== "Ended")).groups.flatMap(([, inRepo]) => inRepo),
-    [sessions],
-  );
-  const place = useMemo(() => places.find((p) => p.id === id) ?? null, [places, id]);
+  /* The address names a workspace or one run in it, and this route is handed
+     the latter — `[id].tsx` passes the run whose transcript you were reading,
+     so the panel marks the same row *here* that the conversation did. The
+     unfiltered list is where an ended run's `workspaceId` is read from; see
+     `[id].tsx`, which resolves an address the same way. */
+  const place = useMemo(() => {
+    const places = group(sessions.filter((s) => s.status !== "Ended")).groups.flatMap(([, inRepo]) => inRepo);
+    const named = sessions.find((s: Session) => s.id === id);
+    return placeOf(places, id, named?.workspaceId) ?? null;
+  }, [sessions, id]);
 
-  const speaker = place ? lead(place) : null;
+  const speaker = place ? runAt(place, id) : null;
   const { data: session } = useSession(speaker?.id ?? "");
   const { conversation } = useConversation(speaker?.id ?? "");
   const { data: everyArtifact } = useListArtifacts();
@@ -99,14 +101,13 @@ export default function OverviewScreen() {
             session={session}
             lead={above}
             team={team}
-            places={places}
             plan={plan}
             artifacts={artifacts}
             onOpenArtifact={(a) => router.push({ pathname: "/workspace/artifact", params: { id: a } })}
-            /* The same route the Workspaces list and the home push, so a
-               child opened from here goes back the way every other workspace
-               does. */
-            onOpenWorkspace={(to) => router.push(`/workspace/${to}`)}
+            /* Onto that member's transcript, addressed by its session — which
+               is what the desk's `/sessions/<id>` link does, through the one
+               route the phone has. */
+            onOpenSession={(to) => router.push(`/workspace/${to}`)}
           />
         ) : (
           <View className="items-center justify-center py-20">

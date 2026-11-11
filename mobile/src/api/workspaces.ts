@@ -169,10 +169,10 @@ export function isChild(place: Workspace, places: Workspace[]): boolean {
  * by what it *is* rather than by which of its runs happened to be in the
  * address.
  *
- * This is also the one question a tap on a team member asks — a row names a
- * session and the phone routes to a *workspace*, and `~/workspace/[id]` finds
- * its place by `Workspace.id`. Deciding that here is what keeps the Overview
- * and the route agreeing about which row opens what.
+ * This is also the lookup a tap on a team member ends in — a row names a
+ * *session* and the phone has only a *workspace* route, so the route resolves
+ * one to the other here rather than every caller doing it its own way. See
+ * `opens` and `runAt`, which are the other two thirds of that.
  */
 export function placeOf(
   places: Workspace[],
@@ -185,6 +185,26 @@ export function placeOf(
       (!!belongsTo && p.id === belongsTo) ||
       p.runs.some((r) => r.id === id),
   );
+}
+
+/**
+ * What a team row opens: the session it names, or nothing when it names the
+ * one you are already reading.
+ *
+ * **One condition, because the desk has exactly one.**
+ * `desktop/src/ui/OverviewTab.tsx` draws the active member as a plain row and
+ * every other member as a link to `/sessions/<id>`. There is no resolution
+ * step in front of it and no second test, and every extra test this has worn
+ * was another way for a row naming a real session to go dead under a thumb:
+ * a member whose workspace was filtered out of the list, one that has ended,
+ * and — the case that killed every row in the panel — a subagent sharing the
+ * manager's checkout, which resolves to the workspace you are standing in.
+ *
+ * So the row carries the **session** id, the same thing the desk links to,
+ * and `runAt` is what the workspace route does with it on the other side.
+ */
+export function opens(member: Session, reading: Session): string | undefined {
+  return member.id === reading.id ? undefined : member.id;
 }
 
 /** The last part of `owner/name`, which is what a rail has room for. */
@@ -218,6 +238,29 @@ export function lead(place: Workspace): Session {
      opened it to read. The desk skips those and this did not, which is one
      way the two clients could show a different transcript for the same row. */
   return match ?? place.runs.find((r) => r.agent !== "Shell") ?? place.runs[0];
+}
+
+/**
+ * The run an address names, when it names one rather than the place itself.
+ *
+ * `placeOf` answers *which workspace*; this answers *whose transcript*, and
+ * the pair is how one route does the work the desk needs two for. The desk
+ * opens a team member at `/sessions/<id>` and shows that session. The phone
+ * has `/workspace/<id>` and nothing else, so the address carries the run and
+ * the screen follows it — which is what lets a subagent sharing the manager's
+ * checkout open its own transcript rather than the page you are already on.
+ *
+ * `lead()` otherwise: an address that names the place is a request for the
+ * place, and the run that speaks for it is the one to read.
+ *
+ * **The `r.id !== place.id` guard is not defensive, it is the whole care.**
+ * A workspace whose sessions carry no `workspaceId` is filed under its
+ * founding run's id, so there `place.id` *is* a run id — and honouring it
+ * would quietly put the founder on screen in place of `lead()` for every
+ * workspace opened from a list.
+ */
+export function runAt(place: Workspace, address: string): Session {
+  return place.runs.find((r) => r.id === address && r.id !== place.id) ?? lead(place);
 }
 
 /**
