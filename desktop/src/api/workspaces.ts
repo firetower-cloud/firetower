@@ -2,9 +2,11 @@
  * Sessions, read as the places they work in.
  *
  * The API returns sessions; a person thinks in workspaces. A workspace is a
- * checkout on a host with any number of agents in it, and the first session of
- * one carries the workspace's own id — so grouping by `workspaceId` and taking
- * the name from the first run gives back the shape somebody actually has.
+ * checkout on a host with any number of agents in it, and every run in one
+ * carries its `workspaceId` — so grouping by that gives back the shape
+ * somebody actually has, and `founder()` says which of those runs the place
+ * is named after. Not whichever sorted first: that was a bug for as long as
+ * this file has existed, and the comment here used to assert it.
  *
  * Shared because the rail and the dashboard both draw it, and reading the fleet
  * twice over should not mean reading it two different ways.
@@ -146,6 +148,40 @@ export function placeBeat(place: Workspace, places: Workspace[]): Beat {
   return beatOf(loudest(familyOf(place, places)));
 }
 
+/**
+ * The run that founded the place: the one it is named after, aged from, and
+ * the one a list means when it opens a workspace.
+ *
+ * **`r.id === place.id` was the whole of this, and it almost never matched.**
+ * `group()` files a place under `workspaceId ?? id`, so that test only finds
+ * the founder of a workspace with no id of its own. For every real workspace
+ * it found nothing, the place kept whichever run sorted to the front — needs
+ * you first, then newest — and a workspace was then named after a subagent in
+ * it, aged from the wrong run, and never nested under the lead that asked for
+ * it. The phone wears it worst: `runAt` opens a workspace at its founder, so
+ * there a missing founder opened a subagent's transcript and the Team panel
+ * marked that subagent's row as the one you were reading.
+ *
+ * Found by shape instead: the run in this place that was not started by
+ * another run in it. A subagent sharing the checkout has its lead here, so it
+ * is skipped; the lead itself — or an agent a person started — has no parent
+ * here and qualifies. Oldest when several do, which is also the answer once
+ * the founder has ended and only what it delegated is left: the oldest run
+ * still here is the best the place can say for itself.
+ */
+export function founder(place: Workspace): Session | undefined {
+  const own = new Set(place.runs.map((r) => r.id));
+  let eldest: Session | undefined;
+  for (const run of place.runs) {
+    /* A place with no workspace of its own is filed under this run's id,
+       which says outright that it founded it. */
+    if (run.id === place.id) return run;
+    if (run.parentId && own.has(run.parentId)) continue;
+    if (!eldest || run.createdAt < eldest.createdAt) eldest = run;
+  }
+  return eldest;
+}
+
 export function group(sessions: Session[]): Repositories {
   const byRepo = new Map<string, Map<string, Workspace>>();
 
@@ -185,15 +221,14 @@ export function group(sessions: Session[]): Repositories {
   // own, and a place is never under itself.
   for (const places of byRepo.values()) {
     for (const place of places.values()) {
-      const founder = place.runs.find((r) => r.id === place.id);
+      const first = founder(place);
       // Named after its founder, not whichever run was seen first: a workspace
       // with a same-workspace child in it must keep the lead's name, not take
-      // the child's. Only when the founder is still around to say.
-      if (founder) place.name = founder.name;
-      // And aged from it, for the same reason. With the founder gone, the
-      // oldest run still here is the best the place can say for itself.
-      place.startedAt = founder?.createdAt ?? place.runs.reduce((a, r) => (r.createdAt < a ? r.createdAt : a), place.runs[0].createdAt);
-      const lead = founder?.parentId ?? undefined;
+      // the child's.
+      if (first) place.name = first.name;
+      // And aged from it, for the same reason.
+      place.startedAt = first?.createdAt ?? place.runs.reduce((a, r) => (r.createdAt < a ? r.createdAt : a), place.runs[0].createdAt);
+      const lead = first?.parentId ?? undefined;
       place.leadOf = lead && !place.runs.some((r) => r.id === lead) ? lead : undefined;
     }
   }

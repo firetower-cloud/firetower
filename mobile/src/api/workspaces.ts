@@ -2,16 +2,27 @@
  * Sessions, read as the places they work in.
  *
  * The API returns sessions; a person thinks in workspaces. A workspace is a
- * checkout on a host with any number of agents in it, and the first session of
- * one carries the workspace's own id — so grouping by `workspaceId` and taking
- * the name from the first run gives back the shape somebody actually has.
+ * checkout on a host with any number of agents in it, and every run in one
+ * carries its `workspaceId` — so grouping by that gives back the shape
+ * somebody actually has, and `founder()` says which of those runs the place
+ * is named after. Not whichever sorted first: that was a bug for as long as
+ * this file has existed, and the comment here used to assert it.
  *
  * Shared because the rail and the dashboard both draw it, and reading the fleet
  * twice over should not mean reading it two different ways.
+ *
+ * **A subset of the desk's copy, deliberately.** `desktop/src/api/workspaces.ts`
+ * also exports `familyOf`, `placeBeat`, `speaksFor`, `flat`, `rowLabel`,
+ * `childrenElsewhere` and `childrenWorking`; each of those answers for a
+ * surface the phone has not got — a rail that hides delegated children under
+ * one mark, an end-workspace confirmation that counts what goes with it.
+ * Everything that says what a *place* is, and whose it is, is the same code
+ * under the same names. Add from there rather than inventing beside it, and
+ * when a third reason arrives, extract the package the README promises.
  */
 
 import type { Session } from "./generated/model";
-import { inFlight, needsYou } from "./view";
+import { BEAT, inFlight, needsYou, type Beat } from "./view";
 
 /** A workspace: a checkout on a host, and the agents working in it. */
 export type Workspace = {
@@ -19,6 +30,16 @@ export type Workspace = {
   name: string;
   branch?: string;
   runs: Session[];
+  /**
+   * The session that asked for this place, when a session did.
+   *
+   * A child's row is drawn under its lead's and sorts straight after it rather
+   * than by its own age, so a lead and what it delegated read as one piece of
+   * work. Only a child in a workspace of its own has this: one started *in* the
+   * lead's workspace is simply another run of that place, and shows as another
+   * mark on the lead's row.
+   */
+  leadOf?: string;
 };
 
 /** Repositories, each with the workspaces cut from it. */
@@ -38,6 +59,39 @@ export function doing(place: Workspace): "waiting" | "working" | "idle" {
   if (place.runs.some(inFlight)) return "working";
   if (place.runs.some(needsYou)) return "waiting";
   return "idle";
+}
+
+/**
+ * The run that founded the place: the one it is named after, and the one a
+ * list means when it opens a workspace.
+ *
+ * **`r.id === place.id` was the whole of this, and it almost never matched.**
+ * `group()` files a place under `workspaceId ?? id`, so that test only finds
+ * the founder of a workspace with no id of its own. For every real workspace
+ * it found nothing, the place kept whichever run sorted to the front — needs
+ * you first, then newest — and three things followed from it: the Workspaces
+ * list and the home named a workspace after a subagent in it, a child
+ * workspace never nested under its lead, and opening a workspace lit a
+ * child's row in the Team panel as the one you were reading.
+ *
+ * Found by shape instead: the run in this place that was not started by
+ * another run in it. A subagent sharing the checkout has its lead here, so it
+ * is skipped; the lead itself — or an agent a person started — has no parent
+ * here and qualifies. Oldest when several do, which is also the answer once
+ * the founder has ended and only what it delegated is left: the oldest run
+ * still here is the best the place can say for itself.
+ */
+export function founder(place: Workspace): Session | undefined {
+  const own = new Set(place.runs.map((r) => r.id));
+  let eldest: Session | undefined;
+  for (const run of place.runs) {
+    /* A place with no workspace of its own is filed under this run's id,
+       which says outright that it founded it. */
+    if (run.id === place.id) return run;
+    if (run.parentId && own.has(run.parentId)) continue;
+    if (!eldest || run.createdAt < eldest.createdAt) eldest = run;
+  }
+  return eldest;
 }
 
 export function group(sessions: Session[]): Repositories {
@@ -67,15 +121,125 @@ export function group(sessions: Session[]): Repositories {
       name: session.name,
       branch: session.branch ?? undefined,
       runs: [session],
+      leadOf: session.parentId ?? undefined,
     });
+  }
+
+  // Whose place each is. The founding session — the one the place is named
+  // after — says who asked for it; whichever run happened to be seen first
+  // does not. And a lead that is one of the place's own runs is no lead at
+  // all: a child started *in* a workspace is a run of it, not a place of its
+  // own, and a place is never under itself.
+  for (const places of byRepo.values()) {
+    for (const place of places.values()) {
+      const first = founder(place);
+      // Named after its founder, not whichever run was seen first: a workspace
+      // with a same-workspace child in it must keep the lead's name, not take
+      // the child's.
+      if (first) place.name = first.name;
+      const asked = first?.parentId ?? undefined;
+      place.leadOf = asked && !place.runs.some((r) => r.id === asked) ? asked : undefined;
+    }
   }
 
   const groups: [string, Workspace[]][] = [...byRepo].map(([repo, places]) => [
     repo,
-    [...places.values()],
+    underTheirLeads([...places.values()]),
   ]);
 
   return { groups, total: groups.reduce((n, [, places]) => n + places.length, 0) };
+}
+
+/**
+ * Each child straight after its lead.
+ *
+ * Within one repository: a child cut from a different repository than its
+ * lead is listed under its own, where its branch is. Everything keeps the
+ * order it arrived in — needs-you first, then newest — so children under one
+ * lead still read newest first, and a child whose lead is nowhere in the list
+ * stays where its own age put it.
+ */
+function underTheirLeads(places: Workspace[]): Workspace[] {
+  const placeOfRun = new Map<string, Workspace>();
+  for (const place of places) for (const run of place.runs) placeOfRun.set(run.id, place);
+
+  const under = new Map<string, Workspace[]>();
+  const top: Workspace[] = [];
+  for (const place of places) {
+    /* `above` where the desk writes `lead`: this file exports a `lead()` of
+       its own for the run that *speaks* for a place, and the two are
+       different questions. Shadowing one with the other is a trap. */
+    const above = place.leadOf ? placeOfRun.get(place.leadOf) : undefined;
+    if (above && above.id !== place.id) {
+      under.set(above.id, [...(under.get(above.id) ?? []), place]);
+    } else {
+      top.push(place);
+    }
+  }
+  return top.flatMap((place) => [place, ...(under.get(place.id) ?? [])]);
+}
+
+/** The place whose session started this one, if it is on the list. */
+export function leadPlace(place: Workspace, places: Workspace[]): Workspace | undefined {
+  if (!place.leadOf) return undefined;
+  return places.find((other) => other.id !== place.id && other.runs.some((r) => r.id === place.leadOf));
+}
+
+/** Whether this place was started by a session in another place on the list. */
+export function isChild(place: Workspace, places: Workspace[]): boolean {
+  return !!leadPlace(place, places);
+}
+
+/**
+ * The place an id in the address belongs to.
+ *
+ * The id may name the workspace or any one run in it — a second agent is
+ * opened by its own id and belongs to the place its sibling made. Both have
+ * always worked.
+ *
+ * **And it still has to work once that run has ended.** Ending the agent you
+ * were reading takes its id out of the running list, so an address naming it
+ * matched no group at all. `belongsTo` is that session's `workspaceId`, which
+ * survives it: the group is keyed by the same value, so the place is findable
+ * by what it *is* rather than by which of its runs happened to be in the
+ * address.
+ *
+ * This is also the lookup a tap on a team member ends in — a row names a
+ * *session* and the phone has only a *workspace* route, so the route resolves
+ * one to the other here rather than every caller doing it its own way. See
+ * `opens` and `runAt`, which are the other two thirds of that.
+ */
+export function placeOf(
+  places: Workspace[],
+  id: string,
+  belongsTo?: string | null,
+): Workspace | undefined {
+  return places.find(
+    (p) =>
+      p.id === id ||
+      (!!belongsTo && p.id === belongsTo) ||
+      p.runs.some((r) => r.id === id),
+  );
+}
+
+/**
+ * What a team row opens: the session it names, or nothing when it names the
+ * one you are already reading.
+ *
+ * **One condition, because the desk has exactly one.**
+ * `desktop/src/ui/OverviewTab.tsx` draws the active member as a plain row and
+ * every other member as a link to `/sessions/<id>`. There is no resolution
+ * step in front of it and no second test, and every extra test this has worn
+ * was another way for a row naming a real session to go dead under a thumb:
+ * a member whose workspace was filtered out of the list, one that has ended,
+ * and — the case that killed every row in the panel — a subagent sharing the
+ * manager's checkout, which resolves to the workspace you are standing in.
+ *
+ * So the row carries the **session** id, the same thing the desk links to,
+ * and `runAt` is what the workspace route does with it on the other side.
+ */
+export function opens(member: Session, reading: Session): string | undefined {
+  return member.id === reading.id ? undefined : member.id;
 }
 
 /** The last part of `owner/name`, which is what a rail has room for. */
@@ -109,4 +273,55 @@ export function lead(place: Workspace): Session {
      opened it to read. The desk skips those and this did not, which is one
      way the two clients could show a different transcript for the same row. */
   return match ?? place.runs.find((r) => r.agent !== "Shell") ?? place.runs[0];
+}
+
+/**
+ * The run an address names, when it names one rather than the place itself.
+ *
+ * `placeOf` answers *which workspace*; this answers *whose transcript*, and
+ * the pair is how one route does the work the desk needs two for. The desk
+ * opens a team member at `/sessions/<id>` and shows that session. The phone
+ * has `/workspace/<id>` and nothing else, so the address carries the run and
+ * the screen follows it — which is what lets a subagent sharing the manager's
+ * checkout open its own transcript rather than the page you are already on.
+ *
+ * `founder()` otherwise: an address that names the place is a request for the
+ * place, and the run the place is named after is the one to read.
+ *
+ * **It was `lead()`, and that is what lit the wrong row in the Team panel.**
+ * `lead()` answers *which run does this row describe* — the loudest one, so a
+ * row's single dot and single line agree. Open a workspace whose subagent is
+ * working and that is the subagent, so the panel marked the subagent's row as
+ * where you are while the header above it carried the workspace's name, and
+ * the parent's own row grew a chevron offering to open what was already
+ * meant to be on screen. Which run is loudest is not who the place *is*.
+ *
+ * `lead()` stays as the last resort for a place with nothing in it to found
+ * it, which `group()` cannot produce — the type wants a `Session` either way.
+ */
+export function runAt(place: Workspace, address: string): Session {
+  return place.runs.find((r) => r.id === address) ?? founder(place) ?? lead(place);
+}
+
+/**
+ * The order a list of workspaces reads in. **Not sections — an order.**
+ *
+ * Grouped is the one not to ship: a workspace changes state while you are
+ * looking at it, and the row you reached for jumps sections under your thumb.
+ * Flat and status-ordered has no such frame.
+ *
+ * `Record<Beat, …>` rather than `Record<string, …>`, so adding a beat is a
+ * build error here instead of a silent `undefined` in the comparator, which
+ * would sort the new one to an arbitrary place.
+ *
+ * Shared because two surfaces draw this list — the Workspaces destination and
+ * the home's docked column, which is the same list previewed — and two copies
+ * of a comparator are two chances to disagree about what comes first.
+ */
+export const RANK: Record<Beat, number> = { blocked: 0, broken: 1, working: 2, done: 3, over: 4 };
+
+/** The same list, in that order. A copy: `sort` is in place and the caller's
+ *  array is memoised upstream. */
+export function ranked(places: Workspace[]): Workspace[] {
+  return places.slice().sort((a, b) => RANK[BEAT[lead(a).status]] - RANK[BEAT[lead(b).status]]);
 }

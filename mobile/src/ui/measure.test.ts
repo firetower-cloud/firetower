@@ -15,6 +15,7 @@ import {
   dottedChips,
   floatWidth,
   libraryColumns,
+  PANEL_MAX,
   panelWidth,
   posterColumns,
   READING_MAX,
@@ -224,5 +225,164 @@ describe("grids and chips", () => {
     expect(dottedChips(576)).toBe(1);
     expect(dottedChips(577)).toBe(2);
     expect(dottedChips(595)).toBe(2);
+  });
+});
+
+/**
+ * **The two columns at 951, against the inset the system actually reported.**
+ *
+ * The block above keeps the documents' 74 because it is about the band
+ * arithmetic, which does not care where the second width came from. This one
+ * is about the *layout the home draws* at the one pose that docks on a Duo, so
+ * it uses the measured 84 — and it asserts the **formula**, never the number
+ * that falls out of it. `317` and `340` are both plausible answers arrived at
+ * honestly from a rail nobody measured, and a test written against either
+ * would pass while the screen was wrong. What has to hold is the relationship:
+ * the conversation keeps its measure, the column takes the rest, and the two
+ * of them plus the rail account for every point of the window.
+ */
+describe("the docked home's two columns, at the measured rail", () => {
+  /** `right: 84`, as the system itself reports it. */
+  const RAIL_MEASURED = 84;
+  const WINDOW = 951;
+  const content = WINDOW - RAIL_MEASURED;
+
+  it("lays out in the frame less the rail, which is what `onLayout` reports", () => {
+    // `pose.ts` measures the root's *frame* and subtracts the system insets.
+    // A change that moves this number has broken the band arithmetic.
+    expect(content).toBe(867);
+    expect(docks(WINDOW, content)).toBe(true);
+  });
+
+  it("leaves the conversation exactly its measure, which is why the column is a remainder", () => {
+    // `panelWidth` is `content − READING_MAX` rather than a breakpoint, so
+    // this is an identity and not a coincidence at this one width.
+    expect(conversationWidth(WINDOW, content)).toBe(READING_MAX);
+    expect(content - panelWidth(content)).toBe(READING_MAX);
+  });
+
+  it("accounts for every point of the window: conversation, column, rail", () => {
+    // The right column is drawn `panel + rail` wide with `marginRight: -rail`,
+    // so its fill reaches the frame while its content stays inside the 84.
+    const panel = panelWidth(content);
+    expect(conversationWidth(WINDOW, content) + panel + RAIL_MEASURED).toBe(WINDOW);
+    expect(panel + RAIL_MEASURED).toBeLessThanOrEqual(WINDOW - READING_MAX);
+  });
+
+  it("asks for a column it can fill, never the cap for its own sake", () => {
+    expect(panelWidth(content)).toBe(Math.min(PANEL_MAX, content - READING_MAX));
+    expect(panelWidth(content)).toBeGreaterThanOrEqual(DOCK_MIN);
+  });
+});
+
+/**
+ * **The one move the whole rule exists to stop, pinned against every rail
+ * anybody has written down.**
+ *
+ * 669 is wider than a phone, so it invites a docked panel. Docking there
+ * leaves the conversation less than the 390pt phone this design came from.
+ * The band rule is not touched by the two-column home, the Workspaces
+ * destination or the top-air floor, and this is the assertion that says so
+ * under all three candidate insets rather than the one that happens to ship.
+ */
+describe("669 floats, whatever the rail turns out to be", () => {
+  const RAILS = [0, 74, 84];
+
+  it("never docks, at any inset anybody has proposed for that display", () => {
+    for (const rail of RAILS) {
+      const content = 669 - rail;
+      expect(band(669, content)).toBe("float");
+      expect(docks(669, content)).toBe(false);
+      // Short of the dock line by more than a rounding error, not by points.
+      expect(content).toBeLessThan(READING_MAX + DOCK_MIN);
+    }
+  });
+
+  it("keeps the conversation the full width, because a float costs it nothing", () => {
+    for (const rail of RAILS) {
+      const content = 669 - rail;
+      expect(conversationWidth(669, content)).toBe(content);
+    }
+  });
+});
+
+/**
+ * **Two floors, asserted as floors rather than as a list of poses.**
+ *
+ * 390 is the phone this design came from and the band rule may never take the
+ * conversation below it. 560 is `READING_MAX`, and a docked pose that does not
+ * leave it has docked when it should have floated — which is what the old
+ * `Math.min(340, Math.max(280, width - 400))` did, returning a 280pt column at
+ * widths where 280 does not fit.
+ *
+ * **The 390 floor is about what the rule *spends*, not about what the hardware
+ * hands over**, and the Duo's front panel is why that distinction has to be
+ * written down. The system reserves 84 of a 466pt window, so the screen is
+ * laid out in **382** — narrower than an iPhone, before any of this code runs.
+ * No panel is taken from it, because `band(466, …)` is `push`. Asserting a
+ * flat `>= 390` there would be asserting that the band rule can give width
+ * back, which it cannot.
+ *
+ * The repository disagrees with itself about that pose and this is written to
+ * hold either way: `edges.test.ts:19` pins the front panel's insets at
+ * `right: 84` as the system reported them, while `coverage §2` models it as
+ * `regular:false` and so never inset, at 466. Both are in the table below.
+ * Nobody has measured which, the design is indifferent, and no band moves.
+ */
+describe("what the conversation is never left with", () => {
+  /** Window, and the inset the system reports on it. */
+  const POSES_MEASURED = [
+    { what: "iPhone", window: 390, rail: 0 },
+    { what: "Android", window: 412, rail: 0 },
+    { what: "Duo front panel, as edges.test.ts pins it", window: 466, rail: 84 },
+    { what: "Duo front panel, as coverage §2 models it", window: 466, rail: 0 },
+    { what: "Duo inner portrait", window: 669, rail: 84 },
+    { what: "Duo inner landscape", window: 951, rail: 84 },
+    { what: "iPhone landscape", window: 844, rail: 0 },
+  ];
+
+  it("never spends width that would take the conversation below 390", () => {
+    for (const p of POSES_MEASURED) {
+      const content = p.window - p.rail;
+      // Either the pose had 390 to give and the conversation still has it, or
+      // it never had 390 and the rule took nothing. The front panel is the
+      // second case: 382 laid out, and no panel to blame it on.
+      expect(conversationWidth(p.window, content)).toBeGreaterThanOrEqual(Math.min(content, 390));
+      if (content < 390) expect(conversationWidth(p.window, content)).toBe(content);
+    }
+  });
+
+  it("leaves the front panel exactly what the system gave it, and takes nothing", () => {
+    // 466 − 84. Narrower than an iPhone, and a fact about the hardware rather
+    // than about this file: `band(466, 382)` is `push`, so there is no panel.
+    expect(466 - 84).toBe(382);
+    expect(band(466, 382)).toBe("push");
+    expect(conversationWidth(466, 382)).toBe(382);
+    expect(panelWidth(382)).toBe(0);
+  });
+
+  it("never drops below the reading measure in a pose that docks", () => {
+    for (const p of POSES_MEASURED) {
+      const content = p.window - p.rail;
+      if (!docks(p.window, content)) continue;
+      expect(conversationWidth(p.window, content)).toBeGreaterThanOrEqual(READING_MAX);
+    }
+  });
+
+  it("holds both floors across every width, not just the five that ship", () => {
+    // A sweep rather than a table: the rule is about widths, and the poses are
+    // samples of it. 320 is the narrowest phone anybody still ships.
+    for (let w = 320; w <= 1400; w++) {
+      for (const rail of [0, 84]) {
+        const content = Math.max(0, w - rail);
+        const left = conversationWidth(w, content);
+        if (docks(w, content)) {
+          expect(left).toBeGreaterThanOrEqual(READING_MAX);
+          expect(panelWidth(content)).toBeGreaterThanOrEqual(DOCK_MIN);
+        }
+        // A pose that does not dock spends nothing on a column.
+        if (!docks(w, content)) expect(left).toBe(content);
+      }
+    }
   });
 });

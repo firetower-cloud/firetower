@@ -102,10 +102,18 @@ reading device evidence correctly — see the note under the table.
 | `iphone` | 390 | no | 390 | **push** | — |
 | `android` | 412 | no | 412 | **push** | — |
 | `front` | 466 | no — `regular:false` | 466 | **push** | — |
-| `innerp` | 669 | **open** | 595 or 669 | **float** either way | — |
+| `innerp` | 669 | **open** | 585 or 669 | **float** either way | — |
 | `innerl` | 951 | **open** | 877 or 951 | **dock** either way | **317 or 340** |
 | `iphone` landscape | 844 | no | 844 | **dock** | **284** |
 | `android` landscape | 915 | no | 915 | **dock** | **340** |
+
+**The inset figures in that table are the measured 84 for `innerp` and the
+documents' 74 for `innerl`,** which is the one place this table disagrees with
+itself. 669 − 84 is **585**; it read 595, which is 669 − 74. `measure.ts`
+records the measurement as 84 and its docblock is now corrected. The `innerl`
+pair is left as written because the paragraph under it is about exactly that
+open question; at 84 it is 867 laid out and a 307pt column. No band, poster
+count or chip count moves under any of the three.
 
 **Measured on a booted simulator:** the front panel lays out at `window 466,
 laid out 466` — the iOS 26/27 tab bar is a floating pill that overlays. That
@@ -164,7 +172,7 @@ replaces, for comparison. They are marked `REF`. Build 42.
 | 7 | Not answering | `{tab:"inbox", era:"home", home:"error"}` | | `app/(tabs)/index.tsx` |
 | 8 | `REF` The Dashboard it replaces | `{tab:"inbox", era:"accepted"}` | accepted, then outgrown — **do not build** | — |
 | 9 | `REF` Today's Inbox tab | `{tab:"inbox", era:"now"}` | what ships today — **do not build** | — |
-| 10 | Workspaces | `{tab:"inbox", screen:"all", era:"home"}` | what "N more" opens | `app/(tabs)/index.tsx` |
+| 10 | Workspaces | `{tab:"inbox", screen:"all", era:"home"}` | **a destination**, second in the tab bar — and its four landing states: reading them, none at all, not answering, holding a row | `app/(tabs)/workspaces.tsx` |
 | 11 | The peek | `{tab:"inbox", era:"accepted", peek:"w1"}` | hold a row. Drawn on the old era; **build it on the new home** | NEW `src/ui/Peek.tsx` |
 
 ### The conversation
@@ -301,7 +309,11 @@ device.
 - **P14 — Theme.** 41 → theme control → Light, Dark, System → every screen
   redraws → restart → the choice survived.
 - **P15 — The fold.** 1 open on `innerp` → fold to `front` → unfold. Then
-  `innerp` → rotate to `innerl` → the inbox takes the 340pt column.
+  `innerp` → rotate to `innerl` → the workspaces list takes the docked column.
+  **And the selected destination survives all of it.** The tab bar moves from
+  the bottom to the trailing rail and back; which of the five is selected is
+  not a thing a rotation may change, and nor is the scroll position of the
+  column or of the destination behind it.
 - **P16 — Background and return.** `socket.tsx` closes to the background and
   reopens, resuming every subscription from its own cursor. A socket the OS
   killed still reports `OPEN` — this is existing behaviour the redesign must

@@ -21,7 +21,7 @@ import { ChevronLeft } from "lucide-react-native";
 import type { Session } from "~/api/generated/model";
 import { useListArtifacts } from "~/api/generated/artifacts/artifacts";
 import { useConversation } from "~/api/conversation";
-import { group, lead } from "~/api/workspaces";
+import { group, placeOf, runAt } from "~/api/workspaces";
 import { useSession, useSessions } from "~/data";
 import { Overview } from "~/ui/Overview";
 import { Waiting } from "~/ui/Waiting";
@@ -34,12 +34,18 @@ export default function OverviewScreen() {
   const edges = useEdges({ gutter: BLEED });
   const { data: sessions, loading } = useSessions();
 
+  /* The address names a workspace or one run in it, and this route is handed
+     the latter — `[id].tsx` passes the run whose transcript you were reading,
+     so the panel marks the same row *here* that the conversation did. The
+     unfiltered list is where an ended run's `workspaceId` is read from; see
+     `[id].tsx`, which resolves an address the same way. */
   const place = useMemo(() => {
-    const { groups } = group(sessions.filter((s) => s.status !== "Ended"));
-    return groups.flatMap(([, places]) => places).find((p) => p.id === id) ?? null;
+    const places = group(sessions.filter((s) => s.status !== "Ended")).groups.flatMap(([, inRepo]) => inRepo);
+    const named = sessions.find((s: Session) => s.id === id);
+    return placeOf(places, id, named?.workspaceId) ?? null;
   }, [sessions, id]);
 
-  const speaker = place ? lead(place) : null;
+  const speaker = place ? runAt(place, id) : null;
   const { data: session } = useSession(speaker?.id ?? "");
   const { conversation } = useConversation(speaker?.id ?? "");
   const { data: everyArtifact } = useListArtifacts();
@@ -98,6 +104,10 @@ export default function OverviewScreen() {
             plan={plan}
             artifacts={artifacts}
             onOpenArtifact={(a) => router.push({ pathname: "/workspace/artifact", params: { id: a } })}
+            /* Onto that member's transcript, addressed by its session — which
+               is what the desk's `/sessions/<id>` link does, through the one
+               route the phone has. */
+            onOpenSession={(to) => router.push(`/workspace/${to}`)}
           />
         ) : (
           <View className="items-center justify-center py-20">

@@ -10,13 +10,32 @@
  */
 import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { BLEED, GUTTER, LEDE_GUTTER, parseInsets, screenEdges, type Insets } from "~/ui/edges";
+import {
+  BLEED,
+  GUTTER,
+  LEDE_GUTTER,
+  parseInsets,
+  screenEdges,
+  TOP_AIR,
+  type Insets,
+} from "~/ui/edges";
 
 /** A plain phone: a status bar, a home indicator, nothing at the sides. */
 const phone: Insets = { top: 59, bottom: 34, left: 0, right: 0 };
 
 /** The Duo's front panel, as the system reports it — `right: 84`. */
 const duo: Insets = { top: 59, bottom: 0, left: 0, right: 84 };
+
+/** Android's usual report: the status bar's own height and nothing else. */
+const android: Insets = { top: 24, bottom: 24, left: 0, right: 0 };
+
+/**
+ * The Duo's inner display, under the assumption the proposal is explicit
+ * about: the clock sits over the trailing rail, outside the content, so the
+ * content's own top inset is 0. The floor is written so the other answer —
+ * an iPad-style 24 overlaid on the content — lands on the same number.
+ */
+const inner: Insets = { top: 0, bottom: 0, left: 0, right: 84 };
 
 describe("screen padding", () => {
   it("never falls below the gutter on either side, on either device", () => {
@@ -82,6 +101,62 @@ describe("screen padding", () => {
     // screen, and `.d-stage`'s, which is the document's chrome. Not the app's.
     expect(GUTTER).toBe(20);
     expect(LEDE_GUTTER).toBe(26);
+  });
+});
+
+/**
+ * **The air above a screen's first line, which no device was guaranteeing.**
+ *
+ * `paddingTop` is `insets.top + (want.top ?? 0)` and every screen root passes
+ * no `top` at all, so on a surface that reserves nothing the air was whatever
+ * the header's own `pt-0.5` gave it — 2 pt. The floor is applied to the
+ * resolved *total*, which is the whole reason it is not the `Math.max` the
+ * file argues against: the regression test below is the one that matters.
+ */
+describe("the floor on the top", () => {
+  it("gives a surface that reserves nothing the design's own air", () => {
+    // The Duo's inner display, where the clock is over the rail and the
+    // content's inset is 0. 2 pt of header air was all there was.
+    expect(screenEdges(inner, { gutter: BLEED }).paddingTop).toBe(TOP_AIR);
+    expect(screenEdges({ top: 0, bottom: 0, left: 0, right: 0 }).paddingTop).toBe(36);
+  });
+
+  it("does not become the padding on a notched phone — the regression", () => {
+    // `Math.max(insets.top, want.top)` is the bug this file already argues
+    // against. Floored on the total, 59 is still 59.
+    expect(screenEdges(phone, { gutter: BLEED }).paddingTop).toBe(59);
+    expect(screenEdges(duo, { gutter: BLEED }).paddingTop).toBe(59);
+  });
+
+  it("keeps the additive rule intact above the floor", () => {
+    // A lede screen asks for 24 of its own. 59 + 24, not max(59, 24), and not
+    // max(83, 36) landing anywhere but 83.
+    expect(screenEdges(phone, { gutter: LEDE_GUTTER, top: 24 }).paddingTop).toBe(83);
+    expect(screenEdges(phone, { top: 8, bottom: 24 }).paddingTop).toBe(67);
+  });
+
+  it("catches Android, which reports a status bar and nothing more", () => {
+    // 24 + the header's 2 is 26 from the frame — the same defect one notch
+    // smaller than the Duo's, and the reason the floor is not Duo-specific.
+    expect(screenEdges(android, { gutter: BLEED }).paddingTop).toBe(36);
+    // A design that asks for more still gets more.
+    expect(screenEdges(android, { top: 24 }).paddingTop).toBe(48);
+  });
+
+  it("lands on the same number under either answer to the unmeasured inset", () => {
+    // Nobody has read the inner display's top inset. 0 if the status bar
+    // lives over the rail, 24 if iOS overlays an iPad-style bar on the
+    // content. The floor is written so the proposal does not depend on it.
+    for (const top of [0, 24, 36]) {
+      expect(screenEdges({ ...inner, top }, { gutter: BLEED }).paddingTop).toBe(36);
+    }
+  });
+
+  it("leaves the bottom alone, which is a decision and not an oversight", () => {
+    // The composer sits on the keyboard, not on the home indicator. A
+    // matching floor under it would hold air open once the keys are up.
+    expect(screenEdges(inner, { gutter: BLEED }).paddingBottom).toBe(0);
+    expect(screenEdges(android, { gutter: BLEED }).paddingBottom).toBe(24);
   });
 });
 
