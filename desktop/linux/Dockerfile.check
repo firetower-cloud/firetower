@@ -1,0 +1,82 @@
+# Does the desktop application build and render on Linux?
+#
+# One image that can do both halves of that question, because they are the
+# same question: a build that produces a `.deb` nobody looked at proves
+# nothing — WebKitGTK's failure mode is a window that opens, reports no error,
+# and is blank or unstyled. So the toolchain and an X server live in here
+# together, and `check.sh` builds, installs and photographs in one run.
+#
+# Debian bookworm rather than ubuntu:22.04 on purpose. Bookworm tracks
+# WebKitGTK through security updates and lands well past the version this
+# application's Tailwind v4 output needs — this image resolved 2.50.6 — which
+# makes it a test of *the application*. An older LTS would be a test of the
+# engine instead, and a worthwhile separate run: change this one line and the
+# `@property` and `color-mix()` questions get a different, harder answer.
+# `check.sh` prints the version it got; read it before trusting any screenshot.
+FROM debian:bookworm
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Two sets of packages, and they are not the same set.
+#
+#   * Tauri v2's documented Linux build dependencies. `libwebkit2gtk-4.1-dev`
+#     is the webview, `libxdo-dev` is synthetic input, `librsvg2-dev` renders
+#     the icon, `libayatana-appindicator3-dev` is the tray this application
+#     does not yet build. `libdbus-1-dev` is not on Tauri's list and the build
+#     fails without it: `keyring`'s `sync-secret-service` feature pulls
+#     `dbus-secret-service` -> `dbus` -> `libdbus-1`, which is a C library.
+#   * what it takes to look at the result. Xvfb is the display, openbox is the
+#     window manager — the window is `decorations: false`, so with no window
+#     manager at all there is nothing to map, raise, resize or photograph —
+#     and xwd/ImageMagick/scrot are three ways to take the picture, because
+#     on a bare X server at least one of them usually disagrees with you.
+#
+# `xdg-utils` is on neither list and the AppImage bundler needs it: it copies
+# `/usr/bin/xdg-open` into the AppDir and fails the bundle outright without
+# it. `--bundles deb` does not care.
+#
+# `gnome-keyring` is deliberately NOT installed. The keychain question is what
+# happens with no Secret Service on the bus, which is a minimal desktop or an
+# ssh session, and installing it would answer a question nobody asked.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential curl wget file pkg-config git ca-certificates \
+        libwebkit2gtk-4.1-dev libxdo-dev libssl-dev \
+        libayatana-appindicator3-dev librsvg2-dev libdbus-1-dev \
+        xvfb openbox x11-apps x11-utils x11-xserver-utils xdotool \
+        imagemagick scrot dbus-x11 \
+        libgl1-mesa-dri mesa-utils \
+        xdg-utils \
+        fonts-dejavu-core fontconfig \
+        jq unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+# The repository pins 1.90 in `rust-toolchain.toml` at its root, which is not
+# copied in here — only `desktop/` is — so the pin is repeated rather than
+# inherited. If the two drift, this is the one that is wrong.
+ENV RUSTUP_HOME=/usr/local/rustup \
+    CARGO_HOME=/usr/local/cargo \
+    PATH=/usr/local/cargo/bin:$PATH
+RUN curl -fsSL https://sh.rustup.rs | sh -s -- -y --no-modify-path \
+        --default-toolchain 1.90 --profile minimal \
+    && rustc --version && cargo --version
+
+# Node 22 and pnpm. `desktop/package.json` declares no `packageManager`, so
+# the major is chosen here: the lockfile is `lockfileVersion: 9.0`, which
+# pnpm 10 reads and writes.
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/* \
+    && npm install -g pnpm@10 \
+    && node --version && pnpm --version
+
+# Not a volume and not a bind mount: the source is mounted read-only at /src
+# and copied here by `check.sh`. A bind mount would put a Linux `target/` and
+# a Linux `node_modules/` into the checkout a Mac is also building in, and
+# pnpm's symlink farm does not survive being shared between the two.
+WORKDIR /work
+
+ENV DISPLAY=:99
+
+# `check.sh` is bind-mounted rather than copied in, so editing the probe does
+# not invalidate the toolchain layers above it. See `run.sh`.
+CMD ["/bin/bash", "/src/linux/check.sh"]

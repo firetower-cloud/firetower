@@ -1,0 +1,231 @@
+
+[1m== environment[0m
+   uname: Linux 7.0.14-orbstack-00380-ga7e0a2dc9535 aarch64
+   debian: 12.15
+   webkit2gtk-4.1: 2.50.6
+   javascriptcoregtk-4.1: 2.50.6
+   gtk+-3.0: 3.24.38
+   libsoup-3.0: 3.2.3
+   glib-2.0: 2.74.6
+   libwebkit2gtk-4.1-0 package: 2.50.6-1~deb12u2
+   rustc: rustc 1.90.0 (1159e78c4 2025-09-14)
+   cargo: cargo 1.90.0 (840b83a10 2025-07-30)
+   node: v22.23.4
+   pnpm: 10.34.9
+   openbox: Openbox 3.6.1
+   secret service on the bus: ca.desrt.dconf.service org.gtk.GLib.PACRunner.service 
+   gnome-keyring installed: unknown ok not-installed
+
+[1m== copying the source and installing the frontend[0m
+   desktop/ copied: 2.2G
+   pnpm install: 0
+
+[1m== building (tauri build --bundles deb)[0m
+   tauri build --bundles deb: exit 1, 25s
+
+[1m== rebuilding with src-tauri/unsigned.conf.json[0m
+   tauri build --bundles deb --config unsigned.conf.json: exit 0
+   artifact: /work/desktop/src-tauri/target/release/bundle/deb/Firetower_0.29.0_arm64.deb
+   artifact: /work/desktop/src-tauri/target/release/bundle/deb/Firetower_0.29.0_arm64.deb.sig
+   artifact: /work/desktop/src-tauri/target/release/bundle/deb/Firetower_0.29.0_arm64/control.tar.gz
+   artifact: /work/desktop/src-tauri/target/release/bundle/deb/Firetower_0.29.0_arm64/data.tar.gz
+   artifact: /work/desktop/src-tauri/target/release/bundle/appimage/Firetower_0.29.0_aarch64.AppImage
+   artifact: /work/desktop/src-tauri/target/release/bundle/appimage/Firetower_0.29.0_aarch64.AppImage.sig
+   deb produced: 1 -> /work/desktop/src-tauri/target/release/bundle/deb/Firetower_0.29.0_arm64.deb
+
+[1m== installing the deb[0m
+   installed: exit 0
+   deb contents: /usr /usr/bin /usr/bin/firetower-desktop /usr/share /usr/share/icons /usr/share/icons/hicolor /usr/share/icons/hicolor/32x32 /usr/share/icons/hicolor/32x32/apps /usr/share/icons/hicolor/32x32/apps/firetower-desktop.png /usr/share/icons/hicolor/128x128 /usr/share/icons/hicolor/128x128/apps /usr/share/icons/hicolor/128x128/apps/firetower-desktop.png /usr/share/icons/hicolor/256x256@2 /usr/share/icons/hicolor/256x256@2/apps /usr/share/icons/hicolor/256x256@2/apps/firetower-desktop.png /usr/share/applications /usr/share/applications/Firetower.desktop 
+   .desktop at /usr/share/applications/Firetower.desktop
+   [Desktop Entry]
+   Categories=
+   Comment=Firetower, as a desktop application
+   Exec=firetower-desktop
+   StartupWMClass=firetower-desktop
+   Icon=firetower-desktop
+   Name=Firetower
+   Terminal=false
+   Type=Application
+   binary: /usr/bin/firetower-desktop
+   ldd not-found entries: 0
+   linked webkit: libdbus-1.so.3 libdbus-1.so.3 libwebkit2gtk-4.1.so.0 libwebkit2gtk-4.1.so.0 
+   icons installed: 3
+
+[1m== display[0m
+   Xvfb:   dimensions:    1440x900 pixels (366x229 millimeters)
+   session bus: unix:path=/tmp/dbus-666mPBmblC,guid=4fe9247dd9612df752206fdd6af456f4
+   window manager: _NET_SUPPORTING_WM_CHECK(WINDOW): window id # 0x20020b
+   wm name: _NET_WM_NAME:  not found.
+   shot root-empty-desktop.png: 1440x900 mean=0 sd=0 colors=1
+
+[1m== launching: default[0m
+   default: window appeared after 902 started
+   shot root-default.png: 1440x900 mean=203.006 sd=100.415 colors=650
+   window window-default: id=4194307 1280x820 at +79+27
+   window shot window-default.png: 1280x820 mean=250.662 sd=22.4619 colors=649
+   default: app log: 2 lines, 1 error/warn lines
+
+[1m== frameless window: hints, drag, resize[0m
+   _MOTIF_WM_HINTS: _MOTIF_WM_HINTS(_MOTIF_WM_HINTS) = 0x2, 0x0, 0x0, 0x0, 0x0
+   _GTK_FRAME_EXTENTS: _GTK_FRAME_EXTENTS:  no such atom on any window.
+   _NET_WM_ALLOWED_ACTIONS: _NET_WM_ALLOWED_ACTIONS(ATOM) = _NET_WM_ACTION_CHANGE_DESKTOP, _NET_WM_ACTION_CLOSE, _NET_WM_ACTION_MOVE, _NET_WM_ACTION_MINIMIZE, _NET_WM_ACTION_RESIZE, _NET_WM_ACTION_FULLSCREEN, _NET_WM_ACTION_MAXIMIZE_HORZ, _NET_WM_ACTION_MAXIMIZE_VERT, _NET_WM_ACTION_ABOVE, _NET_WM_ACTION_BELOW, _OB_WM_ACTION_UNDECORATE 
+   WM_NORMAL_HINTS: WM_NORMAL_HINTS(WM_SIZE_HINTS): 		program specified minimum size: 880 by 560 		program specified base size: 880 by 560 		window gravity: NorthWest 
+   WM_CLASS: WM_CLASS(STRING) = "firetower-desktop", "Firetower-desktop"
+   _NET_WM_STATE: _NET_WM_STATE(ATOM) = 
+   frame vs client:   Absolute upper-left X:  79   Absolute upper-left Y:  27   Width: 1280   Height: 820   Border width: 0 
+   openbox decorated:  xwininfo: Window id: 0x400003 "Firetower"  
+   drag by the title bar: before [WINDOW=4194307 X=79 Y=27 WIDTH=1280 HEIGHT=820 SCREEN=0 ] after [WINDOW=4194307 X=239 Y=127 WIDTH=1280 HEIGHT=820 SCREEN=0 ]
+   window window-after-drag: id=4194307 1280x820 at +239+127
+   window shot window-after-drag.png: 1201x773 mean=250.24 sd=23.7811 colors=600
+   drag the bottom-right corner: 1280x820 -> 1280x820
+   xdotool windowsize 1000x700 -> 1000x700
+   window window-resized: id=4194307 1000x700 at +239+127
+   window shot window-resized.png: 1000x700 mean=249.178 sd=25.3538 colors=611
+   xdotool windowsize 400x300 (minWidth 880, minHeight 560) -> 880x560
+
+[1m== launching: nodmabuf[0m
+   nodmabuf: window appeared after 1205 started
+   shot root-nodmabuf.png: 1440x900 mean=202.991 sd=100.425 colors=685
+   window window-nodmabuf: id=4194307 1280x820 at +79+27
+   window shot window-nodmabuf.png: 1280x820 mean=250.645 sd=22.5524 colors=684
+   nodmabuf: app log: 2 lines, 1 error/warn lines
+
+[1m== launching: nodmabuf-softgl[0m
+   nodmabuf-softgl: window appeared after 1309 started
+   shot root-nodmabuf-softgl.png: 1440x900 mean=202.995 sd=100.423 colors=685
+   window window-nodmabuf-softgl: id=4194307 1280x820 at +79+27
+   window shot window-nodmabuf-softgl.png: 1280x820 mean=250.649 sd=22.5315 colors=684
+   nodmabuf-softgl: app log: 2 lines, 1 error/warn lines
+
+[1m== launching: compositing-off[0m
+   compositing-off: window appeared after 1413 started
+   shot root-compositing-off.png: 1440x900 mean=202.991 sd=100.425 colors=685
+   window window-compositing-off: id=4194307 1280x820 at +79+27
+   window shot window-compositing-off.png: 1280x820 mean=250.645 sd=22.5524 colors=684
+   compositing-off: app log: 2 lines, 1 error/warn lines
+
+[1m== launching: gtk-dark[0m
+   gtk-dark: window appeared after 1542 started
+   shot root-gtk-dark.png: 1440x900 mean=31.1208 sd=23.2481 colors=639
+   window window-gtk-dark: id=4194307 1280x820 at +79+27
+   window shot window-gtk-dark.png: 1280x820 mean=38.4266 sd=19.6603 colors=638
+   gtk-dark: app log: 2 lines, 1 error/warn lines
+
+[1m== launching: gtk-light[0m
+   gtk-light: window appeared after 1731 started
+   shot root-gtk-light.png: 1440x900 mean=203.006 sd=100.415 colors=605
+   window window-gtk-light: id=4194307 1280x820 at +79+27
+   window shot window-gtk-light.png: 1280x820 mean=250.667 sd=22.4403 colors=604
+   gtk-light: app log: 2 lines, 1 error/warn lines
+
+[1m== mock control plane[0m
+   mock /bootstrap: {"version":"0.34.1","eventsPath":"/api/v1/events","authModes":["password"],"organization":"Acme","serverId":"o_1"}
+
+[1m== connecting to the mock control plane[0m
+
+[1m== launching: connect[0m
+   connect: window appeared after 1943 started
+   shot root-connect.png: 1440x900 mean=203.009 sd=100.413 colors=650
+   window window-connect: id=4194307 1280x820 at +80+40
+   window shot window-connect.png: 1280x820 mean=250.666 sd=22.4409 colors=649
+   connect: app log: 2 lines, 1 error/warn lines
+   window connect-1-address: id=4194307 1280x820 at +80+40
+   window shot connect-1-address.png: 1280x820 mean=248.644 sd=34.3488 colors=659
+   window connect-2-found: id=4194307 1280x820 at +80+40
+   window shot connect-2-found.png: 1280x820 mean=250.811 sd=19.8202 colors=782
+   window connect-3-credentials: id=4194307 1280x820 at +80+40
+   window shot connect-3-credentials.png: 1280x820 mean=248.838 sd=32.6377 colors=726
+   window connect-4-signed-in: id=4194307 1280x820 at +80+40
+   window shot connect-4-signed-in.png: 1280x820 mean=244.932 sd=27.8817 colors=1500
+   connect: title now Firetower
+   window app-rail-2: id=4194307 1280x820 at +80+40
+   window shot app-rail-2.png: 1280x820 mean=248.386 sd=20.2449 colors=961
+   window app-rail-1: id=4194307 1280x820 at +80+40
+   window shot app-rail-1.png: 1280x820 mean=244.919 sd=27.8893 colors=1529
+   window app-rail-4: id=4194307 1280x820 at +80+40
+   window shot app-rail-4.png: 1280x820 mean=246.125 sd=25.7631 colors=1159
+   window app-rail-5: id=4194307 1280x820 at +80+40
+   window shot app-rail-5.png: 1280x820 mean=248.792 sd=20.1662 colors=904
+   window app-dark-after-restart: id=4194307 1280x820 at +80+40
+   window shot app-dark-after-restart.png: 1280x820 mean=38.3208 sd=17.3945 colors=702
+   after restart with no Secret Service: see app-dark-after-restart.png
+
+[1m== secret service[0m
+   org.freedesktop.secrets activatable: 0
+   dbus-send to the secrets service: Error org.freedesktop.DBus.Error.ServiceUnknown: The name org.freedesktop.secrets was not provided by any .service files|
+   names on the session bus: 
+
+[1m== probe build[0m
+   vite build: exit 0
+   dist: assets index.html voice-worklet.js 
+   emitted css: /work/desktop/dist/assets/index-EmXorQic.css
+   css bytes: 134135
+   css @property blocks: 73
+   css oklch(): 0
+   css color-mix(): 84
+   css woff2 refs: 3
+   dist/probe.js: 13490 bytes; index.html 445 bytes
+   probe build: exit 0  -> -rwxr-xr-x 2 root root 23409320 Nov 11 11:54 /work/desktop/src-tauri/target/release/firetower-desktop
+
+[1m== probe run: default[0m
+   probe default: window up
+   probe default: titles now [firetower-desktop;Firetower;]
+   window window-probe-default: id=4194307 1280x820 at +79+27
+   window shot window-probe-default.png: 1280x820 mean=250.798 sd=19.8443 colors=794
+   probe default: 3 report(s) kept
+   probe default app stderr: (firetower-desktop:2735): dbind-WARNING **: 11:54:57.167: AT-SPI: Error retrieving accessibility bus address: org.freedesktop.DBus.Error.ServiceUnknown: The name org.a11y.Bus was not provided by any .service files|
+
+[1m== probe run: gtk-dark[0m
+   probe gtk-dark: window up
+   probe gtk-dark: titles now [firetower-desktop;Firetower;]
+   window window-probe-gtk-dark: id=4194307 1280x820 at +79+27
+   window shot window-probe-gtk-dark.png: 1280x820 mean=38.3237 sd=17.4129 colors=709
+   probe gtk-dark: 3 report(s) kept
+   probe gtk-dark app stderr: (firetower-desktop:2976): dbind-WARNING **: 11:55:46.399: AT-SPI: Error retrieving accessibility bus address: org.freedesktop.DBus.Error.ServiceUnknown: The name org.a11y.Bus was not provided by any .service files|
+
+[1m== probe run: gtk-light[0m
+   probe gtk-light: window up
+   probe gtk-light: titles now [firetower-desktop;Firetower;]
+   window window-probe-gtk-light: id=4194307 1280x820 at +79+27
+   window shot window-probe-gtk-light.png: 1280x820 mean=250.799 sd=19.842 colors=800
+   probe gtk-light: 3 report(s) kept
+   probe gtk-light app stderr: (firetower-desktop:3217): dbind-WARNING **: 11:56:35.688: AT-SPI: Error retrieving accessibility bus address: org.freedesktop.DBus.Error.ServiceUnknown: The name org.a11y.Bus was not provided by any .service files|
+
+[1m== probe run: nodmabuf[0m
+   probe nodmabuf: window up
+   probe nodmabuf: titles now [firetower-desktop;FT_PROBE_ALIVE loading;]
+   window window-probe-nodmabuf: id=4194307 1280x820 at +79+27
+   window shot window-probe-nodmabuf.png: 1280x820 mean=250.781 sd=19.9433 colors=826
+   probe nodmabuf: 3 report(s) kept
+   probe nodmabuf app stderr: (firetower-desktop:3453): dbind-WARNING **: 11:57:24.948: AT-SPI: Error retrieving accessibility bus address: org.freedesktop.DBus.Error.ServiceUnknown: The name org.a11y.Bus was not provided by any .service files|
+
+[1m== what Linux compiles to[0m
+   tao version: index.crates.io-1949cf8c6b5b557f
+tao-0.35.3
+   tao linux set_badge_count: 1002:  pub fn set_badge_count(&self, count: Option<i64>, desktop_filename: Option<String>) {|1003-    if let Err(e) = self.window_requests_tx.send((|1004-      WindowId::dummy(),|1005-      WindowRequest::BadgeCount(count, desktop_filename),|1006-    )) {|
+   tao linux set_progress_bar: 1
+   tauri set_badge_count in mod.rs: 2269:  pub fn set_badge_count(&self, count: Option<i64>) -> crate::Result<()> {
+   updater linux branches: 4
+   updater AppImage mentions: 12
+   updater linux error text: 48:    AppImage,|61:            Self::AppImage => "appimage",|1023:/// Linux (AppImage, Deb, RPM)|1033:    /// ├── [AppName]_[version]_amd64.AppImage.tar.gz    # GZ generated by tauri-bundler|1034:    /// │   └──[AppName]_[version]_amd64.AppImage        # Application AppImage|1043:            _ => self.install_appimage(bytes),|
+   webkit2gtk binding snapshot(): 3
+   snapshot signature: 1125:  fn snapshot<P: FnOnce(Result<cairo::Surface, glib::Error>) + 'static>(|1126-    &self,|1127-    region: SnapshotRegion,|1128-    options: SnapshotOptions,|1129-    cancellable: Option<&impl IsA<gio::Cancellable>>,|1130-    callback: P,|1131-  ) {|
+   linux dep tree: 1301 lines -> logs/cargo-tree-linux.txt
+
+[1m== updater artifacts[0m
+   beside the deb: Firetower_0.29.0_arm64 Firetower_0.29.0_arm64.deb Firetower_0.29.0_arm64.deb.sig 
+   signer generate: exit 0  key: yes
+   signed deb build: exit 0
+   deb dir after signing: Firetower_0.29.0_arm64 Firetower_0.29.0_arm64.deb Firetower_0.29.0_arm64.deb.sig 
+   signed appimage build: exit 0
+   appimage dir: total 97028|drwxr-xr-x 1 root root      172 Nov 11 12:00 .|drwxr-xr-x 1 root root       22 Nov 11 12:00 ..|drwxr-xr-x 1 root root      188 Nov 11 12:00 Firetower.AppDir|-rwxr-xr-x 1 root root 99346952 Nov 11 12:00 Firetower_0.29.0_aarch64.AppImage|-rw-r--r-- 1 root root      424 Nov 11 12:00 Firetower_0.29.0_aarch64.AppImage.sig|
+   appimage log tail:         /work/desktop/src-tauri/target/release/bundle/appimage/Firetower_0.29.0_aarch64.AppImage||        Warn The updater secret key from `TAURI_SIGNING_PRIVATE_KEY` does not match the public key from `plugins > updater > pubkey`. If you are not rotating keys, this means your configuration is wrong and won't be accepted at runtime when performing update.|    Finished 1 updater signature at:|        /work/desktop/src-tauri/target/release/bundle/appimage/Firetower_0.29.0_aarch64.AppImage.sig||
+
+[1m== running the AppImage[0m
+   appimage size: 95M
+   appimage: window up
+   window window-appimage: id=4194307 1280x820 at +80+40
+   window shot window-appimage.png: 1280x820 mean=250.802 sd=19.8183 colors=753
+   appimage stderr: |(firetower-desktop:7386): dbind-WARNING **: 12:00:16.054: AT-SPI: Error retrieving accessibility bus address: org.freedesktop.DBus.Error.ServiceUnknown: The name org.a11y.Bus was not provided by any .service files|
+
+[1m== done — 31 screenshots in /out[0m

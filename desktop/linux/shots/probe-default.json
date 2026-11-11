@@ -1,0 +1,130 @@
+{
+  "phase": "p",
+  "navigator": {
+    "userAgent": "Mozilla/5.0 (X11; Linux aarch64) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/60.5 Safari/605.1.15",
+    "platform": "Linux aarch64",
+    "vendor": "Apple Computer, Inc.",
+    "userAgentDataType": "undefined",
+    "userAgentDataPlatform": null,
+    "languages": [
+      "en-US"
+    ],
+    "hardwareConcurrency": 8
+  },
+  "platformDataset": "linux",
+  "theme": {
+    "prefersDark": false,
+    "prefersLight": true,
+    "noPreference": false,
+    "datasetTheme": "light",
+    "stored": null,
+    "colorScheme": "light",
+    "gtkTheme": null
+  },
+  "cssSupport": {
+    "oklch": true,
+    "colorMix": true,
+    "registerProperty": true,
+    "relativeColor": true,
+    "nesting": true,
+    "has": true,
+    "colorScheme": true,
+    "backdropFilter": true,
+    "containerQueries": true
+  },
+  "stylesheets": {
+    "sheets": 1,
+    "unreadable": 0,
+    "kinds": {
+      "CSSLayerBlockRule": 5,
+      "CSSSupportsRule": 44,
+      "CSSStyleRule": 1635,
+      "CSSFontFaceRule": 3,
+      "CSSKeyframesRule": 16,
+      "CSSKeyframeRule": 27,
+      "CSSMediaRule": 21,
+      "CSSPropertyRule": 73
+    }
+  },
+  "computed": {
+    "tokens": {
+      "--color-ground": "#f2f2f3",
+      "--color-panel": "#fff",
+      "--color-bone": "#161617",
+      "--color-ember": "#ff5e1a",
+      "--font-sans": "\"Archivo\", ui-sans-serif, system-ui, sans-serif",
+      "--chrome-title": "40px"
+    },
+    "bodyBackground": "rgb(242, 242, 243)",
+    "bodyColor": "rgb(71, 71, 77)",
+    "bodyFontFamily": "Archivo, ui-sans-serif, -apple-system, system-ui, sans-serif",
+    "htmlClass": "dark"
+  },
+  "dom": {
+    "rootChildren": 1,
+    "elements": 65,
+    "textLength": 121,
+    "text": "Ac Acme / kevin Ac Acme localhost:4401 · 0.34.1 Who are you here? Sign in Forgotten it? Ask an administrator to reset it.",
+    "title": "Firetower"
+  },
+  "viewport": {
+    "innerWidth": 1280,
+    "innerHeight": 820,
+    "devicePixelRatio": 1,
+    "isSecureContext": true
+  },
+  "gl": {
+    "webgl": true,
+    "vendor": "Apple Inc.",
+    "renderer": "Apple GPU",
+    "version": "WebGL 1.0"
+  },
+  "fontsForced": {
+    "32px Archivo": {
+      "loaded": 1,
+      "ok": true
+    },
+    "32px 'Archivo Narrow'": {
+      "loaded": 1,
+      "ok": true
+    },
+    "32px 'JetBrains Mono'": {
+      "loaded": 1,
+      "ok": true
+    }
+  },
+  "fonts": {
+    "faces": [
+      {
+        "family": "Archivo",
+        "weight": "100 900",
+        "status": "loaded"
+      },
+      {
+        "family": "Archivo Narrow",
+        "weight": "100 900",
+        "status": "loaded"
+      },
+      {
+        "family": "JetBrains Mono",
+        "weight": "100 800",
+        "status": "loaded"
+      }
+    ],
+    "count": 3,
+    "status": "loaded",
+    "check": {
+      "archivo": true,
+      "archivoNarrow": true,
+      "jetbrains": true
+    },
+    "widths": {
+      "archivo": 423.6,
+      "archivoNarrow": 352,
+      "jetbrains": 570,
+      "sansSerif": 489.97,
+      "dejavu": 489.97,
+      "monospace": 570
+    }
+  }
+}

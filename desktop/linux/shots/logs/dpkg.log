@@ -1,0 +1,16 @@
+Reading package lists...
+Building dependency tree...
+Reading state information...
+The following NEW packages will be installed:
+  firetower
+0 upgraded, 1 newly installed, 0 to remove and 0 not upgraded.
+Need to get 0 B/8516 kB of archives.
+After this operation, 23.4 MB of additional disk space will be used.
+Get:1 /work/desktop/src-tauri/target/release/bundle/deb/Firetower_0.29.0_arm64.deb firetower arm64 0.29.0 [8516 kB]
+debconf: delaying package configuration, since apt-utils is not installed
+Selecting previously unselected package firetower.
+(Reading database ... (Reading database ... 5%(Reading database ... 10%(Reading database ... 15%(Reading database ... 20%(Reading database ... 25%(Reading database ... 30%(Reading database ... 35%(Reading database ... 40%(Reading database ... 45%(Reading database ... 50%(Reading database ... 55%(Reading database ... 60%(Reading database ... 65%(Reading database ... 70%(Reading database ... 75%(Reading database ... 80%(Reading database ... 85%(Reading database ... 90%(Reading database ... 95%(Reading database ... 100%(Reading database ... 42203 files and directories currently installed.)
+Preparing to unpack .../deb/Firetower_0.29.0_arm64.deb ...
+Unpacking firetower (0.29.0) ...
+Setting up firetower (0.29.0) ...
+Processing triggers for hicolor-icon-theme (0.17-2) ...

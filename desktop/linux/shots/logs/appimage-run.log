@@ -1,0 +1,2 @@
+
+(firetower-desktop:7386): dbind-WARNING **: 12:00:16.054: AT-SPI: Error retrieving accessibility bus address: org.freedesktop.DBus.Error.ServiceUnknown: The name org.a11y.Bus was not provided by any .service files
