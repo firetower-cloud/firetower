@@ -34,10 +34,14 @@ export default function OverviewScreen() {
   const edges = useEdges({ gutter: BLEED });
   const { data: sessions, loading } = useSessions();
 
-  const place = useMemo(() => {
-    const { groups } = group(sessions.filter((s) => s.status !== "Ended"));
-    return groups.flatMap(([, places]) => places).find((p) => p.id === id) ?? null;
-  }, [sessions, id]);
+  /* Every place there is. The screen wants one of them; the Team panel wants
+     the list, because a member row names a *session* and this route takes a
+     *workspace* — `placeOf` is what resolves one to the other. */
+  const places = useMemo(
+    () => group(sessions.filter((s) => s.status !== "Ended")).groups.flatMap(([, inRepo]) => inRepo),
+    [sessions],
+  );
+  const place = useMemo(() => places.find((p) => p.id === id) ?? null, [places, id]);
 
   const speaker = place ? lead(place) : null;
   const { data: session } = useSession(speaker?.id ?? "");
@@ -95,9 +99,14 @@ export default function OverviewScreen() {
             session={session}
             lead={above}
             team={team}
+            places={places}
             plan={plan}
             artifacts={artifacts}
             onOpenArtifact={(a) => router.push({ pathname: "/workspace/artifact", params: { id: a } })}
+            /* The same route the Workspaces list and the home push, so a
+               child opened from here goes back the way every other workspace
+               does. */
+            onOpenWorkspace={(to) => router.push(`/workspace/${to}`)}
           />
         ) : (
           <View className="items-center justify-center py-20">

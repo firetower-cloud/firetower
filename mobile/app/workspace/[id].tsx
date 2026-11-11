@@ -144,6 +144,12 @@ function Conversation({ place }: { place: Workspace }) {
   );
   const managerId = above?.id ?? speaker.id;
   const team = useMemo(() => sessions.filter((s: Session) => s.parentId === managerId), [sessions, managerId]);
+  /* Every place there is: a Team row names a *session* and this route takes a
+     *workspace*, so the panel resolves one to the other through `placeOf`. */
+  const places = useMemo(
+    () => group(sessions.filter((s: Session) => s.status !== "Ended")).groups.flatMap(([, inRepo]) => inRepo),
+    [sessions],
+  );
 
   /**
    * Where the overview goes, which is three answers and not two.
@@ -276,9 +282,13 @@ function Conversation({ place }: { place: Workspace }) {
       session={session}
       lead={above}
       team={team}
+      places={places}
       plan={plan}
       artifacts={artifacts}
       onOpenArtifact={(id) => router.push({ pathname: "/workspace/artifact", params: { id } })}
+      /* The same route the Workspaces list and the home push, so a child
+         opened from here goes back the way every other workspace does. */
+      onOpenWorkspace={(to) => router.push(`/workspace/${to}`)}
     />
   ) : null;
 
