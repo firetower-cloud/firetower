@@ -152,24 +152,38 @@ preflight() {
 
 TOKEN=""
 
-# One call, with the body on **stdin** rather than in the arguments.
+# One call, with nothing secret in its arguments.
 #
-# `curl -d '{"password":"…"}'` puts that password in this machine's process
-# list, where anything running as anybody can read it for as long as the call
-# takes. `-d @-` is the same request with the body coming down a pipe. The
-# token goes in a header, which is an argument too — so it is a short-lived
-# session token rather than the password, and the password itself never
-# appears in an argv here.
+# A process list is readable by anything running as anybody, so what goes in
+# an argv is published for as long as the call takes. Both halves of this call
+# would otherwise be there: `curl -d '{"password":"…"}'` puts the password in
+# one, and `-H "authorization: Bearer …"` puts a working session token in the
+# other — which is a credential for this control plane until it expires, not a
+# lesser thing than the password.
+#
+# So the body comes down a pipe (`-d @-`) and the header comes out of a file
+# that only this account can read (`-H @file`, curl 7.55 and later). What is
+# left on the command line is a method and a URL.
 api() {
     local method="$1" path="$2" body="${3:-}"
     local args=(-sS -X "$method" "$API$path" -H 'content-type: application/json')
-    [ -n "$TOKEN" ] && args+=(-H "authorization: Bearer $TOKEN")
+    [ -n "$HEADERS" ] && args+=(-H "@$HEADERS")
     if [ -n "$body" ]; then
         printf '%s' "$body" | curl "${args[@]}" -d @-
     else
         curl "${args[@]}"
     fi
 }
+
+# Where the authorization header waits, readable by this account and nobody
+# else, for as long as this script runs.
+HEADERS=""
+hold_token() {
+    [ -n "$HEADERS" ] || HEADERS="$(mktemp "${TMPDIR:-/tmp}/worker-sim-auth.XXXXXX")"
+    chmod 600 "$HEADERS"
+    printf 'authorization: Bearer %s\n' "$TOKEN" > "$HEADERS"
+}
+trap '[ -n "$HEADERS" ] && rm -f "$HEADERS"' EXIT
 
 # A tiny JSON reader, so this needs nothing installed. Values here are ids,
 # names and states — no quotes, no nesting — and `jq` is used when it is there.
@@ -200,6 +214,7 @@ sign_in() {
         TOKEN="$(login "$ADMIN_FIRST_PASSWORD")"
         [ -n "$TOKEN" ] || die "could not sign in to $API as $ADMIN_USER"
     fi
+    hold_token
 
     # `/api/v1/setup` is the one endpoint the gate exempts — it is how an
     # interface finds out it has to ask for a new password — so it is also the
@@ -213,6 +228,7 @@ sign_in() {
             TOKEN="$(printf '%s' "$answer" | field token)"
             [ -n "$TOKEN" ] \
                 || die "the seeded password could not be replaced, and nothing works until it is: $answer"
+            hold_token
             say "replaced the seeded password; it is $ADMIN_PASSWORD from here on"
             ;;
     esac
