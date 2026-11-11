@@ -84,6 +84,23 @@ function Signed() {
    * Every trigger has an icon as well as a label on purpose. Apple's rule for
    * a vertical bar is that an item with a title and no icon is not presented
    * vertically at all, so a label-only tab would silently fall out of the rail.
+   *
+   * Two icons per trigger, because a system bar takes the system's glyphs:
+   * `sf` is an SF Symbol and `md` a Material Symbol, each the platform's own
+   * word for the same thing. On iOS `sf` wins outright — `src` and `md` are
+   * never consulted — so the two never argue.
+   *
+   * **`md` is why `expo-symbols` is a dependency, and nothing imports it.**
+   * `md` is not something expo-router carries: it hands the name to
+   * `expo-symbols`' `unstable_getMaterialSymbolSourceAsync`, which renders
+   * the glyph out of the Material Symbols font, and it reaches that package
+   * through a `require` in a `try`. Absent, every `md` name throws while the
+   * bar is being built and React takes this whole tree down with it — a blank
+   * Android app, which is how it shipped once. So it is a real dependency
+   * held by a string no tool can see: `pnpm why` does not know, a type error
+   * cannot say so (`md: AndroidSymbol` is declared in the missing package,
+   * and `skipLibCheck` makes that silence), and anything tidying up unused
+   * dependencies will take it. `e2e/launch.yaml` is what notices.
    */
   return (
     /* The system owns the shape and the material — `backgroundColor` is a no-op
