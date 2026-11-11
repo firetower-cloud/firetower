@@ -33,8 +33,18 @@ appId: com.usefiretower.app
     clearState: true
     permissions: { all: allow }
     label: "Start the app"
-- assertVisible:
-    text: "Connect to a Firetower"
+#
+# `extendedWaitUntil`, not `assertVisible`, and this is the one place this
+# flow waits long. A debug APK carries no JavaScript — `debuggableVariants`
+# leaves `debug` to fetch it from Metro — so every launch downloads and parses
+# the whole bundle before a pixel is drawn. On a laptop that is a couple of
+# seconds; on a CI emulator it measured past Maestro's default patience, and
+# the flow failed on a black screen that was only an app still starting.
+# A long wait costs nothing when the app is healthy: it returns the moment the
+# text appears.
+- extendedWaitUntil:
+    visible: "Connect to a Firetower"
+    timeout: 180000
     label: "The app drew its first screen"
 
 # **Two.** Sign in, which is the only way to the tab bar.
