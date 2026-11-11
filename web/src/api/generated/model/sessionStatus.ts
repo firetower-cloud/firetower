@@ -16,5 +16,6 @@ export const SessionStatus = {
   NeedsYou: 'NeedsYou',
   HandedBack: 'HandedBack',
   Failed: 'Failed',
+  Stranded: 'Stranded',
   Ended: 'Ended',
 } as const;

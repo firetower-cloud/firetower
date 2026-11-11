@@ -9,6 +9,10 @@ export const TONE: Record<SessionStatus, string> = {
   // nothing is in flight and it is your move.
   Ready: "text-sage",
   Failed: "text-brick",
+  // The machine under it restarted. Amber, which the panes already use for
+  // *needs attention, nothing is wrong yet* — not ember, which is spent on
+  // being blocked and on nothing else, and not brick, because nothing broke.
+  Stranded: "text-amber",
   Working: "text-slate",
   Starting: "text-slate",
   Ended: "text-mute",
@@ -16,7 +20,10 @@ export const TONE: Record<SessionStatus, string> = {
 
 export function Signal({ status, size = 8 }: { status: SessionStatus; size?: number }) {
   const tone = TONE[status];
-  const hollow = status === "Ended" || status === "Starting" || status === "Ready";
+  /* Hollow, because hollow already means nothing is running here — and the
+     agent is the thing that is gone. */
+  const hollow =
+    status === "Ended" || status === "Starting" || status === "Ready" || status === "Stranded";
 
   return (
     <span
