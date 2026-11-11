@@ -35,6 +35,10 @@ const TALL: f64 = 737.0;
 /// transcript, at `max-w-[26rem]`, so 416 CSS px — which at 2x wants about 830
 /// pixels. 420 points lands there. 640 was the first guess and produced a
 /// 1280px, 170 KB image to be drawn into a 224px tile.
+///
+/// Only the two platforms that take a picture read it: the stub below never
+/// scales anything, so on Linux this is dead code and `-D warnings` says so.
+#[cfg(any(target_os = "macos", windows))]
 const POSTER: f64 = 420.0;
 
 /// How far past the last display the capture window is parked.
