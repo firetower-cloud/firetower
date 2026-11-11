@@ -69,28 +69,106 @@ fn minimize<R: Runtime>(window: WebviewWindow<R>) {
 /// still the same entry.
 const KEYCHAIN_SERVICE: &str = "cloud.firetower.desktop";
 
+/// What the OS keychain said when it was asked for a credential.
+///
+/// **Three answers and not two, and the third is the whole reason this type
+/// exists.** This used to be a `Result<Option<String>, String>`, and
+/// `keyring` returns `NoEntry` for exactly one situation — nothing is filed
+/// under that name — while *every other* outcome is an error: no Secret
+/// Service on the bus, a locked login keyring, a macOS keychain that will not
+/// grant access without a prompt, a Windows Credential Manager a policy has
+/// closed. The renderer flattened that error into `null` with a `.catch`, so
+/// "the keychain is not there" and "the credential is not there" arrived as
+/// the same answer — and the second one is permission to forget that somebody
+/// signed out. One launch on a machine with no keyring was enough to lose it,
+/// and the launch after that signed back in with the credential they had
+/// declined.
+///
+/// So the distinction is carried in the type, in the *success* channel, where
+/// no error handling can collapse it. `Unknown` is not a failure to be
+/// swallowed; it is an answer, and the only safe thing to do with it is
+/// nothing.
+#[derive(Debug, PartialEq, serde::Serialize)]
+#[serde(tag = "says", rename_all = "camelCase")]
+pub enum Said {
+    /// The keychain has one, and this is it.
+    Held { token: String },
+    /// The keychain answered, and there is nothing filed under that name.
+    Absent,
+    /// The keychain could not be asked, or would not say. **Not `Absent`.**
+    Unknown { why: String },
+}
+
+/// Whether a keychain write or deletion actually happened.
+///
+/// A second two-valued type rather than a `Result`, for the same reason as
+/// above: the caller has to act on "it did not happen", and an error is the
+/// shape that gets discarded on the way across. There is no third answer here
+/// — a change either went through or it did not — and "did not" is always the
+/// safe assumption.
+#[derive(Debug, PartialEq, serde::Serialize)]
+#[serde(tag = "says", rename_all = "camelCase")]
+pub enum Done {
+    /// The keychain confirms it.
+    Done,
+    /// It did not happen, and this is what the platform said about it.
+    Refused { why: String },
+}
+
+/// Read a `keyring` answer as one of the three things it can mean.
+///
+/// Its own function because it is the whole of the fix and the only part that
+/// can be tested without a keychain. Every platform's failure — and `keyring`
+/// is `#[non_exhaustive]`, so there will be failures this was not written
+/// against — lands on `Unknown`. `Absent` is reachable from `NoEntry` and
+/// from nothing else, which is the property `main.rs`'s tests assert against
+/// the error shapes all three platforms actually produce.
+fn said(answer: Result<String, keyring::Error>) -> Said {
+    match answer {
+        Ok(token) => Said::Held { token },
+        Err(keyring::Error::NoEntry) => Said::Absent,
+        Err(e) => Said::Unknown { why: e.to_string() },
+    }
+}
+
+/// Read a `keyring` answer to a deletion the same way.
+///
+/// `NoEntry` is success here: the caller asked for the credential to be gone
+/// and it is gone. Anything else is a refusal, including the one that matters
+/// — a keyring that has left the bus since the credential was stored.
+fn removed(answer: Result<(), keyring::Error>) -> Done {
+    match answer {
+        Ok(()) | Err(keyring::Error::NoEntry) => Done::Done,
+        Err(e) => Done::Refused { why: e.to_string() },
+    }
+}
+
+/// Answers `Said` rather than `Result`, so a rejection cannot become "absent".
 #[tauri::command]
-fn secret_get(key: String) -> Result<Option<String>, String> {
-    let entry = keyring::Entry::new(KEYCHAIN_SERVICE, &key).map_err(|e| e.to_string())?;
-    match entry.get_password() {
-        Ok(v) => Ok(Some(v)),
-        Err(keyring::Error::NoEntry) => Ok(None),
-        Err(e) => Err(e.to_string()),
+fn secret_get(key: String) -> Said {
+    match keyring::Entry::new(KEYCHAIN_SERVICE, &key) {
+        Ok(entry) => said(entry.get_password()),
+        // Not even an entry handle. Nothing is known about what is stored.
+        Err(e) => Said::Unknown { why: e.to_string() },
     }
 }
 
 #[tauri::command]
-fn secret_set(key: String, value: String) -> Result<(), String> {
-    keyring::Entry::new(KEYCHAIN_SERVICE, &key)
-        .and_then(|e| e.set_password(&value))
-        .map_err(|e| e.to_string())
+fn secret_set(key: String, value: String) -> Done {
+    match keyring::Entry::new(KEYCHAIN_SERVICE, &key) {
+        Ok(entry) => match entry.set_password(&value) {
+            Ok(()) => Done::Done,
+            Err(e) => Done::Refused { why: e.to_string() },
+        },
+        Err(e) => Done::Refused { why: e.to_string() },
+    }
 }
 
 #[tauri::command]
-fn secret_delete(key: String) -> Result<(), String> {
-    match keyring::Entry::new(KEYCHAIN_SERVICE, &key).and_then(|e| e.delete_credential()) {
-        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-        Err(e) => Err(e.to_string()),
+fn secret_delete(key: String) -> Done {
+    match keyring::Entry::new(KEYCHAIN_SERVICE, &key) {
+        Ok(entry) => removed(entry.delete_credential()),
+        Err(e) => Done::Refused { why: e.to_string() },
     }
 }
 
@@ -325,4 +403,169 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("firetower failed to start");
+}
+
+/// What the keychain's three answers are, against the errors each platform
+/// really produces.
+///
+/// **These tests are the only instrument we have for Windows.** There is no
+/// Windows machine on this fleet and nobody has driven the keychain there, so
+/// the thing that has to be true — that a Credential Manager a policy has
+/// closed is never read as "there is no credential here" — cannot be measured.
+/// What can be asserted is the mapping it goes through, with the error shapes
+/// `keyring` 3.6 hands up from each backend written down. They run on all
+/// three CI legs.
+///
+/// The errors below are not invented. Each is the message the backend emits
+/// for the situation named, carried in the `keyring::Error` variant that
+/// backend uses for it: `NoStorageAccess` where the store exists and will not
+/// open, `PlatformFailure` where the platform call itself failed.
+#[cfg(test)]
+mod tests {
+    use super::{removed, said, Done, Said};
+
+    fn boxed(why: &str) -> Box<dyn std::error::Error + Send + Sync> {
+        Box::new(std::io::Error::other(why.to_string()))
+    }
+
+    /// The keychain answering "nothing is filed here" — the one and only way
+    /// to `Absent`, and the only answer that permits anything.
+    #[test]
+    fn only_no_entry_means_the_credential_is_not_there() {
+        assert_eq!(said(Err(keyring::Error::NoEntry)), Said::Absent);
+        assert_eq!(
+            said(Ok("ft_live_9c2bbe41".into())),
+            Said::Held {
+                token: "ft_live_9c2bbe41".into()
+            }
+        );
+    }
+
+    #[test]
+    fn linux_without_a_secret_service_is_not_an_absent_credential() {
+        // The common Linux case, and the one QA drove end to end: a minimal
+        // desktop, a tiling window manager or an ssh session, where nothing
+        // owns the name on the bus at all.
+        let answer = said(Err(keyring::Error::NoStorageAccess(boxed(
+            "DBus error: The name org.freedesktop.secrets was not provided by any .service files",
+        ))));
+        assert!(matches!(answer, Said::Unknown { .. }), "{answer:?}");
+    }
+
+    #[test]
+    fn a_locked_linux_keyring_is_not_an_absent_credential() {
+        // gnome-keyring installed, login keyring never unlocked. The prompt
+        // is declined or there is no prompter to show it.
+        let answer = said(Err(keyring::Error::NoStorageAccess(boxed(
+            "DBus error: org.freedesktop.Secret.Error.IsLocked: Cannot get secret of a locked object",
+        ))));
+        assert!(matches!(answer, Said::Unknown { .. }), "{answer:?}");
+    }
+
+    #[test]
+    fn a_locked_macos_keychain_is_not_an_absent_credential() {
+        // `errSecInteractionNotAllowed`, -25308: the item is there and the
+        // keychain will not hand it over without a prompt it cannot show.
+        // This is the path QA can drive natively on this fleet.
+        let answer = said(Err(keyring::Error::NoStorageAccess(boxed(
+            "SecKeychainFindGenericPassword: User interaction is not allowed. (-25308)",
+        ))));
+        assert!(matches!(answer, Said::Unknown { .. }), "{answer:?}");
+
+        // And the refusal that arrives as a platform call failing rather than
+        // as the store being shut: `errSecAuthFailed`, -25293.
+        let denied = said(Err(keyring::Error::PlatformFailure(boxed(
+            "SecKeychainFindGenericPassword: The user name or passphrase you entered is not correct. (-25293)",
+        ))));
+        assert!(matches!(denied, Said::Unknown { .. }), "{denied:?}");
+    }
+
+    #[test]
+    fn a_closed_windows_credential_manager_is_not_an_absent_credential() {
+        // A policy has shut Credential Manager: `CredRead` fails with
+        // `ERROR_ACCESS_DENIED` (5). **Not** `ERROR_NOT_FOUND` (1168), which
+        // is the one `keyring` turns into `NoEntry` — so the two are a single
+        // digit apart in the platform and must not be a single answer here.
+        let shut = said(Err(keyring::Error::NoStorageAccess(boxed(
+            "Windows error 5: Access is denied.",
+        ))));
+        assert!(matches!(shut, Said::Unknown { .. }), "{shut:?}");
+
+        let broken = said(Err(keyring::Error::PlatformFailure(boxed(
+            "Windows error 1312: A specified logon session does not exist. It may already have been terminated.",
+        ))));
+        assert!(matches!(broken, Said::Unknown { .. }), "{broken:?}");
+    }
+
+    /// `keyring::Error` is `#[non_exhaustive]`, so the question is not whether
+    /// these particular shapes are handled but whether the *default* is safe.
+    #[test]
+    fn anything_else_the_keychain_says_is_also_not_absent() {
+        for answer in [
+            said(Err(keyring::Error::BadEncoding(vec![0xff, 0xfe]))),
+            said(Err(keyring::Error::TooLong("service".into(), 32))),
+            said(Err(keyring::Error::Invalid(
+                "target".into(),
+                "cannot be empty".into(),
+            ))),
+            said(Err(keyring::Error::Ambiguous(vec![]))),
+        ] {
+            assert!(matches!(answer, Said::Unknown { .. }), "{answer:?}");
+        }
+    }
+
+    /// Deleting is the other half: a credential that was not there is gone,
+    /// and a keyring that refused has not removed anything.
+    #[test]
+    fn a_deletion_is_done_only_when_the_credential_is_gone() {
+        assert_eq!(removed(Ok(())), Done::Done);
+        assert_eq!(removed(Err(keyring::Error::NoEntry)), Done::Done);
+
+        for refusal in [
+            removed(Err(keyring::Error::NoStorageAccess(boxed(
+                "DBus error: The name org.freedesktop.secrets was not provided by any .service files",
+            )))),
+            removed(Err(keyring::Error::PlatformFailure(boxed(
+                "SecKeychainItemDelete: User interaction is not allowed. (-25308)",
+            )))),
+            removed(Err(keyring::Error::NoStorageAccess(boxed(
+                "Windows error 5: Access is denied.",
+            )))),
+        ] {
+            assert!(matches!(refusal, Done::Refused { .. }), "{refusal:?}");
+        }
+    }
+
+    /// The shape the renderer actually receives, because the tag is what the
+    /// TypeScript switches on and a rename here is a silent change there.
+    #[test]
+    fn the_renderer_sees_a_tagged_answer_it_can_switch_on() {
+        let held = serde_json::to_string(&Said::Held {
+            token: "ft_live_9c2bbe41".into(),
+        })
+        .unwrap();
+        assert_eq!(held, r#"{"says":"held","token":"ft_live_9c2bbe41"}"#);
+        assert_eq!(
+            serde_json::to_string(&Said::Absent).unwrap(),
+            r#"{"says":"absent"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&Said::Unknown {
+                why: "no bus".into()
+            })
+            .unwrap(),
+            r#"{"says":"unknown","why":"no bus"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&Done::Done).unwrap(),
+            r#"{"says":"done"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&Done::Refused {
+                why: "locked".into()
+            })
+            .unwrap(),
+            r#"{"says":"refused","why":"locked"}"#
+        );
+    }
 }
