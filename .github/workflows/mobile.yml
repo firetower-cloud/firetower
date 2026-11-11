@@ -1,7 +1,14 @@
-# The phone on every pull request that touches it: types, lints, tests, and a
-# debug APK as an artifact on the run, so a branch can be installed before it
-# is merged. No secrets, so it is safe for a pull request from a fork; signing
-# and the store live in the release workflow behind a protected environment.
+# The phone on every pull request that touches it: types, lints, tests, a
+# debug APK as an artifact on the run so a branch can be installed before it
+# is merged, and then the app actually started on an emulator. No secrets, so
+# it is safe for a pull request from a fork; signing and the store live in the
+# release workflow behind a protected environment.
+#
+# That last job is the newest and the reason is worth keeping: everything
+# above it is a compiler. `check` type-checks and runs pure functions,
+# `android` links the app. None of them had ever *run* it, and a tab bar that
+# threw on its first render went out with all of them green — see
+# `mobile/e2e/launch.yaml`.
 #
 # There is no iOS job here on purpose. A macOS runner is roughly ten times the
 # cost of a Linux one, and an unsigned simulator build proves less than the
@@ -23,6 +30,10 @@ on:
       - "mobile/**"
       - "api/openapi.json"
       - "web/app/globals.css"
+      # The stand-in control plane the smoke flow connects to. It lives under
+      # desktop/ because that is who wrote it, and a change to it can break
+      # a boot check that has nothing to do with the desktop app.
+      - "desktop/scripts/mock-server.mjs"
       - ".github/workflows/mobile.yml"
       # Its own file is here so that editing the CI re-runs the CI. The
       # release workflow builds the same app from the same lockfile, so it
@@ -108,9 +119,13 @@ jobs:
       # app.config.ts and the installed modules currently say it is, so a
       # checkout that has never run prebuild still builds.
       - run: pnpm exec expo prebuild --platform android --no-install
-      # arm64 only: every phone this APK goes to is arm64, and each extra ABI
-      # is another full compile of the native code.
-      - run: ./gradlew assembleDebug --no-daemon -PreactNativeArchitectures=arm64-v8a
+      # Two ABIs, and the second one is not for a phone. Every phone this APK
+      # goes to is arm64 and each extra ABI is another full compile of the
+      # native code — but the emulator the `smoke` job starts is x86_64, and
+      # a smoke test that runs a *different binary* from the one this job
+      # publishes is not a test of it. The Java, Kotlin and JavaScript halves
+      # are compiled once either way; what doubles is the C++.
+      - run: ./gradlew assembleDebug --no-daemon -PreactNativeArchitectures=arm64-v8a,x86_64
         working-directory: mobile/android
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -118,3 +133,116 @@ jobs:
           name: firetower-android
           path: mobile/android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+
+  # The app, started.
+  #
+  # `android` above proves the app links. This proves it runs: it installs
+  # that very APK on an emulator, connects it to a stand-in control plane and
+  # asserts the four tab destinations are on screen. The bug it exists for
+  # was a `NativeTabs.Trigger.Icon md=` name with no `expo-symbols` installed
+  # to resolve it — a throw on first render, invisible to every other job
+  # here, and a blank screen on every Android device.
+  #
+  # **`ubuntu-latest`, not a Depot runner.** This job waits on an emulator
+  # rather than on cores, so the large runner buys nothing, and KVM on
+  # GitHub's own Linux image is what `android-emulator-runner` is documented
+  # against. The compile stays on Depot, above.
+  smoke:
+    needs: android
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 11
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: mobile/pnpm-lock.yaml
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      # The binary the job above published, not one built again here: building
+      # it twice is half an hour of runner for two artifacts nobody can prove
+      # are the same.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: firetower-android
+          path: apk
+
+      # `assembleDebug` does not embed the JavaScript — `debuggableVariants`
+      # leaves `debug` to fetch it from Metro, which is what makes Fast
+      # Refresh work and is why that APK is a dev client and not a build you
+      # can hand somebody. So Metro has to be here too, and the install below
+      # is for Metro, not for the app.
+      - run: pnpm install --frozen-lockfile
+        working-directory: mobile
+
+      - name: maestro
+        run: |
+          curl -fsSL "https://get.maestro.mobile.dev" | bash
+          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+
+      # Something to connect to. The flow cannot reach the tab bar without a
+      # server — `(tabs)/_layout` returns a `Redirect` before it builds a
+      # single trigger — and `desktop/scripts/mock-server.mjs` answers that
+      # handful of reads with no Postgres and no worker anywhere near it. It
+      # imports nothing outside node, so it needs no install of its own.
+      #
+      # 10.0.2.2 is this runner, as an Android emulator sees it.
+      - name: a control plane to connect to
+        run: node desktop/scripts/mock-server.mjs 4411 &
+
+      - name: metro
+        run: |
+          nohup pnpm exec expo start --port 8081 > "$RUNNER_TEMP/metro.log" 2>&1 &
+          # Up, before anything launches against it. A dev-client APK whose
+          # first bundle request is refused shows a red screen, and a red
+          # screen is indistinguishable from the blank one this job is here
+          # to catch.
+          curl -fsS --retry 60 --retry-all-errors --retry-delay 2 -o /dev/null \
+            http://localhost:8081/status
+        working-directory: mobile
+
+      # The action's own instruction for GitHub's Linux image: the runner has
+      # KVM, its default udev rules do not hand it to the user.
+      - name: hardware acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      # Pixel 7, which is 412 x 915 dp — the Android baseline this project
+      # designs against.
+      - uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_7
+          disable-animations: true
+          emulator-options: -no-window -no-snapshot -noaudio -no-boot-anim -camera-back none
+          script: |
+            adb install -r apk/*.apk
+            # Build the graph before the app asks for it. A cold bundle is
+            # tens of seconds and `launchApp` does not wait that patiently.
+            # Best effort: the entry path is Expo's own and may be renamed,
+            # and a miss here only costs the first launch its patience.
+            curl -fsS -m 600 -o /dev/null \
+              "http://localhost:8081/.expo/.virtual-metro-entry.bundle?platform=android&dev=true" || true
+            maestro test mobile/e2e/launch.yaml \
+              -e ADDRESS=10.0.2.2:4411 -e USER=admin -e PASS=smoke
+
+      # The screenshots are half the point: Maestro matches text and cannot
+      # see an icon, so whether the tab bar has glyphs in it is something a
+      # person reads off the artifact. `always()`, because a failed run is
+      # the one whose pictures are worth having.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: firetower-android-smoke
+          path: ~/.maestro/tests/**
+          if-no-files-found: warn
