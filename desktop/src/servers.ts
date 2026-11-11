@@ -700,8 +700,6 @@ export function updateToken(serverId: string, token: string) {
 
 /**
  * The token this Mac holds for a server is no longer good.
-/**
- * The token this Mac holds for a server is no longer good.
  *
  * Kept, not forgotten: the address is still right and the organisation is
  * still whose it is — the only thing that died is the credential. Forgetting
