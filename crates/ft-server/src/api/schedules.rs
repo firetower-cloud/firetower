@@ -21,9 +21,7 @@ use super::{ApiError, ApiResult, ErrorCode};
 use crate::auth::Principal;
 use crate::schedules::{cadence, launch, pause, settle};
 use crate::AppState;
-use ft_core::schedule::{
-    Cadence, Provenance, Schedule, ScheduleRun, TriggerKind,
-};
+use ft_core::schedule::{Cadence, Provenance, Schedule, ScheduleRun, TriggerKind};
 use ft_core::{RepoId, ScheduleId, ScheduleRunId, TriggerId, UserId};
 
 /// Whose schedules these are.
@@ -677,19 +675,11 @@ async fn assemble(state: &AppState, row: crate::db::ScheduleRow) -> ApiResult<Sc
     // **Counted off the history, every read.** Nothing is stored, which is
     // what lets one rule read three ways — the page says which by counting
     // the same rows it is already drawing.
-    let window = state
-        .db
-        .runs_for_streak(&row.id, pause::WINDOW)
-        .await?;
+    let window = state.db.runs_for_streak(&row.id, pause::WINDOW).await?;
     let counted: Vec<_> = window.iter().map(settle::as_counted).collect();
     let streak = pause::streak(&counted);
 
-    let last_run = state
-        .db
-        .runs_of(&row.id, 1)
-        .await?
-        .first()
-        .map(as_run);
+    let last_run = state.db.runs_of(&row.id, 1).await?.first().map(as_run);
 
     let repo_id = row
         .spec
@@ -697,11 +687,7 @@ async fn assemble(state: &AppState, row: crate::db::ScheduleRow) -> ApiResult<Sc
         .and_then(|v| v.as_str())
         .map(|s| RepoId::from_stored(s.to_string()));
     let repo_slug = match &repo_id {
-        Some(id) => state
-            .db
-            .repo_of(&row.owner_id, id)
-            .await?
-            .map(|r| r.slug),
+        Some(id) => state.db.repo_of(&row.owner_id, id).await?.map(|r| r.slug),
         None => None,
     };
 

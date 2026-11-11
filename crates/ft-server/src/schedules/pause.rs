@@ -334,7 +334,11 @@ mod tests {
             verdict(&[failed(), failed(), failed(), completed()]),
             Some(PausedReason::ThreeFailures)
         );
-        assert_eq!(verdict(&[failed(), failed(), completed()]), None, "two does not");
+        assert_eq!(
+            verdict(&[failed(), failed(), completed()]),
+            None,
+            "two does not"
+        );
     }
 
     #[test]
@@ -406,7 +410,13 @@ mod tests {
         // And the same five rows with only two ordinary failures stop on the
         // fifth rather than on a third that never arrives.
         assert_eq!(
-            verdict(&[failed(), failed(), unreachable(), unreachable(), unreachable()]),
+            verdict(&[
+                failed(),
+                failed(),
+                unreachable(),
+                unreachable(),
+                unreachable()
+            ]),
             Some(PausedReason::FiveRuns)
         );
     }
@@ -435,11 +445,17 @@ mod tests {
     fn a_run_that_completed_ends_the_streak() {
         assert_eq!(verdict(&[failed(), completed(), failed(), failed()]), None);
         let it = streak(&[failed(), completed(), failed(), failed()]);
-        assert_eq!(it.counted, 1, "only the newest, up to the run that completed");
+        assert_eq!(
+            it.counted, 1,
+            "only the newest, up to the run that completed"
+        );
 
         // Including the two completions that are not `clean`.
         assert_eq!(verdict(&[failed(), kept(), failed(), failed()]), None);
-        assert_eq!(verdict(&[failed(), could_not_tell(), failed(), failed()]), None);
+        assert_eq!(
+            verdict(&[failed(), could_not_tell(), failed(), failed()]),
+            None
+        );
     }
 
     /// **An overrun has its own path to paused and must not be counted here.**
@@ -480,14 +496,26 @@ mod tests {
     #[test]
     fn the_worked_streaks() {
         let cases: Vec<(&str, Vec<Counted<'_>>, Option<PausedReason>)> = vec![
-            ("failure × 3", vec![failed(); 3], Some(PausedReason::ThreeFailures)),
-            ("question × 5", vec![asked(); 5], Some(PausedReason::FiveRuns)),
+            (
+                "failure × 3",
+                vec![failed(); 3],
+                Some(PausedReason::ThreeFailures),
+            ),
+            (
+                "question × 5",
+                vec![asked(); 5],
+                Some(PausedReason::FiveRuns),
+            ),
             (
                 "failure × 2, question × 3",
                 vec![asked(), asked(), asked(), failed(), failed()],
                 Some(PausedReason::FiveRuns),
             ),
-            ("unreachable × 5", vec![unreachable(); 5], Some(PausedReason::FiveRuns)),
+            (
+                "unreachable × 5",
+                vec![unreachable(); 5],
+                Some(PausedReason::FiveRuns),
+            ),
             ("unreachable × 3", vec![unreachable(); 3], None),
             (
                 "unreachable × 2, failure × 3",
@@ -509,16 +537,8 @@ mod tests {
                 },
                 Some(PausedReason::ThreeFailures),
             ),
-            (
-                "question × 4",
-                vec![asked(); 4],
-                None,
-            ),
-            (
-                "overran × 5",
-                vec![overran(); 5],
-                None,
-            ),
+            ("question × 4", vec![asked(); 4], None),
+            ("overran × 5", vec![overran(); 5], None),
         ];
 
         for (name, runs, want) in cases {

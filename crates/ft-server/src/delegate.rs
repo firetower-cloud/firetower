@@ -348,13 +348,7 @@ async fn note_proposer(
     }
     state
         .db
-        .update_schedule(
-            id,
-            &row.name,
-            &row.spec,
-            &pins,
-            row.delete_clean_runs,
-        )
+        .update_schedule(id, &row.name, &row.spec, &pins, row.delete_clean_runs)
         .await?;
     Ok(())
 }

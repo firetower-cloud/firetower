@@ -274,10 +274,7 @@ async fn finished(
             // the workspace survives, and the failure is reported rather than
             // worked around.
             match delete_workspace(state, run, session).await {
-                Ok(()) => (
-                    line_for(Outcome::Clean, summary.as_deref(), session),
-                    false,
-                ),
+                Ok(()) => (line_for(Outcome::Clean, summary.as_deref(), session), false),
                 Err(why) => (
                     format!(
                         "{} The workspace could not be deleted: {why}",
@@ -344,7 +341,10 @@ async fn classify(
     }
 
     let all_clear = summaries.iter().all(|c| {
-        c.trouble.is_none() && c.summary.uncommitted == 0 && c.summary.pushed && c.summary.ahead == 0
+        c.trouble.is_none()
+            && c.summary.uncommitted == 0
+            && c.summary.pushed
+            && c.summary.ahead == 0
     });
     match all_clear {
         true => Outcome::Clean,
@@ -459,9 +459,9 @@ pub async fn after_terminal(state: &AppState, schedule: &ScheduleId) -> anyhow::
         (PausedReason::ThreeFailures, _, _) => "after three runs failed".to_string(),
         (PausedReason::FiveRuns, 0, _) => "after five runs needed you".to_string(),
         (PausedReason::FiveRuns, _, 0) => "after five runs could not finish".to_string(),
-        (PausedReason::FiveRuns, f, q) => format!(
-            "after five runs in a row did not finish — {f} failed and {q} stopped to ask"
-        ),
+        (PausedReason::FiveRuns, f, q) => {
+            format!("after five runs in a row did not finish — {f} failed and {q} stopped to ask")
+        }
         (other, _, _) => format!("because {}", super::reason_name(other)),
     };
     announce(state, schedule, &said).await;

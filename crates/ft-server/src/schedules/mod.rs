@@ -157,6 +157,15 @@ pub async fn sweep(state: &AppState, booted: DateTime<Utc>) -> anyhow::Result<us
 
     let now = Utc::now();
     let outcome = async {
+        // What the foreign key on `session_id` used to do. It is a copy now —
+        // it has to be, because it is written before the session exists — so
+        // a workspace `reclaim` purged out from under a kept run is forgotten
+        // here rather than by a cascade.
+        if let Ok(n) = state.db.forget_purged_workspaces().await {
+            if n > 0 {
+                tracing::debug!("{n} scheduled run(s) stopped holding a workspace");
+            }
+        }
         reconcile(state, now).await?;
         settle::pass(state, now).await?;
         due(state, now, booted).await
@@ -254,11 +263,7 @@ async fn reconcile(state: &AppState, now: DateTime<Utc>) -> anyhow::Result<()> {
 }
 
 /// The due phase: one occurrence per trigger that wants one.
-async fn due(
-    state: &AppState,
-    now: DateTime<Utc>,
-    booted: DateTime<Utc>,
-) -> anyhow::Result<usize> {
+async fn due(state: &AppState, now: DateTime<Utc>, booted: DateTime<Utc>) -> anyhow::Result<usize> {
     let wanted = state.db.schedules_due(now, AT_ONCE).await?;
     if wanted.is_empty() {
         return Ok(0);
@@ -290,10 +295,7 @@ async fn due(
         // lands next. `capped` means the gap was longer than the cap and one
         // row names the period instead of one row per occurrence.
         let (passed, next, capped) = clock.between(was_due - chrono::TimeDelta::seconds(1), now);
-        state
-            .db
-            .set_next_fire_at(&trigger.trigger_id, next)
-            .await?;
+        state.db.set_next_fire_at(&trigger.trigger_id, next).await?;
 
         if capped {
             // One row, naming the period. A fifteen-minute schedule left alone
@@ -387,7 +389,13 @@ async fn due(
             continue;
         };
 
-        launch::spawn(state.clone(), schedule, claim, Some(&mut on_host), AT_ONCE_PER_HOST);
+        launch::spawn(
+            state.clone(),
+            schedule,
+            claim,
+            Some(&mut on_host),
+            AT_ONCE_PER_HOST,
+        );
         started += 1;
     }
 
@@ -455,7 +463,11 @@ pub fn clock_of(config: &serde_json::Value) -> Option<cadence::Clock> {
 /// derived back out of it: reversing a cron expression into "every weekday at
 /// 08:30" is guesswork, and it gets it wrong for exactly the expressions
 /// somebody wrote by hand.
-pub fn trigger_config(cadence: &Cadence, timezone: &str, clock: &cadence::Clock) -> serde_json::Value {
+pub fn trigger_config(
+    cadence: &Cadence,
+    timezone: &str,
+    clock: &cadence::Clock,
+) -> serde_json::Value {
     serde_json::json!({
         "cadence": cadence,
         "tz": timezone,

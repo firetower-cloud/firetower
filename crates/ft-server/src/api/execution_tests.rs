@@ -2830,7 +2830,10 @@ async fn says_its_disk(state: &AppState, host: &Host, total_mb: u64, used_mb: u6
         }
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
-    panic!("{} never came back saying what its disk was doing", host.name);
+    panic!(
+        "{} never came back saying what its disk was doing",
+        host.name
+    );
 }
 
 /// Start a bare workspace as somebody, the way every caller of the launch path
@@ -5160,7 +5163,7 @@ async fn spawning_a_name_two_profiles_answer_to_starts_neither() {
 // ── schedules ──────────────────────────────────────────────────────────
 
 use chrono::{DateTime, Utc};
-use ft_core::schedule::{Cadence, PausedReason, RunSource, ScheduleRunState};
+use ft_core::schedule::{Cadence, Outcome, PausedReason, RunSource, ScheduleRunState};
 
 /// A cadence the form can produce, so a test says what it is about rather than
 /// repeating four fields.
@@ -5201,9 +5204,13 @@ async fn create(
 #[tokio::test]
 async fn a_new_schedule_is_off_with_no_clock_until_somebody_approves_it() {
     let (state, principal, _, _, owner) = fixture().await;
-    let made = create(&state, &principal, a_schedule("Dependency audit", weekdays_at("08:30")))
-        .await
-        .expect("a schedule a person wrote");
+    let made = create(
+        &state,
+        &principal,
+        a_schedule("Dependency audit", weekdays_at("08:30")),
+    )
+    .await
+    .expect("a schedule a person wrote");
 
     assert!(!made.active);
     assert!(made.approved_at.is_none());
@@ -5217,7 +5224,10 @@ async fn a_new_schedule_is_off_with_no_clock_until_somebody_approves_it() {
         made.triggers[0].next_fires.is_empty(),
         "and no next run to promise"
     );
-    assert_eq!(state.db.schedules_due(Utc::now(), 20).await.unwrap().len(), 0);
+    assert_eq!(
+        state.db.schedules_due(Utc::now(), 20).await.unwrap().len(),
+        0
+    );
 
     // And approving arms it.
     let Json(on) = super::schedules::approve_schedule(
@@ -5230,7 +5240,11 @@ async fn a_new_schedule_is_off_with_no_clock_until_somebody_approves_it() {
     assert!(on.active);
     assert!(on.approved_at.is_some());
     assert!(on.triggers[0].next_fire_at.is_some());
-    assert_eq!(on.triggers[0].next_fires.len(), 3, "the next three, from the server");
+    assert_eq!(
+        on.triggers[0].next_fires.len(),
+        3,
+        "the next three, from the server"
+    );
     let _ = owner;
 }
 
@@ -5258,7 +5272,12 @@ async fn a_cadence_closer_together_than_fifteen_minutes_is_refused_on_write() {
         refused.message
     );
     assert!(
-        state.db.schedules_of("").await.unwrap_or_default().is_empty(),
+        state
+            .db
+            .schedules_of("")
+            .await
+            .unwrap_or_default()
+            .is_empty(),
         "nothing was written down"
     );
 }
@@ -5285,7 +5304,10 @@ async fn the_server_reads_a_cadence_back_and_says_when_it_would_fire() {
     assert_eq!(answer.expr, "0 7 * * 1");
     assert!(answer.reads.contains("07:00"), "{}", answer.reads);
     assert_eq!(answer.next_fires.len(), 3);
-    assert!(answer.next_fires.windows(2).all(|p| p[1] > p[0]), "in order");
+    assert!(
+        answer.next_fires.windows(2).all(|p| p[1] > p[0]),
+        "in order"
+    );
 }
 
 /// **Criterion 14: `bypassPermissions` is not reachable from this surface.**
@@ -5304,9 +5326,13 @@ async fn a_schedule_cannot_be_asked_to_bypass_permissions() {
 
     // And the default is the shipped "never ask", which denies rather than
     // bypasses.
-    let made = create(&state, &principal, a_schedule("Ordinary", weekdays_at("08:30")))
-        .await
-        .unwrap();
+    let made = create(
+        &state,
+        &principal,
+        a_schedule("Ordinary", weekdays_at("08:30")),
+    )
+    .await
+    .unwrap();
     let row = state.db.schedule(&made.id).await.unwrap().unwrap();
     assert_eq!(row.pins["settings"]["mode"], serde_json::json!("dontAsk"));
 }
@@ -5332,18 +5358,29 @@ async fn what_a_schedule_runs_is_pinned_rather_than_resolved_at_launch() {
     // controls on this surface.
     let spec = crate::schedules::launch::spec_of(&row).expect("it reads back as a launch");
     assert_eq!(spec.size, ft_core::WorkspaceSize::Medium);
-    assert_eq!(spec.share, ft_core::Share::Yields, "Equal is the default, so it is set");
+    assert_eq!(
+        spec.share,
+        ft_core::Share::Yields,
+        "Equal is the default, so it is set"
+    );
     assert!(spec.host_id.is_none(), "a policy, never a machine");
-    assert!(spec.workspace_id.is_none(), "every run starts a new workspace");
+    assert!(
+        spec.workspace_id.is_none(),
+        "every run starts a new workspace"
+    );
 }
 
 /// **Criterion 54: editing clears the approval.**
 #[tokio::test]
 async fn editing_a_schedule_takes_it_off_until_somebody_approves_again() {
     let (state, principal, _, _, _) = fixture().await;
-    let made = create(&state, &principal, a_schedule("Audit", weekdays_at("08:30")))
-        .await
-        .unwrap();
+    let made = create(
+        &state,
+        &principal,
+        a_schedule("Audit", weekdays_at("08:30")),
+    )
+    .await
+    .unwrap();
     let _ = super::schedules::approve_schedule(
         State(state.clone()),
         Extension(principal.clone()),
@@ -5364,16 +5401,15 @@ async fn editing_a_schedule_takes_it_off_until_somebody_approves_again() {
     assert!(!edited.active);
     assert!(edited.approved_at.is_none(), "the approval is gone");
     assert_eq!(edited.revision, 2, "and the revision moved");
-    assert_eq!(state.db.schedules_due(Utc::now(), 20).await.unwrap().len(), 0);
+    assert_eq!(
+        state.db.schedules_due(Utc::now(), 20).await.unwrap().len(),
+        0
+    );
 }
 
 /// A session an agent is working in, running as a saved profile — which is
 /// what the "proposed by" card names.
-async fn an_agent_at_work(
-    state: &AppState,
-    host: &Host,
-    owner: &str,
-) -> ft_core::SessionId {
+async fn an_agent_at_work(state: &AppState, host: &Host, owner: &str) -> ft_core::SessionId {
     let profile = saved_profile(
         state,
         owner,
@@ -5415,7 +5451,10 @@ async fn clock_at(state: &AppState, id: &ft_core::ScheduleId) -> Option<DateTime
     state.db.triggers_of(id).await.unwrap()[0].next_fire_at
 }
 
-async fn runs_of(state: &AppState, id: &ft_core::ScheduleId) -> Vec<ft_core::schedule::ScheduleRun> {
+async fn runs_of(
+    state: &AppState,
+    id: &ft_core::ScheduleId,
+) -> Vec<ft_core::schedule::ScheduleRun> {
     state
         .db
         .runs_of(id, 50)
@@ -5478,10 +5517,8 @@ async fn an_occurrence_due_before_this_process_started_is_missed_and_one_after_i
     // would have lost, including every occurrence inside the start-up settle.
     let fresh = armed(&state, &principal, "After the boot").await;
     due_since(&state, &fresh.id, Utc::now()).await;
-    let long_ago = clock_at(&state, &fresh.id)
-        .await
-        .expect("armed")
-        - chrono::TimeDelta::seconds(1);
+    let long_ago =
+        clock_at(&state, &fresh.id).await.expect("armed") - chrono::TimeDelta::seconds(1);
     crate::schedules::sweep(&state, long_ago).await.unwrap();
 
     let history = runs_of(&state, &fresh.id).await;
@@ -5510,7 +5547,10 @@ async fn one_occurrence_is_never_claimed_twice() {
     // the row before the first one wrote it would see.
     state
         .db
-        .set_next_fire_at(&state.db.triggers_of(&made.id).await.unwrap()[0].id, Some(moment))
+        .set_next_fire_at(
+            &state.db.triggers_of(&made.id).await.unwrap()[0].id,
+            Some(moment),
+        )
         .await
         .unwrap();
     crate::schedules::sweep(&state, booted).await.unwrap();
@@ -5635,7 +5675,15 @@ async fn record(
         .unwrap();
     state
         .db
-        .settle_run(&run, state_word, outcome, Some("forced"), None, error_code, false)
+        .settle_run(
+            &run,
+            state_word,
+            outcome,
+            Some("forced"),
+            None,
+            error_code,
+            false,
+        )
         .await
         .unwrap();
 }
@@ -5676,7 +5724,10 @@ async fn three_failures_pause_the_schedule_and_disarm_its_clock() {
             .is_none(),
         "a paused schedule's trigger is out of the due index entirely"
     );
-    assert_eq!(state.db.schedules_due(Utc::now(), 20).await.unwrap().len(), 0);
+    assert_eq!(
+        state.db.schedules_due(Utc::now(), 20).await.unwrap().len(),
+        0
+    );
 }
 
 /// **Criterion 36a: three unreachable machines do not pause a schedule, and
@@ -5691,7 +5742,15 @@ async fn an_unreachable_machine_is_bounded_by_five_and_not_by_three() {
     let made = armed(&state, &principal, "Shut laptop").await;
 
     for ago in [50, 40, 30] {
-        record(&state, &made.id, ago, "failed", None, Some("HostUnreachable")).await;
+        record(
+            &state,
+            &made.id,
+            ago,
+            "failed",
+            None,
+            Some("HostUnreachable"),
+        )
+        .await;
     }
     crate::schedules::settle::after_terminal(&state, &made.id)
         .await
@@ -5702,7 +5761,15 @@ async fn an_unreachable_machine_is_bounded_by_five_and_not_by_three() {
     );
 
     for ago in [20, 10] {
-        record(&state, &made.id, ago, "failed", None, Some("HostUnreachable")).await;
+        record(
+            &state,
+            &made.id,
+            ago,
+            "failed",
+            None,
+            Some("HostUnreachable"),
+        )
+        .await;
     }
     crate::schedules::settle::after_terminal(&state, &made.id)
         .await
@@ -5725,13 +5792,24 @@ async fn refusals_are_stepped_over_rather_than_resetting_a_streak() {
     let made = armed(&state, &principal, "Full disk").await;
 
     for ago in (10..50).step_by(2) {
-        record(&state, &made.id, ago as i64, "refused", None, Some("NoCapacity")).await;
+        record(
+            &state,
+            &made.id,
+            ago as i64,
+            "refused",
+            None,
+            Some("NoCapacity"),
+        )
+        .await;
     }
     crate::schedules::settle::after_terminal(&state, &made.id)
         .await
         .unwrap();
     let row = state.db.schedule(&made.id).await.unwrap().unwrap();
-    assert!(row.active, "a week of refusals must not pause a healthy schedule");
+    assert!(
+        row.active,
+        "a week of refusals must not pause a healthy schedule"
+    );
 
     let Json(read) = super::schedules::one_schedule(
         State(state.clone()),
@@ -5782,6 +5860,87 @@ async fn a_mixed_streak_stores_only_the_rule_and_reports_both_populations() {
         read.streak.failures > 0 && read.streak.questions > 0,
         "which is how a page knows to say \"kept failing and asking\" without being told"
     );
+}
+
+/// **The history outlives the workspace, and stops offering to open one.**
+///
+/// `session_id` is a copy rather than a reference — it has to be, because the
+/// scheduler writes it before the session exists — so nothing nulls it when
+/// `reclaim` purges what a kept run was holding. The line, its outcome, its
+/// timing and its summary all stay; what goes is the claim to have a
+/// workspace, which is what a row's arrow is drawn from.
+#[tokio::test]
+async fn a_run_keeps_its_line_and_loses_its_workspace_when_reclaim_purges_it() {
+    let (state, principal, host, ready, owner) = fixture().await;
+    ready.store(true, Ordering::SeqCst);
+    let made = armed(&state, &principal, "Leaves something behind").await;
+
+    let session = super::sessions::create_session_as(
+        state.clone(),
+        owner.clone(),
+        "admin".into(),
+        serde_json::from_value(serde_json::json!({
+            "prompt": "a run that kept its workspace",
+            "hostId": host.id.as_str(),
+        }))
+        .unwrap(),
+        super::sessions::Launch::default(),
+    )
+    .await
+    .expect("a workspace to purge");
+
+    let run = ft_core::ScheduleRunId::new();
+    state
+        .db
+        .claim_run(&run, &made.id, None, Utc::now(), 1, "cron", "claimed", None)
+        .await
+        .unwrap();
+    state
+        .db
+        .run_launched(&run, &session.id, &host.name)
+        .await
+        .unwrap();
+    state
+        .db
+        .settle_run(
+            &run,
+            "finished",
+            Some("kept"),
+            Some("Opened #4412. 14 patch updates, tests passed."),
+            Some("Opened #4412"),
+            None,
+            true,
+        )
+        .await
+        .unwrap();
+
+    // The workspace goes the way `reclaim` takes it.
+    state.db.forget_session(&session.id).await.unwrap();
+    crate::reclaim::sweep(&state).await.unwrap();
+    assert!(
+        state.db.session(&session.id).await.unwrap().is_none(),
+        "the session is purged, which is the state under test"
+    );
+
+    state.db.forget_purged_workspaces().await.unwrap();
+
+    let line = runs_of(&state, &made.id)
+        .await
+        .into_iter()
+        .find(|r| r.id.as_str() == run.as_str())
+        .expect("the line survives its workspace");
+    assert_eq!(line.state, ScheduleRunState::Finished);
+    assert_eq!(line.outcome.as_ref(), Some(&Outcome::Kept));
+    assert_eq!(line.summary.as_deref(), Some("Opened #4412"));
+    assert!(line.detail.as_deref().unwrap_or_default().contains("#4412"));
+    assert!(
+        !line.workspace_kept,
+        "and it stops offering to open a workspace that is not there"
+    );
+
+    // Which is also what the count on the page is read from.
+    let (_, kept) = state.db.run_counts(&made.id).await.unwrap();
+    assert_eq!(kept, 0);
 }
 
 /// **Criterion 42c: there is no counter column.**
@@ -5843,7 +6002,10 @@ async fn nothing_turns_a_paused_schedule_back_on_by_itself() {
     .await
     .unwrap();
     assert!(back.active);
-    assert!(back.paused_reason.is_none(), "turning it on clears the rule");
+    assert!(
+        back.paused_reason.is_none(),
+        "turning it on clears the rule"
+    );
 }
 
 /// **Criterion 32: no cap anywhere, and the count is drawn in both switch
@@ -5958,7 +6120,10 @@ async fn a_refused_launch_is_recorded_refused_and_moves_nothing() {
     );
     assert!(!run.workspace_kept);
     assert!(
-        run.detail.as_deref().unwrap_or_default().starts_with("Refused."),
+        run.detail
+            .as_deref()
+            .unwrap_or_default()
+            .starts_with("Refused."),
         "{:?}",
         run.detail
     );
@@ -6064,7 +6229,11 @@ async fn a_disabled_owner_stops_their_schedules() {
         .into_iter()
         .find(|r| r.state.is_terminal())
         .expect("it was recorded");
-    assert_eq!(run.state, ScheduleRunState::Refused, "nothing was started, no secret read");
+    assert_eq!(
+        run.state,
+        ScheduleRunState::Refused,
+        "nothing was started, no secret read"
+    );
 }
 
 /// **Criteria 43–46, over MCP: an agent proposes and the row is off.**
@@ -6095,24 +6264,33 @@ async fn an_agent_proposes_a_schedule_that_has_never_run() {
     .expect("an agent may propose one");
 
     assert!(said.contains("off"), "it says so to the agent: {said}");
-    let Json(library) = super::schedules::list_schedules(
-        State(state.clone()),
-        Extension(principal.clone()),
-    )
-    .await
-    .unwrap();
+    let Json(library) =
+        super::schedules::list_schedules(State(state.clone()), Extension(principal.clone()))
+            .await
+            .unwrap();
     let proposed = library
         .iter()
         .find(|s| s.name == "Close the loop on stale branches")
         .expect("it is in the library immediately");
     assert!(!proposed.active);
     assert!(proposed.approved_at.is_none());
-    assert!(proposed.made.by_agent, "and the row says where it came from");
+    assert!(
+        proposed.made.by_agent,
+        "and the row says where it came from"
+    );
     assert!(proposed.made.from_session_id.is_some(), "with a link back");
-    assert_eq!(state.db.schedules_due(Utc::now(), 20).await.unwrap().len(), 0);
+    assert_eq!(
+        state.db.schedules_due(Utc::now(), 20).await.unwrap().len(),
+        0
+    );
 
     // **Criterion 45: it may not approve, and it may not resume.**
-    for forbidden in ["approve_schedule", "resume_schedule", "update_schedule", "delete_schedule"] {
+    for forbidden in [
+        "approve_schedule",
+        "resume_schedule",
+        "update_schedule",
+        "delete_schedule",
+    ] {
         let refused = crate::delegate::handle(
             &state,
             &asks(
@@ -6131,7 +6309,12 @@ async fn an_agent_proposes_a_schedule_that_has_never_run() {
     }
 
     // **Criterion 47: and there is no tool that ends a workspace.**
-    for absent in ["end_workspace", "destroy_session", "delete_workspace", "end_session"] {
+    for absent in [
+        "end_workspace",
+        "destroy_session",
+        "delete_workspace",
+        "end_session",
+    ] {
         assert!(
             crate::delegate::handle(
                 &state,

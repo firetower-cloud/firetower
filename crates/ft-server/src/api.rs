@@ -633,7 +633,10 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(skills::skill_collisions))
         .routes(routes!(skills::share_skills))
         .routes(routes!(skills::set_repo_defaults))
-        .routes(routes!(schedules::list_schedules, schedules::create_schedule))
+        .routes(routes!(
+            schedules::list_schedules,
+            schedules::create_schedule
+        ))
         .routes(routes!(
             schedules::one_schedule,
             schedules::update_schedule,

@@ -2992,11 +2992,13 @@ impl Db {
         id: &TriggerId,
         at: Option<chrono::DateTime<chrono::Utc>>,
     ) -> Result<()> {
-        sqlx::query("UPDATE schedule_triggers SET next_fire_at = $2, updated_at = now() WHERE id = $1")
-            .bind(id.as_str())
-            .bind(at)
-            .execute(&self.pool)
-            .await?;
+        sqlx::query(
+            "UPDATE schedule_triggers SET next_fire_at = $2, updated_at = now() WHERE id = $1",
+        )
+        .bind(id.as_str())
+        .bind(at)
+        .execute(&self.pool)
+        .await?;
         Ok(())
     }
 
@@ -3102,11 +3104,7 @@ impl Db {
 
     /// The session this run is about to become, written before the launch is
     /// attempted — see `api::sessions::Launch::id`.
-    pub async fn set_run_session(
-        &self,
-        id: &ScheduleRunId,
-        session: &SessionId,
-    ) -> Result<()> {
+    pub async fn set_run_session(&self, id: &ScheduleRunId, session: &SessionId) -> Result<()> {
         sqlx::query("UPDATE schedule_runs SET session_id = $2 WHERE id = $1")
             .bind(id.as_str())
             .bind(session.as_str())
@@ -3169,6 +3167,32 @@ impl Db {
         .await?
         .rows_affected();
         Ok(moved > 0)
+    }
+
+    /// Forget the workspaces that have been reclaimed out from under us.
+    ///
+    /// **What the foreign key used to do, as a sweep.** `session_id` is a copy
+    /// rather than a reference — it has to be, because the scheduler writes it
+    /// before the session exists — so nothing nulls it when `reclaim` purges
+    /// the workspace a *kept* run was holding. Without this a history row
+    /// would go on offering to open a workspace that is not there.
+    ///
+    /// Once per pass, over the kept rows only, which is a small set by
+    /// definition: with no cap it is the one number standing between a
+    /// schedule and a full disk, and anybody watching it would notice it
+    /// climbing into the thousands long before this query did.
+    ///
+    /// Returns how many stopped holding one.
+    pub async fn forget_purged_workspaces(&self) -> Result<u64> {
+        Ok(sqlx::query(
+            "UPDATE schedule_runs r SET workspace_kept = false
+              WHERE r.workspace_kept
+                AND r.session_id IS NOT NULL
+                AND NOT EXISTS (SELECT 1 FROM sessions s WHERE s.id = r.session_id)",
+        )
+        .execute(&self.pool)
+        .await?
+        .rows_affected())
     }
 
     /// The workspace has gone. The line stays — the summary was copied before
@@ -3237,11 +3261,7 @@ impl Db {
     /// transparent — it is not in the list at all, which is what "ignored
     /// entirely" means, and filtering here rather than in Rust means the
     /// window holds fifty runs the rule can actually read.
-    pub async fn runs_for_streak(
-        &self,
-        schedule: &ScheduleId,
-        limit: i64,
-    ) -> Result<Vec<RunRow>> {
+    pub async fn runs_for_streak(&self, schedule: &ScheduleId, limit: i64) -> Result<Vec<RunRow>> {
         Ok(sqlx::query(&format!(
             "SELECT {RUN_COLUMNS} FROM schedule_runs r
               WHERE r.schedule_id = $1 AND r.source <> 'manual'
@@ -3386,12 +3406,11 @@ impl Db {
         if ids.is_empty() {
             return Ok(true);
         }
-        let found: i64 = sqlx::query_scalar(
-            "SELECT count(*) FROM skill_versions WHERE id = ANY($1)",
-        )
-        .bind(ids)
-        .fetch_one(&self.pool)
-        .await?;
+        let found: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM skill_versions WHERE id = ANY($1)")
+                .bind(ids)
+                .fetch_one(&self.pool)
+                .await?;
         Ok(found as usize == ids.len())
     }
 
@@ -3812,12 +3831,10 @@ pub struct SchedulerLock {
 impl SchedulerLock {
     /// Give it back, rather than waiting for the connection to be recycled.
     pub async fn release(mut self) {
-        let _ = sqlx::query(
-            "SELECT pg_advisory_unlock(hashtext(current_schema() || $1)::bigint)",
-        )
-        .bind(SCHEDULER_LOCK)
-        .execute(&mut *self.conn)
-        .await;
+        let _ = sqlx::query("SELECT pg_advisory_unlock(hashtext(current_schema() || $1)::bigint)")
+            .bind(SCHEDULER_LOCK)
+            .execute(&mut *self.conn)
+            .await;
     }
 }
 

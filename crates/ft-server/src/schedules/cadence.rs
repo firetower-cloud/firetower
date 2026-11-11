@@ -420,7 +420,10 @@ mod tests {
     fn a_cadence_reads_back_in_words() {
         let reads = clock(Cadence::Weekdays { at: "07:00".into() }).reads();
         assert!(reads.contains("07:00"), "{reads}");
-        assert!(reads.contains("Monday") && reads.contains("Friday"), "{reads}");
+        assert!(
+            reads.contains("Monday") && reads.contains("Friday"),
+            "{reads}"
+        );
     }
 
     /// The wall clock is kept, not the offset. Paris is +01:00 in January and
