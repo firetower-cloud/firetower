@@ -12,7 +12,7 @@ import { BackendProvider, dropCache } from "~/backend";
 import { bridge } from "~/bridge";
 import { StartProvider } from "~/start";
 import { Connect } from "~/ui/Connect";
-import { servers, onServers } from "~/servers";
+import { servers, onServers, tokensKnown } from "~/servers";
 import { Boundary } from "~/ui/Boundary";
 import { Gate } from "~/ui/Gate";
 import { navigate, usePathname } from "~/shims/next-navigation";
@@ -26,7 +26,44 @@ const WHICH = "firetower.current";
 /** What this used to be called, when it could also hold `"all"`. */
 const WAS = "firetower.scope";
 
+/**
+ * The window, before the keychain has said anything.
+ *
+ * **The chrome, and nothing under it.** `hydrate` runs behind the first frame
+ * now, so for the first moments of a launch a registry row's token has not
+ * arrived yet — and a row with no token is indistinguishable from a row whose
+ * sign-in has died, which `Window` below draws as that server's door. Drawing
+ * it for the half-second a keychain read takes would be a password field
+ * flashing up on every launch; drawing the app instead would be a window full
+ * of panes asking an unauthenticated question each.
+ *
+ * So: the title bar, which moves and closes the window, and the edges, which
+ * resize it. Painted and styled, which is the whole of the fix — this used to
+ * be a window with nothing in it at all, because nothing rendered until the
+ * keychain answered, and a locked keyring means it never does. `servers.ts`
+ * stops waiting after a moment either way, so this is never what anybody is
+ * left looking at.
+ */
+function Starting() {
+  return (
+    <div className="flex h-full w-full flex-col overflow-hidden bg-ground text-text">
+      <Titlebar serverId={null} onSwitch={() => {}} />
+      <Resize />
+      <div className="relative flex min-h-0 flex-1" />
+    </div>
+  );
+}
+
 export function App() {
+  /* Whether the keychain has answered, or been waited out. The registry is
+     read synchronously everywhere and the keychain is not, so this is the one
+     thing the window has to wait for — and it waits with its chrome up. */
+  const [known, setKnown] = useState(tokensKnown);
+  useEffect(() => onServers(() => setKnown(tokensKnown())), []);
+  return known ? <Window /> : <Starting />;
+}
+
+function Window() {
   /**
    * Which Firetower the window is in. One at a time.
    *
