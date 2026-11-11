@@ -53,7 +53,14 @@ readonly REPO="$(cd "$HERE/.." && pwd)"
 readonly API_PORT="${SIM_API_PORT:-14400}"
 readonly API="http://localhost:$API_PORT"
 readonly ADMIN_USER=admin
+# What the docs tell you to type, and what this uses from the second run on.
 readonly ADMIN_PASSWORD=worker-sim-admin
+# What the control plane seeds the account from. An account created that way is
+# marked as needing a new password, and *every* endpoint then answers
+# `PasswordChangeRequired` until it has one — so the first run replaces it
+# rather than trying to work around it. (Found by this failing: `up` got as far
+# as asking the control plane for its ssh key and was refused.)
+readonly ADMIN_FIRST_PASSWORD=worker-sim-initial
 # What the machine is called in the fleet. `run.sh up` is idempotent on it.
 readonly MACHINE=worker-sim
 
@@ -164,23 +171,53 @@ field() {
     fi
 }
 
+login() {
+    api POST /api/v1/auth/login \
+        "{\"username\":\"$ADMIN_USER\",\"password\":\"$1\"}" | field token
+}
+
+# Signed in, and holding a token that actually works.
+#
+# Those are two things. A seeded account signs in perfectly and is then refused
+# by every endpoint with `PasswordChangeRequired` until the temporary password
+# has been replaced, so the token is tried on something before it is trusted.
 sign_in() {
-    local answer
-    answer="$(api POST /api/v1/auth/login \
-        "{\"username\":\"$ADMIN_USER\",\"password\":\"$ADMIN_PASSWORD\"}")"
-    TOKEN="$(printf '%s' "$answer" | field token)"
-    [ -n "$TOKEN" ] || die "could not sign in to $API: $answer"
+    local was="$ADMIN_PASSWORD"
+    TOKEN="$(login "$ADMIN_PASSWORD")"
+    if [ -z "$TOKEN" ]; then
+        was="$ADMIN_FIRST_PASSWORD"
+        TOKEN="$(login "$ADMIN_FIRST_PASSWORD")"
+        [ -n "$TOKEN" ] || die "could not sign in to $API as $ADMIN_USER"
+    fi
+
+    # `/api/v1/setup` is the one endpoint the gate exempts — it is how an
+    # interface finds out it has to ask for a new password — so it is also the
+    # only honest way to ask whether this token is gated. Asking a *gated*
+    # endpoint and matching its error works until somebody exempts another one.
+    case "$(api GET /api/v1/setup)" in
+        *'"needsPassword":true'*)
+            local answer
+            answer="$(api POST /api/v1/auth/password \
+                "{\"current\":\"$was\",\"new\":\"$ADMIN_PASSWORD\"}")"
+            TOKEN="$(printf '%s' "$answer" | field token)"
+            [ -n "$TOKEN" ] \
+                || die "the seeded password could not be replaced, and nothing works until it is: $answer"
+            say "replaced the seeded password; it is $ADMIN_PASSWORD from here on"
+            ;;
+    esac
 }
 
 # A fresh install wants its organisation named before anything can be filed in
 # it. Skipped when it has been.
 finish_setup() {
-    local state
-    state="$(api GET /api/v1/setup)"
-    case "$state" in
+    case "$(api GET /api/v1/setup)" in
         *'"needsOrganization":true'*)
-            api POST /api/v1/setup/organization '{"name":"Worker sim"}' >/dev/null
-            api POST /api/v1/setup/complete '' >/dev/null
+            local named
+            named="$(api POST /api/v1/setup/organization '{"name":"Worker sim"}')"
+            case "$named" in
+                *'"code"'*) die "could not name the organisation: $named" ;;
+            esac
+            api POST /api/v1/setup/complete >/dev/null
             say "named the organisation"
             ;;
     esac
@@ -223,37 +260,58 @@ install_worker_binary() {
     local key
     key="$(api GET /api/v1/ssh-key | field publicKey)"
     [ -n "$key" ] || die "the control plane would not say what its ssh key is"
-    # The installer goes in as a file because `--from -` already owns stdin.
-    docker cp "$REPO/install/worker.sh" "$worker:/tmp/worker.sh" >/dev/null
+    # The installer goes in as a file because `--from -` already owns stdin —
+    # and into the home directory rather than /tmp, because /tmp here is the
+    # tmpfs that makes a restart a reboot and `docker cp` writes *under* it.
+    # (Found by this failing with "cannot open /tmp/worker.sh".)
+    docker cp "$REPO/install/worker.sh" "$worker:/home/firetower/worker.sh" >/dev/null
     docker exec -i -u firetower "$worker" \
-        sh /tmp/worker.sh --from - --skip-packages --authorize "$key" \
+        sh /home/firetower/worker.sh --from - --skip-packages --authorize "$key" \
         < "$HERE/.worker.tar.gz"
     rm -f "$HERE/.worker.tar.gz"
 }
 
+machine_id() {
+    api GET /api/v1/hosts \
+        | jq -r --arg name "$MACHINE" '.[] | select(.name == $name) | .id' 2>/dev/null \
+        | head -1
+}
+
+# Sets MACHINE_ROW, for the same reason `resolve` sets TARGET: a function that
+# both narrates and returns a value through stdout returns the narration too.
+MACHINE_ROW=""
 register_machine() {
+    # `Managed`, not `Default`. Default means "let ssh choose", which in this
+    # container means `/root/.ssh` and nothing authorised anywhere; `Managed` is
+    # the key Firetower made for itself and the one `install/worker.sh
+    # --authorize` just put on the machine. Getting this wrong is a machine that
+    # stays Unreachable with `worker refused the key`, which is what it did.
     local answer id
     answer="$(api POST /api/v1/hosts \
-        "{\"name\":\"$MACHINE\",\"compute\":{\"type\":\"Server\",\"host\":\"worker\",\"user\":\"firetower\",\"key\":{\"type\":\"Default\"}}}")"
+        "{\"name\":\"$MACHINE\",\"compute\":{\"type\":\"Server\",\"host\":\"worker\",\"user\":\"firetower\",\"key\":{\"type\":\"Managed\"}}}")"
     id="$(printf '%s' "$answer" | field id)"
     if [ -z "$id" ]; then
         # Already added is the ordinary answer to running `up` twice.
-        id="$(api GET /api/v1/hosts | tr ',' '\n' | grep -A2 "\"$MACHINE\"" || true)"
-        id="$(api GET /api/v1/hosts | sed -n 's/.*{"id":"\([^"]*\)"[^}]*"name":"'"$MACHINE"'".*/\1/p' | head -1)"
+        id="$(machine_id)"
         [ -n "$id" ] || die "could not add the machine, and it is not already there: $answer"
         say "the machine was already registered"
     else
         say "registered $MACHINE"
     fi
-    printf '%s' "$id"
+    MACHINE_ROW="$id"
+}
+
+machine_state() {
+    api GET /api/v1/hosts \
+        | jq -r --arg name "$MACHINE" '.[] | select(.name == $name) | .state' 2>/dev/null \
+        | head -1
 }
 
 wait_until_online() {
     local waited=0 state
     printf '  waiting for %s to report ready' "$MACHINE"
     while [ "$waited" -lt 180 ]; do
-        state="$(api GET /api/v1/hosts | sed -n 's/.*"name":"'"$MACHINE"'","state":"\([^"]*\)".*/\1/p' | head -1)"
-        [ -n "$state" ] || state="$(api GET /api/v1/hosts | field state)"
+        state="$(machine_state)"
         if [ "$state" = "Online" ]; then
             printf ' — Online after %ss\n' "$waited"
             return 0
@@ -264,11 +322,16 @@ wait_until_online() {
     done
     printf '\n'
     say "it is still '$state'. The machine is added either way — see: $0 status"
+    api GET /api/v1/hosts | jq -r --arg name "$MACHINE" \
+        '.[] | select(.name == $name) | .diagnosis | select(. != null) | "  " + .summary + " — " + .detail' 2>/dev/null || true
     return 1
 }
 
 cmd_up() {
     command -v docker >/dev/null 2>&1 || die "docker is not on PATH"
+    command -v jq >/dev/null 2>&1 \
+        || die "jq is not on PATH, and reading a fleet of one out of a list by hand is how a harness lies to you"
+    command -v curl >/dev/null 2>&1 || die "curl is not on PATH"
     step "Bringing up $PROJECT"
     say "project    $PROJECT"
     say "api        $API"
@@ -278,12 +341,11 @@ cmd_up() {
     finish_setup
     resolve worker
     install_worker_binary "$TARGET"
-    local id
-    id="$(register_machine)"
+    register_machine
     wait_until_online || true
     step "Ready"
     say "control plane   $API  ($ADMIN_USER / $ADMIN_PASSWORD)"
-    say "machine         $MACHINE  ($id)"
+    say "machine         $MACHINE  ($MACHINE_ROW)"
     say "a power cut     $0 kill worker"
     say "the reboot      $0 start worker"
     printf '\n'
@@ -311,15 +373,22 @@ cmd_restart_worker() {
     local id="$TARGET"
     preflight "docker exec pkill -x firetower-worker (the worker process only)" "$id"
     # Inside the container, which is the only place a process is killed by
-    # anything in this file. `pkill -x` is an exact name in that container's own
-    # pid namespace; the host's worker is in another namespace and cannot be
-    # reached from here.
+    # anything in this file: that container's own pid namespace. The host's
+    # worker is in another one and cannot be reached from here.
+    #
+    # `-fx`, so the *whole command line* has to equal that string — an exact
+    # match rather than a pattern that could widen. Not `pkill -x
+    # firetower-worker`, which refuses outright: Linux truncates a process
+    # name to 15 characters and this one is 16, so there is nothing for `-x`
+    # to match. (That is how this was found.) The command line itself comes
+    # from `transport::worker_command`, which is `exec firetower-worker "$@"`
+    # with `--stdio`.
     #
     # The worker is sshd's child, so killing it drops the control plane's
     # connection and the supervisor dials again and starts a new one. tmux is
     # not its child and does not notice — which is the case that must leave
     # every agent exactly where it was.
-    if docker exec "$id" pkill -x firetower-worker; then
+    if docker exec "$id" pkill -fx 'firetower-worker --stdio'; then
         say "the worker process is gone. tmux is untouched:"
         docker exec -u firetower "$id" tmux ls 2>&1 | sed 's/^/    /' || true
         say "nothing here may be stranded — that is acceptance criterion 2."

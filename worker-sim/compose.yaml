@@ -52,10 +52,25 @@ services:
       FIRETOWER_HOME: /home/firetower
       FIRETOWER_BIND: 0.0.0.0
       FIRETOWER_PORT: 4400
+      # So a browser can be the client.
+      #
+      # The desktop app is where a workspace, a conversation and the recovery
+      # card live — the web page this control plane serves is the installation
+      # as an institution and deliberately has no sessions on it. Run the
+      # desktop app from `pnpm --dir desktop dev` and it is an ordinary page on
+      # another port, which makes every call cross-origin; in production it is
+      # Tauri and the allowlist is three `tauri://` origins. Development mode
+      # is what opens that, exactly as `just dev` does for the web app.
+      FIRETOWER_DEV: "true"
       # Deterministic, so `run.sh` can sign in without reading a password out
       # of the log. This control plane is reachable from this machine only.
+      #
+      # An account seeded this way is marked as needing a new password and
+      # every endpoint refuses until it has one, so `run.sh up` replaces it on
+      # the first run with the one the documentation advertises:
+      # worker-sim-admin.
       ADMIN_USERNAME: admin
-      ADMIN_INITIAL_PASSWORD: worker-sim-admin
+      ADMIN_INITIAL_PASSWORD: worker-sim-initial
       # Keeps the vault's key — and so the ssh identity the machine authorises —
       # across a rebuild of this container.
       FIRETOWER_ROOT_KEY: "${SIM_ROOT_KEY:-}"

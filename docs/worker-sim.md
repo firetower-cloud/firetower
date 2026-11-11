@@ -59,9 +59,11 @@ host's tmux server is holding somebody's real work. So:
 
 * **macOS.** This is Linux, and one real difference is known: on a Mac, tmux
   keeps its socket under `$TMPDIR` (`/var/folders/…`) rather than `/tmp`, and
-  what clears it at boot is launchd rather than a tmpfs. The verdict a worker
-  reaches is the same either way — a missing socket and a missing session both
-  come back as "no such session" — but it is reasoning, not a measurement.
+  what clears it at boot is launchd rather than a tmpfs. Both endings are read
+  as "there is no server" by `tmux.rs` — a missing socket answers `(No such
+  file or directory)` and a socket left behind by a dead server answers
+  `(Connection refused)` — but the Linux one is measured here and the macOS one
+  is reasoning.
 * **A real power cut.** Docker on macOS is a VM, so there is a layer between
   `docker kill` and the hardware. What a container restart cannot show is a
   filesystem losing its tail: nothing in `crates/` calls `sync_all`, and the
@@ -79,30 +81,55 @@ host's tmux server is holding somebody's real work. So:
 ## Getting a browser onto it
 
 The control plane is on `http://localhost:14400` (`SIM_API_PORT` to move it),
-with `admin` / `worker-sim-admin`. The API is there from the moment `up`
-finishes. There are two ways to look at it, and for anything about a session
+with `admin` / `worker-sim-admin`. (It is seeded with a temporary password and
+`up` replaces it on the first run, because an account that still has its
+seeded password is refused by every endpoint until it does not.) The API is
+there from the moment `up` finishes. There are two ways to look at it, and for anything about a session
 the second is the real one.
 
-**The web interface**, compiled into the control plane:
+**The desktop app is the one that has sessions on it.** Workspaces,
+conversations and the recovery card are desktop-owned; the web page this
+control plane serves is the installation as an institution — accounts, the
+organisation, where to download the app — and has no session on it at all. So
+for anything you were going to photograph, this is the route:
+
+```sh
+pnpm --dir desktop dev          # vite, on http://localhost:5273
+```
+
+Open `http://localhost:5273` and add this control plane as a server:
+`http://localhost:14400`, `admin`, `worker-sim-admin`. The desktop keeps a
+registry of servers, so the harness sits beside whatever else you have.
+
+Driving it headlessly — which is what a QA agent does — the registry is two
+keys in `localStorage`, exactly as `desktop/scripts/check-states.mjs` seeds
+them:
+
+```js
+localStorage.setItem("firetower.servers", JSON.stringify([{
+  url: "http://localhost:14400", serverId: "o_1", org: "Worker sim",
+  user: "admin", token: "<POST /api/v1/auth/login>", addedAt: "2026-11-11T18:00:00Z",
+}]));
+localStorage.setItem("firetower.current", "o_1");
+```
+
+A conversation is at `http://localhost:5273/#/sessions/<session id>`.
+
+The control plane runs in development mode for this: the app on
+`localhost:5273` is cross-origin, and in production the allowlist is three
+`tauri://` origins because the real app is not a web page. Without it every
+call fails and the app draws *Can't reach it — showing what was last known*,
+which is how this was found.
+
+**The web interface**, if you want the institutional half:
 
 ```sh
 just sim ui     # builds web/out if it is empty, then restarts the control plane
 ```
 
 `web/out` is committed empty and the binary embeds it at compile time, so this
-builds the export and then forces the control plane to be rebuilt around it.
-A minute or two, once.
-
-**The desktop app**, which is where a workspace, a conversation and the
-recovery card actually live:
-
-```sh
-pnpm --dir desktop dev          # vite, on http://localhost:5273
-```
-
-Open it, and add this control plane as a server: `http://localhost:14400`,
-`admin`, `worker-sim-admin`. The desktop keeps a registry of servers, so the
-harness sits beside whatever else you have without replacing it.
+builds the export and then lets the build script rebuild the control plane
+around it. Measured at 58s with `pnpm install` already done.
 
 ## Reproducing the incident
 
@@ -117,7 +144,9 @@ just sim start worker      # it comes back; its agents do not
 
 Within seconds of the reconnect — and with nobody opening anything — every
 session whose agent is gone reads **Machine restarted**, and its conversation
-offers to bring it back. Then the case that must *not* do that:
+offers to bring it back. Measured: the status moved a second after `start`,
+and the reconnect that triggered it is on the supervisor's backoff, 1–35s.
+Then the case that must *not* do that:
 
 ```sh
 just sim restart-worker worker
@@ -128,18 +157,21 @@ exactly where they were, and no session's status moves.
 
 ## How long it takes
 
-Measured on an M2 Pro, first run, nothing cached:
+Measured on an M2 Pro, 10 cores, with Docker's image cache warm and its
+volumes empty:
 
-| step | roughly |
+| step | measured |
 |---|---|
-| `up`, first time (image builds, then a debug build of the control plane) | 6–10 minutes |
-| `up` again, caches warm | 20–40 seconds |
-| the worker binary, after the control plane has been built once | 30–60 seconds |
-| `kill` | instant |
-| `start`, to the machine reading Online again | 10–30 seconds |
-| `restart-worker`, to the worker reconnecting | 5–20 seconds |
-| `just sim ui`, first time | 2–4 minutes |
+| `up`, first time — two image builds, the pinned Rust toolchain installing itself, then a debug build of the control plane | **1m 55s**, of which 72s is waiting for the control plane to compile and bind |
+| `up` again, nothing changed | **31s** (the control plane container is recreated, 12s to answer) |
+| `up` after a Rust change | **1m 10s** — the control plane recompiles, the worker is rebuilt and reinstalled |
+| the worker binary on its own, sharing the control plane's artifacts | 4–17s |
+| `kill` | under a second |
+| `start`, to the control plane reconnecting | 1–35s, on the supervisor's own backoff |
+| a session reading **Machine restarted** after that reconnect | under a second |
+| `restart-worker`, to a new worker being online | about 1s |
+| `just sim ui`, first time | a few minutes (`pnpm install` and `next build`, then the control plane again) |
 
-The number worth knowing before you decide something is broken is the first
-one. `up` compiles this checkout inside the container; it is minutes, and
+The number worth knowing before you decide something has hung is the first
+one, and the part of it that looks like nothing happening is the compile.
 `just sim logs control` is what to watch while it does.
