@@ -2810,13 +2810,27 @@ async fn says_its_disk(state: &AppState, host: &Host, total_mb: u64, used_mb: u6
             }),
         )
         .await;
-    for _ in 0..100 {
-        if state.fleet.capacity_of(&host.id).await.is_some() {
+    // **Both facts, not just the reading.** Replacing a supervisor drops the
+    // old connection, and the write that records a host as offline can land
+    // *after* the new connection's `mark_host_online` — which leaves the row
+    // offline, out of the candidate list, and the test asserting the floor
+    // against a fleet of one. Waiting for the reading alone passed on a quiet
+    // machine and failed under a full suite.
+    for _ in 0..200 {
+        let said = state.fleet.capacity_of(&host.id).await.is_some();
+        let online = state
+            .db
+            .host_by_id(&host.id)
+            .await
+            .ok()
+            .flatten()
+            .is_some_and(|h| h.state == ft_core::HostState::Online);
+        if said && online {
             return;
         }
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
-    panic!("the worker never said what its disk was doing");
+    panic!("{} never came back saying what its disk was doing", host.name);
 }
 
 /// Start a bare workspace as somebody, the way every caller of the launch path
