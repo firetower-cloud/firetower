@@ -59,7 +59,14 @@ export function App() {
      read synchronously everywhere and the keychain is not, so this is the one
      thing the window has to wait for — and it waits with its chrome up. */
   const [known, setKnown] = useState(tokensKnown);
-  useEffect(() => onServers(() => setKnown(tokensKnown())), []);
+  useEffect(() => {
+    /* Read again here, and not only on the next notification. `hydrate` is
+       started right after `render`, so it can finish before this effect has
+       subscribed — and a window that missed that one notification would stay
+       on `Starting` for the rest of the launch. */
+    setKnown(tokensKnown());
+    return onServers(() => setKnown(tokensKnown()));
+  }, []);
   return known ? <Window /> : <Starting />;
 }
 
@@ -96,9 +103,13 @@ function Window() {
       /* private window; the choice just does not survive a reload */
     }
   };
-  /* The servers this Mac has connected to. */
+  /* The servers this Mac has connected to. Re-read on subscribing for the
+     same reason as above: a token can land between the render and this. */
   const [real$, setReal] = useState(servers);
-  useEffect(() => onServers(() => setReal(servers())), []);
+  useEffect(() => {
+    setReal(servers());
+    return onServers(() => setReal(servers()));
+  }, []);
   const path = usePathname();
   /* Is there a newer build: now, and every ten minutes after, so a window left
      open for a fortnight does not learn about a release by being restarted.
