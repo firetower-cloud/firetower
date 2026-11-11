@@ -4976,10 +4976,13 @@ async fn an_agent_at_work(it: &Machine, title: &str) -> ft_core::SessionId {
 /// child carries the subscription its own owner pinned to it.
 async fn someone_elses_child(it: &Machine, title: &str) -> ft_core::SessionId {
     let org = ft_core::OrgId::from_stored(it.state.db.org().await.unwrap());
+    // Named for the session, so a test that needs two of these gets two
+    // people rather than a collision.
+    let who = format!("ana{}", ft_core::SessionId::new().as_str().to_lowercase());
     let ana = it
         .state
         .accounts
-        .create_user(&org, "ana", "ana@example.test", "member")
+        .create_user(&org, &who, &format!("{who}@example.test"), "member")
         .await
         .unwrap()
         .0;
@@ -5572,6 +5575,43 @@ async fn a_lead_cannot_bring_a_stranded_child_back_by_switching_its_subscription
     state.fleet.stop_supervising(&host.id).await;
 }
 
+/// A stranded child this person may see and may not start.
+///
+/// Shared with them at viewer, which is the one case where saying "1 isn't
+/// yours to start" tells them nothing they did not already know.
+async fn a_child_they_may_only_watch(
+    it: &Machine,
+    lead: &ft_core::SessionId,
+) -> ft_core::SessionId {
+    let id = someone_elses_child(it, "a child shared with me").await;
+    it.state
+        .db
+        .set_lineage(&id, lead, Some("split the work"), None)
+        .await
+        .unwrap();
+    let workspace = it
+        .state
+        .db
+        .session(&id)
+        .await
+        .unwrap()
+        .unwrap()
+        .workspace_id
+        .unwrap();
+    // A viewer grant on the place it lives in, which is how one is shared.
+    it.state
+        .access
+        .set_exception(
+            crate::access::FiledKind::Workspace,
+            workspace.as_str(),
+            &it.owner,
+            crate::access::Level::Viewer,
+        )
+        .await
+        .unwrap();
+    id
+}
+
 /// Criterion 1 of the security review: one press on a lead reaches exactly as
 /// far as the person pressing it can.
 ///
@@ -5638,8 +5678,183 @@ async fn a_family_recovery_only_starts_the_children_the_caller_may_operate() {
         ft_core::SessionStatus::Stranded,
         "it is left exactly where it was"
     );
-    // Said out loud, because the button offered a number.
-    assert_eq!(done.detail, "2 starting again. 1 isn’t yours to start.");
+    // Nothing said about it, because this person cannot see it exists.
+    //
+    // `session_of` answers absent rather than refused for exactly that
+    // reason, and a count would hand back what the 404 withheld.
+    assert_eq!(done.detail, "2 agents are starting again");
+
+    // One they *can* see and still may not start is a different matter: they
+    // know it is there, so saying it was left alone tells them nothing new and
+    // stops the button lying about what it did.
+    let watched = a_child_they_may_only_watch(&it, &lead).await;
+    it.says
+        .send(ToServer::AgentClosed {
+            session_id: watched.clone(),
+            gone: ft_proto::Gone::Stranded,
+        })
+        .unwrap();
+    settles_at(&it.state, &watched, ft_core::SessionStatus::Stranded).await;
+    it.state
+        .fleet
+        .set_status(&lead, ft_core::SessionStatus::Stranded, None)
+        .await;
+
+    let Json(again) = sessions::relaunch_session(
+        State(it.state.clone()),
+        Extension(it.principal.clone()),
+        Path(lead.as_str().to_string()),
+        Query(serde_json::from_value(serde_json::json!({ "family": true })).unwrap()),
+    )
+    .await
+    .expect("the family comes back");
+    assert_eq!(again.detail, "1 starting again. 1 isn’t yours to start.");
+    assert!(
+        !it_started(&it.launched, &watched),
+        "and watching it is still not starting it"
+    );
+
+    it.state.fleet.stop_supervising(&it.host.id).await;
+}
+
+/// The consent survives a stale snapshot, which is the shape the check used to
+/// have and the reason it was not enough.
+///
+/// Every handler works from a `Session` it fetched. A switch validates an
+/// account, stops an agent and replays its controls before anything launches,
+/// and a machine can go under it in that time — so the status being checked
+/// was true when it was read and false when it was used. The guard is at the
+/// launch now, under the claim that serialises it, and reads the row rather
+/// than the argument.
+#[tokio::test]
+async fn a_session_stranded_after_it_was_read_is_still_refused_at_the_launch() {
+    let it = a_machine().await;
+    it.ready.store(true, Ordering::SeqCst);
+    it.state
+        .db
+        .mark_host_online(
+            &it.host.id,
+            "test",
+            4,
+            8192,
+            &ft_core::DockerState::running("27.0.3"),
+        )
+        .await
+        .unwrap();
+    let id = an_agent_at_work(&it, "fine when it was read").await;
+
+    // What a handler is holding: a snapshot taken while it was working.
+    let stale = it.state.db.session(&id).await.unwrap().unwrap();
+    assert_eq!(stale.status, ft_core::SessionStatus::Working);
+
+    // And the machine goes, after that read and before the launch.
+    it.says
+        .send(ToServer::AgentClosed {
+            session_id: id.clone(),
+            gone: ft_proto::Gone::Stranded,
+        })
+        .unwrap();
+    settles_at(&it.state, &id, ft_core::SessionStatus::Stranded).await;
+
+    let refused = sessions::relaunch(&it.state, &stale, &it.owner, crate::fleet::Recovering::No)
+        .await
+        .expect_err("the row says stranded, whatever the argument says");
+    assert!(
+        refused.message.contains("Bring it back first"),
+        "{}",
+        refused.message
+    );
+    assert!(
+        !it_started(&it.launched, &id),
+        "nothing was launched for it"
+    );
+    assert_eq!(
+        status_of(&it.state, &id).await,
+        ft_core::SessionStatus::Stranded
+    );
+
+    // And the recovery somebody pressed still works from the same stale
+    // snapshot: what is refused is the claim, not the fetch.
+    sessions::relaunch(&it.state, &stale, &it.owner, crate::fleet::Recovering::Yes)
+        .await
+        .expect("a recovery is the one thing that may");
+    assert!(it_started(&it.launched, &id), "it came back");
+
+    it.state.fleet.stop_supervising(&it.host.id).await;
+}
+
+/// Two recoveries of one session, where the second arrives while the first is
+/// still starting.
+///
+/// The worker's launch takes the tmux session named for a session id, so the
+/// second start does not make a second agent — it takes the first one's place
+/// while it is still coming up, and the workspace is left with whichever won.
+///
+/// Asserted against the claim being held rather than by racing two requests:
+/// with an instant worker there is no window to race *into*, and what has to
+/// be true is that a launch is refused for as long as one is in flight.
+#[tokio::test]
+async fn a_second_start_is_refused_while_one_is_in_flight() {
+    let it = a_machine().await;
+    it.ready.store(true, Ordering::SeqCst);
+    it.state
+        .db
+        .mark_host_online(
+            &it.host.id,
+            "test",
+            4,
+            8192,
+            &ft_core::DockerState::running("27.0.3"),
+        )
+        .await
+        .unwrap();
+    let id = an_agent_at_work(&it, "pressed twice").await;
+    it.says
+        .send(ToServer::AgentClosed {
+            session_id: id.clone(),
+            gone: ft_proto::Gone::Stranded,
+        })
+        .unwrap();
+    settles_at(&it.state, &id, ft_core::SessionStatus::Stranded).await;
+
+    let press = async || {
+        sessions::relaunch_session(
+            State(it.state.clone()),
+            Extension(it.principal.clone()),
+            Path(id.as_str().to_string()),
+            Query(serde_json::from_value(serde_json::json!({})).unwrap()),
+        )
+        .await
+    };
+
+    // One in flight, as it is for as long as the worker takes to answer.
+    let held = it
+        .state
+        .fleet
+        .claim_start(&id, crate::fleet::Recovering::Yes)
+        .await
+        .expect("nothing is starting it yet");
+
+    let refused = press().await.expect_err("while one is already starting");
+    assert!(
+        refused.message.contains("already starting"),
+        "{}",
+        refused.message
+    );
+    assert!(
+        !it_started(&it.launched, &id),
+        "and nothing reached the worker"
+    );
+
+    // And when that one is done — this is a drop; in a launch it is the end
+    // of the launch, whichever way it ended — the way back is open again.
+    drop(held);
+    let _ = press().await.expect("the next press may start it");
+    assert_eq!(
+        starts_of(&it.launched, &id),
+        1,
+        "the worker was asked exactly once"
+    );
 
     it.state.fleet.stop_supervising(&it.host.id).await;
 }
