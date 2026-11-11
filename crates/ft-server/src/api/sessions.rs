@@ -348,7 +348,7 @@ pub(super) async fn create_session(
         .map(|u| u.username.clone())
         .unwrap_or_else(|| owner.clone());
 
-    let session = create_session_as(state, owner, whose, req, None).await?;
+    let session = create_session_as(state, owner, whose, req, Launch::default()).await?;
     Ok((StatusCode::CREATED, Json(session)))
 }
 
@@ -366,6 +366,33 @@ pub(crate) struct Lineage {
     pub req: Option<String>,
 }
 
+/// What a caller knows about a launch that the request body cannot carry.
+///
+/// Two optional things rather than two more parameters, because at three of
+/// the four call sites both are absent and `None, None` says nothing about
+/// which is which.
+#[derive(Default)]
+pub(crate) struct Launch {
+    /// Which session asked for this one, when a session did.
+    pub lineage: Option<Lineage>,
+    /// The id to give the session, when the caller has already written it
+    /// down somewhere.
+    ///
+    /// **For a caller that has to be able to ask "did this start?" after a
+    /// crash.** A scheduled run is claimed in one statement and launched in
+    /// another, and `create_session_as` is not idempotent — so a control plane
+    /// replaced between the two (which is the ordinary way it ends) would
+    /// leave a claim with nothing to match it against. Minting the id in the
+    /// caller and writing it onto the claim first makes one question
+    /// answerable that was not before: does a session with this id exist?
+    /// `insert_session` is the first thing below that commits anything, so
+    /// that question separates "nothing happened" from the rest cleanly.
+    ///
+    /// It does not tell the caller whether the worker received the frame.
+    /// Nothing in the database records that, and nothing could.
+    pub id: Option<SessionId>,
+}
+
 /// Start a session as somebody — whether they asked in person, or a session
 /// of theirs did.
 ///
@@ -379,8 +406,9 @@ pub(crate) async fn create_session_as(
     owner: String,
     whose: String,
     mut req: NewSession,
-    lineage: Option<Lineage>,
+    launch: Launch,
 ) -> ApiResult<Session> {
+    let Launch { lineage, id: given } = launch;
     // Another agent in a place that already exists, which is a different job
     // from making one: the host, the repositories, the branch and the directory
     // are all decided, and everything below about choosing them does not apply.
@@ -800,7 +828,8 @@ pub(crate) async fn create_session_as(
         });
     }
 
-    let id = SessionId::new();
+    // The caller's, when it had already written one down — see [`Launch::id`].
+    let id = given.unwrap_or_else(SessionId::new);
     // What the work is called in a list. The prompt says it best when there is
     // one; otherwise the name is all there is, and it was chosen for this.
     let title = if prompt.is_empty() {
@@ -1825,10 +1854,32 @@ pub(super) async fn destroy_session(
     Path(id): Path<String>,
     Query(req): Query<Removal>,
 ) -> ApiResult<StatusCode> {
-    let id = SessionId::from_stored(id);
+    let me = principal
+        .user
+        .as_ref()
+        .ok_or_else(|| ApiError::new(ErrorCode::Unauthorized, "nobody is signed in"))?;
+    destroy_as(state, me, SessionId::from_stored(id), req).await
+}
+
+/// End an agent, or the whole workspace, as somebody.
+///
+/// The handler above is this with a principal unwrapped — the same shape
+/// [`create_session_as`] has, and for the same reason: a scheduled run ends
+/// the workspace it made, and nobody is present to be a `Principal`.
+///
+/// Takes the `User` rather than an owner id because the `workspace: true`
+/// branch asks [`super::access::may_share`], which wants the row. A caller
+/// with only an id loads it first; that is one read rather than a second
+/// authorization path.
+pub(crate) async fn destroy_as(
+    state: AppState,
+    me: &crate::accounts::User,
+    id: SessionId,
+    req: Removal,
+) -> ApiResult<StatusCode> {
     let session = state
         .db
-        .session_to_work_in(owner(&principal)?, &id)
+        .session_to_work_in(me.id.as_str(), &id)
         .await?
         .ok_or_else(|| ApiError::not_found("session"))?;
 
@@ -1858,10 +1909,6 @@ pub(super) async fn destroy_session(
     // whose own space it sits in or an administrator of the directory it was
     // handed to. That is `may_share`, the same question as moving it.
     if req.workspace {
-        let me = principal
-            .user
-            .as_ref()
-            .ok_or_else(|| ApiError::new(ErrorCode::Unauthorized, "nobody is signed in"))?;
         let place = session
             .workspace_id
             .as_ref()
@@ -1876,7 +1923,7 @@ pub(super) async fn destroy_session(
                      whoever it belongs to",
                 )
             })?;
-    } else if session.owner.as_str() != owner(&principal)? {
+    } else if session.owner.as_str() != me.id.as_str() {
         return Err(ApiError::not_found("session"));
     }
     let the_whole_place = req.workspace;
@@ -1955,7 +2002,7 @@ pub(super) async fn destroy_session(
         if let (true, Some(workspace)) = (the_whole_place, session.workspace_id.as_ref()) {
             for run in state
                 .db
-                .live_runs_beside(owner(&principal)?, workspace, &id)
+                .live_runs_beside(me.id.as_str(), workspace, &id)
                 .await?
             {
                 state.db.forget_session(&run).await?;
@@ -1984,7 +2031,7 @@ pub(super) async fn destroy_session(
     if let (true, Some(workspace)) = (the_whole_place, workspace.as_ref()) {
         for run in state
             .db
-            .live_runs_beside(owner(&principal)?, workspace, &id)
+            .live_runs_beside(me.id.as_str(), workspace, &id)
             .await?
         {
             state
@@ -2050,7 +2097,7 @@ async fn end_children(state: &AppState, lead: &SessionId) -> ApiResult<()> {
 
 /// Removing a session whose host has stopped answering.
 #[derive(Debug, Default, Deserialize, utoipa::IntoParams)]
-pub(super) struct Removal {
+pub(crate) struct Removal {
     /// Take it off the inbox without the machine being told.
     #[serde(default)]
     force: bool,

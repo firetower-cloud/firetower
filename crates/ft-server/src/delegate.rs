@@ -536,11 +536,14 @@ async fn spawn(state: &AppState, request: &AgentRequest) -> Result<String> {
         owner.clone(),
         owner,
         req,
-        Some(Lineage {
-            parent: lead.id.clone(),
-            reason,
-            req: Some(request.req.clone()),
-        }),
+        crate::api::sessions::Launch {
+            lineage: Some(Lineage {
+                parent: lead.id.clone(),
+                reason,
+                req: Some(request.req.clone()),
+            }),
+            ..Default::default()
+        },
     )
     .await
     .map_err(|e| anyhow::anyhow!("{}", e.message))?;

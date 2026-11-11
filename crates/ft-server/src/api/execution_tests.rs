@@ -1738,7 +1738,7 @@ async fn another_persons_repository_cannot_be_added_to_a_session_of_mine() {
             "hostId": host.id.as_str(),
         }))
         .unwrap(),
-        None,
+        super::sessions::Launch::default(),
     )
     .await
     .expect("my own bare session starts");
@@ -2835,7 +2835,7 @@ async fn launch_on(
         owner.to_string(),
         "admin".into(),
         serde_json::from_value(req).unwrap(),
-        None,
+        super::sessions::Launch::default(),
     )
     .await
 }
