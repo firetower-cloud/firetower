@@ -110,7 +110,16 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm tsc --noEmit
       - run: pnpm test
-      - run: cargo clippy --locked -- -D warnings
+      - run: cargo clippy --locked --all-targets -- -D warnings
+        working-directory: desktop/src-tauri
+      # The shell's own tests, on all three platforms, which is the only
+      # instrument there is for the keychain on Windows: nobody has a Windows
+      # machine to drive, so what the OS keychain's failures are *read as* has
+      # to be asserted rather than measured. `main.rs`'s tests carry the error
+      # shapes each backend really produces and check that none of them is
+      # read as "there is no credential here". Running them here is what makes
+      # that true of Windows and not only of this Mac.
+      - run: cargo test --locked
         working-directory: desktop/src-tauri
 
       - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
