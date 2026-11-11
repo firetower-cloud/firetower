@@ -507,7 +507,15 @@ export function Chat({
 
           {items.length === 0 && !working && steps.every((s) => s.state === "done") && (
             <p className="mt-10 text-read text-mute">
-              {conversation.trouble ?? "Nothing said yet. The agent is here and waiting for you."}
+              {/* "The agent is here" is the one thing that is not true of a
+                  session whose machine restarted, and this drew it under the
+                  card offering to bring the agent back. The same species of
+                  bug as the one this screen exists to fix: an interface
+                  asserting something about a session that is not so. */}
+              {conversation.trouble ??
+                (recovery
+                  ? "Nothing was said before the machine restarted."
+                  : "Nothing said yet. The agent is here and waiting for you.")}
             </p>
           )}
 
@@ -565,8 +573,11 @@ export function Chat({
           {gone ? <MachineRemoved /> : session.status === "Failed" && <Relaunch session={session} />}
           {/* Where the transcript was cut off. Not a card wrapped round the
               turn above it: those words are genuinely what the agent wrote and
-              they should read as prose. This is the join, drawn as a join. */}
-          {!gone && recovery && <Seam />}
+              they should read as prose. This is the join, drawn as a join —
+              and a join needs something on both sides of it, so a session that
+              said nothing before its machine went gets the line above instead
+              of a seam across nothing. */}
+          {!gone && recovery && items.length > 0 && <Seam />}
 
           {questions.map((q) => (
             <Questions key={q.req} sessionId={session.id} asking={q} onAnswered={() => settle(q.req)} />
@@ -646,7 +657,13 @@ export function Chat({
            `Watching` below already settled for a viewer. The dock is the most
            valuable space on the screen, and the thing that belongs in it is
            the thing that brings the agent back. */
-        <Recover session={session} team={recovery.team} itself={recovery.itself} />
+        <Recover
+          session={session}
+          team={recovery.team}
+          notYours={recovery.notYours}
+          itself={recovery.itself}
+          spoke={items.length > 0}
+        />
       ) : mayAct ? (
         <AccountSwitcher session={session} working={working}>
           <Composer
@@ -1491,15 +1508,30 @@ function Stopped({ why }: { why: string }) {
 export function recoveryFor(
   session: Session,
   team: Session[],
-): { itself: boolean; team: Session[] } | null {
+): { itself: boolean; team: Session[]; notYours: number } | null {
   const stopped = team.filter((t) => t.status === "Stranded");
-  if (session.status === "Stranded") return { itself: true, team: stopped };
+  /* What this person may actually start, and what they may not.
+   *
+   * A workspace can be shared while the agents inside it are not, and a child
+   * runs on the subscription its own owner pinned to it — so a button that
+   * counted every stranded child would promise to spend somebody else's
+   * credit. The server refuses those and says how many it left; this is the
+   * same question asked early, so the number on the button is the number that
+   * will happen. `!== false` because a control plane older than this app sends
+   * neither field, and reading their absence as "not yours" would take the
+   * recovery away from the person whose work it is. */
+  const mine = stopped.filter((t) => t.mayWrite !== false);
+  const found = {
+    team: mine,
+    notYours: stopped.length - mine.length,
+  };
+  if (session.status === "Stranded") return { itself: true, ...found };
   /* Only `HandedBack`. A lead that is `Working` is either working or waiting
      on its children, and `Working` with a team that stopped is a lead whose
      own agent is still there — it finds out the ordinary way, by being told
      what became of them. */
   if (session.status === "HandedBack" && stopped.length > 0) {
-    return { itself: false, team: stopped };
+    return { itself: false, ...found };
   }
   return null;
 }
@@ -1542,13 +1574,19 @@ export function Seam() {
 export function Recover({
   session,
   team,
+  notYours = 0,
   itself,
+  spoke = true,
 }: {
   session: Session;
-  /** Its agents that stopped with it. */
+  /** Its agents that stopped with it, and that this person may start. */
   team: Session[];
+  /** How many more stopped that are somebody else's to bring back. */
+  notYours?: number;
   /** Whether this agent is one of the stopped ones, or is waiting on them. */
   itself: boolean;
+  /** Whether there is a conversation above this to come back to. */
+  spoke?: boolean;
 }) {
   const cache = useQueryClient();
   const relaunch = useRelaunchSession();
@@ -1577,12 +1615,21 @@ export function Recover({
           </p>
         </div>
         <p className="mt-2 text-meta text-dim">
-          {itself
-            ? "Comes back having read this conversation. Won’t finish the cut-off turn."
-            : "This agent is waiting for a report that isn’t coming."}
+          {/* The promise has to be true of *this* session. A workspace whose
+              machine went before the agent said a word has no conversation to
+              come back having read, and saying it anyway is the same kind of
+              untruth as the spinner this screen replaced. */}
+          {!itself
+            ? "This agent is waiting for a report that isn’t coming."
+            : spoke
+              ? "Comes back having read this conversation. Won’t finish the cut-off turn."
+              : "Comes back to this workspace."}
         </p>
-        {itself && team.length > 0 && (
-          <p className="mt-1 text-meta text-mute">{team.length} of its team stopped too.</p>
+        {itself && team.length + notYours > 0 && (
+          <p className="mt-1 text-meta text-mute">
+            {team.length + notYours} of its team stopped too.
+            {notYours > 0 && ` ${notYours} ${notYours === 1 ? "isn’t" : "aren’t"} yours to start.`}
+          </p>
         )}
         <div className="mt-3.5 flex items-center gap-2">
           <button
