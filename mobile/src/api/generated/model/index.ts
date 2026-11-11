@@ -199,6 +199,7 @@ export * from './reached';
 export * from './reachedDirectory';
 export * from './reaches';
 export * from './readiness';
+export * from './relaunchSessionParams';
 export * from './release';
 export * from './remoteRepo';
 export * from './rename';
