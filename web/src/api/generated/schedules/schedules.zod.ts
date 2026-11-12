@@ -655,6 +655,10 @@ export const ApproveScheduleParams = zod.object({
   "id": zod.string().describe('Schedule id')
 })
 
+export const ApproveScheduleQueryParams = zod.object({
+  "revision": zod.int().optional().describe('The revision being approved')
+})
+
 export const approveScheduleResponseRunsTotalMin = 0;
 
 export const approveScheduleResponseStreakCountedMin = 0;

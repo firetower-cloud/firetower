@@ -22,6 +22,7 @@ export * from './annotationSelection';
 export * from './annotationVersion';
 export * from './answer';
 export * from './apiError';
+export * from './approveScheduleParams';
 export * from './artifact';
 export * from './artifactNaming';
 export * from './artifactRow';

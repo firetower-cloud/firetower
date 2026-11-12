@@ -185,7 +185,7 @@ function Row({ schedule }: { schedule: Schedule }) {
   const flip = async () => {
     if (schedule.active) await pauseSchedule(schedule.id);
     else if (schedule.approvedAt) await resumeSchedule(schedule.id);
-    else await approveSchedule(schedule.id);
+    else await approveSchedule(schedule.id, { revision: schedule.revision });
     await refresh();
   };
 

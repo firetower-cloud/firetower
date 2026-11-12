@@ -564,22 +564,54 @@ pub(super) async fn update_schedule(
 /// one rule about the route instead of two about the caller.
 #[utoipa::path(
     post, path = "/api/v1/schedules/{id}/approve", tag = "schedules",
-    params(("id" = String, Path, description = "Schedule id")),
-    responses((status = 200, body = Schedule), (status = 404, body = ApiError)),
+    params(
+        ("id" = String, Path, description = "Schedule id"),
+        ("revision" = Option<i32>, Query, description = "The revision being approved"),
+    ),
+    responses(
+        (status = 200, body = Schedule),
+        (status = 404, body = ApiError),
+        (status = 409, body = ApiError, description = "it changed since you read it"),
+    ),
 )]
 pub(super) async fn approve_schedule(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
     Path(id): Path<String>,
+    Query(at): Query<Reviewed>,
 ) -> ApiResult<Json<Schedule>> {
     let row = mine(&state, &principal, &id).await?;
     pin_a_spendable_account(&state, &row).await?;
-    state
+
+    // **The revision that was read, not whatever the row says now.** Open a
+    // proposal in one tab, edit it in another, approve the stale tab, and
+    // taking only the id authorized changes nobody had seen. The client sends
+    // what it drew; omitting it approves what is current, which is what a
+    // caller with no screen means.
+    let approving = at.revision.unwrap_or(row.revision);
+    if !state
         .db
-        .approve_schedule(&row.id, owner(&principal)?)
-        .await?;
+        .approve_schedule(&row.id, owner(&principal)?, approving)
+        .await?
+    {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            "This schedule changed since you opened it, so it was not turned on. Read it again \
+             and approve what it says now.",
+        ));
+    }
     turn_on(&state, &row).await?;
     reread(&state, &principal, &row.id).await
+}
+
+/// Which revision a caller is approving.
+#[derive(Debug, Default, Deserialize, ToSchema, utoipa::IntoParams)]
+#[serde(rename_all = "camelCase")]
+pub struct Reviewed {
+    /// What the screen was showing. Omitted means "whatever is current",
+    /// which is the honest answer for a caller that has not drawn anything.
+    #[serde(default)]
+    pub revision: Option<i32>,
 }
 
 /// The subscription this schedule will spend, fixed at the moment it is

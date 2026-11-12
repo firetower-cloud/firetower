@@ -2926,17 +2926,29 @@ impl Db {
     }
 
     /// Approve one, as somebody.
-    pub async fn approve_schedule(&self, id: &ScheduleId, by: &str) -> Result<()> {
-        sqlx::query(
+    /// Approve a **particular revision**, or do nothing.
+    ///
+    /// Taking only the id authorized whatever the row said at that instant,
+    /// which is not necessarily what the person approving had read: open a
+    /// proposal in one tab, edit it in another, approve the stale tab, and you
+    /// have authorized changes you never saw. So the caller says which
+    /// revision it is approving and this refuses to be the one that moved.
+    ///
+    /// `false` means somebody else changed it first, which is the same shape
+    /// every other compare-and-set here has.
+    pub async fn approve_schedule(&self, id: &ScheduleId, by: &str, revision: i32) -> Result<bool> {
+        let moved = sqlx::query(
             "UPDATE schedules
                 SET approved_by = $2, approved_at = now(), updated_at = now()
-              WHERE id = $1",
+              WHERE id = $1 AND revision = $3",
         )
         .bind(id.as_str())
         .bind(by)
+        .bind(revision)
         .execute(&self.pool)
-        .await?;
-        Ok(())
+        .await?
+        .rows_affected();
+        Ok(moved > 0)
     }
 
     pub async fn delete_schedule(&self, id: &ScheduleId) -> Result<()> {

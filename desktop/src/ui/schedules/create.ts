@@ -52,7 +52,11 @@ export async function createAndTurnOn(req: NewSchedule): Promise<Made> {
   const schedule = await createSchedule(req);
 
   try {
-    return { on: true, schedule: await approveSchedule(schedule.id) };
+    return {
+      on: true,
+      // The revision just written, which is the one the sheet described.
+      schedule: await approveSchedule(schedule.id, { revision: schedule.revision }),
+    };
   } catch (e) {
     return {
       on: false,

@@ -139,7 +139,7 @@ export default function Schedules() {
                 onFlip={async () => {
                   if (s.active) await pauseSchedule(s.id);
                   else if (s.approvedAt) await resumeSchedule(s.id);
-                  else await approveSchedule(s.id);
+                  else await approveSchedule(s.id, { revision: s.revision });
                   refresh();
                 }}
               />

@@ -179,7 +179,7 @@ export function ScheduleDetail({ schedule: given }: { schedule: Schedule }) {
               onClick={async () => {
                 if (it.active) await pauseSchedule(it.id);
                 else if (it.approvedAt) await resumeSchedule(it.id);
-                else await approveSchedule(it.id);
+                else await approveSchedule(it.id, { revision: it.revision });
                 await refresh();
               }}
             >

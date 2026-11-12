@@ -28,6 +28,7 @@ import type {
 import type {
   AllRunsParams,
   ApiError,
+  ApproveScheduleParams,
   CadenceAnswer,
   CadenceQuestion,
   NewSchedule,
@@ -777,12 +778,20 @@ export const useUpdateSchedule = <TError = ApiError,
       > => {
       return useMutation(getUpdateScheduleMutationOptions(options), queryClient);
     }
-    export const getApproveScheduleUrl = (id: string,) => {
+    export const getApproveScheduleUrl = (id: string,
+    params?: ApproveScheduleParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `/api/v1/schedules/${id}/approve`
+  return stringifiedParams.length > 0 ? `/api/v1/schedules/${id}/approve?${stringifiedParams}` : `/api/v1/schedules/${id}/approve`
 }
 
 /**
@@ -796,9 +805,10 @@ export const useUpdateSchedule = <TError = ApiError,
  * one rule about the route instead of two about the caller.
  * @summary Approve it and turn it on.
  */
-export const approveSchedule = async (id: string, options?: Parameters<typeof http>[1]): Promise<Schedule> => {
+export const approveSchedule = async (id: string,
+    params?: ApproveScheduleParams, options?: Parameters<typeof http>[1]): Promise<Schedule> => {
 
-  return http<Schedule>(getApproveScheduleUrl(id),
+  return http<Schedule>(getApproveScheduleUrl(id,params),
   {
     ...options,
     method: 'POST'
@@ -828,9 +838,9 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof approveSchedule>>, ApproveScheduleMutationVariables> = (props) => {
-          const {id} = props ?? {};
+          const {id,params} = props ?? {};
 
-          return  approveSchedule(id,requestOptions)
+          return  approveSchedule(id,params,requestOptions)
         }
 
 
@@ -843,7 +853,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type ApproveScheduleMutationResult = NonNullable<Awaited<ReturnType<typeof approveSchedule>>>
 
     export type ApproveScheduleMutationError = ApiError
-    export type ApproveScheduleMutationVariables = {id: string}
+    export type ApproveScheduleMutationVariables = {id: string;params?: ApproveScheduleParams}
 
     /**
  * @summary Approve it and turn it on.

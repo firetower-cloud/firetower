@@ -137,7 +137,7 @@ export function Detail({ id, framed }: { id: string; framed?: boolean }) {
               onPress={async () => {
                 if (it.active) await pauseSchedule(it.id);
                 else if (it.approvedAt) await resumeSchedule(it.id);
-                else await approveSchedule(it.id);
+                else await approveSchedule(it.id, { revision: it.revision });
                 refresh();
               }}
               hitSlop={8}

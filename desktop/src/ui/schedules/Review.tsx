@@ -116,7 +116,11 @@ export function Review({ schedule }: { schedule: Schedule }) {
                   boxShadow: "inset 0 0 0 1px var(--color-sage-deep)",
                 }}
                 onClick={async () => {
-                  await approveSchedule(schedule.id);
+                  // **The revision this screen drew.** Open a proposal in one
+                  // tab, edit it in another, and approving the stale one
+                  // would authorize changes nobody read. The server refuses
+                  // when it has moved.
+                  await approveSchedule(schedule.id, { revision: schedule.revision });
                   await refresh();
                 }}
               >

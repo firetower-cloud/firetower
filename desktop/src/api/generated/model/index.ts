@@ -22,6 +22,7 @@ export * from './annotationSelection.ts';
 export * from './annotationVersion.ts';
 export * from './answer.ts';
 export * from './apiError.ts';
+export * from './approveScheduleParams.ts';
 export * from './artifact.ts';
 export * from './artifactNaming.ts';
 export * from './artifactRow.ts';

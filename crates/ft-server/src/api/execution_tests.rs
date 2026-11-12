@@ -5317,6 +5317,7 @@ async fn a_new_schedule_is_off_with_no_clock_until_somebody_approves_it() {
         State(state.clone()),
         Extension(principal.clone()),
         Path(made.id.as_str().to_string()),
+        Query(Default::default()),
     )
     .await
     .expect("a person may approve");
@@ -5418,6 +5419,62 @@ async fn a_schedule_cannot_be_asked_to_bypass_permissions() {
     .unwrap();
     let row = state.db.schedule(&made.id).await.unwrap().unwrap();
     assert_eq!(row.pins["settings"]["mode"], serde_json::json!("dontAsk"));
+}
+
+/// **Approving a stale screen authorizes nothing.**
+///
+/// Taking only the id authorized whatever the row said at that instant, which
+/// is not necessarily what the person approving had read: open a proposal in
+/// one tab, edit it in another, approve the stale tab, and changes nobody saw
+/// were authorized.
+#[tokio::test]
+async fn approving_a_revision_that_has_moved_is_refused() {
+    let (state, principal, _, _, _) = fixture().await;
+    let made = create(
+        &state,
+        &principal,
+        a_schedule("Read in one tab", weekdays_at("08:30")),
+    )
+    .await
+    .unwrap();
+    let read = made.revision;
+
+    // Edited somewhere else.
+    let _ = super::schedules::update_schedule(
+        State(state.clone()),
+        Extension(principal.clone()),
+        Path(made.id.as_str().to_string()),
+        Json(a_schedule("Read in one tab", weekdays_at("23:30"))),
+    )
+    .await
+    .unwrap();
+
+    // The stale tab's approval names what it drew, and is refused.
+    let refused = super::schedules::approve_schedule(
+        State(state.clone()),
+        Extension(principal.clone()),
+        Path(made.id.as_str().to_string()),
+        Query(serde_json::from_value(serde_json::json!({ "revision": read })).unwrap()),
+    )
+    .await
+    .err()
+    .expect("that is not what this schedule says any more");
+    assert!(refused.message.contains("changed since you opened it"));
+
+    let row = state.db.schedule(&made.id).await.unwrap().unwrap();
+    assert!(!row.active, "and it stayed off");
+    assert!(row.approved_at.is_none());
+
+    // Reading it again and approving what it says now works.
+    let Json(on) = super::schedules::approve_schedule(
+        State(state.clone()),
+        Extension(principal.clone()),
+        Path(made.id.as_str().to_string()),
+        Query(serde_json::from_value(serde_json::json!({ "revision": row.revision })).unwrap()),
+    )
+    .await
+    .expect("the revision in front of them");
+    assert!(on.active);
 }
 
 /// **A pause that lands after the due list is read stops the run anyway.**
@@ -5551,6 +5608,7 @@ async fn a_profile_changed_after_approval_does_not_run() {
         State(state.clone()),
         Extension(principal.clone()),
         Path(made.id.as_str().to_string()),
+        Query(Default::default()),
     )
     .await
     .unwrap();
@@ -5657,6 +5715,7 @@ async fn a_scheduled_run_is_refused_when_the_owner_holds_no_git_authorization() 
         State(state.clone()),
         Extension(principal.clone()),
         Path(made.id.as_str().to_string()),
+        Query(Default::default()),
     )
     .await
     .unwrap();
@@ -5739,6 +5798,7 @@ async fn a_schedule_on_a_local_checkout_needs_no_git_authorization() {
         State(state.clone()),
         Extension(principal.clone()),
         Path(made.id.as_str().to_string()),
+        Query(Default::default()),
     )
     .await
     .unwrap();
@@ -5820,6 +5880,7 @@ async fn a_schedule_cannot_be_turned_on_without_a_subscription_to_spend() {
         State(state.clone()),
         Extension(principal.clone()),
         Path(id.as_str().to_string()),
+        Query(Default::default()),
     )
     .await
     .err()
@@ -5842,6 +5903,7 @@ async fn a_schedule_cannot_be_turned_on_without_a_subscription_to_spend() {
         State(state.clone()),
         Extension(principal.clone()),
         Path(id.as_str().to_string()),
+        Query(Default::default()),
     )
     .await
     .expect("now it can say what it spends");
@@ -6067,6 +6129,7 @@ async fn editing_a_schedule_takes_it_off_until_somebody_approves_again() {
         State(state.clone()),
         Extension(principal.clone()),
         Path(made.id.as_str().to_string()),
+        Query(Default::default()),
     )
     .await
     .unwrap();
@@ -6160,6 +6223,7 @@ async fn armed(
         State(state.clone()),
         Extension(principal.clone()),
         Path(made.id.as_str().to_string()),
+        Query(Default::default()),
     )
     .await
     .unwrap();
@@ -6848,6 +6912,7 @@ async fn a_schedule_left_alone_for_a_year_gets_one_history_row_rather_than_thous
         State(state.clone()),
         Extension(principal.clone()),
         Path(made.id.as_str().to_string()),
+        Query(Default::default()),
     )
     .await
     .unwrap();
@@ -6895,7 +6960,7 @@ async fn a_disabled_owner_stops_their_schedules() {
     )
     .await
     .unwrap();
-    state.db.approve_schedule(&id, &them).await.unwrap();
+    assert!(state.db.approve_schedule(&id, &them, 1).await.unwrap());
     state.db.set_schedule_active(&id, true, None).await.unwrap();
     let made = state.db.schedule(&id).await.unwrap().unwrap();
 
