@@ -1291,7 +1291,10 @@ mod tests {
             !printed.contains("xoxp-very-secret"),
             "a frame's Debug is what reaches a log: {printed}"
         );
-        assert!(printed.contains("slack"), "and it still says which: {printed}");
+        assert!(
+            printed.contains("slack"),
+            "and it still says which: {printed}"
+        );
 
         let wire = serde_json::to_string(&frame).expect("encoding");
         let back: ToWorker = serde_json::from_str(&wire).expect("decoding");

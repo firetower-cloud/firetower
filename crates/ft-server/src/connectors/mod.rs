@@ -1856,7 +1856,7 @@ mod tests {
         let canva = a_connector(&db, &ana, "admin", "canva", mcp::Shape::Scopes).await;
 
         connectors
-            .set_for_session("s_c", &ana, &[canva.clone()])
+            .set_for_session("s_c", &ana, std::slice::from_ref(&canva))
             .await
             .unwrap();
 
