@@ -723,6 +723,15 @@ function restack(live: BandedRow[], settled: BandedRow[]): BandedRow[] {
  * the list with a scrim as it opens, so the window is a press and however
  * long it stays open — under a second in the common case. Let go and the new
  * order applies at once.
+ *
+ * **It has to be the *resolved* peek, not the selected id.** A peek whose
+ * workspace ends elsewhere loses its sheet the way every conditional subview
+ * does — it is unmounted, so its `onClose` never fires and the id stays set.
+ * Held on the id, this then freezes the list for the rest of the screen's
+ * life with nothing on screen to dismiss: a family that goes blocked
+ * afterwards keeps its ember mark and sits under *Idle*, and the summary
+ * above it says *none waiting*. Held on the row, the hold ends when the row
+ * does. {@link useVanished} is the other half, and lets the selection go.
  */
 export function useSettled(rows: BandedRow[], held: boolean): BandedRow[] {
   const settled = useRef(rows);
@@ -730,6 +739,31 @@ export function useSettled(rows: BandedRow[], held: boolean): BandedRow[] {
     if (!held) settled.current = rows;
   }, [held, rows]);
   return held ? restack(rows, settled.current) : rows;
+}
+
+/**
+ * Let a selection go when the thing it named has gone.
+ *
+ * A screen holds the *id* of the row being peeked and resolves it against the
+ * list on every render, because the list is the live one and the row is not a
+ * copy of anything. So the sheet is a conditional subview, and a workspace
+ * that ends elsewhere — from the desk, from another phone, by the agent
+ * finishing — takes the sheet away by unmounting it rather than by closing
+ * it. `onClose` is a callback of a dismissal and there was no dismissal.
+ *
+ * What is left is a screen holding a selection that names nothing, which is
+ * not merely untidy: it is what {@link useSettled} was reading, and a freeze
+ * with no peek to end it does not end. Reachable by one ordinary gesture —
+ * hold a row, have that workspace end elsewhere — and it was.
+ *
+ * Both screens call this, because both have the same two states and the same
+ * sheet. `release` is a `useCallback` at each call site: this runs on every
+ * render that resolves to nothing, and it is `setPeeking(null)` either way.
+ */
+export function useVanished(selected: string | null, found: Workspace | null, release: () => void) {
+  useEffect(() => {
+    if (selected !== null && !found) release();
+  }, [selected, found, release]);
 }
 
 /**
@@ -755,8 +789,24 @@ export function useSettled(rows: BandedRow[], held: boolean): BandedRow[] {
  *
  * Handed the rows that are actually drawn, so the line and the labels cannot
  * disagree — including while {@link useSettled} is holding the order.
+ *
+ * **And handed the fleet, so a held order cannot make it lie.** The clause is
+ * an absence — *none waiting* — and the one thing a frozen list cannot be
+ * trusted about is what has happened since it froze. A family that goes
+ * blocked during a hold has no `waiting` row to be read off `rows`, because
+ * the bands in `rows` are the settled ones; the line would then print *none
+ * waiting* over a row wearing an ember mark, which is the only surface on
+ * this phone where a blocked agent is visible at all. So the absence is
+ * derived from live state and the label from the drawn rows, and the clause
+ * goes if **either** says there is something waiting.
+ *
+ * Live state is the *family's*, which is what a band is: a run that needs you
+ * is in some place's runs, and that place's family is in some drawn row's —
+ * so asking the whole fleet is exactly asking whether any row bands as
+ * waiting, without having to re-rank anything to find out.
  */
 export function fleetLine(every: Workspace[], rows: BandedRow[]): string {
-  const waiting = rows.some((row) => row.band === "waiting");
-  return waiting ? `${every.length} in all` : `${every.length} in all, none waiting`;
+  const labelled = rows.some((row) => row.band === "waiting");
+  const live = every.some((place) => place.runs.some(needsYou));
+  return labelled || live ? `${every.length} in all` : `${every.length} in all, none waiting`;
 }

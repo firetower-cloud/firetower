@@ -47,7 +47,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { getListSessionsQueryKey } from "~/api/generated/sessions/sessions";
 import { useListArtifacts } from "~/api/generated/artifacts/artifacts";
 import type { Session } from "~/api/generated/model";
-import { banded, childrenElsewhere, fleetLine, group, lead, useSettled, type Workspace } from "~/api/workspaces";
+import { banded, childrenElsewhere, fleetLine, group, lead, useSettled, useVanished, type Workspace } from "~/api/workspaces";
 import { elapsed, minutesSince, needsYou } from "~/api/view";
 import { useAgents, useRepos, useSessions } from "~/data";
 import { useServer } from "~/native/current";
@@ -174,9 +174,20 @@ export default function Home() {
      `banded`, which is handed the whole fleet because a family cannot be read
      out of a list its children have been taken out of. */
   const rows = useMemo(() => banded(places), [places]);
+  /* **Off `places`, not off `rows`.** A chip in *Agents waiting for you* can
+     be held too, and a blocked child has a chip and no row — so what is
+     peekable here is every workspace and not only the ones with rows. */
+  const peeked = places.find((p) => p.id === peeking) ?? null;
+  const close = useCallback(() => setPeeking(null), []);
+  /* A workspace that ends elsewhere takes its peek away by unmounting it, so
+     nothing dismisses it and the id stays set. Let it go, or the hold below
+     has nothing left to end it. */
+  useVanished(peeking, peeked, close);
   /* And it holds its order while a row is held, for the same reason and in
-     the same window: the peek a press becomes. */
-  const shown = useSettled(rows, peeking !== null);
+     the same window: the peek a press becomes. **`peeked`, not `peeking`** —
+     a hold on an id that no longer names anything never releases, and the
+     list stays in last week's order with nothing on screen to dismiss. */
+  const shown = useSettled(rows, peeked !== null);
 
   /* Blocked, not `needsYou`. The wider grouping also covers finished and
      broken, which belong on the list but are not the thing that is asking —
@@ -194,7 +205,6 @@ export default function Home() {
   const posters = artifacts.slice(0, cols);
 
   const noRepo = repos.length === 0;
-  const peeked = places.find((p) => p.id === peeking) ?? null;
 
   /**
    * **The session id, not the workspace id.**
@@ -602,7 +612,7 @@ export default function Home() {
           <Peek
             place={peeked}
             places={places}
-            onClose={() => setPeeking(null)}
+            onClose={close}
             onOpen={() => router.push(`/workspace/${peeked.id}`)}
             /* Where the children went: one tap from the list before, three
                after, so the peek pays it back. */
@@ -636,7 +646,7 @@ export default function Home() {
         <Peek
           place={peeked}
           places={places}
-          onClose={() => setPeeking(null)}
+          onClose={close}
           onOpen={() => router.push(`/workspace/${peeked.id}`)}
           /* Where the children went: one tap from the list before, three
              after, so the peek pays it back. */

@@ -85,7 +85,7 @@ import { BLEED, useEdges } from "~/ui/edges";
 import { router } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
 import type { Session } from "~/api/generated/model";
-import { banded, childrenElsewhere, fleetLine, group, lead, useSettled } from "~/api/workspaces";
+import { banded, childrenElsewhere, fleetLine, group, lead, useSettled, useVanished } from "~/api/workspaces";
 import { useSessions } from "~/data";
 import { useServer } from "~/native/current";
 import { getListSessionsQueryKey } from "~/api/generated/sessions/sessions";
@@ -128,16 +128,25 @@ export default function Workspaces() {
    * for it.
    */
   const rows = useMemo(() => banded(every), [every]);
+  const peeked = rows.find((row) => row.place.id === peeking)?.place ?? null;
+  const close = useCallback(() => setPeeking(null), []);
+  /* A workspace that ends elsewhere takes its peek away by unmounting it, so
+     nothing dismisses it and the id stays set. Let it go, or the hold below
+     has nothing left to end it. */
+  useVanished(peeking, peeked, close);
   /**
    * And the order holds still while a row is held, so it cannot move out from
-   * under a thumb. `peeking` is the hold: a press on a row becomes the peek,
-   * which covers the list with a scrim as it opens.
+   * under a thumb. The hold is the peek: a press on a row becomes one, which
+   * covers the list with a scrim as it opens.
+   *
+   * **`peeked`, not `peeking`** — the row, not the id that names it. A peek
+   * whose workspace ended elsewhere leaves an id behind and no sheet, and a
+   * hold on the id then never releases: see {@link useSettled}.
    *
    * The position only — every place in here is the live one, so a row that
    * goes blocked while the peek is open still turns ember where it stands.
    */
-  const shown = useSettled(rows, peeking !== null);
-  const peeked = rows.find((row) => row.place.id === peeking)?.place ?? null;
+  const shown = useSettled(rows, peeked !== null);
 
   /**
    * **The session id, not the workspace id.**
@@ -302,7 +311,7 @@ export default function Workspaces() {
         <Peek
           place={peeked}
           places={every}
-          onClose={() => setPeeking(null)}
+          onClose={close}
           onOpen={() => router.push(`/workspace/${peeked.id}`)}
           /* Where the children went. A child was one tap from this list and is
              now three — open the parent, find the panel, read the Team — so

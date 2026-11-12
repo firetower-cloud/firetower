@@ -53,6 +53,7 @@ import {
   rowLabel,
   runAt,
   useSettled,
+  useVanished,
   waitingAgents,
   type BandedRow,
   type Doing,
@@ -1094,6 +1095,149 @@ describe("the line above the list", () => {
     );
     expect(banded(places)).toHaveLength(1);
     expect(fleetLine(places, banded(places))).toBe("2 in all, none waiting");
+  });
+
+  it("never says none waiting over a fleet that is, even when the rows say otherwise", () => {
+    /* The rows a held list is drawing are the ones it settled in, so a family
+       that goes blocked during a hold has no `waiting` row to be counted —
+       and *none waiting* would then be printed over an ember mark, on the one
+       surface where a blocked agent is visible on this phone at all. */
+    const quiet = fleetOf({ id: "busy", status: "Working" }, { id: "idle", status: "Ready" });
+    const asked = fleetOf({ id: "busy", status: "Working" }, { id: "idle", status: "NeedsYou" });
+    const settled = banded(quiet);
+
+    expect(labels(settled)).toEqual(["Working 1", "Idle 1"]);
+    expect(fleetLine(asked, settled)).toBe("2 in all");
+  });
+
+  it("asks the whole fleet, so a blocked child with no row of its own still counts", () => {
+    const places = fleetOf(
+      { id: "lead", status: "Ready" },
+      { id: "kid", status: "NeedsYou", of: "lead" },
+    );
+    /* The hidden child is what the drawn rows cannot be asked about directly;
+       its lead's band is the thing that carries it, and the fleet answers the
+       same question without re-ranking anything. */
+    expect(fleetLine(places, [])).toBe("2 in all");
+  });
+});
+
+/**
+ * A hold that cannot end, which is the one way this list can go wrong and
+ * stay wrong.
+ *
+ * The screens hold the **id** of the row being peeked and resolve it against
+ * the live list every render, so the sheet is a conditional subview — and a
+ * workspace that ends elsewhere takes it away by *unmounting* it. Nothing was
+ * dismissed, so `onClose` never fires and the id stays set. Held on the id,
+ * {@link useSettled} then freezes the order for the rest of the screen's life
+ * with nothing on screen to dismiss, and only an unrelated peek opened and
+ * dismissed ever lets it go.
+ *
+ * Both lines of both screens are modelled here, because the defect is in the
+ * seam between them rather than in either one.
+ */
+describe("the hold ends when the row it was on does", () => {
+  let places: Workspace[] = [];
+  let peeking: string | null = null;
+  const release = () => {
+    peeking = null;
+  };
+
+  /** The two lines every list-bearing screen has, in the order it has them. */
+  const screen = () => {
+    const rows = banded(places);
+    const peeked = rows.find((row) => row.place.id === peeking)?.place ?? null;
+    useVanished(peeking, peeked, release);
+    return { peeked, shown: useSettled(rows, peeked !== null) };
+  };
+  type Screen = ReturnType<typeof screen>;
+
+  const draw = () => {
+    hooks.render();
+    hooks.flush();
+    return hooks.last<Screen>();
+  };
+
+  /**
+   * One fleet, in whatever state the step wants: `checklist` leads one child
+   * whose status decides the family's band, `busy` is always working, and
+   * `notes` is the row that gets held and then ends elsewhere.
+   */
+  const fleet = (child: SessionStatus, notes = true) =>
+    fleetOf(
+      { id: "checklist", status: "Ready" },
+      { id: "threat", status: child, of: "checklist" },
+      { id: "busy", status: "Working" },
+      ...(notes ? [{ id: "notes", status: "Ready" } as Spot] : []),
+    );
+
+  beforeEach(() => {
+    hooks.unmount();
+    places = fleet("Failed");
+    peeking = null;
+    hooks.mount(screen);
+  });
+
+  it("holds the order while the row it is on is still there", () => {
+    expect(ids(hooks.last<Screen>().shown)).toEqual(["w_checklist", "w_busy", "w_notes"]);
+    peeking = "w_notes";
+    draw();
+    /* The failure under `checklist` is cleared, so it belongs under *Idle*
+       now — and does not move, because a row is held. This is criterion 31
+       and it is what the release must not cost. */
+    places = fleet("Ready");
+    expect(ids(draw().shown)).toEqual(["w_checklist", "w_busy", "w_notes"]);
+    expect(peeking).toBe("w_notes");
+  });
+
+  it("lets go when that row ends elsewhere, and re-sorts at once", () => {
+    /* QA's repro, in the order they ran it: hold the only *Idle* row, have
+       that workspace end from somewhere else, then make another row
+       re-band. On glass `launch-checklist` stayed under *Waiting on you* with
+       a sage mark for the rest of the screen's life. */
+    peeking = "w_notes";
+    draw();
+    places = fleet("Failed", false);
+    const after = draw();
+
+    expect(after.peeked).toBeNull();
+    expect(peeking).toBeNull();
+
+    places = fleet("Ready", false);
+    const settled = draw();
+    expect(ids(settled.shown)).toEqual(["w_busy", "w_checklist"]);
+    expect(labels(settled.shown)).toEqual(["Working 1", "Idle 1"]);
+  });
+
+  it("files a family that goes blocked under the band it is in, not the one it was", () => {
+    /* The louder direction, which QA traced and could not photograph: an
+       **ember** row under *Idle*, with *none waiting* above it. Every lever
+       on that rig moved state the quiet way. */
+    places = fleet("Ready");
+    draw();
+    peeking = "w_notes";
+    draw();
+    places = fleet("Ready", false);
+    draw();
+
+    places = fleet("NeedsYou", false);
+    const rows = draw().shown;
+    const checklist = rows.find((row) => row.place.id === "w_checklist")!;
+    expect(BEAT_TOKEN[placeBeat(checklist.place, places)]).toBe("ember");
+    expect(checklist.band).toBe("waiting");
+    expect(labels(rows)).toEqual(["Waiting on you 1", "Working 1"]);
+    expect(fleetLine(places, rows)).toBe("3 in all");
+  });
+
+  it("releases nothing while nothing is held, and nothing that is still there", () => {
+    expect(peeking).toBeNull();
+    draw();
+    expect(peeking).toBeNull();
+
+    peeking = "w_busy";
+    expect(draw().peeked?.id).toBe("w_busy");
+    expect(peeking).toBe("w_busy");
   });
 });
 
