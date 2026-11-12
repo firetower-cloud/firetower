@@ -23,11 +23,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Icon, IconButton } from "~/components/ui";
 import { useRepos } from "~/data";
 import { useListRoles } from "~/api/generated/roles/roles";
-import {
-  createSchedule,
-  getListSchedulesQueryKey,
-  readCadence,
-} from "~/api/generated/schedules/schedules";
+import { getListSchedulesQueryKey, readCadence } from "~/api/generated/schedules/schedules";
+import { createAndTurnOn } from "./create";
 import type { Cadence, CadenceAnswer, Weekday } from "~/api/generated/model";
 import type { Example } from "./examples";
 import { fires } from "./view";
@@ -149,7 +146,10 @@ export function NewSchedule({ from, onClose }: { from: Example | null; onClose: 
   const save = async () => {
     setSaving(true);
     try {
-      await createSchedule({
+      /* **Created and turned on.** Pressing this is the approval — that is
+         what the summary pinned above the footer is for — and `createAndTurnOn`
+         carries the argument for why that is two calls rather than a flag. */
+      const made = await createAndTurnOn({
         name,
         prompt,
         repoId: repoId || undefined,
@@ -160,6 +160,16 @@ export function NewSchedule({ from, onClose }: { from: Example | null; onClose: 
         deleteCleanRuns: deleteClean,
       });
       await client.invalidateQueries({ queryKey: getListSchedulesQueryKey() });
+      if (!made.on) {
+        /* It exists and it is off. Said here rather than closing on a
+           half-done thing: the row is in the library one switch away, and
+           somebody who was told nothing would be waiting for a run that is
+           never coming. */
+        setRefused(
+          `“${made.schedule.name}” was created but is switched off — ${made.why}. Turn it on from the list when you are ready.`,
+        );
+        return;
+      }
       onClose();
     } catch (e) {
       setRefused(e instanceof Error ? e.message : "Firetower could not write that down.");

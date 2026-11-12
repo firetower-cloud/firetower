@@ -5195,12 +5195,19 @@ async fn create(
     .map(|(_, Json(s))| s)
 }
 
-/// **Criterion 43: it is inactive until a person approves it, and never runs
-/// before.**
+/// **Criterion 43: creating one is inert, whoever asked.**
 ///
 /// Asserted on the trigger as well as on the row, because "off" has to mean
 /// the clock is not armed: a trigger with a `next_fire_at` is one the sweep
 /// would act on.
+///
+/// This is the guarantee ruling 18 rests on, so it is worth being plain about
+/// what it does and does not say. A schedule a person makes through the sheet
+/// *is* on afterwards — the sheet approves it in the same gesture, because
+/// pressing Create is the approval. What this pins is that **writing one down
+/// never activates it**: the activating act is `approve_schedule` and nothing
+/// else, which is what keeps an agent's proposal inactive and this endpoint
+/// inert when it is called by hand.
 #[tokio::test]
 async fn a_new_schedule_is_off_with_no_clock_until_somebody_approves_it() {
     let (state, principal, _, _, owner) = fixture().await;
