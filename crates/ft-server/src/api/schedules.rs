@@ -390,12 +390,29 @@ async fn pins_for(
                 ),
             ));
         }
-        // Where the server can enumerate the choices, the value has to be one
-        // of them. Where it cannot — Codex lists its models and efforts over
-        // its own protocol — an empty list is "unknown to me", not "no such
-        // value", and refusing on it would refuse every Codex model.
+        // **A fence has to be one the catalogue names; a model does not.**
+        //
+        // `grants_more` answers `false` for a value it has never heard of, so
+        // a sandbox value nothing lists passed the check meant to stop
+        // exactly that — an unknown fence is one nobody here can evaluate,
+        // and the only safe reading of it is a refusal.
+        //
+        // Model and effort are deliberately not held to that. The picker
+        // offers aliases (`opus[1m]`) and an engine reports whatever they
+        // resolved to (`claude-opus-5[1m]`), which is a real value the rest
+        // of this product already accepts — see `controls::matched`. Neither
+        // can widen what an agent may do, so an unrecognised one goes to the
+        // engine rather than being refused on its behalf.
+        //
+        // And where the server cannot enumerate at all — Codex lists its
+        // models and efforts over its own protocol — an empty list means
+        // "unknown to me" rather than "no such value".
+        let fence = matches!(
+            kind,
+            ft_core::controls::ControlKind::Mode | ft_core::controls::ControlKind::Sandbox
+        );
         let known = ft_core::controls::choices_for(agent, kind);
-        if !known.is_empty() && !known.iter().any(|k| k == value) {
+        if fence && !known.is_empty() && !known.iter().any(|k| k == value) {
             return Err(ApiError::new(
                 ErrorCode::InvalidRequest,
                 format!(

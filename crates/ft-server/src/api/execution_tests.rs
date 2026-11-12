@@ -6439,6 +6439,25 @@ async fn a_schedule_cannot_be_approved_on_a_setting_that_grants_more() {
     claude.settings.mode = Some("acceptEdits".into());
     assert!(create(&state, &principal, claude).await.is_err());
 
+    // **And a fence nothing lists is refused rather than assumed safe**,
+    // which is what `grants_more` could not do: it answers `false` for a
+    // value it has never heard of.
+    let mut unknown = a_schedule("A fence nobody has heard of", weekdays_at("08:30"));
+    unknown.agent = Agent::Codex;
+    unknown.settings.sandbox = Some("no-fence-at-all".into());
+    let said = create(&state, &principal, unknown)
+        .await
+        .expect_err("an unknown fence is one nobody here can evaluate");
+    assert!(
+        said.message.contains("is not something"),
+        "{}",
+        said.message
+    );
+
+    // A model is not held to that: the picker offers aliases and an engine
+    // reports whatever they resolved to, which is a real value — see
+    // `what_a_schedule_runs_is_pinned_rather_than_resolved_at_launch`.
+
     // And the one that was already named stays named.
     let mut bypass = a_schedule("Bypass", weekdays_at("08:30"));
     bypass.settings.mode = Some("bypassPermissions".into());
