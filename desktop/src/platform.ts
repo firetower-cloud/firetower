@@ -46,8 +46,8 @@ export const key = (k: string) => (isMac ? `${mod}${k}` : `${mod}+${k}`);
  * The *other* modifier: for something local to one pane, where ⌘ is the
  * window's.
  *
- * The rail's six destinations took ⌘1–⌘6, which the workbench's inspector
- * tabs used to hold. A destination is global so it takes the global modifier;
+ * The rail's destinations took ⌘1–⌘7, which the workbench's inspector tabs
+ * used to hold the first three of. A destination is global so it takes the global modifier;
  * a panel tab is local to one workspace, so it takes this. On a Mac that is
  * ⌃, which is free. **Everywhere else Ctrl *is* the global modifier**, so the
  * local one has to be Alt or the two collide — which is the kind of thing

@@ -12,18 +12,25 @@
  * the pair that is not a category word, and it buries reachability a level
  * down. If six ever feels like too many, that is the first merge to make.
  *
- * **Schedules is appended at `⌘7`, not inserted.** Order is the keyboard's
- * order, and the numbers below are written down so they do not move:
- * inserting after Tasks renumbers four destinations and shifts four icons,
- * and that remap would be paid by everybody, every day. The grouping cost is
- * paid once, by somebody reading the rail for the first time, and it is
- * smaller than it looks — the rail reads top to bottom as what is happening,
- * then what is set up, and a schedule is the most set-up-and-leave object in
- * the product.
+ * **Schedules sits at `⌘5`, after Customize**, and Repositories and Machines
+ * moved down one to make room. The rail reads top to bottom as *what is
+ * happening* and then *what is set up*, and a schedule is the most
+ * set-up-and-leave object in the product — so it belongs with Customize
+ * rather than after the machines.
+ *
+ * This was first shipped appended at `⌘7`, on the argument that the numbers
+ * here are written down so they do not move: a remap is paid by everybody,
+ * every day, while the grouping cost is paid once by somebody reading the
+ * rail for the first time. Both halves of that are still true, and the
+ * decision went the other way once both arrangements had been seen — the
+ * insertion here renumbers two destinations rather than the four that
+ * inserting after Tasks would have. **The cost is real and it is paid once:**
+ * anybody's muscle memory for `⌘5` and `⌘6` now lands one place further
+ * down.
  *
  * It is a destination rather than a pane under Customize, which was asked for
  * twice and declined twice. What was refused was Schedules living *inside*
- * Customize, not Schedules living near it. The merge above stays available,
+ * Customize, not Schedules living beside it. The merge above stays available,
  * and taking it here would spend the escape hatch on the seventh rather than
  * the eighth.
  *
@@ -70,9 +77,9 @@ export const DESTINATIONS: Destination[] = [
   { id: "tasks", label: "Tasks", icon: ListTodo, href: "/tasks", key: "2" },
   { id: "artifacts", label: "Artifacts", icon: Shapes, href: "/artifacts", key: "3" },
   { id: "customize", label: "Customize", icon: Puzzle, href: "/configuration/skills", key: "4" },
-  { id: "repos", label: "Repositories", icon: FolderGit2, href: "/configuration/repositories", key: "5" },
-  { id: "machines", label: "Machines", icon: Server, href: "/configuration/machines", key: "6" },
-  { id: "schedules", label: "Schedules", icon: Clock, href: "/schedules", key: "7" },
+  { id: "schedules", label: "Schedules", icon: Clock, href: "/schedules", key: "5" },
+  { id: "repos", label: "Repositories", icon: FolderGit2, href: "/configuration/repositories", key: "6" },
+  { id: "machines", label: "Machines", icon: Server, href: "/configuration/machines", key: "7" },
 ];
 
 /**

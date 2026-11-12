@@ -12,20 +12,27 @@ describe("the rail's own shape", () => {
   });
 
   /**
-   * **Appended, not inserted.** The numbers are written down so they do not
-   * move, and this is what stops a later destination being slipped into the
-   * middle: ⌘3 is always Artifacts, and the six that were here keep the keys
-   * they had.
+   * **The order, written down, because it is the keyboard's.**
+   *
+   * Schedules sits after Customize: the rail reads as what is happening and
+   * then what is set up, and a schedule is closer to a thing you set up than
+   * to a machine. It shipped appended at `⌘7` first, on the argument that
+   * these numbers do not move; it was moved once both arrangements had been
+   * seen, and Repositories and Machines went down one with it.
+   *
+   * What this test is for has not changed — a destination slipped into the
+   * middle moves everybody's keys, so moving one is a deliberate act that
+   * includes editing this list.
    */
-  test("Schedules is seventh and nothing was renumbered", () => {
+  test("the rail is in the order the keyboard is", () => {
     expect(DESTINATIONS.map((d) => [d.id, d.key])).toEqual([
       ["home", "1"],
       ["tasks", "2"],
       ["artifacts", "3"],
       ["customize", "4"],
-      ["repos", "5"],
-      ["machines", "6"],
-      ["schedules", "7"],
+      ["schedules", "5"],
+      ["repos", "6"],
+      ["machines", "7"],
     ]);
   });
 
