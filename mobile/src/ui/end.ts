@@ -19,6 +19,25 @@
  * match the words, because the words are what the desk has done all along and
  * the phone was the client that quietly did less.
  *
+ * ## A 202 is a request, not a receipt
+ *
+ * The control plane answers `202` once the `Destroy` frames are **enqueued**
+ * (`api/sessions.rs:1898`) and does not wait for the worker. A connection can
+ * go after the frames are queued, or the teardown can fail at the worker —
+ * QA watched exactly that, with a child left `Stranded` and its directory
+ * still on disk — and the answer is `202` either way. There is no atomicity
+ * across the family either: children are dispatched first (`:1857`), so a
+ * later failure on the parent's own host can leave the children ended and the
+ * parent alive. That is inherited server behaviour, newly reached by the
+ * phone, and it is not this file's to fix.
+ *
+ * So this returns an {@link Ending} and not a boolean, and *completed* is not
+ * one of its answers. What the phone can honestly say is **where to look**:
+ * the control plane never marks a session as going, so the row is on the list
+ * until the host has finished and gone from it when it has. The question says
+ * so, which makes the list the status display it already was — pending is a
+ * row still there, finished is a row gone, failed is a row that stays.
+ *
  * ## The id, and why it is said explicitly
  *
  * `destroySession(place.id, { workspace: true })`. **The place's id, and
@@ -110,6 +129,46 @@ function ask(title: string, body: string): Promise<boolean> {
 }
 
 /**
+ * What came of asking — and **not** whether the teardown finished.
+ *
+ * A boolean here meant *ended*, and the control plane cannot answer that
+ * question: see the section above on what a `202` is. Three states, named for
+ * what this flow actually learns, so that nothing downstream can read an
+ * acceptance as a completion by accident.
+ */
+export type Ending =
+  /**
+   * Nothing was sent. The question was answered no or dismissed, or the flow
+   * was abandoned because its Firetower moved under it.
+   */
+  | "kept"
+  /**
+   * The control plane took the request and queued the teardown. The agents
+   * stop and the workspace goes **when the host has done it**, which it may
+   * yet fail to do — the row leaving the list is what says it did.
+   */
+  | "requested"
+  /**
+   * It would not take the request and said why, which the reader has been
+   * shown as the control plane wrote it.
+   */
+  | "refused";
+
+/**
+ * The one clause that is about *when*, and it is in both branches.
+ *
+ * Every other clause here is a consequence, and all of them were true — what
+ * nothing said was that none of it has happened yet when the control plane
+ * answers. A `202` means the frames are queued, so the only honest thing the
+ * phone knows afterwards is the observable: the row is on the list until the
+ * host has finished and gone from it when it has. Said here, before the press
+ * rather than after it, because a sentence in front of something irreversible
+ * is worth more than an acknowledgement behind it — and because it turns the
+ * list into the answer for the teardown that quietly fails.
+ */
+const WHEN = " The workspace leaves the list once the host has done it.";
+
+/**
  * What the question says, given what is in the place and what it leads.
  *
  * Exported for its own test. Every clause here is a claim about what the call
@@ -151,7 +210,7 @@ export function endWording(
       : ".");
 
   if (bare) {
-    return `${stopping} Nothing is checked out here, so every file in this workspace goes with it, and there is no branch to go back to.`;
+    return `${stopping} Nothing is checked out here, so every file in this workspace goes with it, and there is no branch to go back to.${WHEN}`;
   }
 
   /* "The workspace", not "Its workspace": after *2 agents stop* there is no
@@ -171,7 +230,7 @@ export function endWording(
       : "Nothing uncommitted is in it.";
   const floor = delegated > 0 ? "The branches stay on the machine." : "The branch stays on the machine.";
 
-  return `${stopping} ${going} ${lost} ${floor}`;
+  return `${stopping} ${going} ${lost} ${floor}${WHEN}`;
 }
 
 /**
@@ -229,7 +288,7 @@ export function useEndWorkspace() {
     };
   }, []);
 
-  return async (place: Workspace, delegated = 0): Promise<boolean> => {
+  return async (place: Workspace, delegated = 0): Promise<Ending> => {
     /* Captured once, before anything suspends: the whole destination, account
        included, and the sentence that names it. Everything after this is
        about this workspace on this Firetower and nothing else. */
@@ -242,15 +301,15 @@ export function useEndWorkspace() {
 
     const work = await sessionWork(place.id, { firetower }).catch(() => null);
     /* Nothing has been asked and nothing promised, so this one is silent. */
-    if (!onTarget()) return false;
+    if (!onTarget()) return "kept";
 
-    if (!(await ask(endTitle(place, named), endWording(place, delegated, work)))) return false;
+    if (!(await ask(endTitle(place, named), endWording(place, delegated, work)))) return "kept";
     /* The second recheck, and the one the defect lived behind: *End it* was
        pressed on a question about A, and a press is not consent to act on
        whatever is current when it lands. */
     if (!onTarget()) {
       Alert.alert("It did not end.", endAstray(place, named ?? aimed?.org ?? null));
-      return false;
+      return "kept";
     }
     /* The heaviest knock in the app, on the one press that cannot be taken
        back — and on the answer rather than on the question, which is where it
@@ -263,13 +322,15 @@ export function useEndWorkspace() {
          for, which is the one holding the list this workspace was on. It is
          invalidated whether or not anybody is still looking at it. */
       await cache.invalidateQueries({ queryKey: getListSessionsQueryKey() });
-      return true;
+      /* **Asked for, not done.** Nothing above this line waited for a worker,
+         so nothing below it may claim one finished. */
+      return "requested";
     } catch (e) {
       /* The control plane's own sentence, as it came. When the host is not
          answering that sentence is the only thing that explains why a
          workspace somebody just ended is still on the list. */
       Alert.alert("It did not end.", why(e));
-      return false;
+      return "refused";
     }
   };
 }

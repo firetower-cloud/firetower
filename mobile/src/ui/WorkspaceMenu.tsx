@@ -27,7 +27,7 @@ import {
 import { answerable } from "~/api/view";
 import type { Workspace } from "~/api/workspaces";
 import { size } from "~/design/tokens.generated";
-import { useEndWorkspace } from "~/ui/end";
+import { useEndWorkspace, type Ending } from "~/ui/end";
 import { Sheet } from "~/ui/Sheet";
 import { useTheme } from "~/design/theme";
 
@@ -48,7 +48,7 @@ export function WorkspaceMenu({
   delegated = 0,
   open,
   onClose,
-  onEnded,
+  onEnding,
 }: {
   session: Session;
   /**
@@ -76,7 +76,19 @@ export function WorkspaceMenu({
   onReread?: () => void;
   open: boolean;
   onClose: () => void;
-  onEnded: () => void;
+  /**
+   * The teardown was **asked for and accepted** — not finished.
+   *
+   * It was `onEnded`, and that was a claim the control plane never made: it
+   * answers `202` once the `Destroy` frames are queued and does not wait for
+   * the worker, which can still fail. See {@link Ending}.
+   *
+   * The screen is still left, because the list is where the three states are
+   * legible and the question now says so: the row is there until the host has
+   * done it, and gone when it has. What changed is that nothing on this path
+   * calls an acceptance an ending.
+   */
+  onEnding: () => void;
 }) {
   const { color } = useTheme();
   const cache = useQueryClient();
@@ -214,10 +226,13 @@ export function WorkspaceMenu({
               /* The one irreversible thing here, so it is asked rather than
                  done — and what it asks is now what it does. `ui/end.ts` is
                  the desk's flow and the sentence that goes with it. */
-              void end(place, delegated).then((ended) => {
-                if (!ended) return;
+              void end(place, delegated).then((ending) => {
+                /* `requested` and nothing else: a refusal has already said so
+                   in the control plane's own words, and a question answered
+                   no leaves the menu where it was. */
+                if (ending !== "requested") return;
                 onClose();
-                onEnded();
+                onEnding();
               });
             },
           } as Row,

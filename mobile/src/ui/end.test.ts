@@ -21,7 +21,7 @@ import { group, type Workspace } from "~/api/workspaces";
 import { useBackendId } from "~/client/http";
 import { Alert } from "~/test/react-native.stub";
 import * as hooks from "~/test/hooks";
-import { endAstray, endTitle, endWording, useEndWorkspace } from "~/ui/end";
+import { endAstray, endTitle, endWording, useEndWorkspace, type Ending } from "~/ui/end";
 
 /* The hooks come from `test/hooks.ts`, which this project uses in place of a
    renderer it does not have — see its own docblock. `useEndWorkspace` needs
@@ -85,7 +85,7 @@ const clean = [{ uncommitted: 0, ahead: 0, pushed: true }];
 describe("what the end question says", () => {
   it("names the place's own agents, and the floor under the question", () => {
     expect(endWording(one(), 0, clean)).toBe(
-      "The agent stops. The workspace goes from the host. Nothing uncommitted is in it. The branch stays on the machine.",
+      "The agent stops. The workspace goes from the host. Nothing uncommitted is in it. The branch stays on the machine. The workspace leaves the list once the host has done it.",
     );
   });
 
@@ -107,7 +107,7 @@ describe("what the end question says", () => {
 
   it("says the agents it started elsewhere go too, which is now true", () => {
     expect(endWording(one(), 3, clean)).toBe(
-      "The agent stops, and so do the 3 agents it started elsewhere. Their workspaces go from the host with this one. Nothing uncommitted is in it. The branches stay on the machine.",
+      "The agent stops, and so do the 3 agents it started elsewhere. Their workspaces go from the host with this one. Nothing uncommitted is in it. The branches stay on the machine. The workspace leaves the list once the host has done it.",
     );
   });
 
@@ -155,7 +155,7 @@ describe("what the end question says", () => {
     ]);
     const said = endWording(bare, 0, clean);
     expect(said).toBe(
-      "The agent stops. Nothing is checked out here, so every file in this workspace goes with it, and there is no branch to go back to.",
+      "The agent stops. Nothing is checked out here, so every file in this workspace goes with it, and there is no branch to go back to. The workspace leaves the list once the host has done it.",
     );
     expect(said).not.toContain("stays on the machine");
   });
@@ -168,6 +168,31 @@ describe("what the end question says", () => {
   });
 });
 
+/* ------------------------------------------------------------------------- *
+ * A 202 is a request
+ * ------------------------------------------------------------------------- */
+
+describe("an accepted teardown is not a finished one", () => {
+  it("says when it happens, in both branches of the question", () => {
+    /* The control plane never marks a session as going, so the row is the
+       only observable there is: still listed is pending, gone is done, still
+       listed later is a teardown that failed. The question is where that is
+       said, because it is said before the press rather than after it. */
+    const when = " The workspace leaves the list once the host has done it.";
+    expect(endWording(one(), 0, clean).endsWith(when)).toBe(true);
+
+    const bare = place([run({ id: "s_1", workspaceId: "w_1", branch: undefined, checkouts: [] })]);
+    expect(endWording(bare, 0, clean).endsWith(when)).toBe(true);
+  });
+
+  it("claims nothing about the branch or the files it did not claim before", () => {
+    /* The clause is additive: every sentence QA checked on a real fleet still
+       reads exactly as it did. */
+    expect(endWording(one(), 3, clean)).toContain(
+      "The agent stops, and so do the 3 agents it started elsewhere. Their workspaces go from the host with this one. Nothing uncommitted is in it. The branches stay on the machine.",
+    );
+  });
+});
 /* ------------------------------------------------------------------------- *
  * The target
  * ------------------------------------------------------------------------- */
@@ -197,7 +222,7 @@ describe("which workspace the question is about", () => {
  * fix the GET went to A and the DELETE went to B.
  */
 describe("a teardown goes to the Firetower it was asked about", () => {
-  let end: (place: Workspace, delegated?: number) => Promise<boolean>;
+  let end: (place: Workspace, delegated?: number) => Promise<Ending>;
 
   beforeEach(() => {
     registry = [A, B];
@@ -236,7 +261,9 @@ describe("a teardown goes to the Firetower it was asked about", () => {
     expect(Alert.up()?.title).toBe("End Quota meter rounding on Ravenholm?");
     Alert.answer("End it");
 
-    expect(await ending).toBe(true);
+    /* **`requested`, not `true`.** The control plane answers `202` once the
+       Destroy frames are queued; nothing here waited for a worker. */
+    expect(await ending).toBe("requested");
     expect(sent).toEqual([
       { url: "https://a.example/api/v1/sessions/w_1/work", method: "GET", token: "Bearer tok_srv_a" },
       { url: "https://a.example/api/v1/sessions/w_1?workspace=true", method: "DELETE", token: "Bearer tok_srv_a" },
@@ -251,7 +278,7 @@ describe("a teardown goes to the Firetower it was asked about", () => {
     useBackendId(B.serverId);
     Alert.answer("End it");
 
-    expect(await ending).toBe(false);
+    expect(await ending).toBe("kept");
     expect(sent.filter((r) => r.method === "DELETE")).toEqual([]);
     expect(Alert.up()?.title).toBe("It did not end.");
     expect(Alert.up()?.body).toContain("still on Ravenholm");
@@ -264,7 +291,7 @@ describe("a teardown goes to the Firetower it was asked about", () => {
     const ending = end(one());
     await vi.waitFor(() => expect(sent).toHaveLength(1));
     expect(Alert.asked).toEqual([]);
-    expect(await ending).toBe(false);
+    expect(await ending).toBe("kept");
     expect(sent.map((r) => r.method)).toEqual(["GET"]);
   });
 
@@ -274,7 +301,7 @@ describe("a teardown goes to the Firetower it was asked about", () => {
     hooks.unmount();
     Alert.answer("End it");
 
-    expect(await ending).toBe(false);
+    expect(await ending).toBe("kept");
     expect(sent.map((r) => r.method)).toEqual(["GET"]);
   });
 
@@ -283,7 +310,7 @@ describe("a teardown goes to the Firetower it was asked about", () => {
     await asked();
     Alert.answer("Keep it");
 
-    expect(await ending).toBe(false);
+    expect(await ending).toBe("kept");
     expect(sent.map((r) => r.method)).toEqual(["GET"]);
     expect(Alert.asked).toHaveLength(1);
   });
@@ -294,7 +321,7 @@ describe("a teardown goes to the Firetower it was asked about", () => {
     await asked();
     Alert.answer("End it");
 
-    expect(await ending).toBe(false);
+    expect(await ending).toBe("refused");
     expect(Alert.up()?.title).toBe("It did not end.");
     expect(Alert.up()?.body).toBe("That machine is not answering.");
   });
