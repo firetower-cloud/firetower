@@ -24,7 +24,7 @@ use crate::api::sessions::{create_session_as, Launch};
 use crate::api::ErrorCode;
 use crate::AppState;
 use ft_core::{RepoId, ScheduleId, ScheduleRunId, SessionId, UserId};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::{Arc, OnceLock};
 use tokio::sync::RwLock;
 
@@ -38,6 +38,35 @@ fn launching() -> &'static Arc<RwLock<HashSet<String>>> {
     HELD.get_or_init(Default::default)
 }
 
+/// How many scheduled launches may be cutting a worktree at once.
+///
+/// **This is what makes the disk floor more than a coarse guard.** The floor
+/// is read when a machine is chosen, and a worktree does not appear on that
+/// reading until the worker next reports — so twenty launches in one pass cut
+/// twenty worktrees against one reading, and forty gigabytes clears a ten
+/// gigabyte floor without the floor being consulted a second time.
+///
+/// The cap used to be applied before a launch, against the machine the
+/// schedule had pinned — which a schedule deliberately never does, so it was
+/// unreachable for every ordinary one. It is applied here instead, where it
+/// does not need to know which machine anything will land on: at most
+/// [`super::AT_ONCE_PER_HOST`] launches are in flight, each holding its
+/// permit until its workspace exists, so the floor is consulted against a
+/// reading at most about five seconds stale and the worst overshoot is three
+/// worktrees rather than twenty.
+///
+/// Across passes as well as within one, which is stronger than the scope
+/// asked for and free: a process-wide semaphore cannot be defeated by two
+/// passes each starting three.
+///
+/// It is not a reservation system and does not pretend to be one. Threat-model
+/// item 17 asks for atomic capacity reservation; this is the ninety per cent
+/// of it that costs nothing.
+fn permits() -> &'static tokio::sync::Semaphore {
+    static ROOM: OnceLock<tokio::sync::Semaphore> = OnceLock::new();
+    ROOM.get_or_init(|| tokio::sync::Semaphore::new(super::AT_ONCE_PER_HOST))
+}
+
 /// The run ids currently being launched here.
 pub async fn in_flight() -> HashSet<String> {
     launching().read().await.clone()
@@ -49,60 +78,21 @@ pub async fn in_flight() -> HashSet<String> {
 /// argued for: "starting a workspace waits on a host, and a second lead asking
 /// meanwhile should not queue behind the first". Twenty due schedules in one
 /// pass want the same treatment.
-pub fn spawn(
-    state: AppState,
-    schedule: crate::db::ScheduleRow,
-    run: ScheduleRunId,
-    on_host: Option<&mut HashMap<String, usize>>,
-    per_host: usize,
-) {
-    // The per-host cap, for a schedule that pinned a machine.
-    //
-    // **Only for a pinned one, and that is a known gap.** The floor is a
-    // coarse guard rather than an accountant: one pass may admit several
-    // launches against one disk reading. Where a machine is named the pass can
-    // bound it here, before anything is started. Where none is named the
-    // machine is chosen inside `create_session_as`, which does not tell its
-    // caller which it picked — so an unpinned pass is bounded by `AT_ONCE`
-    // alone. Bounding that properly means the launch path reporting its choice
-    // back, which is a change to its contract rather than to this file.
-    if let (Some(seen), Some(pinned)) = (on_host, pinned_host(&schedule.spec)) {
-        let count = seen.entry(pinned.clone()).or_default();
-        if *count >= per_host {
-            let state = state.clone();
-            let id = schedule.id.clone();
-            tokio::spawn(async move {
-                let _ = state
-                    .db
-                    .settle_run(
-                        &run,
-                        "skipped",
-                        None,
-                        Some("Skipped. Too many runs were starting on that machine at once."),
-                        None,
-                        None,
-                        false,
-                    )
-                    .await;
-                let _ = super::settle::after_terminal(&state, &id).await;
-            });
-            return;
-        }
-        *count += 1;
-    }
-
+pub fn spawn(state: AppState, schedule: crate::db::ScheduleRow, run: ScheduleRunId) {
     tokio::spawn(async move {
+        // **The permit is held until the workspace exists**, which is the
+        // whole of the bound: see [`permits`]. The run stays claimed while it
+        // waits, and `launching()` is what stops the reconciler adopting a
+        // launch that is merely queued — the five-minute fence only covers a
+        // claim that outlived the process that took it.
         launching().write().await.insert(run.as_str().to_string());
+        let room = permits().acquire().await;
         if let Err(e) = start(&state, &schedule, &run).await {
             tracing::warn!(run = %run, "starting a scheduled run: {e:#}");
         }
+        drop(room);
         launching().write().await.remove(run.as_str());
     });
-}
-
-/// Which machine a schedule named, if it named one.
-fn pinned_host(spec: &serde_json::Value) -> Option<String> {
-    spec.get("hostId")?.as_str().map(str::to_string)
 }
 
 /// Why a launch did not happen.
@@ -670,7 +660,7 @@ pub async fn run_now(
         .await?
         .ok_or_else(|| anyhow::anyhow!("a run is already claimed for this moment"))?;
 
-    spawn(state.clone(), schedule.clone(), claimed.clone(), None, 0);
+    spawn(state.clone(), schedule.clone(), claimed.clone());
     Ok(claimed)
 }
 

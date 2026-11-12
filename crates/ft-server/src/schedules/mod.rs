@@ -40,7 +40,6 @@ use crate::AppState;
 use chrono::{DateTime, Utc};
 use ft_core::schedule::{Cadence, PausedReason, RunSource, TriggerKind};
 use ft_core::{ScheduleId, ScheduleRunId, TriggerId};
-use std::collections::HashMap;
 use std::time::Duration;
 
 pub mod cadence;
@@ -70,18 +69,13 @@ const EVERY: Duration = Duration::from_secs(60);
 /// passes. A hundred schedules all due at 09:00 drain in five passes.
 const AT_ONCE: i64 = 20;
 
-/// The most to start on one machine in one pass.
+/// How many scheduled launches may be cutting a worktree at once.
 ///
-/// The disk floor is a coarse guard rather than an accountant: one pass may
-/// admit twenty launches against one disk reading, and the worktrees they cut
-/// do not appear on that reading for minutes. Twenty at up to 2 GB each clears
-/// a 10 GB floor without the floor ever being consulted a second time.
-///
-/// Three is the proportionate fix — the floor is then consulted at most three
-/// times per host per minute against a reading at most five seconds old, and
-/// the worst overshoot is three worktrees rather than twenty. It is not a
-/// reservation system and does not pretend to be one.
-const AT_ONCE_PER_HOST: usize = 3;
+/// Three, and the argument for it is on `launch::permits`, which is where it
+/// is applied: a pass does not know which machine anything will land on, so a
+/// cap keyed on a machine was unreachable for every schedule that names none
+/// — which is all of them, by design.
+pub(crate) const AT_ONCE_PER_HOST: usize = 3;
 
 /// How long before the first pass.
 ///
@@ -282,10 +276,6 @@ async fn due(state: &AppState, now: DateTime<Utc>, booted: DateTime<Utc>) -> any
     }
 
     let mut started = 0usize;
-    // Per host, so one pass cannot cut twenty worktrees against one disk
-    // reading. Counted here rather than inside the launch, because the launch
-    // is what chooses the machine and this has to bound the choosing.
-    let mut on_host: HashMap<String, usize> = HashMap::new();
 
     for trigger in wanted {
         let Some(schedule) = state.db.schedule(&trigger.schedule_id).await? else {
@@ -404,13 +394,11 @@ async fn due(state: &AppState, now: DateTime<Utc>, booted: DateTime<Utc>) -> any
             continue;
         };
 
-        launch::spawn(
-            state.clone(),
-            schedule,
-            claim,
-            Some(&mut on_host),
-            AT_ONCE_PER_HOST,
-        );
+        // Bounded inside the launch rather than here — a pass does not know
+        // which machine anything will land on, and that is what made the
+        // per-host cap unreachable for an ordinary schedule. See
+        // `launch::permits`.
+        launch::spawn(state.clone(), schedule, claim);
         started += 1;
     }
 
