@@ -24,16 +24,41 @@ import { AgentMark } from "~/ui/AgentMark";
 import { Blocks } from "~/ui/Blocks";
 import { useTheme } from "~/design/theme";
 
-/** Working first, then whatever wants a human, then the quiet ones. */
+/**
+ * Working first, then whatever wants a human, then the quiet ones.
+ *
+ * Numbered with a gap at 4, which is where a member this app cannot read
+ * goes — see {@link rankOf}. Local to this panel and keyed by status rather
+ * than by `Beat`, because the roster separates `Ready` from `HandedBack` and
+ * `api/workspaces`'s `RANK` folds both into `done`.
+ */
 const RANK: Record<string, number> = {
   NeedsYou: 0,
   Working: 1,
   Starting: 2,
   Failed: 3,
-  HandedBack: 4,
-  Ready: 5,
-  Ended: 6,
+  HandedBack: 5,
+  Ready: 6,
+  Ended: 7,
 };
+
+/**
+ * Where a member sorts, including one whose status this app has never heard
+ * of.
+ *
+ * It used to be `RANK[status] ?? 9`, which put an unreadable member **below
+ * `Ended`** — the quietest place on the roster, for the one state nobody can
+ * work out. That is the mistake the rest of this change exists to stop
+ * making: `api/view`'s `beatOf` names the gap and `api/workspaces`'s `RANK`
+ * files it at 2, with the two that want somebody and above the ones at rest.
+ * This is the same answer in this table's own numbering.
+ *
+ * `Object.hasOwn`, not `??`, for `unrecognised`'s reason: `RANK` is a plain
+ * object literal, so `RANK["toString"]` is a function and `??` does not fall
+ * through on it. Subtracting it gives `NaN`, and a comparator that answers
+ * `NaN` leaves the roster in no defined order at all.
+ */
+const rankOf = (status: string): number => (Object.hasOwn(RANK, status) ? RANK[status] : 4);
 
 function Legend({
   children,
@@ -216,7 +241,7 @@ export function Overview({
   const { color } = useTheme();
   const manager = lead ?? session;
   const roster = [...team].sort(
-    (a, b) => (RANK[a.status] ?? 9) - (RANK[b.status] ?? 9) || (a.name ?? "").localeCompare(b.name ?? ""),
+    (a, b) => rankOf(a.status) - rankOf(b.status) || (a.name ?? "").localeCompare(b.name ?? ""),
   );
   const hasTeam = !!lead || roster.length > 0;
   const done = plan.filter((s) => String(s.status) === "Completed").length;
