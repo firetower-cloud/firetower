@@ -47,14 +47,13 @@ import { useQueryClient } from "@tanstack/react-query";
 import { getListSessionsQueryKey } from "~/api/generated/sessions/sessions";
 import { useListArtifacts } from "~/api/generated/artifacts/artifacts";
 import type { Session } from "~/api/generated/model";
-import { banded, childrenElsewhere, fleetLine, group, lead, useSettled, useVanished, type Workspace } from "~/api/workspaces";
+import { banded, fleetLine, group, lead, useSettled, useVanished, type Workspace } from "~/api/workspaces";
 import { elapsed, minutesSince, needsYou } from "~/api/view";
 import { useAgents, useRepos, useSessions } from "~/data";
 import { useServer } from "~/native/current";
 import { ServerChip } from "~/ui/ServerChip";
 import { ArtifactCard } from "~/ui/ArtifactCard";
 import { useAnswering } from "~/api/answering";
-import { useEndWorkspace } from "~/ui/end";
 import { BandLabel } from "~/ui/BandLabel";
 import { Peek, usePeekable } from "~/ui/Peek";
 import { Servers } from "~/ui/Servers";
@@ -230,16 +229,6 @@ export default function Home() {
      which is a different question with a different answer. */
   const speakerId = peeked ? (blockedRun?.id ?? lead(peeked).id) : null;
   const answering = useAnswering(peeked, places);
-
-  /* The same teardown the workspace's own menu asks for, asked from the row —
-     and the count beside the label is the number that goes with it. `places`
-     is the whole list, children included, because only the whole list knows
-     which ones are this one's. */
-  const endWorkspace = useEndWorkspace();
-  const endPeeked = useCallback(() => {
-    if (!peeked) return;
-    void endWorkspace(peeked, childrenElsewhere(peeked, places).length);
-  }, [endWorkspace, peeked, places]);
 
   const refresh = useCallback(
     () => cache.invalidateQueries({ queryKey: getListSessionsQueryKey() }),
@@ -624,7 +613,7 @@ export default function Home() {
             asks={answering.asks}
             waiting={answering.waiting}
             onAnswer={answering.onAnswer}
-            onEnd={endPeeked}
+            onEnd={() => setPeeking(null)}
           />
         ) : null}
         {servers ? <Servers onClose={() => setServers(false)} /> : null}
@@ -658,7 +647,7 @@ export default function Home() {
           asks={answering.asks}
           waiting={answering.waiting}
           onAnswer={answering.onAnswer}
-          onEnd={endPeeked}
+          onEnd={() => setPeeking(null)}
         />
       ) : null}
       {servers ? <Servers onClose={() => setServers(false)} /> : null}

@@ -592,16 +592,13 @@ function Conversation({ place, address }: { place: Workspace; address: string })
       {session ? (
         <WorkspaceMenu
           session={session}
-          place={place}
           conversation={conversation}
           runs={place.runs.map((r) => ({ id: r.id, agent: r.agent, status: r.status }))}
           delegated={delegated}
           onReread={reread}
           open={menu}
           onClose={() => setMenu(false)}
-          /* The teardown was accepted, not finished — see `onEnding`. Back is
-             the list, which is where whether it finished is visible. */
-          onEnding={() => router.back()}
+          onEnded={() => router.back()}
         />
       ) : null}
 
