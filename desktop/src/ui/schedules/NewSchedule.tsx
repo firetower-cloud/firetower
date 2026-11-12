@@ -30,6 +30,7 @@ import {
 } from "~/api/generated/schedules/schedules";
 import type { Cadence, CadenceAnswer, Weekday } from "~/api/generated/model";
 import type { Example } from "./examples";
+import { fires } from "./view";
 
 /** The five. Custom is last, and it is the only one that takes an expression. */
 const CADENCES: { kind: Cadence["kind"]; label: string; note?: string }[] = [
@@ -397,18 +398,7 @@ export function NewSchedule({ from, onClose }: { from: Example | null; onClose: 
                 {reads?.reads ?? "…"}
                 {reads && reads.nextFires.length > 0 && (
                   <span className="s-fires">
-                    Next three runs:{" "}
-                    {reads.nextFires
-                      .map((f) =>
-                        new Date(f).toLocaleString(undefined, {
-                          weekday: "short",
-                          hour: "2-digit",
-                          minute: "2-digit",
-                          hour12: false,
-                        }),
-                      )
-                      .join(", ")}
-                    .
+                    Next three runs: {reads.nextFires.map(fires).join(", ")}.
                   </span>
                 )}
                 {here && here !== zone && (

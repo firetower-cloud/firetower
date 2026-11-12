@@ -44,7 +44,7 @@ import {
 import { destroySession, sessionWork } from "~/api/generated/sessions/sessions";
 import type { Schedule, ScheduleRun } from "~/api/generated/model";
 import { BackToSchedules, RunNowButton, saysWhen } from "./SchedulesPage";
-import { RunMark, inFlight, keptWhy, ran, runLine, stillMoving, took } from "./view";
+import { RunMark, fires, inFlight, keptWhy, ran, runLine, stillMoving, took } from "./view";
 import { pauseSays, stoppedByFiretower } from "./words";
 
 export function ScheduleDetail({ schedule: given }: { schedule: Schedule }) {
@@ -226,7 +226,7 @@ export function ScheduleDetail({ schedule: given }: { schedule: Schedule }) {
                 {trigger?.reads} <span className="mono">{trigger?.timezone}</span>
                 {it.active && (trigger?.nextFires ?? []).length > 0 ? (
                   <span className="s-fires">
-                    Next three runs: {(trigger?.nextFires ?? []).map((f) => ran(f)).join(", ")}.
+                    Next three runs: {(trigger?.nextFires ?? []).map(fires).join(", ")}.
                   </span>
                 ) : (
                   <span className="s-fires">Will not run until you turn it on.</span>

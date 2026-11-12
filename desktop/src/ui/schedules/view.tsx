@@ -191,18 +191,40 @@ export function took(run: ScheduleRun): string {
   return `${Math.floor(hours / 24)}d ${hours % 24}h`;
 }
 
-/** The next run, as the row prints it. */
-export function nextRun(trigger: Trigger | undefined): string {
-  const at = trigger?.nextFireAt;
-  if (!at) return "—";
+/**
+ * A fire time that has not happened yet.
+ *
+ * **It always says which day.** A weekday and a clock is enough for a daily
+ * or a weekly schedule and says nothing at all for a monthly one: the create
+ * sheet read "Mon 08:30, Mon 08:30, Mon 08:30" for three dates a month
+ * apart, which is three times the same non-answer. *Today* and *tomorrow*
+ * are the two days worth naming in words; everything else takes its date.
+ *
+ * One helper for both the sheet and the schedule's own page, because they
+ * were drawing the same fact two ways and only one of them was right.
+ */
+export function fires(at: string): string {
   const when = new Date(at);
   if (Number.isNaN(when.getTime())) return "—";
-  const clock = when.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false });
+  const clock = when.toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
   const today = new Date();
   if (when.toDateString() === today.toDateString()) return `today ${clock}`;
   const soon = new Date(today.getTime() + 86_400_000);
   if (when.toDateString() === soon.toDateString()) return `tomorrow ${clock}`;
-  return `${when.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" })} ${clock}`;
+  return `${when.toLocaleDateString(undefined, {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+  })} ${clock}`;
+}
+
+/** The next run, as the row prints it. */
+export function nextRun(trigger: Trigger | undefined): string {
+  return trigger?.nextFireAt ? fires(trigger.nextFireAt) : "—";
 }
 
 /**

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import type { ScheduleRun, ScheduleRunState } from "~/api/generated/model";
-import { inFlight, runLine, settled, stillMoving } from "./view";
+import { fires, inFlight, runLine, settled, stillMoving } from "./view";
 
 function run(over: Partial<ScheduleRun>): ScheduleRun {
   return {
@@ -112,5 +112,42 @@ describe("whether the page should keep looking", () => {
   test("settled is read from the state", () => {
     expect(settled(run({ state: "claimed" }))).toBe(false);
     expect(settled(run({ state: "refused" }))).toBe(true);
+  });
+});
+
+/**
+ * **A monthly schedule's three fire times are a month apart.**
+ *
+ * The create sheet printed a weekday and a clock, so three dates a month
+ * apart read "Mon 08:30, Mon 08:30, Mon 08:30" — three times the same
+ * non-answer. Every fire time says which day; only today and tomorrow are
+ * worth naming in words.
+ */
+describe("a fire time always says which day", () => {
+  const at = (iso: string) => fires(iso);
+
+  test("three dates a month apart read as three different days", () => {
+    const now = new Date();
+    const first = new Date(now.getFullYear(), now.getMonth() + 1, 7, 8, 30);
+    const second = new Date(now.getFullYear(), now.getMonth() + 2, 7, 8, 30);
+    const third = new Date(now.getFullYear(), now.getMonth() + 3, 7, 8, 30);
+
+    const said = [first, second, third].map((d) => at(d.toISOString()));
+    expect(new Set(said).size).toBe(3);
+    for (const line of said) expect(line).toMatch(/\d/);
+  });
+
+  test("today and tomorrow are named in words", () => {
+    const today = new Date();
+    today.setHours(23, 30, 0, 0);
+    expect(at(today.toISOString())).toMatch(/^today /);
+
+    const tomorrow = new Date(Date.now() + 86_400_000);
+    tomorrow.setHours(8, 30, 0, 0);
+    expect(at(tomorrow.toISOString())).toMatch(/^tomorrow /);
+  });
+
+  test("and nothing readable comes back for a time that is not one", () => {
+    expect(at("not a time")).toBe("—");
   });
 });
