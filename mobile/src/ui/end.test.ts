@@ -70,12 +70,43 @@ const connect = (...list: [Connected, string][]) => {
 
 /* Only three of these are imported by the generated client, and none of them
    is called here: the teardown's own cache is the one the hook was mounted
-   with. */
+   with.
+
+   The invalidation counts and can be held open, because it is the *second* of
+   the two awaits that come after the DELETE has gone — and a flow that is
+   cancelled after one of them and not the other is cancelled after neither. */
 vi.mock("@tanstack/react-query", () => ({
-  useQueryClient: () => ({ invalidateQueries: async () => {} }),
+  useQueryClient: () => ({
+    invalidateQueries: async () => {
+      invalidated += 1;
+      if (holdInvalidate) await holdInvalidate;
+    },
+  }),
   useQuery: () => ({}),
   useMutation: () => ({}),
 }));
+
+/**
+ * An await a test can hold open and then let go of.
+ *
+ * The post-dispatch cancellation is entirely a question of what happens
+ * *during* an await that has already sent something, so the only way to test
+ * it is to stop one in the middle and move the world while it is stopped.
+ */
+function holding() {
+  let open!: () => void;
+  const until = new Promise<void>((settle) => {
+    open = settle;
+  });
+  return { until, open };
+}
+
+/** Held while the teardown's DELETE is in flight, when a test wants it. */
+let holdDelete: Promise<void> | null = null;
+/** Held while the list invalidation is in flight, when a test wants it. */
+let holdInvalidate: Promise<void> | null = null;
+/** How many times the list was invalidated. */
+let invalidated = 0;
 
 /** Every request the transport was handed, in order. */
 const sent: { url: string; method: string; token: string | null }[] = [];
@@ -254,6 +285,9 @@ describe("a teardown goes to the Firetower it was asked about", () => {
     sent.length = 0;
     Alert.asked.length = 0;
     whenRead = null;
+    holdDelete = null;
+    holdInvalidate = null;
+    invalidated = 0;
     answers = { status: 202, body: "" };
     useBackendId(A.serverId);
 
@@ -271,6 +305,9 @@ describe("a teardown goes to the Firetower it was asked about", () => {
           headers: { "content-type": "application/json" },
         });
       }
+      /* After the record, never before it: the request has gone, which is
+         the whole premise of everything below. */
+      if (holdDelete) await holdDelete;
       return new Response(answers.body || null, { status: answers.status });
     }) as unknown as typeof fetch;
 
@@ -479,6 +516,167 @@ describe("a teardown goes to the Firetower it was asked about", () => {
     expect(await ending).toBe("kept");
     expect(Alert.asked).toEqual([]);
     expect(sent).toEqual([]);
+  });
+
+  /* ----------------------------------------------------------------------- *
+   * After the DELETE, where there is nothing left to cancel
+   * ----------------------------------------------------------------------- */
+
+  /**
+   * **The reviewer's second finding: the awaits after the send had no checks
+   * at all.**
+   *
+   * Their method, and so this one's: delay each of the two independently,
+   * change the identity and unmount while it is stopped, then release it.
+   * Both came back `requested`, which let `WorkspaceMenu`'s continuation call
+   * `onEnding()` — a global `router.back()` (`app/workspace/[id].tsx:604`) —
+   * on whatever screen had replaced the one that asked.
+   *
+   * The DELETE cannot be called back and nothing here pretends it can. So
+   * every case below asserts both halves: the request is still recorded as
+   * having gone to the server it was for, **and** the answer is `orphaned`
+   * rather than `requested` or `kept`. Relabelling a sent request as `kept`
+   * would be a fresh version of the lie this file was written to correct.
+   */
+  describe("a request that outlives the screen that asked", () => {
+    /** Ask, press *End it*, and stop with the DELETE in flight. */
+    const sendAndStop = async () => {
+      const gate = holding();
+      holdDelete = gate.until;
+      const ending = end(one());
+      await asked();
+      Alert.answer("End it");
+      await vi.waitFor(() => expect(sent.map((r) => r.method)).toEqual(["GET", "DELETE"]));
+      return { ending, release: gate.open };
+    };
+
+    /** The DELETE really went, to the Firetower it was asked about. */
+    const theDeleteWent = () =>
+      expect(sent.at(-1)).toEqual({
+        url: "https://a.example/api/v1/sessions/w_1?workspace=true",
+        method: "DELETE",
+        token: "Bearer tok_srv_a",
+      });
+
+    it("does not navigate when the screen went while the DELETE was in flight", async () => {
+      const { ending, release } = await sendAndStop();
+      hooks.unmount();
+      release();
+
+      expect(await ending).toBe("orphaned");
+      theDeleteWent();
+    });
+
+    it("does not navigate when the Firetower moved while the DELETE was in flight", async () => {
+      const { ending, release } = await sendAndStop();
+      useBackendId(B.serverId);
+      release();
+
+      expect(await ending).toBe("orphaned");
+      theDeleteWent();
+    });
+
+    it("does not navigate when the address moved while the DELETE was in flight", async () => {
+      /* The Blocker's own case, on the far side of the send. */
+      const { ending, release } = await sendAndStop();
+      remember(CLONE, "tok_srv_b");
+      release();
+
+      expect(await ending).toBe("orphaned");
+      theDeleteWent();
+    });
+
+    /**
+     * **The invalidation is the one that was missed by the fix as well as by
+     * the first version.** It is an await like any other, and a flow cancelled
+     * after one of the two and not the other is cancelled after neither.
+     */
+    it("does not navigate when the screen went while the list was being invalidated", async () => {
+      const gate = holding();
+      holdInvalidate = gate.until;
+      const ending = end(one());
+      await asked();
+      Alert.answer("End it");
+      await vi.waitFor(() => expect(invalidated).toBe(1));
+
+      hooks.unmount();
+      gate.open();
+
+      expect(await ending).toBe("orphaned");
+      theDeleteWent();
+    });
+
+    it("does not navigate when the address moved while the list was being invalidated", async () => {
+      const gate = holding();
+      holdInvalidate = gate.until;
+      const ending = end(one());
+      await asked();
+      Alert.answer("End it");
+      await vi.waitFor(() => expect(invalidated).toBe(1));
+
+      remember(CLONE, "tok_srv_b");
+      gate.open();
+
+      expect(await ending).toBe("orphaned");
+      theDeleteWent();
+    });
+
+    /**
+     * **The list is refreshed either way.** The `QueryClient` belongs to the
+     * identity the hook was mounted for, not to the screen, and the row on
+     * the list is the only thing that says whether the teardown finished. So
+     * the recheck is behind the invalidation rather than in front of it.
+     */
+    it("still invalidates the list it was mounted for, caller or no caller", async () => {
+      const { ending, release } = await sendAndStop();
+      hooks.unmount();
+      release();
+
+      expect(await ending).toBe("orphaned");
+      expect(invalidated).toBe(1);
+    });
+
+    /**
+     * A late rejection has nowhere to be shown either. *It did not end.* over
+     * a workspace the reader did not ask about is worse than silence — and
+     * `refused` is still the truth, so that is still what comes back.
+     */
+    it("shows no alert for a refusal that lands after the screen has gone", async () => {
+      answers = {
+        status: 409,
+        body: JSON.stringify({ code: "HostUnreachable", message: "That machine is not answering." }),
+      };
+      const { ending, release } = await sendAndStop();
+      hooks.unmount();
+      release();
+
+      expect(await ending).toBe("refused");
+      expect(Alert.asked.filter((a) => a.title === "It did not end.")).toEqual([]);
+    });
+
+    it("still shows a refusal to the screen that asked for it", async () => {
+      /* The half that must not be lost: a reader who is still there is still
+         told, in the control plane's own words. */
+      answers = {
+        status: 409,
+        body: JSON.stringify({ code: "HostUnreachable", message: "That machine is not answering." }),
+      };
+      const { ending, release } = await sendAndStop();
+      release();
+
+      expect(await ending).toBe("refused");
+      expect(Alert.up()?.title).toBe("It did not end.");
+      expect(Alert.up()?.body).toBe("That machine is not answering.");
+    });
+
+    it("still answers requested, and navigates, when the caller is still there", async () => {
+      /* The truthful path, unchanged: a delay is not a cancellation. */
+      const { ending, release } = await sendAndStop();
+      release();
+
+      expect(await ending).toBe("requested");
+      expect(invalidated).toBe(1);
+    });
   });
 
   it("leaves the server out of the question when the phone holds one", async () => {
