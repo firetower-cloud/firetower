@@ -24,7 +24,7 @@
  * no cap and no ceiling. With nothing deleting to make room, this number is
  * the only thing that says whether somebody's machines are filling.
  */
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ArrowUpRight, MoreHorizontal, Pencil, ShieldAlert, Square, TriangleAlert } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Icon, IconButton } from "~/components/ui";
@@ -38,31 +38,62 @@ import {
   pauseSchedule,
   resumeSchedule,
   approveSchedule,
+  useOneSchedule,
   useScheduleRuns,
 } from "~/api/generated/schedules/schedules";
 import { destroySession, sessionWork } from "~/api/generated/sessions/sessions";
 import type { Schedule, ScheduleRun } from "~/api/generated/model";
 import { BackToSchedules, RunNowButton, saysWhen } from "./SchedulesPage";
-import { RunMark, keptWhy, ran, runLine, took } from "./view";
+import { RunMark, inFlight, keptWhy, ran, runLine, stillMoving, took } from "./view";
 import { pauseSays, stoppedByFiretower } from "./words";
 
-export function ScheduleDetail({ schedule }: { schedule: Schedule }) {
+export function ScheduleDetail({ schedule: given }: { schedule: Schedule }) {
   const client = useQueryClient();
   const confirm = useConfirm();
   const menu = useMenu<Schedule>();
-  const history = useScheduleRuns(schedule.id, { limit: 20 });
-  const runs = useMemo(() => history.data ?? [], [history.data]);
 
-  const refresh = () => client.invalidateQueries({ queryKey: getListSchedulesQueryKey() });
-  const trigger = schedule.triggers[0];
-  const norepo = !schedule.repoId;
+  /**
+   * **This page follows a run while one is moving.**
+   *
+   * Starting a run answers with its id and nothing else — the launch happens
+   * off the request, on the sweep's own task — so the state that matters
+   * arrives *after* the press. Without this the screen kept whatever it had
+   * when the button was released, which for a refused run was a claimed row
+   * and no sentence, and it never corrected itself.
+   *
+   * Five seconds while something is unsettled, and nothing at all when
+   * nothing is: a launch takes seconds, and a it at rest changes a few
+   * times a day.
+   */
+  const [moving, setMoving] = useState(false);
+  const watch = moving ? 5_000 : false;
+  const history = useScheduleRuns(given.id, { limit: 20 }, { query: { refetchInterval: watch } });
+  const runs = useMemo(() => history.data ?? [], [history.data]);
+  /* The it itself, read here rather than taken from the list, so the
+     count of runs and the rows under it come from the same moment. They did
+     not, and the footnote said "the last 2 of 1 runs". */
+  const fresh = useOneSchedule(given.id, { query: { refetchInterval: watch } });
+  /* **The fresh copy, under a name of its own**, and the one handed in is
+     `given` so that nothing below can read a value from the moment the list
+     was last fetched. That is what let the count and the rows disagree. */
+  const it = fresh.data ?? given;
+
+  useEffect(() => setMoving(stillMoving(runs)), [runs]);
+
+  const refresh = () => {
+    client.invalidateQueries({ queryKey: getListSchedulesQueryKey() });
+    fresh.refetch();
+    history.refetch();
+  };
+  const trigger = it.triggers[0];
+  const norepo = !it.repoId;
   /* Nothing is deleted automatically when the switch is off, and also when
      there is no repository to tell a clean run from a dirty one. Both keep
      everything, and both show the count. */
-  const keepall = !schedule.deleteCleanRuns || norepo;
-  const live = runs.find((r) => r.state === "running" || r.state === "claimed");
+  const keepall = !it.deleteCleanRuns || norepo;
+  const live = inFlight(runs);
   const refused = runs[0]?.state === "refused" ? runs[0] : null;
-  const said = pauseSays(schedule, machineNamed(runs));
+  const said = pauseSays(it, machineNamed(runs));
 
   const items: MenuItem[] = [
     {
@@ -70,15 +101,15 @@ export function ScheduleDetail({ schedule }: { schedule: Schedule }) {
       tone: "danger",
       onPick: async () => {
         const sure = await confirm({
-          title: `Delete ${schedule.name}?`,
+          title: `Delete ${it.name}?`,
           body: live
-            ? "The schedule stops. Its run history is deleted and cannot be recovered. One run is in progress — it will finish and its workspace stays. To stop it, close this and use Stop the run."
-            : "The schedule stops. Its run history is deleted and cannot be recovered. Workspaces from past runs are not affected.",
-          action: "Delete schedule",
+            ? "The it stops. Its run history is deleted and cannot be recovered. One run is in progress — it will finish and its workspace stays. To stop it, close this and use Stop the run."
+            : "The it stops. Its run history is deleted and cannot be recovered. Workspaces from past runs are not affected.",
+          action: "Delete it",
           tone: "danger",
         });
         if (!sure) return;
-        await deleteSchedule(schedule.id);
+        await deleteSchedule(it.id);
         await refresh();
         navigate("/schedules");
       },
@@ -92,16 +123,16 @@ export function ScheduleDetail({ schedule }: { schedule: Schedule }) {
 
         <div className="s-head">
           <div>
-            <h1>{schedule.name}</h1>
+            <h1>{it.name}</h1>
             <p className="sub">
-              {saysWhen(schedule)}.
-              {schedule.active ? "" : stoppedByFiretower(schedule) ? " Stopped by Firetower." : " Paused."}
+              {saysWhen(it)}.
+              {it.active ? "" : stoppedByFiretower(it) ? " Stopped by Firetower." : " Paused."}
             </p>
           </div>
           <div className="acts">
             {/* **Stopping a run and pausing the clock are two controls**, and
                 this one is only here while a run is going. Pausing never
-                touches a run in flight — the schedule that paused itself with
+                touches a run in flight — the it that paused itself with
                 a run still going is the shape of the overrun stop, and it is
                 why these cannot be one button.
 
@@ -119,8 +150,8 @@ export function ScheduleDetail({ schedule }: { schedule: Schedule }) {
                   const sure = await confirm({
                     title: "Stop this run?",
                     body: uncommitted
-                      ? `The agent stops and its workspace stays, with ${uncommitted} uncommitted file${uncommitted === 1 ? "" : "s"} in it. The schedule is unchanged and will run again at its usual time.`
-                      : "The agent stops and its workspace stays. The schedule is unchanged and will run again at its usual time.",
+                      ? `The agent stops and its workspace stays, with ${uncommitted} uncommitted file${uncommitted === 1 ? "" : "s"} in it. The it is unchanged and will run again at its usual time.`
+                      : "The agent stops and its workspace stays. The it is unchanged and will run again at its usual time.",
                     action: "Stop the run",
                   });
                   if (!sure) return;
@@ -133,39 +164,39 @@ export function ScheduleDetail({ schedule }: { schedule: Schedule }) {
                 Stop the run
               </button>
             ) : (
-              <RunNowButton schedule={schedule} onDone={() => history.refetch()} />
+              <RunNowButton schedule={it} onDone={refresh} />
             )}
-            <button className="btn plain" onClick={() => navigate(`/schedules/${schedule.id}?edit=1`)}>
+            <button className="btn plain" onClick={() => navigate(`/schedules/${it.id}?edit=1`)}>
               <Icon of={Pencil} size={14} />
               Edit
             </button>
             <span
               className="tog"
               role="switch"
-              aria-checked={schedule.active}
+              aria-checked={it.active}
               tabIndex={0}
-              title={schedule.active ? "Pause future runs" : "Turn it on"}
+              title={it.active ? "Pause future runs" : "Turn it on"}
               onClick={async () => {
-                if (schedule.active) await pauseSchedule(schedule.id);
-                else if (schedule.approvedAt) await resumeSchedule(schedule.id);
-                else await approveSchedule(schedule.id);
+                if (it.active) await pauseSchedule(it.id);
+                else if (it.approvedAt) await resumeSchedule(it.id);
+                else await approveSchedule(it.id);
                 await refresh();
               }}
             >
               <i />
             </span>
-            <span className="text-body text-dim">{schedule.active ? "On" : "Off"}</span>
-            <IconButton of={MoreHorizontal} label="More" onClick={(e) => menu.show(e, schedule)} />
+            <span className="text-body text-dim">{it.active ? "On" : "Off"}</span>
+            <IconButton of={MoreHorizontal} label="More" onClick={(e) => menu.show(e, it)} />
           </div>
         </div>
 
         {/* **It cannot run.** In brick, leading with the fix. A different
-            thing from a schedule that stopped itself, which is amber. */}
-        {schedule.active && cannotRun(schedule, runs) && (
+            thing from a it that stopped itself, which is amber. */}
+        {it.active && cannotRun(it, runs) && (
           <div className="s-conseq" data-tone="brick">
             <Icon of={TriangleAlert} size={16} />
             <div>
-              <p>{cannotRun(schedule, runs)}</p>
+              <p>{cannotRun(it, runs)}</p>
             </div>
           </div>
         )}
@@ -186,14 +217,14 @@ export function ScheduleDetail({ schedule }: { schedule: Schedule }) {
           <div>
             <div>
               <h2 className="s-h3">Prompt</h2>
-              <div className="s-prompt">{schedule.prompt}</div>
+              <div className="s-prompt">{it.prompt}</div>
             </div>
 
             <div className="s-blk">
               <h2 className="s-h3">Schedule</h2>
               <p className="s-reads">
                 {trigger?.reads} <span className="mono">{trigger?.timezone}</span>
-                {schedule.active && (trigger?.nextFires ?? []).length > 0 ? (
+                {it.active && (trigger?.nextFires ?? []).length > 0 ? (
                   <span className="s-fires">
                     Next three runs: {(trigger?.nextFires ?? []).map((f) => ran(f)).join(", ")}.
                   </span>
@@ -206,13 +237,13 @@ export function ScheduleDetail({ schedule }: { schedule: Schedule }) {
 
             <div className="s-blk">
               <h2 className="s-h3">
-                Run history <span className="n">{schedule.runsTotal}</span>
+                Run history <span className="n">{it.runsTotal}</span>
               </h2>
-              <History runs={runs} norepo={norepo} keepall={keepall} total={schedule.runsTotal} />
+              <History runs={runs} norepo={norepo} keepall={keepall} total={it.runsTotal} />
               {refused && refused.errorCode === "NoCapacity" && (
                 <WhereTo className="mt-[22px]">
                   <b>Runs are being refused rather than started.</b> Nothing is deleted to make
-                  room. A refused run is not a failure, so this is not moving the schedule towards
+                  room. A refused run is not a failure, so this is not moving the it towards
                   pausing itself, and the next run will be attempted at its usual time.
                 </WhereTo>
               )}
@@ -223,8 +254,8 @@ export function ScheduleDetail({ schedule }: { schedule: Schedule }) {
             <Facts
               title="Environment"
               rows={[
-                ["Repository", schedule.repoSlug ?? "None"],
-                ["Base branch", schedule.base ?? "—"],
+                ["Repository", it.repoSlug ?? "None"],
+                ["Base branch", it.base ?? "—"],
                 ["Machine", "First available"],
               ]}
             />
@@ -246,12 +277,12 @@ export function ScheduleDetail({ schedule }: { schedule: Schedule }) {
                 <dt>If a run overruns</dt>
                 <dd>
                   It is never stopped. The next run is skipped, and a second overrun pauses the
-                  schedule.
+                  it.
                 </dd>
                 <dt>If a machine is low on disk</dt>
                 <dd>
                   The run is refused and nothing starts. It does not count as a failure, so this
-                  never pauses the schedule.
+                  never pauses the it.
                 </dd>
               </dl>
             </div>
@@ -268,7 +299,7 @@ export function ScheduleDetail({ schedule }: { schedule: Schedule }) {
                 <div className="s-pop" data-k="kept">
                   <div className="s-poph">
                     <b>Kept</b>
-                    <span>{schedule.workspacesKept} open</span>
+                    <span>{it.workspacesKept} open</span>
                   </div>
                   <span className="line warn">
                     <i />
@@ -280,7 +311,7 @@ export function ScheduleDetail({ schedule }: { schedule: Schedule }) {
                     here is deleted automatically.
                   </p>
                 </div>
-              ) : schedule.deleteCleanRuns ? (
+              ) : it.deleteCleanRuns ? (
                 <>
                   <div className="s-pop" data-k="gone">
                     <div className="s-poph">
@@ -298,7 +329,7 @@ export function ScheduleDetail({ schedule }: { schedule: Schedule }) {
                   <div className="s-pop" data-k="kept">
                     <div className="s-poph">
                       <b>Kept</b>
-                      <span data-loud={!!refused}>{schedule.workspacesKept} open</span>
+                      <span data-loud={!!refused}>{it.workspacesKept} open</span>
                     </div>
                     <span className="line warn">
                       <i />A run that failed
@@ -323,7 +354,7 @@ export function ScheduleDetail({ schedule }: { schedule: Schedule }) {
                 <div className="s-pop" data-k="kept">
                   <div className="s-poph">
                     <b>Kept</b>
-                    <span>{schedule.workspacesKept} open</span>
+                    <span>{it.workspacesKept} open</span>
                   </div>
                   <span className="line warn">
                     <i />
@@ -340,10 +371,10 @@ export function ScheduleDetail({ schedule }: { schedule: Schedule }) {
             <Facts
               title="Who made it"
               rows={
-                schedule.made.byAgent
+                it.made.byAgent
                   ? [
-                      ["Proposed by", schedule.made.who],
-                      ["In", schedule.made.fromWorkspaceName ?? "a conversation"],
+                      ["Proposed by", it.made.who],
+                      ["In", it.made.fromWorkspaceName ?? "a conversation"],
                     ]
                   : [["Made by", "You"]]
               }
@@ -412,7 +443,14 @@ function History({
         ))}
       </div>
       <p className="s-foot-note">
-        Showing the last {runs.length} of {total} runs.{" "}
+        {/* **It cannot say "the last 2 of 1".** It did, because the rows came
+            from one read and the total from another, taken at a different
+            moment. Both come from the same refetch now, and the sentence is
+            still written so that a total which has not caught up says the
+            plain thing rather than an impossible one. */}
+        {total > runs.length
+          ? `Showing the last ${runs.length} of ${total} runs. `
+          : `Showing ${runs.length === 1 ? "the one run" : `all ${runs.length} runs`}. `}
         {norepo
           ? "Without a repository, runs are not summarised. The outcome and the timing are still kept."
           : "Each line is the agent’s own summary, written when it hands back. A run without one shows what git can see instead."}{" "}

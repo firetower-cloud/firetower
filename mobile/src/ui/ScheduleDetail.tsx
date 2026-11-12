@@ -15,6 +15,7 @@
  * middle-dotted string: `STYLE.md` names that as one of three habits to
  * avoid and says to use real layout.
  */
+import { useEffect, useState } from "react";
 import { Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 import { router } from "expo-router";
 import { ChevronLeft, Play } from "lucide-react-native";
@@ -33,7 +34,7 @@ import { COLUMN } from "~/ui/measure";
 import { Waiting } from "~/ui/Waiting";
 import { useTheme } from "~/design/theme";
 import { size } from "~/design/tokens.generated";
-import { RunMark, runLine, says, tagOf } from "~/ui/schedules";
+import { RunMark, runLine, says, stillMoving, tagOf } from "~/ui/schedules";
 
 /**
  * One schedule, as a screen on a phone and as the right pane on a Duo in
@@ -47,8 +48,16 @@ export function Detail({ id, framed }: { id: string; framed?: boolean }) {
   const edges = useEdges({ gutter: BLEED });
   const { color } = useTheme();
   const client = useQueryClient();
-  const schedule = useOneSchedule(id);
-  const history = useScheduleRuns(id, { limit: 20 });
+  /* **The screen follows a run while one is moving.** Starting one answers
+     with its id and nothing else — the launch happens off the request — so
+     the state that matters arrives after the press. Without this the phone
+     kept a claimed row with no sentence and never corrected itself. */
+  const [moving, setMoving] = useState(false);
+  const watch = moving ? 5_000 : false;
+  const schedule = useOneSchedule(id, { query: { refetchInterval: watch } });
+  const history = useScheduleRuns(id, { limit: 20 }, { query: { refetchInterval: watch } });
+  const runs = history.data ?? [];
+  useEffect(() => setMoving(stillMoving(runs)), [runs]);
 
   const refresh = () => {
     client.invalidateQueries({ queryKey: getListSchedulesQueryKey() });
@@ -145,7 +154,7 @@ export function Detail({ id, framed }: { id: string; framed?: boolean }) {
           <Text className="px-5 pt-7 pb-1 font-medium text-dim" style={{ fontSize: size.meta }}>
             Run history
           </Text>
-          {(history.data ?? []).map((r) => (
+          {runs.map((r) => (
             <View key={r.id} className="flex-row items-start gap-3 border-b border-line-soft px-5 py-3">
               <View className="pt-1">
                 <RunMark run={r} />
@@ -172,7 +181,7 @@ export function Detail({ id, framed }: { id: string; framed?: boolean }) {
               </View>
             </View>
           ))}
-          {(history.data ?? []).length === 0 ? (
+          {runs.length === 0 ? (
             <Text className="px-5 py-3 font-sans text-mute" style={{ fontSize: size.body }}>
               {says(it) === "Waiting for you to turn it on"
                 ? "It has never run. Turn it on and the first run happens at its next time."

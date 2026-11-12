@@ -26,9 +26,42 @@ export function RunMark({ run }: { run: ScheduleRun }) {
   return <CircleSlash2 size={14} color={color.mute} strokeWidth={2} />;
 }
 
-/** The line a run shows. */
+/**
+ * The line a run shows.
+ *
+ * **The fallback is derived from the state, never a word that claims an
+ * outcome.** It used to end in `"Finished."` for any run with no sentence
+ * yet, which is every run between being claimed and being settled — so
+ * pressing *Run now* drew a finished run before anything had started, and a
+ * run the capacity gate then refused kept that line.
+ */
 export function runLine(run: ScheduleRun): string {
-  return run.detail?.trim() || run.summary?.trim() || "Finished.";
+  const said = run.detail?.trim() || run.summary?.trim();
+  if (said) return said;
+  switch (run.state) {
+    case "claimed":
+      return "Starting…";
+    case "running":
+      return "Running.";
+    case "refused":
+      return "Refused. Nothing was started.";
+    case "skipped":
+      return "Skipped. The previous run was still going.";
+    case "missed":
+      return "Missed. Firetower was not running.";
+    case "lost":
+      return "Did not start. The control plane restarted while this run was starting.";
+    case "failed":
+      return "Failed.";
+    default:
+      return "Finished.";
+  }
+}
+
+/** Whether anything about this schedule is still moving — what the screen
+ *  polls on while a run is being launched. */
+export function stillMoving(runs: ScheduleRun[]): boolean {
+  return runs.some((r) => r.state === "claimed" || r.state === "running");
 }
 
 /**

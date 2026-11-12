@@ -86,10 +86,75 @@ export function keptWhy(run: ScheduleRun, opts: { norepo?: boolean; keepall?: bo
   return "Kept: the run left work uncommitted or unpushed.";
 }
 
-/** The line a run shows. The agent's own summary wins; the server's sentence
- *  is the fallback it already wrote. */
+/**
+ * The line a run shows.
+ *
+ * The server's sentence first — it is written for a person and it is the one
+ * the history is meant to carry — then the agent's own summary.
+ *
+ * **The fallback is derived from the state, never a word that claims an
+ * outcome.** It used to end in `"Finished."` for any run with no sentence
+ * yet, which is every run between being claimed and being settled: pressing
+ * *Run now* drew a finished run before anything had started, and a run the
+ * capacity gate then refused kept that line. Telling somebody their
+ * unattended work ran when it did not is the worst thing this screen can do,
+ * so there is no longer any path to a word the run has not earned.
+ */
 export function runLine(run: ScheduleRun): string {
-  return run.detail?.trim() || run.summary?.trim() || "Finished.";
+  const said = run.detail?.trim() || run.summary?.trim();
+  if (said) return said;
+  switch (run.state) {
+    case "claimed":
+      return "Starting…";
+    case "running":
+      return "Running.";
+    case "refused":
+      return "Refused. Nothing was started.";
+    case "skipped":
+      return "Skipped. The previous run was still going.";
+    case "missed":
+      return "Missed. Firetower was not running.";
+    case "lost":
+      return "Did not start. The control plane restarted while this run was starting.";
+    case "failed":
+      return "Failed.";
+    default:
+      return "Finished.";
+  }
+}
+
+/**
+ * Whether a run has reached a state nothing follows.
+ *
+ * Read from the state rather than from `endedAt`, because a run is settled by
+ * a sweep and the two are written in one statement — but the state is what
+ * every other reader here asks about.
+ */
+export function settled(run: ScheduleRun): boolean {
+  return run.state !== "claimed" && run.state !== "running";
+}
+
+/**
+ * The run this schedule has in flight, if any — the one *Stop the run* acts
+ * on.
+ *
+ * **`running` and holding a session, not merely `claimed`.** A claimed run is
+ * still being launched: there is no agent yet and no workspace, so there is
+ * nothing to stop, and the teardown it would call has nothing to act on. The
+ * control offered itself for a run that never started.
+ */
+export function inFlight(runs: ScheduleRun[]): ScheduleRun | undefined {
+  return runs.find((r) => r.state === "running" && !!r.sessionId);
+}
+
+/**
+ * Whether anything about this schedule is still moving.
+ *
+ * What the page polls on. A claimed run counts: it is the window where the
+ * client knows least and the server is about to know more.
+ */
+export function stillMoving(runs: ScheduleRun[]): boolean {
+  return runs.some((r) => !settled(r));
 }
 
 /**
