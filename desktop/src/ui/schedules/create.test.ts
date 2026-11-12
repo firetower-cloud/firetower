@@ -18,8 +18,8 @@ vi.mock("~/api/generated/schedules/schedules", () => ({
 const { createAndTurnOn } = await import("./create");
 
 const req = { name: "Dependency audit" } as never;
-const off = { id: "sch_1", name: "Dependency audit", active: false } as never;
-const on = { id: "sch_1", name: "Dependency audit", active: true } as never;
+const off = { id: "sch_1", name: "Dependency audit", active: false, revision: 1 } as never;
+const on = { id: "sch_1", name: "Dependency audit", active: true, revision: 1 } as never;
 
 beforeEach(() => {
   calls.length = 0;
@@ -40,7 +40,10 @@ describe("creating one from the sheet", () => {
     const made = await createAndTurnOn(req);
 
     expect(calls).toEqual(["create", "approve"]);
-    expect(approveSchedule).toHaveBeenCalledWith("sch_1");
+    /* **And it names the revision it just wrote.** Approving by id alone
+       authorizes whatever the row says at that instant, which for a sheet
+       that has described a particular thing is not the same promise. */
+    expect(approveSchedule).toHaveBeenCalledWith("sch_1", { revision: 1 });
     expect(made.on).toBe(true);
     expect(made.schedule.active).toBe(true);
   });
