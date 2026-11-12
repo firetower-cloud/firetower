@@ -1174,15 +1174,28 @@ pub(crate) async fn create_session_as(
     };
     // Named versions where the caller was approved against particular ones,
     // and whatever is current otherwise.
+    //
+    // **The two halves are not best-effort in the same way, and that is the
+    // whole of it.** Seeding a set somebody picked a moment ago may fail and
+    // leave a workspace they can fix in one click. An *approved* set is a
+    // decision taken when nobody was watching, against named versions, and a
+    // launch that quietly reads fewer of them than were approved — or none —
+    // is the thing approval exists to stop. So this path fails closed, and
+    // the error reaches the caller rather than a log line.
     match &approved_versions {
         Some(versions) => {
-            if let Err(e) = state
+            state
                 .skills
                 .pin_versions(id.as_str(), &owner, versions)
                 .await
-            {
-                tracing::warn!("pinning this session's approved skill versions: {e:#}");
-            }
+                .map_err(|e| {
+                    ApiError::new(
+                        ErrorCode::ActionFailed,
+                        format!(
+                            "could not pin the skill versions this run was approved with: {e:#}"
+                        ),
+                    )
+                })?;
         }
         None => {
             if !wanted.is_empty() {
@@ -1197,18 +1210,44 @@ pub(crate) async fn create_session_as(
         }
     }
 
-    // The bundles themselves, each from the version its pin names. Best
-    // effort for the same reason the seeding is: a workspace that comes up
-    // without them is one somebody can fix, and one that refuses to start is
-    // not.
-    let skills = state
-        .skills
-        .bundles_for_session(id.as_str())
-        .await
-        .unwrap_or_else(|e| {
+    // The bundles themselves, each from the version its pin names.
+    let loaded = state.skills.bundles_for_session(id.as_str()).await;
+    let skills = match &approved_versions {
+        // **Counted against what was approved, not against what was found.**
+        // A pin that was never written, a version whose blob has gone, two
+        // skills sharing a name — each of them ends here as a bundle that is
+        // not in this list, and each of them used to be an empty folder on a
+        // worker that nothing mentioned. The count is the one check that does
+        // not depend on knowing in advance which way it could go wrong.
+        Some(versions) => {
+            let got = loaded.map_err(|e| {
+                ApiError::new(
+                    ErrorCode::ActionFailed,
+                    format!("could not read the skills this run was approved with: {e:#}"),
+                )
+            })?;
+            if got.len() != versions.len() {
+                return Err(ApiError::new(
+                    ErrorCode::ActionFailed,
+                    format!(
+                        "this run was approved to read {} skills and only {} can be delivered, \
+                         so it has not been started. Open the schedule, check what it would read \
+                         now, and approve it again.",
+                        versions.len(),
+                        got.len()
+                    ),
+                ));
+            }
+            got
+        }
+        // Best effort for the reason the seeding is: a workspace that comes
+        // up without them is one somebody can fix, and one that refuses to
+        // start is not.
+        None => loaded.unwrap_or_else(|e| {
             tracing::warn!("reading this session's skill bundles: {e:#}");
             Vec::new()
-        });
+        }),
+    };
 
     // Each repository's own variables, opened once. Every read is a line in the
     // vault's log naming the session it was for.

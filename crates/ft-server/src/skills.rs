@@ -3412,6 +3412,47 @@ impl Skills {
         Ok(())
     }
 
+    /// Which of these approved versions could **not** be handed over, and why
+    /// is the same question as "would this session read what was approved".
+    ///
+    /// **A pin that cannot be written is not an error anywhere.**
+    /// [`Skills::pin_versions`] inserts `SELECT … WHERE v.id = $2 AND
+    /// {visible}`, so a version whose skill this person can no longer reach
+    /// writes no row and answers `Ok(())`; the session then comes up with one
+    /// fewer skill, or with none, and nothing says so. A safety skill whose
+    /// visibility was taken away is exactly that case, and the run reached
+    /// `running` with an empty set.
+    ///
+    /// Asking the existence question alone was not enough either: the
+    /// `skill_versions` row is still there after the skill moves out of
+    /// reach. So this asks both at once, as one predicate, and returns the
+    /// ids that fail it — the ids rather than a bool, because the refusal has
+    /// to be able to say which.
+    pub async fn undeliverable(&self, person: &str, versions: &[String]) -> Result<Vec<String>> {
+        if versions.is_empty() {
+            return Ok(Vec::new());
+        }
+        let sql = format!(
+            "SELECT v.id FROM skill_versions v \
+               JOIN skills k ON k.id = v.skill_id \
+              WHERE v.id = ANY($1) AND {visible}",
+            visible = filed_where("k", 2, Level::Viewer),
+        );
+        let can: std::collections::HashSet<String> = sqlx::query_scalar(&sql)
+            .bind(versions)
+            .bind(person)
+            .fetch_all(&self.pool)
+            .await
+            .context("reading which approved skill versions can still be delivered")?
+            .into_iter()
+            .collect();
+        Ok(versions
+            .iter()
+            .filter(|id| !can.contains(*id))
+            .cloned()
+            .collect())
+    }
+
     pub async fn set_for_session(
         &self,
         session: &str,

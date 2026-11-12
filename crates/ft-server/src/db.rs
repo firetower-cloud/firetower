@@ -3446,22 +3446,12 @@ impl Db {
         .await?)
     }
 
-    /// Whether every pinned skill version still resolves.
-    ///
-    /// Fails closed: a version that has gone is a run that would read
-    /// something other than what was approved, and substituting the current
-    /// one is exactly the substitution pinning exists to prevent.
-    pub async fn skill_versions_resolve(&self, ids: &[String]) -> Result<bool> {
-        if ids.is_empty() {
-            return Ok(true);
-        }
-        let found: i64 =
-            sqlx::query_scalar("SELECT count(*) FROM skill_versions WHERE id = ANY($1)")
-                .bind(ids)
-                .fetch_one(&self.pool)
-                .await?;
-        Ok(found as usize == ids.len())
-    }
+    // **`skill_versions_resolve` was here, and asking it was the bug.** It
+    // answered "does every pinned version still exist", which is true of a
+    // version whose skill has moved out of the owner's reach — and that is
+    // the case where the launch delivers nothing. The question the gate asks
+    // now is `Skills::undeliverable`, which is existence *and* authorization
+    // in one predicate. Two predicates were free to disagree, and did.
 
     /// Hold the scheduler's pass against a second control plane.
     ///

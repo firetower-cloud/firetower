@@ -4476,6 +4476,10 @@ async fn a_manager_set_to_reroute_still_cannot_move_a_child_told_to_wait() {
 // ─── Reading a whole profile, and copying it ────────────────────────────────
 
 /// A skill of this owner's, live, so `skill_scope` has something real to name.
+///
+/// **With a file in it**, because `bundles_for_session` joins `skill_files`:
+/// a skill with none produces no bundle, which is indistinguishable from a
+/// skill that could not be delivered.
 async fn a_skill(state: &AppState, owner: &str, name: &str) -> String {
     let org = state.db.org().await.unwrap();
     let slug = state.access.personal_root(owner).await.unwrap();
@@ -4490,7 +4494,11 @@ async fn a_skill(state: &AppState, owner: &str, name: &str) -> String {
                 description: format!("what {name} is for"),
                 frontmatter: serde_json::json!({}),
                 body: "# Do the thing\n".into(),
-                files: vec![],
+                files: vec![crate::skills::IncomingFile {
+                    path: "SKILL.md".into(),
+                    contents: ft_proto::encode(b"# Do the thing\n"),
+                    executable: false,
+                }],
                 notes: None,
             },
             false,
@@ -6302,6 +6310,227 @@ async fn a_scheduled_launch_inherits_nothing_a_person_picked_later() {
 
     let spec = crate::schedules::launch::spec_of(&row).expect("it reads back as a launch");
     assert_eq!(spec.settings.sandbox.as_deref(), Some("workspace+network"));
+}
+
+/// **Blocker 1: an approved skill that can no longer be delivered stops the
+/// run, rather than being quietly left out of it.**
+///
+/// Three things lined up. `pin_versions` inserts `SELECT … WHERE v.id = $2
+/// AND {visible}`, so a version whose skill has moved out of the owner's
+/// reach writes no row and answers `Ok(())`. The gate asked only whether the
+/// `skill_versions` row still existed, which it does. And the launch logged
+/// both the pinning and the bundle read and carried on. A safety skill whose
+/// visibility was taken away therefore produced a run that reached `running`
+/// with **no skills at all** and reported success.
+///
+/// Asserted on the frame: the point is not only that the run failed, it is
+/// that **nothing reached the machine**. A workspace created and then found
+/// to be missing its skills is a workspace that already ran.
+#[tokio::test]
+async fn an_approved_skill_that_cannot_be_delivered_stops_the_run() {
+    let (state, principal, host, ready, owner, created) = frames_fixture().await;
+    ready.store(true, Ordering::SeqCst);
+    says_it_has(&state, &host, &[(Agent::ClaudeCode, true)]).await;
+    let skill = a_skill(&state, &owner, "safety-rails").await;
+
+    let mut new = a_schedule("Reads a safety skill", weekdays_at("08:30"));
+    new.skills = Some(vec![skill.clone()]);
+    let made = create(&state, &principal, new).await.unwrap();
+    let _ = super::schedules::approve_schedule(
+        State(state.clone()),
+        Extension(principal.clone()),
+        Path(made.id.as_str().to_string()),
+        Query(Default::default()),
+    )
+    .await
+    .expect("it activates");
+
+    let row = state.db.schedule(&made.id).await.unwrap().unwrap();
+    let approved: Vec<String> =
+        serde_json::from_value(row.pins["skillVersionIds"].clone()).unwrap();
+    assert_eq!(approved.len(), 1, "the version is pinned: {:?}", row.pins);
+
+    // **Its visibility is taken away** — filed where this person cannot
+    // reach it. The `skill_versions` row is untouched, which is why the
+    // existence check passed.
+    let (them, _) = somebody_elses_repository(&state, "ana").await;
+    sqlx::query(
+        "UPDATE skills SET path = ('u.' || (SELECT slug FROM principals WHERE id = $2) \
+                                  || '.' || $1)::ltree WHERE id = $1",
+    )
+    .bind(&skill)
+    .bind(&them)
+    .execute(state.db.pool())
+    .await
+    .unwrap();
+    assert!(
+        !state
+            .skills
+            .undeliverable(&owner, &approved)
+            .await
+            .unwrap()
+            .is_empty(),
+        "it can no longer be delivered, which is the state under test"
+    );
+
+    let claim = state
+        .db
+        .claim_run(
+            &ft_core::ScheduleRunId::new(),
+            &made.id,
+            None,
+            Utc::now(),
+            1,
+            "cron",
+            "claimed",
+            None,
+            false,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    crate::schedules::launch::start(&state, &row, &claim)
+        .await
+        .expect("a refusal is an outcome");
+
+    let run = runs_of(&state, &made.id)
+        .await
+        .into_iter()
+        .find(|r| r.state.is_terminal())
+        .expect("it was recorded");
+    assert_eq!(run.state, ScheduleRunState::Failed);
+    assert!(
+        run.detail
+            .as_deref()
+            .unwrap_or_default()
+            .contains("can no longer be read"),
+        "{:?}",
+        run.detail
+    );
+    // Nothing was handed over at all.
+    assert!(
+        created.lock().unwrap().is_empty(),
+        "a workspace was created for a run that was approved to read a skill it cannot read"
+    );
+}
+
+/// **And the ordinary case still carries its skills to the worker.**
+///
+/// The other half of failing closed: a count that has to match is a count
+/// that can be wrong in the other direction too, and a run approved with one
+/// skill has to arrive with it.
+#[tokio::test]
+async fn a_scheduled_run_is_handed_the_skills_it_was_approved_with() {
+    let (state, principal, host, ready, owner, created) = frames_fixture().await;
+    ready.store(true, Ordering::SeqCst);
+    says_it_has(&state, &host, &[(Agent::ClaudeCode, true)]).await;
+    let skill = a_skill(&state, &owner, "house-style").await;
+    // One with a credential in the vault: `the_owners_subscription` is enough
+    // to approve against and not enough to start on, because `accounts::pin`
+    // refuses an account whose credential is host-local.
+    let account = a_subscription(&state, &owner, "a_claude", Agent::ClaudeCode).await;
+
+    let mut new = a_schedule("Reads one skill", weekdays_at("08:30"));
+    new.skills = Some(vec![skill]);
+    new.account_id = Some(account);
+    let made = create(&state, &principal, new).await.unwrap();
+    let _ = super::schedules::approve_schedule(
+        State(state.clone()),
+        Extension(principal.clone()),
+        Path(made.id.as_str().to_string()),
+        Query(Default::default()),
+    )
+    .await
+    .expect("it activates");
+
+    let row = state.db.schedule(&made.id).await.unwrap().unwrap();
+    let claim = state
+        .db
+        .claim_run(
+            &ft_core::ScheduleRunId::new(),
+            &made.id,
+            None,
+            Utc::now(),
+            1,
+            "cron",
+            "claimed",
+            None,
+            false,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    crate::schedules::launch::start(&state, &row, &claim)
+        .await
+        .expect("it launches");
+
+    // Said before the frame is read, because "no frame" and "a frame with no
+    // skills" are two different failures and the detail is what tells them
+    // apart.
+    if let Some(stopped) = runs_of(&state, &made.id)
+        .await
+        .into_iter()
+        .find(|r| r.state.is_terminal())
+    {
+        panic!(
+            "it was stopped instead: {:?} {:?}",
+            stopped.state, stopped.detail
+        );
+    }
+
+    let frame = handed_to_worker(&created).await;
+    assert_eq!(frame.skills.len(), 1, "the approved skill crossed over");
+    assert_eq!(frame.skills[0].name, "house-style");
+}
+
+/// **The second fence, asked of the launch rather than of the gate.**
+///
+/// The gate refuses a schedule whose approved versions cannot be delivered,
+/// and a gate is a predicate — it can be wrong about a case nobody thought
+/// of, and two of those are already in the history here: a version whose blob
+/// has gone, and two skills that cannot both be written because a bundle's
+/// folder is its name. So the launch counts what it actually has against what
+/// it was approved to have, which does not depend on knowing in advance how
+/// it could come up short.
+///
+/// Nothing reaches the worker: the count is taken before `CreateWorkspace` is
+/// queued.
+#[tokio::test]
+async fn a_launch_approved_against_named_versions_will_not_start_with_fewer() {
+    let (state, _principal, host, ready, owner, created) = frames_fixture().await;
+    ready.store(true, Ordering::SeqCst);
+    says_it_has(&state, &host, &[(Agent::ClaudeCode, true)]).await;
+
+    let refused = super::sessions::create_session_as(
+        state.clone(),
+        owner.clone(),
+        "admin".into(),
+        serde_json::from_value(serde_json::json!({
+            "prompt": "read the safety rails",
+            "hostId": host.id.as_str(),
+            "agent": "ClaudeCode",
+        }))
+        .unwrap(),
+        super::sessions::Launch {
+            // Approved against a version that is not there — which is what a
+            // deleted skill, a revoked share and a lost blob all look like by
+            // the time this runs.
+            skill_versions: Some(vec!["skv_01gone".into()]),
+            inherit_settings: false,
+            ..Default::default()
+        },
+    )
+    .await
+    .expect_err("a run approved to read something it cannot read does not start");
+    assert!(
+        refused.message.contains("approved to read"),
+        "{}",
+        refused.message
+    );
+    assert!(
+        created.lock().unwrap().is_empty(),
+        "a workspace was created for a run that could not be given what it was approved"
+    );
 }
 
 /// **Blocker 2, as it survived the first fix: the engine checked was not the

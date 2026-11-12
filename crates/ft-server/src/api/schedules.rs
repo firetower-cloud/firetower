@@ -516,17 +516,41 @@ async fn pins_for(
     }
 
     // The skills each run reads, resolved **now** and pinned. An absent list
-    // is resolved from the repository's defaults at creation, because leaving
-    // it absent would resolve it afresh at every launch — which is the thing
-    // approval is supposed to fix.
+    // is resolved at creation, because leaving it absent would resolve it
+    // afresh at every launch — which is the thing approval is supposed to
+    // fix.
+    //
+    // **And resolved the way the launch resolves it**, which this did not do:
+    // it took the request or the repository's defaults, while
+    // `create_session_as` gives a profile's own set precedence over both — "a
+    // profile replaces that selection rather than narrowing it". So a
+    // schedule running as a scoped profile pinned one set and would have run
+    // a different one, and what was approved on screen was never what would
+    // be read. Same function, same three sources, same union.
     let repos: Vec<ft_core::RepoId> = repos_asked(req);
-    let skills: Vec<String> = match &req.skills {
-        Some(chosen) => chosen.clone(),
-        None => state
+    let skills: Vec<String> = match (profile, &req.skills) {
+        (Some(role), _) => crate::roles::skills_at_spawn(&state.skills, role, owner_id, &repos)
+            .await
+            .map_err(|e| {
+                ApiError::new(
+                    ErrorCode::ActionFailed,
+                    format!("could not read what that profile would read: {e:#}"),
+                )
+            })?,
+        (None, Some(chosen)) => chosen.clone(),
+        // **Not swallowed into an empty set.** An error reading the defaults
+        // is not the answer "there are none", and pinning "none" here is
+        // approving a run that reads nothing.
+        (None, None) => state
             .skills
             .defaults_for(owner_id, &repos)
             .await
-            .unwrap_or_default(),
+            .map_err(|e| {
+                ApiError::new(
+                    ErrorCode::ActionFailed,
+                    format!("could not read which skills this would read: {e:#}"),
+                )
+            })?,
     };
 
     // **The subscription this will spend, resolved now and required.**

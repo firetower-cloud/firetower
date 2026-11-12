@@ -508,25 +508,54 @@ async fn gate(
         }
     }
 
-    // 6 · The pins still resolve. Fail closed — never substitute a default,
-    // which is the substitution pinning exists to prevent.
+    // 6 · The pins can still be **delivered**. Fail closed — never
+    // substitute a default, which is the substitution pinning exists to
+    // prevent.
+    //
+    // **Existence was the wrong question.** This asked whether every
+    // `skill_versions` row was still there, and that row survives the skill
+    // moving out of the owner's reach: the gate passed, `pin_versions`
+    // matched nothing because its insert carries the visibility predicate,
+    // and the run came up with one fewer skill — or with none at all, which
+    // is how a safety skill disappeared from a run that then reported
+    // success. Authorization and existence are one question here, asked of
+    // one predicate.
     let versions: Vec<String> = schedule
         .pins
         .get("skillVersionIds")
         .and_then(|v| serde_json::from_value(v.clone()).ok())
         .unwrap_or_default();
-    if !state
-        .db
-        .skill_versions_resolve(&versions)
+    match state
+        .skills
+        .undeliverable(&schedule.owner_id, &versions)
         .await
-        .unwrap_or(false)
     {
-        return Err(Stopped {
-            state: "failed",
-            detail: "A skill version this schedule pinned is no longer there.".into(),
-            code: ErrorCode::InvalidRequest,
-            and_stop: None,
-        });
+        Ok(gone) if !gone.is_empty() => {
+            return Err(Stopped {
+                state: "failed",
+                detail: format!(
+                    "{} of the skills this schedule was approved with can no longer be read — \
+                     either the version is gone or it is no longer shared with you. Open the \
+                     schedule, check what it would read now, and approve it again.",
+                    gone.len()
+                ),
+                code: ErrorCode::InvalidRequest,
+                and_stop: None,
+            });
+        }
+        // **An error is a refusal too.** Not knowing whether the approved set
+        // can be delivered is not the same as knowing it can, and the whole
+        // point of this gate is that nothing silently reads less than what
+        // was approved.
+        Err(e) => {
+            return Err(Stopped {
+                state: "failed",
+                detail: format!("Firetower could not check this schedule's skills: {e:#}"),
+                code: ErrorCode::ActionFailed,
+                and_stop: None,
+            });
+        }
+        Ok(_) => {}
     }
 
     // **And the profile is still the one that was approved.**
