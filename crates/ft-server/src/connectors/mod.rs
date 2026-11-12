@@ -629,6 +629,11 @@ impl Connectors {
             resource: resource.clone(),
             scopes: scopes.clone(),
             server,
+            // One shape in v1. Where a server turns out to accept only
+            // loopback, this is the line that changes — and `client_for`
+            // records what it registered against, so a connector that has
+            // already registered keeps the shape it registered with.
+            redirect: RedirectStrategy::ServerCallback,
         };
         let client = match self.client_for(vault, id, &found, redirect_uri).await {
             Ok(client) => client,
@@ -1229,6 +1234,9 @@ impl Connectors {
             resource,
             scopes,
             server,
+            // Read off `found` where it is written, below: the shape is part of
+            // the registration rather than part of the request.
+            redirect: _,
         } = found;
         let existing = sqlx::query(
             "SELECT client_id FROM connector_clients \
@@ -1242,7 +1250,9 @@ impl Connectors {
         if let Some(row) = existing {
             // The endpoints are refreshed every time, because they move and a
             // stale `token_endpoint` fails halfway through a flow somebody has
-            // already left the app for. The `client_id` is what is kept.
+            // already left the app for. The `client_id` is what is kept — and
+            // so is `redirect_strategy`, because the client was registered
+            // against it and changing one means registering again.
             sqlx::query(
                 "UPDATE connector_clients SET authorization_endpoint = $2, token_endpoint = $3, \
                    resource = $4, scopes = $5 WHERE connector_id = $1",
@@ -1280,11 +1290,11 @@ impl Connectors {
         sqlx::query(
             "INSERT INTO connector_clients \
                (connector_id, issuer, client_id, has_secret, authorization_endpoint, \
-                token_endpoint, resource, scopes) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8) \
+                token_endpoint, resource, scopes, redirect_strategy) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) \
              ON CONFLICT (connector_id) DO UPDATE SET issuer = $2, client_id = $3, \
                has_secret = $4, authorization_endpoint = $5, token_endpoint = $6, \
-               resource = $7, scopes = $8",
+               resource = $7, scopes = $8, redirect_strategy = $9",
         )
         .bind(id)
         .bind(issuer)
@@ -1294,6 +1304,7 @@ impl Connectors {
         .bind(server.token_endpoint.as_deref().unwrap_or_default())
         .bind(resource)
         .bind(scopes.join(" "))
+        .bind(found.redirect.as_stored())
         .execute(&self.pool)
         .await?;
 
@@ -1420,6 +1431,69 @@ impl Connectors {
     }
 }
 
+/// Which shape of redirect URI an authorization server will accept.
+///
+/// **A seam, because there turn out to be two and not one.** Measured across
+/// thirteen providers: most accept any HTTPS address, so the control plane's
+/// own callback works and a self-hosted Firetower on a Tailscale name works
+/// with it. A few — Asana, Intercom and Vercel among them — refuse arbitrary
+/// HTTPS and accept **only** `http://127.0.0.1:<port>/callback`, which the
+/// specification explicitly permits and which is what `claude mcp add
+/// --callback-port` exists for.
+///
+/// Only [`ServerCallback`] is built. [`Loopback`] is here as the branch rather
+/// than as a later migration: a client is registered *against* its redirect
+/// URIs, so discovering this after the fact would mean re-registering every
+/// client, and the shape is recorded per client for that reason.
+///
+/// [`ServerCallback`]: RedirectStrategy::ServerCallback
+/// [`Loopback`]: RedirectStrategy::Loopback
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RedirectStrategy {
+    /// The control plane's own public address. The largest group accepts it.
+    ServerCallback,
+    /// `http://127.0.0.1:<port>/callback`, for a server that accepts nothing
+    /// else. **Not built**: it needs a listener on the machine running the
+    /// client, which a desktop app has and a control plane does not, so it is
+    /// a different flow rather than a different string.
+    Loopback,
+}
+
+impl RedirectStrategy {
+    pub fn as_stored(self) -> &'static str {
+        match self {
+            RedirectStrategy::ServerCallback => "server_callback",
+            RedirectStrategy::Loopback => "loopback",
+        }
+    }
+
+    pub fn from_stored(text: &str) -> RedirectStrategy {
+        match text {
+            "loopback" => RedirectStrategy::Loopback,
+            _ => RedirectStrategy::ServerCallback,
+        }
+    }
+
+    /// Where a browser is sent back to, for this shape.
+    ///
+    /// `base` is the control plane's own public address, which is the only one
+    /// an authorization server can reach and the only one a redirect URI can
+    /// be registered against. A desktop client never receives the redirect.
+    pub fn redirect_uri(self, base: &str) -> Result<String> {
+        match self {
+            RedirectStrategy::ServerCallback => Ok(format!(
+                "{}/api/v1/connectors/callback",
+                base.trim_end_matches('/')
+            )),
+            RedirectStrategy::Loopback => anyhow::bail!(
+                "this server accepts only a loopback redirect, and Firetower does not offer one \
+                 yet — it needs a listener on the machine you are sitting at rather than on the \
+                 control plane. Paste a token instead, where the server offers that."
+            ),
+        }
+    }
+}
+
 /// The name Firetower's own permission tool answers to.
 ///
 /// A connector called this would replace it in the MCP configuration, and the
@@ -1448,6 +1522,8 @@ struct Discovered {
     resource: String,
     scopes: Vec<String>,
     server: auth::AuthorizationServer,
+    /// Which shape of redirect this client is being registered against.
+    redirect: RedirectStrategy,
 }
 
 /// Where a finished browser leg landed, for the page that says so.
@@ -2180,6 +2256,35 @@ mod tests {
 
         connectors.set_for_session("s_c", &ana, &[]).await.unwrap();
         assert!(connectors.of_session("s_c").await.unwrap().is_empty());
+    }
+
+    /// The redirect seam: one shape built, one named and refused in words.
+    ///
+    /// Thirteen providers were registered against live: most accept any HTTPS
+    /// address, and a few accept only loopback. The second is a different flow
+    /// rather than a different string — it needs a listener on the machine the
+    /// person is sitting at — so what this asserts is that asking for it says
+    /// so rather than building a URL that will be rejected.
+    #[test]
+    fn there_are_two_redirect_shapes_and_one_of_them_says_it_is_not_built() {
+        assert_eq!(
+            RedirectStrategy::ServerCallback
+                .redirect_uri("https://fire.westlabs.ts.net/")
+                .unwrap(),
+            "https://fire.westlabs.ts.net/api/v1/connectors/callback",
+            "and a trailing slash does not become a double one"
+        );
+        let refused = RedirectStrategy::Loopback
+            .redirect_uri("https://fire.westlabs.ts.net")
+            .unwrap_err()
+            .to_string();
+        assert!(refused.contains("loopback"), "{refused}");
+
+        // A client is registered against its redirect URIs, so the shape is
+        // stored per client and has to survive the round trip.
+        for shape in [RedirectStrategy::ServerCallback, RedirectStrategy::Loopback] {
+            assert_eq!(RedirectStrategy::from_stored(shape.as_stored()), shape);
+        }
     }
 
     fn tool(name: &str, description: &str) -> mcp::Tool {

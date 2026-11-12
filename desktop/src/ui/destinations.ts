@@ -77,6 +77,7 @@ export const DESTINATIONS: Destination[] = [
  */
 const PANE_HOME: Record<string, DestinationId> = {
   skills: "customize",
+  connectors: "customize",
   roles: "customize",
   agents: "customize",
   repositories: "repos",

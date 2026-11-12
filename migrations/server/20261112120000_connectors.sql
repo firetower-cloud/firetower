@@ -179,6 +179,18 @@ create table connector_clients (
     resource               text not null,
     -- What was asked for, space separated, as it was asked for.
     scopes                 text not null default '',
+    -- **Which shape of redirect this registration is bound to.** A client is
+    -- registered against its redirect URIs, so changing the shape means
+    -- registering again — which is why it is recorded per client rather than
+    -- decided per sign-in.
+    --
+    -- 'server_callback' is the control plane's own public address, which is
+    -- what the largest group of authorization servers accepts. 'loopback' is
+    -- `http://127.0.0.1:<port>/callback`, which a few accept *instead* of
+    -- arbitrary HTTPS and which the specification explicitly permits. Only the
+    -- first is implemented; the column exists so the second is a branch rather
+    -- than a migration. See `connectors::RedirectStrategy`.
+    redirect_strategy      text not null default 'server_callback',
     registered_at          timestamptz not null default now()
 );
 

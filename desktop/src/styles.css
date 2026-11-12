@@ -5117,4 +5117,188 @@ html:not([data-platform="macos"]) {
     margin: 4px 9px;
     background: var(--color-line);
   }
+
+  /* ── Connectors ──────────────────────────────────────────────────
+     Six classes, and only six, because the library screen is `Skills`'
+     own vocabulary with a different noun: `.pcol`, `.sksec`, `.sk`,
+     `.plate`, `.find`, `.risk`, and the whole `.sheet2` family are
+     already here. What a connector needs that a skill does not is a
+     way to list a server's tools densely, a panel for the half of the
+     page that is about your own sign-in, and the two-step dots on a
+     sign-in sheet. Everything else was already drawn.
+
+     Desk-only, which is where `check-style` says a class the web
+     application does not have belongs — Connectors is a desktop screen
+     in this build. */
+
+  /* A server's tools, or the permissions it will ask for, as chips. Dense
+     on purpose: fourteen of these is an ordinary number and fourteen rows
+     is a page of nothing but tool names. Which ones **write** is the
+     useful half of the list, so that is what the glyph carries. */
+  .cx-tools {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 12px;
+  }
+  .cx-tool {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    max-width: 100%;
+    padding: 5px 11px 5px 9px;
+    border-radius: 99px;
+    background: var(--color-raise);
+    font-family: var(--font-mono), ui-monospace, monospace;
+    font-size: 0.8125rem;
+    color: var(--color-dim);
+  }
+  .cx-tool .g {
+    display: grid;
+    place-items: center;
+    flex: none;
+    color: var(--color-hush);
+  }
+  /* Amber, not brick. A write tool is worth reading before you approve it;
+     it is not an error, and four brick chips read as four things broken. */
+  .cx-tool[data-w="1"] {
+    color: var(--color-bone);
+  }
+  .cx-tool[data-w="1"] .g {
+    color: var(--color-amber);
+  }
+  .cx-tool .n {
+    flex: none;
+    font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+    font-size: 0.75rem;
+    color: var(--color-mute);
+  }
+
+  /* The half of a connector's page that is about *your* sign-in rather
+     than about the server. A panel because it is the one part of the page
+     with controls on it, and the rest is facts. */
+  .cx-half {
+    padding: 17px 19px 15px;
+    border-radius: 15px;
+    background: var(--color-raise);
+  }
+  .cx-half h3 {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    font-size: 1.0625rem;
+    font-weight: var(--font-weight-mid);
+    letter-spacing: -0.008em;
+    color: var(--color-bone);
+  }
+  .cx-half h3 .g {
+    display: grid;
+    place-items: center;
+    color: var(--color-dim);
+  }
+  .cx-half > p {
+    max-width: 68ch;
+    margin-top: 5px;
+    font-size: var(--text-ui);
+    line-height: 1.6;
+    color: var(--color-text);
+  }
+  .cx-half .foot {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+    margin-top: 14px;
+  }
+
+  /* The facts nobody configures, as a sheet of rows rather than a card:
+     they are long sentences, and `.facts-card` right-aligns and truncates
+     because its values are short. */
+  .cx-fsheet {
+    margin-top: 34px;
+    border-top: 1px solid var(--color-line);
+  }
+  .cx-fsheet .row {
+    display: grid;
+    grid-template-columns: 13rem 1fr;
+    gap: 18px;
+    padding: 13px 0;
+    border-bottom: 1px solid var(--color-line-soft);
+  }
+  .cx-fsheet dt {
+    font-size: var(--text-ui);
+    color: var(--color-dim);
+  }
+  .cx-fsheet dd {
+    min-width: 0;
+    font-size: var(--text-ui);
+    line-height: 1.6;
+    color: var(--color-text);
+  }
+
+  /* What a server will not say until you sign in. A block rather than an
+     empty list, because an empty list reads as a failure to load and this
+     is the server declining — which is a fact worth stating. */
+  .dt-unknown {
+    margin-top: 12px;
+    padding: 16px 18px;
+    border-radius: 14px;
+    background: var(--color-raise);
+  }
+  .dt-unknown b {
+    font-size: var(--text-lede);
+    font-weight: var(--font-weight-mid);
+    color: var(--color-bone);
+  }
+  .dt-unknown p {
+    max-width: 72ch;
+    margin-top: 6px;
+    font-size: var(--text-ui);
+    line-height: 1.6;
+    color: var(--color-text);
+  }
+  .dt-unknown p.quiet {
+    color: var(--color-mute);
+  }
+
+  /* A refusal, or a warning, inside a sheet. Brick by default and amber
+     where the thing is worth reading rather than wrong — a trust warning
+     is not an error, and drawing it as one teaches people to dismiss it. */
+  .sh-bad {
+    margin: 10px 6px 4px;
+    padding: 11px 14px;
+    border-left: 2px solid var(--color-brick);
+    border-radius: 4px 12px 12px 4px;
+    background: var(--color-brick-tint);
+    font-size: 0.875rem;
+    line-height: 1.55;
+    color: var(--color-text);
+  }
+  .sh-bad[data-tone="amber"] {
+    border-left-color: var(--color-amber);
+    background: var(--color-amber-tint);
+  }
+  .sh-bad b {
+    display: block;
+    margin-bottom: 2px;
+    font-weight: var(--font-weight-mid);
+    color: var(--color-bone);
+  }
+
+  /* Two steps on a sign-in sheet: read what you are granting, then the
+     browser. Dots rather than "Step 1 of 2", because two is a number you
+     can see. */
+  .sh-steps {
+    display: flex;
+    gap: 5px;
+    padding: 0 16px 10px;
+  }
+  .sh-steps i {
+    width: 18px;
+    height: 3px;
+    border-radius: 99px;
+    background: var(--color-line);
+  }
+  .sh-steps i[data-on="true"] {
+    background: var(--color-dim);
+  }
 }

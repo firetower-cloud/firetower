@@ -28,6 +28,22 @@
  * skills for a session on a repository is deciding what that repository
  * needs, so the footer offers to make the selection the default there. The
  * whole set, not additions — otherwise unticking never carries over.
+ *
+ * **Connectors are in this window too, because *what can this session reach*
+ * is one question.** Two windows for one question is two places to look. They
+ * differ from skills in exactly two ways and both are said on the screen: a
+ * connector you are not signed in to is shown and **not tickable**, with *Sign
+ * in* where the tick would be — nobody lends anybody a credential — and
+ * turning one on **takes effect when the agent next starts**, because an agent
+ * reads its MCP servers and its permission rules once, at launch. Turning one
+ * off takes effect at once, which is the asymmetry worth stating rather than
+ * smoothing over.
+ *
+ * Connectors are deliberately **outside the token meter**. The meter is the
+ * skills budget, measured per bundle at import; a connector's cost is the tool
+ * definitions an agent fetches lazily, which is not the same number and not
+ * measured the same way. One meter over two different quantities would be a
+ * number nobody could act on.
  */
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
@@ -41,7 +57,14 @@ import {
 } from "~/api/generated/skills/skills";
 import type { Session, Skill } from "~/api/generated/model";
 import { navigate } from "~/shims/next-navigation";
-import { useSessionSkillIds, useSkills, why } from "~/data";
+import { useConnectors, useSessionConnectorIds, useSessionSkillIds, useSkills, why } from "~/data";
+import {
+  chooseConnectors,
+  getListConnectorsQueryKey,
+  getSessionConnectorsQueryKey,
+} from "~/api/generated/connectors/connectors";
+import type { Connector } from "~/api/generated/model";
+import { Plug } from "lucide-react";
 import { BUDGET, sameSet, SMALLEST_BUDGET } from "~/skills";
 
 
@@ -49,9 +72,14 @@ import { BUDGET, sameSet, SMALLEST_BUDGET } from "~/skills";
 export function SkillPicker({ session, onClose }: { session: Session; onClose: () => void }) {
   const all = useSkills();
   const live = useSessionSkillIds(session.id);
+  const cx = useConnectors();
+  const cxLive = useSessionConnectorIds(session.id);
   const cache = useQueryClient();
 
   const [draft, setDraft] = useState<Set<string> | null>(null);
+  /* The connectors' own draft, for the same reason skills have one: changing
+     the set is a decision, and a decision is confirmed once. */
+  const [cxDraft, setCxDraft] = useState<Set<string> | null>(null);
   const [query, setQuery] = useState("");
   const [showAll, setShowAll] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
@@ -70,15 +98,31 @@ export function SkillPicker({ session, onClose }: { session: Session; onClose: (
   }, [draft, live.loading, live.data]);
 
   useEffect(() => {
+    if (cxDraft === null && !cxLive.loading) setCxDraft(new Set(cxLive.data));
+  }, [cxDraft, cxLive.loading, cxLive.data]);
+
+  useEffect(() => {
     const esc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", esc);
     return () => window.removeEventListener("keydown", esc);
   }, [onClose]);
 
   const picked = draft ?? new Set<string>();
+  const cxPicked = cxDraft ?? new Set<string>();
+  /** Whether this person can actually turn one on. Criterion 17's whole UI. */
+  const usable = (c: Connector) => c.signIn === "None" || (c.connected && !c.expired);
+  const cxRows = cx.data.filter((c) => {
+    const q = query.trim().toLowerCase();
+    return !q || c.name.toLowerCase().includes(q) || c.description.toLowerCase().includes(q);
+  });
+  const cxAdded = [...cxPicked].filter((id) => !cxLive.data.includes(id));
+  const cxGone = cxLive.data.filter((id) => !cxPicked.has(id));
+  const cxDirty = cxAdded.length > 0 || cxGone.length > 0;
   // An empty library has nothing to search, meter or confirm, so the window
-  // shrinks to the one thing worth doing: going to add a skill.
-  const empty = !all.loading && all.data.length === 0;
+  // shrinks to the one thing worth doing: going to add a skill. Only when
+  // there are no connectors either — the window answers one question, and
+  // half an answer is not an empty state.
+  const empty = !all.loading && all.data.length === 0 && !cx.loading && cx.data.length === 0;
   const openLibrary = () => {
     onClose();
     navigate("/configuration/skills");
@@ -149,10 +193,15 @@ export function SkillPicker({ session, onClose }: { session: Session; onClose: (
 
   const confirm = async () => {
     // Nothing to send is still an answer: the window closes as it would have.
-    if (!dirty && !writesDefaults) return onClose();
+    if (!dirty && !writesDefaults && !cxDirty) return onClose();
     setSaving(true);
     setFailed(null);
     try {
+      if (cxDirty) {
+        await chooseConnectors(session.id, { selected: [...cxPicked] });
+        await cache.invalidateQueries({ queryKey: getSessionConnectorsQueryKey(session.id) });
+        await cache.invalidateQueries({ queryKey: getListConnectorsQueryKey() });
+      }
       if (dirty) await chooseSkills(session.id, { selected: [...picked] });
       if (setsDefaults) for (const r of aimed) await setRepoDefaults(r.repoId, { skills: [...picked] });
       if (clearsDefaults)
@@ -183,8 +232,22 @@ export function SkillPicker({ session, onClose }: { session: Session; onClose: (
     "No longer the default once saved"
   ) : setsDefaults ? (
     "The default once saved"
+  ) : cxDirty && cxAdded.length > 0 ? (
+    /* The one asymmetry between the two halves, and it is worth the words:
+       an agent reads its MCP servers and its permission rules once, when it
+       launches. Turning one *off* needs no restart, so the sentence names
+       which direction it is about. */
+    <span className="text-bone">
+      {cxAdded.length === 1 ? "A connector was" : `${cxAdded.length} connectors were`} added — the
+      agent has to start again before {cxAdded.length === 1 ? "it" : "they"} can be used
+    </span>
+  ) : cxDirty ? (
+    <span className="text-bone">
+      {cxGone.length === 1 ? "A connector was" : `${cxGone.length} connectors were`} turned off,
+      which takes effect at once
+    </span>
   ) : (
-    `${picked.size} on`
+    `${picked.size + cxPicked.size} on`
   );
 
   const repoWord = repos.length === 1 ? repos[0]!.slug : `${chosenRepos.size} repos`;
@@ -204,9 +267,9 @@ export function SkillPicker({ session, onClose }: { session: Session; onClose: (
       >
         <div className="flex items-start gap-2 border-b border-line px-3.5 py-2.5">
           <span className="min-w-0 flex-1">
-            <span className="block text-ui text-bone">Skills for this session</span>
+            <span className="block text-ui text-bone">What this session can reach</span>
             {!empty && (
-              <span className="block truncate text-micro text-mute">Each one stays in the model's context on every turn</span>
+              <span className="block truncate text-micro text-mute">Everything ticked here is in the model's context on every turn</span>
             )}
           </span>
           <button
@@ -243,7 +306,7 @@ export function SkillPicker({ session, onClose }: { session: Session; onClose: (
                 autoFocus
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search skills"
+                placeholder="Search skills and connectors"
                 className="h-10 min-w-0 flex-1 bg-transparent text-ui text-bone placeholder:text-mute focus:outline-none"
               />
             </div>
@@ -261,6 +324,61 @@ export function SkillPicker({ session, onClose }: { session: Session; onClose: (
                   </button>
                 </div>
               )}
+              {/* **First, because it is the half somebody came here to change.**
+                  A skill is a thing you mostly leave alone; a connector is the
+                  thing a session needs today. Outside `groups` because its
+                  rows are a different shape — one of them can be untickable,
+                  which no skill row can be. */}
+              {cxRows.length > 0 && (
+                <div>
+                  <div className="sticky top-0 z-10 flex items-baseline gap-1.5 lift px-3.5 pt-2.5 pb-1 text-micro">
+                    <span className="text-dim">Connectors</span>
+                    <span className="tabular-nums text-mute">
+                      {cxPicked.size} on
+                      {cxRows.filter((c) => !usable(c)).length > 0 &&
+                        `, ${cxRows.filter((c) => !usable(c)).length} to sign in to`}
+                    </span>
+                  </div>
+                  {cxRows.map((c) => (
+                    <ConnectorRow
+                      key={c.id}
+                      connector={c}
+                      on={cxPicked.has(c.id)}
+                      usable={usable(c)}
+                      needsRestart={cxAdded.includes(c.id)}
+                      onToggle={() =>
+                        setCxDraft((d) => {
+                          const next = new Set(d ?? []);
+                          next.has(c.id) ? next.delete(c.id) : next.add(c.id);
+                          return next;
+                        })
+                      }
+                      onSignIn={() => {
+                        onClose();
+                        navigate(`/configuration/connectors/${c.id}`);
+                      }}
+                    />
+                  ))}
+                  {/* **Criterion 17, said rather than inferred.** A connector
+                      with no sign-in of yours is in this list, counts for
+                      nothing and is not sent to the agent. Drawn only when
+                      there is one, so it is a fact about the screen rather
+                      than a standing paragraph. */}
+                  {cxRows.some((c) => !usable(c)) && (
+                    <p className="px-3.5 pt-1 pb-2 text-micro leading-relaxed text-mute">
+                      You have not signed in to{" "}
+                      {cxRows
+                        .filter((c) => !usable(c))
+                        .map((c) => c.name)
+                        .join(", ")}
+                      , so {cxRows.filter((c) => !usable(c)).length === 1 ? "it counts" : "they count"} for
+                      nothing and {cxRows.filter((c) => !usable(c)).length === 1 ? "is" : "are"} not sent to
+                      the agent. A sign-in is yours alone — nobody lends one.
+                    </p>
+                  )}
+                </div>
+              )}
+
               {groups.map((g) => {
                 const capped = g.at === "all" && !query && !showAll && g.rows.length > 8;
                 const rows = capped ? g.rows.slice(0, 6) : g.rows;
@@ -373,11 +491,13 @@ export function SkillPicker({ session, onClose }: { session: Session; onClose: (
                   ? "Saving…"
                   : clash || over
                     ? "Can't confirm"
-                    : dirty
-                      ? `Confirm ${picked.size} ${picked.size === 1 ? "skill" : "skills"}`
-                      : writesDefaults
-                        ? "Save"
-                        : "Confirm"}
+                    : cxAdded.length > 0
+                      ? "Confirm and restart"
+                      : dirty
+                        ? `Confirm ${picked.size} ${picked.size === 1 ? "skill" : "skills"}`
+                        : cxDirty || writesDefaults
+                          ? "Save"
+                          : "Confirm"}
               </button>
             </div>
           </>
@@ -385,6 +505,77 @@ export function SkillPicker({ session, onClose }: { session: Session; onClose: (
       </div>
     </div>,
     document.body,
+  );
+}
+
+/**
+ * One connector on one line.
+ *
+ * **Untickable where there is no sign-in of this person's**, with *Sign in*
+ * where the tick would be. That is the whole of criterion 17 at this end: the
+ * row is shown, it counts for nothing, and the way out of that state is a
+ * button rather than a tooltip. A directory could one day lend the connector;
+ * it will never lend the sign-in.
+ */
+function ConnectorRow({
+  connector: c,
+  on,
+  usable,
+  needsRestart,
+  onToggle,
+  onSignIn,
+}: {
+  connector: Connector;
+  on: boolean;
+  usable: boolean;
+  needsRestart: boolean;
+  onToggle: () => void;
+  onSignIn: () => void;
+}) {
+  const says =
+    c.description ||
+    (c.probed?.shape === "tools"
+      ? `${c.probed.toolCount} tools${c.probed.writeCount > 0 ? `, ${c.probed.writeCount} of them write` : ""}`
+      : c.url);
+
+  return (
+    <div className="flex w-full items-center gap-2.5 px-3.5 py-2 hover:bg-raise/60">
+      {usable ? (
+        <button
+          onClick={onToggle}
+          title={c.description || c.url}
+          className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
+        >
+          <Tick on={on} />
+          <Plug className="h-3.5 w-3.5 shrink-0 text-mute" strokeWidth={1.75} />
+          <span className="flex min-w-0 flex-1 items-baseline gap-2.5">
+            <span className={`shrink-0 text-ui ${on ? "text-bone" : "text-text"}`}>{c.name}</span>
+            <span className="min-w-0 truncate text-meta text-mute">{says}</span>
+          </span>
+        </button>
+      ) : (
+        <span className="flex min-w-0 flex-1 items-center gap-2.5">
+          {/* Where the tick would be. Not a disabled checkbox: a tick you
+              cannot press reads as a bug, and a dash reads as a state. */}
+          <span className="grid h-[15px] w-[15px] shrink-0 place-items-center text-mute">
+            <span className="block h-px w-2 bg-mute" />
+          </span>
+          <Plug className="h-3.5 w-3.5 shrink-0 text-mute" strokeWidth={1.75} />
+          <span className="flex min-w-0 flex-1 items-baseline gap-2.5">
+            <span className="shrink-0 text-ui text-mute">{c.name}</span>
+            <span className="min-w-0 truncate text-meta text-mute">
+              {c.expired ? "your sign-in has expired" : says}
+            </span>
+          </span>
+        </span>
+      )}
+      {needsRestart && <span className="shrink-0 text-micro text-mute">needs a restart</span>}
+      {!usable && (
+        <button onClick={onSignIn} className="control shrink-0 text-dim hover:bg-raise hover:text-bone">
+          {c.expired ? "Sign in again" : "Sign in"}
+        </button>
+      )}
+    </div>
   );
 }
 

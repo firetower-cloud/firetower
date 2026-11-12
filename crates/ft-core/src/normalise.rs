@@ -1585,6 +1585,40 @@ mod skill_tests {
         assert_eq!(skill_reached_for("", &by_title), Some("house-prose".into()));
     }
 
+    /// **Criterion 16, verified rather than assumed.**
+    ///
+    /// A connector's tool arrives spelled `mcp__<server>__<tool>`, and it has
+    /// to land as an MCP call in every client that draws a transcript — which
+    /// is the desk and the phone; the web application has no transcript view.
+    /// Both read `ItemKind` off this function, so this is the one place the
+    /// classification can be wrong, and nothing else about connectors needed
+    /// changing to make it right.
+    ///
+    /// The second half matters as much: an MCP call that *reads a file* is an
+    /// MCP call first. Which server it came from is the more useful thing to
+    /// draw, and a connector's `read_file_content` rendering as an ordinary
+    /// file read would hide the fact that a third party was involved.
+    #[test]
+    fn a_connectors_tool_is_an_mcp_call_whatever_else_its_name_says() {
+        // The three real servers' real tool names.
+        for name in [
+            "mcp__gdrive__search_files",
+            "mcp__gdrive__read_file_content",
+            "mcp__canva__design_content_write",
+            "mcp__slack__slack_post_message",
+        ] {
+            assert_eq!(classify(name), ItemKind::McpToolCall, "{name}");
+        }
+
+        // Firetower's own permission tool takes the same path, which is why
+        // nothing had to be added for it either.
+        assert_eq!(classify("mcp__firetower__approve"), ItemKind::McpToolCall);
+
+        // And a bare tool of the same shape is still what it is: the prefix is
+        // what decides, not the suffix.
+        assert_eq!(classify("Read"), ItemKind::FileRead);
+    }
+
     /// A read is still a read. Treating every file as a skill would put the
     /// whole transcript under the wrong heading.
     #[test]

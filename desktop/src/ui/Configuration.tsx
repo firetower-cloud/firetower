@@ -34,6 +34,7 @@ import { GitHosts } from "~/ui/config/GitHosts";
 import { Trackers } from "~/ui/config/Trackers";
 import { Agents } from "~/ui/config/Agents";
 import { Skills } from "~/ui/config/Skills";
+import { Connectors } from "~/ui/config/Connectors";
 import { Roles } from "~/ui/config/Roles";
 import { Secrets } from "~/ui/config/Secrets";
 import { People } from "~/ui/config/People";
@@ -75,6 +76,8 @@ function Pane({ at, open, backend, onForgot }: { at: string; open: string | null
       return <Agents live />;
     case "skills":
       return <Skills open={open} />;
+    case "connectors":
+      return <Connectors open={open} />;
     case "roles":
       return <Roles />;
     case "people":
