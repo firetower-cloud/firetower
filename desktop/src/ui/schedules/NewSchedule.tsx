@@ -5,27 +5,60 @@
  * behind it, and the dock is for starting work now — pressing Enter there
  * sends it. Here Enter inserts a newline and nothing submits, because the
  * prompt is a paragraph somebody is writing for an agent that cannot ask a
- * follow-up question.
+ * follow-up question. That is the one behaviour this does not share with the
+ * composer.
  *
- * **The consequence summary is pinned above the footer.** It is six things a
- * person has to know before turning on an unattended run, and at the bottom
- * of a scrolling body they would approve without having seen them.
+ * **Everything else is the composer's own control, imported.** The
+ * repositories menu, the machine menu, the profile menu, what runs it and the
+ * skills list are the components the Dashboard uses — `RepoMenu`,
+ * `ProfileMenu`, `Menu`/`Opt`, `RunPicker`, `Pop`, `Readout` — not lookalikes
+ * of them. A rebuilt control is a control that drifts from the product the
+ * first time somebody changes the real one, and this sheet shipped with five
+ * of them: a native `<select>` for the repository that could hold one, a
+ * machine that was a sentence rather than a picker, no model and no account at
+ * all, and a Skills row that only said what *would* happen.
  *
- * **Four rows in it, not six.** The schedule, the repository, the machine and
- * the agent are set by controls six inches above, and repeating them would be
- * the same fact in a control, a label and a summary. What is left is what no
- * control says: what the run may do, what it costs, and what happens when it
- * cannot finish.
+ * **The body scrolls, all of it.** The consequence summary used to be pinned
+ * above the footer so it could not be scrolled away; it reads as the bottom of
+ * the sheet, which hid the fact that there was anything below the fold at all.
+ * It is the last card in the body now.
  */
 import { useEffect, useMemo, useState } from "react";
-import { ChevronDown, FolderGit2, Server, Shield, TriangleAlert, UsersRound, X } from "lucide-react";
+import {
+  ChevronDown,
+  Diamond,
+  FolderGit2,
+  Server,
+  ServerOff,
+  TriangleAlert,
+  UserRound,
+  X,
+} from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Icon, IconButton } from "~/components/ui";
-import { useRepos } from "~/data";
+import { AgentMark } from "~/components/AgentMark";
+import { Pop } from "~/ui/Pop";
+import { RunPicker } from "~/ui/RunPicker";
+import { Head, Menu, Opt, ProfileMenu, RepoMenu } from "~/ui/StartComposer";
+import { canRun, NoMachine, resolve, type Where } from "~/components/WhereItRuns";
+import { Readout } from "~/components/HostReadiness";
+import { machineLabel, machines } from "~/api/environments";
+import { usable } from "~/api/accounts";
+import { useAccounts, useAgents, useHosts, useRepos, useSkills } from "~/data";
+import { navigate } from "~/shims/next-navigation";
 import { useListRoles } from "~/api/generated/roles/roles";
+import { useAgentControls } from "~/api/generated/agents/agents";
 import { getListSchedulesQueryKey, readCadence } from "~/api/generated/schedules/schedules";
 import { createAndTurnOn } from "./create";
-import type { Cadence, CadenceAnswer, Weekday } from "~/api/generated/model";
+import { unattendedValue } from "./controls";
+import type {
+  Agent,
+  Cadence,
+  CadenceAnswer,
+  Control,
+  ControlKind,
+  Weekday,
+} from "~/api/generated/model";
 import type { Example } from "./examples";
 import { fires } from "./view";
 
@@ -40,22 +73,89 @@ const CADENCES: { kind: Cadence["kind"]; label: string; note?: string }[] = [
 
 const DAYS: Weekday[] = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
 
+type Checkout = { id: string; slug: string };
+
 export function NewSchedule({ from, onClose }: { from: Example | null; onClose: () => void }) {
   const client = useQueryClient();
-  const repos = useRepos();
+  const { data: repos } = useRepos();
+  const { data: allSkills } = useSkills();
+  const { data: hosts } = useHosts();
+  const { data: agents } = useAgents();
+  const { data: accounts } = useAccounts();
   const profiles = useListRoles().data ?? [];
 
   const [name, setName] = useState(from?.name ?? "");
   const [prompt, setPrompt] = useState(from?.prompt ?? "");
-  const [repoId, setRepoId] = useState<string>("");
-  const [profile, setProfile] = useState<string>("");
+  const [checkouts, setCheckouts] = useState<Checkout[]>([]);
+  const [profileId, setProfileId] = useState<string | null>(null);
   const [base, setBase] = useState("");
   const [advanced, setAdvanced] = useState(false);
   const [deleteClean, setDeleteClean] = useState(true);
   const [saving, setSaving] = useState(false);
   const [refused, setRefused] = useState<string | null>(null);
+  /** Which menu is open, and what it drops from. The composer's own idiom. */
+  const [open, setOpen] = useState<{ which: string; at: HTMLElement } | null>(null);
 
-  const [kind, setKind] = useState<Cadence["kind"]>(from?.cadence.kind ?? "weekdays");
+  /* ── What runs it: the machine, the engine, the account, the controls ──
+     The same state the composer keeps, so the same components can be fed. */
+  const [where, setWhere] = useState<Where>({ machine: "", hostId: "", agent: "" });
+  const [accountId, setAccountId] = useState("");
+  const [chosen, setChosen] = useState<Partial<Record<ControlKind, string>>>({});
+  const [skillIds, setSkillIds] = useState<string[] | null>(null);
+
+  const all = useMemo(() => machines(hosts), [hosts]);
+  const { host } = useMemo(() => resolve(hosts, where), [hosts, where]);
+  const machine =
+    all.find((m) => m.key === where.machine) ??
+    (host ? all.find((m) => m.hosts.some((h) => h.id === host.id)) : undefined) ??
+    all[0];
+
+  const profile = profiles.find((p) => p.id === profileId);
+  const pinned = (profile?.agent ?? undefined) as Agent | undefined;
+  const picked = agents.some((a) => a.kind === where.agent) ? (where.agent as Agent) : undefined;
+  const kind = (pinned ||
+    picked ||
+    agents.find((a) => host && canRun(a, host.id))?.kind ||
+    agents[0]?.kind) as Agent | undefined;
+
+  const mine = useMemo(() => accounts.filter((a) => a.kind === kind && usable(a)), [accounts, kind]);
+  const account = mine.find((a) => a.id === accountId);
+  useEffect(() => {
+    if (account || mine.length === 0) return;
+    setAccountId((mine.find((a) => a.isDefault) ?? mine[0]).id);
+  }, [account, mine]);
+
+  const controlsQ = useAgentControls(kind ?? "", { query: { enabled: !!kind } });
+  const controls = (kind ? (controlsQ.data ?? []) : []) as Control[];
+
+  /* What the pickers open on. See [`unattendedValue`]: `control.current` is
+     what that person last worked with, which is the one thing an unattended
+     run must not inherit. */
+  const valueOf = (c: Control) => chosen[c.kind] ?? unattendedValue(c);
+  /** What the sheet is showing for one control, if this engine has it. */
+  const showing = (kind: ControlKind) => {
+    const c = controls.find((v) => v.kind === kind);
+    return c ? valueOf(c) : undefined;
+  };
+
+  // A change of engine drops what was chosen for the last one: a model is one
+  // agent's, and a mode's word is too.
+  useEffect(() => {
+    setChosen({});
+  }, [kind]);
+
+  // Skills: the set that applies by default — always-on, or a default in a
+  // repository this checks out — unless the person picks their own.
+  const defaultSkillIds = useMemo(
+    () =>
+      allSkills
+        .filter((s) => s.alwaysOn || s.defaultIn.some((r) => checkouts.some((c) => c.id === r)))
+        .map((s) => s.id),
+    [allSkills, checkouts],
+  );
+  const selectedSkills = skillIds ?? defaultSkillIds;
+
+  const [kindOf, setKind] = useState<Cadence["kind"]>(from?.cadence.kind ?? "weekdays");
   const [at, setAt] = useState(("at" in (from?.cadence ?? {}) ? (from!.cadence as { at: string }).at : "") || "08:30");
   const [day, setDay] = useState<Weekday>(
     from?.cadence.kind === "weekly"
@@ -91,7 +191,7 @@ export function NewSchedule({ from, onClose }: { from: Example | null; onClose: 
   const here = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
   const cadence: Cadence = useMemo(() => {
-    switch (kind) {
+    switch (kindOf) {
       case "daily":
         return { kind: "daily", at };
       case "weekly":
@@ -107,7 +207,7 @@ export function NewSchedule({ from, onClose }: { from: Example | null; onClose: 
       default:
         return { kind: "weekdays", at };
     }
-  }, [kind, at, day, dayOfMonth, expr, monthly, nth]);
+  }, [kindOf, at, day, dayOfMonth, expr, monthly, nth]);
 
   /**
    * **The server reads it back.** No client parses cron: the read-back and
@@ -140,23 +240,48 @@ export function NewSchedule({ from, onClose }: { from: Example | null; onClose: 
     };
   }, [cadence, zone]);
 
-  const norepo = !repoId;
+  const norepo = checkouts.length === 0;
   const tooOften = !!refused;
+  const close = () => setOpen(null);
+  const toggle = (which: string, at: HTMLElement) =>
+    setOpen((o) => (o?.which === which ? null : { which, at }));
+  const toggleRepo = (r: Checkout) =>
+    setCheckouts((list) =>
+      list.some((c) => c.id === r.id) ? list.filter((c) => c.id !== r.id) : [...list, r],
+    );
 
   const save = async () => {
     setSaving(true);
     try {
       /* **Created and turned on.** Pressing this is the approval — that is
-         what the summary pinned above the footer is for — and `createAndTurnOn`
-         carries the argument for why that is two calls rather than a flag. */
+         what the summary at the foot of the body is for — and
+         `createAndTurnOn` carries the argument for why that is two calls
+         rather than a flag. */
       const made = await createAndTurnOn({
         name,
         prompt,
-        repoId: repoId || undefined,
+        repoIds: checkouts.map((c) => c.id),
+        hostId: host?.id,
         base: base || undefined,
         cadence,
         timezone: zone,
-        profile: profile || undefined,
+        profile: profileId || undefined,
+        agent: kind,
+        accountId: accountId || undefined,
+        /* What this engine actually offers, at the value this sheet is
+           showing. A control the engine does not have is left out rather
+           than sent as null: the server refuses a setting the engine would
+           ignore, which is the right answer and a confusing one to get from
+           a field nobody filled in. */
+        settings: {
+          model: showing("model"),
+          effort: showing("effort"),
+          mode: showing("mode"),
+          sandbox: showing("sandbox"),
+        },
+        /* `null` is "resolve the defaults now and pin them", which is what an
+           untouched control means. A set somebody chose is sent as itself. */
+        skills: skillIds ?? undefined,
         deleteCleanRuns: deleteClean,
       });
       await client.invalidateQueries({ queryKey: getListSchedulesQueryKey() });
@@ -179,7 +304,7 @@ export function NewSchedule({ from, onClose }: { from: Example | null; onClose: 
   };
 
   return (
-    <div className="veil" data-wide onMouseDown={onClose}>
+    <div className="veil s-veil scroll-slim" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="sheet2 s-sheet" onMouseDown={(e) => e.stopPropagation()}>
         <div className="sh-head">
           <h2>New schedule</h2>
@@ -203,28 +328,47 @@ export function NewSchedule({ from, onClose }: { from: Example | null; onClose: 
             <label htmlFor="sch-prompt">Prompt</label>
             <div className="s-compose">
               <div className="shelf">
-                <select
-                  className="sc"
-                  value={repoId}
-                  onChange={(e) => setRepoId(e.target.value)}
-                  aria-label="Repository"
+                {/* The composer's own chip and the composer's own menu, which
+                    is a multi-select: one working branch across every
+                    repository it checks out. */}
+                <button
+                  onClick={(e) => toggle("repo", e.currentTarget)}
+                  data-set={checkouts.length > 0}
+                  data-which="repo"
+                  className="chip"
+                  title="Which repositories each run checks out"
                 >
-                  <option value="">Add a repository</option>
-                  {repos.data.map((r) => (
-                    <option key={r.id} value={r.id}>
-                      {r.slug}
-                    </option>
-                  ))}
-                </select>
-                {/* **A policy, never a host id.** A pinned machine that is
-                    retired is a schedule that fails every morning, so this is
-                    a statement rather than a picker. */}
-                <span className="sc" title="Runs on whichever machine is free when the schedule fires.">
-                  <span className="ic">
-                    <Icon of={Server} size={16} />
+                  <span className="grid place-items-center text-mute">
+                    <Icon of={FolderGit2} size={14} />
                   </span>
-                  First available machine
-                </span>
+                  <span className="lbl">
+                    {checkouts.length === 0
+                      ? "Add a repository"
+                      : checkouts.length === 1
+                        ? checkouts[0].slug
+                        : `${checkouts.length} repositories`}
+                  </span>
+                  <Icon of={ChevronDown} size={12} className="text-mute" />
+                </button>
+                {/* **One machine, named.** It used to say "First available
+                    machine" and store no host id — a policy rather than a
+                    choice. A schedule names the machine it runs on, the same
+                    way starting work does. */}
+                <button
+                  onClick={(e) => toggle("machine", e.currentTarget)}
+                  data-set={!!machine}
+                  data-which="machine"
+                  className="chip"
+                  title={machine ? "Where each run starts" : "No machine to run on"}
+                >
+                  <span className="grid place-items-center text-mute">
+                    <Icon of={machine ? Server : ServerOff} size={14} />
+                  </span>
+                  <span className="lbl" title={machine ? machineLabel(machine) : undefined}>
+                    {machine ? machineLabel(machine) : "No machine"}
+                  </span>
+                  <Icon of={ChevronDown} size={12} className="text-mute" />
+                </button>
               </div>
               <div className="s-in">
                 <textarea
@@ -241,30 +385,70 @@ export function NewSchedule({ from, onClose }: { from: Example | null; onClose: 
                   }}
                 />
                 <div className="bar">
-                  <select
+                  <button
+                    onClick={(e) => toggle("profile", e.currentTarget)}
+                    data-set={!!profile}
                     className="chip"
-                    value={profile}
-                    onChange={(e) => setProfile(e.target.value)}
-                    aria-label="Agent profile"
+                    title="Which profile the agent wears"
                   >
-                    <option value="">Just an agent</option>
-                    {profiles.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </select>
-                  {/* The shipped "never ask" behaviour, which **denies rather
-                      than bypasses**: what it is not allowed to do fails
-                      instead of reaching somebody who is not there. It is not
-                      a control here because there is only one answer that
-                      makes sense unattended. */}
-                  <span className="chip" title="Refuses anything not already allowed, rather than asking.">
-                    <span className="ic">
-                      <Icon of={Shield} size={16} />
+                    <span className="grid place-items-center text-mute">
+                      {pinned ? (
+                        <AgentMark agent={pinned} size={15} />
+                      ) : (
+                        <UserRound className="h-[15px] w-[15px]" strokeWidth={1.8} />
+                      )}
                     </span>
-                    Never ask
-                  </span>
+                    <span className="lbl">{profile ? profile.name : "Just an agent"}</span>
+                    <Icon of={ChevronDown} size={12} className="text-mute" />
+                  </button>
+                  {/* The engine, the account, the model, the effort, the
+                      permissions and the sandbox — one control, the same one
+                      the Dashboard and the conversation use. */}
+                  {kind && (
+                    <RunPicker
+                      agent={kind}
+                      agentLabel={agents.find((a) => a.kind === kind)?.label}
+                      agents={agents.filter((a) => a.supported).map((a) => ({ kind: a.kind, label: a.label }))}
+                      accounts={mine.map((a) => ({ id: a.id, name: a.name, isDefault: a.isDefault }))}
+                      accountId={account?.id ?? ""}
+                      agentLocked={!!pinned}
+                      controls={controls}
+                      valueOf={valueOf}
+                      onPickAgent={(k) => setWhere({ ...where, agent: k })}
+                      onPickAccount={(id) => setAccountId(id)}
+                      onPickControl={(k, v) => setChosen((p) => ({ ...p, [k]: v }))}
+                    />
+                  )}
+                  {/* **A profile resolves the skills or this does, never
+                      both**, so with one set there is nothing here to choose
+                      between and the chip says who decided instead. */}
+                  {profile ? (
+                    <span className="chip" title="The profile decides what each run reads.">
+                      <span className="grid place-items-center text-mute">
+                        <Icon of={Diamond} size={14} />
+                      </span>
+                      <span className="lbl">Skills set by {profile.name}</span>
+                    </span>
+                  ) : (
+                    <button
+                      onClick={(e) => toggle("skills", e.currentTarget)}
+                      data-set={selectedSkills.length > 0}
+                      className="chip"
+                      title="Which skills each run reads"
+                    >
+                      <span className="grid place-items-center text-mute">
+                        <Icon of={Diamond} size={14} />
+                      </span>
+                      <span className="lbl">
+                        {selectedSkills.length === 0
+                          ? "No skills"
+                          : selectedSkills.length === 1
+                            ? (allSkills.find((s) => s.id === selectedSkills[0])?.name ?? "1 skill")
+                            : `${selectedSkills.length} skills`}
+                      </span>
+                      <Icon of={ChevronDown} size={12} className="text-mute" />
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -281,7 +465,7 @@ export function NewSchedule({ from, onClose }: { from: Example | null; onClose: 
               </span>
               <select
                 className="s-pill"
-                value={kind}
+                value={kindOf}
                 onChange={(e) => setKind(e.target.value as Cadence["kind"])}
                 aria-label="How often"
               >
@@ -292,7 +476,7 @@ export function NewSchedule({ from, onClose }: { from: Example | null; onClose: 
                   </option>
                 ))}
               </select>
-              {kind === "weekly" && (
+              {kindOf === "weekly" && (
                 <select
                   className="s-pill"
                   value={day}
@@ -306,7 +490,7 @@ export function NewSchedule({ from, onClose }: { from: Example | null; onClose: 
                   ))}
                 </select>
               )}
-              {kind === "monthly" && (
+              {kindOf === "monthly" && (
                 <>
                   <select
                     className="s-pill"
@@ -360,7 +544,7 @@ export function NewSchedule({ from, onClose }: { from: Example | null; onClose: 
                   )}
                 </>
               )}
-              {kind === "custom" ? (
+              {kindOf === "custom" ? (
                 /* Mono, because a cron expression is read character by
                    character. */
                 <input
@@ -435,7 +619,7 @@ export function NewSchedule({ from, onClose }: { from: Example | null; onClose: 
                 <div className="s-arow">
                   <span className="s-al">
                     <b>Base branch</b>
-                    <s>Each run branches from here.</s>
+                    <s>Each run branches from here, in every repository it checks out.</s>
                   </span>
                   <span className="s-av">
                     <input
@@ -486,38 +670,12 @@ export function NewSchedule({ from, onClose }: { from: Example | null; onClose: 
                   )}
                 </span>
               </div>
-
-              {/* **No Skills control while a profile is set.** A profile
-                  resolves one or the other, never both, so there is nothing
-                  to choose between — and a read-only line stands in its place
-                  here rather than on the composer, because on a schedule
-                  there is no later moment to look at what a run loaded. */}
-              <div className="s-arow">
-                <span className="s-al">
-                  <b>Skills</b>
-                  <s>
-                    {profile
-                      ? "The profile decides what each run reads."
-                      : norepo
-                        ? "Uses your default skills unless you choose a set."
-                        : "Uses this repository’s default skills unless you choose a set."}
-                  </s>
-                </span>
-                <span className="s-av">
-                  {profile ? (
-                    <span className="s-src">
-                      Set by <b>{profiles.find((p) => p.id === profile)?.name ?? "the profile"}</b>
-                    </span>
-                  ) : (
-                    <span className="s-src">{norepo ? "Your defaults" : "Repository defaults"}</span>
-                  )}
-                </span>
-              </div>
             </div>
           )}
-        </div>
 
-        <div className="s-pinned">
+          {/* **Last in the body, and it scrolls with everything else.** It was
+              pinned above the footer so it could not be scrolled away, which
+              made it read as the end of the sheet and hid the fold. */}
           <div className="s-sumbox">
             <h3>Running unattended</h3>
             <dl className="s-sum">
@@ -534,7 +692,9 @@ export function NewSchedule({ from, onClose }: { from: Example | null; onClose: 
                 Edits files and runs commands.{norepo ? "" : " Can use this repository’s secrets."}
               </dd>
               <dt>Usage</dt>
-              <dd>From your own subscription allowance.</dd>
+              <dd>
+                {account ? `From ${account.name}’s allowance.` : "From your own subscription allowance."}
+              </dd>
               <dt>If approval is needed</dt>
               <dd>The action is blocked. The run carries on.</dd>
               {/* The timeout stops the *waiting*, not the run: the only stop
@@ -548,19 +708,120 @@ export function NewSchedule({ from, onClose }: { from: Example | null; onClose: 
         </div>
 
         <div className="sh-foot">
-          <span className="where">An agent can propose a schedule for you to approve.</span>
+          <span className="where">
+            {all.length === 0
+              ? "No machine to run on yet."
+              : "An agent can propose a schedule for you to approve."}
+          </span>
           <button className="btn quiet" onClick={onClose}>
             Cancel
           </button>
           <button
             className="btn primary"
-            disabled={saving || tooOften || !name.trim() || !prompt.trim()}
+            disabled={saving || tooOften || !name.trim() || !prompt.trim() || !host}
+            title={host ? undefined : "Pick a machine for it to run on"}
             onClick={save}
           >
             Create schedule
           </button>
         </div>
       </div>
+
+      {/* ---------- the composer's menus, dropped from this sheet's chips ---------- */}
+      {open?.which === "repo" && (
+        <Pop anchor={open.at} onClose={close} width={340}>
+          <RepoMenu repos={repos} checkouts={checkouts} onToggle={toggleRepo} onClose={close} />
+        </Pop>
+      )}
+
+      {open?.which === "machine" && (
+        <Pop anchor={open.at} onClose={close} width={340}>
+          <Menu>
+            {all.length === 0 && (
+              <NoMachine
+                onAddMachine={() => {
+                  close();
+                  navigate("/configuration/machines/add");
+                }}
+              />
+            )}
+            {all.map((m) => (
+              <Opt
+                key={m.key}
+                on={m.key === machine?.key}
+                onPick={() => {
+                  setWhere({ machine: m.key, hostId: "", agent: where.agent });
+                  close();
+                }}
+                icon={<Server className="h-4 w-4" strokeWidth={1.8} />}
+                title={machineLabel(m)}
+              />
+            ))}
+          </Menu>
+          {/* Outside the scroller, for the same reason it is on the composer:
+              it is what the machine you picked is up to, not another machine
+              to pick. */}
+          {host && kind && (
+            <div className="shrink-0 border-t border-line-soft py-1">
+              <Readout
+                key={`${host.id}:${kind}`}
+                host={host}
+                agent={kind}
+                agentLabel={agents.find((a) => a.kind === kind)?.label}
+              />
+            </div>
+          )}
+        </Pop>
+      )}
+
+      {open?.which === "profile" && (
+        <Pop anchor={open.at} onClose={close} width={320}>
+          <ProfileMenu
+            profiles={profiles}
+            profileId={profileId}
+            onPick={(id) => {
+              setProfileId(id);
+              close();
+            }}
+          />
+        </Pop>
+      )}
+
+      {open?.which === "skills" && (
+        <Pop anchor={open.at} onClose={close} width={340}>
+          <Menu>
+            <Head>Skills each run reads</Head>
+            {allSkills.length === 0 && (
+              <div className="px-3 py-3 text-center text-micro text-mute">
+                Your library has no skills yet.
+              </div>
+            )}
+            {allSkills.map((s) => {
+              const on = selectedSkills.includes(s.id);
+              return (
+                <Opt
+                  key={s.id}
+                  on={on}
+                  keepOpen
+                  onPick={() =>
+                    setSkillIds(
+                      on
+                        ? selectedSkills.filter((x) => x !== s.id)
+                        : [...selectedSkills, s.id],
+                    )
+                  }
+                  icon={<Diamond className="h-4 w-4" strokeWidth={1.75} />}
+                  title={s.name}
+                  sub={s.alwaysOn ? "always on" : (s.description || undefined)}
+                />
+              );
+            })}
+          </Menu>
+          <div className="pkfoot">
+            Resolved and pinned when you create it, so a run reads the versions you approved.
+          </div>
+        </Pop>
+      )}
     </div>
   );
 }

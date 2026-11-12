@@ -863,7 +863,8 @@
      are in the same rule for the same reason — a row that cannot shrink can
      only grow. */
   .shelf .chip,
-  .composer .bar .chip {
+  .composer .bar .chip,
+  .s-compose .bar .chip {
     flex: 0 1 auto;
     min-width: 0;
   }
@@ -5289,25 +5290,50 @@ html:not([data-platform="macos"]) {
      The body scrolls; the summary and the footer do not, so a person
      cannot approve an unattended run without the consequences having been
      on screen. */
+  /* **Under `Pop`, and scrolling.** Two things come out of one decision:
+     the sheet's pickers are the composer's own, which portal to the body at
+     `z-70` so a menu is never clipped by the card it drops from — a scrim
+     above them would paint over every menu, so this sits below them, the way
+     Sharing's dialog does at 60. And because nothing inside the card may
+     clip, the card is allowed to be taller than the window and *this*
+     scrolls. */
+  .s-veil {
+    z-index: 58;
+    overflow-y: auto;
+    place-items: start center;
+  }
+  /* `position: relative` and `overflow: visible`: the summary used to be
+     pinned in a fixed-height flex column, which meant the body was a
+     scroller — and a scroller clips. `RunPicker` opens upward from the
+     composer's footer and was cut off by exactly that edge. */
   .s-sheet {
+    position: relative;
     width: 624px;
     max-width: 100%;
     display: flex;
     flex-direction: column;
-    max-height: min(84vh, 860px);
+    /* Both of `.sheet2`'s own, undone on purpose: it caps at the scrim's
+       height and clips, which is the pair that made the body a scroller. */
+    max-height: none;
+    overflow: visible;
   }
   .s-sbody {
-    min-height: 0;
-    flex: 1;
-    overflow-y: auto;
     padding: 4px 20px;
     display: flex;
     flex-direction: column;
     gap: 12px;
   }
-  .s-pinned {
-    flex: none;
-    padding: 12px 20px 0;
+  /* **No focus ring on the two text fields.** `.fld .box` draws a 1.5px inset
+     and the window's own `:focus-visible` draws an outline on top of it;
+     neither is on the control this sheet is modelled on. The composer has no
+     ring at all — you can see the caret. Scoped here rather than removed from
+     `.fld`, which other forms still want. */
+  .s-sheet .fld .box:focus-within {
+    box-shadow: none;
+  }
+  .s-sheet .fld .box input:focus-visible,
+  .s-sheet .s-compose .in:focus-visible {
+    outline: none;
   }
   .s-fold {
     display: flex;
