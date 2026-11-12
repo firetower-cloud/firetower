@@ -34,7 +34,7 @@ import {
 } from "~/api/generated/sessions/sessions";
 import { elapsed, minutesSince, statusLabel } from "~/api/view";
 import { useDiff, useSession, useSessions, why } from "~/data";
-import { childrenElsewhere, group, placeOf, runAt, type Workspace } from "~/api/workspaces";
+import { group, placeOf, runAt, type Workspace } from "~/api/workspaces";
 import { AgentMark } from "~/ui/AgentMark";
 import { Approval } from "~/ui/Approval";
 import { Changes } from "~/ui/Changes";
@@ -156,16 +156,6 @@ function Conversation({ place, address }: { place: Workspace; address: string })
     () => (speaker.parentId ? (sessions.find((s: Session) => s.id === speaker.parentId) ?? null) : null),
     [sessions, speaker.parentId],
   );
-  /* How many agents this workspace started elsewhere. Only the menu wants it,
-     and only for the question it asks before ending the place — those agents
-     go with it, and their rows are folded under this one on both lists, so
-     the question is the last place anybody is told. */
-  const delegated = useMemo(() => {
-    const places = group(sessions.filter((s: Session) => s.status !== "Ended")).groups.flatMap(
-      ([, inRepo]) => inRepo,
-    );
-    return childrenElsewhere(place, places).length;
-  }, [sessions, place]);
   const managerId = above?.id ?? speaker.id;
   const team = useMemo(() => sessions.filter((s: Session) => s.parentId === managerId), [sessions, managerId]);
   /**
@@ -594,7 +584,6 @@ function Conversation({ place, address }: { place: Workspace; address: string })
           session={session}
           conversation={conversation}
           runs={place.runs.map((r) => ({ id: r.id, agent: r.agent, status: r.status }))}
-          delegated={delegated}
           onReread={reread}
           open={menu}
           onClose={() => setMenu(false)}

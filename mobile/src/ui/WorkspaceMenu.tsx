@@ -44,7 +44,6 @@ export function WorkspaceMenu({
   conversation,
   runs,
   onReread,
-  delegated = 0,
   open,
   onClose,
   onEnded,
@@ -54,14 +53,6 @@ export function WorkspaceMenu({
   conversation?: Conversation;
   /** Every run of this workspace, not just the one being read. */
   runs?: { id: string; agent: string; status: string }[];
-  /**
-   * How many agents this workspace started **elsewhere** and has not ended.
-   *
-   * They go with it, and since their rows are now folded under this
-   * workspace's on both lists, the question is the last place anybody is told
-   * so. `childrenElsewhere` is what counts them; only a list of places can.
-   */
-  delegated?: number;
   /** Read the whole transcript again, from nothing. */
   onReread?: () => void;
   open: boolean;
@@ -193,13 +184,21 @@ export function WorkspaceMenu({
       icon: Trash2,
       tone: "brick",
       onPress: () => {
-        /* The one irreversible thing here, so it is asked rather than done.
-           The worktree goes with it. */
+        /* The question is what the call does, which is not what this question
+           used to say. `/stop` ends the agent — `stopSession`'s own generated
+           summary is "Stop the agent. The workspace and its branch stay." —
+           and the words claimed the worktree went from the host and anything
+           uncommitted with it. Neither was ever true of this call: nothing on
+           `/stop` touches a checkout, and `end_children` is reached only from
+           the teardown path (`api/sessions.rs:1828`, `:1857`), so no child is
+           touched either.
+           Making the behaviour match the words is a real teardown, and that
+           is a PR of its own. Here the words match the behaviour. A claim the
+           product cannot back is what `STYLE.md` says costs the most trust,
+           and this is the only confirmation in the app that was making one. */
         Alert.alert(
           "End this workspace?",
-          delegated > 0
-            ? `The agent stops, and so ${delegated === 1 ? "does the agent" : `do the ${delegated} agents`} it started elsewhere. Their worktrees go from the host with this one, and anything not committed goes with them.`
-            : "The agent stops and its worktree is removed from the host. Anything not committed goes with it.",
+          "The agent stops. The workspace and its branch stay.",
           [
             { text: "Keep it", style: "cancel" },
             {
