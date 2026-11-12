@@ -28,7 +28,6 @@ import {
   Monitor,
   PanelLeftClose,
   Pencil,
-  Plus,
   Puzzle,
   Server,
   Search,
@@ -624,15 +623,9 @@ function Schedules({ path }: { path: string }) {
     <>
       <Row label="All schedules" icon={Clock} on={path === "/schedules"} to="/schedules" />
       <Row label="All runs" icon={FileClock} on={onRuns} to="/schedules/runs" />
-      {/* The way to make one, from the index rather than only from the page.
-          It lands on the library with the sheet open — the sheet is over that
-          screen, so arriving anywhere else would be arriving behind it. */}
-      <button onClick={() => navigate("/schedules?new=1")} className="prow strong">
-        <span className="grid w-[17px] shrink-0 place-items-center text-dim">
-          <Icon of={Plus} size={14} />
-        </span>
-        <span className="min-w-0 flex-1 truncate">New schedule</span>
-      </button>
+      {/* **No New schedule here.** It was the same action twice: *All
+          schedules* is one row above it and carries the button. Two rows in
+          this panel, then the sections. */}
       {everything.length === 0 && (
         <p className="px-2 pt-3 text-meta text-dim">
           Nothing on a clock yet. Start one from an example.
