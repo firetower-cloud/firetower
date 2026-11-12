@@ -5452,7 +5452,7 @@ async fn a_recovery_that_will_not_start_leaves_it_stranded_with_the_reason() {
         .unwrap()
         .note
         .unwrap_or_default();
-    assert!(note.starts_with("Didn't restart:"), "{note}");
+    assert!(note.starts_with("Didn’t restart:"), "{note}");
     assert!(note.contains("index.lock"), "{note}");
 
     it.state.fleet.stop_supervising(&it.host.id).await;
@@ -5854,6 +5854,250 @@ async fn a_second_start_is_refused_while_one_is_in_flight() {
         starts_of(&it.launched, &id),
         1,
         "the worker was asked exactly once"
+    );
+
+    it.state.fleet.stop_supervising(&it.host.id).await;
+}
+
+/// QA's bug 2: a recovery that fails tells the person the reason, **and**
+/// writes it down.
+///
+/// It did one or the other. The failures before the launch — the agent not
+/// installed, the host not answering, the host gone — returned through `?`
+/// above the note, so the reason was on the screen of whoever pressed and
+/// nowhere else: a reload, another screen, or a colleague opening the
+/// conversation saw "The machine restarted" and no sign that anything had been
+/// tried. The note is the only part of a refusal that outlives the request.
+#[tokio::test]
+async fn a_recovery_refused_before_it_launches_still_writes_down_why() {
+    let it = a_machine().await;
+    it.state
+        .db
+        .mark_host_online(
+            &it.host.id,
+            "test",
+            4,
+            8192,
+            &ft_core::DockerState::running("27.0.3"),
+        )
+        .await
+        .unwrap();
+    let session = an_agent_at_work(&it, "on a machine with no agent on it").await;
+    it.says
+        .send(ToServer::AgentClosed {
+            session_id: session.clone(),
+            gone: ft_proto::Gone::Stranded,
+        })
+        .unwrap();
+    settles_at(&it.state, &session, ft_core::SessionStatus::Stranded).await;
+
+    // The machine is up and has no Claude Code on it, which is `require_ready`
+    // refusing — before anything is launched and before anything used to be
+    // written.
+    it.ready.store(false, Ordering::SeqCst);
+
+    let refused = sessions::relaunch_session(
+        State(it.state.clone()),
+        Extension(it.principal.clone()),
+        Path(session.as_str().to_string()),
+        Query(serde_json::from_value(serde_json::json!({})).unwrap()),
+    )
+    .await
+    .expect_err("the machine cannot run it");
+
+    let note = it
+        .state
+        .db
+        .session(&session)
+        .await
+        .unwrap()
+        .unwrap()
+        .note
+        .unwrap_or_default();
+    assert!(
+        note.starts_with("Didn’t restart:"),
+        "the reason outlives the request. refused with: {} / note: {note}",
+        refused.message
+    );
+    assert!(
+        note.contains("not ready") || note.contains("Claude Code"),
+        "and it is the reason, not a shrug: {note}"
+    );
+    assert_eq!(
+        status_of(&it.state, &session).await,
+        ft_core::SessionStatus::Stranded,
+        "nothing about the workspace changed, so nothing about the state does"
+    );
+    assert!(
+        refused.message.contains("not ready") || refused.message.contains("Claude Code"),
+        "and the person who pressed it is told the same thing: {}",
+        refused.message
+    );
+
+    it.state.fleet.stop_supervising(&it.host.id).await;
+}
+
+/// And a launch the machine refuses is not a 500.
+///
+/// `anyhow::Error` into `ApiError` is `Internal`, which is a 500, which an
+/// interface draws as nothing — because there is nothing in a 500 worth
+/// drawing. A machine refusing to start an agent is not a fault in this
+/// control plane: it is the answer to the thing we asked it to do, in its own
+/// words, and it has a code of its own.
+#[tokio::test]
+async fn a_launch_the_machine_refuses_is_the_machines_answer_not_a_server_fault() {
+    let it = a_machine().await;
+    it.ready.store(true, Ordering::SeqCst);
+    it.state
+        .db
+        .mark_host_online(
+            &it.host.id,
+            "test",
+            4,
+            8192,
+            &ft_core::DockerState::running("27.0.3"),
+        )
+        .await
+        .unwrap();
+    let session = an_agent_at_work(&it, "whose worktree was removed").await;
+    it.says
+        .send(ToServer::AgentClosed {
+            session_id: session.clone(),
+            gone: ft_proto::Gone::Stranded,
+        })
+        .unwrap();
+    settles_at(&it.state, &session, ft_core::SessionStatus::Stranded).await;
+
+    *it.launch_refuses.lock().unwrap() =
+        Some("the workspace at /home/agent/work is not there any more".to_string());
+
+    let refused = sessions::relaunch_session(
+        State(it.state.clone()),
+        Extension(it.principal.clone()),
+        Path(session.as_str().to_string()),
+        Query(serde_json::from_value(serde_json::json!({})).unwrap()),
+    )
+    .await
+    .expect_err("the machine refused it");
+
+    assert_eq!(
+        refused.code.status(),
+        axum::http::StatusCode::CONFLICT,
+        "not a 500: a page with nothing on it is what an interface draws for one"
+    );
+    let note = it
+        .state
+        .db
+        .session(&session)
+        .await
+        .unwrap()
+        .unwrap()
+        .note
+        .unwrap_or_default();
+    assert!(note.contains("not there any more"), "{note}");
+    assert_eq!(
+        status_of(&it.state, &session).await,
+        ft_core::SessionStatus::Stranded
+    );
+
+    it.state.fleet.stop_supervising(&it.host.id).await;
+}
+
+/// A second press while the first is still starting writes nothing down.
+///
+/// The note belongs to the attempt that was made. A press that was refused
+/// *before* anything was attempted has nothing to say about the workspace, and
+/// writing one would overwrite the reason belonging to the launch that is
+/// still in flight — on a row that is `Starting` because that launch moved it.
+#[tokio::test]
+async fn a_press_that_never_got_the_claim_leaves_the_note_alone() {
+    let it = a_machine().await;
+    it.ready.store(true, Ordering::SeqCst);
+    it.state
+        .db
+        .mark_host_online(
+            &it.host.id,
+            "test",
+            4,
+            8192,
+            &ft_core::DockerState::running("27.0.3"),
+        )
+        .await
+        .unwrap();
+    let session = an_agent_at_work(&it, "pressed twice").await;
+    it.says
+        .send(ToServer::AgentClosed {
+            session_id: session.clone(),
+            gone: ft_proto::Gone::Stranded,
+        })
+        .unwrap();
+    settles_at(&it.state, &session, ft_core::SessionStatus::Stranded).await;
+    let before = it.state.db.session(&session).await.unwrap().unwrap().note;
+
+    let held = it
+        .state
+        .fleet
+        .claim_start(&session, crate::fleet::Recovering::Yes)
+        .await
+        .expect("nothing is starting it yet");
+    let refused = sessions::relaunch_session(
+        State(it.state.clone()),
+        Extension(it.principal.clone()),
+        Path(session.as_str().to_string()),
+        Query(serde_json::from_value(serde_json::json!({})).unwrap()),
+    )
+    .await
+    .expect_err("one is already starting");
+    assert!(refused.message.contains("already starting"));
+    assert_eq!(
+        it.state.db.session(&session).await.unwrap().unwrap().note,
+        before,
+        "nothing was attempted, so nothing is written down about it"
+    );
+    drop(held);
+
+    it.state.fleet.stop_supervising(&it.host.id).await;
+}
+
+/// QA's bug 3: a message to a stranded session is refused rather than dropped.
+///
+/// It answered 200 `{"sent":true}` and the text appeared in the transcript as
+/// a user bubble read by nobody. The desktop cannot reach it — the composer is
+/// replaced by the recovery card — but the phone has the label and the beat
+/// and no gate, so on a phone it is reachable by typing. A rule held in one
+/// interface is a rule the next surface has not been told about.
+#[tokio::test]
+async fn a_message_to_a_stranded_session_is_refused_rather_than_swallowed() {
+    let it = a_machine().await;
+    let session = an_agent_at_work(&it, "nobody is listening").await;
+    it.says
+        .send(ToServer::AgentClosed {
+            session_id: session.clone(),
+            gone: ft_proto::Gone::Stranded,
+        })
+        .unwrap();
+    settles_at(&it.state, &session, ft_core::SessionStatus::Stranded).await;
+
+    let refused = conversation::send_turn(
+        State(it.state.clone()),
+        Extension(it.principal.clone()),
+        Path(session.as_str().to_string()),
+        Json(serde_json::from_value(serde_json::json!({ "text": "hello?" })).unwrap()),
+    )
+    .await
+    .expect_err("there is nothing to say it to");
+    assert!(
+        refused.message.contains("Bring it back first"),
+        "and it says what to do instead: {}",
+        refused.message
+    );
+    assert!(
+        it.turns
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|(said_to, _)| said_to != &session),
+        "nothing reached the machine"
     );
 
     it.state.fleet.stop_supervising(&it.host.id).await;

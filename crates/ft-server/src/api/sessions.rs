@@ -1318,28 +1318,74 @@ pub(crate) async fn relaunch(
         ));
     }
 
-    launch(state, session, owner, recovering).await
+    // The claim first, and before anything is written down.
+    //
+    // It answers both questions this launch is not allowed to skip — whether
+    // something else is already starting this session, and whether this
+    // session may be started at all — and it reads the row rather than the
+    // `Session` above, which the caller fetched and which a machine can go
+    // under. It has to be taken *before* the `Starting` that `launch` writes,
+    // because after that the row no longer says what it has to be asked.
+    //
+    // Out here rather than inside, because a refusal to claim is the one
+    // failure that must leave no trace: nothing was attempted, and writing a
+    // note would overwrite the reason of whatever *is* starting — on a row
+    // that is `Starting` because the first press moved it.
+    let claim = state
+        .fleet
+        .claim_start(&session.id, recovering)
+        .await
+        .map_err(|e| ApiError::new(ErrorCode::InvalidRequest, format!("{e:#}")))?;
+
+    // From here on, every way out writes the reason down.
+    //
+    // It used to be written at one of them — the launch coming back refused —
+    // and the half-dozen failures before that returned through `?` with the
+    // reason on screen and nothing persisted: a reload, another screen, or
+    // anybody who did not press the button saw "The machine restarted" and no
+    // hint that an attempt had been made at all. The note is the only part of
+    // this that outlives the request.
+    match launch(state, session, owner, &claim).await {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            // With the reason in it. The response says the same thing to
+            // whoever pressed the button, and the note is what is still there
+            // afterwards — on a reload, on another screen, to somebody who did
+            // not press it. A note that said only "it did not restart" left
+            // that person with nothing to act on but the button, so the answer
+            // was to press it again.
+            let note = format!(
+                "Didn’t restart: {}. The workspace and account are unchanged.",
+                error.message.trim_end_matches('.')
+            );
+            // A session that was stranded stays stranded, and this is the one
+            // place that decides it. An attempt that would not start has
+            // changed nothing: the worktree, the branch and the edits the
+            // agent had already written are all still on the machine, so
+            // "still stopped, that attempt did not take" is the honest
+            // reading — and `Failed` would say the opposite twice over, by
+            // telling the control plane the session holds nothing and by
+            // making the next keystroke restart it.
+            let status = if session.status == ft_core::SessionStatus::Stranded {
+                ft_core::SessionStatus::Stranded
+            } else {
+                ft_core::SessionStatus::Failed
+            };
+            state
+                .fleet
+                .set_status(&session.id, status, Some(&note))
+                .await;
+            Err(error)
+        }
+    }
 }
 
 async fn launch(
     state: &AppState,
     session: &Session,
     owner: &str,
-    recovering: Recovering,
+    claim: &crate::fleet::Starting,
 ) -> Result<(), ApiError> {
-    // First, and before anything is written down.
-    //
-    // The claim answers both questions this launch is not allowed to skip —
-    // whether something else is already starting this session, and whether
-    // this session may be started at all — and it reads the row rather than
-    // the `Session` above, which the caller fetched and which a machine can
-    // go under. It has to be taken *before* the `Starting` written below,
-    // because after that the row no longer says what it has to be asked.
-    let claim = state
-        .fleet
-        .claim_start(&session.id, recovering)
-        .await
-        .map_err(|e| ApiError::new(ErrorCode::InvalidRequest, format!("{e:#}")))?;
     let host = state
         .db
         .host_by_id(&session.host_id)
@@ -1454,32 +1500,12 @@ async fn launch(
             &claim,
         )
         .await;
-    if let Err(error) = started {
-        // With the reason in it. The response says the same thing to whoever
-        // pressed the button, and the note is what is still there afterwards —
-        // on a reload, on another screen, to somebody who did not press it. A
-        // note that said only "it did not restart" left that person with
-        // nothing to act on but the button, so the answer was to press it
-        // again.
-        let note = format!("Didn't restart: {error:#}. The workspace and account are unchanged.");
-        // A session that was stranded stays stranded, and this is the one
-        // place that decides it. An attempt that would not start has changed
-        // nothing: the worktree, the branch and the edits the agent had
-        // already written are all still on the machine, so "still stopped,
-        // that attempt did not take" is the honest reading — and `Failed`
-        // would say the opposite twice over, by telling the control plane the
-        // session holds nothing and by making the next keystroke restart it.
-        let status = if session.status == ft_core::SessionStatus::Stranded {
-            ft_core::SessionStatus::Stranded
-        } else {
-            ft_core::SessionStatus::Failed
-        };
-        state
-            .fleet
-            .set_status(&session.id, status, Some(&note))
-            .await;
-        return Err(error.into());
-    }
+    // A machine refusing a launch is not a fault in this control plane, and
+    // `anyhow::Error` into `ApiError` is `Internal` — a 500, which the
+    // interface draws as nothing at all because there is nothing useful in a
+    // 500. `ActionFailed` is what it is: the thing we asked the machine to do
+    // did not happen, and the sentence explaining it came from the machine.
+    started.map_err(|e| ApiError::new(ErrorCode::ActionFailed, format!("{e:#}")))?;
 
     // What its children finished while it was down.
     //

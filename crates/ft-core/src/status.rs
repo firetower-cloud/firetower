@@ -126,7 +126,11 @@ impl SessionStatus {
             //   changed nothing: the worktree, the branch and the uncommitted
             //   edits are all still there. The reason goes in the note and the
             //   state stays where it is.
-            (Stranded, Starting | Ended) => true,
+            // And staying where it is, which is not a move: a recovery that
+            // would not start writes its reason into the note and leaves the
+            // state alone. `Working -> Working` is the same idea, and is
+            // already here for the same reason.
+            (Stranded, Starting | Ended | Stranded) => true,
             (Stranded, _) => false,
 
             // Anything can be ended or fail.
@@ -280,6 +284,10 @@ mod tests {
         assert!(
             !Stranded.can_transition_to(Working),
             "a replayed pre-crash event must not put it back to work"
+        );
+        assert!(
+            Stranded.can_transition_to(Stranded),
+            "and it can be said again, which is how a refused recovery writes down why"
         );
         assert!(!Stranded.can_transition_to(NeedsYou));
         assert!(!Stranded.can_transition_to(HandedBack));

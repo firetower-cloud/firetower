@@ -2426,6 +2426,15 @@ impl Db {
             // transition table cannot express this, because it does not know
             // who is asking; here, `from` is exactly that.
             //
+            // `$1 = status` is not a transition at all: it is a note being
+            // written about a state that is not moving, which is how a
+            // recovery that would not start says why. Without it the refusal
+            // was silently dropped — a session stayed `Stranded` with its
+            // note still reading "The machine restarted", and the person who
+            // pressed the button was the only one who ever saw the reason.
+            // A worker cannot sneak through it: `Stranded` is derived here
+            // and is never a status a worker reports.
+            //
             // It does not stand in the way of a real recovery: `relaunch` sets
             // `Starting` itself, from this process, with no host behind it.
             sqlx::query(
@@ -2434,6 +2443,7 @@ impl Db {
                     AND status <> 'Ended'
                     AND (status <> 'Stranded'
                          OR $1 = 'Ended'
+                         OR $1 = status
                          OR ($1 = 'Starting' AND $5))
                     AND workspace_id IN (SELECT id FROM workspaces WHERE forgotten_at IS NULL)",
             )
