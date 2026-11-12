@@ -51,12 +51,39 @@
  * The narrow endpoint that would make all of this unnecessary — one that
  * returns a session's pending requests — is the right eventual shape and is
  * server work. Noted on the pull request as a follow-up rather than done here.
+ *
+ * ## What it is read for travels with it
+ *
+ * A hook keeps its state in a **slot**, and the slot outlives the session in
+ * it. The peek asks for two of these by position, so when the blocked set
+ * changes — one agent unblocks while a row is held, and the next slides up a
+ * place — the slot's state is still the previous session's for exactly one
+ * commit, the one before its effect runs. For one frame it drew one agent's
+ * name over another agent's request, and a press submitted that pair.
+ *
+ * Nobody was answering as somebody else: `host_to_speak_in` wants the target
+ * session and Writer on its workspace. What it could do is worse in a
+ * quieter way — a request id is only unique *within* a session (Codex numbers
+ * them from one), so the stale id can name a real and different permission in
+ * the session it lands on. Allow, pressed on a question that was never shown.
+ *
+ * So the session a read is about travels with the read, and the slot is
+ * compared against it **while rendering** rather than in an effect. An effect
+ * is a frame late by construction, and a frame is where this lived.
  */
 import { useEffect, useState } from "react";
 import { foldAll, nothing, type Asked } from "~/api/conversation";
 import { getConversation } from "~/api/generated/sessions/sessions";
 
 export type Pending = {
+  /**
+   * The session the rest of this is about.
+   *
+   * Carried rather than assumed. The caller knows which session it asked
+   * for; this is what lets it prove the answer it is holding came from that
+   * question and not from the one that was in this slot before.
+   */
+  of: string | null;
   /** What it is blocked on, once it is known. */
   asked: Asked | null;
   /** True while the one request is in flight. */
@@ -65,7 +92,7 @@ export type Pending = {
   failed: boolean;
 };
 
-const idle: Pending = { asked: null, reading: false, failed: false };
+const idle: Pending = { of: null, asked: null, reading: false, failed: false };
 
 /**
  * Read one session's pending request, once.
@@ -96,7 +123,7 @@ export function usePending(sessionId: string | null, blocked: boolean): Pending 
        that has moved on, and must not leave a stale `asked` behind for the
        next row somebody holds. */
     let live = true;
-    setState({ asked: null, reading: true, failed: false });
+    setState({ of: sessionId, asked: null, reading: true, failed: false });
 
     const read = async (): Promise<Asked | null> => {
       const tail = foldAll(nothing, (await getConversation(sessionId, { tail: TAIL })).events);
@@ -111,7 +138,7 @@ export function usePending(sessionId: string | null, blocked: boolean): Pending 
     read()
       .then((asked) => {
         if (!live) return;
-        setState({ asked, reading: false, failed: false });
+        setState({ of: sessionId, asked, reading: false, failed: false });
       })
       .catch((e) => {
         if (!live) return;
@@ -119,13 +146,22 @@ export function usePending(sessionId: string | null, blocked: boolean): Pending 
            and Deny over a request it could not read would be a button that
            does nothing, which is worse than the menu on its own. */
         console.warn("[firetower] could not read what this workspace is asking", e);
-        setState({ asked: null, reading: false, failed: true });
+        setState({ of: sessionId, asked: null, reading: false, failed: true });
       });
 
     return () => {
       live = false;
     };
   }, [sessionId]);
+
+  /* **Here, not in the effect.** The effect above clears the slot when the
+     session in it changes, and it runs *after* the commit that changed it —
+     so by itself it clears the frame after the one somebody could press. A
+     read belongs to the session it was made for or it is not an answer yet,
+     and that is a question this render can settle on its own. */
+  if (state.of !== sessionId) {
+    return sessionId ? { of: sessionId, asked: null, reading: true, failed: false } : idle;
+  }
 
   return state;
 }

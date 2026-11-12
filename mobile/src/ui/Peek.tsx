@@ -30,7 +30,7 @@
  * that a browser cannot test, and it had never been run on a device before
  * this build.
  */
-import { useCallback, useMemo } from "react";
+import { useCallback } from "react";
 import { Pressable, Text, View } from "react-native";
 import Animated, {
   FadeIn,
@@ -44,12 +44,9 @@ import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { ChevronRight } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { useWindowDimensions } from "react-native";
-import type { Asked } from "~/api/conversation";
-import type { Session } from "~/api/generated/model";
-import { useAnswerRequest } from "~/api/generated/sessions/sessions";
-import { usePending } from "~/api/pending";
+import { type Ask } from "~/api/answering";
 import type { Workspace } from "~/api/workspaces";
-import { asking, childrenElsewhere, lastMoved, familyOf, placeBeat, placeOf, rowLabel } from "~/api/workspaces";
+import { childrenElsewhere, lastMoved, familyOf, placeBeat, placeOf, rowLabel } from "~/api/workspaces";
 import { elapsed, minutesSince } from "~/api/view";
 import { Blocks } from "~/ui/Blocks";
 import { useTheme } from "~/design/theme";
@@ -124,63 +121,6 @@ export function usePeekable(onPeek: () => void, onOpen: () => void) {
   return { gesture: Gesture.Exclusive(hold, tap), pressed };
 }
 
-/**
- * How many waiting agents one peek offers buttons for.
- *
- * Three questions is most of a phone and this has no scroll in it: it tops out
- * at 16% of the window and grows down. Two, then a line saying how many more
- * are waiting — which is still two answers for one long press, and the whole
- * reason the component exists.
- */
-export const ANSWERS = 2;
-
-/**
- * The questions a held row can answer, and the one call that answers them.
- *
- * **One hook rather than the same twenty lines in two screens**, for the
- * reason `usePeekable` is one hook: the home and the Workspaces destination
- * had already drifted once, and this is worse to get wrong — the pairing of a
- * question to the agent it was asked by is what decides whose approval a
- * button grants.
- *
- * `usePending` per agent, and a fixed number of them: hooks cannot be called
- * in a loop whose length changes, which is the other reason the cap is a
- * constant rather than a preference. Both calls are inert when nothing is
- * held — a null id makes no request.
- */
-export function useAnswering(place: Workspace | null, places: Workspace[]) {
-  const waiting = useMemo(() => (place ? asking(place, places) : []), [place, places]);
-  const asks = waiting.slice(0, ANSWERS);
-  const read = [
-    usePending(asks[0]?.id ?? null, !!asks[0]),
-    usePending(asks[1]?.id ?? null, !!asks[1]),
-  ];
-  const answer = useAnswerRequest();
-
-  return {
-    /** The agents being offered an answer, each with what it asked. */
-    asks: asks.map((run, i) => ({ run, asked: read[i].asked, reading: read[i].reading })),
-    /** Everyone waiting, including the ones past the cap. */
-    waiting: waiting.length,
-    onAnswer: (run: Session, yes: boolean) => {
-      const asked = read[asks.findIndex((r) => r.id === run.id)]?.asked;
-      /* No `req`, no answer. A button that fires against a request that could
-         not be read is worse than no button — see `api/pending.ts`. */
-      if (!asked) return;
-      answer.mutate({
-        id: run.id,
-        data: {
-          req: asked.req,
-          decision: yes ? { decision: "Allow" } : { decision: "Deny", reason: null },
-        },
-      });
-    },
-  };
-}
-
-/** One agent's question, with both answers on it. */
-export type Ask = { run: Session; asked?: Asked | null; reading?: boolean };
-
 type Answer = { label: string; run: () => void; tone?: "loud" | "quiet"; count?: number; go?: boolean };
 
 /**
@@ -198,7 +138,7 @@ function Asking({
 }: {
   ask: Ask;
   at: number;
-  onAnswer?: (run: Session, yes: boolean) => void;
+  onAnswer?: (ask: Ask, yes: boolean) => void;
   close: () => void;
 }) {
   /* The agent's own note is better than anything derivable, and it is what
@@ -228,7 +168,7 @@ function Asking({
             testID={`peek-no${suffix}`}
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              onAnswer?.(ask.run, false);
+              onAnswer?.(ask, false);
               close();
             }}
             className="h-12 flex-1 items-center justify-center rounded-field bg-ground"
@@ -241,7 +181,7 @@ function Asking({
             testID={`peek-yes${suffix}`}
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-              onAnswer?.(ask.run, true);
+              onAnswer?.(ask, true);
               close();
             }}
             className="h-12 flex-1 items-center justify-center rounded-field bg-bone"
@@ -293,7 +233,7 @@ export function Peek({
   asks?: Ask[];
   /** Everyone waiting, including the ones past the cap. */
   waiting?: number;
-  onAnswer?: (run: Session, yes: boolean) => void;
+  onAnswer?: (ask: Ask, yes: boolean) => void;
   onEnd: () => void;
 }) {
   const { color } = useTheme();
