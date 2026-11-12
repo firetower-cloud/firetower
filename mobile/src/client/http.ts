@@ -10,8 +10,13 @@
  * reason the desktop does it: every generated call would otherwise need it
  * threaded through, and a call that forgot would fail as a 401 rather than as
  * a type error.
+ *
+ * Reading it from module state is also the one thing a long operation cannot
+ * rely on, so a request may name the Firetower it is for and go there or
+ * nowhere — see {@link Aimed} and {@link destination}.
  */
-import { servers, tokenFor } from "~/native/servers";
+import { identity } from "~/api/identity";
+import { servers, tokenFor, type Connected } from "~/native/servers";
 
 export class ApiError extends Error {
   constructor(
@@ -47,6 +52,19 @@ function here() {
   return all.find((s) => s.serverId === current) ?? all[0];
 }
 
+/**
+ * Which Firetower a request sent **right now** would reach — the whole of it,
+ * account included.
+ *
+ * `here()` itself rather than a second opinion about it: a flow that has to
+ * notice its destination moving must read the same resolution the request
+ * will. {@link currentBackend} answers a `serverId`, which is half of the
+ * question twice over — the same address with somebody else signed into it is
+ * not the same destination, and `forget()` moves what `here()` resolves to
+ * without `current` changing at all.
+ */
+export const destination = (): Connected | undefined => here();
+
 export const apiBase = () => here()?.url ?? "";
 export const wsBase = () => apiBase().replace(/^http/, "ws");
 export const token = () => {
@@ -55,16 +73,48 @@ export const token = () => {
 };
 export const meansSignedOut = (code: string) => code === "Unauthorized";
 
-/** Called by every generated operation as `http(url, init)`. */
-export const http = async <T>(url: string, init: RequestInit = {}): Promise<T> => {
-  const server = here();
-  if (!server) throw new ApiError("NoServer", "no Firetower is selected", 0);
+/**
+ * A request, and optionally the Firetower it is **for**.
+ *
+ * `here()` reads module state the app changes underneath it: switch server and
+ * everything sent afterwards goes somewhere else. That is right for a screen
+ * reading data — it is the screen you are on — and wrong for a sequence that
+ * has already asked a person a question about one particular place. Read the
+ * workspace on one Firetower, ask, and the answer can arrive pointed at
+ * another: same operation, different machine.
+ *
+ * So a request may name its destination and then it goes there or nowhere.
+ * `ui/end.ts` is the one call in this app that cannot be taken back and is
+ * the reason this exists.
+ *
+ * **The identity, not the `serverId`.** The same address with somebody else
+ * signed into it is not the server the question was asked about — which is
+ * why this reaches into `api/identity` for the one function that encodes the
+ * pair. That module imports nothing, so the direction of the dependency is
+ * the only thing it costs.
+ */
+export type Aimed = RequestInit & { firetower?: string };
 
-  const headers = new Headers(init.headers);
+/** Called by every generated operation as `http(url, init)`. */
+export const http = async <T>(url: string, init: Aimed = {}): Promise<T> => {
+  const { firetower, ...rest } = init;
+  /* Named, or resolved. A named one that is no longer connected is refused
+     rather than quietly sent to whatever is current — being pointed at the
+     wrong machine is the whole of what naming it prevents. */
+  const server = firetower ? servers().find((s) => identity(s) === firetower) : here();
+  if (!server) {
+    throw new ApiError(
+      "NoServer",
+      firetower ? "that Firetower is not connected any more" : "no Firetower is selected",
+      0,
+    );
+  }
+
+  const headers = new Headers(rest.headers);
   if (!headers.has("content-type")) headers.set("content-type", "application/json");
   headers.set("authorization", `Bearer ${tokenFor(server.serverId)}`);
 
-  const res = await fetch(`${server.url}${url}`, { ...init, headers });
+  const res = await fetch(`${server.url}${url}`, { ...rest, headers });
   if (!res.ok) throw await ApiError.from(res);
   if (res.status === 204 || res.headers.get("content-length") === "0") return undefined as T;
   const text = await res.text();
