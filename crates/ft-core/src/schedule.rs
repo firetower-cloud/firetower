@@ -315,6 +315,36 @@ pub struct ScheduleCheckout {
     pub slug: String,
 }
 
+/// What an approved run will do, beyond its prompt and its clock.
+///
+/// **The pins, as a client reads them.** Every one of these is fixed when
+/// somebody approves the schedule and resolved nowhere else afterwards — see
+/// `api::schedules::pins_for`. Nothing exposed them, so no screen could say
+/// what it was approving, and the edit sheet had nothing to fill itself in
+/// from: it could offer the prompt and the clock and would have silently
+/// reset the engine, the subscription, the profile, the controls and the
+/// skills to whatever a fresh form defaults to.
+///
+/// Ids rather than names: this is what a form sends back. A screen that wants
+/// to *draw* them joins against the lists it already has.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduleChoices {
+    /// **The engine that will actually run** — the profile's, where one pins
+    /// an engine, rather than the one the request named.
+    pub agent: crate::Agent,
+    /// The subscription it spends. Null only on a draft nobody has approved,
+    /// or an engine that authenticates nothing.
+    pub account_id: Option<String>,
+    pub profile: Option<String>,
+    /// Model, effort, permissions and sandbox, as approved. An absent field
+    /// is one the agent decides for itself; see `agentDecides` in the pins.
+    pub settings: crate::controls::Preferred,
+    /// The skills each run reads, by id, resolved at approval.
+    #[serde(default)]
+    pub skills: Vec<String>,
+}
+
 /// A schedule, as a client reads it.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -355,6 +385,8 @@ pub struct Schedule {
     /// clean-run rule would read a bare workspace as the safe case and delete
     /// every file the agent made.
     pub delete_clean_runs: bool,
+    /// What it will run, as approved. See [`ScheduleChoices`].
+    pub choices: ScheduleChoices,
     /// How many of this schedule's runs are still holding a workspace.
     ///
     /// Drawn in both switch states. With no cap this is the only thing that

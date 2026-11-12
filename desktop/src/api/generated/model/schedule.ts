@@ -10,6 +10,7 @@ import type { PausedReason } from './pausedReason.ts';
 import type { Provenance } from './provenance.ts';
 import type { RepoId } from './repoId.ts';
 import type { ScheduleCheckout } from './scheduleCheckout.ts';
+import type { ScheduleChoices } from './scheduleChoices.ts';
 import type { ScheduleId } from './scheduleId.ts';
 import type { ScheduleRun } from './scheduleRun.ts';
 import type { Streak } from './streak.ts';
@@ -29,6 +30,8 @@ export interface Schedule {
   approvedAt?: string | null;
   /** @nullable */
   base?: string | null;
+  /** What it will run, as approved. See [`ScheduleChoices`]. */
+  choices: ScheduleChoices;
   createdAt: string;
   /**
      * Whether a clean run's workspace is deleted.

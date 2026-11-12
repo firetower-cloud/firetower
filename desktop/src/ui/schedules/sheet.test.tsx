@@ -32,6 +32,7 @@ import type {
   Host,
   Repo,
   Role,
+  Schedule,
   Skill,
 } from "~/api/generated/model";
 
@@ -183,6 +184,112 @@ describe("the create sheet", () => {
     );
     expect(html).toContain("No machine to run on yet.");
     expect(html).toContain("Pick a machine for it to run on");
+  });
+});
+
+/** One as the server reports it, with everything an edit has to fill in. */
+const saved = {
+  id: "sch_01edit",
+  name: "Dependency audit",
+  prompt: "check every dependency for a newer version",
+  repoId: "r_02api",
+  repoSlug: "acme/api",
+  repos: [{ id: "r_02api", slug: "acme/api" }],
+  base: "trunk",
+  hostId: host.id,
+  hostName: "studio",
+  active: true,
+  pausedReason: null,
+  approvedAt: "2026-11-01T08:30:00Z",
+  revision: 3,
+  deleteCleanRuns: false,
+  workspacesKept: 0,
+  runsTotal: 4,
+  lastRun: null,
+  streak: { failures: 0, counted: 0, unreachable: 0, questions: 0 },
+  made: { byAgent: false, who: "You", fromSessionId: null, fromWorkspaceName: null, at: "2026-11-01T08:00:00Z" },
+  createdAt: "2026-11-01T08:00:00Z",
+  updatedAt: "2026-11-01T08:00:00Z",
+  triggers: [
+    {
+      id: "trg_01",
+      kind: "cron",
+      cadence: { kind: "weekly", at: "06:15", day: "thursday" },
+      timezone: "Europe/Paris",
+      enabled: true,
+      expr: "15 6 * * 4",
+      reads: "Every Thursday at 06:15",
+      nextFires: [],
+      nextFireAt: null,
+    },
+  ],
+  choices: {
+    agent: "ClaudeCode",
+    accountId: "acct_work",
+    profile: null,
+    settings: { model: "opus-5", mode: "dontAsk" },
+    skills: ["sk_01"],
+  },
+} as unknown as Schedule;
+
+/**
+ * **Editing is the same sheet, filled in.**
+ *
+ * There was no way to edit a schedule at all: the button navigated to
+ * `?edit=1` and nothing read it. And filling the form in was not possible
+ * until `Schedule.choices` existed — the approved engine, subscription,
+ * profile, controls and skills were in the pins and nothing exposed them, so
+ * a form could only have reset every one of them to a fresh default and
+ * called that an edit.
+ */
+describe("the sheet, editing one that exists", () => {
+  const drawn = () =>
+    renderToStaticMarkup(
+      <QueryClientProvider client={cache()}>
+        <NewSchedule from={null} editing={saved} onClose={() => {}} />
+      </QueryClientProvider>,
+    );
+
+  it("says which act this is", () => {
+    const html = drawn();
+    expect(html).toContain("Edit schedule");
+    expect(html).toContain("Save changes");
+    // It was on, so saving is approving what it says now.
+    expect(html).toContain("Saving this approves what it says now.");
+  });
+
+  it("fills in what the schedule already says", () => {
+    const html = drawn();
+    expect(html).toContain('value="Dependency audit"');
+    expect(html).toContain("check every dependency for a newer version");
+    // The repository it checks out, on the chip rather than as a count.
+    expect(html).toContain("acme/api");
+    // Its own cadence and zone, not the form's defaults.
+    expect(html).toContain('value="weekly"');
+    expect(html).toContain('value="thursday"');
+    expect(html).toContain('value="06:15"');
+    expect(html).toContain('value="Europe/Paris"');
+    // And the branch it branches from, which is why Advanced is open.
+    expect(html).toContain('value="trunk"');
+  });
+
+  it("keeps the engine's remembered controls out of it", () => {
+    // `choices.settings` is what was approved. The mode here is the engine's
+    // never-ask word, which is also what a new sheet would pick — the model
+    // is the one that proves it came from the schedule rather than from the
+    // catalogue's own default.
+    expect(saved.choices.settings.model).toBe("opus-5");
+    expect(drawn()).toContain("Opus 5");
+  });
+
+  it("leaves one that was switched off switched off", () => {
+    const paused = { ...saved, active: false } as Schedule;
+    const html = renderToStaticMarkup(
+      <QueryClientProvider client={cache()}>
+        <NewSchedule from={null} editing={paused} onClose={() => {}} />
+      </QueryClientProvider>,
+    );
+    expect(html).toContain("It stays switched off until you turn it on.");
   });
 });
 

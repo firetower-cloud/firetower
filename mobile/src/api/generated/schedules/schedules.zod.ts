@@ -61,6 +61,18 @@ export const ListSchedulesResponseItem = zod.object({
   "active": zod.boolean().describe('Whether it is on. Off and `pausedReason: null` is a person\'s doing.'),
   "approvedAt": zod.iso.datetime({"offset":true}).nullish().describe('Null until a person turns it on. The whole of "an agent may propose but\nnot activate".'),
   "base": zod.string().nullish(),
+  "choices": zod.object({
+  "accountId": zod.string().nullish().describe('The subscription it spends. Null only on a draft nobody has approved,\nor an engine that authenticates nothing.'),
+  "agent": zod.enum(['ClaudeCode', 'Codex', 'KimiCode', 'CursorAgent', 'Shell']).describe('**The engine that will actually run** — the profile\'s, where one pins\nan engine, rather than the one the request named.'),
+  "profile": zod.string().nullish(),
+  "settings": zod.object({
+  "effort": zod.string().nullish(),
+  "mode": zod.string().nullish(),
+  "model": zod.string().nullish(),
+  "sandbox": zod.string().nullish()
+}).describe('Model, effort, permissions and sandbox, as approved. An absent field\nis one the agent decides for itself; see `agentDecides` in the pins.'),
+  "skills": zod.array(zod.string()).optional().describe('The skills each run reads, by id, resolved at approval.')
+}).describe('What it will run, as approved. See [`ScheduleChoices`].'),
   "createdAt": zod.iso.datetime({"offset":true}),
   "deleteCleanRuns": zod.boolean().describe('Whether a clean run\'s workspace is deleted.\n\nAlways false, and not offered as a control, when there is no\nrepository: `session_work` answers an empty list for a workspace with\nnothing checked out, so "nothing uncommitted" is vacuously true and a\nclean-run rule would read a bare workspace as the safe case and delete\nevery file the agent made.'),
   "hostId": zod.union([zod.null(),zod.string().describe('The machine each run starts on, when the schedule names one.\n\n`null` means the scheduler places it — which is what a proposal that\nnamed no machine leaves behind. The create sheet always names one.')]).optional(),
@@ -239,6 +251,18 @@ export const CreateScheduleResponse = zod.object({
   "active": zod.boolean().describe('Whether it is on. Off and `pausedReason: null` is a person\'s doing.'),
   "approvedAt": zod.iso.datetime({"offset":true}).nullish().describe('Null until a person turns it on. The whole of "an agent may propose but\nnot activate".'),
   "base": zod.string().nullish(),
+  "choices": zod.object({
+  "accountId": zod.string().nullish().describe('The subscription it spends. Null only on a draft nobody has approved,\nor an engine that authenticates nothing.'),
+  "agent": zod.enum(['ClaudeCode', 'Codex', 'KimiCode', 'CursorAgent', 'Shell']).describe('**The engine that will actually run** — the profile\'s, where one pins\nan engine, rather than the one the request named.'),
+  "profile": zod.string().nullish(),
+  "settings": zod.object({
+  "effort": zod.string().nullish(),
+  "mode": zod.string().nullish(),
+  "model": zod.string().nullish(),
+  "sandbox": zod.string().nullish()
+}).describe('Model, effort, permissions and sandbox, as approved. An absent field\nis one the agent decides for itself; see `agentDecides` in the pins.'),
+  "skills": zod.array(zod.string()).optional().describe('The skills each run reads, by id, resolved at approval.')
+}).describe('What it will run, as approved. See [`ScheduleChoices`].'),
   "createdAt": zod.iso.datetime({"offset":true}),
   "deleteCleanRuns": zod.boolean().describe('Whether a clean run\'s workspace is deleted.\n\nAlways false, and not offered as a control, when there is no\nrepository: `session_work` answers an empty list for a workspace with\nnothing checked out, so "nothing uncommitted" is vacuously true and a\nclean-run rule would read a bare workspace as the safe case and delete\nevery file the agent made.'),
   "hostId": zod.union([zod.null(),zod.string().describe('The machine each run starts on, when the schedule names one.\n\n`null` means the scheduler places it — which is what a proposal that\nnamed no machine leaves behind. The create sheet always names one.')]).optional(),
@@ -400,6 +424,18 @@ export const OneScheduleResponse = zod.object({
   "active": zod.boolean().describe('Whether it is on. Off and `pausedReason: null` is a person\'s doing.'),
   "approvedAt": zod.iso.datetime({"offset":true}).nullish().describe('Null until a person turns it on. The whole of "an agent may propose but\nnot activate".'),
   "base": zod.string().nullish(),
+  "choices": zod.object({
+  "accountId": zod.string().nullish().describe('The subscription it spends. Null only on a draft nobody has approved,\nor an engine that authenticates nothing.'),
+  "agent": zod.enum(['ClaudeCode', 'Codex', 'KimiCode', 'CursorAgent', 'Shell']).describe('**The engine that will actually run** — the profile\'s, where one pins\nan engine, rather than the one the request named.'),
+  "profile": zod.string().nullish(),
+  "settings": zod.object({
+  "effort": zod.string().nullish(),
+  "mode": zod.string().nullish(),
+  "model": zod.string().nullish(),
+  "sandbox": zod.string().nullish()
+}).describe('Model, effort, permissions and sandbox, as approved. An absent field\nis one the agent decides for itself; see `agentDecides` in the pins.'),
+  "skills": zod.array(zod.string()).optional().describe('The skills each run reads, by id, resolved at approval.')
+}).describe('What it will run, as approved. See [`ScheduleChoices`].'),
   "createdAt": zod.iso.datetime({"offset":true}),
   "deleteCleanRuns": zod.boolean().describe('Whether a clean run\'s workspace is deleted.\n\nAlways false, and not offered as a control, when there is no\nrepository: `session_work` answers an empty list for a workspace with\nnothing checked out, so "nothing uncommitted" is vacuously true and a\nclean-run rule would read a bare workspace as the safe case and delete\nevery file the agent made.'),
   "hostId": zod.union([zod.null(),zod.string().describe('The machine each run starts on, when the schedule names one.\n\n`null` means the scheduler places it — which is what a proposal that\nnamed no machine leaves behind. The create sheet always names one.')]).optional(),
@@ -583,6 +619,18 @@ export const UpdateScheduleResponse = zod.object({
   "active": zod.boolean().describe('Whether it is on. Off and `pausedReason: null` is a person\'s doing.'),
   "approvedAt": zod.iso.datetime({"offset":true}).nullish().describe('Null until a person turns it on. The whole of "an agent may propose but\nnot activate".'),
   "base": zod.string().nullish(),
+  "choices": zod.object({
+  "accountId": zod.string().nullish().describe('The subscription it spends. Null only on a draft nobody has approved,\nor an engine that authenticates nothing.'),
+  "agent": zod.enum(['ClaudeCode', 'Codex', 'KimiCode', 'CursorAgent', 'Shell']).describe('**The engine that will actually run** — the profile\'s, where one pins\nan engine, rather than the one the request named.'),
+  "profile": zod.string().nullish(),
+  "settings": zod.object({
+  "effort": zod.string().nullish(),
+  "mode": zod.string().nullish(),
+  "model": zod.string().nullish(),
+  "sandbox": zod.string().nullish()
+}).describe('Model, effort, permissions and sandbox, as approved. An absent field\nis one the agent decides for itself; see `agentDecides` in the pins.'),
+  "skills": zod.array(zod.string()).optional().describe('The skills each run reads, by id, resolved at approval.')
+}).describe('What it will run, as approved. See [`ScheduleChoices`].'),
   "createdAt": zod.iso.datetime({"offset":true}),
   "deleteCleanRuns": zod.boolean().describe('Whether a clean run\'s workspace is deleted.\n\nAlways false, and not offered as a control, when there is no\nrepository: `session_work` answers an empty list for a workspace with\nnothing checked out, so "nothing uncommitted" is vacuously true and a\nclean-run rule would read a bare workspace as the safe case and delete\nevery file the agent made.'),
   "hostId": zod.union([zod.null(),zod.string().describe('The machine each run starts on, when the schedule names one.\n\n`null` means the scheduler places it — which is what a proposal that\nnamed no machine leaves behind. The create sheet always names one.')]).optional(),
@@ -709,6 +757,18 @@ export const ApproveScheduleResponse = zod.object({
   "active": zod.boolean().describe('Whether it is on. Off and `pausedReason: null` is a person\'s doing.'),
   "approvedAt": zod.iso.datetime({"offset":true}).nullish().describe('Null until a person turns it on. The whole of "an agent may propose but\nnot activate".'),
   "base": zod.string().nullish(),
+  "choices": zod.object({
+  "accountId": zod.string().nullish().describe('The subscription it spends. Null only on a draft nobody has approved,\nor an engine that authenticates nothing.'),
+  "agent": zod.enum(['ClaudeCode', 'Codex', 'KimiCode', 'CursorAgent', 'Shell']).describe('**The engine that will actually run** — the profile\'s, where one pins\nan engine, rather than the one the request named.'),
+  "profile": zod.string().nullish(),
+  "settings": zod.object({
+  "effort": zod.string().nullish(),
+  "mode": zod.string().nullish(),
+  "model": zod.string().nullish(),
+  "sandbox": zod.string().nullish()
+}).describe('Model, effort, permissions and sandbox, as approved. An absent field\nis one the agent decides for itself; see `agentDecides` in the pins.'),
+  "skills": zod.array(zod.string()).optional().describe('The skills each run reads, by id, resolved at approval.')
+}).describe('What it will run, as approved. See [`ScheduleChoices`].'),
   "createdAt": zod.iso.datetime({"offset":true}),
   "deleteCleanRuns": zod.boolean().describe('Whether a clean run\'s workspace is deleted.\n\nAlways false, and not offered as a control, when there is no\nrepository: `session_work` answers an empty list for a workspace with\nnothing checked out, so "nothing uncommitted" is vacuously true and a\nclean-run rule would read a bare workspace as the safe case and delete\nevery file the agent made.'),
   "hostId": zod.union([zod.null(),zod.string().describe('The machine each run starts on, when the schedule names one.\n\n`null` means the scheduler places it — which is what a proposal that\nnamed no machine leaves behind. The create sheet always names one.')]).optional(),
@@ -824,6 +884,18 @@ export const PauseScheduleResponse = zod.object({
   "active": zod.boolean().describe('Whether it is on. Off and `pausedReason: null` is a person\'s doing.'),
   "approvedAt": zod.iso.datetime({"offset":true}).nullish().describe('Null until a person turns it on. The whole of "an agent may propose but\nnot activate".'),
   "base": zod.string().nullish(),
+  "choices": zod.object({
+  "accountId": zod.string().nullish().describe('The subscription it spends. Null only on a draft nobody has approved,\nor an engine that authenticates nothing.'),
+  "agent": zod.enum(['ClaudeCode', 'Codex', 'KimiCode', 'CursorAgent', 'Shell']).describe('**The engine that will actually run** — the profile\'s, where one pins\nan engine, rather than the one the request named.'),
+  "profile": zod.string().nullish(),
+  "settings": zod.object({
+  "effort": zod.string().nullish(),
+  "mode": zod.string().nullish(),
+  "model": zod.string().nullish(),
+  "sandbox": zod.string().nullish()
+}).describe('Model, effort, permissions and sandbox, as approved. An absent field\nis one the agent decides for itself; see `agentDecides` in the pins.'),
+  "skills": zod.array(zod.string()).optional().describe('The skills each run reads, by id, resolved at approval.')
+}).describe('What it will run, as approved. See [`ScheduleChoices`].'),
   "createdAt": zod.iso.datetime({"offset":true}),
   "deleteCleanRuns": zod.boolean().describe('Whether a clean run\'s workspace is deleted.\n\nAlways false, and not offered as a control, when there is no\nrepository: `session_work` answers an empty list for a workspace with\nnothing checked out, so "nothing uncommitted" is vacuously true and a\nclean-run rule would read a bare workspace as the safe case and delete\nevery file the agent made.'),
   "hostId": zod.union([zod.null(),zod.string().describe('The machine each run starts on, when the schedule names one.\n\n`null` means the scheduler places it — which is what a proposal that\nnamed no machine leaves behind. The create sheet always names one.')]).optional(),
@@ -941,6 +1013,18 @@ export const ResumeScheduleResponse = zod.object({
   "active": zod.boolean().describe('Whether it is on. Off and `pausedReason: null` is a person\'s doing.'),
   "approvedAt": zod.iso.datetime({"offset":true}).nullish().describe('Null until a person turns it on. The whole of "an agent may propose but\nnot activate".'),
   "base": zod.string().nullish(),
+  "choices": zod.object({
+  "accountId": zod.string().nullish().describe('The subscription it spends. Null only on a draft nobody has approved,\nor an engine that authenticates nothing.'),
+  "agent": zod.enum(['ClaudeCode', 'Codex', 'KimiCode', 'CursorAgent', 'Shell']).describe('**The engine that will actually run** — the profile\'s, where one pins\nan engine, rather than the one the request named.'),
+  "profile": zod.string().nullish(),
+  "settings": zod.object({
+  "effort": zod.string().nullish(),
+  "mode": zod.string().nullish(),
+  "model": zod.string().nullish(),
+  "sandbox": zod.string().nullish()
+}).describe('Model, effort, permissions and sandbox, as approved. An absent field\nis one the agent decides for itself; see `agentDecides` in the pins.'),
+  "skills": zod.array(zod.string()).optional().describe('The skills each run reads, by id, resolved at approval.')
+}).describe('What it will run, as approved. See [`ScheduleChoices`].'),
   "createdAt": zod.iso.datetime({"offset":true}),
   "deleteCleanRuns": zod.boolean().describe('Whether a clean run\'s workspace is deleted.\n\nAlways false, and not offered as a control, when there is no\nrepository: `session_work` answers an empty list for a workspace with\nnothing checked out, so "nothing uncommitted" is vacuously true and a\nclean-run rule would read a bare workspace as the safe case and delete\nevery file the agent made.'),
   "hostId": zod.union([zod.null(),zod.string().describe('The machine each run starts on, when the schedule names one.\n\n`null` means the scheduler places it — which is what a proposal that\nnamed no machine leaves behind. The create sheet always names one.')]).optional(),

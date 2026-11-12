@@ -1244,6 +1244,34 @@ async fn assemble(state: &AppState, row: crate::db::ScheduleRow) -> ApiResult<Sc
         None => None,
     };
 
+    // **Straight off the pins and the spec**, with no query of its own:
+    // `assemble` runs for every row of the library and a name lookup per
+    // schedule would be a list that costs a join per row. A screen that wants
+    // names has the profiles and the accounts already.
+    let choices = ft_core::schedule::ScheduleChoices {
+        agent: engine_of(&row.spec),
+        account_id: row
+            .pins
+            .get("accountId")
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
+        profile: row
+            .pins
+            .get("profile")
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
+        settings: row
+            .pins
+            .get("settings")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default(),
+        skills: row
+            .pins
+            .get("skills")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default(),
+    };
+
     let by_agent = row.from_session_id.is_some();
     let who = match by_agent {
         true => row
@@ -1276,6 +1304,7 @@ async fn assemble(state: &AppState, row: crate::db::ScheduleRow) -> ApiResult<Sc
         repos,
         host_id,
         host_name,
+        choices,
         base: row
             .spec
             .get("base")

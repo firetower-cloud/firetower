@@ -37,6 +37,7 @@
 import {
   approveSchedule,
   createSchedule,
+  updateSchedule,
 } from "~/api/generated/schedules/schedules";
 import type { NewSchedule, Schedule } from "~/api/generated/model";
 
@@ -65,6 +66,45 @@ export async function createAndTurnOn(req: NewSchedule): Promise<Made> {
         e instanceof Error
           ? e.message
           : "it was written down but could not be turned on",
+    };
+  }
+}
+
+/**
+ * Saving an edit, which is the same two acts in the same order.
+ *
+ * **An edit un-approves.** `PATCH /schedules/{id}` bumps `revision`, clears
+ * `approved_at` and switches the schedule off — anything else would let
+ * somebody change what an approved run does without approving the change,
+ * which is the whole of what approval is for. So a schedule that was *on*
+ * before the edit is approved again at its new revision: the person has just
+ * read the consequence summary and pressed Save, which is the same decision
+ * pressing Create is.
+ *
+ * One that was **off** stays off. Editing is not a way to turn something on:
+ * a proposal nobody has approved, or a schedule somebody paused, is left as
+ * they left it and the switch is still theirs to press.
+ */
+export async function saveEdits(
+  id: string,
+  req: NewSchedule,
+  wasOn: boolean,
+): Promise<Made> {
+  const schedule = await updateSchedule(id, req);
+  if (!wasOn) {
+    return { on: false, schedule, why: "it was switched off before you edited it" };
+  }
+  try {
+    return {
+      on: true,
+      // The revision the edit just produced, which is the one on screen.
+      schedule: await approveSchedule(id, { revision: schedule.revision }),
+    };
+  } catch (e) {
+    return {
+      on: false,
+      schedule,
+      why: e instanceof Error ? e.message : "the change was saved but could not be turned on",
     };
   }
 }

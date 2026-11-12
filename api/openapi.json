@@ -15065,6 +15065,7 @@
           "revision",
           "triggers",
           "deleteCleanRuns",
+          "choices",
           "workspacesKept",
           "streak",
           "runsTotal",
@@ -15090,6 +15091,10 @@
               "string",
               "null"
             ]
+          },
+          "choices": {
+            "$ref": "#/components/schemas/ScheduleChoices",
+            "description": "What it will run, as approved. See [`ScheduleChoices`]."
           },
           "createdAt": {
             "type": "string",
@@ -15216,6 +15221,44 @@
           },
           "slug": {
             "type": "string"
+          }
+        }
+      },
+      "ScheduleChoices": {
+        "type": "object",
+        "description": "What an approved run will do, beyond its prompt and its clock.\n\n**The pins, as a client reads them.** Every one of these is fixed when\nsomebody approves the schedule and resolved nowhere else afterwards — see\n`api::schedules::pins_for`. Nothing exposed them, so no screen could say\nwhat it was approving, and the edit sheet had nothing to fill itself in\nfrom: it could offer the prompt and the clock and would have silently\nreset the engine, the subscription, the profile, the controls and the\nskills to whatever a fresh form defaults to.\n\nIds rather than names: this is what a form sends back. A screen that wants\nto *draw* them joins against the lists it already has.",
+        "required": [
+          "agent",
+          "settings"
+        ],
+        "properties": {
+          "accountId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The subscription it spends. Null only on a draft nobody has approved,\nor an engine that authenticates nothing."
+          },
+          "agent": {
+            "$ref": "#/components/schemas/Agent",
+            "description": "**The engine that will actually run** — the profile's, where one pins\nan engine, rather than the one the request named."
+          },
+          "profile": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "settings": {
+            "$ref": "#/components/schemas/Preferred",
+            "description": "Model, effort, permissions and sandbox, as approved. An absent field\nis one the agent decides for itself; see `agentDecides` in the pins."
+          },
+          "skills": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The skills each run reads, by id, resolved at approval."
           }
         }
       },

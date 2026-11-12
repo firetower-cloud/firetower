@@ -236,6 +236,7 @@ export * from './runSource';
 export * from './runState';
 export * from './schedule';
 export * from './scheduleCheckout';
+export * from './scheduleChoices';
 export * from './scheduleId';
 export * from './scheduleRun';
 export * from './scheduleRunId';

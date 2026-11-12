@@ -23,7 +23,7 @@
  * the sheet, which hid the fact that there was anything below the fold at all.
  * It is the last card in the body now.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronDown,
   Diamond,
@@ -49,7 +49,7 @@ import { navigate } from "~/shims/next-navigation";
 import { useListRoles } from "~/api/generated/roles/roles";
 import { useAgentControls } from "~/api/generated/agents/agents";
 import { getListSchedulesQueryKey, readCadence } from "~/api/generated/schedules/schedules";
-import { createAndTurnOn } from "./create";
+import { createAndTurnOn, saveEdits } from "./create";
 import { unattendedValue } from "./controls";
 import type {
   Agent,
@@ -57,6 +57,7 @@ import type {
   CadenceAnswer,
   Control,
   ControlKind,
+  Schedule,
   Weekday,
 } from "~/api/generated/model";
 import type { Example } from "./examples";
@@ -75,7 +76,28 @@ const DAYS: Weekday[] = ["monday", "tuesday", "wednesday", "thursday", "friday",
 
 type Checkout = { id: string; slug: string };
 
-export function NewSchedule({ from, onClose }: { from: Example | null; onClose: () => void }) {
+export function NewSchedule({
+  from,
+  editing,
+  onClose,
+}: {
+  from: Example | null;
+  /**
+   * The schedule being changed, where this is an edit rather than a new one.
+   *
+   * **The same sheet, which is the whole design.** There is one set of
+   * controls for what a schedule is, and an edit screen of its own would be a
+   * second one to keep in step. What differs is three words and where Save
+   * goes.
+   *
+   * Everything it fills in comes from [`Schedule`] — including `choices`,
+   * which is the approved engine, subscription, profile, controls and skills.
+   * Nothing exposed those before, so this form could only have reset them to
+   * whatever a fresh one defaults to.
+   */
+  editing?: Schedule | null;
+  onClose: () => void;
+}) {
   const client = useQueryClient();
   const { data: repos } = useRepos();
   const { data: allSkills } = useSkills();
@@ -84,13 +106,16 @@ export function NewSchedule({ from, onClose }: { from: Example | null; onClose: 
   const { data: accounts } = useAccounts();
   const profiles = useListRoles().data ?? [];
 
-  const [name, setName] = useState(from?.name ?? "");
-  const [prompt, setPrompt] = useState(from?.prompt ?? "");
-  const [checkouts, setCheckouts] = useState<Checkout[]>([]);
-  const [profileId, setProfileId] = useState<string | null>(null);
-  const [base, setBase] = useState("");
-  const [advanced, setAdvanced] = useState(false);
-  const [deleteClean, setDeleteClean] = useState(true);
+  const [name, setName] = useState(editing?.name ?? from?.name ?? "");
+  const [prompt, setPrompt] = useState(editing?.prompt ?? from?.prompt ?? "");
+  const [checkouts, setCheckouts] = useState<Checkout[]>(
+    editing ? editing.repos.map((r) => ({ id: r.id, slug: r.slug })) : [],
+  );
+  const [profileId, setProfileId] = useState<string | null>(editing?.choices.profile ?? null);
+  const [base, setBase] = useState(editing?.base ?? "");
+  // Open where there is something in it to see.
+  const [advanced, setAdvanced] = useState(!!editing?.base);
+  const [deleteClean, setDeleteClean] = useState(editing?.deleteCleanRuns ?? true);
   const [saving, setSaving] = useState(false);
   const [refused, setRefused] = useState<string | null>(null);
   /** Which menu is open, and what it drops from. The composer's own idiom. */
@@ -98,10 +123,22 @@ export function NewSchedule({ from, onClose }: { from: Example | null; onClose: 
 
   /* ── What runs it: the machine, the engine, the account, the controls ──
      The same state the composer keeps, so the same components can be fed. */
-  const [where, setWhere] = useState<Where>({ machine: "", hostId: "", agent: "" });
-  const [accountId, setAccountId] = useState("");
-  const [chosen, setChosen] = useState<Partial<Record<ControlKind, string>>>({});
-  const [skillIds, setSkillIds] = useState<string[] | null>(null);
+  const [where, setWhere] = useState<Where>({
+    machine: "",
+    hostId: editing?.hostId ?? "",
+    agent: editing?.choices.agent ?? "",
+  });
+  const [accountId, setAccountId] = useState(editing?.choices.accountId ?? "");
+  const [chosen, setChosen] = useState<Partial<Record<ControlKind, string>>>(() => {
+    const was = editing?.choices.settings;
+    if (!was) return {};
+    const seed: Partial<Record<ControlKind, string>> = {};
+    (["model", "effort", "mode", "sandbox"] as ControlKind[]).forEach((k) => {
+      if (was[k]) seed[k] = was[k]!;
+    });
+    return seed;
+  });
+  const [skillIds, setSkillIds] = useState<string[] | null>(editing?.choices.skills ?? null);
 
   const all = useMemo(() => machines(hosts), [hosts]);
   const { host } = useMemo(() => resolve(hosts, where), [hosts, where]);
@@ -109,6 +146,21 @@ export function NewSchedule({ from, onClose }: { from: Example | null; onClose: 
     all.find((m) => m.key === where.machine) ??
     (host ? all.find((m) => m.hosts.some((h) => h.id === host.id)) : undefined) ??
     all[0];
+
+  // **Which machine the host it names belongs to**, once the list is in.
+  // `where.hostId` alone is not enough: `resolve` looks for the host inside
+  // the *machine*, and with no machine chosen that is whichever came first —
+  // so an edit would draw the right machine only by luck and would save the
+  // wrong one.
+  const placed = useRef(false);
+  useEffect(() => {
+    const named = editing?.hostId;
+    if (placed.current || !named || all.length === 0) return;
+    const its = all.find((m) => m.hosts.some((h) => h.id === named));
+    if (!its) return;
+    placed.current = true;
+    setWhere((w) => ({ ...w, machine: its.key, hostId: named }));
+  }, [all, editing?.hostId]);
 
   const profile = profiles.find((p) => p.id === profileId);
   const pinned = (profile?.agent ?? undefined) as Agent | undefined;
@@ -140,8 +192,14 @@ export function NewSchedule({ from, onClose }: { from: Example | null; onClose: 
 
   // A change of engine drops what was chosen for the last one: a model is one
   // agent's, and a mode's word is too.
+  //
+  // **Only a change.** `kind` is `undefined` until the agent list arrives, so
+  // clearing on every run of this wiped what an edit had filled in before
+  // anybody saw it.
+  const lastKind = useRef<Agent | undefined>(undefined);
   useEffect(() => {
-    setChosen({});
+    if (lastKind.current && lastKind.current !== kind) setChosen({});
+    lastKind.current = kind;
   }, [kind]);
 
   // Skills: the set that applies by default — always-on, or a default in a
@@ -155,17 +213,21 @@ export function NewSchedule({ from, onClose }: { from: Example | null; onClose: 
   );
   const selectedSkills = skillIds ?? defaultSkillIds;
 
-  const [kindOf, setKind] = useState<Cadence["kind"]>(from?.cadence.kind ?? "weekdays");
-  const [at, setAt] = useState(("at" in (from?.cadence ?? {}) ? (from!.cadence as { at: string }).at : "") || "08:30");
+  /* The cadence this opens on: the one it already has when this is an edit,
+     the example's when one was picked, and weekdays otherwise. One name for
+     all three so each control below reads one thing. */
+  const was: Cadence | undefined = editing?.triggers[0]?.cadence ?? from?.cadence;
+  const [kindOf, setKind] = useState<Cadence["kind"]>(was?.kind ?? "weekdays");
+  const [at, setAt] = useState(("at" in (was ?? {}) ? (was as { at: string }).at : "") || "08:30");
   const [day, setDay] = useState<Weekday>(
-    from?.cadence.kind === "weekly"
-      ? from.cadence.day
-      : from?.cadence.kind === "monthly" && from.cadence.on.kind === "nth"
-        ? from.cadence.on.day
+    was?.kind === "weekly"
+      ? was.day
+      : was?.kind === "monthly" && was.on.kind === "nth"
+        ? was.on.day
         : "monday",
   );
   const [dayOfMonth, setDayOfMonth] = useState(
-    from?.cadence.kind === "monthly" && from.cadence.on.kind === "day" ? from.cadence.on.day : 1,
+    was?.kind === "monthly" && was.on.kind === "day" ? was.on.day : 1,
   );
   /**
    * **A month has two ways of saying which day**, and only one of them is a
@@ -177,17 +239,22 @@ export function NewSchedule({ from, onClose }: { from: Example | null; onClose: 
    * the 1st.
    */
   const [monthly, setMonthly] = useState<"day" | "nth">(
-    from?.cadence.kind === "monthly" ? from.cadence.on.kind : "day",
+    was?.kind === "monthly" ? was.on.kind : "day",
   );
   const [nth, setNth] = useState(
-    from?.cadence.kind === "monthly" && from.cadence.on.kind === "nth" ? from.cadence.on.nth : 1,
+    was?.kind === "monthly" && was.on.kind === "nth" ? was.on.nth : 1,
   );
-  const [expr, setExpr] = useState("0 7 * * 1-5");
+  const [expr, setExpr] = useState(was?.kind === "custom" ? was.expr : "0 7 * * 1-5");
 
   /* The schedule's own zone, defaulted to this computer's because that is
      almost always the answer — and stored as the IANA name, never an offset,
      because an offset is wrong twice a year. */
-  const [zone, setZone] = useState(() => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");
+  const [zone, setZone] = useState(
+    () =>
+      editing?.triggers[0]?.timezone ||
+      Intl.DateTimeFormat().resolvedOptions().timeZone ||
+      "UTC",
+  );
   const here = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
   const cadence: Cadence = useMemo(() => {
@@ -253,11 +320,12 @@ export function NewSchedule({ from, onClose }: { from: Example | null; onClose: 
   const save = async () => {
     setSaving(true);
     try {
-      /* **Created and turned on.** Pressing this is the approval — that is
-         what the summary at the foot of the body is for — and
-         `createAndTurnOn` carries the argument for why that is two calls
-         rather than a flag. */
-      const made = await createAndTurnOn({
+      /* **Created and turned on**, or saved and turned back on. Pressing this
+         is the approval — that is what the summary at the foot of the body is
+         for — and `createAndTurnOn` carries the argument for why that is two
+         calls rather than a flag. `saveEdits` carries the same argument for
+         an edit, which un-approves. */
+      const body = {
         name,
         prompt,
         repoIds: checkouts.map((c) => c.id),
@@ -283,15 +351,21 @@ export function NewSchedule({ from, onClose }: { from: Example | null; onClose: 
            untouched control means. A set somebody chose is sent as itself. */
         skills: skillIds ?? undefined,
         deleteCleanRuns: deleteClean,
-      });
+      };
+      const made = editing
+        ? await saveEdits(editing.id, body, editing.active)
+        : await createAndTurnOn(body);
       await client.invalidateQueries({ queryKey: getListSchedulesQueryKey() });
-      if (!made.on) {
+      /* **Only when it should have ended up on.** An edit to a schedule that
+         was already switched off leaves it off, which is not news — it is
+         where the person left it. */
+      if (!made.on && (!editing || editing.active)) {
         /* It exists and it is off. Said here rather than closing on a
            half-done thing: the row is in the library one switch away, and
            somebody who was told nothing would be waiting for a run that is
            never coming. */
         setRefused(
-          `“${made.schedule.name}” was created but is switched off — ${made.why}. Turn it on from the list when you are ready.`,
+          `“${made.schedule.name}” was ${editing ? "saved" : "created"} but is switched off — ${made.why}. Turn it on from the list when you are ready.`,
         );
         return;
       }
@@ -307,7 +381,7 @@ export function NewSchedule({ from, onClose }: { from: Example | null; onClose: 
     <div className="veil s-veil scroll-slim" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="sheet2 s-sheet" onMouseDown={(e) => e.stopPropagation()}>
         <div className="sh-head">
-          <h2>New schedule</h2>
+          <h2>{editing ? "Edit schedule" : "New schedule"}</h2>
           <IconButton of={X} label="Close" onClick={onClose} />
         </div>
 
@@ -711,7 +785,11 @@ export function NewSchedule({ from, onClose }: { from: Example | null; onClose: 
           <span className="where">
             {all.length === 0
               ? "No machine to run on yet."
-              : "An agent can propose a schedule for you to approve."}
+              : editing
+                ? editing.active
+                  ? "Saving this approves what it says now."
+                  : "It stays switched off until you turn it on."
+                : "An agent can propose a schedule for you to approve."}
           </span>
           <button className="btn quiet" onClick={onClose}>
             Cancel
@@ -722,7 +800,7 @@ export function NewSchedule({ from, onClose }: { from: Example | null; onClose: 
             title={host ? undefined : "Pick a machine for it to run on"}
             onClick={save}
           >
-            Create schedule
+            {editing ? "Save changes" : "Create schedule"}
           </button>
         </div>
       </div>

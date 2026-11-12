@@ -44,6 +44,7 @@ import {
 import { destroySession, sessionWork } from "~/api/generated/sessions/sessions";
 import type { Schedule, ScheduleRun } from "~/api/generated/model";
 import { BackToSchedules, RunNowButton, saysWhen } from "./SchedulesPage";
+import { NewSchedule } from "./NewSchedule";
 import { RunMark, fires, inFlight, keptWhy, ran, runLine, stillMoving, took } from "./view";
 import { pauseSays, stoppedByFiretower } from "./words";
 
@@ -66,6 +67,13 @@ export function ScheduleDetail({ schedule: given }: { schedule: Schedule }) {
    * times a day.
    */
   const [moving, setMoving] = useState(false);
+  /* **The same sheet the create screen uses**, filled in. `?edit=1` is read
+     once on the way in, for the rail's row and for a link somebody kept;
+     afterwards this is ordinary state, like the create sheet on the library
+     screen. */
+  const [editing, setEditing] = useState(
+    () => typeof window !== "undefined" && window.location.hash.includes("edit=1"),
+  );
   const watch = moving ? 5_000 : false;
   const history = useScheduleRuns(given.id, { limit: 20 }, { query: { refetchInterval: watch } });
   const runs = useMemo(() => history.data ?? [], [history.data]);
@@ -166,7 +174,7 @@ export function ScheduleDetail({ schedule: given }: { schedule: Schedule }) {
             ) : (
               <RunNowButton schedule={it} onDone={refresh} />
             )}
-            <button className="btn plain" onClick={() => navigate(`/schedules/${it.id}?edit=1`)}>
+            <button className="btn plain" onClick={() => setEditing(true)}>
               <Icon of={Pencil} size={14} />
               Edit
             </button>
@@ -395,6 +403,16 @@ export function ScheduleDetail({ schedule: given }: { schedule: Schedule }) {
         </div>
       </div>
       {menu.open && <ContextMenu at={menu.open.at} items={items} onClose={menu.close} />}
+      {editing && (
+        <NewSchedule
+          from={null}
+          editing={it}
+          onClose={() => {
+            setEditing(false);
+            void refresh();
+          }}
+        />
+      )}
     </div>
   );
 }
