@@ -148,8 +148,6 @@ def a_control_plane():
     if not key.exists():
         key.write_text(subprocess.run(["openssl", "rand", "-base64", "32"],
                                       capture_output=True, text=True).stdout.strip())
-    psql("DROP DATABASE IF EXISTS ftdemo;")
-    psql("CREATE DATABASE ftdemo;")
     home = WORK / "home"
     subprocess.run(["rm", "-rf", str(home)])
     home.mkdir(parents=True)
@@ -178,6 +176,14 @@ def a_control_plane():
         if port_is_taken(port):
             sys.exit("something is already listening on %d. Set FTDEMO_PORT and "
                      "FTDEMO_MCP_PORT to ports nothing else has." % port)
+
+    # **After the servers are down, never before.** Postgres refuses to drop a
+    # database something is connected to, and a previous run left running is
+    # connected to it — so dropping first silently did nothing, and the demo
+    # ran against a database that already had its own connectors in it and
+    # refused every one of them as a duplicate.
+    psql("DROP DATABASE IF EXISTS ftdemo;")
+    psql("CREATE DATABASE ftdemo;")
 
     child = started(["./target/debug/firetower", "serve"], WORK / "server.log", env)
     if not waited_for(API + "/bootstrap") or child.poll() is not None:
@@ -428,6 +434,9 @@ def the_library():
 
 
 def main():
+    # **Not a `finally` that returns.** A `return` inside one discards whatever
+    # exception was in flight, which is how a run that died in the first
+    # function printed one cheerful line and exited zero.
     try:
         a_control_plane()
         demo_one()
@@ -436,16 +445,20 @@ def main():
         demo_two_whole()
         the_library()
         say("Done. The control plane's log is at %s" % (WORK / "server.log"))
-    finally:
-        # `FTDEMO_KEEP=1` leaves both servers up, which is what the screenshot
-        # script needs: it photographs this control plane, with these real
-        # connectors in it, rather than a mock agreeing with itself.
-        if os.environ.get("FTDEMO_KEEP"):
-            print("\n   servers left running · TOKEN=$(cat %s)" % (WORK / "token"))
-            pathlib.Path(WORK / "token").write_text(TOKEN)
-            return
+    except BaseException:
         for child in CHILDREN:
             child.terminate()
+        raise
+
+    # `FTDEMO_KEEP=1` leaves both servers up, which is what the screenshot
+    # script needs: it photographs this control plane, with these real
+    # connectors in it, rather than a mock agreeing with itself.
+    if os.environ.get("FTDEMO_KEEP"):
+        pathlib.Path(WORK / "token").write_text(TOKEN)
+        print("\n   servers left running · TOKEN=$(cat %s)" % (WORK / "token"))
+        return
+    for child in CHILDREN:
+        child.terminate()
 
 
 if __name__ == "__main__":
