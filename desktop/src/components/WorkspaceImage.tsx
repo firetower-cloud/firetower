@@ -37,6 +37,11 @@ export function isWorkspaceSrc(src: string | undefined): src is string {
   return !/^(https?:|data:|blob:|\/\/)/i.test(src);
 }
 
+/** A picture somewhere else on the network, which rendering it would fetch. */
+export function isRemoteSrc(src: string): boolean {
+  return /^(https?:|\/\/)/i.test(src);
+}
+
 export function WorkspaceImage({ src, alt }: { src: string; alt?: string }) {
   const { session } = useContext(ImagesFrom);
   /* `undefined` while it is being looked for, `null` once it is known not to
