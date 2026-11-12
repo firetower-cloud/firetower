@@ -15,14 +15,31 @@
  *
  * Both ids are opaque strings, so no type can tell them apart. This is what
  * there is instead: the distinction stated once, where it is cheap to check.
+ *
+ * ## And, at the end, the band
+ *
+ * The list is labelled where its order turns, which added `bandOf`, `banded`
+ * and `useSettled` to this file. Three of those tests are not about one
+ * example: **the invariant** — *no row's mark is louder than the band it sits
+ * under* — is asserted over a generated fleet, against the two readings it
+ * replaced, because three hand-written cases would not have told us whether
+ * the two changes in `bandOf` are each load-bearing. The last of them mounts a
+ * hook, so `test/hooks.ts` is here as well: what freezes while a row is held
+ * is a fact about the gap between a commit and its effects, which is the one
+ * thing a pure test cannot see.
  */
-import { describe, expect, it } from "vitest";
-import type { Session } from "~/api/generated/model";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { Session, SessionStatus } from "~/api/generated/model";
 import {
   asking,
+  banded,
+  bandOf,
+  BANDS,
   childLine,
   childrenElsewhere,
+  doing,
   familyOf,
+  fleetLine,
   founder,
   group,
   isChild,
@@ -35,10 +52,19 @@ import {
   ranked,
   rowLabel,
   runAt,
+  useSettled,
   waitingAgents,
+  type BandedRow,
+  type Doing,
   type Workspace,
 } from "~/api/workspaces";
-import { BEAT } from "~/api/view";
+import { BEAT, BEAT_TOKEN, inFlight, needsYou } from "~/api/view";
+import * as hooks from "~/test/hooks";
+
+/* For `useSettled` only, at the foot of this file. Nothing above it touches
+   React; `await import` because a `vi.mock` factory is hoisted above the
+   imports it would otherwise close over. */
+vi.mock("react", async () => (await import("~/test/hooks")).react);
 
 /** Enough of a session for `group` and `lead`. */
 const run = (over: Partial<Session> & { id: string }): Session =>
@@ -708,5 +734,490 @@ describe("a row that stands for a family", () => {
       const places = fleet({ status: "HandedBack" }, { status: "Failed" });
       expect(waitingAgents(places)).toBe(0);
     });
+  });
+});
+
+/**
+ * A fleet from a flat description. `of` makes a workspace the child of
+ * another one's founding run, which is the only relation these care about —
+ * a child *in* a workspace is one of its runs and never had a row.
+ */
+type Spot = { id: string; status: SessionStatus; of?: string };
+const fleetOf = (...spots: Spot[]): Workspace[] =>
+  group(
+    spots.map((spot) =>
+      run({
+        id: `s_${spot.id}`,
+        workspaceId: `w_${spot.id}`,
+        parentId: spot.of ? `s_${spot.of}` : undefined,
+        name: spot.of ? `${spot.of} / ${spot.id}` : spot.id,
+        status: spot.status,
+      }),
+    ),
+  ).groups.flatMap(([, inRepo]) => inRepo);
+
+const ids = (rows: BandedRow[]) => rows.map((row) => row.place.id);
+const labels = (rows: BandedRow[]) =>
+  rows.flatMap((row) => (row.turn ? [`${row.turn.says} ${row.turn.count}`] : []));
+
+describe("the band a row reads under", () => {
+  const at = (places: Workspace[], id: string) => places.find((p) => p.id === id)!;
+
+  it("is the family's: an idle parent with a blocked child waits on you", () => {
+    const places = fleetOf({ id: "lead", status: "Ready" }, { id: "kid", status: "NeedsYou", of: "lead" });
+    const parent = at(places, "w_lead");
+
+    /* The reading the desk's rail still has, and the reason this is a third
+       function: the place's own agents are all `Ready`, so it bands as idle
+       while wearing the ember mark its child gave it. */
+    expect(doing(parent)).toBe("idle");
+    expect(placeBeat(parent, places)).toBe("blocked");
+    expect(bandOf(parent, places)).toBe("waiting");
+  });
+
+  it("tests for a person before a machine, so a typing sibling cannot hide a question", () => {
+    const places = fleetOf(
+      { id: "lead", status: "Ready" },
+      { id: "stuck", status: "NeedsYou", of: "lead" },
+      { id: "typing", status: "Working", of: "lead" },
+    );
+    const parent = at(places, "w_lead");
+
+    /* Widening `doing()` to the family and leaving its precedence alone files
+       this under *Working* — one agent is typing, one is stuck, and the
+       heading picks the typing one. That is the second of the two changes. */
+    expect(familyOf(parent, places).some(inFlight)).toBe(true);
+    expect(bandOf(parent, places)).toBe("waiting");
+  });
+
+  it("is working only when nothing in the family wants you", () => {
+    const places = fleetOf({ id: "lead", status: "Ready" }, { id: "kid", status: "Working", of: "lead" });
+    expect(bandOf(at(places, "w_lead"), places)).toBe("working");
+  });
+
+  it("is idle when the family is at rest, which is most of what lands there", () => {
+    const places = fleetOf({ id: "lead", status: "Ready" }, { id: "kid", status: "Ready", of: "lead" });
+    expect(bandOf(at(places, "w_lead"), places)).toBe("idle");
+  });
+
+  /* The two statuses that are not a question and are still your move.
+     `NEEDS_YOU` spans all three, so both band as waiting — which is the point
+     for a failure and the known gap for a hand-back: nothing on the row says
+     it handed back. See the PR body. */
+  it("puts a failure under waiting on you, because it will not go on by itself", () => {
+    const places = fleetOf({ id: "lead", status: "Ready" }, { id: "kid", status: "Failed", of: "lead" });
+    expect(bandOf(at(places, "w_lead"), places)).toBe("waiting");
+  });
+
+  it("puts a hand-back there too, where your move is", () => {
+    const places = fleetOf({ id: "done", status: "HandedBack" });
+    expect(bandOf(at(places, "w_done"), places), "D6: with a sage mark, and nothing saying so").toBe(
+      "waiting",
+    );
+  });
+
+  it("finds no family in a list its children have been taken out of", () => {
+    const places = fleetOf({ id: "lead", status: "Ready" }, { id: "kid", status: "NeedsYou", of: "lead" });
+    const rows = places.filter((p) => !isChild(p, places));
+    /* Why `banded` takes the whole fleet as its only argument. */
+    expect(bandOf(at(places, "w_lead"), rows)).toBe("idle");
+  });
+
+  it("leaves `doing()` alone — it still answers for the place and nothing else", () => {
+    const places = fleetOf(
+      { id: "lead", status: "Working" },
+      { id: "kid", status: "NeedsYou", of: "lead" },
+    );
+    const parent = at(places, "w_lead");
+    expect(doing(parent)).toBe("working");
+    expect(bandOf(parent, places)).toBe("waiting");
+  });
+});
+
+describe("the order the bands make", () => {
+  it("is band first, then the beat inside it", () => {
+    const places = fleetOf(
+      { id: "idle", status: "Ready" },
+      { id: "busy", status: "Working" },
+      { id: "broken", status: "Failed" },
+      { id: "asking", status: "NeedsYou" },
+    );
+    /* `blocked` before `broken` within *Waiting on you*, which is `RANK`. */
+    expect(ids(banded(places))).toEqual(["w_asking", "w_broken", "w_busy", "w_idle"]);
+  });
+
+  it("keeps a parent with a blocked child above the working rows", () => {
+    const places = fleetOf(
+      { id: "busy", status: "Working" },
+      { id: "lead", status: "Ready" },
+      { id: "kid", status: "NeedsYou", of: "lead" },
+    );
+    expect(ids(banded(places))).toEqual(["w_lead", "w_busy"]);
+  });
+
+  /* The two kinds of row the owner will see move, both of which fall out of
+     band-first sorting rather than being chosen. */
+  it("lifts a hand-back out of the idle end of the list", () => {
+    const places = fleetOf({ id: "busy", status: "Working" }, { id: "gave", status: "HandedBack" });
+    expect(ids(banded(places))).toEqual(["w_gave", "w_busy"]);
+  });
+
+  it("lifts a working family that has a failure in it above the clean ones", () => {
+    const places = fleetOf(
+      { id: "clean", status: "Working" },
+      { id: "lead", status: "Working" },
+      { id: "kid", status: "Failed", of: "lead" },
+    );
+    expect(ids(banded(places))).toEqual(["w_lead", "w_clean"]);
+    /* Its mark is still the family's loudest *beat*, which is working: a
+       place is at rest only when nothing in it is going. */
+    expect(placeBeat(places.find((p) => p.id === "w_lead")!, places)).toBe("working");
+  });
+});
+
+describe("the label where the band turns", () => {
+  it("draws one per band, on its first row and nowhere else", () => {
+    const places = fleetOf(
+      { id: "asking", status: "NeedsYou" },
+      { id: "busy", status: "Working" },
+      { id: "idle", status: "Ready" },
+    );
+    const rows = banded(places);
+    expect(labels(rows)).toEqual(["Waiting on you 1", "Working 1", "Idle 1"]);
+    expect(rows.filter((row) => row.turn)).toHaveLength(3);
+  });
+
+  it("counts the rows under it, not the agents", () => {
+    const places = fleetOf(
+      { id: "lead", status: "NeedsYou" },
+      { id: "kid", status: "NeedsYou", of: "lead" },
+      { id: "idle", status: "Ready" },
+    );
+    /* Two agents are asking; one row stands for both of them, and a label
+       that said 2 over one row would be the "33 lines, 40 touched" lie. */
+    expect(waitingAgents(places)).toBe(2);
+    expect(labels(banded(places))).toEqual(["Waiting on you 1", "Idle 1"]);
+  });
+
+  it("does not draw a band that has nothing in it", () => {
+    const places = fleetOf({ id: "asking", status: "NeedsYou" }, { id: "busy", status: "Working" });
+    expect(labels(banded(places))).toEqual(["Waiting on you 1", "Working 1"]);
+  });
+
+  it("still draws the one label when every row is in one band", () => {
+    const places = fleetOf({ id: "a", status: "Ready" }, { id: "b", status: "Ready" });
+    expect(labels(banded(places))).toEqual(["Idle 2"]);
+  });
+
+  it("draws it for a list of one", () => {
+    expect(labels(banded(fleetOf({ id: "only", status: "Working" })))).toEqual(["Working 1"]);
+  });
+
+  it("draws nothing at all for no rows", () => {
+    expect(banded([])).toEqual([]);
+  });
+
+  /**
+   * Criterion 33, which is the trap in this change.
+   *
+   * The comparator and the labels have to come off the same list. `banded`
+   * takes one argument and does the ranking, the filtering and the labelling
+   * inside, so a caller cannot hand the comparator the rows it is drawing —
+   * and that is what this asserts: every label agrees with what the sort
+   * used, and no label is drawn twice.
+   */
+  it("ranks and labels from one list, so no band is split in two", () => {
+    const places = fleetOf(
+      { id: "lead", status: "Ready" },
+      { id: "kid", status: "NeedsYou", of: "lead" },
+      { id: "busy", status: "Working" },
+      { id: "asking", status: "NeedsYou" },
+      { id: "idle", status: "Ready" },
+    );
+    const rows = banded(places);
+
+    for (const row of rows) expect(row.band).toBe(bandOf(row.place, places));
+    expect(labels(rows)).toEqual(["Waiting on you 2", "Working 1", "Idle 1"]);
+    expect(new Set(rows.flatMap((r) => (r.turn ? [r.turn.says] : []))).size).toBe(3);
+
+    /* And what it would have read handed the rows instead: `familyOf` finds
+       no children there, so `w_lead` answers for itself alone and lands in a
+       different band than the one its mark says. */
+    const drawn = places.filter((p) => !isChild(p, places));
+    expect(bandOf(drawn.find((p) => p.id === "w_lead")!, drawn)).toBe("idle");
+    expect(bandOf(places.find((p) => p.id === "w_lead")!, places)).toBe("waiting");
+  });
+});
+
+/**
+ * **The invariant, over a generated fleet rather than three examples.**
+ *
+ * *No row's mark is ever louder than the band it sits under* — ember and
+ * brick appear only under *Waiting on you*. It is the whole reason `bandOf`
+ * is two changes and not one, so it is measured against both of the readings
+ * it replaced: the rail's `doing(place)`, and `doing()` widened to the family
+ * with its precedence left alone. Hand-written cases would not say whether
+ * each change is load-bearing; a fleet of a few hundred does.
+ *
+ * `Ended` is left out of the statuses because both lists filter it before
+ * they group — a workspace that is over has no row to band.
+ */
+describe("no row's mark is louder than its band", () => {
+  const STATUSES: SessionStatus[] = ["Starting", "Working", "NeedsYou", "HandedBack", "Ready", "Failed"];
+
+  /** Repeatable noise: the same fleets on every machine, every run. */
+  const dice = (seed: number) => {
+    let held = seed;
+    return (sides: number) => {
+      held = (held * 1664525 + 1013904223) % 4294967296;
+      return Math.floor((held / 4294967296) * sides);
+    };
+  };
+
+  /** One to six parents, each with up to three agents and up to two children
+   *  of its own, every status drawn at random. */
+  const fleet = (seed: number): Workspace[] => {
+    const roll = dice(seed);
+    const spots: Spot[] = [];
+    for (let p = 0; p <= roll(6); p += 1) {
+      spots.push({ id: `p${p}`, status: STATUSES[roll(STATUSES.length)] });
+      for (let r = 0; r < roll(3); r += 1) {
+        /* Another agent in the *same* checkout: one of the place's own runs,
+           which is the other half of what `familyOf` gathers. */
+        spots.push({ id: `p${p}r${r}`, status: STATUSES[roll(STATUSES.length)] });
+      }
+      for (let k = 0; k < roll(3); k += 1) {
+        spots.push({ id: `p${p}k${k}`, status: STATUSES[roll(STATUSES.length)], of: `p${p}` });
+      }
+    }
+    return fleetOf(...spots);
+  };
+
+  /** `doing()` widened to the family and nothing else — the first change
+   *  without the second. */
+  const widened = (place: Workspace, places: Workspace[]): Doing => {
+    const family = familyOf(place, places);
+    if (family.some(inFlight)) return "working";
+    if (family.some(needsYou)) return "waiting";
+    return "idle";
+  };
+
+  const loud = (place: Workspace, places: Workspace[]) => {
+    const token = BEAT_TOKEN[placeBeat(place, places)];
+    return token === "ember" || token === "brick";
+  };
+
+  const fleets = Array.from({ length: 300 }, (_, seed) => fleet(seed + 1));
+
+  it("holds for every row of every fleet", () => {
+    const rows = fleets.flatMap((places) => banded(places).map((row) => ({ row, places })));
+    expect(rows.length).toBeGreaterThan(600);
+
+    const broken = rows.filter(({ row, places }) => loud(row.place, places) && row.band !== "waiting");
+    expect(broken).toEqual([]);
+  });
+
+  it("does not hold for either of the readings it replaced", () => {
+    /* If these ever came back zero the invariant above would be vacuous and
+       `bandOf` could be deleted. The first is the desk's rail today; the
+       second is the half-fix. */
+    const own = fleets.flatMap((places) =>
+      banded(places).filter((row) => loud(row.place, places) && doing(row.place) !== "waiting"),
+    );
+    const half = fleets.flatMap((places) =>
+      banded(places).filter(
+        (row) => loud(row.place, places) && widened(row.place, places) !== "waiting",
+      ),
+    );
+    expect(own.length).toBeGreaterThan(0);
+    expect(half.length).toBeGreaterThan(0);
+  });
+
+  it("draws contiguous bands with one label each, for every fleet", () => {
+    const order: Doing[] = ["waiting", "working", "idle"];
+    for (const places of fleets) {
+      const rows = banded(places);
+      const seen = rows.flatMap((row) => (row.turn ? [row.band] : []));
+      /* Contiguous, in the labels' order, each drawn once — which is what
+         makes a label a *turn* rather than a section heading. */
+      expect(seen).toEqual(order.filter((band) => rows.some((row) => row.band === band)));
+      for (const row of rows) {
+        expect(row.band).toBe(bandOf(row.place, places));
+        if (row.turn) expect(row.turn.count).toBe(rows.filter((r) => r.band === row.band).length);
+      }
+      expect(rows.flatMap((row) => (row.turn ? [row.turn.says] : []))).toEqual(
+        seen.map((band) => BANDS[band]),
+      );
+    }
+  });
+
+  it("bands every row of every fleet, and hides every child", () => {
+    for (const places of fleets) {
+      const rows = banded(places);
+      expect(rows.map((row) => row.place.id).sort()).toEqual(
+        places
+          .filter((p) => !isChild(p, places))
+          .map((p) => p.id)
+          .sort(),
+      );
+    }
+  });
+});
+
+describe("the line above the list", () => {
+  it("drops its waiting clause while a waiting band is drawn", () => {
+    const places = fleetOf(
+      { id: "lead", status: "Ready" },
+      { id: "kid", status: "NeedsYou", of: "lead" },
+      { id: "busy", status: "Working" },
+    );
+    /* Three workspaces, one row banded as waiting, and one agent asking —
+       the two numbers the old line printed three lines apart. */
+    expect(fleetLine(places, banded(places))).toBe("3 in all");
+  });
+
+  it("keeps it when there is no such band, because an absence is not a statement", () => {
+    const places = fleetOf({ id: "busy", status: "Working" }, { id: "idle", status: "Ready" });
+    expect(fleetLine(places, banded(places))).toBe("2 in all, none waiting");
+  });
+
+  it("drops it for a row banded by a failure, which no agent count would have said", () => {
+    const places = fleetOf({ id: "broke", status: "Failed" });
+    expect(waitingAgents(places)).toBe(0);
+    expect(fleetLine(places, banded(places))).toBe("1 in all");
+  });
+
+  it("counts every workspace, children included", () => {
+    const places = fleetOf(
+      { id: "lead", status: "Working" },
+      { id: "kid", status: "Working", of: "lead" },
+    );
+    expect(banded(places)).toHaveLength(1);
+    expect(fleetLine(places, banded(places))).toBe("2 in all, none waiting");
+  });
+});
+
+/**
+ * The order holds still while a row is held, and the row does not.
+ *
+ * Mounted rather than called, because the two halves of this live on either
+ * side of a commit: what a reader sees is the frame, and what records the
+ * settled order is the effect after it.
+ */
+describe("the order while a row is held", () => {
+  /* One list, drawn over and over from whatever these two say. */
+  let places: Workspace[] = [];
+  let held = false;
+  const shown = () => hooks.last<BandedRow[]>();
+  const draw = () => {
+    hooks.render();
+    hooks.flush();
+    return shown();
+  };
+
+  const settling = fleetOf(
+    { id: "lead", status: "Ready" },
+    { id: "kid", status: "NeedsYou", of: "lead" },
+    { id: "busy", status: "Working" },
+    { id: "idle", status: "Ready" },
+  );
+  const answered = fleetOf(
+    { id: "lead", status: "Ready" },
+    { id: "kid", status: "Ready", of: "lead" },
+    { id: "busy", status: "Working" },
+    { id: "idle", status: "Ready" },
+  );
+  /* The other direction, and the one that must not be frozen: a row that was
+     at rest stops being, under a thumb. */
+  const alsoAsking = fleetOf(
+    { id: "lead", status: "Ready" },
+    { id: "kid", status: "NeedsYou", of: "lead" },
+    { id: "busy", status: "Working" },
+    { id: "idle", status: "NeedsYou" },
+  );
+
+  beforeEach(() => {
+    hooks.unmount();
+    places = settling;
+    held = false;
+    hooks.mount(() => useSettled(banded(places), held));
+  });
+
+  it("re-sorts freely while nothing is held", () => {
+    expect(ids(shown())).toEqual(["w_lead", "w_busy", "w_idle"]);
+    places = answered;
+    expect(ids(draw())).toEqual(["w_busy", "w_lead", "w_idle"]);
+  });
+
+  it("holds the order, and the labels, for as long as the row is held", () => {
+    held = true;
+    places = answered;
+    const rows = draw();
+
+    expect(ids(rows)).toEqual(["w_lead", "w_busy", "w_idle"]);
+    /* Including the band it is labelled under: a row held in place with a
+       fresh band would split that band in two and draw its label twice. */
+    expect(labels(rows)).toEqual(["Waiting on you 1", "Working 1", "Idle 1"]);
+  });
+
+  it("holds the position and never the row, so a quiet mark can sit under a loud band", () => {
+    held = true;
+    places = answered;
+    const lead = draw()[0];
+
+    expect(lead.band).toBe("waiting");
+    /* The live place, so the mark, the age and the second line are the
+       family's current ones: the dot has gone sage under a heading that now
+       outranks it, which is the visible evidence that the list is holding
+       still for you — and the safe direction. */
+    expect(BEAT_TOKEN[placeBeat(lead.place, places)]).toBe("sage");
+  });
+
+  it("lets a row go blocked under your thumb, ember and all, where it stands", () => {
+    held = true;
+    places = alsoAsking;
+    const rows = draw();
+
+    /* The unsafe direction, and the reason only the position freezes. The
+       row keeps its place and its *label* — but not its mark, or the one
+       surface a blocked agent is visible on would be drawing sage at it. */
+    expect(ids(rows)).toEqual(["w_lead", "w_busy", "w_idle"]);
+    expect(rows[2].band).toBe("idle");
+    expect(BEAT_TOKEN[placeBeat(rows[2].place, places)]).toBe("ember");
+    /* And it is where it belongs the moment you let go — ahead of `w_lead`,
+       which ties with it on both keys and arrived later. */
+    held = false;
+    const after = draw();
+    expect(after.find((row) => row.place.id === "w_idle")?.band).toBe("waiting");
+    expect(ids(after)).toEqual(["w_idle", "w_lead", "w_busy"]);
+  });
+
+  it("applies the new order the moment you let go", () => {
+    held = true;
+    places = answered;
+    draw();
+    held = false;
+    expect(ids(draw())).toEqual(["w_busy", "w_lead", "w_idle"]);
+  });
+
+  it("gives a row that arrives mid-hold the end of its own band", () => {
+    held = true;
+    places = [
+      ...settling,
+      ...fleetOf({ id: "fresh", status: "NeedsYou" }).filter((p) => p.id === "w_fresh"),
+    ];
+    const rows = draw();
+
+    /* The held rows keep their places; the new one does not push one out from
+       under a thumb, and the bands stay contiguous. */
+    expect(ids(rows)).toEqual(["w_lead", "w_fresh", "w_busy", "w_idle"]);
+    expect(labels(rows)).toEqual(["Waiting on you 2", "Working 1", "Idle 1"]);
+  });
+
+  it("forgets a row that has gone, and re-lands the labels around it", () => {
+    held = true;
+    places = settling.filter((p) => p.id !== "w_busy");
+    expect(ids(draw())).toEqual(["w_lead", "w_idle"]);
+    expect(labels(draw())).toEqual(["Waiting on you 1", "Idle 1"]);
   });
 });

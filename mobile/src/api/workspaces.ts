@@ -22,7 +22,17 @@
  * what a row says about its children is a row's business, and the desk's rail
  * has no room for a second line. When a third client wants any of it, extract
  * the package the README promises.
+ *
+ * **The band is the one place this goes past the rail rather than porting
+ * it.** `BANDS`, `ranked`'s comparator and `banded` are the desk's `BANDS`,
+ * `worstFirst` and `Listing`; `bandOf` is new, and it is what the rail's
+ * `doing(place)` should have been — see its docblock for the two gaps. It
+ * belongs on the desk as well, which has both of them and the same hidden
+ * children, but that is the desk's change to make and this does not assume
+ * it. `useSettled` is the phone's alone: a pointer does not rest on a row.
  */
+
+import { useEffect, useRef } from "react";
 
 import type { Session } from "./generated/model";
 import { BEAT, inFlight, needsYou, type Beat } from "./view";
@@ -51,14 +61,23 @@ export type Repositories = {
   total: number;
 };
 
+/** What a place is doing, in one word: `doing()`'s answer, and a band's. */
+export type Doing = "waiting" | "working" | "idle";
+
 /**
  * What the place as a whole is doing.
  *
  * Not any one agent's status. `unfinished` is the wrong question here — it
  * means "still holds a host", so an idle workspace and a busy one both answer
  * yes, and everything reads as working.
+ *
+ * **Its own runs, and `inFlight` before `needsYou`. Both are deliberate and
+ * both are wrong for a band** — see {@link bandOf}, which is a third function
+ * rather than a change to this one. This answers *what is this place doing*
+ * for a word on a row, where *working* is the more useful answer; a heading
+ * with rows under it is a different question.
  */
-export function doing(place: Workspace): "waiting" | "working" | "idle" {
+export function doing(place: Workspace): Doing {
   if (place.runs.some(inFlight)) return "working";
   if (place.runs.some(needsYou)) return "waiting";
   return "idle";
@@ -478,11 +497,86 @@ export function runAt(place: Workspace, address: string): Session {
 }
 
 /**
+ * The three bands a list reads under, and what each one is called.
+ *
+ * **The desk's own three words** — `desktop/src/ui/RailPanel.tsx:184` draws
+ * exactly these — and not the owner's *working, waiting, done*. `doing()`
+ * answers `idle` when nothing is in flight and nothing wants you, and most of
+ * what lands there is `Ready`: up, idle, nothing owed either way. Calling
+ * that *Done* claims a workspace finished something when it may have done
+ * nothing at all. The work that genuinely finished is a hand-back, which is
+ * under *Waiting on you* where your move is, or ended, which is filtered off
+ * both lists before they get here.
+ *
+ * Sentence case, because `STYLE.md` allows roughly one tracked-out ALL-CAPS
+ * legend per screen and this would be three.
+ */
+export const BANDS: Record<Doing, string> = {
+  waiting: "Waiting on you",
+  working: "Working",
+  idle: "Idle",
+};
+
+/**
+ * And the order they are drawn in: worst first.
+ *
+ * `Record<Doing, …>` for {@link RANK}'s reason — a fourth band is a build
+ * error in both tables rather than a silent `undefined` in the comparator.
+ */
+const BAND_ORDER: Record<Doing, number> = { waiting: 0, working: 1, idle: 2 };
+
+/**
+ * Which band a row reads under. **The family's, and a person before a
+ * machine.**
+ *
+ * `doing(place)` is the wrong reading twice over, and only one of the two
+ * mistakes is about hidden children.
+ *
+ * - **It reads `place.runs`.** A parent that is `Ready` in every one of its
+ *   own agents, with one blocked child under it, bands as *Idle* — while
+ *   wearing the ember mark `placeBeat` gives it. A contradiction on the row,
+ *   and a blocked agent filed under the one heading nobody reads when they
+ *   are looking for work to do. The desk's rail has this gap today.
+ * - **It tests `inFlight` first.** Widening it to the family is necessary and
+ *   not sufficient: that precedence was written for a *word on a row*, and as
+ *   a band it files the stuck agent under the typing one. {@link placeBeat}'s
+ *   own docblock is the argument against it — *a sibling still working does
+ *   not make an unanswered question any less unanswered.*
+ *
+ * So this is a third function and `doing()` is untouched: it still answers
+ * the question it was written for, `lead()` still reads it, and nothing that
+ * calls it moves.
+ *
+ * **What the swap buys is an invariant**, and the invariant is what the tests
+ * hold: *no row's mark is louder than the band it sits under.* `placeBeat` is
+ * `blocked` only when a run in the family is `NeedsYou` and `broken` only
+ * when one is `Failed` — and both of those are in `NEEDS_YOU`, which is what
+ * `needsYou` tests. So the first line here catches every row the second and
+ * third could have filed too quietly, and ember and brick appear only under
+ * *Waiting on you*. The reverse mismatch survives and should: a sage mark
+ * under that heading is a hand-back, a slate one is a working family with a
+ * failure in it. A quiet mark under a loud heading sends you to look at
+ * something that genuinely wants you; a loud mark under a quiet heading loses
+ * the agent.
+ *
+ * `places` is the whole fleet, for `familyOf`'s reason.
+ */
+export function bandOf(place: Workspace, places: Workspace[]): Doing {
+  const family = familyOf(place, places);
+  if (family.some(needsYou)) return "waiting";
+  if (family.some(inFlight)) return "working";
+  return "idle";
+}
+
+/**
  * The order a list of workspaces reads in. **Not sections — an order.**
  *
- * Grouped is the one not to ship: a workspace changes state while you are
- * looking at it, and the row you reached for jumps sections under your thumb.
- * Flat and status-ordered has no such frame.
+ * Grouped is still the one not to ship: a workspace changes state while you
+ * are looking at it, and the row you reached for would jump sections under
+ * your thumb. What the bands add is a *label* where the order turns, which is
+ * what the desk's rail has always drawn — see {@link banded}. No container,
+ * nothing to collapse, and no row with a parent other than the scroll view it
+ * was always in.
  *
  * `Record<Beat, …>` rather than `Record<string, …>`, so adding a beat is a
  * build error here instead of a silent `undefined` in the comparator, which
@@ -495,8 +589,20 @@ export function runAt(place: Workspace, address: string): Session {
 export const RANK: Record<Beat, number> = { blocked: 0, broken: 1, working: 2, done: 3, over: 4 };
 
 /**
- * The same list, in that order. A copy: `sort` is in place and the caller's
- * array is memoised upstream.
+ * The same list, in that order: **the band first, then the beat within it.**
+ * A copy — `sort` is in place and the caller's array is memoised upstream.
+ *
+ * This is the desk's `worstFirst` (`RailPanel.tsx:196`) with {@link bandOf}
+ * in place of `doing`. Band first is not a preference: it is what makes the
+ * three bands *contiguous*, and non-contiguous bands mean the same label
+ * drawn twice down one list. There is no version of labelling this list that
+ * does not touch the sort.
+ *
+ * **Two kinds of row therefore move**, and somebody who knows this list will
+ * see it. A family that is working with a failed agent in it rises above the
+ * cleanly-working ones. And a handed-back workspace leaves the idle end of
+ * the list for *Waiting on you*, which is a fix rather than a cost: a
+ * hand-back used to sort beside a workspace where nothing is happening.
  *
  * **On `placeBeat`, which is the family's, not `BEAT[lead(a).status]`.** Both
  * lists hide a delegated child under its lead, so a blocked child would
@@ -507,5 +613,150 @@ export const RANK: Record<Beat, number> = { blocked: 0, broken: 1, working: 2, d
  * `familyOf` goes looking for children in a list they have been taken out of.
  */
 export function ranked(places: Workspace[]): Workspace[] {
-  return places.slice().sort((a, b) => RANK[placeBeat(a, places)] - RANK[placeBeat(b, places)]);
+  return places
+    .slice()
+    .sort(
+      (a, b) =>
+        BAND_ORDER[bandOf(a, places)] - BAND_ORDER[bandOf(b, places)] ||
+        RANK[placeBeat(a, places)] - RANK[placeBeat(b, places)],
+    );
+}
+
+/** A row, and the band it is drawn under. */
+export type BandedRow = {
+  place: Workspace;
+  /** Which band it sits in. */
+  band: Doing;
+  /**
+   * The label to draw above it — set on the first row of each band and `null`
+   * on every other row. That is what makes this a label where the band
+   * *turns* rather than a section heading: there is nothing to put rows
+   * *inside* of.
+   */
+  turn: { says: string; count: number } | null;
+};
+
+/**
+ * Where the band turns, and how many rows each one holds.
+ *
+ * The count is **rows**, counted off the rows themselves: a count that does
+ * not match what is under it is the "33 lines, 40 touched" lie, and a hidden
+ * child has no row to be counted in. It cannot count agents either — a label
+ * stands for a run of rows and has to say how many of those there are.
+ *
+ * An empty band is not *handled* here. It is undrawable: a band with no rows
+ * in it has nothing to turn at. A fleet that is all one band still gets that
+ * one label, because the first row always turns.
+ */
+function turns(rows: { place: Workspace; band: Doing }[]): BandedRow[] {
+  const held = new Map<Doing, number>();
+  for (const row of rows) held.set(row.band, (held.get(row.band) ?? 0) + 1);
+
+  let last: Doing | null = null;
+  return rows.map(({ place, band }) => {
+    const turn = band === last ? null : { says: BANDS[band], count: held.get(band) ?? 0 };
+    last = band;
+    return { place, band, turn };
+  });
+}
+
+/**
+ * The rows to draw, banded. One list, in one order, with a label where the
+ * band turns — the desk's `Listing` (`RailPanel.tsx:320`), whose own comment
+ * says what this file's used to: *flat and ordered, not grouped into
+ * sections.*
+ *
+ * **One argument, and it is the whole fleet, because that is the trap.** The
+ * comparator and the labels have to be computed from the same list: hand the
+ * comparator the rows a screen is drawing and `familyOf` finds no children
+ * there, so the band a row was *sorted* by and the band its label is *drawn*
+ * from disagree — and the same label draws twice down one list. Found in the
+ * prototype, which did exactly that until it matched this. So the ranking,
+ * the filter and the labels all happen in here, where a caller cannot get the
+ * order of the three wrong.
+ */
+export function banded(every: Workspace[]): BandedRow[] {
+  return turns(
+    ranked(every)
+      .filter((place) => !isChild(place, every))
+      .map((place) => ({ place, band: bandOf(place, every) })),
+  );
+}
+
+/** The live rows, in the order and under the bands they last settled in. */
+function restack(live: BandedRow[], settled: BandedRow[]): BandedRow[] {
+  const was = new Map(settled.map((row, at) => [row.place.id, { band: row.band, at }]));
+  const kept = live.map((row, i) => {
+    const seen = was.get(row.place.id);
+    /* A row that arrived while the list was frozen has no settled position,
+       so it joins the end of its own band rather than displacing a held one. */
+    return { place: row.place, band: seen?.band ?? row.band, at: seen?.at ?? settled.length + i };
+  });
+  kept.sort((a, b) => BAND_ORDER[a.band] - BAND_ORDER[b.band] || a.at - b.at);
+  return turns(kept);
+}
+
+/**
+ * The order the list last settled in, for as long as a row is held.
+ *
+ * **The phone's one addition to the desk's design**, and the direct answer to
+ * why this list refused status grouping for as long as it did: *the row you
+ * reached for* must not move. The objection was never really about sections —
+ * a flat list that re-sorts under a thumb is the same defect — and a fleet
+ * refetch lands while a press is in flight often enough to matter.
+ *
+ * **Only the position is held. The row is never stale.** Every `place` here
+ * is the live one, so a row that goes blocked under your thumb still turns
+ * ember where it stands — under a heading that is now quieter than its mark,
+ * for the second or two it is held. That mismatch is the visible evidence
+ * that the list is holding still for you. Freezing a row's *contents* would
+ * be the unsafe direction: a row that goes blocked and keeps drawing sage is
+ * the one failure this whole change exists to prevent.
+ *
+ * The band is frozen alongside the order, and it has to be. A row held in
+ * place while its own band changes would otherwise sit under the wrong
+ * heading and split that band in two — which is the duplicate label again,
+ * arriving by a different door. So a held row keeps the band it was ranked
+ * by, and anything that arrives mid-freeze joins the end of its own band.
+ *
+ * `held` is the peek, which is what a press on a row becomes: `Peek` covers
+ * the list with a scrim as it opens, so the window is a press and however
+ * long it stays open — under a second in the common case. Let go and the new
+ * order applies at once.
+ */
+export function useSettled(rows: BandedRow[], held: boolean): BandedRow[] {
+  const settled = useRef(rows);
+  useEffect(() => {
+    if (!held) settled.current = rows;
+  }, [held, rows]);
+  return held ? restack(rows, settled.current) : rows;
+}
+
+/**
+ * The line above the list, which now says only what no band can say.
+ *
+ * It read *3 waiting on you · 14 in all*, three lines above a label reading
+ * *Waiting on you · 3* — two sizes of the same claim, and the one in the
+ * smaller type is the one with the hairline and the rows under it.
+ *
+ * Worse than repetition: **the two numbers disagree in both directions.**
+ * `waitingAgents` counts *agents* that are `NeedsYou`; a band counts *rows*,
+ * and a row can be banded for a `Failed` or `HandedBack` agent that is asking
+ * nothing. Three rows, two questions — or two rows, three questions, with two
+ * of them in one family. Neither number is wrong; printing both three lines
+ * apart with no word to tell them apart is.
+ *
+ * So the clause goes while a *Waiting on you* label is drawn, and what stays
+ * is the fleet: **every workspace, children included**, because that many
+ * checkouts hold that many hosts and ending a parent ends what it started.
+ * **The clause comes back when nothing is waiting**, because then there is no
+ * label to say it and an absence is not a statement — and that branch is the
+ * copy that ships today, unchanged.
+ *
+ * Handed the rows that are actually drawn, so the line and the labels cannot
+ * disagree — including while {@link useSettled} is holding the order.
+ */
+export function fleetLine(every: Workspace[], rows: BandedRow[]): string {
+  const waiting = rows.some((row) => row.band === "waiting");
+  return waiting ? `${every.length} in all` : `${every.length} in all, none waiting`;
 }
