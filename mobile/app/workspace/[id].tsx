@@ -599,7 +599,9 @@ function Conversation({ place, address }: { place: Workspace; address: string })
           onReread={reread}
           open={menu}
           onClose={() => setMenu(false)}
-          onEnded={() => router.back()}
+          /* The teardown was accepted, not finished — see `onEnding`. Back is
+             the list, which is where whether it finished is visible. */
+          onEnding={() => router.back()}
         />
       ) : null}
 
