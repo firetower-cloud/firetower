@@ -85,12 +85,13 @@ import { BLEED, useEdges } from "~/ui/edges";
 import { router } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
 import type { Session } from "~/api/generated/model";
-import { banded, fleetLine, group, lead, useSettled, useVanished } from "~/api/workspaces";
+import { banded, childrenElsewhere, fleetLine, group, lead, useSettled, useVanished } from "~/api/workspaces";
 import { useSessions } from "~/data";
 import { useServer } from "~/native/current";
 import { getListSessionsQueryKey } from "~/api/generated/sessions/sessions";
 import { useAnswering } from "~/api/answering";
 import { BandLabel } from "~/ui/BandLabel";
+import { useEndWorkspace } from "~/ui/end";
 import { Peek } from "~/ui/Peek";
 import { Unreachable } from "~/ui/Unreachable";
 import { Waiting } from "~/ui/Waiting";
@@ -171,6 +172,16 @@ export default function Workspaces() {
      below, which is a different question with a different answer. */
   const speakerId = peeked ? (blockedRun?.id ?? lead(peeked).id) : null;
   const answering = useAnswering(peeked, every);
+
+  /* The same teardown the workspace's own menu asks for, asked from the row.
+     `every` rather than `places`: only the whole list knows which workspaces
+     are this one's children, and the count in the question is the number that
+     goes with it. */
+  const endWorkspace = useEndWorkspace();
+  const endPeeked = useCallback(() => {
+    if (!peeked) return;
+    void endWorkspace(peeked, childrenElsewhere(peeked, every).length);
+  }, [endWorkspace, peeked, every]);
 
   const refresh = useCallback(
     () => cache.invalidateQueries({ queryKey: getListSessionsQueryKey() }),
@@ -313,7 +324,7 @@ export default function Workspaces() {
           asks={answering.asks}
           waiting={answering.waiting}
           onAnswer={answering.onAnswer}
-          onEnd={() => setPeeking(null)}
+          onEnd={endPeeked}
         />
       ) : null}
     </View>
