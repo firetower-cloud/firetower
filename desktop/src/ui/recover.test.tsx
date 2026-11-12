@@ -14,9 +14,10 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { recoveryFor, Recover, Seam } from "./Chat";
+import { cutOffHere, recoveryFor, Recover, Seam } from "./Chat";
 import { getListHostsQueryKey } from "~/api/generated/hosts/hosts";
 import type { Host, Session, SessionStatus } from "~/api/generated/model";
+import type { Item } from "~/api/conversation";
 
 const run = (id: string, status: SessionStatus, over: Partial<Session> = {}): Session =>
   ({
@@ -173,8 +174,64 @@ describe("what the card says", () => {
     expect(empty).toContain("Bring it back");
   });
 
-  it("marks where the transcript was cut off, in one line", () => {
-    const said = words(renderToStaticMarkup(<Seam />));
-    expect(said).toBe("cut off when the machine restarted");
+  it("marks where the transcript was cut off, and what was in flight", () => {
+    const said = words(
+      renderToStaticMarkup(
+        <Seam
+          machine="worker-sim"
+          at="2026-11-12T09:14:00Z"
+          unfinished={{ kind: "FileChange", input: { file_path: "crates/x.rs" } } as unknown as Item}
+        />,
+      ),
+    );
+    expect(said).toContain("cut off — worker-sim restarted");
+    // The one row of what-a-crash-costs worth drawing: there is no line
+    // saying the write landed, so the file on disk is the only answer.
+    expect(said).toContain("crates/x.rs was in flight. Nothing records whether it finished.");
+  });
+
+  it("says nothing about a tool call when there was none in flight", () => {
+    const said = words(renderToStaticMarkup(<Seam machine="worker-sim" />));
+    expect(said).toBe("cut off — worker-sim restarted");
+  });
+
+  /* QA's bug 1. A lead that handed back before the machine went has a final
+     turn that *completed* — its team is what stopped, which the card says. A
+     seam over that turn is a second statement about the same screen, and the
+     false one. */
+  describe("whether a seam belongs here at all", () => {
+    it("is drawn for the conversation that was actually cut", () => {
+      expect(cutOffHere({ itself: true }, true)).toBe(true);
+    });
+
+    it("is not drawn over a turn that finished", () => {
+      expect(cutOffHere({ itself: false }, true)).toBe(false);
+    });
+
+    it("is not drawn across nothing", () => {
+      expect(cutOffHere({ itself: true }, false)).toBe(false);
+      expect(cutOffHere(null, true)).toBe(false);
+    });
+  });
+
+  /* QA's bug 2. A failed recovery writes its reason into the note precisely
+     so it outlives the request — and this card unmounts and remounts around
+     its own failure, because the launch moves the session to `Starting` and
+     back, so anything it was holding goes with it. */
+  it("shows why the last attempt did not take, from the note", () => {
+    const refused = run("s_1", "Stranded", {
+      note: "Didn’t restart: the workspace at /home/agent/work is not there any more. The workspace and account are unchanged.",
+    });
+    const said = words(drawn(<Recover session={refused} team={[]} itself />));
+    expect(said).toContain("is not there any more");
+    expect(said).toContain("Bring it back");
+  });
+
+  it("does not mistake the stranding note for a refusal", () => {
+    const fresh = run("s_1", "Stranded", {
+      note: "The machine restarted. The workspace is still there.",
+    });
+    const said = words(drawn(<Recover session={fresh} team={[]} itself />));
+    expect(said).not.toContain("The machine restarted. The workspace is still there.");
   });
 });

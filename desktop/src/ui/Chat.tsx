@@ -234,6 +234,22 @@ export function Chat({
   const gone = useMachineGone(session.hostId);
   const answerable = session.status !== "Ended" && !gone;
   const recovery = useMemo(() => recoveryFor(session, team), [session, team]);
+  const fleet = useHosts();
+  const machine = fleet.data.find((h) => h.id === session.hostId)?.name;
+  /* The last thing the agent started and never reported finishing.
+   *
+   * It is the one row of what-a-crash-costs worth drawing: everything else is
+   * either safe (the workspace, the branch, this conversation) or obviously
+   * gone (the process). Whether a half-written edit landed is neither — there
+   * is no line saying it did, so the file on disk is the only answer, and
+   * nothing on this screen says so unless this does. */
+  /* What the last press of *Bring it back* did, kept here because the card
+     that made it is gone the moment the session starts. */
+  const [broughtBack, setBroughtBack] = useState<string | null>(null);
+  const unfinished = useMemo(
+    () => [...items].reverse().find((i) => i.status === undefined && DID[i.kind] !== undefined),
+    [items],
+  );
   /* Repositories being checked in, started from the toolbar's panel. Drawn
      here because this is where what happened to a workspace is written down. */
   const runs = useCheckouts(session.id);
@@ -566,18 +582,40 @@ export function Chat({
           ))}
 
           {working && <Working heardAt={conversation.heardAt} items={items} delegates={running} inTurn={conversation.inTurn === true} />}
-          {stopped && <Stopped why={stopped} />}
+          {/* Not while a recovery card is up. The agent *was* stopped before
+              its turn finished, so the sentence is true — but the seam says it
+              in the right colour and the card says what to do about it, and
+              brick means *it broke* when nothing broke. Three statements of
+              one fact, one of them in the wrong tone. */}
+          {stopped && !recovery && <Stopped why={stopped} />}
           {/* The card that explains the whole state, and offers nothing.
               Instead of `Relaunch`, not beside it: starting again is the one
               thing that cannot happen here. */}
           {gone ? <MachineRemoved /> : session.status === "Failed" && <Relaunch session={session} />}
-          {/* Where the transcript was cut off. Not a card wrapped round the
-              turn above it: those words are genuinely what the agent wrote and
-              they should read as prose. This is the join, drawn as a join —
-              and a join needs something on both sides of it, so a session that
-              said nothing before its machine went gets the line above instead
-              of a seam across nothing. */}
-          {!gone && recovery && items.length > 0 && <Seam />}
+          {/* Where *this* conversation was cut off. Not a card wrapped round
+              the turn above it: those words are genuinely what the agent wrote
+              and they should read as prose. This is the join, drawn as a join.
+              Two things have to be true of it. A join needs something on both
+              sides, so a session that said nothing before its machine went
+              gets the line above instead of a seam across nothing. And the
+              conversation has to be the one that was cut: a lead that handed
+              back before the machine went has a turn that *completed*, and
+              drawing a seam across it was the same untruth as the three this
+              screen just stopped telling — its team stopped, which is what the
+              card below says. */}
+          {!gone && cutOffHere(recovery, items.length > 0) && (
+            <Seam machine={machine} at={session.updatedAt} unfinished={unfinished} />
+          )}
+          {/* And what a press did, once it has. The card is in the composer's
+              place and goes the moment the session starts, so the answer to
+              the one question it cannot answer in advance — how many of a
+              family actually came back — belongs in the conversation. */}
+          {broughtBack && (
+            <p className="mt-6 flex items-center gap-2.5 text-ui text-dim">
+              <RotateCcw className="h-3.5 w-3.5 shrink-0 text-mute" strokeWidth={1.75} />
+              {broughtBack}
+            </p>
+          )}
 
           {questions.map((q) => (
             <Questions key={q.req} sessionId={session.id} asking={q} onAnswered={() => settle(q.req)} />
@@ -663,6 +701,7 @@ export function Chat({
           notYours={recovery.notYours}
           itself={recovery.itself}
           spoke={items.length > 0}
+          onDone={setBroughtBack}
         />
       ) : mayAct ? (
         <AccountSwitcher session={session} working={working}>
@@ -1537,6 +1576,23 @@ export function recoveryFor(
 }
 
 /**
+ * Whether a seam belongs in this conversation.
+ *
+ * Two things have to be true and each was wrong once. There has to be
+ * something on both sides of the join — a session that said nothing before
+ * its machine went gets a sentence, not a line across nothing. And the
+ * conversation has to be the one that was cut: a lead that handed back
+ * *before* the machine went has a final turn that completed, and drawing
+ * "cut off" over it was the same untruth as the three this screen stopped
+ * telling. Its team stopped; the card says so; the seam must not say
+ * otherwise a line above it.
+ */
+export const cutOffHere = (
+  recovery: { itself: boolean } | null,
+  saidAnything: boolean,
+): boolean => !!recovery?.itself && saidAnything;
+
+/**
  * Where the transcript stops mid-sentence.
  *
  * One line, and it says the thing nobody can work out by looking: the last
@@ -1544,14 +1600,46 @@ export function recoveryFor(
  * is flushed as it goes, so everything above is real — there is simply no line
  * saying the write landed, which makes the file on disk the only answer.
  */
-export function Seam() {
+export function Seam({
+  machine,
+  at,
+  unfinished,
+}: {
+  /** The machine that restarted, when the fleet has said what it is called. */
+  machine?: string;
+  /** When this session was found stranded. */
+  at?: string;
+  /** The last thing the agent started and never reported finishing. */
+  unfinished?: Item;
+}) {
   return (
-    <div className="mt-6 flex items-center gap-3">
-      <span className="h-px flex-1 bg-amber-deep/50" />
-      <span className="text-meta text-amber">cut off when the machine restarted</span>
-      <span className="h-px flex-1 bg-amber-deep/50" />
-    </div>
+    <>
+      <div className="mt-6 flex items-center gap-3">
+        <span className="h-px flex-1 bg-amber-deep/50" />
+        <span className="text-meta text-amber">
+          cut off — {machine ?? "the machine"} restarted{at ? ` ${clock(at)}` : ""}
+        </span>
+        <span className="h-px flex-1 bg-amber-deep/50" />
+      </div>
+      {/* The sentence that makes the line above mean something. Everything a
+          crash costs is either plainly safe or plainly gone, except this: a
+          tool call that started and has no line saying it ended. Nothing else
+          on the screen says that the file on disk is now the only answer. */}
+      {unfinished && (
+        <p className="mt-2.5 text-meta text-mute">
+          <span className="font-mono text-code text-dim">{said(unfinished)}</span> was in flight.
+          Nothing records whether it finished.
+        </p>
+      )}
+    </>
   );
+}
+
+/** A time of day, for a thing that happened today or yesterday. */
+function clock(iso: string): string {
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return "";
+  return at.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 }
 
 /**
@@ -1577,6 +1665,7 @@ export function Recover({
   notYours = 0,
   itself,
   spoke = true,
+  onDone,
 }: {
   session: Session;
   /** Its agents that stopped with it, and that this person may start. */
@@ -1587,6 +1676,8 @@ export function Recover({
   itself: boolean;
   /** Whether there is a conversation above this to come back to. */
   spoke?: boolean;
+  /** Told what a press did, because this card is gone by the time it lands. */
+  onDone?: (said: string) => void;
 }) {
   const cache = useQueryClient();
   const relaunch = useRelaunchSession();
@@ -1597,10 +1688,28 @@ export function Recover({
      it is being offered a way back — and it has to be there to read what its
      team finished. */
   const all = team.length + 1;
+  /* The note is the durable half and the error is the immediate one, and they
+     say the same thing when both are there. */
+  const refusal = session.note?.startsWith("Didn’t restart:")
+    ? session.note
+    : relaunch.error
+      ? why(relaunch.error)
+      : null;
   const bring = (family: boolean) =>
     relaunch.mutate(
       { id: session.id, params: family ? { family: true } : undefined },
-      { onSuccess: () => cache.invalidateQueries({ queryKey: getGetSessionQueryKey(session.id) }) },
+      {
+        onSuccess: (done) => {
+          cache.invalidateQueries({ queryKey: getGetSessionQueryKey(session.id) });
+          // What the press actually did. The server counts it precisely —
+          // "3 starting again. 1 isn't yours to start." — for exactly this,
+          // and throwing it away left the one case where the button delivers
+          // less than it offered with nothing on screen to say so. Held by
+          // the conversation rather than by this card, which goes the moment
+          // the session starts.
+          onDone?.(done.detail);
+        },
+      },
     );
 
   return (
@@ -1650,11 +1759,16 @@ export function Recover({
             </button>
           )}
         </div>
-        {/* The reason it would not start, to the person who pressed it. The
-            note carries the same thing for anybody who arrives later, and the
-            session stays stranded either way — nothing about the workspace
-            changed. */}
-        {relaunch.error && <p className="mt-2 text-meta text-brick">{why(relaunch.error)}</p>}
+        {/* Why the last attempt did not take.
+            From the **note**, not from the mutation: a failed launch moves the
+            session to `Starting` and back, so this card unmounts and remounts
+            around its own request and whatever it was holding goes with it.
+            That is why a failure that was written down perfectly still showed
+            the person who pressed it nothing at all. The note survives it, a
+            reload, and somebody else opening the conversation.
+            `relaunch.error` stays for the failures that write no note —
+            a second press while the first is still starting. */}
+        {refusal && <p className="mt-2 text-meta text-brick">{refusal}</p>}
       </div>
     </div>
   );
