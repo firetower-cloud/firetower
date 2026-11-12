@@ -23,6 +23,29 @@ export const Platform = { OS: "ios" as const, select: (o: Record<string, unknown
  * `ui/end.ts` asks the one irreversible question through this, and the
  * sentence it asks is a pure function worth pinning — the whole reason that
  * file exists is that the sentence and the call it was attached to disagreed.
- * Nothing under test presses a button, so this only has to exist.
+ *
+ * **It records, and it can be answered.** The sentence alone was enough while
+ * the only thing worth pinning was the wording; the teardown's *target* is a
+ * fact about what happens between the question going up and a button coming
+ * back, which cannot be tested without pressing one. So every question is
+ * kept and `answer()` presses a button by its label, the way a thumb does —
+ * the promise in `ask()` settles from the handler and nowhere else.
  */
-export const Alert = { alert: () => {} };
+type Button = { text?: string; onPress?: () => void };
+type Asked = { title: string; body?: string; buttons?: Button[]; options?: { onDismiss?: () => void } };
+
+export const Alert = {
+  /** Every question asked, oldest first. A test clears this itself. */
+  asked: [] as Asked[],
+  alert: (title: string, body?: string, buttons?: Button[], options?: { onDismiss?: () => void }) => {
+    Alert.asked.push({ title, body, buttons, options });
+  },
+  /** The question on screen. */
+  up: () => Alert.asked.at(-1),
+  /** Press a button on the question on screen, by what it says. */
+  answer: (text: string) => {
+    const button = Alert.up()?.buttons?.find((b) => b.text === text);
+    if (!button) throw new Error(`no "${text}" on ${Alert.up()?.title ?? "nothing"}`);
+    button.onPress?.();
+  },
+};

@@ -41,6 +41,32 @@
  * nobody could reach as a workspace with nothing in it. Here anything
  * unreadable says so.
  *
+ * ## The target is bound, not resolved again later
+ *
+ * This flow suspends twice before it sends anything — once reading the work,
+ * once waiting for an answer — and the second wait is a native window that
+ * outlives the React tree that opened it. Switch Firetower in between and
+ * `BackendProvider` remounts everything under it, while the question stays on
+ * screen with A's facts in it; the generated client then resolves the DELETE
+ * against whatever is current, which is B. A session id carries no server in
+ * it (`crates/ft-core/src/ids.rs:20`), so on two separately selectable
+ * backends restored from one database — staging from production, which is
+ * ordinary practice — the same id names a real workspace on both, and B's is
+ * destroyed on A's preflight.
+ *
+ * Two things together, because neither is enough:
+ *
+ * - **The destination is bound.** Both calls name the Firetower they are for
+ *   — see {@link Aimed} in `client/http.ts` — so the read and the teardown go
+ *   to the same machine by construction rather than by the ordering of a
+ *   check. Naming the workspace in the question does **not** fix this: an
+ *   alert can accurately name A while the DELETE still leaves for B.
+ * - **The operation is cancelled if the identity moves.** Bound or not, an
+ *   answer given on one Firetower is not consent to act on another, so the
+ *   target is rechecked after *each* await and the flow stops rather than
+ *   sending. Which it is — the question, the screen, or both — is why
+ *   {@link endAstray} says only that nothing was sent.
+ *
  * ## When the host is not answering
  *
  * The control plane refuses with 409 `HostUnreachable` and a sentence of its
@@ -51,12 +77,16 @@
  * one is a different and larger decision than the one that was made here, so
  * this reports and stops: it never claims a teardown it did not get.
  */
+import { useEffect, useRef } from "react";
 import { Alert } from "react-native";
 import { useQueryClient } from "@tanstack/react-query";
 import * as Haptics from "expo-haptics";
 import { destroySession, getListSessionsQueryKey, sessionWork } from "~/api/generated/sessions/sessions";
+import { identity } from "~/api/identity";
 import type { Workspace } from "~/api/workspaces";
+import { destination } from "~/client/http";
 import { why } from "~/data";
+import { servers } from "~/native/servers";
 
 /**
  * A question with two answers, as a promise.
@@ -145,6 +175,41 @@ export function endWording(
 }
 
 /**
+ * Which workspace, and on which Firetower.
+ *
+ * It asked *End this workspace?* over a list of several, which names neither
+ * the thing going nor the machine it is going from — and this app holds more
+ * than one Firetower at a time. **The title is not the fix for the target**
+ * (the binding above is), but a question about something irreversible should
+ * say what it is about, and the one id in this sentence that a person can
+ * check is the name.
+ *
+ * `place.name` rather than `rowLabel`'s: a child's full `lead / child` is
+ * more identifying, not less, and this flow has no list to strip a prefix
+ * against. The server is named only when there is more than one to confuse it
+ * with — on a phone that knows one Firetower it is a word about nothing.
+ */
+export function endTitle(place: Workspace, server: string | null): string {
+  return server ? `End ${place.name} on ${server}?` : `End ${place.name}?`;
+}
+
+/**
+ * What is said when the answer arrives somewhere the question was not asked.
+ *
+ * **Only what is known.** Either the Firetower moved under the question or
+ * the screen that asked it is gone, and the two are usually the same event —
+ * so this says the one thing true of both, names where the workspace still
+ * is, and leaves the reader somewhere to ask again from. Claiming a cause
+ * here would be the same class of mistake as the sentence this whole file was
+ * written to fix.
+ */
+export function endAstray(place: Workspace, server: string | null): string {
+  return server
+    ? `Nothing was sent. ${place.name} is still on ${server} — ask again from there.`
+    : `Nothing was sent. ${place.name} was not ended.`;
+}
+
+/**
  * Ask, and then end it.
  *
  * `delegated` is how many agents this place started elsewhere and has not
@@ -153,17 +218,50 @@ export function endWording(
  */
 export function useEndWorkspace() {
   const cache = useQueryClient();
+  /* Unmount is a cancellation, and it is the only way this flow can learn its
+     caller is gone: `Alert` is a native window, so the question survives the
+     tree that opened it and comes back to a closure nobody is waiting on. */
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
 
   return async (place: Workspace, delegated = 0): Promise<boolean> => {
-    const work = await sessionWork(place.id).catch(() => null);
-    if (!(await ask("End this workspace?", endWording(place, delegated, work)))) return false;
+    /* Captured once, before anything suspends: the whole destination, account
+       included, and the sentence that names it. Everything after this is
+       about this workspace on this Firetower and nothing else. */
+    const aimed = destination();
+    const firetower = identity(aimed);
+    /* Named only when the phone holds more than one; see `endTitle`. */
+    const named = servers().length > 1 ? (aimed?.org ?? null) : null;
+    /** Still the same Firetower, and still somebody to answer to? */
+    const onTarget = () => alive.current && identity(destination()) === firetower;
+
+    const work = await sessionWork(place.id, { firetower }).catch(() => null);
+    /* Nothing has been asked and nothing promised, so this one is silent. */
+    if (!onTarget()) return false;
+
+    if (!(await ask(endTitle(place, named), endWording(place, delegated, work)))) return false;
+    /* The second recheck, and the one the defect lived behind: *End it* was
+       pressed on a question about A, and a press is not consent to act on
+       whatever is current when it lands. */
+    if (!onTarget()) {
+      Alert.alert("It did not end.", endAstray(place, named ?? aimed?.org ?? null));
+      return false;
+    }
     /* The heaviest knock in the app, on the one press that cannot be taken
        back — and on the answer rather than on the question, which is where it
        was before this moved out of the menu. */
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
 
     try {
-      await destroySession(place.id, { workspace: true });
+      await destroySession(place.id, { workspace: true }, { firetower });
+      /* `cache` is the `QueryClient` of the identity this hook was mounted
+         for, which is the one holding the list this workspace was on. It is
+         invalidated whether or not anybody is still looking at it. */
       await cache.invalidateQueries({ queryKey: getListSessionsQueryKey() });
       return true;
     } catch (e) {
