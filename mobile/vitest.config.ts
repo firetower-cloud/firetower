@@ -18,6 +18,7 @@ export default defineConfig({
       // touches it.
       "react-native": path.resolve(__dirname, "src/test/react-native.stub.ts"),
       "react-native-mmkv": path.resolve(__dirname, "src/test/native.stub.ts"),
+      "expo-haptics": path.resolve(__dirname, "src/test/native.stub.ts"),
       "expo-secure-store": path.resolve(__dirname, "src/test/native.stub.ts"),
       "react-native-safe-area-context": path.resolve(__dirname, "src/test/native.stub.ts"),
     },
