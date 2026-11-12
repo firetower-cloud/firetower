@@ -18,7 +18,7 @@
 import { Pressable, Text, View } from "react-native";
 import { ChevronRight, GitBranch, GitPullRequest, Link2, Shapes } from "lucide-react-native";
 import type { Artifact, PlanStep, Session } from "~/api/generated/model";
-import { BEAT, BEAT_TOKEN, STATUS_LABEL, elapsed, minutesSince } from "~/api/view";
+import { BEAT_TOKEN, beatOf, elapsed, minutesSince, statusLabel } from "~/api/view";
 import { opens } from "~/api/workspaces";
 import { AgentMark } from "~/ui/AgentMark";
 import { Blocks } from "~/ui/Blocks";
@@ -93,7 +93,7 @@ function Member({
   onOpen?: () => void;
 }) {
   const { color } = useTheme();
-  const beat = BEAT[session.status];
+  const beat = beatOf(session);
   const tone = BEAT_TOKEN[beat];
   const row = `flex-row items-start gap-2 rounded-lg px-3 py-2.5 ${active ? "bg-raise" : ""}`;
   const inner = (
@@ -123,7 +123,7 @@ function Member({
             className="min-w-0 shrink font-sans text-meta"
             style={{ color: tone === "mute" ? color.dim : color[tone === "ember" ? "ember-soft" : tone] }}
           >
-            {(session.status === "NeedsYou" ? session.note : null) || STATUS_LABEL[session.status]}
+            {(session.status === "NeedsYou" ? session.note : null) || statusLabel(session.status)}
           </Text>
           <AgentMark agent={session.agent} size={11} tone={color.mute} />
         </View>

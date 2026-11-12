@@ -35,7 +35,7 @@
 import { useEffect, useRef } from "react";
 
 import type { Session } from "./generated/model";
-import { BEAT, inFlight, needsYou, type Beat } from "./view";
+import { beatOf, inFlight, needsYou, unrecognised, type Beat } from "./view";
 
 /** A workspace: a checkout on a host, and the agents working in it. */
 export type Workspace = {
@@ -273,16 +273,26 @@ export function familyOf(place: Workspace, places: Workspace[]): Session[] {
  * - **broken**, then **done** — both at rest, and a failure is the louder of
  *   the two: it will not finish on its own, whatever else here did.
  * - **over** only when every one of them has ended.
+ *
+ * **unknown** sits with the two that are at rest and above *done*, for the
+ * same reason a failure does: nobody can say it is finished. It is not above
+ * `working`, because a family with an agent actually typing in it is better
+ * described by that than by a word the app could not read.
  */
-const PRECEDENCE: Beat[] = ["blocked", "working", "broken", "done", "over"];
+const PRECEDENCE: Beat[] = ["blocked", "working", "broken", "unknown", "done", "over"];
 
 /** The one of these whose beat comes first. Ties keep the order they arrived
- *  in, which is the place's own runs before anything it delegated. */
+ *  in, which is the place's own runs before anything it delegated.
+ *
+ *  `beatOf` rather than `BEAT[…]`: the table answers `undefined` for a status
+ *  this app has never heard of, and `indexOf(undefined)` is `-1` — which
+ *  sorts ahead of every real beat, so the one run nobody could read became
+ *  the one the whole row was named after. */
 function loudest(runs: Session[]): Session {
   let best = runs[0];
-  let rank = PRECEDENCE.indexOf(BEAT[best.status]);
+  let rank = PRECEDENCE.indexOf(beatOf(best));
   for (const run of runs.slice(1)) {
-    const at = PRECEDENCE.indexOf(BEAT[run.status]);
+    const at = PRECEDENCE.indexOf(beatOf(run));
     if (at < rank) [best, rank] = [run, at];
   }
   return best;
@@ -301,7 +311,7 @@ function loudest(runs: Session[]): Session {
  * This is the question for a colour, and for the order the list reads in.
  */
 export function placeBeat(place: Workspace, places: Workspace[]): Beat {
-  return BEAT[loudest(familyOf(place, places)).status];
+  return beatOf(loudest(familyOf(place, places)));
 }
 
 /**
@@ -564,6 +574,21 @@ const BAND_ORDER: Record<Doing, number> = { waiting: 0, working: 1, idle: 2 };
 export function bandOf(place: Workspace, places: Workspace[]): Doing {
   const family = familyOf(place, places);
   if (family.some(needsYou)) return "waiting";
+  /* **An unrecognised status is not idle, and the three bands do not grow a
+     fourth for it.** `needsYou` and `inFlight` are both lists of statuses
+     this app knows, so a newer control plane's state answered no to both and
+     fell through to the bottom of the list, under the one heading nobody
+     reads when they are looking for work to do — which is the same way a
+     hidden blocked child used to get lost, arriving from the API rather than
+     from the tree.
+
+     *Waiting on you* because somebody does have to look: the app cannot say
+     what the state means, and that is a question for a person. The row's own
+     mark stays quiet (`BEAT_TOKEN.unknown` is `mute`) and its label says the
+     state is not known, so this is a quiet mark under a loud heading — the
+     direction this file's own note says is the safe one. The reverse would
+     lose the agent. */
+  if (family.some(unrecognised)) return "waiting";
   if (family.some(inFlight)) return "working";
   return "idle";
 }
@@ -586,7 +611,16 @@ export function bandOf(place: Workspace, places: Workspace[]): Doing {
  * the home's docked column, which is the same list previewed — and two copies
  * of a comparator are two chances to disagree about what comes first.
  */
-export const RANK: Record<Beat, number> = { blocked: 0, broken: 1, working: 2, done: 3, over: 4 };
+export const RANK: Record<Beat, number> = {
+  blocked: 0,
+  broken: 1,
+  /* With the two that want somebody, and above the ones at rest: a state the
+     app cannot read is not a state it may file as finished. */
+  unknown: 2,
+  working: 3,
+  done: 4,
+  over: 5,
+};
 
 /**
  * The same list, in that order: **the band first, then the beat within it.**
@@ -808,5 +842,14 @@ export function useVanished(selected: string | null, found: Workspace | null, re
 export function fleetLine(every: Workspace[], rows: BandedRow[]): string {
   const labelled = rows.some((row) => row.band === "waiting");
   const live = every.some((place) => place.runs.some(needsYou));
-  return labelled || live ? `${every.length} in all` : `${every.length} in all, none waiting`;
+  /* **And nothing unreadable, either.** *None waiting* is an absence, and an
+     absence is only true of states this app can read. A status it has never
+     heard of answers no to `needsYou` by not being in a list — so the one
+     session whose meaning nobody could work out was also the one the line
+     counted as nothing. It cannot be claimed as waiting either; what it can
+     do is stop the claim that nothing is. */
+  const unreadable = every.some((place) => place.runs.some(unrecognised));
+  return labelled || live || unreadable
+    ? `${every.length} in all`
+    : `${every.length} in all, none waiting`;
 }

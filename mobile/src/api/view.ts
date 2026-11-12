@@ -63,7 +63,7 @@ export const inFlight = (s: { status: SessionStatus }) => IN_FLIGHT.includes(s.s
  * thing that does — `Signal`'s dot and `Blocks`' quadrants both read it, so
  * they cannot drift apart again.
  */
-export type Beat = "working" | "blocked" | "done" | "broken" | "over";
+export type Beat = "working" | "blocked" | "done" | "broken" | "over" | "unknown";
 
 export const BEAT: Record<SessionStatus, Beat> = {
   Starting: "working",
@@ -79,7 +79,40 @@ export const BEAT: Record<SessionStatus, Beat> = {
   Ended: "over",
 };
 
-export const beatOf = (s: { status: SessionStatus }): Beat => BEAT[s.status];
+/**
+ * **A status this app has never heard of is not idle.**
+ *
+ * `BEAT` is exhaustive over the `SessionStatus` the generated model knows,
+ * and a control plane newer than the app on the phone can send one it does
+ * not. The lookup then answered `undefined`, which typed as `Beat` and
+ * behaved as *nothing in particular*: no mark drawn, the row banded under
+ * *Idle*, and the summary line above it still reading **none waiting**. A
+ * real `Stranded` session off a real control plane produced exactly that. A
+ * newer server's intervention state is the kind most worth seeing, and it was
+ * the kind that disappeared.
+ *
+ * So the gap is named instead of inferred. `unknown` is a beat like the
+ * others and every table over `Beat` has to answer for it, which is what
+ * `Record<Beat, …>` is for — the next person to add one gets a build error
+ * rather than this defect again.
+ *
+ * It is not a forward-compatibility scheme and does not try to guess what the
+ * state means. It says the app does not know, which is the only true thing
+ * available.
+ */
+export const beatOf = (s: { status: SessionStatus }): Beat =>
+  unrecognised(s) ? "unknown" : BEAT[s.status];
+
+/**
+ * Whether this app knows what a status means at all.
+ *
+ * `Object.hasOwn` and not `in`, which walks the prototype: `"toString" in
+ * BEAT` is `true`, so a status by that name would read as recognised and
+ * `BEAT[status]` would hand back a function where a `Beat` was expected —
+ * this very defect, through the one door a plain object literal leaves open.
+ * The statuses are strings off the wire and nothing narrows them.
+ */
+export const unrecognised = (s: { status: SessionStatus }) => !Object.hasOwn(BEAT, s.status);
 
 /**
  * The same table again, as token names.
@@ -95,6 +128,18 @@ export const BEAT_TOKEN: Record<Beat, "slate" | "ember" | "sage" | "brick" | "mu
   done: "sage",
   broken: "brick",
   over: "mute",
+  /**
+   * `mute`, and drawn hollow — see `Signal`.
+   *
+   * Not a sixth colour: `STYLE.md`'s budget is five and an unknown state has
+   * not earned one of the loud ones. Ember would claim the agent is waiting
+   * on you and sage would claim it finished, and both are guesses. The row is
+   * found by its band and its words, not by its colour: `bandOf` files it
+   * under *Waiting on you* and `statusLabel` says the app does not know the
+   * state. A quiet mark under a loud heading is the safe direction — see
+   * `bandOf`'s own note on which way that mismatch is allowed to go.
+   */
+  unknown: "mute",
 };
 
 /** One colour per meaning, and nothing else may choose one. */
@@ -104,6 +149,7 @@ export const BEAT_TONE: Record<Beat, string> = {
   done: "text-sage",
   broken: "text-brick",
   over: "text-mute",
+  unknown: "text-mute",
 };
 
 /**
@@ -147,6 +193,26 @@ export const STATUS_LABEL: Record<SessionStatus, string> = {
   Failed: "Failed",
   Ended: "Ended",
 };
+
+/**
+ * The same, and **a sentence for a state this app does not have a word for.**
+ *
+ * `STATUS_LABEL[status]` answered `undefined` for one, which renders as an
+ * empty line — so the one state whose meaning nobody could work out was also
+ * the one the interface said nothing at all about.
+ *
+ * The server's own word is kept, because it is the only identifying thing
+ * there is and it is what somebody would search the control plane for. What
+ * is added is that this app does not know it, which stops the word being read
+ * as a state the reader simply has not met yet.
+ *
+ * Short because of where it lands. This is the meta line under a workspace
+ * title, beside the age and a `⋯`, and a one-line `numberOfLines` row in the
+ * Overview panel — a longer gloss crowded the control at 402pt and would
+ * truncate below it.
+ */
+export const statusLabel = (status: SessionStatus): string =>
+  STATUS_LABEL[status] ?? `${status} — unknown to this app`;
 
 /** Terminal-state summary, derived rather than stored. */
 export function outcomeOf(session: Session): string {

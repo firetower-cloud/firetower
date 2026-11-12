@@ -32,7 +32,7 @@ import {
   useInterruptSession,
   useSendTurn,
 } from "~/api/generated/sessions/sessions";
-import { elapsed, minutesSince, STATUS_LABEL } from "~/api/view";
+import { elapsed, minutesSince, statusLabel } from "~/api/view";
 import { useDiff, useSession, useSessions, why } from "~/data";
 import { childrenElsewhere, group, placeOf, runAt, type Workspace } from "~/api/workspaces";
 import { AgentMark } from "~/ui/AgentMark";
@@ -358,7 +358,7 @@ function Conversation({ place, address }: { place: Workspace; address: string })
           </Text>
           <View className="mt-0.5 flex-row items-center gap-1.5">
             <Signal status={speaker.status} size={6} />
-            <Text className="font-sans text-meta text-dim">{STATUS_LABEL[speaker.status]}</Text>
+            <Text className="font-sans text-meta text-dim">{statusLabel(speaker.status)}</Text>
             <Text className="font-sans text-meta text-mute">·</Text>
             <Text className="font-sans text-meta text-mute">
               {elapsed(minutesSince(speaker.updatedAt))}

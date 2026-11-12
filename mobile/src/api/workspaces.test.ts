@@ -59,7 +59,7 @@ import {
   type Doing,
   type Workspace,
 } from "~/api/workspaces";
-import { BEAT, BEAT_TOKEN, inFlight, needsYou } from "~/api/view";
+import { BEAT_TOKEN, beatOf, inFlight, needsYou, statusLabel, unrecognised } from "~/api/view";
 import * as hooks from "~/test/hooks";
 
 /* For `useSettled` only, at the foot of this file. Nothing above it touches
@@ -545,7 +545,7 @@ describe("a row that stands for a family", () => {
       const parent = leadOf(places);
       /* What the row drew before: the place's own agents, which have nothing
          to say about an agent in another checkout. */
-      expect(BEAT[lead(parent).status]).toBe("done");
+      expect(beatOf(lead(parent))).toBe("done");
       expect(placeBeat(parent, places)).toBe("blocked");
     });
 
@@ -1119,6 +1119,141 @@ describe("the line above the list", () => {
        its lead's band is the thing that carries it, and the fleet answers the
        same question without re-ranking anything. */
     expect(fleetLine(places, [])).toBe("2 in all");
+  });
+});
+
+/**
+ * A status this app has never heard of.
+ *
+ * **Pre-existing, and not a regression from anything on this branch.** The
+ * tables over `SessionStatus` are exhaustive over what the generated model
+ * knows, and a control plane newer than the app on the phone can send one it
+ * does not. Every lookup then answered `undefined` and every test of
+ * membership answered no, so the state arrived as *nothing in particular*: no
+ * mark, the row under *Idle*, and the line above it still reading **none
+ * waiting**.
+ *
+ * It is taken here because it defeats the guarantee the rest of this change
+ * rests on. `mobile/STYLE.md` names three surfaces for ember and only the
+ * inbox row exists, so the list is the one place a waiting agent is visible
+ * on this phone — and a status nobody could read was the one thing that could
+ * leave it silently. `Stranded` is not hypothetical: it comes off a real
+ * control plane, which is where this was found.
+ *
+ * `Stranded as SessionStatus` is the whole point of the cast. The type cannot
+ * express a value the schema has not been regenerated for, and that is
+ * exactly the situation being tested.
+ */
+describe("a status this app does not know", () => {
+  const STRANDED = "Stranded" as SessionStatus;
+  const at = (places: Workspace[], id: string) => places.find((p) => p.id === id)!;
+
+  it("is unknown rather than idle, and says so", () => {
+    const run = { status: STRANDED };
+
+    expect(unrecognised(run)).toBe(true);
+    expect(beatOf(run)).toBe("unknown");
+    /* The two memberships that answered no by a value's absence from a list,
+       which is what read as idle. Neither changes: what changes is that
+       falling through both is no longer the end of the question. */
+    expect(needsYou(run)).toBe(false);
+    expect(inFlight(run)).toBe(false);
+  });
+
+  it("is not fooled by a status named after something on Object", () => {
+    /* `"toString" in BEAT` is `true` — the prototype — so a membership test
+       by `in` would call that status recognised and hand a function back
+       where a `Beat` belongs. These are strings off the wire. */
+    for (const odd of ["toString", "constructor", "hasOwnProperty"] as unknown as SessionStatus[]) {
+      expect(unrecognised({ status: odd })).toBe(true);
+      expect(beatOf({ status: odd })).toBe("unknown");
+    }
+  });
+
+  it("draws a mark, and a quiet one", () => {
+    /* `BEAT_TOKEN[undefined]` was `undefined`, and `color[undefined]` draws a
+       dot with no colour. Mute rather than ember or sage: the app cannot say
+       the agent is waiting on you and cannot say it finished either. */
+    expect(BEAT_TOKEN[beatOf({ status: STRANDED })]).toBe("mute");
+  });
+
+  it("says the state is unsupported rather than nothing at all", () => {
+    /* `STATUS_LABEL[status]` was `undefined`, which renders as an empty line:
+       the one state whose meaning nobody could work out was also the one the
+       interface said nothing about. The server's own word is kept, because it
+       is the only identifying thing there is. */
+    expect(statusLabel(STRANDED)).toBe("Stranded — unknown to this app");
+    expect(statusLabel("Working")).toBe("Working");
+  });
+
+  it("bands under Waiting on you, not Idle", () => {
+    const places = fleetOf({ id: "odd", status: STRANDED });
+
+    expect(bandOf(at(places, "w_odd"), places)).toBe("waiting");
+    expect(labels(banded(places))).toEqual(["Waiting on you 1"]);
+  });
+
+  it("carries a blocked sibling's band rather than displacing it", () => {
+    /* It does not become the loudest thing in a family either: a real question
+       outranks a word the app could not read. */
+    const places = fleetOf(
+      { id: "lead", status: STRANDED },
+      { id: "kid", status: "NeedsYou", of: "lead" },
+    );
+    const parent = at(places, "w_lead");
+
+    expect(placeBeat(parent, places)).toBe("blocked");
+    expect(bandOf(parent, places)).toBe("waiting");
+  });
+
+  it("does not become the loudest run by being unreadable", () => {
+    /* `PRECEDENCE.indexOf(undefined)` is `-1`, which sorts ahead of every real
+       beat — so the one run nobody could read was the one the whole row got
+       named after. */
+    const places = fleetOf(
+      { id: "lead", status: STRANDED },
+      { id: "kid", status: "Working", of: "lead" },
+    );
+    expect(placeBeat(at(places, "w_lead"), places)).toBe("working");
+  });
+
+  it("holds the invariant: no row's mark is louder than its band", () => {
+    /* Criterion 27, over the new beat. Mute is not louder than anything, so a
+       quiet mark under a loud heading — which this file's own note calls the
+       safe direction — is what an unknown row is. */
+    const places = fleetOf({ id: "odd", status: STRANDED }, { id: "idle", status: "Ready" });
+    for (const row of banded(places)) {
+      const token = BEAT_TOKEN[placeBeat(row.place, places)];
+      if (token === "ember" || token === "brick") expect(row.band).toBe("waiting");
+    }
+  });
+
+  it("suppresses none waiting while anything is unreadable", () => {
+    /* The reviewer's own reproduction: a controlled `Stranded` session
+       produced `idle`, an undefined mark, and "1 in all, none waiting". The
+       absence is only true of states this app can read. */
+    const places = fleetOf({ id: "odd", status: STRANDED });
+
+    expect(waitingAgents(places)).toBe(0);
+    expect(fleetLine(places, banded(places))).toBe("1 in all");
+  });
+
+  it("suppresses it for an unreadable child with no row of its own", () => {
+    /* The fleet is asked, not the drawn rows — so a hidden child carries the
+       same way a blocked one does. */
+    const places = fleetOf(
+      { id: "lead", status: "Ready" },
+      { id: "kid", status: STRANDED, of: "lead" },
+    );
+    expect(banded(places)).toHaveLength(1);
+    expect(fleetLine(places, banded(places))).toBe("2 in all");
+  });
+
+  it("still says none waiting over a fleet it can read", () => {
+    /* The branch that ships today, unchanged: this must not have turned the
+       clause off for everybody. */
+    const places = fleetOf({ id: "busy", status: "Working" }, { id: "idle", status: "Ready" });
+    expect(fleetLine(places, banded(places))).toBe("2 in all, none waiting");
   });
 });
 
