@@ -6631,6 +6631,78 @@ async fn a_launch_approved_against_named_versions_will_not_start_with_fewer() {
     );
 }
 
+/// **A run's workspace is a workspace, and the lists say so.**
+///
+/// Asked for after a report that scheduled runs were missing from the home
+/// page's Workspaces panel. Nothing excludes them and nothing ever did: a run
+/// goes through the same `insert_session`, which writes the same `workspaces`
+/// row filed in the owner's own space, and `sessions_page` is the one query
+/// behind that panel. What makes one *look* absent is that it was never
+/// started, or that it has already been deleted — a clean run deletes its
+/// workspace when `deleteCleanRuns` is on, which is the default.
+///
+/// So this is a test rather than an argument: it launches one and reads the
+/// list the panel reads.
+#[tokio::test]
+async fn a_scheduled_runs_workspace_is_in_the_list_the_home_page_reads() {
+    let (state, principal, host, ready, owner, created) = frames_fixture().await;
+    ready.store(true, Ordering::SeqCst);
+    says_it_has(&state, &host, &[(Agent::ClaudeCode, true)]).await;
+    let account = a_subscription(&state, &owner, "a_claude", Agent::ClaudeCode).await;
+
+    let mut new = a_schedule("Shows up like any other", weekdays_at("08:30"));
+    new.account_id = Some(account);
+    let made = create(&state, &principal, new).await.unwrap();
+    let _ = super::schedules::approve_schedule(
+        State(state.clone()),
+        Extension(principal.clone()),
+        Path(made.id.as_str().to_string()),
+        Query(Default::default()),
+    )
+    .await
+    .expect("it activates");
+
+    let row = state.db.schedule(&made.id).await.unwrap().unwrap();
+    let claim = state
+        .db
+        .claim_run(
+            &ft_core::ScheduleRunId::new(),
+            &made.id,
+            None,
+            Utc::now(),
+            1,
+            "cron",
+            "claimed",
+            None,
+            false,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    crate::schedules::launch::start(&state, &row, &claim, crate::schedules::launch::Why::Clock)
+        .await
+        .expect("it launches");
+    let frame = handed_to_worker(&created).await;
+
+    // The panel's own query, unfiltered: `GET /sessions` is `sessions_page`,
+    // which inner-joins `workspaces` — so a run whose workspace row was not
+    // written would be invisible there however well it ran.
+    let listed = state.db.sessions_page(&owner, None, None).await.unwrap();
+    let its = listed
+        .iter()
+        .find(|s| s.id == frame.session_id)
+        .expect("a run's workspace is not in the list the home page reads");
+    assert_eq!(
+        its.workspace_id.as_ref().map(|w| w.as_str()),
+        Some(frame.session_id.as_str()),
+        "and it is its own place, so the panel groups it as one"
+    );
+    assert!(
+        its.parent_id.is_none(),
+        "not a child of anything, so it is drawn as a place"
+    );
+}
+
 /// **Blocker 2, as it survived the first fix: the engine checked was not the
 /// engine that ran.**
 ///
