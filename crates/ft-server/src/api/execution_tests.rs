@@ -6136,7 +6136,12 @@ async fn a_schedule_cannot_be_turned_on_without_a_subscription_to_spend() {
         drafted.pins["accountId"].is_null(),
         "nothing resolved, which is the state under test"
     );
-    assert_eq!(drafted.pins["accountNeeded"], serde_json::json!(true));
+    // Nothing records *whether* one is needed: it is the spec's engine that
+    // says so, every time it is asked.
+    assert!(
+        crate::api::schedules::engine_of(&drafted.spec).needs_credential(),
+        "the engine this would run is one that spends a subscription"
+    );
 
     // Turning it on cannot be.
     let refused = super::schedules::approve_schedule(
@@ -6593,10 +6598,90 @@ async fn a_schedules_controls_are_checked_against_the_engine_a_profile_pins() {
         serde_json::json!("never"),
         "and the word is the one Codex knows"
     );
-    assert_eq!(
-        row.pins["accountNeeded"],
-        serde_json::json!(true),
-        "a shell authenticates nothing and Codex does — asked of the engine that runs"
+    // A shell authenticates nothing and Codex does, and what decides is the
+    // engine recorded in the spec rather than the one that was asked for.
+    assert!(
+        crate::api::schedules::engine_of(&row.spec).needs_credential(),
+        "asked of the engine that runs: {:?}",
+        row.spec["agent"]
+    );
+}
+
+/// **Blocker 3: a stored "needs no subscription" does not survive the launch.**
+///
+/// `accountNeeded` was written at creation from the engine that was
+/// *requested*, so a schedule asking for a plain shell with a Codex profile
+/// stored `false` — and a stored `false` skipped the whole of gate 4: no
+/// authorization check, no usage-limit check, no pin. `pin_agent_account`, a
+/// `before insert` trigger, then filled `sessions.agent_account_id` from
+/// whatever default had turned up since, and with no portable credential the
+/// launch falls through to the worker's own identity.
+///
+/// The flag is gone and the engine is asked instead. This writes the stale
+/// pins back by hand, which is what a row approved by that build looks like,
+/// and the launch refuses on the engine rather than believing the row.
+#[tokio::test]
+async fn a_stored_claim_that_no_subscription_is_needed_does_not_survive_a_launch() {
+    let (state, principal, host, ready, owner, created) = frames_fixture().await;
+    ready.store(true, Ordering::SeqCst);
+    says_it_has(&state, &host, &[(Agent::ClaudeCode, true)]).await;
+
+    let made = armed(&state, &principal, "Spends something").await;
+    let row = state.db.schedule(&made.id).await.unwrap().unwrap();
+    assert!(
+        row.pins["accountId"].is_string(),
+        "approval pinned one, which is the state being tampered with"
+    );
+
+    // What that build stored: no pin, and a claim that none is needed.
+    let mut pins = row.pins.clone();
+    pins["accountId"] = serde_json::Value::Null;
+    pins["accountNeeded"] = serde_json::json!(false);
+    sqlx::query("UPDATE schedules SET pins = $2 WHERE id = $1")
+        .bind(made.id.as_str())
+        .bind(&pins)
+        .execute(state.db.pool())
+        .await
+        .unwrap();
+    let row = state.db.schedule(&made.id).await.unwrap().unwrap();
+
+    let claim = state
+        .db
+        .claim_run(
+            &ft_core::ScheduleRunId::new(),
+            &made.id,
+            None,
+            Utc::now(),
+            1,
+            "cron",
+            "claimed",
+            None,
+            false,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    crate::schedules::launch::start(&state, &row, &claim)
+        .await
+        .expect("a refusal is an outcome");
+
+    let run = runs_of(&state, &made.id)
+        .await
+        .into_iter()
+        .find(|r| r.state.is_terminal())
+        .expect("it was recorded");
+    assert_eq!(run.state, ScheduleRunState::Failed);
+    assert!(
+        run.detail
+            .as_deref()
+            .unwrap_or_default()
+            .contains("which subscription it spends"),
+        "{:?}",
+        run.detail
+    );
+    assert!(
+        created.lock().unwrap().is_empty(),
+        "a workspace was created for a run with no authorized subscription"
     );
 }
 

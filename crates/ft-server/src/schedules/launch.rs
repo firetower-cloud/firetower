@@ -431,21 +431,19 @@ async fn gate(
     // falls through to host-local authentication, which is the worker's
     // identity rather than the owner's.
     //
-    // `accountNeeded` tells an approved credential-free engine — a plain
-    // shell has nothing to authenticate — from a pin that is simply absent.
-    // Absent is the state this refuses.
+    // **Asked of the engine, not of a stored flag.** It read
+    // `pins.accountNeeded`, which was written at creation from the *requested*
+    // engine — so a schedule that asked for a plain shell with a Codex
+    // profile stored `false`, and a stored `false` skipped both of the checks
+    // below and left `pin_agent_account` to fill the column from whatever
+    // default had turned up. Engines that authenticate nothing are the ones
+    // nothing offers, so deriving this fails closed by construction.
     let account = schedule
         .pins
         .get("accountId")
         .and_then(|v| v.as_str())
         .map(str::to_string);
-    let needs_account = schedule
-        .pins
-        .get("accountNeeded")
-        .and_then(|v| v.as_bool())
-        // A schedule approved before this was recorded. Fail closed: the
-        // engines that need none are the ones nothing offers.
-        .unwrap_or(true);
+    let needs_account = crate::api::schedules::engine_of(&schedule.spec).needs_credential();
     if needs_account && account.is_none() {
         return Err(Stopped {
             state: "failed",

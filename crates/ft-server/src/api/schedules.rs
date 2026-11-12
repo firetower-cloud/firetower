@@ -583,16 +583,20 @@ async fn pins_for(
             })?
             .map(|a| a.id),
     };
-    // Distinguished from an approved credential-free mode, which is a real
-    // state: a plain shell authenticates nothing, so there is nothing to pin
-    // and nothing to fall back to either.
+    // **Whether an account is needed is not recorded.** It was, as
+    // `accountNeeded`, and both the gate and `pin_a_spendable_account` read
+    // it instead of asking the engine — so a schedule written while the
+    // engine was resolved wrongly carried `false`, and a stored `false` skips
+    // the account checks entirely. `pin_agent_account`, a `before insert`
+    // trigger, then fills the column from whatever default has turned up.
     //
-    // **Not required here — required at approval.** Writing one down is inert
-    // for everybody, and refusing to let somebody draft a schedule because
-    // they have not connected a subscription yet would make the inert row
-    // unobtainable. [`approve_schedule`] is where the authorization is fixed,
-    // and that is where an account has to exist and be spendable.
-    let needs_account = agent.needs_credential();
+    // It is derivable from the spec's engine at any moment, by
+    // [`engine_of`], and one derivation cannot disagree with itself.
+    //
+    // **An account is still not required here — it is required at approval.**
+    // Writing a draft down is inert for everybody, and refusing to let
+    // somebody draft a schedule because they have not connected a
+    // subscription yet would make the inert row unobtainable.
 
     // The versions those skills resolve to **now**, and what a run is pinned
     // to. Recording the ids was not enough on its own: the launch pinned
@@ -642,10 +646,6 @@ async fn pins_for(
     Ok(serde_json::json!({
         "settings": settings,
         "agentDecides": decides_itself,
-        // Whether an account is a thing this engine has at all, so the gate
-        // can tell "approved with no credential, deliberately" from "the pin
-        // is missing".
-        "accountNeeded": needs_account,
         "skills": skills,
         "accountId": account,
         "profile": req.profile,
@@ -781,21 +781,12 @@ pub struct Reviewed {
 /// somebody is present and deciding.
 async fn pin_a_spendable_account(state: &AppState, row: &crate::db::ScheduleRow) -> ApiResult<()> {
     // An engine that authenticates nothing has nothing to pin and nothing to
-    // fall back to. Told apart from an absent pin deliberately.
-    let needs = row
-        .pins
-        .get("accountNeeded")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(true);
-    if !needs {
+    // fall back to — a plain shell. Asked of the engine the spec names, which
+    // is the engine that will run.
+    let agent = engine_of(&row.spec);
+    if !agent.needs_credential() {
         return Ok(());
     }
-
-    let agent: ft_core::Agent = row
-        .spec
-        .get("agent")
-        .and_then(|v| serde_json::from_value(v.clone()).ok())
-        .unwrap_or(ft_core::Agent::ClaudeCode);
 
     let pinned = row.pins.get("accountId").and_then(|v| v.as_str());
     let account = match pinned {
@@ -1066,6 +1057,22 @@ pub(super) async fn read_cadence(
 /// Resolved here, recorded in the spec, and used for every per-engine
 /// question: the permission mode's word, the sandbox, whether a subscription
 /// is needed, and which account is the default.
+/// The engine an approved spec says will run.
+///
+/// **The one source for anything per-engine after approval**, so that nothing
+/// downstream decides on a flag that was written by a build that got the
+/// engine wrong. `spec["agent"]` is the effective engine — see
+/// [`effective_agent`] — and gate 5 refuses the run outright if the profile
+/// that pinned it has changed since, because the fingerprint covers it.
+///
+/// `ClaudeCode` for a spec that cannot be read, which fails closed: it is an
+/// engine that needs a credential, so every check keyed on this runs.
+pub(crate) fn engine_of(spec: &serde_json::Value) -> ft_core::Agent {
+    spec.get("agent")
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or(ft_core::Agent::ClaudeCode)
+}
+
 /// Pure, and resolved from the same field `create_session_as` reads, so the
 /// two cannot disagree about which engine this is.
 fn effective_agent(req: &NewSchedule, profile: Option<&crate::roles::Role>) -> ft_core::Agent {
