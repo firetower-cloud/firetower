@@ -173,10 +173,18 @@ create table schedule_runs (
     -- the session id and writes it here *before* it attempts the launch, so
     -- that a control plane replaced mid-launch — the ordinary way this process
     -- ends — leaves a claim that can be reconciled: "does a session with this
-    -- id exist?" separates "nothing ran, no credential was read" from the
-    -- rest, because `insert_session` is the first thing in a launch that
-    -- commits. A foreign key makes that write impossible, because at that
-    -- moment the session does not exist yet.
+    -- id exist?" separates **"nothing was started"** from the rest, because
+    -- `insert_session` is the first thing in a launch that commits. A foreign
+    -- key makes that write impossible, because at that moment the session
+    -- does not exist yet.
+    --
+    -- It does **not** separate "nothing was read". The owner's git
+    -- authorization is resolved before that insert — the gate asks the vault
+    -- whether they still hold it, and a repository whose trunk is unknown is
+    -- probed on their token — and `secret_access` records a read against its
+    -- owner and a reason, never against a session. So this answers "did
+    -- anything start"; the vault's own log is what answers "was anything
+    -- read".
     --
     -- What the key was for was `on delete set null`, so the link went when
     -- `reclaim` purged the workspace and the line stayed. That still happens,

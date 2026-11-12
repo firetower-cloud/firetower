@@ -178,8 +178,10 @@ struct Stopped {
 /// **Which is not the same as "no credential is read", and the difference is
 /// worth keeping straight.** Gate 2 asks the vault whether the owner still
 /// holds git authorization for each remote, because the only honest way to
-/// ask is to try to resolve it — so the gate itself reads, and every read is
-/// a line in `secret_access` naming the session it was for. What the gates
+/// ask is to try to resolve it — so the gate itself reads, and it reads
+/// before there is a session to attribute it to. `secret_access` records
+/// every read against its owner and the reason given for it, which here
+/// names the repository; no row in that log says "a session". What the gates
 /// protect is what *reaches a machine*.
 ///
 /// `pub(crate)` for the tests rather than for any caller: [`spawn`] is how the

@@ -3407,9 +3407,19 @@ impl Db {
 
     /// Whether a session with this id exists at all.
     ///
-    /// The one question minting the id early makes answerable: `insert_session`
-    /// is the first thing in a launch that commits, so a claim naming a session
-    /// that is not there means nothing ran and no credential was read.
+    /// The one question minting the id early makes answerable:
+    /// `insert_session` is the first thing in a launch that commits, so a
+    /// claim naming a session that is not there means **nothing was
+    /// started** — no workspace was made, no agent ran, nothing reached a
+    /// machine.
+    ///
+    /// It does **not** mean no credential was read, and the difference is
+    /// worth keeping straight. The launch resolves the owner's git
+    /// authorization before it inserts anything, and a repository whose trunk
+    /// is not known yet is probed on their token — both before this row
+    /// exists. `secret_access` records those reads against their owner and
+    /// the reason given, never against a session, so the vault's log is what
+    /// answers "was anything read" and this answers "did anything start".
     pub async fn session_exists(&self, id: &SessionId) -> Result<bool> {
         Ok(
             sqlx::query_scalar::<_, bool>("SELECT EXISTS (SELECT 1 FROM sessions WHERE id = $1)")
