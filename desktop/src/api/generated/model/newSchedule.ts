@@ -7,6 +7,7 @@
  */
 import type { Agent } from './agent.ts';
 import type { Cadence } from './cadence.ts';
+import type { HostId } from './hostId.ts';
 import type { Preferred } from './preferred.ts';
 import type { RepoId } from './repoId.ts';
 
@@ -33,11 +34,20 @@ export interface NewSchedule {
      * @nullable
      */
   fromSessionId?: string | null;
+  hostId?: null | HostId;
   name: string;
   /** @nullable */
   profile?: string | null;
   prompt: string;
   repoId?: null | RepoId;
+  /**
+     * Every repository each run checks out, in order.
+     *
+     * One working branch across all of them, which is what makes a change
+     * spanning two repositories reviewable — the same thing the composer
+     * does when you tick a second one.
+     */
+  repoIds?: RepoId[];
   /**
      * Model, effort, permissions and sandbox. **Pinned explicitly** — see
      * [`pins_for`].

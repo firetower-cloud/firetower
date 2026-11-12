@@ -207,7 +207,14 @@ async fn propose_schedule(state: &AppState, request: &AgentRequest) -> Result<St
             name: name.clone(),
             prompt,
             repo_id,
+            // One repository, which is all the tool asks for. A proposal is a
+            // sentence an agent wrote, not a form.
+            repo_ids: Vec::new(),
             base: None,
+            // **No machine.** A proposal names none, so the scheduler places
+            // each run — see [`NewSchedule::host_id`]. The person approving it
+            // is the one who can say which machine it should be.
+            host_id: None,
             cadence,
             timezone,
             profile,

@@ -635,7 +635,7 @@ pub fn spec_of(schedule: &crate::db::ScheduleRow) -> Result<ft_core::NewSession,
 }
 
 /// Which repositories a spec checks out.
-fn repos_in(spec: &serde_json::Value) -> Vec<String> {
+pub fn repos_in(spec: &serde_json::Value) -> Vec<String> {
     let mut out = Vec::new();
     if let Some(one) = spec.get("repoId").and_then(|v| v.as_str()) {
         out.push(one.to_string());

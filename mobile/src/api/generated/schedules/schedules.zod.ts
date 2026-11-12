@@ -63,6 +63,8 @@ export const ListSchedulesResponseItem = zod.object({
   "base": zod.string().nullish(),
   "createdAt": zod.iso.datetime({"offset":true}),
   "deleteCleanRuns": zod.boolean().describe('Whether a clean run\'s workspace is deleted.\n\nAlways false, and not offered as a control, when there is no\nrepository: `session_work` answers an empty list for a workspace with\nnothing checked out, so "nothing uncommitted" is vacuously true and a\nclean-run rule would read a bare workspace as the safe case and delete\nevery file the agent made.'),
+  "hostId": zod.union([zod.null(),zod.string().describe('The machine each run starts on, when the schedule names one.\n\n`null` means the scheduler places it — which is what a proposal that\nnamed no machine leaves behind. The create sheet always names one.')]).optional(),
+  "hostName": zod.string().nullish(),
   "id": zod.string().describe('Identifies a schedule — a durable authorization to start an agent with nobody present.'),
   "lastRun": zod.union([zod.null(),zod.object({
   "detail": zod.string().nullish().describe('The sentence a person reads. Written once.'),
@@ -91,8 +93,12 @@ export const ListSchedulesResponseItem = zod.object({
   "name": zod.string(),
   "pausedReason": zod.union([zod.null(),zod.enum(['three_failures', 'five_runs', 'overran', 'owner_disabled']).describe('Which rule stopped a schedule.\n\n**The rule, and nothing else.** Not a composed sentence and not a tally:\nthe streak is the leading part of the history the page already draws, so it\ncounts the failures and the questions itself and says the exact shape —\nincluding the mixed case, which no single rule name covers. A sentence\nstored here would be a second copy of that, free to disagree with it.\n\nNull — `None` — is a person. "You paused this" and "this gave up" have to\nread differently, and the absence is the cheapest way to tell them apart.')]).optional(),
   "prompt": zod.string().describe('What it asks for.'),
-  "repoId": zod.union([zod.null(),zod.string().describe('Which repository, if any. A schedule with none is a bare agent, and\nseveral things about it are different — see `deleteCleanRuns`.')]).optional(),
+  "repoId": zod.union([zod.null(),zod.string().describe('Which repository, if any. A schedule with none is a bare agent, and\nseveral things about it are different — see `deleteCleanRuns`.\n\nThe **first** of `repos`, kept as its own field because every screen\nthat draws one repository reads this and most schedules have one.')]).optional(),
   "repoSlug": zod.string().nullish(),
+  "repos": zod.array(zod.object({
+  "id": zod.string().describe('Identifies a connected repository.'),
+  "slug": zod.string()
+}).describe('One repository a schedule checks out.\n\nThe slug beside the id because every screen that draws a repository draws\nits name, and a client holding only ids would have to join against the\nrepository list to say anything at all.')).describe('Every repository each run checks out, in order.'),
   "revision": zod.int(),
   "runsTotal": zod.int().min(listSchedulesResponseRunsTotalMin),
   "streak": zod.object({
@@ -195,10 +201,12 @@ export const CreateScheduleBody = zod.object({
 }).describe('A cron expression, written by hand.\n\nFive fields, the form everybody writes. Validated on write, and refused\nwhen it would fire more often than every fifteen minutes.')]).describe('How often a schedule runs, as the person expressed it.\n\nKept beside the cron expression it compiles to rather than derived back out\nof it: "every weekday at 08:30" and `30 8 * * 1-5` are the same instruction,\nand only one of them is a control an edit form can redraw. Reversing a cron\nexpression into a cadence is guesswork that gets it wrong for the\nexpressions a person wrote by hand.\n\n**No client parses cron.** The server compiles this, computes the next\nthree fire times and writes the plain-English read-back, so there is one\ncron implementation in the product rather than two that disagree about\ndaylight saving in March.'),
   "deleteCleanRuns": zod.boolean().optional().describe('Whether a clean run\'s workspace is deleted. Ignored without a\nrepository, where nothing is ever deleted automatically.'),
   "fromSessionId": zod.string().nullish().describe('The conversation that asked for this, when an agent did.'),
+  "hostId": zod.union([zod.null(),zod.string().describe('**Which machine each run starts on.**\n\nA schedule used to pin a policy — any machine that is free — and never\na host, because a pinned machine that is retired is a schedule that\nfails every morning. Reversed deliberately: a schedule names one\nmachine, the same way starting work does, because "it ran somewhere"\nis not an answer somebody can act on at 9am.\n\nStill optional on the wire, so a proposal that names none is a\nschedule the scheduler places. The create sheet always names one.')]).optional(),
   "name": zod.string(),
   "profile": zod.string().nullish(),
   "prompt": zod.string(),
-  "repoId": zod.union([zod.null(),zod.string().describe('Omit for a bare agent. Several things are different without one — see\n`deleteCleanRuns`.')]).optional(),
+  "repoId": zod.union([zod.null(),zod.string().describe('Omit for a bare agent. Several things are different without one — see\n`deleteCleanRuns`.\n\nKept beside `repoIds` so anything holding one repository still works —\nthe MCP tool writes this — and when both are given this one goes\nfirst, which is the rule `NewSession` already follows for the same\npair.')]).optional(),
+  "repoIds": zod.array(zod.string().describe('Identifies a connected repository.')).optional().describe('Every repository each run checks out, in order.\n\nOne working branch across all of them, which is what makes a change\nspanning two repositories reviewable — the same thing the composer\ndoes when you tick a second one.'),
   "settings": zod.object({
   "effort": zod.string().nullish(),
   "mode": zod.string().nullish(),
@@ -233,6 +241,8 @@ export const CreateScheduleResponse = zod.object({
   "base": zod.string().nullish(),
   "createdAt": zod.iso.datetime({"offset":true}),
   "deleteCleanRuns": zod.boolean().describe('Whether a clean run\'s workspace is deleted.\n\nAlways false, and not offered as a control, when there is no\nrepository: `session_work` answers an empty list for a workspace with\nnothing checked out, so "nothing uncommitted" is vacuously true and a\nclean-run rule would read a bare workspace as the safe case and delete\nevery file the agent made.'),
+  "hostId": zod.union([zod.null(),zod.string().describe('The machine each run starts on, when the schedule names one.\n\n`null` means the scheduler places it — which is what a proposal that\nnamed no machine leaves behind. The create sheet always names one.')]).optional(),
+  "hostName": zod.string().nullish(),
   "id": zod.string().describe('Identifies a schedule — a durable authorization to start an agent with nobody present.'),
   "lastRun": zod.union([zod.null(),zod.object({
   "detail": zod.string().nullish().describe('The sentence a person reads. Written once.'),
@@ -261,8 +271,12 @@ export const CreateScheduleResponse = zod.object({
   "name": zod.string(),
   "pausedReason": zod.union([zod.null(),zod.enum(['three_failures', 'five_runs', 'overran', 'owner_disabled']).describe('Which rule stopped a schedule.\n\n**The rule, and nothing else.** Not a composed sentence and not a tally:\nthe streak is the leading part of the history the page already draws, so it\ncounts the failures and the questions itself and says the exact shape —\nincluding the mixed case, which no single rule name covers. A sentence\nstored here would be a second copy of that, free to disagree with it.\n\nNull — `None` — is a person. "You paused this" and "this gave up" have to\nread differently, and the absence is the cheapest way to tell them apart.')]).optional(),
   "prompt": zod.string().describe('What it asks for.'),
-  "repoId": zod.union([zod.null(),zod.string().describe('Which repository, if any. A schedule with none is a bare agent, and\nseveral things about it are different — see `deleteCleanRuns`.')]).optional(),
+  "repoId": zod.union([zod.null(),zod.string().describe('Which repository, if any. A schedule with none is a bare agent, and\nseveral things about it are different — see `deleteCleanRuns`.\n\nThe **first** of `repos`, kept as its own field because every screen\nthat draws one repository reads this and most schedules have one.')]).optional(),
   "repoSlug": zod.string().nullish(),
+  "repos": zod.array(zod.object({
+  "id": zod.string().describe('Identifies a connected repository.'),
+  "slug": zod.string()
+}).describe('One repository a schedule checks out.\n\nThe slug beside the id because every screen that draws a repository draws\nits name, and a client holding only ids would have to join against the\nrepository list to say anything at all.')).describe('Every repository each run checks out, in order.'),
   "revision": zod.int(),
   "runsTotal": zod.int().min(createScheduleResponseRunsTotalMin),
   "streak": zod.object({
@@ -388,6 +402,8 @@ export const OneScheduleResponse = zod.object({
   "base": zod.string().nullish(),
   "createdAt": zod.iso.datetime({"offset":true}),
   "deleteCleanRuns": zod.boolean().describe('Whether a clean run\'s workspace is deleted.\n\nAlways false, and not offered as a control, when there is no\nrepository: `session_work` answers an empty list for a workspace with\nnothing checked out, so "nothing uncommitted" is vacuously true and a\nclean-run rule would read a bare workspace as the safe case and delete\nevery file the agent made.'),
+  "hostId": zod.union([zod.null(),zod.string().describe('The machine each run starts on, when the schedule names one.\n\n`null` means the scheduler places it — which is what a proposal that\nnamed no machine leaves behind. The create sheet always names one.')]).optional(),
+  "hostName": zod.string().nullish(),
   "id": zod.string().describe('Identifies a schedule — a durable authorization to start an agent with nobody present.'),
   "lastRun": zod.union([zod.null(),zod.object({
   "detail": zod.string().nullish().describe('The sentence a person reads. Written once.'),
@@ -416,8 +432,12 @@ export const OneScheduleResponse = zod.object({
   "name": zod.string(),
   "pausedReason": zod.union([zod.null(),zod.enum(['three_failures', 'five_runs', 'overran', 'owner_disabled']).describe('Which rule stopped a schedule.\n\n**The rule, and nothing else.** Not a composed sentence and not a tally:\nthe streak is the leading part of the history the page already draws, so it\ncounts the failures and the questions itself and says the exact shape —\nincluding the mixed case, which no single rule name covers. A sentence\nstored here would be a second copy of that, free to disagree with it.\n\nNull — `None` — is a person. "You paused this" and "this gave up" have to\nread differently, and the absence is the cheapest way to tell them apart.')]).optional(),
   "prompt": zod.string().describe('What it asks for.'),
-  "repoId": zod.union([zod.null(),zod.string().describe('Which repository, if any. A schedule with none is a bare agent, and\nseveral things about it are different — see `deleteCleanRuns`.')]).optional(),
+  "repoId": zod.union([zod.null(),zod.string().describe('Which repository, if any. A schedule with none is a bare agent, and\nseveral things about it are different — see `deleteCleanRuns`.\n\nThe **first** of `repos`, kept as its own field because every screen\nthat draws one repository reads this and most schedules have one.')]).optional(),
   "repoSlug": zod.string().nullish(),
+  "repos": zod.array(zod.object({
+  "id": zod.string().describe('Identifies a connected repository.'),
+  "slug": zod.string()
+}).describe('One repository a schedule checks out.\n\nThe slug beside the id because every screen that draws a repository draws\nits name, and a client holding only ids would have to join against the\nrepository list to say anything at all.')).describe('Every repository each run checks out, in order.'),
   "revision": zod.int(),
   "runsTotal": zod.int().min(oneScheduleResponseRunsTotalMin),
   "streak": zod.object({
@@ -525,10 +545,12 @@ export const UpdateScheduleBody = zod.object({
 }).describe('A cron expression, written by hand.\n\nFive fields, the form everybody writes. Validated on write, and refused\nwhen it would fire more often than every fifteen minutes.')]).describe('How often a schedule runs, as the person expressed it.\n\nKept beside the cron expression it compiles to rather than derived back out\nof it: "every weekday at 08:30" and `30 8 * * 1-5` are the same instruction,\nand only one of them is a control an edit form can redraw. Reversing a cron\nexpression into a cadence is guesswork that gets it wrong for the\nexpressions a person wrote by hand.\n\n**No client parses cron.** The server compiles this, computes the next\nthree fire times and writes the plain-English read-back, so there is one\ncron implementation in the product rather than two that disagree about\ndaylight saving in March.'),
   "deleteCleanRuns": zod.boolean().optional().describe('Whether a clean run\'s workspace is deleted. Ignored without a\nrepository, where nothing is ever deleted automatically.'),
   "fromSessionId": zod.string().nullish().describe('The conversation that asked for this, when an agent did.'),
+  "hostId": zod.union([zod.null(),zod.string().describe('**Which machine each run starts on.**\n\nA schedule used to pin a policy — any machine that is free — and never\na host, because a pinned machine that is retired is a schedule that\nfails every morning. Reversed deliberately: a schedule names one\nmachine, the same way starting work does, because "it ran somewhere"\nis not an answer somebody can act on at 9am.\n\nStill optional on the wire, so a proposal that names none is a\nschedule the scheduler places. The create sheet always names one.')]).optional(),
   "name": zod.string(),
   "profile": zod.string().nullish(),
   "prompt": zod.string(),
-  "repoId": zod.union([zod.null(),zod.string().describe('Omit for a bare agent. Several things are different without one — see\n`deleteCleanRuns`.')]).optional(),
+  "repoId": zod.union([zod.null(),zod.string().describe('Omit for a bare agent. Several things are different without one — see\n`deleteCleanRuns`.\n\nKept beside `repoIds` so anything holding one repository still works —\nthe MCP tool writes this — and when both are given this one goes\nfirst, which is the rule `NewSession` already follows for the same\npair.')]).optional(),
+  "repoIds": zod.array(zod.string().describe('Identifies a connected repository.')).optional().describe('Every repository each run checks out, in order.\n\nOne working branch across all of them, which is what makes a change\nspanning two repositories reviewable — the same thing the composer\ndoes when you tick a second one.'),
   "settings": zod.object({
   "effort": zod.string().nullish(),
   "mode": zod.string().nullish(),
@@ -563,6 +585,8 @@ export const UpdateScheduleResponse = zod.object({
   "base": zod.string().nullish(),
   "createdAt": zod.iso.datetime({"offset":true}),
   "deleteCleanRuns": zod.boolean().describe('Whether a clean run\'s workspace is deleted.\n\nAlways false, and not offered as a control, when there is no\nrepository: `session_work` answers an empty list for a workspace with\nnothing checked out, so "nothing uncommitted" is vacuously true and a\nclean-run rule would read a bare workspace as the safe case and delete\nevery file the agent made.'),
+  "hostId": zod.union([zod.null(),zod.string().describe('The machine each run starts on, when the schedule names one.\n\n`null` means the scheduler places it — which is what a proposal that\nnamed no machine leaves behind. The create sheet always names one.')]).optional(),
+  "hostName": zod.string().nullish(),
   "id": zod.string().describe('Identifies a schedule — a durable authorization to start an agent with nobody present.'),
   "lastRun": zod.union([zod.null(),zod.object({
   "detail": zod.string().nullish().describe('The sentence a person reads. Written once.'),
@@ -591,8 +615,12 @@ export const UpdateScheduleResponse = zod.object({
   "name": zod.string(),
   "pausedReason": zod.union([zod.null(),zod.enum(['three_failures', 'five_runs', 'overran', 'owner_disabled']).describe('Which rule stopped a schedule.\n\n**The rule, and nothing else.** Not a composed sentence and not a tally:\nthe streak is the leading part of the history the page already draws, so it\ncounts the failures and the questions itself and says the exact shape —\nincluding the mixed case, which no single rule name covers. A sentence\nstored here would be a second copy of that, free to disagree with it.\n\nNull — `None` — is a person. "You paused this" and "this gave up" have to\nread differently, and the absence is the cheapest way to tell them apart.')]).optional(),
   "prompt": zod.string().describe('What it asks for.'),
-  "repoId": zod.union([zod.null(),zod.string().describe('Which repository, if any. A schedule with none is a bare agent, and\nseveral things about it are different — see `deleteCleanRuns`.')]).optional(),
+  "repoId": zod.union([zod.null(),zod.string().describe('Which repository, if any. A schedule with none is a bare agent, and\nseveral things about it are different — see `deleteCleanRuns`.\n\nThe **first** of `repos`, kept as its own field because every screen\nthat draws one repository reads this and most schedules have one.')]).optional(),
   "repoSlug": zod.string().nullish(),
+  "repos": zod.array(zod.object({
+  "id": zod.string().describe('Identifies a connected repository.'),
+  "slug": zod.string()
+}).describe('One repository a schedule checks out.\n\nThe slug beside the id because every screen that draws a repository draws\nits name, and a client holding only ids would have to join against the\nrepository list to say anything at all.')).describe('Every repository each run checks out, in order.'),
   "revision": zod.int(),
   "runsTotal": zod.int().min(updateScheduleResponseRunsTotalMin),
   "streak": zod.object({
@@ -683,6 +711,8 @@ export const ApproveScheduleResponse = zod.object({
   "base": zod.string().nullish(),
   "createdAt": zod.iso.datetime({"offset":true}),
   "deleteCleanRuns": zod.boolean().describe('Whether a clean run\'s workspace is deleted.\n\nAlways false, and not offered as a control, when there is no\nrepository: `session_work` answers an empty list for a workspace with\nnothing checked out, so "nothing uncommitted" is vacuously true and a\nclean-run rule would read a bare workspace as the safe case and delete\nevery file the agent made.'),
+  "hostId": zod.union([zod.null(),zod.string().describe('The machine each run starts on, when the schedule names one.\n\n`null` means the scheduler places it — which is what a proposal that\nnamed no machine leaves behind. The create sheet always names one.')]).optional(),
+  "hostName": zod.string().nullish(),
   "id": zod.string().describe('Identifies a schedule — a durable authorization to start an agent with nobody present.'),
   "lastRun": zod.union([zod.null(),zod.object({
   "detail": zod.string().nullish().describe('The sentence a person reads. Written once.'),
@@ -711,8 +741,12 @@ export const ApproveScheduleResponse = zod.object({
   "name": zod.string(),
   "pausedReason": zod.union([zod.null(),zod.enum(['three_failures', 'five_runs', 'overran', 'owner_disabled']).describe('Which rule stopped a schedule.\n\n**The rule, and nothing else.** Not a composed sentence and not a tally:\nthe streak is the leading part of the history the page already draws, so it\ncounts the failures and the questions itself and says the exact shape —\nincluding the mixed case, which no single rule name covers. A sentence\nstored here would be a second copy of that, free to disagree with it.\n\nNull — `None` — is a person. "You paused this" and "this gave up" have to\nread differently, and the absence is the cheapest way to tell them apart.')]).optional(),
   "prompt": zod.string().describe('What it asks for.'),
-  "repoId": zod.union([zod.null(),zod.string().describe('Which repository, if any. A schedule with none is a bare agent, and\nseveral things about it are different — see `deleteCleanRuns`.')]).optional(),
+  "repoId": zod.union([zod.null(),zod.string().describe('Which repository, if any. A schedule with none is a bare agent, and\nseveral things about it are different — see `deleteCleanRuns`.\n\nThe **first** of `repos`, kept as its own field because every screen\nthat draws one repository reads this and most schedules have one.')]).optional(),
   "repoSlug": zod.string().nullish(),
+  "repos": zod.array(zod.object({
+  "id": zod.string().describe('Identifies a connected repository.'),
+  "slug": zod.string()
+}).describe('One repository a schedule checks out.\n\nThe slug beside the id because every screen that draws a repository draws\nits name, and a client holding only ids would have to join against the\nrepository list to say anything at all.')).describe('Every repository each run checks out, in order.'),
   "revision": zod.int(),
   "runsTotal": zod.int().min(approveScheduleResponseRunsTotalMin),
   "streak": zod.object({
@@ -792,6 +826,8 @@ export const PauseScheduleResponse = zod.object({
   "base": zod.string().nullish(),
   "createdAt": zod.iso.datetime({"offset":true}),
   "deleteCleanRuns": zod.boolean().describe('Whether a clean run\'s workspace is deleted.\n\nAlways false, and not offered as a control, when there is no\nrepository: `session_work` answers an empty list for a workspace with\nnothing checked out, so "nothing uncommitted" is vacuously true and a\nclean-run rule would read a bare workspace as the safe case and delete\nevery file the agent made.'),
+  "hostId": zod.union([zod.null(),zod.string().describe('The machine each run starts on, when the schedule names one.\n\n`null` means the scheduler places it — which is what a proposal that\nnamed no machine leaves behind. The create sheet always names one.')]).optional(),
+  "hostName": zod.string().nullish(),
   "id": zod.string().describe('Identifies a schedule — a durable authorization to start an agent with nobody present.'),
   "lastRun": zod.union([zod.null(),zod.object({
   "detail": zod.string().nullish().describe('The sentence a person reads. Written once.'),
@@ -820,8 +856,12 @@ export const PauseScheduleResponse = zod.object({
   "name": zod.string(),
   "pausedReason": zod.union([zod.null(),zod.enum(['three_failures', 'five_runs', 'overran', 'owner_disabled']).describe('Which rule stopped a schedule.\n\n**The rule, and nothing else.** Not a composed sentence and not a tally:\nthe streak is the leading part of the history the page already draws, so it\ncounts the failures and the questions itself and says the exact shape —\nincluding the mixed case, which no single rule name covers. A sentence\nstored here would be a second copy of that, free to disagree with it.\n\nNull — `None` — is a person. "You paused this" and "this gave up" have to\nread differently, and the absence is the cheapest way to tell them apart.')]).optional(),
   "prompt": zod.string().describe('What it asks for.'),
-  "repoId": zod.union([zod.null(),zod.string().describe('Which repository, if any. A schedule with none is a bare agent, and\nseveral things about it are different — see `deleteCleanRuns`.')]).optional(),
+  "repoId": zod.union([zod.null(),zod.string().describe('Which repository, if any. A schedule with none is a bare agent, and\nseveral things about it are different — see `deleteCleanRuns`.\n\nThe **first** of `repos`, kept as its own field because every screen\nthat draws one repository reads this and most schedules have one.')]).optional(),
   "repoSlug": zod.string().nullish(),
+  "repos": zod.array(zod.object({
+  "id": zod.string().describe('Identifies a connected repository.'),
+  "slug": zod.string()
+}).describe('One repository a schedule checks out.\n\nThe slug beside the id because every screen that draws a repository draws\nits name, and a client holding only ids would have to join against the\nrepository list to say anything at all.')).describe('Every repository each run checks out, in order.'),
   "revision": zod.int(),
   "runsTotal": zod.int().min(pauseScheduleResponseRunsTotalMin),
   "streak": zod.object({
@@ -903,6 +943,8 @@ export const ResumeScheduleResponse = zod.object({
   "base": zod.string().nullish(),
   "createdAt": zod.iso.datetime({"offset":true}),
   "deleteCleanRuns": zod.boolean().describe('Whether a clean run\'s workspace is deleted.\n\nAlways false, and not offered as a control, when there is no\nrepository: `session_work` answers an empty list for a workspace with\nnothing checked out, so "nothing uncommitted" is vacuously true and a\nclean-run rule would read a bare workspace as the safe case and delete\nevery file the agent made.'),
+  "hostId": zod.union([zod.null(),zod.string().describe('The machine each run starts on, when the schedule names one.\n\n`null` means the scheduler places it — which is what a proposal that\nnamed no machine leaves behind. The create sheet always names one.')]).optional(),
+  "hostName": zod.string().nullish(),
   "id": zod.string().describe('Identifies a schedule — a durable authorization to start an agent with nobody present.'),
   "lastRun": zod.union([zod.null(),zod.object({
   "detail": zod.string().nullish().describe('The sentence a person reads. Written once.'),
@@ -931,8 +973,12 @@ export const ResumeScheduleResponse = zod.object({
   "name": zod.string(),
   "pausedReason": zod.union([zod.null(),zod.enum(['three_failures', 'five_runs', 'overran', 'owner_disabled']).describe('Which rule stopped a schedule.\n\n**The rule, and nothing else.** Not a composed sentence and not a tally:\nthe streak is the leading part of the history the page already draws, so it\ncounts the failures and the questions itself and says the exact shape —\nincluding the mixed case, which no single rule name covers. A sentence\nstored here would be a second copy of that, free to disagree with it.\n\nNull — `None` — is a person. "You paused this" and "this gave up" have to\nread differently, and the absence is the cheapest way to tell them apart.')]).optional(),
   "prompt": zod.string().describe('What it asks for.'),
-  "repoId": zod.union([zod.null(),zod.string().describe('Which repository, if any. A schedule with none is a bare agent, and\nseveral things about it are different — see `deleteCleanRuns`.')]).optional(),
+  "repoId": zod.union([zod.null(),zod.string().describe('Which repository, if any. A schedule with none is a bare agent, and\nseveral things about it are different — see `deleteCleanRuns`.\n\nThe **first** of `repos`, kept as its own field because every screen\nthat draws one repository reads this and most schedules have one.')]).optional(),
   "repoSlug": zod.string().nullish(),
+  "repos": zod.array(zod.object({
+  "id": zod.string().describe('Identifies a connected repository.'),
+  "slug": zod.string()
+}).describe('One repository a schedule checks out.\n\nThe slug beside the id because every screen that draws a repository draws\nits name, and a client holding only ids would have to join against the\nrepository list to say anything at all.')).describe('Every repository each run checks out, in order.'),
   "revision": zod.int(),
   "runsTotal": zod.int().min(resumeScheduleResponseRunsTotalMin),
   "streak": zod.object({

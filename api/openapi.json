@@ -13213,6 +13213,17 @@
             ],
             "description": "The conversation that asked for this, when an agent did."
           },
+          "hostId": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/HostId",
+                "description": "**Which machine each run starts on.**\n\nA schedule used to pin a policy — any machine that is free — and never\na host, because a pinned machine that is retired is a schedule that\nfails every morning. Reversed deliberately: a schedule names one\nmachine, the same way starting work does, because \"it ran somewhere\"\nis not an answer somebody can act on at 9am.\n\nStill optional on the wire, so a proposal that names none is a\nschedule the scheduler places. The create sheet always names one."
+              }
+            ]
+          },
           "name": {
             "type": "string"
           },
@@ -13232,9 +13243,16 @@
               },
               {
                 "$ref": "#/components/schemas/RepoId",
-                "description": "Omit for a bare agent. Several things are different without one — see\n`deleteCleanRuns`."
+                "description": "Omit for a bare agent. Several things are different without one — see\n`deleteCleanRuns`.\n\nKept beside `repoIds` so anything holding one repository still works —\nthe MCP tool writes this — and when both are given this one goes\nfirst, which is the rule `NewSession` already follows for the same\npair."
               }
             ]
+          },
+          "repoIds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RepoId"
+            },
+            "description": "Every repository each run checks out, in order.\n\nOne working branch across all of them, which is what makes a change\nspanning two repositories reviewable — the same thing the composer\ndoes when you tick a second one."
           },
           "settings": {
             "$ref": "#/components/schemas/Preferred",
@@ -15042,6 +15060,7 @@
           "id",
           "name",
           "prompt",
+          "repos",
           "active",
           "revision",
           "triggers",
@@ -15079,6 +15098,23 @@
           "deleteCleanRuns": {
             "type": "boolean",
             "description": "Whether a clean run's workspace is deleted.\n\nAlways false, and not offered as a control, when there is no\nrepository: `session_work` answers an empty list for a workspace with\nnothing checked out, so \"nothing uncommitted\" is vacuously true and a\nclean-run rule would read a bare workspace as the safe case and delete\nevery file the agent made."
+          },
+          "hostId": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/HostId",
+                "description": "The machine each run starts on, when the schedule names one.\n\n`null` means the scheduler places it — which is what a proposal that\nnamed no machine leaves behind. The create sheet always names one."
+              }
+            ]
+          },
+          "hostName": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "id": {
             "$ref": "#/components/schemas/ScheduleId"
@@ -15120,7 +15156,7 @@
               },
               {
                 "$ref": "#/components/schemas/RepoId",
-                "description": "Which repository, if any. A schedule with none is a bare agent, and\nseveral things about it are different — see `deleteCleanRuns`."
+                "description": "Which repository, if any. A schedule with none is a bare agent, and\nseveral things about it are different — see `deleteCleanRuns`.\n\nThe **first** of `repos`, kept as its own field because every screen\nthat draws one repository reads this and most schedules have one."
               }
             ]
           },
@@ -15129,6 +15165,13 @@
               "string",
               "null"
             ]
+          },
+          "repos": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ScheduleCheckout"
+            },
+            "description": "Every repository each run checks out, in order."
           },
           "revision": {
             "type": "integer",
@@ -15157,6 +15200,22 @@
             "format": "int32",
             "description": "How many of this schedule's runs are still holding a workspace.\n\nDrawn in both switch states. With no cap this is the only thing that\nsays whether somebody's machines are filling.",
             "minimum": 0
+          }
+        }
+      },
+      "ScheduleCheckout": {
+        "type": "object",
+        "description": "One repository a schedule checks out.\n\nThe slug beside the id because every screen that draws a repository draws\nits name, and a client holding only ids would have to join against the\nrepository list to say anything at all.",
+        "required": [
+          "id",
+          "slug"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/RepoId"
+          },
+          "slug": {
+            "type": "string"
           }
         }
       },

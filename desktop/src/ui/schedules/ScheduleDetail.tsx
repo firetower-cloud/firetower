@@ -254,9 +254,16 @@ export function ScheduleDetail({ schedule: given }: { schedule: Schedule }) {
             <Facts
               title="Environment"
               rows={[
-                ["Repository", it.repoSlug ?? "None", true],
+                [
+                  it.repos.length > 1 ? "Repositories" : "Repository",
+                  it.repos.length > 0 ? it.repos.map((r) => r.slug).join(", ") : "None",
+                  true,
+                ],
                 ["Base branch", it.base ?? "—", true],
-                ["Machine", "First available"],
+                // **Named, not "first available".** A schedule pins the
+                // machine it runs on. One written before it did names none,
+                // and the scheduler still places those.
+                ["Machine", it.hostName ?? "First available", true],
               ]}
             />
             {/* **Stacked, because every value here is a sentence.** The

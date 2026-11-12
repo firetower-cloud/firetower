@@ -5,9 +5,11 @@
  * The Firetower control plane: API, scheduling, and worker transports.
  * OpenAPI spec version: 0
  */
+import type { HostId } from './hostId.ts';
 import type { PausedReason } from './pausedReason.ts';
 import type { Provenance } from './provenance.ts';
 import type { RepoId } from './repoId.ts';
+import type { ScheduleCheckout } from './scheduleCheckout.ts';
 import type { ScheduleId } from './scheduleId.ts';
 import type { ScheduleRun } from './scheduleRun.ts';
 import type { Streak } from './streak.ts';
@@ -38,6 +40,9 @@ export interface Schedule {
      * every file the agent made.
      */
   deleteCleanRuns: boolean;
+  hostId?: null | HostId;
+  /** @nullable */
+  hostName?: string | null;
   id: ScheduleId;
   lastRun?: null | ScheduleRun;
   made: Provenance;
@@ -48,6 +53,8 @@ export interface Schedule {
   repoId?: null | RepoId;
   /** @nullable */
   repoSlug?: string | null;
+  /** Every repository each run checks out, in order. */
+  repos: ScheduleCheckout[];
   revision: number;
   /** @minimum 0 */
   runsTotal: number;

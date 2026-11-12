@@ -66,10 +66,14 @@ export function Review({ schedule }: { schedule: Schedule }) {
                   <dd>
                     {trigger?.reads} {trigger?.timezone}
                   </dd>
-                  <dt>Repository</dt>
-                  <dd>{schedule.repoSlug ?? "None — nothing is checked out"}</dd>
+                  <dt>{schedule.repos.length > 1 ? "Repositories" : "Repository"}</dt>
+                  <dd>
+                    {schedule.repos.length > 0
+                      ? schedule.repos.map((r) => r.slug).join(", ")
+                      : "None — nothing is checked out"}
+                  </dd>
                   <dt>Machine</dt>
-                  <dd>First available</dd>
+                  <dd>{schedule.hostName ?? "First available"}</dd>
                   <dt>Workspace</dt>
                   <dd>
                     {schedule.deleteCleanRuns

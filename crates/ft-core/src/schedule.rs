@@ -26,7 +26,7 @@
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use crate::{RepoId, ScheduleId, ScheduleRunId, SessionId, TriggerId};
+use crate::{HostId, RepoId, ScheduleId, ScheduleRunId, SessionId, TriggerId};
 
 /// How often a schedule runs, as the person expressed it.
 ///
@@ -303,6 +303,18 @@ pub struct Provenance {
     pub at: chrono::DateTime<chrono::Utc>,
 }
 
+/// One repository a schedule checks out.
+///
+/// The slug beside the id because every screen that draws a repository draws
+/// its name, and a client holding only ids would have to join against the
+/// repository list to say anything at all.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduleCheckout {
+    pub id: RepoId,
+    pub slug: String,
+}
+
 /// A schedule, as a client reads it.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -313,9 +325,20 @@ pub struct Schedule {
     pub prompt: String,
     /// Which repository, if any. A schedule with none is a bare agent, and
     /// several things about it are different — see `deleteCleanRuns`.
+    ///
+    /// The **first** of `repos`, kept as its own field because every screen
+    /// that draws one repository reads this and most schedules have one.
     pub repo_id: Option<RepoId>,
     pub repo_slug: Option<String>,
+    /// Every repository each run checks out, in order.
+    pub repos: Vec<ScheduleCheckout>,
     pub base: Option<String>,
+    /// The machine each run starts on, when the schedule names one.
+    ///
+    /// `null` means the scheduler places it — which is what a proposal that
+    /// named no machine leaves behind. The create sheet always names one.
+    pub host_id: Option<HostId>,
+    pub host_name: Option<String>,
     /// Whether it is on. Off and `pausedReason: null` is a person's doing.
     pub active: bool,
     pub paused_reason: Option<PausedReason>,

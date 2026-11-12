@@ -45,11 +45,35 @@ pub struct NewSchedule {
     pub prompt: String,
     /// Omit for a bare agent. Several things are different without one — see
     /// `deleteCleanRuns`.
+    ///
+    /// Kept beside `repoIds` so anything holding one repository still works —
+    /// the MCP tool writes this — and when both are given this one goes
+    /// first, which is the rule `NewSession` already follows for the same
+    /// pair.
     #[serde(default)]
     pub repo_id: Option<RepoId>,
+    /// Every repository each run checks out, in order.
+    ///
+    /// One working branch across all of them, which is what makes a change
+    /// spanning two repositories reviewable — the same thing the composer
+    /// does when you tick a second one.
+    #[serde(default)]
+    pub repo_ids: Vec<RepoId>,
     /// The branch each run starts from. Only meaningful with a repository.
     #[serde(default)]
     pub base: Option<String>,
+    /// **Which machine each run starts on.**
+    ///
+    /// A schedule used to pin a policy — any machine that is free — and never
+    /// a host, because a pinned machine that is retired is a schedule that
+    /// fails every morning. Reversed deliberately: a schedule names one
+    /// machine, the same way starting work does, because "it ran somewhere"
+    /// is not an answer somebody can act on at 9am.
+    ///
+    /// Still optional on the wire, so a proposal that names none is a
+    /// schedule the scheduler places. The create sheet always names one.
+    #[serde(default)]
+    pub host_id: Option<ft_core::HostId>,
     pub cadence: Cadence,
     /// An IANA name. Required, and not defaulted to the server's own zone:
     /// "09:00" means nothing without saying whose nine.
@@ -206,14 +230,31 @@ pub(crate) async fn write_one(
         ));
     }
 
-    // **The repository, as the person who named it.** The same predicate every
-    // launch re-checks; naming somebody else's here would be the ownership
-    // hole with a timer attached.
-    if let Some(repo) = &req.repo_id {
-        if state.db.repo_of(owner_id, repo).await?.is_none() {
+    // **Every repository, as the person who named it.** The same predicate
+    // every launch re-checks; naming somebody else's here would be the
+    // ownership hole with a timer attached.
+    for repo in repos_asked(&req) {
+        if state.db.repo_of(owner_id, &repo).await?.is_none() {
             return Err(ApiError::new(
                 ErrorCode::RepoNotConnected,
                 "that repository isn't connected",
+            ));
+        }
+    }
+
+    // **And the machine is one they may start work on.** `create_session_as`
+    // narrows to `hosts_for(owner, Writer)` and cannot be reached around, so
+    // this is not the fence — it is the difference between finding out now
+    // and finding out at 9am from a run that says "no machine is available".
+    if let Some(host) = &req.host_id {
+        let theirs = state
+            .db
+            .hosts_for(owner_id, crate::access::Level::Writer)
+            .await?;
+        if !theirs.iter().any(|h| h.id.as_str() == host.as_str()) {
+            return Err(ApiError::new(
+                ErrorCode::InvalidRequest,
+                "that machine isn't one you can start work on",
             ));
         }
     }
@@ -233,7 +274,7 @@ pub(crate) async fn write_one(
     let agent = effective_agent(&req, profile.as_ref());
     let spec = spec_for(&req, agent);
     let pins = pins_for(state, owner_id, &req, agent, profile.as_ref()).await?;
-    let delete_clean_runs = req.repo_id.is_some() && req.delete_clean_runs;
+    let delete_clean_runs = !repos_asked(&req).is_empty() && req.delete_clean_runs;
 
     if fresh {
         state
@@ -299,16 +340,49 @@ fn spec_for(req: &NewSchedule, agent: ft_core::Agent) -> serde_json::Value {
         "size": ft_core::WorkspaceSize::Medium,
         "share": ft_core::Share::Yields,
     });
-    if let Some(repo) = &req.repo_id {
-        spec["repoId"] = serde_json::json!(repo.as_str());
-        if let Some(base) = req.base.as_deref().map(str::trim).filter(|b| !b.is_empty()) {
+    let base = req.base.as_deref().map(str::trim).filter(|b| !b.is_empty());
+    let checkouts = repos_asked(req);
+    if let Some(first) = checkouts.first() {
+        // Both shapes, because both are read. `repoId` is what every screen
+        // and `repos_in` already look at first, and the array is what makes a
+        // second repository a checkout rather than a parallel field.
+        spec["repoId"] = serde_json::json!(first.as_str());
+        spec["repos"] = serde_json::Value::Array(
+            checkouts
+                .iter()
+                .map(|id| {
+                    let mut asked = serde_json::json!({ "repoId": id.as_str() });
+                    if let Some(base) = base {
+                        asked["base"] = serde_json::json!(base);
+                    }
+                    asked
+                })
+                .collect(),
+        );
+        if let Some(base) = base {
             spec["base"] = serde_json::json!(base);
         }
     }
-    // **No `hostId`.** A schedule pins a policy — any machine that is free —
-    // and never a host: a pinned machine that is retired is a schedule that
-    // fails every morning.
+    // **The machine, where one was named.** See [`NewSchedule::host_id`] for
+    // why this is here at all, and what it costs.
+    if let Some(host) = &req.host_id {
+        spec["hostId"] = serde_json::json!(host.as_str());
+    }
     spec
+}
+
+/// Every repository this asks for, in order, each named once.
+///
+/// `repoId` first — the single-repository callers write that one — then the
+/// list, which is what a sheet with two ticked sends.
+fn repos_asked(req: &NewSchedule) -> Vec<RepoId> {
+    let mut out: Vec<RepoId> = Vec::new();
+    for id in req.repo_id.iter().chain(req.repo_ids.iter()) {
+        if !out.iter().any(|seen| seen.as_str() == id.as_str()) {
+            out.push(id.clone());
+        }
+    }
+    out
 }
 
 /// What must not be resolved again at launch.
@@ -445,7 +519,7 @@ async fn pins_for(
     // is resolved from the repository's defaults at creation, because leaving
     // it absent would resolve it afresh at every launch — which is the thing
     // approval is supposed to fix.
-    let repos: Vec<ft_core::RepoId> = req.repo_id.clone().into_iter().collect();
+    let repos: Vec<ft_core::RepoId> = repos_asked(req);
     let skills: Vec<String> = match &req.skills {
         Some(chosen) => chosen.clone(),
         None => state
@@ -1089,13 +1163,31 @@ async fn assemble(state: &AppState, row: crate::db::ScheduleRow) -> ApiResult<Sc
 
     let last_run = state.db.runs_of(&row.id, 1).await?.first().map(as_run);
 
-    let repo_id = row
+    // **Read out of the spec the way the launch reads it**, so the screen and
+    // the run cannot disagree about which repositories these are.
+    let mut repos: Vec<ft_core::schedule::ScheduleCheckout> = Vec::new();
+    for id in crate::schedules::launch::repos_in(&row.spec) {
+        let id = RepoId::from_stored(id);
+        // A repository disconnected since is dropped rather than drawn as a
+        // bare id: the gate refuses the run for that reason and says so, and
+        // a list is not where that belongs.
+        if let Some(repo) = state.db.repo_of(&row.owner_id, &id).await? {
+            repos.push(ft_core::schedule::ScheduleCheckout {
+                id,
+                slug: repo.slug,
+            });
+        }
+    }
+    let repo_id = repos.first().map(|r| r.id.clone());
+    let repo_slug = repos.first().map(|r| r.slug.clone());
+
+    let host_id = row
         .spec
-        .get("repoId")
+        .get("hostId")
         .and_then(|v| v.as_str())
-        .map(|s| RepoId::from_stored(s.to_string()));
-    let repo_slug = match &repo_id {
-        Some(id) => state.db.repo_of(&row.owner_id, id).await?.map(|r| r.slug),
+        .map(|s| ft_core::HostId::from_stored(s.to_string()));
+    let host_name = match &host_id {
+        Some(id) => state.db.host_by_id(id).await?.map(|h| h.name),
         None => None,
     };
 
@@ -1128,6 +1220,9 @@ async fn assemble(state: &AppState, row: crate::db::ScheduleRow) -> ApiResult<Sc
             .to_string(),
         repo_id,
         repo_slug,
+        repos,
+        host_id,
+        host_name,
         base: row
             .spec
             .get("base")
