@@ -104,6 +104,29 @@ different machine — and `up` reinstalls it. `down` and `up` is therefore a
 fresh machine with the same name and the same sessions pointed at it, which is
 a useful thing to be able to make.
 
+## When it will not come up
+
+**"memory map must have a non-zero length"**, or any other `rustc` error about
+a file in `/target`, means the build cache was cut off mid-write — a Docker
+daemon that restarted under it will do this, and on a Mac that is OrbStack
+updating itself. The files are zero-length rather than wrong, and
+`cargo clean -p` will not remove them — cargo has no reason to think they are
+broken. Delete them by what they are:
+
+```sh
+docker run --rm -v ft-worker-sim_target:/target alpine:3 \
+    sh -c 'find /target -type f -size 0 -delete'
+just sim up
+```
+
+Measured at 176 files after one OrbStack restart, and about two minutes to
+rebuild what they were. `just sim down --volumes` gets there the long way
+round, at the cost of the whole cache.
+
+Worth knowing before you conclude the harness is broken: everything else
+survives a daemon restart, because the containers are stopped rather than
+removed. `docker start` on each, or another `up`, and the fleet is as it was.
+
 ## What it cannot simulate
 
 * **macOS.** This is Linux, and one real difference is known: on a Mac, tmux
