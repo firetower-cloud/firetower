@@ -2866,20 +2866,13 @@ impl Db {
         .await?)
     }
 
-    /// Fix what a schedule runs with, without touching anything else.
-    ///
-    /// For the one thing resolved at approval rather than at creation: the
-    /// subscription it spends. Everything else in `pins` is written when the
-    /// schedule is, and this deliberately does not bump `revision` — nothing
-    /// about what was approved has changed, it has been *recorded*.
-    pub async fn set_schedule_pins(&self, id: &ScheduleId, pins: &serde_json::Value) -> Result<()> {
-        sqlx::query("UPDATE schedules SET pins = $2, updated_at = now() WHERE id = $1")
-            .bind(id.as_str())
-            .bind(pins)
-            .execute(&self.pool)
-            .await?;
-        Ok(())
-    }
+    // **`set_schedule_pins` was here, and both halves of it were wrong.** It
+    // took a whole `pins` object the caller had read earlier and wrote it
+    // back with no revision condition — so approval could put a snapshot from
+    // before somebody's edit over the top of it, and it ran *before* the
+    // revision comparison, so a rejected approval had already written. The
+    // one field approval resolves is now set by [`Db::approve_schedule`], in
+    // the same statement, on one key, under the same condition.
 
     /// Turn a schedule on, or off, and say which rule did it.
     ///
@@ -2936,15 +2929,38 @@ impl Db {
     ///
     /// `false` means somebody else changed it first, which is the same shape
     /// every other compare-and-set here has.
-    pub async fn approve_schedule(&self, id: &ScheduleId, by: &str, revision: i32) -> Result<bool> {
+    ///
+    /// **And the subscription is recorded here, in this statement.** It was
+    /// written by a separate call that ran before this comparison and carried
+    /// no condition of its own, so a rejected approval had already changed
+    /// the row, and the object it wrote was one the caller had read before —
+    /// which could put a stale snapshot of every other pin over the top of
+    /// somebody's edit. One `jsonb_set` on one key, guarded by the same
+    /// revision, cannot do either: a rejected approval changes nothing, and
+    /// nothing but `accountId` is touched however old the caller's copy is.
+    ///
+    /// `None` leaves the pins alone, which is what an engine that
+    /// authenticates nothing needs, and what an already-pinned schedule
+    /// needs.
+    pub async fn approve_schedule(
+        &self,
+        id: &ScheduleId,
+        by: &str,
+        revision: i32,
+        account: Option<&str>,
+    ) -> Result<bool> {
         let moved = sqlx::query(
             "UPDATE schedules
-                SET approved_by = $2, approved_at = now(), updated_at = now()
+                SET approved_by = $2, approved_at = now(), updated_at = now(),
+                    pins = CASE WHEN $4::text IS NULL THEN pins
+                                ELSE jsonb_set(pins, '{accountId}', to_jsonb($4::text), true)
+                           END
               WHERE id = $1 AND revision = $3",
         )
         .bind(id.as_str())
         .bind(by)
         .bind(revision)
+        .bind(account)
         .execute(&self.pool)
         .await?
         .rows_affected();

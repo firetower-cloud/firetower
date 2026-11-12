@@ -6184,6 +6184,91 @@ async fn a_schedule_cannot_be_turned_on_without_a_subscription_to_spend() {
     );
 }
 
+/// **Blocker 6: an approval that is refused changes nothing.**
+///
+/// Resolving the subscription ran *before* the revision was compared, and it
+/// wrote through a statement with no revision condition of its own — so
+/// approving a stale tab was refused, correctly, after it had already written
+/// a pin. And what it wrote was the whole `pins` object as the handler had
+/// read it, which could put a snapshot from before somebody's edit over the
+/// top of that edit.
+///
+/// One statement now does the condition, the approval and the subscription.
+#[tokio::test]
+async fn an_approval_of_a_stale_revision_writes_nothing() {
+    let (state, principal, _, _, owner) = fixture().await;
+
+    // **Drafted while nothing of that engine's was connected**, which is the
+    // sequence where approval is the moment a subscription gets resolved: a
+    // draft may have no pin, and turning it on may not.
+    let mut new = a_schedule("Edited in another tab", weekdays_at("08:30"));
+    new.agent = Agent::Codex;
+    let made = create(&state, &principal, new).await.unwrap();
+    let before = state.db.schedule(&made.id).await.unwrap().unwrap();
+    assert!(before.pins["accountId"].is_null());
+
+    // Somebody edits it, which bumps the revision and clears the approval.
+    // Still nothing connected, so the pin is still unwritten.
+    let mut edit = a_schedule("Edited in another tab", weekdays_at("09:30"));
+    edit.agent = Agent::Codex;
+    super::schedules::write_one(&state, &owner, &owner, &made.id, edit, false)
+        .await
+        .unwrap();
+    let edited = state.db.schedule(&made.id).await.unwrap().unwrap();
+    assert!(edited.revision > before.revision, "the edit landed");
+    assert!(edited.pins["accountId"].is_null());
+
+    // And now one is connected, and is the default — so approval has a
+    // subscription to resolve and record, which is what it used to do before
+    // it compared the revision.
+    let codex = a_subscription(&state, &owner, "a_codex", Agent::Codex).await;
+    sqlx::query("UPDATE agent_accounts SET is_default = true WHERE id = $1")
+        .bind(&codex)
+        .execute(state.db.pool())
+        .await
+        .unwrap();
+    assert!(
+        super::accounts::default_account(&state.db, &owner, Agent::Codex)
+            .await
+            .unwrap()
+            .is_some(),
+        "there is one to resolve, which is the state under test"
+    );
+
+    // The stale tab approves what it was showing.
+    let refused = super::schedules::approve_schedule(
+        State(state.clone()),
+        Extension(principal.clone()),
+        Path(made.id.as_str().to_string()),
+        Query(super::schedules::Reviewed {
+            revision: Some(before.revision),
+        }),
+    )
+    .await
+    .expect_err("the revision it read is not the one on the row");
+    assert!(
+        refused.message.contains("changed since you opened it"),
+        "{}",
+        refused.message
+    );
+
+    let after = state.db.schedule(&made.id).await.unwrap().unwrap();
+    assert!(
+        after.pins["accountId"].is_null(),
+        "a refused approval wrote a subscription anyway: {:?}",
+        after.pins["accountId"]
+    );
+    assert!(after.approved_at.is_none(), "and it is still not approved");
+    assert_eq!(
+        after.revision, edited.revision,
+        "and the edit is still the current revision"
+    );
+    // Nothing at all: the whole object, not only the field approval resolves.
+    // What used to be written back was the caller's own earlier copy of it.
+    assert_eq!(after.pins, edited.pins);
+    assert_eq!(after.spec, edited.spec);
+}
+
 /// **And the gate refuses a run whose pin is missing**, whatever let it
 /// through — a row written by an older build, or an edit that cleared it.
 /// Defence in depth: the pin being there is checked where it is used, not
@@ -6199,7 +6284,12 @@ async fn a_run_whose_schedule_names_no_subscription_is_not_launched() {
     pins.as_object_mut()
         .unwrap()
         .insert("accountId".into(), serde_json::Value::Null);
-    state.db.set_schedule_pins(&made.id, &pins).await.unwrap();
+    sqlx::query("UPDATE schedules SET pins = $2 WHERE id = $1")
+        .bind(made.id.as_str())
+        .bind(&pins)
+        .execute(state.db.pool())
+        .await
+        .unwrap();
     let row = state.db.schedule(&made.id).await.unwrap().unwrap();
 
     let claim = state
@@ -7698,7 +7788,11 @@ async fn a_disabled_owner_stops_their_schedules() {
     )
     .await
     .unwrap();
-    assert!(state.db.approve_schedule(&id, &them, 1).await.unwrap());
+    assert!(state
+        .db
+        .approve_schedule(&id, &them, 1, None)
+        .await
+        .unwrap());
     state.db.set_schedule_active(&id, true, None).await.unwrap();
     let made = state.db.schedule(&id).await.unwrap().unwrap();
 

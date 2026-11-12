@@ -731,17 +731,24 @@ pub(super) async fn approve_schedule(
     Query(at): Query<Reviewed>,
 ) -> ApiResult<Json<Schedule>> {
     let row = mine(&state, &principal, &id).await?;
-    pin_a_spendable_account(&state, &row).await?;
+    // Resolved and checked, and **nothing written**: this used to write the
+    // pin before the comparison below, so an approval that was then rejected
+    // as stale had already changed the row.
+    let account = the_subscription_to_record(&state, &row).await?;
 
     // **The revision that was read, not whatever the row says now.** Open a
     // proposal in one tab, edit it in another, approve the stale tab, and
     // taking only the id authorized changes nobody had seen. The client sends
     // what it drew; omitting it approves what is current, which is what a
     // caller with no screen means.
+    //
+    // One statement does all of it — the condition, the approval and the
+    // subscription — so there is no order for them to be in. See
+    // [`crate::db::Db::approve_schedule`].
     let approving = at.revision.unwrap_or(row.revision);
     if !state
         .db
-        .approve_schedule(&row.id, owner(&principal)?, approving)
+        .approve_schedule(&row.id, owner(&principal)?, approving, account.as_deref())
         .await?
     {
         return Err(ApiError::new(
@@ -775,17 +782,26 @@ pub struct Reviewed {
 /// credential the launch falls through to host-local authentication, which is
 /// the worker's identity rather than the owner's.
 ///
-/// So the account is resolved here if the draft had none, and *written into
-/// the pins*, which is what makes "approved against this subscription" a
-/// fact rather than a hope. Approval is the right moment for it: it is when
-/// somebody is present and deciding.
-async fn pin_a_spendable_account(state: &AppState, row: &crate::db::ScheduleRow) -> ApiResult<()> {
+/// So the account is resolved here if the draft had none, and recorded by the
+/// statement that records the approval — which is what makes "approved
+/// against this subscription" a fact rather than a hope. Approval is the
+/// right moment for it: it is when somebody is present and deciding.
+///
+/// **This writes nothing.** It answers which subscription to record, or
+/// `None` for nothing to record — already pinned, or an engine with nothing
+/// to authenticate — and refuses if there is no spendable one. It used to
+/// write, before the revision was compared, so a stale approval that was
+/// then refused had already changed the row.
+async fn the_subscription_to_record(
+    state: &AppState,
+    row: &crate::db::ScheduleRow,
+) -> ApiResult<Option<String>> {
     // An engine that authenticates nothing has nothing to pin and nothing to
     // fall back to — a plain shell. Asked of the engine the spec names, which
     // is the engine that will run.
     let agent = engine_of(&row.spec);
     if !agent.needs_credential() {
-        return Ok(());
+        return Ok(None);
     }
 
     let pinned = row.pins.get("accountId").and_then(|v| v.as_str());
@@ -832,14 +848,12 @@ async fn pin_a_spendable_account(state: &AppState, row: &crate::db::ScheduleRow)
         Some((_, true)) => {}
     }
 
-    if pinned.is_none() {
-        let mut pins = row.pins.clone();
-        if let Some(obj) = pins.as_object_mut() {
-            obj.insert("accountId".into(), serde_json::json!(account));
-        }
-        state.db.set_schedule_pins(&row.id, &pins).await?;
-    }
-    Ok(())
+    // Already pinned is nothing to record: the pin is what was approved
+    // before, and re-writing it would be a write for no reason.
+    Ok(match pinned {
+        Some(_) => None,
+        None => Some(account),
+    })
 }
 
 /// Stop future runs. **Never touches a run in flight** — that is a separate
@@ -891,8 +905,16 @@ pub(super) async fn resume_schedule(
     }
     // Turning one back on is an activation too, so it answers the same
     // question: the subscription it was approved against has to still be
-    // there and still be spendable.
-    pin_a_spendable_account(&state, &row).await?;
+    // there and still be spendable. It refuses rather than recording one,
+    // because resuming is not approving — a schedule with no pin is one a
+    // person has to look at, which is what the gate says too.
+    if the_subscription_to_record(&state, &row).await?.is_some() {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            "This schedule does not say which subscription it spends, so it cannot be turned \
+             back on. Open it, choose one, and approve it again.",
+        ));
+    }
     turn_on(&state, &row).await?;
     reread(&state, &principal, &row.id).await
 }
