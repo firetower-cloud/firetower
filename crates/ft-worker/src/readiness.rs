@@ -200,10 +200,33 @@ mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
 
+    /// A stand-in on the PATH, **run once before anything times it.**
+    ///
+    /// The probe gives each tool three seconds, and on macOS the *first* exec
+    /// of a newly written executable can cost more than that on its own: the
+    /// system inspects it before it runs. So a test that wrote a script and
+    /// immediately probed it reported the tool missing about one run in
+    /// three, on a quiet machine — the probe timing out rather than anything
+    /// these tests are about.
+    ///
+    /// Running it here pays that once and leaves the three seconds measuring
+    /// what they are for.
+    ///
+    /// **Except for a body meant to hang**, which is `hanging_executable_is_bounded`'s
+    /// whole subject: waiting for that one would wait out its sleep. It needs
+    /// no warming either, because a slow first exec is the thing it is
+    /// asserting a bound on.
     fn fake(dir: &Path, name: &str, body: &str) {
         let file = dir.join(name);
         std::fs::write(&file, format!("#!/bin/sh\n{body}\n")).unwrap();
-        std::fs::set_permissions(file, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755)).unwrap();
+        if !body.contains("sleep") {
+            std::process::Command::new(&file)
+                .arg("--version")
+                .stdin(std::process::Stdio::null())
+                .output()
+                .unwrap();
+        }
     }
 
     #[tokio::test]
