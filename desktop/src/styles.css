@@ -5195,6 +5195,16 @@ html:not([data-platform="macos"]) {
   .s-pill:hover {
     color: var(--color-bone);
   }
+  /* **The label gives way, not the row.** A zone is
+     `America/Argentina/Buenos_Aires` at its longest, and the row these sit in
+     wraps — a pill that cannot shrink pushes the one beside it onto a second
+     line rather than truncating. */
+  .s-pill .lbl {
+    min-width: 0;
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
   /* A cron expression is read character by character. */
   .s-pill.mono,
   .s-pill[data-mono="true"] {

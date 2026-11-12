@@ -18,7 +18,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { NewSchedule } from "./NewSchedule";
 import { actions } from "./ScheduleDetail";
-import { Menu, Opt, ProfileMenu, RepoMenu } from "~/ui/StartComposer";
+import { ProfileMenu, RepoMenu } from "~/ui/StartComposer";
+import { Menu, Opt, Sift, looselyMatches } from "~/ui/menus";
 import { unattendedValue } from "./controls";
 import { getListReposQueryKey } from "~/api/generated/repos/repos";
 import { getListHostsQueryKey } from "~/api/generated/hosts/hosts";
@@ -276,11 +277,13 @@ describe("the sheet, editing one that exists", () => {
     expect(html).toContain("check every dependency for a newer version");
     // The repository it checks out, on the chip rather than as a count.
     expect(html).toContain("acme/api");
-    // Its own cadence and zone, not the form's defaults.
-    expect(html).toContain('value="weekly"');
-    expect(html).toContain('value="thursday"');
+    // Its own cadence and zone, not the form's defaults — read off the
+    // pills as a person reads them, now that these are the product's menus
+    // rather than native selects carrying a `value`.
+    expect(html).toContain("Every week");
+    expect(html).toContain("Thursday");
     expect(html).toContain('value="06:15"');
-    expect(html).toContain('value="Europe/Paris"');
+    expect(html).toContain("Europe/Paris");
     // And the branch it branches from, which is why Advanced is open.
     expect(html).toContain('value="trunk"');
   });
@@ -314,6 +317,56 @@ describe("the sheet, editing one that exists", () => {
  * belongs in overflow: drawn beside *Run now*, a control pressed repeatedly,
  * it is how a schedule somebody meant to pause gets deleted.
  */
+/**
+ * **The pickers are the product's, and the search is one search.**
+ *
+ * Seven native `<select>`s survived in the cadence row — a control that
+ * cannot be styled to match anything, which is why it leapt out of a screen
+ * where everything else is ours. They are `PickOne` now, which opens the same
+ * menu every other picker opens, and the box above the long one is the same
+ * `Sift` that `RepoMenu` and `ProfileMenu` use rather than a third copy.
+ */
+describe("the cadence row's pickers", () => {
+  it("has no native select left in it", () => {
+    expect(sheet()).not.toContain("<select");
+  });
+
+  /** The rule, which the zone list is the reason for. */
+  it("matches a zone on the part anybody remembers", () => {
+    expect(looselyMatches("Europe/Paris", "paris")).toBe(true);
+    expect(looselyMatches("Asia/Qatar", "qatar")).toBe(true);
+    // The underscore is a wire format, not something anybody types.
+    expect(looselyMatches("America/New_York", "new york")).toBe(true);
+    expect(looselyMatches("America/New_York", "new_york")).toBe(true);
+    // Still a substring of the whole path, so the continent works too.
+    expect(looselyMatches("Europe/Paris", "europe")).toBe(true);
+    expect(looselyMatches("Europe/Paris", "qatar")).toBe(false);
+    // Nothing typed matches everything, which is what an open menu is.
+    expect(looselyMatches("Europe/Paris", "  ")).toBe(true);
+  });
+
+  /** Five cadences do not need searching, and the box can be left out. */
+  it("offers the box only where the list is long enough to need one", () => {
+    const rows = (shown: string[]) =>
+      shown.map((z) => <Opt key={z} on={false} onPick={() => {}} icon={null} title={z} />);
+    const long = renderToStaticMarkup(
+      <Sift items={["Europe/Paris", "Asia/Qatar"]} placeholder="Search zones" noun="zone">
+        {(shown) => rows(shown)}
+      </Sift>,
+    );
+    expect(long).toContain("Search zones");
+    expect(long).toContain("Europe/Paris");
+
+    const short = renderToStaticMarkup(
+      <Sift items={["Every day"]} when={false} placeholder="Search" noun="option">
+        {(shown) => rows(shown)}
+      </Sift>,
+    );
+    expect(short).not.toContain("placeholder");
+    expect(short).toContain("Every day");
+  });
+});
+
 describe("the schedule page's overflow menu", () => {
   const menu = actions({ onCopy: () => {}, onDelete: () => {} });
 

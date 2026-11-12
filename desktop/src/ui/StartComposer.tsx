@@ -27,7 +27,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowUp,
-  Check,
   ChevronDown,
   CircleAlert,
   Diamond,
@@ -36,7 +35,6 @@ import {
   GitBranch,
   Paperclip,
   Plus,
-  Search,
   Server,
   ServerOff,
   UserRound,
@@ -50,6 +48,7 @@ import { VoiceDialog } from "~/ui/voice/Dialogs";
 import { useVoice } from "~/ui/voice/useVoice";
 import { useAgentControls } from "~/api/generated/agents/agents";
 import { Pop } from "~/ui/Pop";
+import { Head, Menu, Opt, Sift, looselyMatches } from "~/ui/menus";
 import { Readout, isReady } from "~/components/HostReadiness";
 import { useHostReadiness } from "~/api/generated/hosts/hosts";
 import { useListRoles } from "~/api/generated/roles/roles";
@@ -991,23 +990,6 @@ function Pill({
 }
 
 /**
- * The scrolling part of a menu, and only that part.
- *
- * Exported with `Head`, `Opt`, `RepoMenu` and `ProfileMenu` because the
- * schedules sheet drops the same menus from the same chips. **Imported, not
- * copied**: a lookalike is a control that drifts from the product the first
- * time one of them is changed, and this page is where these were drawn.
- *
- * `min-h-0` because `Pop` caps the card at the room the window actually has
- * and a flex child refuses to shrink below its content without it — the
- * flexbox rule in STYLE.md. Anything that should stay put while this scrolls,
- * a search box or a readiness footer, goes beside it rather than inside it.
- */
-export function Menu({ children }: { children: React.ReactNode }) {
-  return <div className="scroll-slim max-h-80 min-h-0 overflow-y-auto py-1">{children}</div>;
-}
-
-/**
  * Which repositories a query leaves.
  *
  * By slug and case-insensitively, which is how everybody types a repository
@@ -1045,74 +1027,59 @@ export function RepoMenu({
   onToggle: (r: { id: string; slug: string }) => void;
   onClose: () => void;
 }) {
-  const [q, setQ] = useState("");
-  const shown = matching(repos, q);
-
   return (
     <>
-      {repos.length > 0 && (
-        <div className="shrink-0 border-b border-line-soft p-2">
-          <div className="flex items-center gap-2 rounded-md bg-ground px-2.5 py-1.5">
-            <Search className="h-3.5 w-3.5 shrink-0 text-mute" strokeWidth={1.8} />
-            <input
-              autoFocus
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              onKeyDown={(e) => {
-                // Enter takes the only one left, which is what typing three
-                // characters and reaching for the keyboard means. The old
-                // sheet did this and the habit came with the people.
-                if (e.key !== "Enter" || shown.length !== 1) return;
-                e.preventDefault();
-                onToggle(shown[0]);
-              }}
-              placeholder="Search repositories"
-              className="w-full bg-transparent text-meta text-bone placeholder:text-mute focus:outline-none"
-            />
-          </div>
-        </div>
-      )}
-      <Menu>
-        {/* **The shape `NoMachine` uses, because it is the same moment.** A
-            line of grey saying "No repositories connected." states the
-            problem and withholds the remedy, and this is the menu you opened
-            looking for one. It names no host: which provider this install
-            uses is not ours to assume, so it sends you to the page where
-            every one of them is. */}
-        {repos.length === 0 && (
-          <div className="px-3 py-3">
-            <p className="text-ui text-bone">No repository connected</p>
-            <p className="mt-1 max-w-[46ch] text-meta text-dim">
-              Workspaces are cut from a repository you connect. You can start without one.
-            </p>
-            <button
-              onClick={() => {
-                onClose();
-                navigate("/configuration/repositories");
-              }}
-              className="control mt-2.5 border border-line bg-panel text-ui text-bone hover:bg-overlay"
-            >
-              Connect a repository
-            </button>
-          </div>
+      {/* The box, the filtering and the empty line are `Sift`'s — there is
+          one of them in the product. What a query *means* is this list's:
+          `matching` folds case and looks at the slug, which is the half of
+          `owner/name` anybody remembers. */}
+      <Sift
+        items={repos}
+        match={(r, q) => matching([r], q).length > 0}
+        when={repos.length > 0}
+        placeholder="Search repositories"
+        noun="repository"
+        onlyOne={onToggle}
+      >
+        {(shown) => (
+          <>
+            {/* **The shape `NoMachine` uses, because it is the same moment.**
+                A line of grey saying "No repositories connected." states the
+                problem and withholds the remedy, and this is the menu you
+                opened looking for one. It names no host: which provider this
+                install uses is not ours to assume, so it sends you to the
+                page where every one of them is. */}
+            {repos.length === 0 && (
+              <div className="px-3 py-3">
+                <p className="text-ui text-bone">No repository connected</p>
+                <p className="mt-1 max-w-[46ch] text-meta text-dim">
+                  Workspaces are cut from a repository you connect. You can start without one.
+                </p>
+                <button
+                  onClick={() => {
+                    onClose();
+                    navigate("/configuration/repositories");
+                  }}
+                  className="control mt-2.5 border border-line bg-panel text-ui text-bone hover:bg-overlay"
+                >
+                  Connect a repository
+                </button>
+              </div>
+            )}
+            {shown.map((r) => (
+              <Opt
+                key={r.id}
+                on={checkouts.some((c) => c.id === r.id)}
+                onPick={() => onToggle(r)}
+                keepOpen
+                icon={<FolderGit2 className="h-4 w-4" strokeWidth={1.8} />}
+                title={r.slug}
+                sub={r.defaultBranch ?? undefined}
+              />
+            ))}
+          </>
         )}
-        {shown.map((r) => (
-          <Opt
-            key={r.id}
-            on={checkouts.some((c) => c.id === r.id)}
-            onPick={() => onToggle(r)}
-            keepOpen
-            icon={<FolderGit2 className="h-4 w-4" strokeWidth={1.8} />}
-            title={r.slug}
-            sub={r.defaultBranch ?? undefined}
-          />
-        ))}
-        {q.trim() !== "" && shown.length === 0 && (
-          <div className="px-3 py-3 text-center text-micro text-mute">
-            No repository matches “{q}”.
-          </div>
-        )}
-      </Menu>
+      </Sift>
       {/* What ticking another one actually does. Outside the scroller, so it
           stays put while the list moves under the pointer.
 
@@ -1150,9 +1117,6 @@ export function ProfileMenu({
   profileId: string | null;
   onPick: (id: string | null) => void;
 }) {
-  const [q, setQ] = useState("");
-  const query = q.trim().toLowerCase();
-
   const ordered = useMemo(
     () =>
       [...profiles].sort(
@@ -1162,63 +1126,55 @@ export function ProfileMenu({
       ),
     [profiles],
   );
-  const shown = query
-    ? ordered.filter(
-        (p) =>
-          p.name.toLowerCase().includes(query) ||
-          (p.does ?? "").toLowerCase().includes(query),
-      )
-    : ordered;
 
   return (
     <>
-      {profiles.length > 3 && (
-        <div className="shrink-0 border-b border-line-soft p-2">
-          <div className="flex items-center gap-2 rounded-md bg-ground px-2.5 py-1.5">
-            <Search className="h-3.5 w-3.5 shrink-0 text-mute" strokeWidth={1.8} />
-            <input
-              autoFocus
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Search profiles"
-              className="w-full bg-transparent text-meta text-bone placeholder:text-mute focus:outline-none"
-            />
-          </div>
-        </div>
-      )}
-      <Menu>
-        {!query && (
-          <Opt
-            on={!profileId}
-            onPick={() => onPick(null)}
-            icon={<UserRound className="h-4 w-4" strokeWidth={1.8} />}
-            title="Just an agent"
-            sub="No profile — a plain workspace"
-          />
+      {/* The same box as the repository menu, from the same place. What a
+          query means here is the name or what the profile *does*, which is
+          how somebody looks for one they set up months ago. */}
+      <Sift
+        items={ordered}
+        match={(p, q) =>
+          looselyMatches(`${p.name} ${p.does ?? ""}`, q)
+        }
+        when={profiles.length > 3}
+        placeholder="Search profiles"
+        noun="profile"
+        onlyOne={(p) => onPick(p.id)}
+      >
+        {(shown, query) => (
+          <>
+            {/* Only with nothing typed: *Just an agent* is not a profile and
+                cannot match a search for one. */}
+            {!query.trim() && (
+              <Opt
+                on={!profileId}
+                onPick={() => onPick(null)}
+                icon={<UserRound className="h-4 w-4" strokeWidth={1.8} />}
+                title="Just an agent"
+                sub="No profile — a plain workspace"
+              />
+            )}
+            {shown.map((p) => (
+              <Opt
+                key={p.id}
+                on={p.id === profileId}
+                onPick={() => onPick(p.id)}
+                icon={
+                  p.agent ? (
+                    <AgentMark agent={p.agent as Agent} size={16} />
+                  ) : (
+                    <UserRound className="h-4 w-4" strokeWidth={1.8} />
+                  )
+                }
+                title={p.name}
+                sub={p.does}
+                chip={p.canDelegate ? "can delegate" : undefined}
+              />
+            ))}
+          </>
         )}
-        {shown.map((p) => (
-          <Opt
-            key={p.id}
-            on={p.id === profileId}
-            onPick={() => onPick(p.id)}
-            icon={
-              p.agent ? (
-                <AgentMark agent={p.agent as Agent} size={16} />
-              ) : (
-                <UserRound className="h-4 w-4" strokeWidth={1.8} />
-              )
-            }
-            title={p.name}
-            sub={p.does}
-            chip={p.canDelegate ? "can delegate" : undefined}
-          />
-        ))}
-        {query && shown.length === 0 && (
-          <div className="px-3 py-3 text-center text-micro text-mute">
-            No profile matches “{q}”.
-          </div>
-        )}
-      </Menu>
+      </Sift>
       {/* **What they are for, and a way to get one** — rather than a
           definition of the word. Somebody meeting an empty list needs the
           route, and the route is the Profiles page: making one there is two
@@ -1239,58 +1195,5 @@ export function ProfileMenu({
         )}
       </div>
     </>
-  );
-}
-
-export function Head({ children }: { children: React.ReactNode }) {
-  return <div className="px-3 pt-2 pb-1 text-micro text-mute">{children}</div>;
-}
-
-export function Opt({
-  on,
-  disabled,
-  keepOpen,
-  onPick,
-  icon,
-  title,
-  sub,
-  chip,
-}: {
-  on: boolean;
-  disabled?: boolean;
-  keepOpen?: boolean;
-  onPick: () => void;
-  icon: React.ReactNode;
-  title: string;
-  sub?: string;
-  chip?: string;
-}) {
-  return (
-    <button
-      type="button"
-      role="option"
-      aria-selected={on}
-      disabled={disabled}
-      onClick={(e) => {
-        if (keepOpen) e.stopPropagation();
-        onPick();
-      }}
-      className={`flex w-full items-center gap-2.5 px-3 py-2 text-left ${
-        disabled ? "opacity-40" : "hover:bg-raise"
-      }`}
-    >
-      <span className={`shrink-0 ${on ? "text-bone" : "text-dim"}`}>{icon}</span>
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-ui text-bone">{title}</span>
-        {sub && <span className="block truncate text-micro text-mute">{sub}</span>}
-      </span>
-      {chip && (
-        <span className="chip2">{chip}</span>
-      )}
-      <Check
-        className={`h-4 w-4 shrink-0 ${on ? "text-slate" : "text-transparent"}`}
-        strokeWidth={2.5}
-      />
-    </button>
   );
 }

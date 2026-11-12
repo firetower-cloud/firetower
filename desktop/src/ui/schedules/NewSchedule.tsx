@@ -43,7 +43,8 @@ import { Icon, IconButton } from "~/components/ui";
 import { AgentMark } from "~/components/AgentMark";
 import { Pop } from "~/ui/Pop";
 import { RunPicker } from "~/ui/RunPicker";
-import { Head, Menu, Opt, ProfileMenu, RepoMenu } from "~/ui/StartComposer";
+import { ProfileMenu, RepoMenu } from "~/ui/StartComposer";
+import { Head, Menu, Opt, PickOne } from "~/ui/menus";
 import { canRun, NoMachine, resolve, type Where } from "~/components/WhereItRuns";
 import { Readout } from "~/components/HostReadiness";
 import { machineLabel, machines } from "~/api/environments";
@@ -77,6 +78,9 @@ const CADENCES: { kind: Cadence["kind"]; label: string; note?: string }[] = [
 ];
 
 const DAYS: Weekday[] = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
+
+/** `monday` as somebody reads it. */
+const titled = (word: string) => word[0].toUpperCase() + word.slice(1);
 
 type Checkout = { id: string; slug: string };
 
@@ -560,83 +564,74 @@ export function NewSchedule({
               <span className="s-kind" title="A clock is the only trigger available.">
                 On a clock
               </span>
-              <select
-                className="s-pill"
+              {/* **The product's pill, not a native select.** Seven of these
+                  were `<select>`s — the one control that cannot be made to
+                  match anything around it, which is why they leapt out of a
+                  row where everything else is ours. `PickOne` draws the same
+                  pill and opens the same menu every other picker in the app
+                  opens, through `Pop`, so nothing clips it. */}
+              <PickOne
+                label="How often"
                 value={kindOf}
-                onChange={(e) => setKind(e.target.value as Cadence["kind"])}
-                aria-label="How often"
-              >
-                {CADENCES.map((c) => (
-                  <option key={c.kind} value={c.kind}>
-                    {c.label}
-                    {c.note ? ` — ${c.note}` : ""}
-                  </option>
-                ))}
-              </select>
+                options={CADENCES.map((c) => ({
+                  value: c.kind,
+                  label: c.label,
+                  // The explanatory half keeps its words and stops being
+                  // glued on with an em dash: it is what picking this will
+                  // ask for next, and a menu row can draw two lines.
+                  note: c.note,
+                }))}
+                onPick={(v) => setKind(v as Cadence["kind"])}
+                width={300}
+              />
               {kindOf === "weekly" && (
-                <select
-                  className="s-pill"
+                <PickOne
+                  label="Which day"
                   value={day}
-                  onChange={(e) => setDay(e.target.value as Weekday)}
-                  aria-label="Which day"
-                >
-                  {DAYS.map((d) => (
-                    <option key={d} value={d}>
-                      {d[0].toUpperCase() + d.slice(1)}
-                    </option>
-                  ))}
-                </select>
+                  options={DAYS.map((d) => ({ value: d, label: titled(d) }))}
+                  onPick={(v) => setDay(v as Weekday)}
+                />
               )}
               {kindOf === "monthly" && (
                 <>
-                  <select
-                    className="s-pill"
+                  <PickOne
+                    label="How the day is chosen"
                     value={monthly}
-                    onChange={(e) => setMonthly(e.target.value as "day" | "nth")}
-                    aria-label="How the day is chosen"
-                  >
-                    <option value="day">on a date</option>
-                    <option value="nth">on a weekday</option>
-                  </select>
+                    options={[
+                      { value: "day", label: "on a date" },
+                      { value: "nth", label: "on a weekday" },
+                    ]}
+                    onPick={(v) => setMonthly(v as "day" | "nth")}
+                  />
                   {monthly === "day" ? (
-                    <select
-                      className="s-pill"
-                      value={dayOfMonth}
-                      onChange={(e) => setDayOfMonth(Number(e.target.value))}
-                      aria-label="Which date"
-                    >
-                      {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => (
-                        <option key={d} value={d}>
-                          {d}
-                        </option>
-                      ))}
-                    </select>
+                    <PickOne
+                      label="Which date"
+                      value={String(dayOfMonth)}
+                      options={Array.from({ length: 31 }, (_, i) => ({
+                        value: String(i + 1),
+                        label: String(i + 1),
+                      }))}
+                      onPick={(v) => setDayOfMonth(Number(v))}
+                      width={180}
+                    />
                   ) : (
                     <>
-                      <select
-                        className="s-pill"
-                        value={nth}
-                        onChange={(e) => setNth(Number(e.target.value))}
-                        aria-label="Which one"
-                      >
-                        {["first", "second", "third", "fourth", "last"].map((word, i) => (
-                          <option key={word} value={i + 1}>
-                            {word}
-                          </option>
-                        ))}
-                      </select>
-                      <select
-                        className="s-pill"
+                      <PickOne
+                        label="Which one"
+                        value={String(nth)}
+                        options={["first", "second", "third", "fourth", "last"].map((word, i) => ({
+                          value: String(i + 1),
+                          label: word,
+                        }))}
+                        onPick={(v) => setNth(Number(v))}
+                        width={180}
+                      />
+                      <PickOne
+                        label="Which weekday"
                         value={day}
-                        onChange={(e) => setDay(e.target.value as Weekday)}
-                        aria-label="Which weekday"
-                      >
-                        {DAYS.map((d) => (
-                          <option key={d} value={d}>
-                            {d[0].toUpperCase() + d.slice(1)}
-                          </option>
-                        ))}
-                      </select>
+                        options={DAYS.map((d) => ({ value: d, label: titled(d) }))}
+                        onPick={(v) => setDay(v as Weekday)}
+                      />
                     </>
                   )}
                 </>
@@ -660,19 +655,19 @@ export function NewSchedule({
                   aria-label="Time of day"
                 />
               )}
-              <select
-                className="s-pill"
-                value={zone}
-                onChange={(e) => setZone(e.target.value)}
-                aria-label="Time zone"
+              {/* **The one that needed the search.** Several hundred IANA
+                  zones: a menu without a filter is a scroll, which is
+                  probably why this was left native longest. */}
+              <PickOne
+                label="Time zone"
                 title="The time stays the same through daylight saving changes."
-              >
-                {zones(zone, here).map((z) => (
-                  <option key={z} value={z}>
-                    {z}
-                  </option>
-                ))}
-              </select>
+                value={zone}
+                options={zones(zone, here).map((z) => ({ value: z, label: z }))}
+                onPick={setZone}
+                search
+                noun="zone"
+                width={320}
+              />
             </div>
 
             {refused ? (
