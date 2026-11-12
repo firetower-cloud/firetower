@@ -260,6 +260,9 @@ pub(super) async fn reveal_secret(
     Path((scope, name)): Path<(String, String)>,
 ) -> ApiResult<Json<RevealedSecret>> {
     let me = whoever(&principal)?;
+    if let Some(refusal) = never_revealed(&scope) {
+        return Err(refusal);
+    }
     let owner = whose(&state.vault, &scope, &name, me).await?;
 
     let value = state
@@ -276,6 +279,41 @@ pub(super) async fn reveal_secret(
         name,
         value: value.to_string(),
     }))
+}
+
+/// The scopes this route will not hand back, whoever is asking.
+///
+/// **Criterion 12.** A connector's grant is held so that a session can spend
+/// it, and for nothing else: there is no screen that shows one, no "copy it
+/// elsewhere" story that needs one, and the thing it opens is somebody else's
+/// product rather than a git remote somebody might have to clone by hand. So
+/// the argument that justifies this route for a git token — a credential you
+/// cannot inspect is one you cannot verify — does not reach these, and what is
+/// left is a quiet copy of a token.
+///
+/// Refused by **scope**, not by name, and listed here rather than checked at
+/// each call site: a second route that reveals something would have to be
+/// written past this function, which is harder to do by accident than
+/// forgetting a condition.
+///
+/// A refusal rather than a 404, because the row is there and saying so is the
+/// honest answer — the interface shows "Firetower holds this and will not show
+/// it to anybody", which is a fact worth stating.
+fn never_revealed(scope: &str) -> Option<ApiError> {
+    const HELD_AND_NEVER_SHOWN: &[(&str, &str)] = &[
+        (
+            vault::CONNECTOR,
+            "A connector's authorization is held so a session can use it, and no route returns              it — including to you. Sign out and sign in again to replace it.",
+        ),
+        (
+            vault::CONNECTOR_CLIENT,
+            "That is the application secret this Firetower registered with a connector's              authorization server. Nothing returns it.",
+        ),
+    ];
+    HELD_AND_NEVER_SHOWN
+        .iter()
+        .find(|(held, _)| *held == scope)
+        .map(|(_, why)| ApiError::new(ErrorCode::Forbidden, *why))
 }
 
 /// Store a credential, whether or not there is one under that name already.
@@ -382,6 +420,39 @@ mod tests {
         let admin = accounts.user_by_name("admin").await.unwrap().unwrap();
         let vault = Vault::new(db.pool().clone(), RootKey::generate());
         (vault, accounts, admin)
+    }
+
+    /// **Criterion 12.** A connector's grant comes back from no route,
+    /// including this one — the only route in the product that hands a stored
+    /// value to a person.
+    ///
+    /// Asserted at the predicate rather than through the handler on purpose:
+    /// `never_revealed` is the whole of the rule, and a test that drove the
+    /// route would be asserting the same thing with a database and a signed-in
+    /// user in the way. The scopes are named here as literals so that renaming
+    /// one in the vault and forgetting this is a failure rather than a silent
+    /// hole.
+    #[test]
+    fn a_connectors_grant_is_refused_by_the_one_route_that_reveals() {
+        for scope in [vault::CONNECTOR, vault::CONNECTOR_CLIENT] {
+            let refusal =
+                never_revealed(scope).unwrap_or_else(|| panic!("{scope} must never be revealed"));
+            // Not a 404: the row is there, and saying so is the honest answer.
+            assert_eq!(refusal.code.status(), StatusCode::FORBIDDEN);
+            assert!(
+                !refusal.message.is_empty(),
+                "and it says why, because somebody is reading it"
+            );
+        }
+        assert_eq!(vault::CONNECTOR, "connector");
+        assert_eq!(vault::CONNECTOR_CLIENT, "connector-client");
+
+        // Everything else this route exists for is untouched. A git token you
+        // cannot inspect is one you cannot verify or copy elsewhere, which is
+        // the argument that justifies the route at all.
+        for scope in [GIT, vault::AGENT, vault::TRACKER, "global", "repo:r_1"] {
+            assert!(never_revealed(scope).is_none(), "{scope}");
+        }
     }
 
     /// The bug this file was opened for: adding refused every name.

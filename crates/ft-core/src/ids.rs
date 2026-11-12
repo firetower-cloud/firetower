@@ -103,6 +103,11 @@ id_type!(
     "Identifies one version of a skill. Append-only: a session pins one."
 );
 id_type!(
+    ConnectorId,
+    "cx",
+    "Identifies a connector — a remote MCP server an agent can reach."
+);
+id_type!(
     ArtifactId,
     "ar",
     "Identifies an artifact — a page an agent published for somebody to look at."

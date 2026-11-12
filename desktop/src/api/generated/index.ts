@@ -3,6 +3,7 @@ export * from './accounts/accounts.ts';
 export * from './agents/agents.ts';
 export * from './artifacts/artifacts.ts';
 export * from './auth/auth.ts';
+export * from './connectors/connectors.ts';
 export * from './consumption/consumption.ts';
 export * from './conversation/conversation.ts';
 export * from './events/events.ts';

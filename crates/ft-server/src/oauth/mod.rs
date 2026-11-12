@@ -31,7 +31,7 @@ mod github;
 mod gitlab;
 
 pub mod grant;
-pub use grant::{Grant, Renewals};
+pub use grant::{read as read_token_response, Grant, Renewals};
 
 /// Identifies us politely, and some hosts refuse requests without one.
 const USER_AGENT: &str = concat!("firetower/", env!("CARGO_PKG_VERSION"));

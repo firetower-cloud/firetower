@@ -3,6 +3,7 @@ export * from './accounts/accounts.zod.ts';
 export * from './agents/agents.zod.ts';
 export * from './artifacts/artifacts.zod.ts';
 export * from './auth/auth.zod.ts';
+export * from './connectors/connectors.zod.ts';
 export * from './consumption/consumption.zod.ts';
 export * from './conversation/conversation.zod.ts';
 export * from './events/events.zod.ts';

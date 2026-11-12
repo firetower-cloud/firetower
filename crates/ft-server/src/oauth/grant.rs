@@ -189,8 +189,11 @@ pub async fn renew(
 
 /// A grant out of a token endpoint's answer.
 ///
-/// Shared with the device flow's final poll, which returns the same body.
-pub(super) fn read(body: &str) -> Result<Grant> {
+/// Shared with the device flow's final poll, which returns the same body — and
+/// with a connector's authorization-code exchange, which is a different flow
+/// against a different kind of server and has the same four fields coming back.
+/// Re-exported as `oauth::read_token_response` for that reader.
+pub fn read(body: &str) -> Result<Grant> {
     #[derive(Deserialize)]
     struct Response {
         access_token: String,
