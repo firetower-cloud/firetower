@@ -5420,6 +5420,159 @@ async fn a_schedule_cannot_be_asked_to_bypass_permissions() {
     assert_eq!(row.pins["settings"]["mode"], serde_json::json!("dontAsk"));
 }
 
+/// **Blocker 4: a scheduled run does not borrow the machine's git identity.**
+///
+/// Owning the local `repos` row says somebody connected it once; it says
+/// nothing about whether their authorization on the git host is still good.
+/// `credential_for` answers `None` for "we hold nothing for this person on
+/// this host", and the launch path reads that as "use whatever credentials
+/// the worker already has" — deliberate for an interactive session, and for
+/// an unattended one it means a schedule keeps reaching private code under a
+/// shared identity after the owner's own authorization is gone.
+#[tokio::test]
+async fn a_scheduled_run_is_refused_when_the_owner_holds_no_git_authorization() {
+    let (state, principal, _, _, owner) = fixture().await;
+    let repo = state
+        .db
+        .ensure_repo(
+            "backend",
+            "git@github.com:acme/backend.git",
+            Some("main"),
+            None,
+            &owner,
+            None,
+        )
+        .await
+        .unwrap();
+
+    let mut new = a_schedule("Reaches a private remote", weekdays_at("08:30"));
+    new.repo_id = Some(repo.id.clone());
+    let made = create(&state, &principal, new).await.unwrap();
+    let _ = super::schedules::approve_schedule(
+        State(state.clone()),
+        Extension(principal.clone()),
+        Path(made.id.as_str().to_string()),
+    )
+    .await
+    .unwrap();
+    let row = state.db.schedule(&made.id).await.unwrap().unwrap();
+
+    // Nothing is held for this person on that host — which is exactly the
+    // state a disconnected provider leaves behind.
+    assert!(
+        crate::api::credential_for_repo(&state, &repo, &owner, "test")
+            .await
+            .is_none(),
+        "the vault holds nothing, which is the state under test"
+    );
+
+    let claim = state
+        .db
+        .claim_run(
+            &ft_core::ScheduleRunId::new(),
+            &made.id,
+            None,
+            Utc::now(),
+            1,
+            "cron",
+            "claimed",
+            None,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    crate::schedules::launch::start(&state, &row, &claim)
+        .await
+        .expect("a refusal is an outcome");
+
+    let run = runs_of(&state, &made.id)
+        .await
+        .into_iter()
+        .find(|r| r.state.is_terminal())
+        .expect("it was recorded");
+    assert_eq!(run.state, ScheduleRunState::Failed);
+    assert_eq!(run.error_code.as_deref(), Some("RepoAccessDenied"));
+    assert!(
+        run.detail
+            .as_deref()
+            .unwrap_or_default()
+            .contains("no git authorization"),
+        "{:?}",
+        run.detail
+    );
+}
+
+/// **A local path needs no git host and is not asked for one.**
+///
+/// The fence is "a remote on a git host", which is what `host_of` answers —
+/// the same function the credential lookup uses to decide which host a remote
+/// is on, so the two cannot disagree about what counts.
+#[tokio::test]
+async fn a_schedule_on_a_local_checkout_needs_no_git_authorization() {
+    let (state, principal, host, ready, owner) = fixture().await;
+    ready.store(true, Ordering::SeqCst);
+    says_it_has(&state, &host, &[(Agent::ClaudeCode, true)]).await;
+    let repo = state
+        .db
+        .ensure_repo(
+            "media-app",
+            "/home/editor/media-app",
+            Some("main"),
+            None,
+            &owner,
+            None,
+        )
+        .await
+        .unwrap();
+    assert!(crate::providers::host_of(&repo.remote).is_none());
+
+    let mut new = a_schedule("A path on the machine", weekdays_at("08:30"));
+    new.repo_id = Some(repo.id.clone());
+    let made = create(&state, &principal, new).await.unwrap();
+    let _ = super::schedules::approve_schedule(
+        State(state.clone()),
+        Extension(principal.clone()),
+        Path(made.id.as_str().to_string()),
+    )
+    .await
+    .unwrap();
+    let row = state.db.schedule(&made.id).await.unwrap().unwrap();
+
+    let claim = state
+        .db
+        .claim_run(
+            &ft_core::ScheduleRunId::new(),
+            &made.id,
+            None,
+            Utc::now(),
+            1,
+            "cron",
+            "claimed",
+            None,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    crate::schedules::launch::start(&state, &row, &claim)
+        .await
+        .expect("it runs, or is refused for a reason of the fleet's");
+
+    let run = runs_of(&state, &made.id)
+        .await
+        .into_iter()
+        .find(|r| r.state.is_terminal());
+    // It may still be refused — this fixture's worker cannot clone — but
+    // never for want of a git credential it does not need.
+    if let Some(run) = run {
+        assert_ne!(
+            run.error_code.as_deref(),
+            Some("RepoAccessDenied"),
+            "a path on the machine was asked for a token: {:?}",
+            run.detail
+        );
+    }
+}
+
 /// **Blocker 3: a schedule cannot be left to pick a subscription later.**
 ///
 /// `pin_agent_account` is a `before insert` trigger that fills

@@ -274,11 +274,56 @@ async fn gate(
             .await
             .ok()
             .flatten();
-        if theirs.is_none() {
+        let Some(theirs) = theirs else {
             return Err(Stopped {
                 state: "failed",
                 detail: "A repository this schedule checks out is no longer connected.".into(),
                 code: ErrorCode::RepoNotConnected,
+                and_stop: None,
+            });
+        };
+
+        // **And the owner still has authority over the remote, not just over
+        // the row.**
+        //
+        // Owning the local `repos` row says somebody connected it once. It
+        // says nothing about whether their authorization on the git host is
+        // still good — and `credential_for` answers `None` for "we hold
+        // nothing for this person on this host", which the launch path treats
+        // as "work off whatever credentials the worker already has". That is
+        // deliberate and right for an interactive session: a local path, or a
+        // host nobody authorized, on a machine whose ssh key opens it.
+        //
+        // For an unattended run it is the wrong default twice over. Disconnect
+        // the owner's provider and the schedule keeps reaching private code —
+        // under the *worker's* identity, which is shared by every session on
+        // that machine, after the owner's own authorization is gone. Nothing
+        // would say so, because falling back is not an error.
+        //
+        // So this path fails closed: a remote on a git host needs a
+        // credential of the owner's, now. A local path needs none and asks
+        // for none — `host_of` is what tells them apart, and it is the same
+        // function the credential lookup uses to decide which host a remote
+        // is on.
+        if crate::providers::host_of(&theirs.remote).is_some()
+            && crate::api::credential_for_repo(
+                state,
+                &theirs,
+                &schedule.owner_id,
+                &format!("checking authorization for {}", theirs.slug),
+            )
+            .await
+            .is_none()
+        {
+            return Err(Stopped {
+                state: "failed",
+                detail: format!(
+                    "Firetower holds no git authorization for {} any more, and an unattended run \
+                     is not given the machine's own. Reconnect the git host on the Repositories \
+                     screen.",
+                    theirs.slug
+                ),
+                code: ErrorCode::RepoAccessDenied,
                 and_stop: None,
             });
         }
