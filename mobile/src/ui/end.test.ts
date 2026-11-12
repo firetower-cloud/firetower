@@ -45,7 +45,7 @@ const clean = [{ uncommitted: 0, ahead: 0, pushed: true }];
 describe("what the end question says", () => {
   it("names the place's own agents, and the floor under the question", () => {
     expect(endWording(one(), 0, clean)).toBe(
-      "The agent stops. Its workspace goes from the host. Nothing uncommitted is in it. The branch stays on the machine.",
+      "The agent stops. The workspace goes from the host. Nothing uncommitted is in it. The branch stays on the machine.",
     );
   });
 
