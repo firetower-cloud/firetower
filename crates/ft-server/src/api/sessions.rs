@@ -58,6 +58,55 @@ const RECONNECT_GRACE: std::time::Duration = std::time::Duration::from_secs(30);
 /// reports a refusal that makes no sense on a machine with plenty of room.
 const DISK_FLOOR_MB: u64 = 10_240;
 
+/// What a machine's disk says about taking another worktree.
+///
+/// **Three answers, because two of them refuse for different reasons and the
+/// difference is the whole of what somebody can do about it.** A full machine
+/// is a machine to clear space on. A machine whose *entire* disk is smaller
+/// than the floor can never pass it, however empty it is — and told it was
+/// "low on disk", somebody goes and frees space that will never be enough.
+/// That is a real report: a 9.6 GB worker refused at 1.8 GB free, with 12 GB
+/// then cleared on a different disk entirely.
+///
+/// The predicate is unchanged: `Fine` admits and both others refuse, which is
+/// what it did when it was a `bool`. What is new is that the refusal can say
+/// which.
+#[derive(Clone, Copy)]
+enum Disk {
+    /// Room for another worktree — or no reading at all, which is unknown
+    /// rather than low. See the note on `room` below.
+    Fine,
+    /// Under the floor, on a machine big enough that clearing space would
+    /// lift it over.
+    Low,
+    /// **Smaller than one run needs, in total.** Nothing to clear.
+    TooSmall { total_mb: u64 },
+}
+
+impl Disk {
+    /// `free` is `None` for a machine with no usable reading, which fails
+    /// open; `total_mb` is `0` for the same case and is only read when there
+    /// is a reading to read it beside.
+    fn of(free: Option<u64>, total_mb: u64) -> Self {
+        match free {
+            None => Self::Fine,
+            Some(mb) if mb >= DISK_FLOOR_MB => Self::Fine,
+            // Order matters only for readability: a disk under the floor
+            // cannot have the floor free.
+            Some(_) if total_mb < DISK_FLOOR_MB => Self::TooSmall { total_mb },
+            Some(_) => Self::Low,
+        }
+    }
+}
+
+/// Megabytes as somebody reads them, for a sentence about a whole disk.
+///
+/// One decimal, because the number this exists for is 9853 and "9 GB" of a
+/// 10 GB floor reads as a rounding argument rather than as a fact.
+fn in_gb(mb: u64) -> String {
+    format!("{:.1} GB", mb as f64 / 1024.0)
+}
+
 /// Sessions, newest first.
 ///
 /// Without `limit` this returns everything, which is what the dashboard wants —
@@ -647,6 +696,12 @@ pub(crate) async fn create_session_as(
     // front of this is absent or it is about a minute old; it is never older.
     let mut room = std::collections::HashMap::new();
     for h in &hosts {
+        let total_mb = state
+            .fleet
+            .capacity_of(&h.id)
+            .await
+            .map(|c| c.disk_total_mb)
+            .unwrap_or(0);
         let free = state.fleet.capacity_of(&h.id).await.and_then(|c| {
             // **A total of zero is a probe that failed, not a disk with
             // nothing left on it.** `capacity.rs` answers `(0, 0)` when `df`
@@ -672,12 +727,10 @@ pub(crate) async fn create_session_as(
                 total => Some(total.saturating_sub(c.disk_used_mb)),
             }
         });
-        room.insert(
-            h.id.as_str().to_string(),
-            free.is_none_or(|mb| mb >= DISK_FLOOR_MB),
-        );
+        room.insert(h.id.as_str().to_string(), Disk::of(free, total_mb));
     }
-    let has_room = |id: &ft_core::HostId| room.get(id.as_str()).copied().unwrap_or(true);
+    let disk = |id: &ft_core::HostId| room.get(id.as_str()).copied().unwrap_or(Disk::Fine);
+    let has_room = |id: &ft_core::HostId| matches!(disk(id), Disk::Fine);
 
     // Narrowed separately from `up` rather than folded into it, so the refusal
     // below can tell "every machine is low on disk" from "no machine can run
@@ -736,9 +789,21 @@ pub(crate) async fn create_session_as(
             // what emptied the list. Only then: `roomy` is checked before the
             // engine sentence precisely so this cannot be said about a fleet
             // whose disks are fine.
-            (true, false) if roomy.is_empty() => {
-                ApiError::new(ErrorCode::NoCapacity, "No machine had room on disk.")
-            }
+            (true, false) if roomy.is_empty() => ApiError::new(
+                ErrorCode::NoCapacity,
+                // Same distinction, said of a fleet rather than a machine.
+                // Only when *every* one is too small: a mixture is a fleet
+                // that is full today, which is what clearing space fixes.
+                match up
+                    .iter()
+                    .all(|h| matches!(disk(&h.id), Disk::TooSmall { .. }))
+                {
+                    true => "No machine has enough disk for a run. Clearing space cannot change \
+                             that."
+                        .to_string(),
+                    false => "No machine had room on disk.".to_string(),
+                },
+            ),
             (true, false) => ApiError::new(
                 ErrorCode::NoCapacity,
                 format!(
@@ -768,11 +833,31 @@ pub(crate) async fn create_session_as(
     // again by each caller: a scheduled run's history line is this message
     // under the word `Refused`, and a reading that was low a moment ago is not
     // a present fact anything can claim afterwards.
-    if !has_room(&host.id) {
-        return Err(ApiError::new(
-            ErrorCode::NoCapacity,
-            format!("{} was low on disk.", host.name),
-        ));
+    match disk(&host.id) {
+        Disk::Fine => {}
+        Disk::Low => {
+            return Err(ApiError::new(
+                ErrorCode::NoCapacity,
+                format!("{} was low on disk.", host.name),
+            ))
+        }
+        // **A different condition, and it needs its own sentence.** "Low on
+        // disk" sends somebody to free space; on a machine whose whole disk
+        // is smaller than the floor there is no amount of space to free, and
+        // the report that found this was somebody doing exactly that — 12 GB
+        // cleared on the control plane's own Mac, which is not the disk this
+        // reading is of.
+        Disk::TooSmall { total_mb } => {
+            return Err(ApiError::new(
+                ErrorCode::NoCapacity,
+                format!(
+                    "{} has {} of disk in total, which is less than a run is given room for. \
+                     Clearing space cannot change that.",
+                    host.name,
+                    in_gb(total_mb)
+                ),
+            ))
+        }
     }
 
     // A host that has just dropped is usually seconds from being back — a wifi

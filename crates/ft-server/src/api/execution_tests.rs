@@ -2992,6 +2992,44 @@ async fn a_named_machine_low_on_disk_is_refused_naming_it() {
     state.fleet.stop_supervising(&host.id).await;
 }
 
+/// **A machine smaller than the floor is refused for the reason it is
+/// refused, which is not "low on disk".**
+///
+/// Kevin's numbers, exactly: a 9.6 GB disk with 1.8 GB free. The predicate is
+/// right — 1.8 is under the floor — but no amount of clearing can lift a
+/// 9.6 GB disk over a 10 GB floor, and told it was *low on disk* he went and
+/// freed 12 GB on a different machine. The refusal has to say which of the
+/// two conditions this is.
+#[tokio::test]
+async fn a_machine_smaller_than_the_floor_says_so_rather_than_low_on_disk() {
+    let (state, _, host, _, owner) = fixture().await;
+    says_its_disk(&state, &host, 9_853, 8_008).await;
+
+    let refused = launch_on(&state, &owner, Some(&host))
+        .await
+        .expect_err("1.8 GB is under the floor");
+
+    assert!(matches!(refused.code, ErrorCode::NoCapacity));
+    assert!(
+        refused.message.contains("9.6 GB of disk in total"),
+        "it says how big the disk actually is: {}",
+        refused.message
+    );
+    assert!(
+        refused
+            .message
+            .contains("Clearing space cannot change that"),
+        "and that clearing space is not the remedy: {}",
+        refused.message
+    );
+    assert!(
+        !refused.message.contains("low on disk"),
+        "the misleading sentence is the one under test: {}",
+        refused.message
+    );
+    state.fleet.stop_supervising(&host.id).await;
+}
+
 /// **Nobody named one, so the candidate list narrowed and emptied.**
 ///
 /// It names no machine because there is no one machine to name — every

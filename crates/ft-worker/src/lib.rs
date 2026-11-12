@@ -188,6 +188,13 @@ struct Sending {
 /// run is refused rather than started. So this cadence is load-bearing, and
 /// making the reporting lazier would make that refusal decide on a reading
 /// older than it looks. The rest of `Capacity` is still only ever drawn.
+///
+/// **Both numbers, not just the free space.** `disk_total_mb` decides which
+/// of two refusals a person is given: a machine under the floor is one to
+/// clear space on, and a machine whose *whole disk* is under the floor can
+/// never pass it, which is a different sentence and a different remedy.
+/// Reporting a total of zero — which `capacity.rs` does when it cannot read
+/// the disk at all — is read as "unknown" and refuses nothing.
 const REPORT_EVERY: std::time::Duration = std::time::Duration::from_secs(5);
 /// How often to look for an agent that has rotated its own credential.
 ///
