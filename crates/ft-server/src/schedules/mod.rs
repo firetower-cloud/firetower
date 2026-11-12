@@ -77,6 +77,29 @@ const AT_ONCE: i64 = 20;
 /// — which is all of them, by design.
 pub(crate) const AT_ONCE_PER_HOST: usize = 3;
 
+/// How long a launch may hold its permit waiting for the workspace to appear
+/// in the worker's own accounting.
+///
+/// **The permit is only a bound if it outlives the thing it bounds.** It was
+/// released when `create_session_as` returned, and that function *queues*
+/// `CreateWorkspace` — so three permits admitted three launches, each of
+/// which freed its permit a few milliseconds later while the worker had not
+/// yet cut a worktree. The reviewer put eight onto one machine that way.
+///
+/// So the permit is held until `Fleet::usage_of` can see the workspace, which
+/// is the moment the worker's five-second `Usage` report includes it: the
+/// workspace exists *and* the next disk reading covers it, which is exactly
+/// what the floor needs to be true.
+///
+/// Three minutes, which is a compromise in one direction only. It is longer
+/// than an ordinary clone and container start — [`ORPHAN_AFTER`]'s note
+/// measures the worst honest launch at a shade over two — and short enough
+/// that three wedged workers do not park every permit for a whole sweep
+/// window. Past it the permit is released and the launch is left alone: the
+/// run is still live, the reconciler still has `ORPHAN_AFTER`, and the worst
+/// case is the overshoot that used to be the only case.
+pub(crate) const CREATION_WAIT: Duration = Duration::from_secs(180);
+
 /// How long before the first pass.
 ///
 /// Longer than `reclaim`'s own thirty seconds, and for a reason of its own: a

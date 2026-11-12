@@ -87,12 +87,50 @@ pub fn spawn(state: AppState, schedule: crate::db::ScheduleRow, run: ScheduleRun
         // claim that outlived the process that took it.
         launching().write().await.insert(run.as_str().to_string());
         let room = permits().acquire().await;
-        if let Err(e) = start(&state, &schedule, &run, why).await {
-            tracing::warn!(run = %run, "starting a scheduled run: {e:#}");
+        match start(&state, &schedule, &run, why).await {
+            Err(e) => tracing::warn!(run = %run, "starting a scheduled run: {e:#}"),
+            // **And this is what makes the permit a bound at all.**
+            // `create_session_as` returns when `CreateWorkspace` has been
+            // *queued*, so releasing here released it before the worktree
+            // existed — three permits admitted three launches that each freed
+            // their permit milliseconds later, and eight workspaces landed on
+            // one machine. See [`super::CREATION_WAIT`].
+            Ok(Some(session)) => created(&state, &session).await,
+            // Nothing was started, so there is nothing to wait for: a gate
+            // refused it, and the next launch may have the permit now.
+            Ok(None) => {}
         }
         drop(room);
         launching().write().await.remove(run.as_str());
     });
+}
+
+/// Wait until the worker's own accounting covers this workspace.
+///
+/// `Fleet::usage_of` answers once a `Usage` report has named it, which the
+/// worker sends every five seconds — so this returns when the workspace
+/// exists *and* the disk reading the floor consults includes it. Those are
+/// the two things the permit is protecting, and they become true together.
+///
+/// Capped, because a worker that never reports must not hold a permit for
+/// ever. Past the cap this gives up and says nothing: the run is live, the
+/// reconciler still has its fence, and the only consequence is the overshoot
+/// that used to happen every time.
+async fn created(state: &AppState, session: &SessionId) {
+    let until = tokio::time::Instant::now() + super::CREATION_WAIT;
+    while tokio::time::Instant::now() < until {
+        if state.fleet.usage_of(session).await.is_some() {
+            return;
+        }
+        // A second is well under the worker's own five, so this notices the
+        // first report that covers it rather than the second.
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+    tracing::warn!(
+        session = %session,
+        "the worker has not reported this workspace within {:?}; releasing the launch permit",
+        super::CREATION_WAIT
+    );
 }
 
 /// Why this run is starting — which decides one gate, and nothing else.
@@ -107,7 +145,7 @@ pub fn spawn(state: AppState, schedule: crate::db::ScheduleRow, run: ScheduleRun
 /// An enum rather than a `bool`, because a literal at a call site is exactly
 /// how `inherit_settings` went wrong.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum Why {
+pub enum Why {
     /// The clock reached an occurrence. The schedule has to still be on: a
     /// run claimed a moment before somebody pressed pause is not the one more
     /// run that starts anyway.
@@ -152,7 +190,7 @@ pub(crate) async fn start(
     schedule: &crate::db::ScheduleRow,
     run: &ScheduleRunId,
     why: Why,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Option<SessionId>> {
     match gate(state, schedule, why).await {
         Err(stopped) => {
             let settled = state
@@ -177,7 +215,8 @@ pub(crate) async fn start(
             } else if settled {
                 super::settle::after_terminal(state, &schedule.id).await?;
             }
-            Ok(())
+            // Nothing was started, so there is no workspace to wait for.
+            Ok(None)
         }
         Ok(spec) => {
             // **Minted here, not inside.** Written onto the run before the
@@ -226,7 +265,11 @@ pub(crate) async fn start(
                         .map(|h| h.name)
                         .unwrap_or_default();
                     state.db.run_launched(run, &started.id, &host).await?;
-                    Ok(())
+                    // **The id of the workspace that is being made**, so the
+                    // caller can hold its permit until the worker says it
+                    // exists. `create_session_as` returning is not that: it
+                    // has queued a frame.
+                    Ok(Some(started.id))
                 }
                 Err(e) => {
                     // The whole of the mapping. `HostUnreachable` is a
@@ -261,7 +304,9 @@ pub(crate) async fn start(
                     if settled {
                         super::settle::after_terminal(state, &schedule.id).await?;
                     }
-                    Ok(())
+                    // The launch was refused or failed: no workspace is being
+                    // made, so nothing holds the permit.
+                    Ok(None)
                 }
             }
         }

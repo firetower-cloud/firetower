@@ -6712,7 +6712,7 @@ async fn a_schedules_controls_are_checked_against_the_engine_a_profile_pins() {
 /// and the launch refuses on the engine rather than believing the row.
 #[tokio::test]
 async fn a_stored_claim_that_no_subscription_is_needed_does_not_survive_a_launch() {
-    let (state, principal, host, ready, owner, created) = frames_fixture().await;
+    let (state, principal, host, ready, _owner, created) = frames_fixture().await;
     ready.store(true, Ordering::SeqCst);
     says_it_has(&state, &host, &[(Agent::ClaudeCode, true)]).await;
 
