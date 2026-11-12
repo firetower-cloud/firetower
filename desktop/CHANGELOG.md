@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.30.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.29.1...desktop-v0.30.0) (2026-11-12)
+
+
+### Features
+
+* **desktop:** Linux, as an experimental tier ([0720e9d](https://github.com/firetower-cloud/firetower/commit/0720e9dee924685ad9102055706deb53ae4bc051))
+
+
+### Bug Fixes
+
+* **desktop:** ask for a password once, where no row can vouch for the keychain ([0ba2ba3](https://github.com/firetower-cloud/firetower/commit/0ba2ba351b6bb66de854126ff9b8efe1c1785328))
+* **desktop:** draw the window's door instead of an empty window ([0adaa3f](https://github.com/firetower-cloud/firetower/commit/0adaa3f0077104fc456d3cdf3dd0930fc7461fdf))
+* **desktop:** only restore a sign-in this machine can prove it may ([93b7192](https://github.com/firetower-cloud/firetower/commit/93b7192a93acdd7d3fe3c836feed4f045904c0c7))
+
 ## [0.29.1](https://github.com/firetower-cloud/firetower/compare/desktop-v0.29.0...desktop-v0.29.1) (2026-11-11)
 
 

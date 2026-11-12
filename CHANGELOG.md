@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.55.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.54.1...firetower-v0.55.0) (2026-11-12)
+
+
+### Features
+
+* **desktop:** Linux, as an experimental tier ([0720e9d](https://github.com/firetower-cloud/firetower/commit/0720e9dee924685ad9102055706deb53ae4bc051))
+
 ## [0.54.1](https://github.com/firetower-cloud/firetower/compare/firetower-v0.54.0...firetower-v0.54.1) (2026-11-11)
 
 
