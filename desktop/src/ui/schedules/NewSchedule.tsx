@@ -18,10 +18,14 @@
  * machine that was a sentence rather than a picker, no model and no account at
  * all, and a Skills row that only said what *would* happen.
  *
- * **The body scrolls, all of it.** The consequence summary used to be pinned
- * above the footer so it could not be scrolled away; it reads as the bottom of
+ * **The body scrolls, all of it.** A consequence summary used to be pinned
+ * above the footer so it could not be scrolled away; it read as the bottom of
  * the sheet, which hid the fact that there was anything below the fold at all.
- * It is the last card in the body now.
+ * It was then the last card in the body, and now it is not here: every row of
+ * it restated a control a few inches above or was true of every schedule ever
+ * made. The controls are the disclosure. The proposal review keeps its own
+ * copy, for a reason that is about that screen — see the note where this one
+ * used to be.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -747,38 +751,17 @@ export function NewSchedule({
             </div>
           )}
 
-          {/* **Last in the body, and it scrolls with everything else.** It was
-              pinned above the footer so it could not be scrolled away, which
-              made it read as the end of the sheet and hid the fold. */}
-          <div className="s-sumbox">
-            <h3>Running unattended</h3>
-            <dl className="s-sum">
-              <dt>Workspace</dt>
-              <dd>
-                {norepo
-                  ? "A new one for each run, kept until you delete it. Nothing is checked out, so there is no way to tell what a run left behind."
-                  : deleteClean
-                    ? "A new one for each run, deleted as that run finishes. Kept instead if the run failed, needed you, or left work uncommitted. Nothing bounds how many are kept."
-                    : "A new one for each run, kept until you delete it. Nothing bounds how many are kept."}
-              </dd>
-              <dt>Access</dt>
-              <dd>
-                Edits files and runs commands.{norepo ? "" : " Can use this repository’s secrets."}
-              </dd>
-              <dt>Usage</dt>
-              <dd>
-                {account ? `From ${account.name}’s allowance.` : "From your own subscription allowance."}
-              </dd>
-              <dt>If approval is needed</dt>
-              <dd>The action is blocked. The run carries on.</dd>
-              {/* The timeout stops the *waiting*, not the run: the only stop
-                  this product has would mark the session ended, which deletes
-                  the conversation — and the question with it — inside a
-                  minute. */}
-              <dt>If the agent needs you</dt>
-              <dd>After 15 minutes it stops waiting. The workspace stays open, so you can still answer.</dd>
-            </dl>
-          </div>
+          {/* **No consequence summary here, and the reason is which screen
+              this is.** Every row of it either restated a control six inches
+              above — the repositories, the machine, the engine, the account —
+              or was boilerplate true of every schedule ever made. The same
+              fact in a control, a label and a summary is what the copy
+              standard's rule 5 is about, and the controls are the disclosure.
+
+              **The proposal review keeps its copy of it**, and that is not an
+              inconsistency: there, an agent chose those things and you are
+              approving somebody else's configuration, so the summary is the
+              only place the effective authority is stated. */}
         </div>
 
         <div className="sh-foot">

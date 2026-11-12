@@ -157,15 +157,26 @@ describe("the create sheet", () => {
     expect(unattendedValue(MODEL)).toBeUndefined();
   });
 
-  it("keeps the consequence summary in the body it scrolls with", () => {
+  /**
+   * **No consequence summary, because every row of it was already on the
+   * screen.** The repositories, the machine, the engine and the account are
+   * controls a few inches above it; the rest — *edits files and runs
+   * commands*, *the action is blocked* — is true of every schedule ever made
+   * and changes with nothing anybody picks.
+   *
+   * The proposal review keeps its own copy, and that difference is the
+   * point: there an agent chose those things and the summary is the only
+   * place the effective authority is stated.
+   */
+  it("does not restate the controls as a summary", () => {
     const html = sheet();
+    expect(html).not.toContain("Running unattended");
+    expect(html).not.toContain("The action is blocked");
+    // And the body is still the one scroller, with the footer outside it.
     const body = html.indexOf("s-sbody");
     const foot = html.indexOf("sh-foot");
-    const summary = html.indexOf("Running unattended");
     expect(body).toBeGreaterThan(-1);
-    expect(summary).toBeGreaterThan(body);
-    expect(summary).toBeLessThan(foot);
-    // It was in a third row of its own, pinned between them.
+    expect(foot).toBeGreaterThan(body);
     expect(html).not.toContain("s-pinned");
   });
 
