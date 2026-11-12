@@ -258,7 +258,11 @@ pub async fn owed(state: &AppState, now: DateTime<Utc>) -> anyhow::Result<()> {
         if let Some(words) = session.proposed_title.as_deref() {
             state
                 .db
-                .set_run_summary(&run.id, words, &line_for(outcome, Some(words), &session))
+                .set_run_summary(
+                    &run.id,
+                    words,
+                    &line_for(outcome, Some(words), &session, None),
+                )
                 .await?;
         }
 
@@ -274,7 +278,7 @@ pub async fn owed(state: &AppState, now: DateTime<Utc>) -> anyhow::Result<()> {
             // not is a fact about somebody's disk.
             let line = format!(
                 "{} The workspace could not be deleted: {why}",
-                line_for(outcome, session.proposed_title.as_deref(), &session)
+                line_for(outcome, session.proposed_title.as_deref(), &session, None)
             );
             state.db.set_run_detail(&run.id, &line).await?;
         }
@@ -361,8 +365,10 @@ async fn finished(
     let summary = session.proposed_title.clone();
 
     // Classified from a live round trip, which is why "could not tell" is one
-    // of the answers rather than an error.
-    let outcome = classify(state, session, elapsed, max_runtime).await;
+    // of the answers rather than an error — and what it saw comes back with
+    // it, because that is the only thing that can support a sentence about
+    // what the run left.
+    let (outcome, seen) = classify(state, session, elapsed, max_runtime).await;
 
     // **The teardown waits for the words; the record does not.**
     //
@@ -373,26 +379,33 @@ async fn finished(
     // settles with the workspace standing and [`owed`] deletes it once the
     // words arrive or the grace runs out.
     let (line, kept) = match (outcome, summary.is_some()) {
-        (Outcome::Clean, false) if run.delete_clean_runs => {
-            (line_for(Outcome::Clean, None, session), true)
-        }
+        (Outcome::Clean, false) if run.delete_clean_runs => (
+            line_for(Outcome::Clean, None, session, seen.as_deref()),
+            true,
+        ),
         (Outcome::Clean, true) if run.delete_clean_runs => {
             // `destroy_as` with the owner's row, and **never forcing** — see
             // `Removal::the_workspace`. A host that is not answering refuses,
             // the workspace survives, and the failure is reported rather than
             // worked around.
             match delete_workspace(state, run, session).await {
-                Ok(()) => (line_for(Outcome::Clean, summary.as_deref(), session), false),
+                Ok(()) => (
+                    line_for(Outcome::Clean, summary.as_deref(), session, seen.as_deref()),
+                    false,
+                ),
                 Err(why) => (
                     format!(
                         "{} The workspace could not be deleted: {why}",
-                        line_for(Outcome::Clean, summary.as_deref(), session)
+                        line_for(Outcome::Clean, summary.as_deref(), session, seen.as_deref())
                     ),
                     true,
                 ),
             }
         }
-        (other, _) => (line_for(other, summary.as_deref(), session), true),
+        (other, _) => (
+            line_for(other, summary.as_deref(), session, seen.as_deref()),
+            true,
+        ),
     };
 
     let settled = state
@@ -419,17 +432,26 @@ async fn finished(
 /// trip, and `session_work`'s own comment is emphatic that an absent number is
 /// "absent, never zero" — filling them with zeros is what previously drew a
 /// dead host as a workspace with nothing left to commit.
+/// **And what it saw, not only what it concluded.** The line used to be
+/// composed from the outcome and a branch name, which is how a run that
+/// pushed nothing came to say "Pushed agent/test3-3." — `Clean` is equally
+/// true of an agent that changed nothing, and a branch name exists either
+/// way. The numbers that decided the outcome are the only thing that can
+/// support a sentence about it, so they come back with it.
+///
+/// `None` for "the machine could not be asked", which is `Unknown` and is a
+/// different thing from asking and finding nothing.
 async fn classify(
     state: &AppState,
     session: &ft_core::Session,
     elapsed: chrono::TimeDelta,
     max_runtime: chrono::TimeDelta,
-) -> Outcome {
+) -> (Outcome, Option<Vec<ft_core::CheckoutSummary>>) {
     // An overrun is not a clean run, however it ended. Derived from the
     // duration rather than remembered, so it agrees with what the overrun
     // observer said while it was still going.
     if max_runtime > chrono::TimeDelta::zero() && elapsed >= max_runtime {
-        return Outcome::Overran;
+        return (Outcome::Overran, None);
     }
 
     let summaries = match state.fleet.summarize(&session.host_id, &session.id).await {
@@ -438,14 +460,14 @@ async fn classify(
         // run left. Kept, correctly — and the line must not claim it was kept
         // *because* something was uncommitted, which would be a guess stated
         // as a fact.
-        Err(_) => return Outcome::Unknown,
+        Err(_) => return (Outcome::Unknown, None),
     };
 
     // **The dangerous case, not the safe one.** Nothing checked out means
     // nothing to compare, so this is never clean and is therefore never
     // deleted.
     if summaries.is_empty() {
-        return Outcome::Kept;
+        return (Outcome::Kept, Some(summaries));
     }
 
     let all_clear = summaries.iter().all(|c| {
@@ -454,9 +476,72 @@ async fn classify(
             && c.summary.pushed
             && c.summary.ahead == 0
     });
-    match all_clear {
+    let outcome = match all_clear {
         true => Outcome::Clean,
         false => Outcome::Kept,
+    };
+    (outcome, Some(summaries))
+}
+
+/// `n thing` or `n things`, for a sentence that counts.
+fn plural(n: u32, thing: &str) -> String {
+    match n {
+        1 => format!("1 {thing}"),
+        n => format!("{n} {thing}s"),
+    }
+}
+
+/// What one checkout shows, as a clause — or nothing, where it shows nothing.
+///
+/// **Every clause is supported by a number the worker reported.** The old
+/// line asserted a push from the presence of a branch name; these say only
+/// what the counts say, and where a count is absent they leave it out rather
+/// than guess. `None` means this checkout has nothing to report, which is a
+/// real and common answer: Firetower cut the branch and the agent changed
+/// nothing.
+fn clause(c: &ft_core::CheckoutSummary) -> Option<String> {
+    let branch = &c.summary.branch;
+    // Unreadable comes first: nothing below it can be trusted about a
+    // checkout the worker could not inspect.
+    if let Some(trouble) = c
+        .trouble
+        .as_deref()
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+    {
+        return Some(format!("could not read {}: {trouble}", c.slug));
+    }
+    let kept = match (c.summary.uncommitted, c.summary.ahead) {
+        (0, 0) => None,
+        (0, ahead) => Some(format!(
+            "left {} unpushed on {branch}",
+            plural(ahead, "commit")
+        )),
+        (files, 0) => Some(format!(
+            "left {} uncommitted on {branch}",
+            plural(files, "file")
+        )),
+        (files, ahead) => Some(format!(
+            "left {} uncommitted and {} unpushed on {branch}",
+            plural(files, "file"),
+            plural(ahead, "commit")
+        )),
+    };
+    if kept.is_some() {
+        return kept;
+    }
+    // Nothing outstanding. **Whether anything was pushed is a different
+    // question**, and `commits` is the only field that answers it: `ahead`
+    // starts measuring against the upstream the moment a branch exists on the
+    // remote, so a pushed branch holding nothing also reports `ahead: 0`.
+    // Absent — from a worker too old to answer — is not zero, and says
+    // nothing rather than claiming either way.
+    match c.summary.commits {
+        Some(n) if n > 0 && c.summary.pushed => {
+            Some(format!("pushed {} to {branch}", plural(n, "commit")))
+        }
+        Some(n) if n > 0 => Some(format!("made {} on {branch}", plural(n, "commit"))),
+        _ => None,
     }
 }
 
@@ -466,7 +551,16 @@ async fn classify(
 /// what git can see rather than showing an empty row — `describe()` gives up
 /// when there is no credential, or an account switched, or the agent answered
 /// with nothing, and none of those is a failure or should read as one.
-fn line_for(outcome: Outcome, summary: Option<&str>, session: &ft_core::Session) -> String {
+fn line_for(
+    outcome: Outcome,
+    summary: Option<&str>,
+    session: &ft_core::Session,
+    // What the machine said about each checkout, where it was asked. `None`
+    // is "not in hand" — a line being composed a second time, after the
+    // run was settled — and is not the same as `Some(&[])`, which is a
+    // workspace with nothing checked out.
+    seen: Option<&[ft_core::CheckoutSummary]>,
+) -> String {
     if let Some(said) = summary.map(str::trim).filter(|s| !s.is_empty()) {
         return said.to_string();
     }
@@ -476,16 +570,55 @@ fn line_for(outcome: Outcome, summary: Option<&str>, session: &ft_core::Session)
     if session.checkouts.is_empty() && session.repo.is_none() {
         return "Finished.".to_string();
     }
-    match (outcome, session.branch.as_deref()) {
-        (Outcome::Clean, Some(branch)) => format!("Finished. Pushed {branch}."),
-        (Outcome::Clean, None) => "Finished. Nothing was left to commit or push.".to_string(),
-        (Outcome::Overran, _) => "Finished, after running longer than this schedule allows.".into(),
-        (Outcome::Unknown, _) => {
-            "Finished. The machine could not be reached, so what it left could not be read.".into()
+    // Neither of these depends on a checkout: one is about the clock and the
+    // other is about not having been able to look.
+    match outcome {
+        Outcome::Overran => {
+            return "Finished, after running longer than this schedule allows.".to_string()
         }
-        (_, Some(branch)) => format!("Finished. Work was left on {branch}."),
-        (_, None) => "Finished.".to_string(),
+        Outcome::Unknown => {
+            return "Finished. The machine could not be reached, so what it left could not be read."
+                .to_string()
+        }
+        _ => {}
     }
+
+    let Some(seen) = seen else {
+        // **The facts are not in hand, so the sentence says only what the
+        // outcome itself supports.** `Clean` is defined as nothing
+        // uncommitted and nothing unpushed, so that much is safe to say;
+        // *why* a run was kept is not, and guessing it is how "Pushed
+        // agent/test3-3." came to be printed about a run that pushed nothing.
+        return match outcome {
+            Outcome::Clean => "Finished. Nothing was left to commit or push.".to_string(),
+            _ => "Finished. The workspace was kept.".to_string(),
+        };
+    };
+
+    says(seen)
+}
+
+/// What a finished run left, from what the machine reported.
+///
+/// **Every checkout speaks.** A run can carry several repositories now, so
+/// the first branch does not get to describe the rest: each one with
+/// something to report contributes a clause, in the order they are checked
+/// out, and a run where none of them has anything to report says so.
+///
+/// Its own function so it can be read back in a test without a `Session`.
+fn says(seen: &[ft_core::CheckoutSummary]) -> String {
+    let clauses: Vec<String> = seen.iter().filter_map(clause).collect();
+    if clauses.is_empty() {
+        return "Finished. Nothing was left to commit or push.".to_string();
+    }
+    // Every clause is written verb-first, so the sentence reads the same way
+    // the rest of this page does — the system as the actor — and so the one
+    // that starts it can be capitalised without touching a repository's name.
+    let mut said = clauses.join("; ");
+    if let Some(first) = said.get_mut(0..1) {
+        first.make_ascii_uppercase();
+    }
+    format!("Finished. {said}.")
 }
 
 fn outcome_name(outcome: Outcome) -> &'static str {
@@ -633,5 +766,138 @@ pub fn as_counted(row: &crate::db::RunRow) -> super::pause::Counted<'_> {
             _ => None,
         },
         error_code: row.error_code.as_deref(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ft_core::{CheckoutSummary, WorkSummary};
+
+    /// One checkout, as the worker reports it.
+    fn checkout(slug: &str, branch: &str) -> CheckoutSummary {
+        CheckoutSummary {
+            path: String::new(),
+            slug: slug.into(),
+            summary: WorkSummary {
+                branch: branch.into(),
+                uncommitted: 0,
+                ahead: 0,
+                pushed: true,
+                commits: Some(0),
+                unborn: false,
+            },
+            trouble: None,
+        }
+    }
+
+    /// **The one Kevin caught: a push that never happened.**
+    ///
+    /// The line asserted "Pushed {branch}" from the outcome being `Clean` and
+    /// a branch name existing. `Clean` is equally true of an agent that
+    /// changed nothing — Firetower cuts the branch either way — so a run that
+    /// did nothing announced a push. `commits` is the field that answers it,
+    /// and it is the only one that can: `ahead` starts measuring against the
+    /// upstream the moment a branch exists on the remote, so a pushed branch
+    /// holding nothing also reports `ahead: 0`.
+    #[test]
+    fn a_clean_run_that_pushed_nothing_does_not_claim_it_pushed() {
+        let said = says(&[checkout("acme/web", "agent/test3-3")]);
+        assert_eq!(said, "Finished. Nothing was left to commit or push.");
+        assert!(!said.contains("Pushed"), "{said}");
+        assert!(!said.contains("agent/test3-3"), "{said}");
+    }
+
+    #[test]
+    fn a_run_that_did_push_says_how_much() {
+        let mut one = checkout("acme/web", "agent/bumps");
+        one.summary.commits = Some(3);
+        assert_eq!(says(&[one]), "Finished. Pushed 3 commits to agent/bumps.");
+
+        let mut just_one = checkout("acme/web", "agent/bumps");
+        just_one.summary.commits = Some(1);
+        assert_eq!(
+            says(&[just_one]),
+            "Finished. Pushed 1 commit to agent/bumps."
+        );
+    }
+
+    /// **A worker too old to count says nothing about pushing**, rather than
+    /// either claiming or denying one. What it does say — nothing left to
+    /// commit or push — is carried by `uncommitted` and `ahead`, which it does
+    /// report.
+    #[test]
+    fn an_uncountable_push_is_left_unsaid() {
+        let mut one = checkout("acme/web", "agent/bumps");
+        one.summary.commits = None;
+        assert_eq!(
+            says(&[one]),
+            "Finished. Nothing was left to commit or push."
+        );
+    }
+
+    /// **The second arm, which had the same shape.** "Work was left on
+    /// {branch}" was asserted of every outcome that was not clean — including
+    /// a branch that was never pushed and has nothing on it, where no work
+    /// was left at all.
+    #[test]
+    fn what_was_left_is_counted_rather_than_assumed() {
+        let mut files = checkout("acme/web", "agent/x");
+        files.summary.uncommitted = 3;
+        assert_eq!(
+            says(&[files]),
+            "Finished. Left 3 files uncommitted on agent/x."
+        );
+
+        let mut unpushed = checkout("acme/web", "agent/x");
+        unpushed.summary.pushed = false;
+        unpushed.summary.ahead = 2;
+        unpushed.summary.commits = Some(2);
+        assert_eq!(
+            says(&[unpushed]),
+            "Finished. Left 2 commits unpushed on agent/x."
+        );
+
+        let mut both = checkout("acme/web", "agent/x");
+        both.summary.uncommitted = 1;
+        both.summary.ahead = 4;
+        assert_eq!(
+            says(&[both]),
+            "Finished. Left 1 file uncommitted and 4 commits unpushed on agent/x."
+        );
+
+        // Not pushed, and nothing on it: `Kept`, and nothing to report.
+        let mut empty = checkout("acme/web", "agent/x");
+        empty.summary.pushed = false;
+        assert_eq!(
+            says(&[empty]),
+            "Finished. Nothing was left to commit or push."
+        );
+    }
+
+    /// A checkout the worker could not inspect says that, and says nothing
+    /// about what is in it.
+    #[test]
+    fn an_unreadable_checkout_names_itself_and_the_trouble() {
+        let mut bad = checkout("acme/web", "agent/x");
+        bad.trouble = Some("not a git repository".into());
+        bad.summary.uncommitted = 9;
+        assert_eq!(
+            says(&[bad]),
+            "Finished. Could not read acme/web: not a git repository."
+        );
+    }
+
+    /// **Two branches, two stories, and the first does not speak for both.**
+    #[test]
+    fn every_checkout_with_something_to_say_says_it() {
+        let mut pushed = checkout("acme/web", "agent/web");
+        pushed.summary.commits = Some(2);
+        let mut left = checkout("acme/api", "agent/api");
+        left.summary.uncommitted = 1;
+        assert_eq!(
+            says(&[pushed, left]),
+            "Finished. Pushed 2 commits to agent/web; left 1 file uncommitted on agent/api."
+        );
     }
 }
