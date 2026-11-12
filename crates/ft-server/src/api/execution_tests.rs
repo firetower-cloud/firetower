@@ -7579,6 +7579,215 @@ async fn a_mixed_streak_stores_only_the_rule_and_reports_both_populations() {
     );
 }
 
+/// **A run whose agent has handed back is finished, not "Running."**
+///
+/// The sweep waited up to `SUMMARY_GRACE` for `describe()` to write a
+/// summary before settling anything — so for up to a sweep plus two minutes
+/// the row said the agent was still running, while the arrow beside it opened
+/// a conversation where it had plainly stopped. The waiting was right and the
+/// label was untrue.
+///
+/// The outcome never depended on the summary: `classify` asks git and the
+/// clock. So the state settles at once with a line composed from what git can
+/// see, and the agent's own words replace it when they arrive.
+#[tokio::test]
+async fn a_handed_back_run_is_finished_at_once_and_gets_its_words_later() {
+    let (state, principal, host, ready, owner) = fixture().await;
+    ready.store(true, Ordering::SeqCst);
+    let made = armed(&state, &principal, "Finishes quietly").await;
+
+    let session = super::sessions::create_session_as(
+        state.clone(),
+        owner.clone(),
+        "admin".into(),
+        serde_json::from_value(serde_json::json!({
+            "prompt": "a run that finished",
+            "hostId": host.id.as_str(),
+        }))
+        .unwrap(),
+        super::sessions::Launch::default(),
+    )
+    .await
+    .expect("a workspace for the run");
+
+    let run = ft_core::ScheduleRunId::new();
+    state
+        .db
+        .claim_run(
+            &run,
+            &made.id,
+            None,
+            Utc::now(),
+            1,
+            "cron",
+            "claimed",
+            None,
+            false,
+        )
+        .await
+        .unwrap();
+    state
+        .db
+        .run_launched(&run, &session.id, &host.name)
+        .await
+        .unwrap();
+
+    // The agent has stopped and `describe()` has not written anything yet,
+    // which is the state this is about: for up to a sweep plus two minutes
+    // the row said "Running." about an agent anybody could see had finished.
+    state
+        .fleet
+        .set_status(&session.id, ft_core::SessionStatus::HandedBack, None)
+        .await;
+    assert!(
+        state
+            .db
+            .session(&session.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .proposed_title
+            .is_none(),
+        "no summary yet, which is why this used to wait"
+    );
+
+    crate::schedules::settle::pass(&state, Utc::now())
+        .await
+        .unwrap();
+
+    let settled = runs_of(&state, &made.id)
+        .await
+        .into_iter()
+        .find(|r| r.id == run)
+        .expect("the run is there");
+    assert_eq!(
+        settled.state,
+        ScheduleRunState::Finished,
+        "a run whose agent has handed back is finished, whatever the summary is doing"
+    );
+    assert!(settled.outcome.is_some(), "with its outcome");
+    assert!(settled.summary.is_none(), "and no words yet");
+    let said = settled.detail.clone().unwrap_or_default();
+    assert!(
+        !said.to_lowercase().contains("running"),
+        "and it does not say it is running: {said}"
+    );
+    assert!(
+        settled.workspace_kept,
+        "the workspace stands until the words arrive, or deleting it would lose them"
+    );
+
+    // And then the agent's own account of it lands.
+    state
+        .db
+        .record_proposal(&session.id, "Bumped four patch versions", "")
+        .await
+        .unwrap();
+    crate::schedules::settle::owed(&state, Utc::now())
+        .await
+        .unwrap();
+
+    let after = runs_of(&state, &made.id)
+        .await
+        .into_iter()
+        .find(|r| r.id == run)
+        .expect("still there");
+    assert_eq!(after.summary.as_deref(), Some("Bumped four patch versions"));
+    assert!(
+        after
+            .detail
+            .unwrap_or_default()
+            .contains("Bumped four patch"),
+        "the line is rewritten in the agent's own words"
+    );
+    assert_eq!(
+        after.state,
+        ScheduleRunState::Finished,
+        "and stays finished"
+    );
+}
+
+/// **A run that is waiting for an answer does not say it is running.**
+///
+/// It must not settle — a question answered inside the window never counts at
+/// all, which is the property the whole pause rule rests on — but for up to
+/// `needs_you_within` the row claimed the agent was working, and the one
+/// person who could end that wait was being told there was nothing to do.
+#[tokio::test]
+async fn a_run_waiting_on_a_question_says_so_while_it_waits() {
+    let (state, principal, host, ready, owner) = fixture().await;
+    ready.store(true, Ordering::SeqCst);
+    let made = armed(&state, &principal, "Asks something").await;
+
+    let session = super::sessions::create_session_as(
+        state.clone(),
+        owner.clone(),
+        "admin".into(),
+        serde_json::from_value(serde_json::json!({
+            "prompt": "a run that asks",
+            "hostId": host.id.as_str(),
+        }))
+        .unwrap(),
+        super::sessions::Launch::default(),
+    )
+    .await
+    .expect("a workspace for the run");
+
+    let run = ft_core::ScheduleRunId::new();
+    state
+        .db
+        .claim_run(
+            &run,
+            &made.id,
+            None,
+            Utc::now(),
+            1,
+            "cron",
+            "claimed",
+            None,
+            false,
+        )
+        .await
+        .unwrap();
+    state
+        .db
+        .run_launched(&run, &session.id, &host.name)
+        .await
+        .unwrap();
+    state
+        .fleet
+        .set_status(
+            &session.id,
+            ft_core::SessionStatus::NeedsYou,
+            Some("Which branch should this land on?"),
+        )
+        .await;
+
+    crate::schedules::settle::pass(&state, Utc::now())
+        .await
+        .unwrap();
+
+    let asking = runs_of(&state, &made.id)
+        .await
+        .into_iter()
+        .find(|r| r.id == run)
+        .expect("the run is there");
+    // Still live, which is the half that must not change.
+    assert!(
+        !asking.state.is_terminal(),
+        "answering it still counts as a finish"
+    );
+    let said = asking.detail.unwrap_or_default();
+    assert!(
+        said.contains("Waiting for an answer"),
+        "it says what it is doing: {said}"
+    );
+    assert!(
+        said.contains("Which branch"),
+        "and what it asked, in its own words: {said}"
+    );
+}
+
 /// **The history outlives the workspace, and stops offering to open one.**
 ///
 /// `session_id` is a copy rather than a reference — it has to be, because the

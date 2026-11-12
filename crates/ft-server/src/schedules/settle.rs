@@ -93,6 +93,22 @@ pub async fn pass(state: &AppState, now: DateTime<Utc>) -> anyhow::Result<()> {
                     // And it may still overrun while it waits, which is a
                     // different fact about a different deadline.
                     overrun(state, &run, since_launch, max_runtime).await?;
+                    // **And while it waits, it does not say "Running."** The
+                    // run is still live and must not settle — a question
+                    // answered inside the window never counts at all, which
+                    // is the property the whole pause rule rests on — but the
+                    // agent is not working, it is asking, and for up to
+                    // `needs_you_within` the row claimed otherwise. The one
+                    // person who can end that wait was being told there was
+                    // nothing to do.
+                    let asking = session
+                        .note
+                        .as_deref()
+                        .map(|q| format!("Waiting for an answer. {q}"))
+                        .unwrap_or_else(|| "Waiting for an answer.".to_string());
+                    if run.detail.as_deref() != Some(asking.as_str()) {
+                        state.db.set_run_detail(&run.id, &asking).await?;
+                    }
                     continue;
                 }
 
@@ -151,14 +167,20 @@ pub async fn pass(state: &AppState, now: DateTime<Utc>) -> anyhow::Result<()> {
 
             // The agent did its turn and is waiting for the next thing, which
             // for an unattended run is the end of the work.
+            //
+            // **Settled now, not after the grace.** This waited up to
+            // `SUMMARY_GRACE` for `describe()` to write a summary — so a run
+            // that had plainly finished was recorded as *running* for up to a
+            // sweep plus two minutes, and the row said "Running." about an
+            // agent anybody could open and see had stopped. The waiting was
+            // right and the label was a lie.
+            //
+            // The outcome does not depend on the summary: `classify` asks git
+            // and the clock, and `describe()` only supplies the words. So the
+            // state goes down immediately with the outcome and the timing,
+            // and [`owed`] fills the words in when they land. See
+            // `Db::runs_awaiting_their_end`.
             SessionStatus::HandedBack | SessionStatus::Ready => {
-                // One more pass, if `describe()` may still be writing the
-                // summary. It takes seconds and may land after the sweep next
-                // looks; settling now would keep a line that says nothing.
-                let waited = now - session.updated_at;
-                if session.proposed_title.is_none() && waited < super::SUMMARY_GRACE {
-                    continue;
-                }
                 finished(state, &run, &session, since_launch, max_runtime).await?;
             }
 
@@ -180,6 +202,81 @@ pub async fn pass(state: &AppState, now: DateTime<Utc>) -> anyhow::Result<()> {
                     after_terminal(state, &run.schedule_id).await?;
                 }
             }
+        }
+    }
+    Ok(())
+}
+
+/// What a finished run still owes: the agent's own words, and a teardown.
+///
+/// **The second half of settling promptly.** `pass` records the state the
+/// moment a session hands back, because claiming an agent is still running
+/// when it has stopped is telling somebody something untrue about their own
+/// work. Two things genuinely cannot be known yet at that moment, and this is
+/// where they land:
+///
+/// - **The summary.** `describe()` writes `proposed_title` seconds after the
+///   hand-back. The line settles with what git can see — which is a real
+///   sentence, not a blank — and is rewritten in the agent's own words when
+///   they arrive.
+/// - **The teardown.** Deleting a clean run's workspace takes the session
+///   with it, so doing it before the summary lands would lose the words for
+///   good. It happens here instead, once they have arrived or the grace has
+///   run out.
+///
+/// Past the grace nothing more is owed: the line keeps what git said, and a
+/// clean run is deleted on that last look. The query is bounded by `ended_at`
+/// so a control plane that restarted still finishes what the one before it
+/// started, rather than scanning the whole history to find out.
+pub async fn owed(state: &AppState, now: DateTime<Utc>) -> anyhow::Result<()> {
+    // Wide enough to cover a restart, narrow enough to be the recent tail.
+    let since = now - super::SUMMARY_GRACE * 10;
+    for run in state.db.runs_awaiting_their_end(since).await? {
+        let Some(session_id) = run.session_id.clone() else {
+            continue;
+        };
+        let Some(session) = state.db.session(&session_id).await? else {
+            // The workspace has gone — somebody ended it, or `reclaim` did.
+            // Nothing is owed and nothing can be read: the line stays as it
+            // was settled, which is the honest answer, and the row stops
+            // claiming to hold a workspace.
+            state.db.run_workspace_gone(&run.id).await?;
+            continue;
+        };
+
+        let outcome = match run.outcome.as_deref() {
+            Some("clean") => Outcome::Clean,
+            Some("kept") => Outcome::Kept,
+            Some("needs_you") => Outcome::NeedsYou,
+            Some("overran") => Outcome::Overran,
+            _ => Outcome::Unknown,
+        };
+
+        // The words, if they have arrived. Written once — `set_run_summary`
+        // will not overwrite one — so two control planes both seeing this
+        // land write the same thing once.
+        if let Some(words) = session.proposed_title.as_deref() {
+            state
+                .db
+                .set_run_summary(&run.id, words, &line_for(outcome, Some(words), &session))
+                .await?;
+        }
+
+        // And the teardown, once there is nothing left to wait for.
+        let waited = now - run.ended_at.unwrap_or(run.claimed_at);
+        let still_coming = session.proposed_title.is_none() && waited < super::SUMMARY_GRACE;
+        if still_coming || outcome != Outcome::Clean || !run.delete_clean_runs {
+            continue;
+        }
+        if let Err(why) = delete_workspace(state, &run, &session).await {
+            // Said on the row rather than only in the log, for the reason the
+            // settle path says it: a workspace that should have gone and has
+            // not is a fact about somebody's disk.
+            let line = format!(
+                "{} The workspace could not be deleted: {why}",
+                line_for(outcome, session.proposed_title.as_deref(), &session)
+            );
+            state.db.set_run_detail(&run.id, &line).await?;
         }
     }
     Ok(())
@@ -267,8 +364,19 @@ async fn finished(
     // of the answers rather than an error.
     let outcome = classify(state, session, elapsed, max_runtime).await;
 
-    let (line, kept) = match outcome {
-        Outcome::Clean if run.delete_clean_runs => {
+    // **The teardown waits for the words; the record does not.**
+    //
+    // A clean run's workspace is deleted, and deleting it takes the session
+    // with it — so doing that before `describe()` has written its summary
+    // loses the agent's own account of what it did, permanently. That is what
+    // the grace was buying. It still buys it: with no summary yet, this
+    // settles with the workspace standing and [`owed`] deletes it once the
+    // words arrive or the grace runs out.
+    let (line, kept) = match (outcome, summary.is_some()) {
+        (Outcome::Clean, false) if run.delete_clean_runs => {
+            (line_for(Outcome::Clean, None, session), true)
+        }
+        (Outcome::Clean, true) if run.delete_clean_runs => {
             // `destroy_as` with the owner's row, and **never forcing** — see
             // `Removal::the_workspace`. A host that is not answering refuses,
             // the workspace survives, and the failure is reported rather than
@@ -284,7 +392,7 @@ async fn finished(
                 ),
             }
         }
-        other => (line_for(other, summary.as_deref(), session), true),
+        (other, _) => (line_for(other, summary.as_deref(), session), true),
     };
 
     let settled = state

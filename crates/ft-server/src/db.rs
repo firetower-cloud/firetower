@@ -3275,6 +3275,32 @@ impl Db {
     /// For the overrun rule, which counts observations of one run that has not
     /// finished rather than runs. The run is untouched otherwise: nothing in
     /// this product ends a session for taking too long.
+    /// The agent's own words, once they arrive, and the line composed from
+    /// them.
+    ///
+    /// **Only while the summary is still absent**, which is what makes this
+    /// safe to run from a sweep: two control planes both seeing the summary
+    /// land write the same thing once. `settle_run`'s own `COALESCE` keeps a
+    /// summary that is already there; this will not overwrite one either.
+    pub async fn set_run_summary(
+        &self,
+        id: &ScheduleRunId,
+        summary: &str,
+        detail: &str,
+    ) -> Result<bool> {
+        let written = sqlx::query(
+            "UPDATE schedule_runs SET summary = $2, detail = $3
+              WHERE id = $1 AND summary IS NULL",
+        )
+        .bind(id.as_str())
+        .bind(summary)
+        .bind(detail)
+        .execute(&self.pool)
+        .await?
+        .rows_affected();
+        Ok(written > 0)
+    }
+
     pub async fn set_run_detail(&self, id: &ScheduleRunId, detail: &str) -> Result<()> {
         sqlx::query("UPDATE schedule_runs SET detail = $2 WHERE id = $1")
             .bind(id.as_str())
@@ -3369,42 +3395,82 @@ impl Db {
     /// A scan of `schedule_runs_live`, which is the size of the fleet's live
     /// work rather than of all history.
     pub async fn live_runs(&self) -> Result<Vec<LiveRun>> {
-        let rows = sqlx::query(
-            "SELECT r.id, r.schedule_id, r.session_id, r.state, r.detail, r.fire_at,
-                    r.claimed_at, r.launched_at, r.source,
-                    s.owner_id, s.delete_clean_runs,
-                    extract(epoch FROM s.max_runtime)::bigint AS max_runtime_secs,
-                    extract(epoch FROM s.needs_you_within)::bigint AS needs_you_secs
-               FROM schedule_runs r
-               JOIN schedules s ON s.id = r.schedule_id
-              WHERE r.state IN ('claimed', 'running')
-              ORDER BY r.claimed_at",
-        )
+        let rows = sqlx::query(&format!(
+            "SELECT {RUN_WORK} WHERE r.state IN ('claimed', 'running') ORDER BY r.claimed_at"
+        ))
         .fetch_all(&self.pool)
         .await?;
 
-        Ok(rows
-            .iter()
-            .map(|r| LiveRun {
-                id: ScheduleRunId::from_stored(r.get::<String, _>("id")),
-                schedule_id: ScheduleId::from_stored(r.get::<String, _>("schedule_id")),
-                session_id: r
-                    .get::<Option<String>, _>("session_id")
-                    .map(SessionId::from_stored),
-                state: r.get("state"),
-                detail: r.get("detail"),
-                fire_at: r.get("fire_at"),
-                claimed_at: r.get("claimed_at"),
-                launched_at: r.get("launched_at"),
-                source: r.get("source"),
-                owner_id: r.get("owner_id"),
-                delete_clean_runs: r.get("delete_clean_runs"),
-                max_runtime_secs: r.get::<Option<i64>, _>("max_runtime_secs").unwrap_or(7200),
-                needs_you_secs: r.get::<Option<i64>, _>("needs_you_secs").unwrap_or(900),
-            })
-            .collect())
+        Ok(rows.iter().map(as_live_run).collect())
     }
 
+    /// Runs that have ended with something still owed: the agent's own
+    /// summary, or a workspace a clean run is to be deleted with.
+    ///
+    /// **Two things the sweep used to wait for before settling anything.**
+    /// `describe()` writes a summary seconds after a hand-back, and waiting
+    /// for it meant a run that had plainly finished was recorded as still
+    /// running for up to a sweep plus the grace. The state settles at once
+    /// now and these come afterwards, so the bound has to be read from the
+    /// row rather than from the schedule.
+    ///
+    /// Bounded by `ended_at` so this is the recent tail of the history rather
+    /// than all of it, and narrowed to rows that are actually owed something:
+    /// a kept run of any other kind is finished with and never looked at
+    /// again.
+    pub async fn runs_awaiting_their_end(
+        &self,
+        since: chrono::DateTime<chrono::Utc>,
+    ) -> Result<Vec<LiveRun>> {
+        let rows = sqlx::query(&format!(
+            "SELECT {RUN_WORK}
+              WHERE r.state = 'finished'
+                AND r.session_id IS NOT NULL
+                AND r.ended_at > $1
+                AND (r.summary IS NULL
+                  OR (r.workspace_kept AND r.outcome = 'clean' AND s.delete_clean_runs))
+              ORDER BY r.ended_at"
+        ))
+        .bind(since)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows.iter().map(as_live_run).collect())
+    }
+}
+
+/// What the sweep reads about a run, and the schedule behind it.
+const RUN_WORK: &str = "r.id, r.schedule_id, r.session_id, r.state, r.outcome, r.detail,
+            r.fire_at, r.claimed_at, r.launched_at, r.ended_at, r.source,
+            s.owner_id, s.delete_clean_runs,
+            extract(epoch FROM s.max_runtime)::bigint AS max_runtime_secs,
+            extract(epoch FROM s.needs_you_within)::bigint AS needs_you_secs
+       FROM schedule_runs r
+       JOIN schedules s ON s.id = r.schedule_id";
+
+fn as_live_run(r: &sqlx::postgres::PgRow) -> LiveRun {
+    LiveRun {
+        id: ScheduleRunId::from_stored(r.get::<String, _>("id")),
+        schedule_id: ScheduleId::from_stored(r.get::<String, _>("schedule_id")),
+        session_id: r
+            .get::<Option<String>, _>("session_id")
+            .map(SessionId::from_stored),
+        state: r.get("state"),
+        outcome: r.get("outcome"),
+        detail: r.get("detail"),
+        fire_at: r.get("fire_at"),
+        claimed_at: r.get("claimed_at"),
+        launched_at: r.get("launched_at"),
+        ended_at: r.get("ended_at"),
+        source: r.get("source"),
+        owner_id: r.get("owner_id"),
+        delete_clean_runs: r.get("delete_clean_runs"),
+        max_runtime_secs: r.get::<Option<i64>, _>("max_runtime_secs").unwrap_or(7200),
+        needs_you_secs: r.get::<Option<i64>, _>("needs_you_secs").unwrap_or(900),
+    }
+}
+
+impl Db {
     /// Whether a session with this id exists at all.
     ///
     /// The one question minting the id early makes answerable:
@@ -4041,10 +4107,15 @@ pub struct LiveRun {
     pub schedule_id: ScheduleId,
     pub session_id: Option<SessionId>,
     pub state: String,
+    /// What a finished run left, by name. Read rather than re-derived when a
+    /// run's line is composed a second time, because classifying costs a
+    /// round trip to the machine and the answer is already written down.
+    pub outcome: Option<String>,
     pub detail: Option<String>,
     pub fire_at: chrono::DateTime<chrono::Utc>,
     pub claimed_at: chrono::DateTime<chrono::Utc>,
     pub launched_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub ended_at: Option<chrono::DateTime<chrono::Utc>>,
     pub source: String,
     pub owner_id: String,
     pub delete_clean_runs: bool,

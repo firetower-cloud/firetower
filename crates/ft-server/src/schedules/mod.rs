@@ -185,6 +185,11 @@ pub async fn sweep(state: &AppState, booted: DateTime<Utc>) -> anyhow::Result<us
         }
         reconcile(state, now).await?;
         settle::pass(state, now).await?;
+        // After `pass`, because `pass` is what settles a run and this is what
+        // a settled run still owes — the agent's own summary, and the
+        // teardown a clean one waits for. Both used to hold the *state* up;
+        // neither does now. See [`settle::owed`].
+        settle::owed(state, now).await?;
         due(state, now, booted).await
     }
     .await;
