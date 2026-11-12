@@ -105,6 +105,28 @@
  * really went, so it is reported as {@link Ending}'s `orphaned` rather than
  * relabelled `kept`. Trading one false sentence for another is not a fix.
  *
+ * ## Mounted is not current
+ *
+ * Unmount and destination were two of the three ways a continuation can lose
+ * the reader, and the third is the quietest: **push another screen.** The one
+ * that asked is still mounted, on the same backend, with the same cache — so
+ * both of the checks above pass while the thing in front of the reader is a
+ * different workspace, and `onEnding()` navigates it. Dismissing the menu is
+ * not the event; pushing over it is.
+ *
+ * So the screen's **visit** is counted and the operation captures which one it
+ * was asked in. A generation and not a flag, because a flag can be revived by
+ * coming back: blur, answer, return, and a boolean reads true again for a
+ * continuation that was abandoned two screens ago. And the two questions are
+ * kept apart — {@link useEndWorkspace}'s `onTarget` decides what may be
+ * *sent*, `inFront` decides what may reach the *glass*. Navigating away is not
+ * a cancellation of something somebody asked for; it is the end of that
+ * operation's claim on the screen.
+ *
+ * The cache invalidation stays **above** the guard, where it already was. It
+ * belongs to the destination and not to the screen, and the list is the one
+ * thing that says whether the teardown finished.
+ *
  * **The destination, and the identity, and they are one thing now.** The
  * first version of this bound `[serverId, user]` and that was the same
  * mistake one layer down. A `serverId` is derived from the organisation's
@@ -150,6 +172,7 @@
 import { useEffect, useRef } from "react";
 import { Alert } from "react-native";
 import { useQueryClient } from "@tanstack/react-query";
+import { useIsFocused } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { destroySession, getListSessionsQueryKey, sessionWork } from "~/api/generated/sessions/sessions";
 import type { Workspace } from "~/api/workspaces";
@@ -202,10 +225,11 @@ export type Ending =
    * **The request went, and there is nobody here to tell.**
    *
    * `requested` with the caller gone: the DELETE was sent and accepted, and
-   * by the time it came back the screen that asked had been unmounted or the
-   * Firetower had moved underneath it. The teardown is happening either way —
-   * nothing can call it back, and this must never be read as `kept`, which
-   * would be a fresh version of the lie this whole file exists to correct.
+   * by the time it came back the screen that asked had been unmounted, the
+   * Firetower had moved underneath it, or the reader had pushed something over
+   * it. The teardown is happening either way — nothing can call it back, and
+   * this must never be read as `kept`, which would be a fresh version of the
+   * lie this whole file exists to correct.
    *
    * What it withholds is the *acting on it*. `onEnding()` is a global
    * `router.back()` and an alert is a window over whatever is in front now,
@@ -373,8 +397,48 @@ export function useEndWorkspace() {
   const from = useRef(destination());
   const aimed = from.current;
   const firetower = aimOf(aimed);
+  /**
+   * **Which visit to this screen is the one in front.**
+   *
+   * Mounted is not current. Confirm a teardown, push another screen while the
+   * DELETE or the invalidation is in flight, and the screen that asked is
+   * still mounted on the same backend — so both of the checks above pass,
+   * while the thing in front of the reader belongs to somebody else. The
+   * continuation came back `requested` and `WorkspaceMenu` called `onEnding()`
+   * on it, which is a global `router.back()`; a late rejection put *It did not
+   * end.* over it the same way.
+   *
+   * A **generation** rather than a flag, because a flag can be revived: blur,
+   * answer the question, come back to the screen and a boolean reads true
+   * again — and the continuation it would let through was abandoned three
+   * screens ago. Each blur ends a visit for good, so an operation that
+   * captured one can never be in front again.
+   *
+   * `useIsFocused` throws outside expo-router's own route tree, and every
+   * caller of this hook is a route component — `WorkspaceMenu` on
+   * `workspace/[id]`, and the two tab screens that drive the peek's *End*. A
+   * caller that was not would be a caller with no answer to this question at
+   * all, which is worth a crash in development rather than a guard that
+   * silently never fires.
+   */
+  const focused = useIsFocused();
+  const visit = useRef(0);
+  useEffect(() => {
+    /* Only a **blur** ends a visit, and it ends it for good: coming back is a
+       new one. `useIsFocused` reads a context, so it changes when focus
+       changes and never on an unrelated re-render — which rules out the
+       failure mode of counting `useFocusEffect`'s cleanups instead. React may
+       re-run an effect whenever its deps move, and that hook's deps include
+       the navigation object; a screen that redraws on every streamed line
+       would have ended a visit per frame and orphaned every teardown it ever
+       asked for, silently. */
+    if (!focused) visit.current += 1;
+  }, [focused]);
 
   return async (place: Workspace, delegated = 0): Promise<Ending> => {
+    /* The visit this was asked in. Captured with everything else that is
+       about *this* press rather than about the screen. */
+    const since = visit.current;
     /* Named only when the phone holds more than one; see `endTitle`. Which
        machine is a fact about the mounted destination; whether saying so is
        worth the words is a fact about the registry now. */
@@ -391,6 +455,22 @@ export function useEndWorkspace() {
      * about an irreversible thing should not be asked in the first place.
      */
     const onTarget = () => alive.current && !!firetower && aimOf(destination()) === firetower;
+    /**
+     * Is there still somebody in front of this to say it to?
+     *
+     * **Two predicates and not one, because they answer different
+     * questions.** `onTarget` decides whether anything may be *sent*: it is
+     * about the machine, and a press is consent to act on the machine that
+     * was named. This decides whether anything may be put on the *screen* or
+     * navigate it — and navigating away is not a cancellation of a teardown
+     * somebody asked for, but it does end that teardown's claim on the glass.
+     *
+     * Folded together, a blur would have stopped the DELETE and a destination
+     * that moved would have been reported by an alert over whatever is in
+     * front now. Both of those are a fresh version of the defect this file
+     * exists to correct, arriving through the fix for it.
+     */
+    const inFront = () => alive.current && visit.current === since;
 
     /* **Before the read, and not only after it.** The registry can have moved
        before this was ever called — a workspace retained from before the swap,
@@ -413,7 +493,11 @@ export function useEndWorkspace() {
        pressed on a question about A, and a press is not consent to act on
        whatever is current when it lands. */
     if (!onTarget()) {
-      Alert.alert("It did not end.", endAstray(place, named ?? aimed?.org ?? null));
+      /* Said to whoever asked, and to nobody else. The question was answered
+         on this screen; if the reader has since pushed another one, an
+         unqualified *It did not end.* over it is the hazard below arriving
+         before the send instead of after it. */
+      if (inFront()) Alert.alert("It did not end.", endAstray(place, named ?? aimed?.org ?? null));
       return "kept";
     }
     /* The heaviest knock in the app, on the one press that cannot be taken
@@ -431,10 +515,11 @@ export function useEndWorkspace() {
          the recheck rather than behind it. */
       await cache.invalidateQueries({ queryKey: getListSessionsQueryKey() });
       /* Two awaits since the last recheck, and either can outlive the screen
-         that asked or the Firetower it asked about. One check covers both,
-         because it is the last thing before the answer goes back. The request
-         has gone and this says so; what it withholds is the navigation. */
-      if (!onTarget()) return "orphaned";
+         that asked, the Firetower it asked about, or this screen's turn at
+         being the one in front. One check covers all three, because it is the
+         last thing before the answer goes back. The request has gone and this
+         says so; what it withholds is the navigation. */
+      if (!onTarget() || !inFront()) return "orphaned";
       /* **Asked for, not done.** Nothing above this line waited for a worker,
          so nothing below it may claim one finished. */
       return "requested";
@@ -444,10 +529,11 @@ export function useEndWorkspace() {
          workspace somebody just ended is still on the list.
 
          Unless there is nobody it would be explaining it to: a rejection that
-         lands after the screen has gone, or after the Firetower moved, puts
-         that sentence over a workspace it is not about. The refusal is still
-         the answer — it is just not shown to somebody who did not ask. */
-      if (onTarget()) Alert.alert("It did not end.", why(e));
+         lands after the screen has gone, after the Firetower moved, or after
+         the reader has pushed something over the screen that asked, puts that
+         sentence over a workspace it is not about. The refusal is still the
+         answer — it is just not shown to somebody who did not ask. */
+      if (onTarget() && inFront()) Alert.alert("It did not end.", why(e));
       return "refused";
     }
   };

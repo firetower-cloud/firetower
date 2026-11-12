@@ -22,6 +22,7 @@ import { group, type Workspace } from "~/api/workspaces";
 import { aimOf, useBackendId } from "~/client/http";
 import { forget, remember, servers, type Connected } from "~/native/servers";
 import { Alert } from "~/test/react-native.stub";
+import { screen } from "~/test/router.stub";
 import * as hooks from "~/test/hooks";
 import { endAstray, endTitle, endWording, useEndWorkspace, type Ending } from "~/ui/end";
 
@@ -291,6 +292,8 @@ describe("a teardown goes to the Firetower it was asked about", () => {
     invalidated = 0;
     answers = { status: 202, body: "" };
     useBackendId(A.serverId);
+    hooks.unmount();
+    screen.reset();
 
     globalThis.fetch = (async (url: string, init: RequestInit = {}) => {
       const method = init.method ?? "GET";
@@ -706,6 +709,102 @@ describe("a teardown goes to the Firetower it was asked about", () => {
 
       expect(await ending).toBe("orphaned");
       theDeleteWent();
+    });
+
+    /* ------------------------------------------------------------------- *
+     * Mounted is not current
+     * ------------------------------------------------------------------- */
+
+    /**
+     * **The third way a continuation loses its reader, and the quietest.**
+     *
+     * The two above take the screen away or move the machine under it. This
+     * one does neither: *dismiss the menu and push another screen.* The screen
+     * that asked is still mounted, on the same backend, with the same cache —
+     * so the unmount check and the destination check both pass, and the
+     * continuation came back `requested` to a caller whose `onEnding()` is a
+     * global `router.back()`. It navigated whatever was in front.
+     *
+     * Both awaits, because a flow cancelled after one of them and not the
+     * other is cancelled after neither — which is how the invalidation was
+     * missed the last two times.
+     */
+    it("does not navigate when the screen was pushed over while the DELETE was in flight", async () => {
+      const { ending, release } = await sendAndStop();
+      screen.blur();
+      release();
+
+      expect(await ending).toBe("orphaned");
+      theDeleteWent();
+    });
+
+    it("does not navigate when the screen was pushed over while the list was being invalidated", async () => {
+      const gate = holding();
+      holdInvalidate = gate.until;
+      const ending = end(one());
+      await asked();
+      Alert.answer("End it");
+      await vi.waitFor(() => expect(invalidated).toBe(1));
+
+      screen.blur();
+      gate.open();
+
+      expect(await ending).toBe("orphaned");
+      theDeleteWent();
+    });
+
+    /**
+     * **A generation, not a flag.** Coming back to the screen must not revive
+     * a continuation that was abandoned while it was away — which is exactly
+     * what a boolean would do, and is why the reviewer asked for a captured
+     * one. The reader is on the same screen they started on and the teardown
+     * still may not navigate it, because the visit it was asked in is over.
+     */
+    it("is not revived by returning to the screen it was asked on", async () => {
+      const { ending, release } = await sendAndStop();
+      screen.blur();
+      screen.focus();
+      release();
+
+      expect(await ending).toBe("orphaned");
+      theDeleteWent();
+    });
+
+    /**
+     * The alert gate, which the reviewer named separately: a delayed rejection
+     * passed it the same way. The control plane's sentence is still the truth
+     * and `refused` is still the answer — it is just not put over a workspace
+     * the reader did not ask about.
+     */
+    it("shows no alert for a refusal that lands after the screen was pushed over", async () => {
+      answers = {
+        status: 409,
+        body: JSON.stringify({ code: "HostUnreachable", message: "That machine is not answering." }),
+      };
+      const { ending, release } = await sendAndStop();
+      screen.blur();
+      release();
+
+      expect(await ending).toBe("refused");
+      expect(Alert.asked.filter((a) => a.title === "It did not end.")).toEqual([]);
+    });
+
+    /**
+     * And the other half of the split: a blur is **not** a cancellation of the
+     * send. The press was consent to act on the machine that was named, and
+     * nothing about navigating away makes that machine a different one. Folded
+     * into one predicate this would have been a teardown silently dropped
+     * because a thumb moved.
+     */
+    it("still sends, and still invalidates, when the screen is pushed over before the DELETE", async () => {
+      const ending = end(one());
+      await asked();
+      screen.blur();
+      Alert.answer("End it");
+
+      expect(await ending).toBe("orphaned");
+      theDeleteWent();
+      expect(invalidated).toBe(1);
     });
 
     /**

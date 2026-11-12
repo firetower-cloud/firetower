@@ -89,9 +89,12 @@ export function WorkspaceMenu({
    * calls an acceptance an ending.
    *
    * **Not called once this screen is no longer the one that asked.** The
-   * teardown's two awaits can outlive the menu or the Firetower under it, and
-   * this is a global `router.back()` — so a request that comes back
-   * `orphaned` is reported and not acted on.
+   * teardown's two awaits can outlive the menu, the Firetower under it, or
+   * this screen's turn at being the one in front — and this is a global
+   * `router.back()`, so a request that comes back `orphaned` is reported and
+   * not acted on. Being pushed over is the quietest of the three: the screen
+   * is still mounted on the same backend, and nothing but the navigator knows
+   * the difference. See `ui/end.ts`.
    */
   onEnding: () => void;
 }) {

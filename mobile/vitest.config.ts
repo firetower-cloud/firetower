@@ -17,6 +17,9 @@ export default defineConfig({
       // See the note in the stub: Flow-typed source, and nothing under test
       // touches it.
       "react-native": path.resolve(__dirname, "src/test/react-native.stub.ts"),
+      // Which screen is in front, which `ui/end.ts` has to know and no pure
+      // function can be asked. See the stub.
+      "expo-router": path.resolve(__dirname, "src/test/router.stub.ts"),
       "react-native-mmkv": path.resolve(__dirname, "src/test/native.stub.ts"),
       "expo-haptics": path.resolve(__dirname, "src/test/native.stub.ts"),
       "expo-secure-store": path.resolve(__dirname, "src/test/native.stub.ts"),
