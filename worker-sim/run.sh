@@ -89,6 +89,7 @@ usage() {
     printf '    psql                     a prompt on the control plane database\n'
     printf '    ui                       build the interface and say where to point a browser\n'
     printf '    agent <name>             fetch an agent onto the machine (claude-code, codex)\n'
+    printf '    connect <name>           give it a subscription to run them on, token on stdin\n'
     printf '    down [--volumes]         remove this project'"'"'s containers, and its build caches with --volumes\n\n'
     printf '  <container> is a service name — worker, control, postgres — or a full\n'
     printf '  ft-worker-sim-* container name. There is no default: a command that\n'
@@ -403,6 +404,9 @@ say_what_is_mounted() {
     fi
 
     say "tree       ${dirty} uncommitted file(s) — THE CONTROL PLANE WILL INCLUDE THEM"
+    # `--report-only` is `status` asking; it says what is true and decides
+    # nothing.
+    [ "${1:-}" = "--report-only" ] && return 0
     if [ "${SIM_ALLOW_DIRTY:-0}" = "1" ] || [ "${1:-}" = "--dirty" ]; then
         say "           (--dirty given, carrying on)"
         return 0
@@ -496,13 +500,22 @@ cmd_status() {
     step "$PROJECT"
     compose ps || true
     step "What the control plane was built from"
-    # Asked of the container rather than of this shell: the mount is the
-    # answer, and a second checkout at a different commit is exactly the
-    # confusion this is here to end.
+    # The commit from this shell, and the *identity of the mount* from the
+    # container, because neither can answer both halves.
+    #
+    # Git inside the container cannot read this checkout at all when it is a
+    # worktree: `/workspace/.git` is a file pointing at a directory on the
+    # host that is not mounted, so `git log` says "not a git repository" and
+    # `git status --porcelain | wc -l` says **0** — a clean tree, confidently,
+    # about a repository it could not open. A QA pass asked exactly that way.
+    # So the commit is read here, where git works, and the container is asked
+    # only what it is actually holding.
+    say_what_is_mounted --report-only
     resolve control
+    printf '  mounted    '
     docker exec "$TARGET" sh -c \
-        'cd /workspace && git log -1 --format="  %h %s" 2>/dev/null; printf "  "; git status --porcelain 2>/dev/null | wc -l | tr -d " "; echo " uncommitted file(s)"' \
-        2>/dev/null || say "  (the control plane is not running)"
+        'cat /workspace/.git 2>/dev/null || echo "a plain checkout (no .git file)"' \
+        2>/dev/null || say "(the control plane is not running)"
     if curl -fsS "$API/readyz" >/dev/null 2>&1; then
         sign_in
         step "The fleet, as the control plane sees it"
@@ -523,6 +536,49 @@ cmd_logs() {
 cmd_psql() {
     resolve postgres
     docker exec -it "$TARGET" psql -U firetower -d firetower
+}
+
+# Give this control plane a subscription to run agents on.
+#
+# The token comes in on **stdin**, never in an argument: it is a working
+# credential for somebody's plan, and a process list is readable by anything
+# running as anybody.
+#
+# Where it comes from is the part nothing here can do. Claude Code hands you a
+# token rather than signing a machine in — `claude setup-token`, which opens a
+# browser and asks the person whose subscription it is. Codex and Kimi are the
+# other way round and sign in with a device code, which is `/agents/{kind}/login`
+# and not this.
+cmd_connect() {
+    local kind="${1:-}"
+    case "$kind" in
+        claude-code|ClaudeCode) kind=ClaudeCode ;;
+        "") die "name an agent: claude-code" ;;
+        *) die "$kind does not take a pasted token. Codex and Kimi sign in with a device code." ;;
+    esac
+    [ -t 0 ] && die "the token is read from stdin: claude setup-token | $0 connect claude-code"
+
+    local token
+    # One line, and only what a token is made of. The body below is built with
+    # printf, so a quote or a backslash in here would be a broken request
+    # rather than a clear refusal — and anything with whitespace in it is
+    # almost certainly the wrong thing pasted.
+    token="$(cat | tr -d '\r' | head -1)"
+    [ -n "$token" ] || die "nothing arrived on stdin"
+    case "$token" in
+        *[!A-Za-z0-9._~+/=-]*)
+            die "that does not look like a token — expected what \`claude setup-token\` prints" ;;
+    esac
+    sign_in
+
+    local answer
+    answer="$(api POST /api/v1/agent-accounts \
+        "$(printf '{"kind":"%s","name":"worker-sim","mode":"Subscription","secret":"%s"}' \
+            "$kind" "$token")")"
+    case "$answer" in
+        *'"code"'*) die "the control plane would not take it: $answer" ;;
+    esac
+    say "connected. Sessions on $MACHINE can run $kind now."
 }
 
 cmd_agent() {
@@ -618,6 +674,7 @@ case "${1:-}" in
     logs)           shift; cmd_logs "${1:-}" ;;
     psql)           shift; cmd_psql ;;
     agent)          shift; cmd_agent "${1:-}" ;;
+    connect)        shift; cmd_connect "${1:-}" ;;
     ui)             shift; cmd_ui ;;
     # No default that does anything. A bare invocation is a usage message.
     ""|-h|--help|help) usage; exit 2 ;;
