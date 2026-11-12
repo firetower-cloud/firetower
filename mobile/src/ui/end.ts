@@ -124,10 +124,13 @@ export function endWording(
     return `${stopping} Nothing is checked out here, so every file in this workspace goes with it, and there is no branch to go back to.`;
   }
 
+  /* "The workspace", not "Its workspace": after *2 agents stop* there is no
+     one agent for "its" to belong to, and the workspace is the thing the
+     title already named. */
   const going =
     delegated > 0
       ? "Their workspaces go from the host with this one."
-      : "Its workspace goes from the host.";
+      : "The workspace goes from the host.";
   /* "would be lost" rather than "goes with it", which is the phone's voice
      everywhere else here: this clause's subject is a count, and one file and
      four files cannot share a verb. The desk's phrasing agrees with both. */
