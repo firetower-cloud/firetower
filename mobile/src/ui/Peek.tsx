@@ -121,7 +121,7 @@ export function usePeekable(onPeek: () => void, onOpen: () => void) {
   return { gesture: Gesture.Exclusive(hold, tap), pressed };
 }
 
-type Answer = { label: string; run: () => void; tone?: "loud" | "quiet"; count?: number; go?: boolean };
+type Answer = { label: string; run: () => void; tone?: "loud" | "quiet"; go?: boolean };
 
 /**
  * What one agent asked, and both answers to it.
@@ -266,9 +266,14 @@ export function Peek({
           { label: "Open the conversation", run: onOpen },
           toChildren,
           { label: "What it changed", run: onChanges },
-          /* What goes with it. A parent's children are ended with it and they
-             are no longer rows you could have seen first. */
-          { label: "End this workspace", run: onEnd, tone: "loud", count: kids.length },
+          /* No count, deliberately. Every call site passes `onEnd={() =>
+             setPeeking(null)}` — the peek dismisses and nothing else happens,
+             which is true on `main` too and is not this branch's doing. A
+             count of what would go with it made a dead control look
+             authoritative about what it would take. Wiring it is a real
+             teardown and that is a PR of its own; until then the label alone
+             is the honest state. */
+          { label: "End this workspace", run: onEnd, tone: "loud" },
         ]
   ).filter((item): item is Answer => !!item);
 
@@ -356,7 +361,7 @@ export function Peek({
 
         <View className="h-px bg-line-soft" />
 
-        {items.map(({ label, run, tone, count, go }, i) => (
+        {items.map(({ label, run, tone, go }, i) => (
           <View key={label}>
             {tone === "loud" && i > 0 ? <View className="my-2 h-px bg-line-soft" /> : null}
             <Pressable
@@ -374,7 +379,6 @@ export function Peek({
               >
                 {label}
               </Text>
-              {count ? <Text className="font-sans text-meta text-mute">{`(${count})`}</Text> : null}
               {go ? <ChevronRight color={color.mute} size={16} style={{ marginLeft: "auto" }} /> : null}
             </Pressable>
           </View>
