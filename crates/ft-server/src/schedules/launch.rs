@@ -343,32 +343,72 @@ async fn gate(
         // that machine, after the owner's own authorization is gone. Nothing
         // would say so, because falling back is not an error.
         //
-        // So this path fails closed: a remote on a git host needs a
-        // credential of the owner's, now. A local path needs none and asks
-        // for none — `host_of` is what tells them apart, and it is the same
-        // function the credential lookup uses to decide which host a remote
-        // is on.
-        if crate::providers::host_of(&theirs.remote).is_some()
-            && crate::api::credential_for_repo(
-                state,
-                &theirs,
-                &schedule.owner_id,
-                &format!("checking authorization for {}", theirs.slug),
-            )
-            .await
-            .is_none()
-        {
-            return Err(Stopped {
-                state: "failed",
-                detail: format!(
-                    "Firetower holds no git authorization for {} any more, and an unattended run \
-                     is not given the machine's own. Reconnect the git host on the Repositories \
-                     screen.",
-                    theirs.slug
-                ),
-                code: ErrorCode::RepoAccessDenied,
-                and_stop: None,
-            });
+        // So this path fails closed, and the question it asks first is **how
+        // git will reach this remote**, because that decides whose identity
+        // goes on the wire. `host_of` was standing in for that and is not it:
+        // it answers `None` for `ssh://git@gitbox/acme.git` — a bare hostname
+        // it cannot match a connection against — which waved a remote nobody
+        // had authorized straight through, and `Some("github.com")` for
+        // `git@github.com:acme/backend.git`, which is ssh and would never
+        // present the https token that satisfied the check.
+        //
+        // See [`crate::providers::Transport`]. Three answers, three outcomes.
+        match crate::providers::transport_of(&theirs.remote) {
+            // A path on the machine. Nothing leaves it and nothing
+            // authenticates, so there is no identity to get wrong.
+            crate::providers::Transport::Local => {}
+
+            // The owner's credential, now — and this is the transport that
+            // actually carries it: git asks our helper, and the identity on
+            // the wire is the one this gate chose.
+            crate::providers::Transport::Web => {
+                if crate::api::credential_for_repo(
+                    state,
+                    &theirs,
+                    &schedule.owner_id,
+                    &format!("checking authorization for {}", theirs.slug),
+                )
+                .await
+                .is_none()
+                {
+                    return Err(Stopped {
+                        state: "failed",
+                        detail: format!(
+                            "Firetower holds no git authorization for {} any more, and an \
+                             unattended run is not given the machine's own. Reconnect the git \
+                             host on the Repositories screen.",
+                            theirs.slug
+                        ),
+                        code: ErrorCode::RepoAccessDenied,
+                        and_stop: None,
+                    });
+                }
+            }
+
+            // **A transport that cannot carry the owner's identity at all.**
+            // Over ssh the credential we hold is never presented: the
+            // machine's key decides, and that key is shared by every session
+            // on it and outlives the owner's own authorization. Holding a
+            // token made the old check pass while changing nothing about what
+            // went on the wire.
+            //
+            // Refused rather than downgraded. The remedy is a person
+            // connecting the repository over https, and saying so is more use
+            // than a run that works until somebody rotates a key nobody here
+            // knows about.
+            crate::providers::Transport::Machine(how) => {
+                return Err(Stopped {
+                    state: "failed",
+                    detail: format!(
+                        "{} is reached over {how}, which authenticates as the machine rather \
+                         than as you — and an unattended run is not given the machine's \
+                         identity. Connect it over https to run it on a schedule.",
+                        theirs.slug
+                    ),
+                    code: ErrorCode::RepoAccessDenied,
+                    and_stop: None,
+                });
+            }
         }
     }
 

@@ -5699,7 +5699,11 @@ async fn a_scheduled_run_is_refused_when_the_owner_holds_no_git_authorization() 
         .db
         .ensure_repo(
             "backend",
-            "git@github.com:acme/backend.git",
+            // **https**, because that is the transport a credential of theirs
+            // is carried on at all. The ssh form is refused one gate earlier
+            // and for a different reason — see
+            // `a_scheduled_run_will_not_reach_a_remote_over_the_machines_own_identity`.
+            "https://github.com/acme/backend.git",
             Some("main"),
             None,
             &owner,
@@ -5767,11 +5771,104 @@ async fn a_scheduled_run_is_refused_when_the_owner_holds_no_git_authorization() 
     );
 }
 
+/// **Blocker 4, the half a held token hid: ssh never presents it.**
+///
+/// The old fence was `host_of(remote).is_some()` plus "do we hold a
+/// credential", and both halves were wrong about the same remote.
+/// `git@github.com:acme/backend.git` has a host, so the check ran; the owner
+/// holds a GitHub token, so it passed — and then git reached that remote over
+/// **ssh**, which never asks for a token. It authenticated with the machine's
+/// key: shared by every session on the host, and still working long after the
+/// owner's own authorization is gone. The gate said "authorized" about an
+/// identity it had no say over.
+///
+/// So a transport that cannot carry the owner's identity is refused, token or
+/// no token. This test holds one, which is what made the old check green.
+#[tokio::test]
+async fn a_scheduled_run_will_not_reach_a_remote_over_the_machines_own_identity() {
+    let (state, principal, _, _, owner) = fixture().await;
+    // Held, and current. This is the state the old check called authorized.
+    state
+        .vault
+        .put(
+            crate::vault::Key::of(crate::vault::GIT, "github", &owner),
+            "gho_still_valid",
+            "test",
+        )
+        .await
+        .unwrap();
+    let repo = state
+        .db
+        .ensure_repo(
+            "backend",
+            "git@github.com:acme/backend.git",
+            Some("main"),
+            None,
+            &owner,
+            None,
+        )
+        .await
+        .unwrap();
+    assert!(
+        crate::api::credential_for_repo(&state, &repo, &owner, "test")
+            .await
+            .is_some(),
+        "a token is held — the point is that ssh would not present it"
+    );
+
+    let mut new = a_schedule("Pulls over ssh", weekdays_at("08:30"));
+    new.repo_id = Some(repo.id.clone());
+    let made = create(&state, &principal, new).await.unwrap();
+    let _ = super::schedules::approve_schedule(
+        State(state.clone()),
+        Extension(principal.clone()),
+        Path(made.id.as_str().to_string()),
+        Query(Default::default()),
+    )
+    .await
+    .unwrap();
+    let row = state.db.schedule(&made.id).await.unwrap().unwrap();
+
+    let claim = state
+        .db
+        .claim_run(
+            &ft_core::ScheduleRunId::new(),
+            &made.id,
+            None,
+            Utc::now(),
+            1,
+            "cron",
+            "claimed",
+            None,
+            false,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    crate::schedules::launch::start(&state, &row, &claim)
+        .await
+        .expect("a refusal is an outcome");
+
+    let run = runs_of(&state, &made.id)
+        .await
+        .into_iter()
+        .find(|r| r.state.is_terminal())
+        .expect("it was recorded");
+    assert_eq!(run.state, ScheduleRunState::Failed);
+    assert_eq!(run.error_code.as_deref(), Some("RepoAccessDenied"));
+    let said = run.detail.as_deref().unwrap_or_default();
+    assert!(
+        said.contains("ssh") && said.contains("as the machine"),
+        "it has to say which transport and why: {said:?}"
+    );
+}
+
 /// **A local path needs no git host and is not asked for one.**
 ///
-/// The fence is "a remote on a git host", which is what `host_of` answers —
-/// the same function the credential lookup uses to decide which host a remote
-/// is on, so the two cannot disagree about what counts.
+/// The fence is how git would *reach* the remote, which is what
+/// [`crate::providers::transport_of`] answers. A path on the machine
+/// authenticates nothing, so there is no identity to get wrong and no token
+/// to ask for.
 #[tokio::test]
 async fn a_schedule_on_a_local_checkout_needs_no_git_authorization() {
     let (state, principal, host, ready, owner) = fixture().await;
@@ -5789,7 +5886,10 @@ async fn a_schedule_on_a_local_checkout_needs_no_git_authorization() {
         )
         .await
         .unwrap();
-    assert!(crate::providers::host_of(&repo.remote).is_none());
+    assert!(matches!(
+        crate::providers::transport_of(&repo.remote),
+        crate::providers::Transport::Local
+    ));
 
     let mut new = a_schedule("A path on the machine", weekdays_at("08:30"));
     new.repo_id = Some(repo.id.clone());

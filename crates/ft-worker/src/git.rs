@@ -1185,6 +1185,26 @@ async fn cred_env(credential: Option<Credential>) -> Result<CredEnv> {
     let serving = Askpass::start(credential, &helper).await?;
     vars.extend(serving.env());
 
+    // **And nothing else may answer for this remote.** `GIT_ASKPASS` is only
+    // consulted when git has to prompt, and it asks its *credential helpers*
+    // first — so a machine with `credential.helper = osxkeychain` in a global
+    // config, or a `store` file somebody left in a home directory, answered
+    // ahead of the credential we were handed. The push went up as whoever set
+    // that helper up, which is the machine's identity rather than this
+    // session's owner, and nothing said so because a helper answering is the
+    // ordinary case.
+    //
+    // An empty `credential.helper` resets the list, and config from these
+    // variables is read after every file, so this empties whatever the files
+    // asked for. Only when there is a credential: with none, the machine's
+    // own configuration is all there is and is the right answer.
+    vars.push(("GIT_CONFIG_COUNT".to_string(), "1".to_string()));
+    vars.push((
+        "GIT_CONFIG_KEY_0".to_string(),
+        "credential.helper".to_string(),
+    ));
+    vars.push(("GIT_CONFIG_VALUE_0".to_string(), String::new()));
+
     Ok(CredEnv {
         vars,
         _serving: Some(serving),
@@ -1565,6 +1585,51 @@ mod retry_tests {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    /// **Nothing on the machine may answer for a credential we were handed.**
+    ///
+    /// Git asks its credential helpers before it ever reaches `GIT_ASKPASS`,
+    /// so a global `credential.helper` — osxkeychain, or a `store` file in
+    /// somebody's home directory — answered first and the transfer went up
+    /// under whoever configured it. That is the machine's identity, shared by
+    /// every session on it, and a helper answering is the ordinary case so
+    /// nothing logged it.
+    ///
+    /// Only with a credential: with none, the machine's own configuration is
+    /// all there is, which is right for a local path or a host nobody has
+    /// authorized.
+    #[tokio::test]
+    async fn a_handed_credential_is_the_only_one_git_may_use() {
+        let bare = cred_env(None).await.unwrap();
+        assert!(
+            !bare.vars.iter().any(|(k, _)| k == "GIT_CONFIG_COUNT"),
+            "with no credential the machine's own configuration is the answer"
+        );
+
+        let ours = cred_env(Some(Credential {
+            username: "x-access-token".into(),
+            secret: "ghs_example".into(),
+        }))
+        .await
+        .unwrap();
+        let by = |key: &str| {
+            ours.vars
+                .iter()
+                .find(|(k, _)| k == key)
+                .map(|(_, v)| v.clone())
+        };
+        assert_eq!(by("GIT_CONFIG_COUNT").as_deref(), Some("1"));
+        assert_eq!(
+            by("GIT_CONFIG_KEY_0").as_deref(),
+            Some("credential.helper")
+        );
+        assert_eq!(
+            by("GIT_CONFIG_VALUE_0").as_deref(),
+            Some(""),
+            "an empty value is what resets the helper list"
+        );
+        assert!(by("GIT_ASKPASS").is_some(), "ours is still the one asked");
+    }
 
     /// A base ref that has not moved since the mirror was made must not make
     /// everyone else's merges look like this session's work.
