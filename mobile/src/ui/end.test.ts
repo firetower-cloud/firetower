@@ -18,7 +18,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Session } from "~/api/generated/model";
 import { destroySession } from "~/api/generated/sessions/sessions";
 import { group, type Workspace } from "~/api/workspaces";
-import { useBackendId } from "~/client/http";
+import { aimOf, useBackendId } from "~/client/http";
+import { forget, remember, servers, type Connected } from "~/native/servers";
 import { Alert } from "~/test/react-native.stub";
 import * as hooks from "~/test/hooks";
 import { endAstray, endTitle, endWording, useEndWorkspace, type Ending } from "~/ui/end";
@@ -28,20 +29,44 @@ import { endAstray, endTitle, endWording, useEndWorkspace, type Ending } from "~
    them for one ref and one effect, and the effect is the cancellation. */
 vi.mock("react", async () => (await import("~/test/hooks")).react);
 
-/* The two Firetowers. The same account on both, because the account is not
-   what this is about: a database restored from another — staging from
-   production — gives two separately selectable backends holding the *same*
-   session ids, which is what makes a misdirected DELETE land on a real
-   workspace instead of failing safely. */
-const A = { url: "https://a.example", serverId: "srv_a", org: "Ravenholm", user: "kate", addedAt: "2026-11-01T00:00:00Z" };
-const B = { url: "https://b.example", serverId: "srv_b", org: "Staging", user: "kate", addedAt: "2026-11-02T00:00:00Z" };
+/**
+ * The two Firetowers, **and the real registry rather than a stand-in for
+ * one.**
+ *
+ * The same account on both, because the account is not what this is about: a
+ * database restored from another — staging from production — gives two
+ * separately selectable backends holding the *same* session ids, which is
+ * what makes a misdirected DELETE land on a real workspace instead of failing
+ * safely.
+ *
+ * It was two mocked functions, and that is what let the second version of
+ * this defect through: a mock cannot be handed to `remember()`, so the one
+ * way the registry actually moves under a request — a connection *replaced*
+ * by its server id, with URL and token together — was unreachable from a
+ * test. `native/servers.ts` loads in node as it is, because
+ * `vitest.config.ts` stubs MMKV and the Keychain to no-ops and the rows are
+ * held in memory. So every test below moves the registry through the function
+ * the app moves it through.
+ */
+const A: Connected = { url: "https://a.example", serverId: "srv_a", org: "Ravenholm", user: "kate", addedAt: "2026-11-01T00:00:00Z" };
+const B: Connected = { url: "https://b.example", serverId: "srv_b", org: "Staging", user: "kate", addedAt: "2026-11-02T00:00:00Z" };
 
-let registry = [A, B];
+/**
+ * A's id and A's account at B's address, holding B's token: **a restored
+ * database, as the registry sees it.**
+ *
+ * `serverId` is derived from the organisation's database id, so a copy keeps
+ * it — which was the premise of the original finding and is exactly why
+ * binding to the id pair reintroduced it. Nothing here is contrived: this is
+ * one `remember()` of a `/bootstrap` answer from the clone.
+ */
+const CLONE: Connected = { ...A, url: B.url };
 
-vi.mock("~/native/servers", () => ({
-  servers: () => registry,
-  tokenFor: (serverId: string) => `tok_${serverId}`,
-}));
+/** The registry, as the app would have left it. */
+const connect = (...list: [Connected, string][]) => {
+  for (const s of servers().slice()) forget(s.serverId);
+  for (const [server, token] of list) remember(server, token);
+};
 
 /* Only three of these are imported by the generated client, and none of them
    is called here: the teardown's own cache is the one the hook was mounted
@@ -225,7 +250,7 @@ describe("a teardown goes to the Firetower it was asked about", () => {
   let end: (place: Workspace, delegated?: number) => Promise<Ending>;
 
   beforeEach(() => {
-    registry = [A, B];
+    connect([A, "tok_srv_a"], [B, "tok_srv_b"]);
     sent.length = 0;
     Alert.asked.length = 0;
     whenRead = null;
@@ -333,7 +358,7 @@ describe("a teardown goes to the Firetower it was asked about", () => {
    * is now — which is the defect, stated as a test rather than as prose.
    */
   it("cannot be redirected by a server switch once it names its target", async () => {
-    const firetower = JSON.stringify([A.serverId, A.user]);
+    const firetower = aimOf(A);
     useBackendId(B.serverId);
 
     await destroySession("w_1", { workspace: true }, { firetower });
@@ -347,8 +372,8 @@ describe("a teardown goes to the Firetower it was asked about", () => {
   });
 
   it("refuses a named Firetower that has been signed out of, rather than sending it elsewhere", async () => {
-    const firetower = JSON.stringify([A.serverId, A.user]);
-    registry = [B];
+    const firetower = aimOf(A);
+    connect([B, "tok_srv_b"]);
     useBackendId(B.serverId);
 
     await expect(destroySession("w_1", { workspace: true }, { firetower })).rejects.toThrow(
@@ -357,8 +382,107 @@ describe("a teardown goes to the Firetower it was asked about", () => {
     expect(sent).toEqual([]);
   });
 
+  /**
+   * **The reviewer's second reproduction, which the first fix did not stop.**
+   *
+   * Same server id, same account, different address. Step for step:
+   *
+   * 1. The preflight reaches A.
+   * 2. While the question is up, `remember()` replaces A's connection with
+   *    B's URL and B's token, keeping A's id and A's username.
+   * 3. *End it.*
+   *
+   * Bound to `[serverId, user]`, the comparison still passed and the recorded
+   * traffic was a GET to A with A's token and then a **DELETE to B with B's
+   * token** — the original finding, reached through the fix for it. Bound to
+   * the destination, the address is part of what is compared and there is no
+   * longer a pair for the clone to match.
+   */
+  it("sends nothing when the same id and account moved to another address", async () => {
+    const ending = end(one());
+    await asked();
+    expect(Alert.up()?.title).toBe("End Quota meter rounding on Ravenholm?");
+
+    remember(CLONE, "tok_srv_b");
+    Alert.answer("End it");
+
+    expect(await ending).toBe("kept");
+    /* The GET, and nothing after it. */
+    expect(sent).toEqual([
+      { url: "https://a.example/api/v1/sessions/w_1/work", method: "GET", token: "Bearer tok_srv_a" },
+    ]);
+    expect(Alert.up()?.title).toBe("It did not end.");
+  });
+
+  it("asks nothing when the address moved while the work was being read", async () => {
+    /* The other suspension point, moved the same way. */
+    whenRead = () => remember(CLONE, "tok_srv_b");
+    const ending = end(one());
+    await vi.waitFor(() => expect(sent).toHaveLength(1));
+
+    expect(Alert.asked).toEqual([]);
+    expect(await ending).toBe("kept");
+    expect(sent.map((r) => r.method)).toEqual(["GET"]);
+  });
+
+  /**
+   * The same case at the transport, which is the half that holds whether or
+   * not the flow notices anything. A bound request whose address moved under
+   * it has nowhere to go, and `here()` is not an answer to where it was for.
+   */
+  it("refuses a bound destination whose address moved under its id", async () => {
+    const firetower = aimOf(A);
+    remember(CLONE, "tok_srv_b");
+
+    await expect(destroySession("w_1", { workspace: true }, { firetower })).rejects.toThrow(
+      "that Firetower is not connected any more",
+    );
+    expect(sent).toEqual([]);
+  });
+
+  it("writes the address into the aim, so a moved one cannot match", () => {
+    /* The encoding itself: this is what the two tests above rest on. */
+    expect(aimOf(A)).not.toBe(aimOf(CLONE));
+    expect(aimOf(A)).toBe(JSON.stringify([A.serverId, A.user, A.url]));
+  });
+
+  /**
+   * **An omitted destination and a supplied one that names nothing are two
+   * different requests.**
+   *
+   * `aimOf` answers `""` when there was nothing to aim at, and read as falsy
+   * that took the same branch as *no destination given* — so the one input
+   * meaning *I do not know where this was for* resolved to whatever is
+   * current. The key being there is the question; what is in it only decides
+   * which answer.
+   */
+  it("tells an omitted destination from a supplied one that names nothing", async () => {
+    await expect(destroySession("w_1", { workspace: true }, { firetower: "" })).rejects.toThrow(
+      "the Firetower this was for is not known",
+    );
+    expect(sent).toEqual([]);
+
+    /* Omitted still resolves, because a screen reading data is on the server
+       it is on. That is the behaviour this must not take away. */
+    await destroySession("w_1", { workspace: true });
+    expect(sent.map((r) => r.url)).toEqual([
+      "https://a.example/api/v1/sessions/w_1?workspace=true",
+    ]);
+  });
+
+  it("asks nothing at all when there is no Firetower to ask about", async () => {
+    /* `aimOf(undefined)` is `""`, which used to compare equal to itself and
+       let the question go up about a machine the flow could not name. */
+    connect();
+    const ending = end(one());
+
+    expect(await ending).toBe("kept");
+    expect(Alert.asked).toEqual([]);
+    expect(sent).toEqual([]);
+  });
+
   it("leaves the server out of the question when the phone holds one", async () => {
-    registry = [A];
+    connect([A, "tok_srv_a"]);
     const ending = end(one());
     await asked();
     expect(Alert.up()?.title).toBe("End Quota meter rounding?");
