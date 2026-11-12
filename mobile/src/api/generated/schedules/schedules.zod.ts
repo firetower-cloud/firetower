@@ -142,10 +142,21 @@ export const ListSchedulesResponseItem = zod.object({
 export const ListSchedulesResponse = zod.array(ListSchedulesResponseItem)
 
 /**
- * Turning it on is a separate act, which is the whole of "an agent may
- * propose but may not activate" — and it is the same code path for a person,
- * so there is one rule rather than two.
- * @summary Write one down. **Inactive and unapproved**, whoever asked.
+ * This does not take an "and turn it on" argument, and that absence is the
+ * rule rather than an omission. A schedule a person creates through the
+ * sheet does land on — pressing Create is the act of approval, which is what
+ * the pinned consequence summary is for — but the thing that turns it on is
+ * [`approve_schedule`], a second explicit call against a path of its own.
+ *
+ * **The distinction is the route, not the caller.** An `activate` flag here
+ * would move it to the caller: anything able to reach this endpoint could
+ * ask for a running schedule, and "an agent may propose but may not
+ * activate" would rest on who was asking rather than on which path was
+ * taken — which is a rule that drifts the first time something new calls it.
+ * So everything that merely creates gets an inactive schedule: the MCP tool,
+ * this endpoint by hand, a copy, a webhook trigger that does not exist yet.
+ * One path activates, and it is one an agent has no door to.
+ * @summary Write one down. **Inactive and unapproved, whoever asked.**
  */
 export const createScheduleBodyCadenceFourOnOneDayMin = 0;
 
@@ -630,9 +641,14 @@ export const UpdateScheduleResponse = zod.object({
 }).describe('A schedule, as a client reads it.')
 
 /**
- * The one act an agent may not do. A person doing it is what makes a proposal
- * an ordinary schedule — the row afterwards is identical to one somebody
- * wrote.
+ * **The one act an agent may not do, and the only thing that activates a
+ * schedule.** A person doing it is what makes a proposal an ordinary
+ * schedule — the row afterwards is identical to one somebody wrote.
+ *
+ * It is also what the create sheet calls the moment it has written one down,
+ * because pressing Create is the approval. That is the whole of ruling 18:
+ * creating is inert for everybody and this is the explicit act, so there is
+ * one rule about the route instead of two about the caller.
  * @summary Approve it and turn it on.
  */
 export const ApproveScheduleParams = zod.object({

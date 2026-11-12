@@ -5390,6 +5390,112 @@ async fn a_schedule_cannot_be_asked_to_bypass_permissions() {
     assert_eq!(row.pins["settings"]["mode"], serde_json::json!("dontAsk"));
 }
 
+/// **Blocker 2: an unset control must not be filled from a later preference.**
+///
+/// `carry_preferences` fills any unset control from what that person was last
+/// working with. So a Codex schedule approved with no sandbox, and then an
+/// unrelated interactive session where they pick *Everything*, used to launch
+/// with no filesystem fence at all — unattended, on their credentials. The
+/// claim that "the `carry_preferences` trap is closed" was not true.
+///
+/// Closed by shutting the channel rather than racing to fill every field:
+/// a scheduled launch reads no remembered settings, so an unset control falls
+/// to the agent's own default, which is fixed and documented.
+#[tokio::test]
+async fn a_scheduled_launch_inherits_nothing_a_person_picked_later() {
+    let (state, principal, host, ready, owner) = fixture().await;
+    ready.store(true, Ordering::SeqCst);
+
+    // What they were last working with, as the interactive path remembers it.
+    sqlx::query(
+        "INSERT INTO agent_control_preferences (user_id, agent, kind, value) \
+         VALUES ($1, 'Codex', 'sandbox', 'everything')",
+    )
+    .bind(&owner)
+    .execute(state.db.pool())
+    .await
+    .unwrap();
+    assert!(
+        !state
+            .db
+            .preferred_controls(&owner, Agent::Codex)
+            .await
+            .unwrap()
+            .is_empty(),
+        "the preference is there to be inherited, which is the state under test"
+    );
+
+    // A person's own session does inherit it — that behaviour is the point of
+    // it and somebody is present.
+    let mine = super::sessions::create_session_as(
+        state.clone(),
+        owner.clone(),
+        "admin".into(),
+        serde_json::from_value(serde_json::json!({
+            "prompt": "mine",
+            "hostId": host.id.as_str(),
+            "agent": "Codex",
+        }))
+        .unwrap(),
+        super::sessions::Launch::default(),
+    )
+    .await
+    .expect("a person's own session starts");
+    let _ = mine;
+
+    // A scheduled one does not.
+    let mut new = a_schedule("Unattended", weekdays_at("08:30"));
+    new.agent = Agent::Codex;
+    let made = create(&state, &principal, new).await.unwrap();
+    let row = state.db.schedule(&made.id).await.unwrap().unwrap();
+
+    assert_eq!(
+        row.pins["settings"]["sandbox"],
+        serde_json::json!("workspace+network"),
+        "the fence is pinned rather than left to be filled in later"
+    );
+    assert_eq!(
+        row.pins["settings"]["mode"],
+        serde_json::json!("never"),
+        "and the mode is the word this engine knows, not the other one's"
+    );
+
+    let spec = crate::schedules::launch::spec_of(&row).expect("it reads back as a launch");
+    assert_eq!(spec.settings.sandbox.as_deref(), Some("workspace+network"));
+}
+
+/// **And a value that grants more is refused on write, by engine.**
+///
+/// A person picking one is warned about it. There is nobody to warn when a
+/// schedule fires, so it cannot be stored — asked of the control catalogue
+/// rather than of a list of dangerous words kept somewhere else.
+#[tokio::test]
+async fn a_schedule_cannot_be_approved_on_a_setting_that_grants_more() {
+    let (state, principal, _, _, _) = fixture().await;
+
+    let mut codex = a_schedule("No fence", weekdays_at("08:30"));
+    codex.agent = Agent::Codex;
+    codex.settings.sandbox = Some("everything".into());
+    let refused = create(&state, &principal, codex)
+        .await
+        .expect_err("no filesystem fence, with nobody there");
+    assert!(matches!(refused.code, ErrorCode::InvalidRequest));
+    assert!(refused.message.contains("more than it otherwise could"));
+
+    // The same rule catches Claude's own granting choice.
+    let mut claude = a_schedule("Writes files unasked", weekdays_at("08:30"));
+    claude.settings.mode = Some("acceptEdits".into());
+    assert!(create(&state, &principal, claude).await.is_err());
+
+    // And the one that was already named stays named.
+    let mut bypass = a_schedule("Bypass", weekdays_at("08:30"));
+    bypass.settings.mode = Some("bypassPermissions".into());
+    let said = create(&state, &principal, bypass)
+        .await
+        .expect_err("not from here");
+    assert!(said.message.contains("bypassPermissions"));
+}
+
 /// **The four control fields are pinned explicitly**, which is the
 /// `carry_preferences` trap: an unset field is filled from whatever that
 /// person was last working with, so `settings: {}` would mean "whatever they

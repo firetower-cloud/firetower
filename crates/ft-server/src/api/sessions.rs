@@ -371,7 +371,6 @@ pub(crate) struct Lineage {
 /// Two optional things rather than two more parameters, because at three of
 /// the four call sites both are absent and `None, None` says nothing about
 /// which is which.
-#[derive(Default)]
 pub(crate) struct Launch {
     /// Which session asked for this one, when a session did.
     pub lineage: Option<Lineage>,
@@ -391,6 +390,39 @@ pub(crate) struct Launch {
     /// It does not tell the caller whether the worker received the frame.
     /// Nothing in the database records that, and nothing could.
     pub id: Option<SessionId>,
+    /// Whether this launch may start on what its owner was last working with.
+    ///
+    /// **`false` is what closes the `carry_preferences` trap**, and closing
+    /// the channel is the fix rather than racing to fill every field.
+    /// `carry_preferences` fills any unset control from
+    /// `preferred_controls(person, agent)` — so a schedule approved with an
+    /// unset sandbox would start with whatever that person later picked in an
+    /// unrelated interactive session, which for Codex includes *Everything*:
+    /// no filesystem fence, unattended, on their credentials. Pinning the
+    /// fields the server can resolve does not close it, because the set of
+    /// applicable controls is per engine and one of them lists its models at
+    /// runtime.
+    ///
+    /// With this off, an unset field falls to the **agent's own** default,
+    /// which is a fixed and documented thing rather than a record of
+    /// somebody's afternoon.
+    ///
+    /// `true` for a person: starting work where you left off is the whole
+    /// point of that behaviour, and somebody is present.
+    pub inherit_settings: bool,
+}
+
+impl Default for Launch {
+    /// Written out rather than derived, because `bool` derives `false` and
+    /// the default here is `true`: every existing caller is a person or a
+    /// lead acting as one, and they inherit.
+    fn default() -> Self {
+        Self {
+            lineage: None,
+            id: None,
+            inherit_settings: true,
+        }
+    }
 }
 
 /// Start a session as somebody — whether they asked in person, or a session
@@ -408,12 +440,17 @@ pub(crate) async fn create_session_as(
     mut req: NewSession,
     launch: Launch,
 ) -> ApiResult<Session> {
-    let Launch { lineage, id: given } = launch;
+    let Launch {
+        lineage,
+        id: given,
+        inherit_settings,
+    } = launch;
     // Another agent in a place that already exists, which is a different job
     // from making one: the host, the repositories, the branch and the directory
     // are all decided, and everything below about choosing them does not apply.
     if let Some(workspace_id) = req.workspace_id.clone() {
-        return start_another_agent(state, owner, workspace_id, req, lineage).await;
+        return start_another_agent(state, owner, workspace_id, req, lineage, inherit_settings)
+            .await;
     }
 
     // The profile this is started as, if any. Resolved before anything is
@@ -1065,7 +1102,7 @@ pub(crate) async fn create_session_as(
     // there is nothing better to do: one process, one environment. What each
     // repository asked for in a *file* stays its own, inside its own checkout.
     let mut env: Vec<(String, String)> = Vec::new();
-    carry_preferences(&state, &mut env, &owner, req.agent, &req.settings).await;
+    carry_preferences(&state, &mut env, &owner, req.agent, &req.settings, true).await;
     for vars in &per_repo_env {
         for v in vars {
             env.retain(|(existing, _)| *existing != v.name);
@@ -1385,13 +1422,23 @@ async fn carry_preferences(
     user_id: &str,
     agent: ft_core::Agent,
     overrides: &ft_core::controls::Preferred,
+    inherit: bool,
 ) {
-    let pairs = match state.db.preferred_controls(user_id, agent).await {
-        Ok(pairs) => pairs,
-        Err(e) => {
-            tracing::warn!("reading remembered settings for {}: {e:#}", agent.label());
-            Vec::new()
-        }
+    // **Nothing remembered, for a launch with nobody present.** This read is
+    // the whole of the trap: it fills any unset control from what that person
+    // was last working with, so an approved schedule would start on a choice
+    // made in an unrelated session afterwards — including, for Codex, a
+    // sandbox of *Everything*. Skipping it leaves an unset field to the
+    // agent's own default, which is fixed and documented.
+    let pairs = match inherit {
+        false => Vec::new(),
+        true => match state.db.preferred_controls(user_id, agent).await {
+            Ok(pairs) => pairs,
+            Err(e) => {
+                tracing::warn!("reading remembered settings for {}: {e:#}", agent.label());
+                Vec::new()
+            }
+        },
     };
     // What was remembered, then whatever this start chose on top — the New
     // page's picker wins over the last session's, field by field.
@@ -1479,7 +1526,15 @@ pub(crate) async fn relaunch(
     };
 
     let mut env: Vec<(String, String)> = Vec::new();
-    carry_preferences(state, &mut env, owner, session.agent, &Default::default()).await;
+    carry_preferences(
+        state,
+        &mut env,
+        owner,
+        session.agent,
+        &Default::default(),
+        true,
+    )
+    .await;
     // Re-composed from the stored profile, so a session that resumes after a
     // restart comes back as the profile it was started as. Best effort: a
     // persona that cannot be read is a plain restart, not a refusal to restart.
@@ -1616,6 +1671,7 @@ async fn start_another_agent(
     workspace_id: ft_core::WorkspaceId,
     req: NewSession,
     lineage: Option<Lineage>,
+    inherit_settings: bool,
 ) -> ApiResult<Session> {
     if !req.agent.speaks_a_protocol() {
         return Err(ApiError::new(
@@ -1763,7 +1819,15 @@ async fn start_another_agent(
     // Its own credential and its own environment, resolved against this session
     // so the vault's log names the run that spent it.
     let mut env: Vec<(String, String)> = Vec::new();
-    carry_preferences(&state, &mut env, &owner, req.agent, &req.settings).await;
+    carry_preferences(
+        &state,
+        &mut env,
+        &owner,
+        req.agent,
+        &req.settings,
+        inherit_settings,
+    )
+    .await;
     if let Some(account) = &req.account_id {
         super::accounts::pin(&state, &owner, &id, account, req.agent).await?;
     }
@@ -4294,8 +4358,17 @@ pub(super) async fn continue_with_account(
         // not that call arriving again. A fresh continuation is a new row.
         req: None,
     });
-    let next =
-        start_another_agent(state.clone(), owner.to_string(), workspace, req, lineage).await?;
+    // A continuation of a session a person is in: it inherits what they were
+    // working with, exactly as the session it continues did.
+    let next = start_another_agent(
+        state.clone(),
+        owner.to_string(),
+        workspace,
+        req,
+        lineage,
+        true,
+    )
+    .await?;
     Ok(next.id)
 }
 

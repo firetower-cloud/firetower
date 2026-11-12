@@ -310,22 +310,71 @@ async fn pins_for(
     req: &NewSchedule,
 ) -> ApiResult<serde_json::Value> {
     let mut settings = req.settings.clone();
-    // The permission mode, which has a default on this surface and only one
-    // sensible one: it refuses anything not already allowed rather than
-    // asking, because an unattended run has nobody to ask. **Not
-    // `bypassPermissions`** — that is not in the menu this reads from, and it
-    // is refused below whoever sends it.
+
+    // **The permission mode, per engine.** It refuses anything not already
+    // allowed rather than asking, because an unattended run has nobody to
+    // ask — and the *word* for that differs: Claude Code spells it `dontAsk`
+    // and Codex spells it `never`. This defaulted to `dontAsk` whatever the
+    // engine, which for Codex is a value it has never heard of, so the
+    // control silently did nothing.
     if settings.mode.is_none() {
-        settings.mode = Some(NEVER_ASK.to_string());
+        settings.mode = ft_core::controls::never_asks_as(req.agent).map(str::to_string);
     }
-    if let Some(mode) = settings.mode.as_deref() {
-        if mode == "bypassPermissions" {
+
+    // **The sandbox, where the engine has one.** Left unset it used to be
+    // filled at launch from whatever that person last picked in an unrelated
+    // session, which for Codex includes *Everything* — no filesystem fence,
+    // unattended, on their credentials. Inheritance is off for a scheduled
+    // launch now, and this pins the fence rather than leaving it to the
+    // agent's own default.
+    if settings.sandbox.is_none() {
+        settings.sandbox = ft_core::controls::unattended_sandbox(req.agent).map(str::to_string);
+    }
+
+    // **And nothing that grants more than the agent otherwise had**, asked of
+    // the control catalogue rather than of a list of dangerous words kept
+    // here. A choice marked `.grants()` is one a person is warned about
+    // before picking; there is nobody to warn when a schedule fires, so it is
+    // refused on write and named in the refusal.
+    //
+    // `bypassPermissions` is refused by the same rule — it is not in the
+    // menu at all, so it is not a value this engine takes.
+    for (kind, value) in [
+        (
+            ft_core::controls::ControlKind::Mode,
+            settings.mode.as_deref(),
+        ),
+        (
+            ft_core::controls::ControlKind::Sandbox,
+            settings.sandbox.as_deref(),
+        ),
+        (
+            ft_core::controls::ControlKind::Model,
+            settings.model.as_deref(),
+        ),
+        (
+            ft_core::controls::ControlKind::Effort,
+            settings.effort.as_deref(),
+        ),
+    ] {
+        let Some(value) = value else { continue };
+        if ft_core::controls::grants_more(req.agent, kind, value) {
             return Err(ApiError::new(
                 ErrorCode::InvalidRequest,
-                "bypassPermissions is not a mode a schedule may run in. An unattended run \
-                 refuses what it is not allowed to do rather than being allowed more.",
+                format!(
+                    "“{value}” lets the agent do more than it otherwise could, and a schedule \
+                     runs with nobody there to be asked about it. Pick something a run can be \
+                     left alone with."
+                ),
             ));
         }
+    }
+    if settings.mode.as_deref() == Some("bypassPermissions") {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            "bypassPermissions is not a mode a schedule may run in. An unattended run refuses \
+             what it is not allowed to do rather than being allowed more.",
+        ));
     }
 
     // The skills each run reads, resolved **now** and pinned. An absent list
@@ -363,17 +412,29 @@ async fn pins_for(
         .await
         .unwrap_or_default();
 
+    // **What the pins say about a control nobody can resolve here.** Codex
+    // lists its own models over its protocol, so the server cannot name one
+    // at approval — and an unset field is no longer a hole, because a
+    // scheduled launch inherits nothing: it falls to the agent's own default,
+    // which is fixed and documented. Recorded so a reader can tell "the
+    // agent decides this" from "nobody thought about it".
+    let decides_itself: Vec<&str> = ["model", "effort"]
+        .into_iter()
+        .filter(|f| match *f {
+            "model" => settings.model.is_none(),
+            _ => settings.effort.is_none(),
+        })
+        .collect();
+
     Ok(serde_json::json!({
         "settings": settings,
+        "agentDecides": decides_itself,
         "skills": skills,
         "accountId": account,
         "profile": req.profile,
         "skillVersionIds": versions,
     }))
 }
-
-/// The shipped "never ask" behaviour: it refuses rather than bypasses.
-const NEVER_ASK: &str = "dontAsk";
 
 /// One schedule of yours.
 #[utoipa::path(

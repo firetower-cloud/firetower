@@ -355,6 +355,51 @@ pub const SANDBOX_WORKSPACE: &str = "workspace";
 pub const SANDBOX_WORKSPACE_NETWORK: &str = "workspace+network";
 pub const SANDBOX_EVERYTHING: &str = "everything";
 
+/// The permission mode that refuses rather than asks, per engine.
+///
+/// `None` for an agent with no permission control at all. **Per engine,
+/// because the word differs**: Claude Code spells it `dontAsk` and Codex
+/// spells it `never`, and handing one engine the other's word is a control
+/// that silently does nothing — which for a session with nobody present
+/// means it stops to ask somebody who is not there, or does not stop at all.
+pub fn never_asks_as(agent: crate::Agent) -> Option<&'static str> {
+    match agent {
+        crate::Agent::ClaudeCode => Some("dontAsk"),
+        crate::Agent::Codex => Some("never"),
+        _ => None,
+    }
+}
+
+/// Whether a value for this control grants the agent more than it otherwise
+/// had — the `caution: Grants` the pickers draw a warning against.
+///
+/// Asked of the catalogue rather than of a list written down somewhere else,
+/// so a choice added with `.grants()` is covered by whatever reads this
+/// without that code being revisited. **Which is the point**: an unattended
+/// run must not be startable on a value a person would have been warned
+/// about, and "the list of dangerous values" is not a thing to maintain
+/// twice.
+pub fn grants_more(agent: crate::Agent, kind: ControlKind, value: &str) -> bool {
+    for_agent(agent, Vec::new(), Vec::new())
+        .into_iter()
+        .filter(|c| c.kind == kind)
+        .flat_map(|c| c.choices)
+        .any(|choice| choice.value == value && choice.caution == Some(Caution::Grants))
+}
+
+/// What an unattended run's sandbox may be, where the engine has one.
+///
+/// `workspace+network` rather than `workspace`: a scheduled run clones,
+/// installs what a setup script asks for and pushes a branch, and all three
+/// need the network. What it may not have is `everything`, which is no
+/// filesystem fence at all — see [`grants_more`].
+pub fn unattended_sandbox(agent: crate::Agent) -> Option<&'static str> {
+    match agent {
+        crate::Agent::Codex => Some(SANDBOX_WORKSPACE_NETWORK),
+        _ => None,
+    }
+}
+
 /// What a session running this agent can be asked to change.
 ///
 /// `models` is passed in because one agent knows its own and the other does

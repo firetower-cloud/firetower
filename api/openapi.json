@@ -3745,8 +3745,8 @@
         "tags": [
           "schedules"
         ],
-        "summary": "Write one down. **Inactive and unapproved**, whoever asked.",
-        "description": "Turning it on is a separate act, which is the whole of \"an agent may\npropose but may not activate\" — and it is the same code path for a person,\nso there is one rule rather than two.",
+        "summary": "Write one down. **Inactive and unapproved, whoever asked.**",
+        "description": "This does not take an \"and turn it on\" argument, and that absence is the\nrule rather than an omission. A schedule a person creates through the\nsheet does land on — pressing Create is the act of approval, which is what\nthe pinned consequence summary is for — but the thing that turns it on is\n[`approve_schedule`], a second explicit call against a path of its own.\n\n**The distinction is the route, not the caller.** An `activate` flag here\nwould move it to the caller: anything able to reach this endpoint could\nask for a running schedule, and \"an agent may propose but may not\nactivate\" would rest on who was asking rather than on which path was\ntaken — which is a rule that drifts the first time something new calls it.\nSo everything that merely creates gets an inactive schedule: the MCP tool,\nthis endpoint by hand, a copy, a webhook trigger that does not exist yet.\nOne path activates, and it is one an agent has no door to.",
         "operationId": "create_schedule",
         "requestBody": {
           "content": {
@@ -3967,7 +3967,7 @@
           "schedules"
         ],
         "summary": "Approve it and turn it on.",
-        "description": "The one act an agent may not do. A person doing it is what makes a proposal\nan ordinary schedule — the row afterwards is identical to one somebody\nwrote.",
+        "description": "**The one act an agent may not do, and the only thing that activates a\nschedule.** A person doing it is what makes a proposal an ordinary\nschedule — the row afterwards is identical to one somebody wrote.\n\nIt is also what the create sheet calls the moment it has written one down,\nbecause pressing Create is the approval. That is the whole of ruling 18:\ncreating is inert for everybody and this is the explicit act, so there is\none rule about the route instead of two about the caller.",
         "operationId": "approve_schedule",
         "parameters": [
           {

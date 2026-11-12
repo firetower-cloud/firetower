@@ -170,6 +170,14 @@ pub(crate) async fn start(
                 Launch {
                     lineage: None,
                     id: Some(session.clone()),
+                    // **Nothing is inherited.** `carry_preferences` fills an
+                    // unset control from whatever this person was last
+                    // working with, so a schedule approved with an unset
+                    // sandbox would start on a choice made in an unrelated
+                    // session afterwards — for Codex, that includes no
+                    // filesystem fence at all. An unset field falls to the
+                    // agent's own default instead, which is fixed.
+                    inherit_settings: false,
                 },
             )
             .await;
