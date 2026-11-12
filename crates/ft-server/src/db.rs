@@ -24,6 +24,20 @@ use sqlx::{PgPool, Row};
 /// `EXISTS (...)` clause quoted in the message. Substituting a const is not
 /// re-parsed, so the braces can only be braces.
 const HOST_COLUMNS: &str = "h.*, h.path::text AS path";
+
+/// How long a conversation outlives the work it belongs to.
+///
+/// `reclaim::sweep` deletes a finished workspace, and the cascade takes the
+/// agent's whole log with it — so without a window, a workspace that ends is a
+/// conversation gone within the minute, and the copy on the machine went with
+/// the worktree. A week is long enough to come back and read what an agent did
+/// and short enough that the growth this sweep exists to stop is still
+/// stopped.
+///
+/// Here rather than in `reclaim.rs` because it is one predicate in
+/// [`Db::workspaces_to_purge`], which is where that module's own header says
+/// retention belongs.
+pub const TRANSCRIPT_RETENTION: chrono::TimeDelta = chrono::TimeDelta::days(7);
 /// What counts as being in the fleet: anything but a retired machine.
 ///
 /// A `Local` host is the control plane's own process, which no longer runs
@@ -640,17 +654,33 @@ impl Db {
         Ok(())
     }
 
+    /// Workspaces whose work is over and whose conversation has been kept long
+    /// enough.
+    ///
+    /// Two predicates, and the second is the retention `reclaim.rs` always
+    /// said belonged here. Purging deletes the `workspaces` row and the
+    /// cascade takes `agent_lines` with it, so until this existed, ending a
+    /// workspace destroyed the record of what happened in it inside the
+    /// minute — in both places at once, because the transcript on the machine
+    /// goes with the worktree. Somebody who ends a session and then wants to
+    /// know what the agent did has [`TRANSCRIPT_RETENTION`] to ask.
+    ///
+    /// Read from the sessions rather than from `workspaces.updated_at`: the
+    /// row is touched by things that are not the work ending, and what this
+    /// has to measure is time since the last session in it stopped.
     pub async fn workspaces_to_purge(&self, limit: i64) -> Result<Vec<WorkspaceId>> {
         let rows = sqlx::query_scalar::<_, String>(
             "SELECT w.id FROM workspaces w
               WHERE EXISTS (SELECT 1 FROM sessions s WHERE s.workspace_id = w.id)
                 AND NOT EXISTS (
                       SELECT 1 FROM sessions s
-                       WHERE s.workspace_id = w.id AND s.status <> 'Ended')
+                       WHERE s.workspace_id = w.id
+                         AND (s.status <> 'Ended' OR s.updated_at > $2))
               ORDER BY w.updated_at
               LIMIT $1",
         )
         .bind(limit)
+        .bind(chrono::Utc::now() - TRANSCRIPT_RETENTION)
         .fetch_all(&self.pool)
         .await
         .context("listing workspaces whose data can go")?;
@@ -2370,16 +2400,58 @@ impl Db {
             // direct write, so an event could put a finished session back to
             // work and disagree with the model; now both paths run through
             // here, so it is enforced in one place for both.
+            //
+            // And the second clause, for the same reason and against a
+            // specific event: a worker that reconnects replays everything the
+            // control plane missed, which after a machine restarts includes
+            // the last `StatusChanged { Working }` from before the crash. That
+            // event is new to this database, so the `ON CONFLICT` above does
+            // not stop it — and applied to a session that has since been found
+            // stranded it would put the spinner straight back, with nothing
+            // left to correct it.
+            //
+            // `Stranded` leaves for a restart somebody asked for, or to be let
+            // go of; the same two moves `can_transition_to` allows, held here
+            // as well because this is the only place a worker's word reaches
+            // the row.
+            //
+            // **And `Starting` only when this process is the one saying it.**
+            // That is the whole of the consent: `Stranded` is the state that
+            // holds "nothing restarts an agent unless a person asked", and
+            // `Starting` is its only doorway — so a worker must not be able to
+            // open it. A replayed pre-crash `StatusChanged { Starting }` —
+            // from a relaunch that was in flight when the machine went — would
+            // otherwise walk a session out of `Stranded`, and the `Working`
+            // behind it in the same replay is then an ordinary, legal move. The
+            // transition table cannot express this, because it does not know
+            // who is asking; here, `from` is exactly that.
+            //
+            // `$1 = status` is not a transition at all: it is a note being
+            // written about a state that is not moving, which is how a
+            // recovery that would not start says why. Without it the refusal
+            // was silently dropped — a session stayed `Stranded` with its
+            // note still reading "The machine restarted", and the person who
+            // pressed the button was the only one who ever saw the reason.
+            // A worker cannot sneak through it: `Stranded` is derived here
+            // and is never a status a worker reports.
+            //
+            // It does not stand in the way of a real recovery: `relaunch` sets
+            // `Starting` itself, from this process, with no host behind it.
             sqlx::query(
                 "UPDATE sessions SET status = $1, note = $2, updated_at = $3
                   WHERE id = $4
                     AND status <> 'Ended'
+                    AND (status <> 'Stranded'
+                         OR $1 = 'Ended'
+                         OR $1 = status
+                         OR ($1 = 'Starting' AND $5))
                     AND workspace_id IN (SELECT id FROM workspaces WHERE forgotten_at IS NULL)",
             )
             .bind(serde_json::to_string(status)?.trim_matches('"'))
             .bind(note.as_deref())
             .bind(at)
             .bind(session_id.as_str())
+            .bind(from.is_none())
             .execute(&mut *tx)
             .await?;
         }
@@ -5530,6 +5602,19 @@ mod tests {
             .unwrap()
     }
 
+    /// Put a session's last movement into the past, which is the only way to
+    /// ask a question about a week-long window inside a test.
+    async fn stopped_days_ago(db: &Db, id: &SessionId, days: i64) {
+        sqlx::query(
+            "UPDATE sessions SET updated_at = now() - ($1 || ' days')::interval WHERE id = $2",
+        )
+        .bind(days.to_string())
+        .bind(id.as_str())
+        .execute(&db.pool)
+        .await
+        .unwrap();
+    }
+
     /// The whole point: a workspace that is over stops costing anything.
     #[tokio::test]
     async fn a_finished_workspace_gives_back_what_it_was_holding() {
@@ -5546,6 +5631,7 @@ mod tests {
         assert_eq!(lines_held(&db, &id).await, 1);
 
         set_status(&db, &id, ft_core::SessionStatus::Ended, None).await;
+        stopped_days_ago(&db, &id, 8).await;
 
         let workspace = workspace_of(&db, &id).await;
         assert_eq!(
@@ -5557,6 +5643,87 @@ mod tests {
         assert_eq!(db.purge_workspace(&workspace).await.unwrap(), 1);
         assert_eq!(lines_held(&db, &id).await, 0, "the log goes with it");
         assert!(db.session(&id).await.unwrap().is_none());
+    }
+
+    /// The window itself. Ending a workspace used to delete the conversation
+    /// inside the minute — and the copy in the workspace goes with the
+    /// worktree, so that was the only two records of the work, removed
+    /// together, before anybody could read either.
+    #[tokio::test]
+    async fn a_conversation_outlives_the_work_by_a_week() {
+        let (db, owner) = db_with_user().await;
+        let host = db
+            .ensure_test_host("fire-01", owner.as_str())
+            .await
+            .unwrap();
+        let id = a_run(&db, &host.id, &owner).await;
+        db.record_agent_line(&id, 1, r#"{"type":"assistant"}"#)
+            .await
+            .unwrap();
+
+        set_status(&db, &id, ft_core::SessionStatus::Ended, None).await;
+        let workspace = workspace_of(&db, &id).await;
+        assert!(
+            !db.workspaces_to_purge(10)
+                .await
+                .unwrap()
+                .contains(&workspace),
+            "it ended a moment ago; the transcript is the only record left"
+        );
+
+        // A day inside the window is still inside it.
+        stopped_days_ago(&db, &id, 6).await;
+        assert!(
+            !db.workspaces_to_purge(10)
+                .await
+                .unwrap()
+                .contains(&workspace),
+            "six days is inside a seven-day window"
+        );
+
+        stopped_days_ago(&db, &id, 8).await;
+        assert!(
+            db.workspaces_to_purge(10)
+                .await
+                .unwrap()
+                .contains(&workspace),
+            "and past it the growth this sweep exists to stop is stopped"
+        );
+    }
+
+    /// One run ended a fortnight ago beside one ended this morning. The
+    /// workspace is one thing, so the window is the latest of them.
+    #[tokio::test]
+    async fn a_workspace_is_kept_for_its_most_recent_run() {
+        let (db, owner) = db_with_user().await;
+        let host = db
+            .ensure_test_host("fire-01", owner.as_str())
+            .await
+            .unwrap();
+        let first = a_run(&db, &host.id, &owner).await;
+        let workspace = workspace_of(&db, &first).await;
+        // A second agent in the same place, which is what the API's
+        // `start_another_agent` makes. Written here rather than built, because
+        // the only thing this test needs of it is the row it shares.
+        let second = a_run(&db, &host.id, &owner).await;
+        sqlx::query("UPDATE sessions SET workspace_id = $1 WHERE id = $2")
+            .bind(workspace.as_str())
+            .bind(second.as_str())
+            .execute(&db.pool)
+            .await
+            .unwrap();
+
+        set_status(&db, &first, ft_core::SessionStatus::Ended, None).await;
+        set_status(&db, &second, ft_core::SessionStatus::Ended, None).await;
+        stopped_days_ago(&db, &first, 14).await;
+
+        assert!(
+            !db.workspaces_to_purge(10)
+                .await
+                .unwrap()
+                .contains(&workspace),
+            "the second agent stopped this morning"
+        );
     }
 
     /// The one that matters most. Everything else here is recoverable; this is

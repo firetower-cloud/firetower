@@ -255,8 +255,11 @@ pub async fn watch(session_id: SessionId, since_line: u64, out: Out) -> Result<E
                 tool_name,
                 input,
             },
+            // The agent said so itself, which is the one report that needs no
+            // probe behind it.
             FromAgent::Exited { .. } => ToServer::AgentClosed {
                 session_id: session_id.clone(),
+                gone: ft_proto::Gone::Exited,
             },
             // Ours went the other way; this is somebody else's answer.
             FromAgent::Decided { .. } => continue,

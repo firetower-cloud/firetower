@@ -11,6 +11,14 @@ use anyhow::{bail, Context, Result};
 use std::path::Path;
 use tokio::process::Command;
 
+/// How long `has-session` is given before the answer is called unknown.
+///
+/// Generous, because a slow answer is still an answer and a machine under
+/// load is the ordinary condition of a worker. Finite, because the only thing
+/// worse than a slow probe is one that never returns: it is awaited on the
+/// path that decides whether an agent is gone.
+const PROBE_LIMIT: std::time::Duration = std::time::Duration::from_secs(10);
+
 /// One agent, running or not.
 #[derive(Debug, Clone)]
 pub struct Tmux {
@@ -215,12 +223,44 @@ impl Tmux {
     /// Check existence without treating a failed tmux probe as proof of
     /// absence. Watcher EOF may indicate an agent exit, but only a known
     /// `has-session` miss is enough evidence to close its conversation.
+    ///
+    /// Bounded, because the question is asked on the path that decides whether
+    /// a session is reported gone and `has-session` talks to a server that can
+    /// stop answering: a tmux under heavy load, a filesystem that has wedged,
+    /// a socket a process is holding without reading. An unbounded probe there
+    /// is not a slow answer, it is a watcher task parked for the life of the
+    /// worker and a session whose liveness is never resolved either way. A
+    /// probe that runs out of time is an *unknown* — the same as any other
+    /// unreadable answer — so the conservative path is the one it takes.
     pub(crate) async fn checked_exists(&self) -> Result<bool> {
-        let output = Command::new("tmux")
+        // `kill_on_drop`, because the timeout below drops this future and
+        // tokio leaves a child running when it does. A probe is only ever
+        // abandoned for hanging, so without this the hung ones accumulate:
+        // one tmux client per probe, each holding the connection that made
+        // the last one hang.
+        let probe = Command::new("tmux")
             .args(["has-session", "-t", &self.target()])
-            .output()
-            .await
-            .context("checking the tmux session")?;
+            .kill_on_drop(true)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .context("asking tmux")?;
+
+        let output = match tokio::time::timeout(PROBE_LIMIT, probe.wait_with_output()).await {
+            Ok(output) => output.context("checking the tmux session")?,
+            Err(_) => {
+                // Said rather than left to the drop: a child reaped here is
+                // one that cannot become a zombie, and an unanswered probe is
+                // an unknown — which leaves a live agent alone, as every other
+                // unreadable answer does.
+                anyhow::bail!(
+                    "tmux did not answer about {} within {}s",
+                    self.name,
+                    PROBE_LIMIT.as_secs()
+                )
+            }
+        };
 
         checked_exists_output(
             &self.name,
@@ -389,9 +429,7 @@ fn checked_exists_output(
     }
 
     let stderr = stderr.trim();
-    if exit_code == Some(1)
-        && (said_absent(name, stderr) || stderr.starts_with("no server running on "))
-    {
+    if exit_code == Some(1) && (said_absent(name, stderr) || said_no_server(stderr)) {
         return Ok(false);
     }
 
@@ -404,6 +442,52 @@ fn checked_exists_output(
             stderr
         }
     )
+}
+
+/// Whether tmux said there is no server at all, rather than refusing to say.
+///
+/// Which is the same fact about a session as `said_absent`, reached from the
+/// other end: nothing is listening on that socket, so nothing is running under
+/// it. And it is the answer the case this whole path exists for actually
+/// produces — a machine that has just rebooted has no tmux server, because
+/// tmux had not been started again yet.
+///
+/// Two wordings, because `no server running on …` is not the only one:
+/// tmux 3.3a — Debian bookworm's, and so most Linux hosts — answers
+/// `error connecting to /tmp/tmux-1000/default (No such file or directory)`.
+/// Only the first was read, and the consequence was the whole feature: on a
+/// rebooted machine the probe came back *unreadable*, an unreadable probe is
+/// an unknown, and an unknown leaves a dead agent reported alive. Found by
+/// running it in a container; it cannot be found on a developer's Mac, where a
+/// tmux server is almost always already up and the answer is `NAME not found`
+/// instead.
+///
+/// `(Connection refused)` is the same fact with the socket file still there —
+/// a server that died without cleaning up after itself, which is what a crash
+/// leaves behind on a machine that does not clear its temporary directory at
+/// boot. macOS is that machine.
+///
+/// Nothing else. `(Permission denied)` is a server somebody else is running
+/// and is not an answer about ours, and anything unrecognised stays an
+/// unknown — the whole value of this function is that it is the one place that
+/// decides, and it decides by recognising rather than by assuming.
+///
+/// **A socket can go while the server it belongs to lives**, which on its own
+/// would make this a guess: something sweeping `/tmp` could take it with the
+/// agents still running. What makes it an answer is *where it is asked from*.
+/// Both callers have already failed to reach the agent through its own socket
+/// — the watcher's, which is a different file in the same directory — so by
+/// the time this is read, two sockets are unreachable at once. That is the
+/// signature of a temporary directory that was emptied, which is a reboot;
+/// and in the case it is not, the agent is already unreachable for turns,
+/// permissions and everything else the product does with it. A session nobody
+/// can send a word to is one to offer a restart for, whichever way it got
+/// there.
+fn said_no_server(stderr: &str) -> bool {
+    stderr.starts_with("no server running on ")
+        || (stderr.starts_with("error connecting to ")
+            && (stderr.ends_with("(No such file or directory)")
+                || stderr.ends_with("(Connection refused)")))
 }
 
 /// Whether tmux said this session is not there, rather than refusing to say.
@@ -543,6 +627,46 @@ mod tests {
             "can't find session: firetower-s_test"
         )
         .is_err());
+    }
+
+    /// The wording a rebooted machine actually produces.
+    ///
+    /// This is the one that was missing, and it was the whole feature: with no
+    /// tmux server at all, tmux 3.3a says `error connecting to … (No such file
+    /// or directory)` rather than `no server running on …`, so a machine that
+    /// had just restarted answered the probe unreadably and every agent on it
+    /// went on being reported alive. Verified against tmux 3.3a in the
+    /// container harness, where `has-session` exits 1 with exactly this.
+    #[test]
+    fn no_tmux_server_at_all_is_an_answer_whichever_way_it_is_worded() {
+        for wording in [
+            // tmux 3.4 and later.
+            "no server running on /tmp/tmux-1000/default",
+            // Debian bookworm's 3.3a, and so most Linux hosts.
+            "error connecting to /tmp/tmux-1000/default (No such file or directory)",
+            // A socket left behind by a server that died: macOS, which does
+            // not clear its temporary directory at every boot.
+            "error connecting to /var/folders/x/y/T/tmux-501/default (Connection refused)",
+        ] {
+            assert!(
+                !checked_exists_output("firetower-s_test", false, Some(1), wording).unwrap(),
+                "{wording:?} means there is no session"
+            );
+        }
+
+        // And a server that is there and will not talk to us is not an answer
+        // about anything. A probe that cannot be read has to stay an unknown,
+        // because an unknown leaves a live agent alone.
+        for unknown in [
+            "error connecting to /tmp/tmux-0/default (Permission denied)",
+            "error connecting to /tmp/tmux-1000/default (Connection timed out)",
+            "failed to connect to server: resource temporarily unavailable",
+        ] {
+            assert!(
+                checked_exists_output("firetower-s_test", false, Some(1), unknown).is_err(),
+                "{unknown:?} is not an answer"
+            );
+        }
     }
 
     /// Asking exactly changes the sentence, and the sentence is parsed.

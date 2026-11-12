@@ -42,7 +42,7 @@ export function elapsed(minutes: number): string {
  * Everything waiting on a human. All three mean the same thing to the person
  * using Firetower: it stopped being useful without you.
  */
-export const NEEDS_YOU: SessionStatus[] = ["NeedsYou", "HandedBack", "Failed"];
+export const NEEDS_YOU: SessionStatus[] = ["NeedsYou", "HandedBack", "Failed", "Stranded"];
 export const IN_FLIGHT: SessionStatus[] = ["Starting", "Working"];
 
 export const needsYou = (s: { status: SessionStatus }) => NEEDS_YOU.includes(s.status);
@@ -63,7 +63,7 @@ export const inFlight = (s: { status: SessionStatus }) => IN_FLIGHT.includes(s.s
  * thing that does — `Signal`'s dot and `Blocks`' quadrants both read it, so
  * they cannot drift apart again.
  */
-export type Beat = "working" | "blocked" | "done" | "broken" | "over";
+export type Beat = "working" | "blocked" | "stopped" | "done" | "broken" | "over";
 
 export const BEAT: Record<SessionStatus, Beat> = {
   Starting: "working",
@@ -76,6 +76,8 @@ export const BEAT: Record<SessionStatus, Beat> = {
   Ready: "done",
   /** It did not finish, and it will not on its own. */
   Failed: "broken",
+  /** The machine under it restarted. Nothing broke; the floor went. */
+  Stranded: "stopped",
   Ended: "over",
 };
 
@@ -89,9 +91,13 @@ export const beatOf = (s: { status: SessionStatus }): Beat => BEAT[s.status];
  * `Beat`, so they cannot come apart — which is the whole reason `BEAT` exists
  * rather than two lists of colours.
  */
-export const BEAT_TOKEN: Record<Beat, "slate" | "ember" | "sage" | "brick" | "mute"> = {
+export const BEAT_TOKEN: Record<
+  Beat,
+  "slate" | "ember" | "amber" | "sage" | "brick" | "mute"
+> = {
   working: "slate",
   blocked: "ember",
+  stopped: "amber",
   done: "sage",
   broken: "brick",
   over: "mute",
@@ -101,6 +107,12 @@ export const BEAT_TOKEN: Record<Beat, "slate" | "ember" | "sage" | "brick" | "mu
 export const BEAT_TONE: Record<Beat, string> = {
   working: "text-slate",
   blocked: "text-ember",
+  /* Amber, which the panes already use for *needs attention, nothing is wrong
+     yet*, and which the ember rule has never claimed. Not ember: ember answers
+     one question — is something blocked on you — and a machine that restarts
+     under a dozen agents would spend the whole budget on the one thing it is
+     not for. Not brick either: nothing broke. */
+  stopped: "text-amber",
   done: "text-sage",
   broken: "text-brick",
   over: "text-mute",
@@ -145,6 +157,7 @@ export const STATUS_LABEL: Record<SessionStatus, string> = {
   NeedsYou: "Asked a question",
   HandedBack: "Handed it back",
   Failed: "Failed",
+  Stranded: "Machine restarted",
   Ended: "Ended",
 };
 

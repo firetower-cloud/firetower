@@ -30,10 +30,29 @@ struct Worker {
     /// worker writes — so a test can assert on those rather than stopping at
     /// `skill_pins` and inferring the rest.
     launched: Launches,
+    /// What a launch answers with.
+    ///
+    /// A machine can refuse one — an `index.lock` in the worktree, a directory
+    /// that is not there any more — and what the control plane does with a
+    /// refusal is as much the feature as what it does with a success.
+    launch_refuses: Arc<std::sync::Mutex<Option<String>>>,
+    /// Every turn this worker was handed, and for which session.
+    ///
+    /// A child's finished work reaches its lead as an ordinary turn, so this
+    /// is the only place "the lead was told" can be observed.
+    turns: Turns,
+    /// Frames this worker sends without being asked.
+    ///
+    /// Which is half of what a worker does: an agent closing, an event
+    /// replayed from its own log after a reconnect. A test holds the sender,
+    /// so it can make the machine say the thing the incident said.
+    says: tokio::sync::broadcast::Sender<ToServer>,
 }
 
 /// What the control plane told the worker to start.
 type Launches = Arc<std::sync::Mutex<Vec<ft_proto::StartAgent>>>;
+/// What the control plane told the worker to say to an agent.
+type Turns = Arc<std::sync::Mutex<Vec<(ft_core::SessionId, String)>>>;
 #[async_trait::async_trait]
 impl Transport for Worker {
     fn describe(&self) -> String {
@@ -44,10 +63,36 @@ impl Transport for Worker {
         let ready = self.ready.clone();
         let probe = self.probe.clone();
         let launched = self.launched.clone();
+        let launch_refuses = self.launch_refuses.clone();
+        let turns = self.turns.clone();
+        let mut unprompted = self.says.subscribe();
         tokio::spawn(async move {
             let (r, w) = tokio::io::split(theirs);
             let mut codec = Codec::new(r, w);
-            while let Ok(frame) = codec.read::<ToWorker>().await {
+            loop {
+                // Both directions, because a worker is not a request/response
+                // service: the frames this feature turns on are the ones it
+                // sends on its own.
+                let frame = tokio::select! {
+                    frame = codec.read::<ToWorker>() => match frame {
+                        Ok(frame) => frame,
+                        Err(_) => break,
+                    },
+                    said = unprompted.recv() => {
+                        match said {
+                            Ok(said) => {
+                                if codec.write(&said).await.is_err() {
+                                    break;
+                                }
+                                continue;
+                            }
+                            // Lagged or closed: nothing a fixture can do about
+                            // it, and nothing it should hide either.
+                            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                        }
+                    }
+                };
                 let response = match frame {
                     ToWorker::Hello { .. } => Some(ToServer::Hello {
                         protocol: PROTOCOL_VERSION,
@@ -83,10 +128,24 @@ impl Transport for Worker {
                         if let ft_proto::Action::StartAgent { spec } = action {
                             launched.lock().unwrap().push(*spec);
                         }
+                        let refused = launch_refuses.lock().unwrap().clone();
                         Some(ToServer::ActionDone {
                             req,
-                            result: Ok("started".into()),
+                            result: match refused {
+                                Some(why) => Err(why),
+                                None => Ok("started".into()),
+                            },
                         })
+                    }
+                    ToWorker::SendTurn {
+                        ref session_id,
+                        ref message,
+                    } => {
+                        turns
+                            .lock()
+                            .unwrap()
+                            .push((session_id.clone(), message.to_string()));
+                        None
                     }
                     ToWorker::ProbeRemote { req, .. } => Some(ToServer::RemoteProbed {
                         req,
@@ -116,8 +175,8 @@ async fn fixture() -> (
     Arc<AtomicBool>,
     String,
 ) {
-    let (state, principal, host, ready, owner, _) = watched_fixture().await;
-    (state, principal, host, ready, owner)
+    let it = a_machine().await;
+    (it.state, it.principal, it.host, it.ready, it.owner)
 }
 
 /// The same fixture, and what the worker was told to start.
@@ -132,6 +191,37 @@ async fn watched_fixture() -> (
     String,
     Launches,
 ) {
+    let it = a_machine().await;
+    (
+        it.state,
+        it.principal,
+        it.host,
+        it.ready,
+        it.owner,
+        it.launched,
+    )
+}
+
+/// One machine, with every handle on it a test might pull.
+///
+/// The two tuples above are views of this; anything that needs the machine to
+/// *say* something — an agent gone, an event replayed — takes the whole thing.
+struct Machine {
+    state: AppState,
+    principal: crate::auth::Principal,
+    host: Host,
+    ready: Arc<AtomicBool>,
+    owner: String,
+    launched: Launches,
+    /// Every turn an agent on it was handed.
+    turns: Turns,
+    /// What the worker sends of its own accord.
+    says: tokio::sync::broadcast::Sender<ToServer>,
+    /// Set it, and every launch is refused with this reason.
+    launch_refuses: Arc<std::sync::Mutex<Option<String>>>,
+}
+
+async fn a_machine() -> Machine {
     let (db, owner) = crate::db::Db::open_for_test_owned().await.unwrap();
     let accounts = crate::accounts::Accounts::new(db.pool().clone());
     let principal = crate::auth::Principal {
@@ -142,6 +232,9 @@ async fn watched_fixture() -> (
     let host = db.ensure_host("native", native(), &owner).await.unwrap();
     let ready = Arc::new(AtomicBool::new(false));
     let launched: Launches = Default::default();
+    let turns: Turns = Default::default();
+    let says = tokio::sync::broadcast::Sender::new(16);
+    let launch_refuses: Arc<std::sync::Mutex<Option<String>>> = Default::default();
     let fleet = crate::fleet::Fleet::new(db.clone());
     fleet
         .supervise(
@@ -150,6 +243,9 @@ async fn watched_fixture() -> (
                 ready: ready.clone(),
                 probe: None,
                 launched: launched.clone(),
+                turns: turns.clone(),
+                says: says.clone(),
+                launch_refuses: launch_refuses.clone(),
             }),
         )
         .await;
@@ -181,7 +277,17 @@ async fn watched_fixture() -> (
         previews: Default::default(),
         public_url: "http://localhost".into(),
     };
-    (state, principal, host, ready, owner, launched)
+    Machine {
+        state,
+        principal,
+        host,
+        ready,
+        owner,
+        launched,
+        turns,
+        says,
+        launch_refuses,
+    }
 }
 
 fn native() -> Compute {
@@ -562,6 +668,9 @@ async fn connecting_a_host_path_defers_validation_to_the_execution_machine() {
                 ready,
                 probe: None,
                 launched: Default::default(),
+                turns: Default::default(),
+                says: tokio::sync::broadcast::Sender::new(1),
+                launch_refuses: Default::default(),
             }),
         )
         .await;
@@ -1349,6 +1458,9 @@ async fn an_empty_repository_is_connected_rather_than_refused() {
                     empty: true,
                 }),
                 launched: Default::default(),
+                turns: Default::default(),
+                says: tokio::sync::broadcast::Sender::new(1),
+                launch_refuses: Default::default(),
             }),
         )
         .await;
@@ -2580,6 +2692,9 @@ async fn another_machine(state: &AppState, owner: &str, name: &str) -> Host {
                 ready: Arc::new(AtomicBool::new(true)),
                 probe: None,
                 launched: Default::default(),
+                turns: Default::default(),
+                says: tokio::sync::broadcast::Sender::new(1),
+                launch_refuses: Default::default(),
             }),
         )
         .await;
@@ -4806,4 +4921,1184 @@ async fn spawning_a_name_two_profiles_answer_to_starts_neither() {
     .expect("a name only one profile answers to is still a handle");
 
     state.fleet.stop_supervising(&host.id).await;
+}
+
+// ── A machine that restarted under the work ──────────────────────────────
+//
+// The incident: a Mac mini rebooted with four leads and eight team agents on
+// it, came back, and left all twelve under "Working — nothing heard for
+// 18000s". Everything below is one of the things that has to be true for that
+// not to happen again, driven through the real wire protocol and the real
+// database.
+
+/// One session on this machine, mid-turn, with a line of transcript behind it.
+///
+/// The line matters: the worker only reports a session stranded once the
+/// control plane has heard something from its agent, because a session nothing
+/// has ever been heard from is one that is still being built.
+async fn an_agent_at_work(it: &Machine, title: &str) -> ft_core::SessionId {
+    let id = ft_core::SessionId::new();
+    it.state
+        .db
+        .insert_session(
+            &id,
+            &it.host.id,
+            &it.owner,
+            None,
+            title,
+            "do the work",
+            None,
+            None,
+            "ClaudeCode",
+            ft_core::WorkspaceSize::Medium,
+            ft_core::Share::Equal,
+            &[],
+            None,
+        )
+        .await
+        .unwrap();
+    it.state
+        .db
+        .record_agent_line(&id, 1, r#"{"type":"assistant"}"#)
+        .await
+        .unwrap();
+    it.state
+        .fleet
+        .set_status(&id, ft_core::SessionStatus::Working, None)
+        .await;
+    id
+}
+
+/// A stranded session belonging to somebody else, in the same lead's family.
+///
+/// Its own account, so the caller has writer on nothing of theirs — which is
+/// the shape of the escalation: a lead is shared, its children are not, and a
+/// child carries the subscription its own owner pinned to it.
+async fn someone_elses_child(it: &Machine, title: &str) -> ft_core::SessionId {
+    let org = ft_core::OrgId::from_stored(it.state.db.org().await.unwrap());
+    // Named for the session, so a test that needs two of these gets two
+    // people rather than a collision.
+    let who = format!("ana{}", ft_core::SessionId::new().as_str().to_lowercase());
+    let ana = it
+        .state
+        .accounts
+        .create_user(&org, &who, &format!("{who}@example.test"), "member")
+        .await
+        .unwrap()
+        .0;
+    let id = ft_core::SessionId::new();
+    it.state
+        .db
+        .insert_session(
+            &id,
+            &it.host.id,
+            ana.id.as_str(),
+            None,
+            title,
+            "do the work",
+            None,
+            None,
+            "ClaudeCode",
+            ft_core::WorkspaceSize::Medium,
+            ft_core::Share::Equal,
+            &[],
+            None,
+        )
+        .await
+        .unwrap();
+    it.state
+        .db
+        .record_agent_line(&id, 1, r#"{"type":"assistant"}"#)
+        .await
+        .unwrap();
+    it.state
+        .fleet
+        .set_status(&id, ft_core::SessionStatus::Working, None)
+        .await;
+    id
+}
+
+/// How many times the worker has been told to start this session's agent.
+///
+/// Off the wire, because that is the only place the answer is: a refusal that
+/// happens after the launch frame has gone is not a refusal. Counted rather
+/// than asked as a yes or no, because a child is started once when it is
+/// spawned — so what a test about *not* starting it has to show is that the
+/// number did not move.
+fn starts_of(launched: &Launches, id: &ft_core::SessionId) -> usize {
+    launched
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|s| &s.session_id == id)
+        .count()
+}
+
+fn it_started(launched: &Launches, id: &ft_core::SessionId) -> bool {
+    starts_of(launched, id) > 0
+}
+
+async fn status_of(state: &AppState, id: &ft_core::SessionId) -> ft_core::SessionStatus {
+    state
+        .db
+        .session_status(id)
+        .await
+        .unwrap()
+        .expect("the session is there")
+}
+
+/// Wait for a status the worker is about to report.
+///
+/// A poll rather than a sleep, because what is being waited for is a frame
+/// crossing a duplex stream and a row being written — microseconds in
+/// practice, and a fixed sleep would be either flaky or slow.
+async fn settles_at(state: &AppState, id: &ft_core::SessionId, want: ft_core::SessionStatus) {
+    for _ in 0..200 {
+        if status_of(state, id).await == want {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    panic!(
+        "{id} stayed {:?} instead of reaching {want:?}",
+        status_of(state, id).await
+    );
+}
+
+/// Wait until an event the worker sent has been *recorded*, whatever it did to
+/// the status.
+///
+/// This is what makes "it did not change" a fact rather than a guess:
+/// `write_event` writes the row and applies the status change in one
+/// transaction, so once the row is there, whatever the predicate decided about
+/// the status has already been decided.
+async fn recorded(state: &AppState, id: &ft_core::SessionId, events: usize) {
+    for _ in 0..200 {
+        let seen = state
+            .db
+            .events_since(0)
+            .await
+            .unwrap()
+            .iter()
+            .filter(|e| &e.session_id == id)
+            .count();
+        if seen >= events {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    panic!("{id} never recorded {events} events");
+}
+
+/// Criterion 1 and criterion 2, which are one test because they are one
+/// decision: the control plane has to act on the worker's verdict, and only on
+/// the worker's verdict.
+///
+/// The frames are the real ones. `AgentClosed { Stranded }` is what a worker
+/// sends when there was no agent socket to connect to *and* tmux has no
+/// session for it; `AgentUnwatched` is what it sends in every other case,
+/// including the three that must leave a live agent alone — a worker process
+/// that restarted, a dropped network, and a tmux probe that could not be read.
+#[tokio::test]
+async fn a_machine_that_restarted_strands_its_work_and_nothing_else_does() {
+    let it = a_machine().await;
+    let stranded = an_agent_at_work(&it, "mid-turn when the machine went").await;
+    let alive = an_agent_at_work(&it, "on a machine that never went").await;
+
+    it.says
+        .send(ToServer::AgentClosed {
+            session_id: stranded.clone(),
+            gone: ft_proto::Gone::Stranded,
+        })
+        .unwrap();
+    settles_at(&it.state, &stranded, ft_core::SessionStatus::Stranded).await;
+
+    // "Machine restarted", and said without anybody opening the session: this
+    // is the reconnect path, and nothing in it waits for a browser.
+    assert_eq!(
+        ft_core::SessionStatus::Stranded.label(),
+        "Machine restarted"
+    );
+    let note = it
+        .state
+        .db
+        .session(&stranded)
+        .await
+        .unwrap()
+        .unwrap()
+        .note
+        .unwrap_or_default();
+    assert_eq!(note, "The machine restarted. The workspace is still there.");
+
+    // And it is still a session the next reconnect asks the worker to watch.
+    // `Failed` is excluded from that list, which is why this is not `Failed`:
+    // marked wrong once, an agent would never be followed again.
+    assert!(
+        it.state
+            .db
+            .live_session_ids_on(&it.host.id)
+            .await
+            .unwrap()
+            .contains(&stranded),
+        "a stranded session is still watched, so a mistake here is recoverable"
+    );
+
+    // The watcher stopping is not the agent going. This is the frame a worker
+    // sends for a session whose agent it cannot read but whose tmux is still
+    // there, and the only right answer to it is nothing at all.
+    it.says
+        .send(ToServer::AgentUnwatched {
+            session_id: alive.clone(),
+        })
+        .unwrap();
+    // And then the one frame that does mean its process ended, on the same
+    // ordered stream. Reaching `Failed` is what proves the unwatch above was
+    // handled and did nothing: a session wrongly stranded by it could not get
+    // here, because `Stranded` is not a state an exit moves.
+    it.says
+        .send(ToServer::AgentClosed {
+            session_id: alive.clone(),
+            gone: ft_proto::Gone::Exited,
+        })
+        .unwrap();
+    settles_at(&it.state, &alive, ft_core::SessionStatus::Failed).await;
+    assert_eq!(
+        it.state
+            .db
+            .session(&alive)
+            .await
+            .unwrap()
+            .unwrap()
+            .note
+            .unwrap_or_default(),
+        "The agent exited. Any permission questions were cancelled.",
+        "an agent that really did exit still says so in its own words"
+    );
+
+    it.state.fleet.stop_supervising(&it.host.id).await;
+}
+
+/// Criterion 4, both ways round. The riskiest line in this change.
+///
+/// A worker that reconnects replays what the control plane missed, and after a
+/// reboot that includes the last `StatusChanged { Working }` from before the
+/// crash. It is new to this database, so nothing dedupes it; applied, it would
+/// put the spinner back with nothing left to correct it. And the guard has to
+/// be narrow enough that a real recovery still works, because the recovery
+/// ends in the agent reporting exactly the same status.
+#[tokio::test]
+async fn a_stale_replay_cannot_un_strand_and_a_real_recovery_still_can() {
+    let it = a_machine().await;
+    let session = an_agent_at_work(&it, "cut off mid-sentence").await;
+
+    it.says
+        .send(ToServer::AgentClosed {
+            session_id: session.clone(),
+            gone: ft_proto::Gone::Stranded,
+        })
+        .unwrap();
+    settles_at(&it.state, &session, ft_core::SessionStatus::Stranded).await;
+
+    // The replay. Written from the worker's own log, with the sequence number
+    // it had before the machine went down.
+    it.says
+        .send(ToServer::Event {
+            seq: 1,
+            session_id: session.clone(),
+            kind: ft_core::EventKind::StatusChanged {
+                status: ft_core::SessionStatus::Working,
+                note: None,
+            },
+            at: chrono::Utc::now() - chrono::TimeDelta::minutes(5),
+        })
+        .unwrap();
+    recorded(&it.state, &session, 3).await;
+    assert_eq!(
+        status_of(&it.state, &session).await,
+        ft_core::SessionStatus::Stranded,
+        "a pre-crash event must not put a stranded session back to work"
+    );
+
+    // And not through the doorway either. `Starting` is the one status that
+    // leaves `Stranded`, so a worker saying it — a relaunch that was in flight
+    // when the machine went, replayed — would walk the session out and leave
+    // the `Working` behind it in the same replay an ordinary legal move.
+    it.says
+        .send(ToServer::Event {
+            seq: 2,
+            session_id: session.clone(),
+            kind: ft_core::EventKind::StatusChanged {
+                status: ft_core::SessionStatus::Starting,
+                note: None,
+            },
+            at: chrono::Utc::now() - chrono::TimeDelta::minutes(4),
+        })
+        .unwrap();
+    recorded(&it.state, &session, 4).await;
+    assert_eq!(
+        status_of(&it.state, &session).await,
+        ft_core::SessionStatus::Stranded,
+        "only the control plane may say a stranded session is starting"
+    );
+
+    // Now the recovery somebody pressed, which is the only way out: the
+    // control plane sets `Starting` itself, and the agent's own `Working`
+    // arrives against that.
+    it.ready.store(true, Ordering::SeqCst);
+    it.state
+        .db
+        .mark_host_online(
+            &it.host.id,
+            "test",
+            4,
+            8192,
+            &ft_core::DockerState::running("27.0.3"),
+        )
+        .await
+        .unwrap();
+    let Json(done) = sessions::relaunch_session(
+        State(it.state.clone()),
+        Extension(it.principal.clone()),
+        Path(session.as_str().to_string()),
+        Query(serde_json::from_value(serde_json::json!({})).unwrap()),
+    )
+    .await
+    .expect("a stranded session can be started again");
+    assert!(done.detail.contains("starting again"), "{}", done.detail);
+    assert_eq!(
+        status_of(&it.state, &session).await,
+        ft_core::SessionStatus::Starting
+    );
+
+    it.says
+        .send(ToServer::Event {
+            seq: 3,
+            session_id: session.clone(),
+            kind: ft_core::EventKind::StatusChanged {
+                status: ft_core::SessionStatus::Working,
+                note: None,
+            },
+            at: chrono::Utc::now(),
+        })
+        .unwrap();
+    settles_at(&it.state, &session, ft_core::SessionStatus::Working).await;
+
+    it.state.fleet.stop_supervising(&it.host.id).await;
+}
+
+/// Criteria 5 and 6: a lead that comes back takes a turn on its own, out of
+/// what its children finished while it was down.
+///
+/// Nothing types anything here, which is the point. `relaunch` sends the agent
+/// an empty prompt — it is being picked up, not opened — so without a drain
+/// the lead comes back, reads its history, and sits in front of results it is
+/// never handed.
+#[tokio::test]
+async fn recovering_a_lead_brings_its_team_back_and_hands_it_their_work() {
+    let it = a_machine().await;
+    it.ready.store(true, Ordering::SeqCst);
+    it.state
+        .db
+        .mark_host_online(
+            &it.host.id,
+            "test",
+            4,
+            8192,
+            &ft_core::DockerState::running("27.0.3"),
+        )
+        .await
+        .unwrap();
+
+    let lead = an_agent_at_work(&it, "the lead").await;
+    let child = an_agent_at_work(&it, "one of its team").await;
+    let elsewhere = an_agent_at_work(&it, "somebody else's agent").await;
+    it.state
+        .db
+        .set_lineage(&child, &lead, Some("split the work"), None)
+        .await
+        .unwrap();
+
+    // What the child finished before the machine went, durable in `deliveries`
+    // and unread.
+    it.state
+        .db
+        .queue_delivery(&lead, Some(&child), "what the child found")
+        .await
+        .unwrap();
+
+    for session in [&lead, &child, &elsewhere] {
+        it.says
+            .send(ToServer::AgentClosed {
+                session_id: session.clone(),
+                gone: ft_proto::Gone::Stranded,
+            })
+            .unwrap();
+    }
+    for session in [&lead, &child, &elsewhere] {
+        settles_at(&it.state, session, ft_core::SessionStatus::Stranded).await;
+    }
+
+    let Json(done) = sessions::relaunch_session(
+        State(it.state.clone()),
+        Extension(it.principal.clone()),
+        Path(lead.as_str().to_string()),
+        Query(serde_json::from_value(serde_json::json!({ "family": true })).unwrap()),
+    )
+    .await
+    .expect("the family comes back");
+    assert_eq!(done.detail, "2 agents are starting again");
+
+    // The team first and the lead last, so a lead that comes back finds its
+    // children running rather than missing.
+    let order: Vec<ft_core::SessionId> = it
+        .launched
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|spec| spec.session_id.clone())
+        .collect();
+    assert_eq!(order, vec![child.clone(), lead.clone()]);
+    assert!(
+        !order.contains(&elsewhere),
+        "a family is the family: nothing else on the machine is touched"
+    );
+    assert_eq!(
+        status_of(&it.state, &elsewhere).await,
+        ft_core::SessionStatus::Stranded
+    );
+
+    // And the child's report reaches the lead with nobody typing. The drain is
+    // spawned behind the pause the agent's socket needs, so this is the one
+    // thing here worth waiting for.
+    let told = |text: &str| {
+        it.turns
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(session, said)| session == &lead && said.contains(text))
+    };
+    for _ in 0..400 {
+        if told("what the child found") {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert!(
+        told("what the child found"),
+        "a lead brought back is handed what its team finished while it was down"
+    );
+    assert!(
+        it.state.db.take_deliveries(&lead).await.unwrap().is_empty(),
+        "and the queue is empty afterwards, because it was read"
+    );
+
+    it.state.fleet.stop_supervising(&it.host.id).await;
+}
+
+/// Criterion 9: a recovery that will not start leaves the session stranded,
+/// with the reason in its note.
+///
+/// `Failed` would be wrong twice over: it tells the control plane the session
+/// holds nothing — while the worktree, the branch and the uncommitted edits
+/// are all still on the machine — and it makes the next keystroke restart the
+/// agent, which is the auto-recovery this feature deliberately does not have.
+#[tokio::test]
+async fn a_recovery_that_will_not_start_leaves_it_stranded_with_the_reason() {
+    let it = a_machine().await;
+    it.ready.store(true, Ordering::SeqCst);
+    it.state
+        .db
+        .mark_host_online(
+            &it.host.id,
+            "test",
+            4,
+            8192,
+            &ft_core::DockerState::running("27.0.3"),
+        )
+        .await
+        .unwrap();
+    let session = an_agent_at_work(&it, "a worktree with a lock in it").await;
+    it.says
+        .send(ToServer::AgentClosed {
+            session_id: session.clone(),
+            gone: ft_proto::Gone::Stranded,
+        })
+        .unwrap();
+    settles_at(&it.state, &session, ft_core::SessionStatus::Stranded).await;
+
+    *it.launch_refuses.lock().unwrap() = Some("git: index.lock exists in the worktree".to_string());
+
+    let error = sessions::relaunch_session(
+        State(it.state.clone()),
+        Extension(it.principal.clone()),
+        Path(session.as_str().to_string()),
+        Query(serde_json::from_value(serde_json::json!({})).unwrap()),
+    )
+    .await
+    .expect_err("the machine refused it");
+    assert!(error.message.contains("index.lock"), "{}", error.message);
+
+    assert_eq!(
+        status_of(&it.state, &session).await,
+        ft_core::SessionStatus::Stranded,
+        "the attempt did not take; nothing about the workspace changed"
+    );
+    let note = it
+        .state
+        .db
+        .session(&session)
+        .await
+        .unwrap()
+        .unwrap()
+        .note
+        .unwrap_or_default();
+    assert!(note.starts_with("Didn’t restart:"), "{note}");
+    assert!(note.contains("index.lock"), "{note}");
+
+    it.state.fleet.stop_supervising(&it.host.id).await;
+}
+
+/// Criterion 10: ending a stranded workspace does not take its conversation
+/// with it inside the minute.
+///
+/// Both copies go at once otherwise — `purge_workspace` deletes the row and
+/// the cascade takes `agent_lines`, while the transcript in the workspace goes
+/// with the worktree. For a session somebody ends *because* its machine
+/// restarted, that is the whole record of the work deleted in the same minute
+/// as the decision to let the directory go.
+#[tokio::test]
+async fn ending_a_stranded_workspace_keeps_its_conversation() {
+    let it = a_machine().await;
+    let session = an_agent_at_work(&it, "not worth bringing back").await;
+    it.says
+        .send(ToServer::AgentClosed {
+            session_id: session.clone(),
+            gone: ft_proto::Gone::Stranded,
+        })
+        .unwrap();
+    settles_at(&it.state, &session, ft_core::SessionStatus::Stranded).await;
+
+    // Letting it go. The one move out of `Stranded` other than a restart.
+    it.state
+        .fleet
+        .set_status(&session, ft_core::SessionStatus::Ended, None)
+        .await;
+    assert_eq!(
+        crate::reclaim::sweep(&it.state).await.unwrap(),
+        0,
+        "the sweep runs every sixty seconds; it must not take this one"
+    );
+    let lines: i64 = sqlx::query_scalar("SELECT count(*) FROM agent_lines WHERE session_id = $1")
+        .bind(session.as_str())
+        .fetch_one(it.state.db.pool())
+        .await
+        .unwrap();
+    assert_eq!(lines, 1, "the conversation is still there to read");
+
+    it.state.fleet.stop_supervising(&it.host.id).await;
+}
+
+/// The consent model, through the side door a lead already has a key to.
+///
+/// `children` with `switch` moves a child onto another subscription, and the
+/// switch stops the agent and starts it again — through `switch_for`,
+/// `continue_with_account` and then `relaunch`. Stopping an agent that is
+/// already absent *succeeds*, so a child whose machine restarted would have
+/// come back with no person anywhere in the operation: the lead survived
+/// somewhere else, read its own history, and rerouted quota.
+///
+/// Prior permission to move somebody's allowance is not permission to recover
+/// from a machine failure, and the second is the one this release made a
+/// decision about. Refused at the switch so the answer says what to do, and
+/// refused again at the launch, which is where it is enforced.
+#[tokio::test]
+async fn a_lead_cannot_bring_a_stranded_child_back_by_switching_its_subscription() {
+    let (state, _principal, host, ready, owner, launched) = watched_fixture().await;
+    let lead = a_lead_that_delegates(&state, &host, &ready, &owner, Agent::ClaudeCode).await;
+    let account = a_subscription(&state, &owner, "a_other", Agent::ClaudeCode).await;
+    saved_profile(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Engineer",
+            "does": "Writes the change and the tests",
+            "placement": "here",
+            "agent": "ClaudeCode",
+            // The rung that lets a lead reroute without asking anybody.
+            "onUsageLimit": "same",
+        }),
+    )
+    .await;
+    let child = a_child_that_ran_out(&state, &host, &lead, "sp1", "Engineer").await;
+    // Everything else about this switch is in order: the machine has the
+    // agent, the account is usable, the profile allows the reroute. The one
+    // thing wrong with it is the thing under test.
+    says_it_has(&state, &host, &[(Agent::ClaudeCode, true)]).await;
+
+    // And then the machine under it restarted.
+    state
+        .fleet
+        .set_status(&child.id, ft_core::SessionStatus::Stranded, None)
+        .await;
+    // It was started once, when it was spawned. That is the number that must
+    // not move.
+    let started_once = starts_of(&launched, &child.id);
+
+    let refused = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "sw1",
+            "children",
+            serde_json::json!({ "action": "switch", "id": child.id.as_str(), "account": account }),
+        ),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(
+        refused.contains("Bring it back first"),
+        "it says what a person has to do, and that the lead cannot: {refused}"
+    );
+    assert_eq!(
+        status_of(&state, &child.id).await,
+        ft_core::SessionStatus::Stranded,
+        "nothing started, and the state that holds the consent still holds it"
+    );
+    assert_eq!(
+        starts_of(&launched, &child.id),
+        started_once,
+        "no second agent was launched for it"
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// A stranded child this person may see and may not start.
+///
+/// Shared with them at viewer, which is the one case where saying "1 isn't
+/// yours to start" tells them nothing they did not already know.
+async fn a_child_they_may_only_watch(
+    it: &Machine,
+    lead: &ft_core::SessionId,
+) -> ft_core::SessionId {
+    let id = someone_elses_child(it, "a child shared with me").await;
+    it.state
+        .db
+        .set_lineage(&id, lead, Some("split the work"), None)
+        .await
+        .unwrap();
+    let workspace = it
+        .state
+        .db
+        .session(&id)
+        .await
+        .unwrap()
+        .unwrap()
+        .workspace_id
+        .unwrap();
+    // A viewer grant on the place it lives in, which is how one is shared.
+    it.state
+        .access
+        .set_exception(
+            crate::access::FiledKind::Workspace,
+            workspace.as_str(),
+            &it.owner,
+            crate::access::Level::Viewer,
+        )
+        .await
+        .unwrap();
+    id
+}
+
+/// Criterion 1 of the security review: one press on a lead reaches exactly as
+/// far as the person pressing it can.
+///
+/// `children_of` answers for the control plane acting on a lead's behalf — its
+/// own doc says it is never for a handler acting for a person — so a family
+/// recovery that trusted it started children the caller had no business
+/// starting, on the subscriptions pinned to them. The endpoint had checked one
+/// session: the one they named.
+#[tokio::test]
+async fn a_family_recovery_only_starts_the_children_the_caller_may_operate() {
+    let it = a_machine().await;
+    it.ready.store(true, Ordering::SeqCst);
+    it.state
+        .db
+        .mark_host_online(
+            &it.host.id,
+            "test",
+            4,
+            8192,
+            &ft_core::DockerState::running("27.0.3"),
+        )
+        .await
+        .unwrap();
+
+    let lead = an_agent_at_work(&it, "the lead").await;
+    let mine = an_agent_at_work(&it, "a child of mine").await;
+    let theirs = someone_elses_child(&it, "a child somebody else owns").await;
+    for child in [&mine, &theirs] {
+        it.state
+            .db
+            .set_lineage(child, &lead, Some("split the work"), None)
+            .await
+            .unwrap();
+    }
+    for session in [&lead, &mine, &theirs] {
+        it.says
+            .send(ToServer::AgentClosed {
+                session_id: session.clone(),
+                gone: ft_proto::Gone::Stranded,
+            })
+            .unwrap();
+        settles_at(&it.state, session, ft_core::SessionStatus::Stranded).await;
+    }
+
+    let Json(done) = sessions::relaunch_session(
+        State(it.state.clone()),
+        Extension(it.principal.clone()),
+        Path(lead.as_str().to_string()),
+        Query(serde_json::from_value(serde_json::json!({ "family": true })).unwrap()),
+    )
+    .await
+    .expect("the family comes back");
+
+    assert!(
+        it_started(&it.launched, &mine),
+        "the child this person may operate came back"
+    );
+    assert!(
+        !it_started(&it.launched, &theirs),
+        "and the one they may not was not started on somebody else's subscription"
+    );
+    assert_eq!(
+        status_of(&it.state, &theirs).await,
+        ft_core::SessionStatus::Stranded,
+        "it is left exactly where it was"
+    );
+    // Nothing said about it, because this person cannot see it exists.
+    //
+    // `session_of` answers absent rather than refused for exactly that
+    // reason, and a count would hand back what the 404 withheld.
+    assert_eq!(done.detail, "2 agents are starting again");
+
+    // One they *can* see and still may not start is a different matter: they
+    // know it is there, so saying it was left alone tells them nothing new and
+    // stops the button lying about what it did.
+    let watched = a_child_they_may_only_watch(&it, &lead).await;
+    it.says
+        .send(ToServer::AgentClosed {
+            session_id: watched.clone(),
+            gone: ft_proto::Gone::Stranded,
+        })
+        .unwrap();
+    settles_at(&it.state, &watched, ft_core::SessionStatus::Stranded).await;
+    it.state
+        .fleet
+        .set_status(&lead, ft_core::SessionStatus::Stranded, None)
+        .await;
+
+    let Json(again) = sessions::relaunch_session(
+        State(it.state.clone()),
+        Extension(it.principal.clone()),
+        Path(lead.as_str().to_string()),
+        Query(serde_json::from_value(serde_json::json!({ "family": true })).unwrap()),
+    )
+    .await
+    .expect("the family comes back");
+    assert_eq!(again.detail, "1 starting again. 1 isn’t yours to start.");
+    assert!(
+        !it_started(&it.launched, &watched),
+        "and watching it is still not starting it"
+    );
+
+    it.state.fleet.stop_supervising(&it.host.id).await;
+}
+
+/// The consent survives a stale snapshot, which is the shape the check used to
+/// have and the reason it was not enough.
+///
+/// Every handler works from a `Session` it fetched. A switch validates an
+/// account, stops an agent and replays its controls before anything launches,
+/// and a machine can go under it in that time — so the status being checked
+/// was true when it was read and false when it was used. The guard is at the
+/// launch now, under the claim that serialises it, and reads the row rather
+/// than the argument.
+#[tokio::test]
+async fn a_session_stranded_after_it_was_read_is_still_refused_at_the_launch() {
+    let it = a_machine().await;
+    it.ready.store(true, Ordering::SeqCst);
+    it.state
+        .db
+        .mark_host_online(
+            &it.host.id,
+            "test",
+            4,
+            8192,
+            &ft_core::DockerState::running("27.0.3"),
+        )
+        .await
+        .unwrap();
+    let id = an_agent_at_work(&it, "fine when it was read").await;
+
+    // What a handler is holding: a snapshot taken while it was working.
+    let stale = it.state.db.session(&id).await.unwrap().unwrap();
+    assert_eq!(stale.status, ft_core::SessionStatus::Working);
+
+    // And the machine goes, after that read and before the launch.
+    it.says
+        .send(ToServer::AgentClosed {
+            session_id: id.clone(),
+            gone: ft_proto::Gone::Stranded,
+        })
+        .unwrap();
+    settles_at(&it.state, &id, ft_core::SessionStatus::Stranded).await;
+
+    let refused = sessions::relaunch(&it.state, &stale, &it.owner, crate::fleet::Recovering::No)
+        .await
+        .expect_err("the row says stranded, whatever the argument says");
+    assert!(
+        refused.message.contains("Bring it back first"),
+        "{}",
+        refused.message
+    );
+    assert!(
+        !it_started(&it.launched, &id),
+        "nothing was launched for it"
+    );
+    assert_eq!(
+        status_of(&it.state, &id).await,
+        ft_core::SessionStatus::Stranded
+    );
+
+    // And the recovery somebody pressed still works from the same stale
+    // snapshot: what is refused is the claim, not the fetch.
+    sessions::relaunch(&it.state, &stale, &it.owner, crate::fleet::Recovering::Yes)
+        .await
+        .expect("a recovery is the one thing that may");
+    assert!(it_started(&it.launched, &id), "it came back");
+
+    it.state.fleet.stop_supervising(&it.host.id).await;
+}
+
+/// Two recoveries of one session, where the second arrives while the first is
+/// still starting.
+///
+/// The worker's launch takes the tmux session named for a session id, so the
+/// second start does not make a second agent — it takes the first one's place
+/// while it is still coming up, and the workspace is left with whichever won.
+///
+/// Asserted against the claim being held rather than by racing two requests:
+/// with an instant worker there is no window to race *into*, and what has to
+/// be true is that a launch is refused for as long as one is in flight.
+#[tokio::test]
+async fn a_second_start_is_refused_while_one_is_in_flight() {
+    let it = a_machine().await;
+    it.ready.store(true, Ordering::SeqCst);
+    it.state
+        .db
+        .mark_host_online(
+            &it.host.id,
+            "test",
+            4,
+            8192,
+            &ft_core::DockerState::running("27.0.3"),
+        )
+        .await
+        .unwrap();
+    let id = an_agent_at_work(&it, "pressed twice").await;
+    it.says
+        .send(ToServer::AgentClosed {
+            session_id: id.clone(),
+            gone: ft_proto::Gone::Stranded,
+        })
+        .unwrap();
+    settles_at(&it.state, &id, ft_core::SessionStatus::Stranded).await;
+
+    let press = async || {
+        sessions::relaunch_session(
+            State(it.state.clone()),
+            Extension(it.principal.clone()),
+            Path(id.as_str().to_string()),
+            Query(serde_json::from_value(serde_json::json!({})).unwrap()),
+        )
+        .await
+    };
+
+    // One in flight, as it is for as long as the worker takes to answer.
+    let held = it
+        .state
+        .fleet
+        .claim_start(&id, crate::fleet::Recovering::Yes)
+        .await
+        .expect("nothing is starting it yet");
+
+    let refused = press().await.expect_err("while one is already starting");
+    assert!(
+        refused.message.contains("already starting"),
+        "{}",
+        refused.message
+    );
+    assert!(
+        !it_started(&it.launched, &id),
+        "and nothing reached the worker"
+    );
+
+    // And when that one is done — this is a drop; in a launch it is the end
+    // of the launch, whichever way it ended — the way back is open again.
+    drop(held);
+    let _ = press().await.expect("the next press may start it");
+    assert_eq!(
+        starts_of(&it.launched, &id),
+        1,
+        "the worker was asked exactly once"
+    );
+
+    it.state.fleet.stop_supervising(&it.host.id).await;
+}
+
+/// QA's bug 2: a recovery that fails tells the person the reason, **and**
+/// writes it down.
+///
+/// It did one or the other. The failures before the launch — the agent not
+/// installed, the host not answering, the host gone — returned through `?`
+/// above the note, so the reason was on the screen of whoever pressed and
+/// nowhere else: a reload, another screen, or a colleague opening the
+/// conversation saw "The machine restarted" and no sign that anything had been
+/// tried. The note is the only part of a refusal that outlives the request.
+#[tokio::test]
+async fn a_recovery_refused_before_it_launches_still_writes_down_why() {
+    let it = a_machine().await;
+    it.state
+        .db
+        .mark_host_online(
+            &it.host.id,
+            "test",
+            4,
+            8192,
+            &ft_core::DockerState::running("27.0.3"),
+        )
+        .await
+        .unwrap();
+    let session = an_agent_at_work(&it, "on a machine with no agent on it").await;
+    it.says
+        .send(ToServer::AgentClosed {
+            session_id: session.clone(),
+            gone: ft_proto::Gone::Stranded,
+        })
+        .unwrap();
+    settles_at(&it.state, &session, ft_core::SessionStatus::Stranded).await;
+
+    // The machine is up and has no Claude Code on it, which is `require_ready`
+    // refusing — before anything is launched and before anything used to be
+    // written.
+    it.ready.store(false, Ordering::SeqCst);
+
+    let refused = sessions::relaunch_session(
+        State(it.state.clone()),
+        Extension(it.principal.clone()),
+        Path(session.as_str().to_string()),
+        Query(serde_json::from_value(serde_json::json!({})).unwrap()),
+    )
+    .await
+    .expect_err("the machine cannot run it");
+
+    let note = it
+        .state
+        .db
+        .session(&session)
+        .await
+        .unwrap()
+        .unwrap()
+        .note
+        .unwrap_or_default();
+    assert!(
+        note.starts_with("Didn’t restart:"),
+        "the reason outlives the request. refused with: {} / note: {note}",
+        refused.message
+    );
+    assert!(
+        note.contains("not ready") || note.contains("Claude Code"),
+        "and it is the reason, not a shrug: {note}"
+    );
+    assert_eq!(
+        status_of(&it.state, &session).await,
+        ft_core::SessionStatus::Stranded,
+        "nothing about the workspace changed, so nothing about the state does"
+    );
+    assert!(
+        refused.message.contains("not ready") || refused.message.contains("Claude Code"),
+        "and the person who pressed it is told the same thing: {}",
+        refused.message
+    );
+
+    it.state.fleet.stop_supervising(&it.host.id).await;
+}
+
+/// And a launch the machine refuses is not a 500.
+///
+/// `anyhow::Error` into `ApiError` is `Internal`, which is a 500, which an
+/// interface draws as nothing — because there is nothing in a 500 worth
+/// drawing. A machine refusing to start an agent is not a fault in this
+/// control plane: it is the answer to the thing we asked it to do, in its own
+/// words, and it has a code of its own.
+#[tokio::test]
+async fn a_launch_the_machine_refuses_is_the_machines_answer_not_a_server_fault() {
+    let it = a_machine().await;
+    it.ready.store(true, Ordering::SeqCst);
+    it.state
+        .db
+        .mark_host_online(
+            &it.host.id,
+            "test",
+            4,
+            8192,
+            &ft_core::DockerState::running("27.0.3"),
+        )
+        .await
+        .unwrap();
+    let session = an_agent_at_work(&it, "whose worktree was removed").await;
+    it.says
+        .send(ToServer::AgentClosed {
+            session_id: session.clone(),
+            gone: ft_proto::Gone::Stranded,
+        })
+        .unwrap();
+    settles_at(&it.state, &session, ft_core::SessionStatus::Stranded).await;
+
+    *it.launch_refuses.lock().unwrap() =
+        Some("the workspace at /home/agent/work is not there any more".to_string());
+
+    let refused = sessions::relaunch_session(
+        State(it.state.clone()),
+        Extension(it.principal.clone()),
+        Path(session.as_str().to_string()),
+        Query(serde_json::from_value(serde_json::json!({})).unwrap()),
+    )
+    .await
+    .expect_err("the machine refused it");
+
+    assert_eq!(
+        refused.code.status(),
+        axum::http::StatusCode::CONFLICT,
+        "not a 500: a page with nothing on it is what an interface draws for one"
+    );
+    let note = it
+        .state
+        .db
+        .session(&session)
+        .await
+        .unwrap()
+        .unwrap()
+        .note
+        .unwrap_or_default();
+    assert!(note.contains("not there any more"), "{note}");
+    assert_eq!(
+        status_of(&it.state, &session).await,
+        ft_core::SessionStatus::Stranded
+    );
+
+    it.state.fleet.stop_supervising(&it.host.id).await;
+}
+
+/// A second press while the first is still starting writes nothing down.
+///
+/// The note belongs to the attempt that was made. A press that was refused
+/// *before* anything was attempted has nothing to say about the workspace, and
+/// writing one would overwrite the reason belonging to the launch that is
+/// still in flight — on a row that is `Starting` because that launch moved it.
+#[tokio::test]
+async fn a_press_that_never_got_the_claim_leaves_the_note_alone() {
+    let it = a_machine().await;
+    it.ready.store(true, Ordering::SeqCst);
+    it.state
+        .db
+        .mark_host_online(
+            &it.host.id,
+            "test",
+            4,
+            8192,
+            &ft_core::DockerState::running("27.0.3"),
+        )
+        .await
+        .unwrap();
+    let session = an_agent_at_work(&it, "pressed twice").await;
+    it.says
+        .send(ToServer::AgentClosed {
+            session_id: session.clone(),
+            gone: ft_proto::Gone::Stranded,
+        })
+        .unwrap();
+    settles_at(&it.state, &session, ft_core::SessionStatus::Stranded).await;
+    let before = it.state.db.session(&session).await.unwrap().unwrap().note;
+
+    let held = it
+        .state
+        .fleet
+        .claim_start(&session, crate::fleet::Recovering::Yes)
+        .await
+        .expect("nothing is starting it yet");
+    let refused = sessions::relaunch_session(
+        State(it.state.clone()),
+        Extension(it.principal.clone()),
+        Path(session.as_str().to_string()),
+        Query(serde_json::from_value(serde_json::json!({})).unwrap()),
+    )
+    .await
+    .expect_err("one is already starting");
+    assert!(refused.message.contains("already starting"));
+    assert_eq!(
+        it.state.db.session(&session).await.unwrap().unwrap().note,
+        before,
+        "nothing was attempted, so nothing is written down about it"
+    );
+    drop(held);
+
+    it.state.fleet.stop_supervising(&it.host.id).await;
+}
+
+/// QA's bug 3: a message to a stranded session is refused rather than dropped.
+///
+/// It answered 200 `{"sent":true}` and the text appeared in the transcript as
+/// a user bubble read by nobody. The desktop cannot reach it — the composer is
+/// replaced by the recovery card — but the phone has the label and the beat
+/// and no gate, so on a phone it is reachable by typing. A rule held in one
+/// interface is a rule the next surface has not been told about.
+#[tokio::test]
+async fn a_message_to_a_stranded_session_is_refused_rather_than_swallowed() {
+    let it = a_machine().await;
+    let session = an_agent_at_work(&it, "nobody is listening").await;
+    it.says
+        .send(ToServer::AgentClosed {
+            session_id: session.clone(),
+            gone: ft_proto::Gone::Stranded,
+        })
+        .unwrap();
+    settles_at(&it.state, &session, ft_core::SessionStatus::Stranded).await;
+
+    let refused = conversation::send_turn(
+        State(it.state.clone()),
+        Extension(it.principal.clone()),
+        Path(session.as_str().to_string()),
+        Json(serde_json::from_value(serde_json::json!({ "text": "hello?" })).unwrap()),
+    )
+    .await
+    .expect_err("there is nothing to say it to");
+    assert!(
+        refused.message.contains("Bring it back first"),
+        "and it says what to do instead: {}",
+        refused.message
+    );
+    assert!(
+        it.turns
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|(said_to, _)| said_to != &session),
+        "nothing reached the machine"
+    );
+
+    it.state.fleet.stop_supervising(&it.host.id).await;
 }

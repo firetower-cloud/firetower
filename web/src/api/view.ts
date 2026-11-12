@@ -42,7 +42,7 @@ export function elapsed(minutes: number): string {
  * Everything waiting on a human. All three mean the same thing to the person
  * using Firetower: it stopped being useful without you.
  */
-export const NEEDS_YOU: SessionStatus[] = ["NeedsYou", "HandedBack", "Failed"];
+export const NEEDS_YOU: SessionStatus[] = ["NeedsYou", "HandedBack", "Failed", "Stranded"];
 export const IN_FLIGHT: SessionStatus[] = ["Starting", "Working"];
 
 /**
@@ -101,6 +101,7 @@ export const STATUS_LABEL: Record<SessionStatus, string> = {
   NeedsYou: "Asked a question",
   HandedBack: "Handed it back",
   Failed: "Failed",
+  Stranded: "Machine restarted",
   Ended: "Ended",
 };
 

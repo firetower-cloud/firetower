@@ -6000,6 +6000,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "family",
+            "in": "query",
+            "description": "Bring the agents this one started back with it",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -14626,6 +14635,7 @@
           "NeedsYou",
           "HandedBack",
           "Failed",
+          "Stranded",
           "Ended"
         ]
       },

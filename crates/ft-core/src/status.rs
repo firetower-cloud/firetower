@@ -30,6 +30,23 @@ pub enum SessionStatus {
     HandedBack,
     /// Something broke. Also your move.
     Failed,
+    /// The machine under it restarted. The workspace is there; the agent is not.
+    ///
+    /// Not [`Failed`](Self::Failed), and the difference is four predicates
+    /// rather than a choice of words. `Failed.is_finished()` is true, which
+    /// tells the control plane a session holds nothing — and this one holds a
+    /// worktree, a branch and whatever the agent had already written.
+    /// `Db::live_session_ids_on` excludes `Failed`, so marking it that would
+    /// drop the session from the watch list every reconnect asks about, and a
+    /// session wrongly marked once is an agent nobody ever follows again. And
+    /// typing into a `Failed` session already restarts it — see
+    /// `api::conversation` — which for a machine that restarted under twelve
+    /// agents would be twelve agents restarted by a keystroke.
+    ///
+    /// The only way out is a restart somebody asked for. That is held here, in
+    /// the transition table, rather than in a comment asking people to
+    /// remember: see [`can_transition_to`](Self::can_transition_to).
+    Stranded,
     /// Branch shipped, workspace destroyed. Terminal.
     Ended,
 }
@@ -43,12 +60,18 @@ impl SessionStatus {
     ///
     /// `Ended` was cleaned up and `Failed` never got going — neither holds a
     /// workspace, an agent, or a claim on the host it was scheduled to.
+    /// `Stranded` is not among them, and that is the point of it: a stranded
+    /// session is still holding its workspace on a machine, which is why
+    /// removing that machine or that repository has to keep saying no.
     pub fn is_finished(&self) -> bool {
         matches!(self, Self::Ended | Self::Failed)
     }
 
     pub fn needs_you(&self) -> bool {
-        matches!(self, Self::NeedsYou | Self::HandedBack | Self::Failed)
+        matches!(
+            self,
+            Self::NeedsYou | Self::HandedBack | Self::Failed | Self::Stranded
+        )
     }
 
     /// Whether the agent is still doing something unattended.
@@ -70,6 +93,7 @@ impl SessionStatus {
             Self::NeedsYou => "Asked a question",
             Self::HandedBack => "Handed it back",
             Self::Failed => "Failed",
+            Self::Stranded => "Machine restarted",
             Self::Ended => "Ended",
         }
     }
@@ -85,12 +109,43 @@ impl SessionStatus {
             // Nothing escapes the terminal state.
             (Ended, _) => false,
 
+            // A machine that restarted leaves by a restart somebody pressed,
+            // or by being let go of. Nothing else, and deliberately above the
+            // arm below rather than after it:
+            //
+            // - not `Working`, because a stranded session cannot start working
+            //   again without passing through a start. That is what makes the
+            //   consent structural, and it is what stops a stale pre-crash
+            //   `StatusChanged { Working }` — replayed by the worker on its
+            //   next reconnect — from quietly un-stranding one. `Db::write_event`
+            //   holds the same rule in SQL, and holds one more that cannot be
+            //   written here: `Starting` is the doorway out, so only the
+            //   control plane itself may say it. This table knows which moves
+            //   exist and not who is asking for one.
+            // - not `Failed`, because a recovery that would not start has
+            //   changed nothing: the worktree, the branch and the uncommitted
+            //   edits are all still there. The reason goes in the note and the
+            //   state stays where it is.
+            // And staying where it is, which is not a move: a recovery that
+            // would not start writes its reason into the note and leaves the
+            // state alone. `Working -> Working` is the same idea, and is
+            // already here for the same reason.
+            (Stranded, Starting | Ended | Stranded) => true,
+            (Stranded, _) => false,
+
             // Anything can be ended or fail.
             (_, Ended) | (_, Failed) => true,
 
+            // The floor went while something was running. Proof, not a guess:
+            // the worker probed tmux and was told there is no session.
+            (Starting | Working | NeedsYou, Stranded) => true,
+
             // Booting. A session with a first prompt goes straight to work;
-            // one made without a task comes up idle instead.
-            (Starting, Working | Ready) => true,
+            // one made without a task comes up idle instead — and a recovered
+            // one reads its own history and may have nothing to answer, which
+            // is `HandedBack`. Not `Ready`: that means "has never been asked
+            // for anything", and this session has a conversation behind it.
+            (Starting, Working | Ready | HandedBack) => true,
             (Starting, _) => false,
 
             // Working either stops for you, or keeps going.
@@ -135,14 +190,18 @@ mod tests {
 
     #[test]
     fn ended_is_the_only_terminal_state() {
-        for s in [Starting, Working, NeedsYou, HandedBack, Failed, Ended] {
+        for s in [
+            Starting, Working, NeedsYou, HandedBack, Failed, Stranded, Ended,
+        ] {
             assert_eq!(s.is_terminal(), s == Ended, "{s:?}");
         }
     }
 
     #[test]
     fn nothing_escapes_ended() {
-        for s in [Starting, Working, NeedsYou, HandedBack, Failed, Ended] {
+        for s in [
+            Starting, Working, NeedsYou, HandedBack, Failed, Stranded, Ended,
+        ] {
             assert!(
                 !Ended.can_transition_to(s),
                 "Ended -> {s:?} must be refused"
@@ -163,16 +222,29 @@ mod tests {
         assert!(NeedsYou.needs_you());
         assert!(HandedBack.needs_you());
         assert!(Failed.needs_you());
+        // A machine that restarted is nobody's move but yours: nothing will
+        // happen to it until somebody presses.
+        assert!(Stranded.needs_you());
         assert!(!Working.needs_you());
         assert!(!Starting.needs_you());
         assert!(!Ended.needs_you());
     }
 
     #[test]
-    fn a_starting_session_cannot_skip_straight_to_resting() {
+    fn a_starting_session_cannot_skip_straight_to_being_asked() {
         assert!(!Starting.can_transition_to(NeedsYou));
-        assert!(!Starting.can_transition_to(HandedBack));
         assert!(Starting.can_transition_to(Working));
+    }
+
+    /// An agent brought back after its machine restarted starts with no
+    /// prompt — `relaunch` sends one deliberately empty — reads its own
+    /// history, and may have nothing to answer. It stops there, and the
+    /// honest resting state for that is `HandedBack`: `Ready` means "has
+    /// never been asked for anything", which is false of a session with a
+    /// conversation behind it.
+    #[test]
+    fn a_recovered_agent_may_come_back_with_nothing_to_say() {
+        assert!(Starting.can_transition_to(HandedBack));
     }
 
     #[test]
@@ -181,6 +253,45 @@ mod tests {
             assert!(s.can_transition_to(Failed), "{s:?} -> Failed");
             assert!(s.can_transition_to(Ended), "{s:?} -> Ended");
         }
+        // Except a stranded one, which cannot fail. A restart that would not
+        // take has changed nothing about the workspace, so the reason belongs
+        // in the note and the state belongs where it is — otherwise one failed
+        // attempt moves the session into a state that says it holds nothing
+        // and that a keystroke may restart.
+        assert!(!Stranded.can_transition_to(Failed));
+        assert!(Stranded.can_transition_to(Ended));
+    }
+
+    /// The only entry, and the only way out.
+    #[test]
+    fn a_stranded_session_leaves_only_by_a_restart_somebody_asked_for() {
+        for s in [Starting, Working, NeedsYou] {
+            assert!(s.can_transition_to(Stranded), "{s:?} -> Stranded");
+        }
+        // Resting states are left where they are. A session that had already
+        // handed back and whose machine then restarted still reads "handed it
+        // back", which is true of the work — and stranding every resting
+        // session on a machine the moment its worker reconnects would rewrite
+        // weeks of finished conversations into an alarm.
+        for s in [HandedBack, Ready, Failed, Ended] {
+            assert!(!s.can_transition_to(Stranded), "{s:?} -> Stranded");
+        }
+
+        assert!(
+            Stranded.can_transition_to(Starting),
+            "the recovery, which is the one thing anybody can press"
+        );
+        assert!(
+            !Stranded.can_transition_to(Working),
+            "a replayed pre-crash event must not put it back to work"
+        );
+        assert!(
+            Stranded.can_transition_to(Stranded),
+            "and it can be said again, which is how a refused recovery writes down why"
+        );
+        assert!(!Stranded.can_transition_to(NeedsYou));
+        assert!(!Stranded.can_transition_to(HandedBack));
+        assert!(!Stranded.can_transition_to(Ready));
     }
 
     #[test]
@@ -192,7 +303,9 @@ mod tests {
 
     #[test]
     fn in_flight_and_needs_you_are_disjoint() {
-        for s in [Starting, Working, NeedsYou, HandedBack, Failed, Ended] {
+        for s in [
+            Starting, Working, NeedsYou, HandedBack, Failed, Stranded, Ended,
+        ] {
             assert!(!(s.in_flight() && s.needs_you()), "{s:?} cannot be both");
         }
     }
@@ -214,6 +327,10 @@ mod finished_tests {
             SessionStatus::Working,
             SessionStatus::NeedsYou,
             SessionStatus::HandedBack,
+            // The one that must never be folded into `Failed`. It is holding
+            // a worktree, a branch and edits the agent had already written, so
+            // the host and the repository under it cannot be removed.
+            SessionStatus::Stranded,
         ] {
             assert!(!still_going.is_finished(), "{still_going:?}");
         }

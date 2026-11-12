@@ -797,8 +797,35 @@ pub(super) async fn send_turn(
     // so this cannot fire for a session that is merely busy. And only once: the
     // relaunch either works or leaves the same state behind, and the next
     // message is somebody deciding to try again rather than a loop.
+    // Nothing is listening, and saying so is the whole of the fix.
+    //
+    // This answered 200 `{"sent":true}` and the text appeared in the
+    // transcript as a user bubble, read by nobody — there is no agent. The
+    // desktop cannot reach it, because the composer is replaced by the
+    // recovery card, but the phone has the label and the beat and no gate, so
+    // on a phone it is reachable by typing. The refusal belongs here for the
+    // reason the account switch's does: a rule held in one interface is a rule
+    // the next surface has not been told about.
+    if session.status == ft_core::SessionStatus::Stranded {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            "that machine restarted under this agent. Bring it back first, and then say this.",
+        ));
+    }
+
     if session.status == ft_core::SessionStatus::Failed {
-        crate::api::sessions::relaunch(&state, &session, &who).await?;
+        // `Recovering::No`, and the gate above is why it can be: this fires
+        // for `Failed` and for nothing else. A machine that restarted leaves
+        // `Stranded`, which typing into deliberately does not restart — twelve
+        // agents coming back because somebody pressed a key in one of them is
+        // the thing this feature exists to not do.
+        crate::api::sessions::relaunch(
+            &state,
+            &session,
+            &who,
+            crate::api::sessions::Recovering::No,
+        )
+        .await?;
         // Long enough for the supervisor to bind its socket, which is all this
         // is waiting for — the agent behind it can still be starting, because
         // what we send lands on a pipe it will read when it is ready. If it is

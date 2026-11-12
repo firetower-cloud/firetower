@@ -1466,6 +1466,21 @@ pub struct Fleet {
     /// In memory, like `typed` above and for the same reason — a thing in
     /// flight rather than a thing to keep.
     delivering: Arc<RwLock<HashMap<String, Held>>>,
+    /// Sessions a start is in flight for, so there is never a second one.
+    ///
+    /// The worker's launch takes the tmux session named for a session id, so
+    /// two starts racing is not two agents — it is the second one tearing
+    /// down the first while it is still coming up, and a workspace left with
+    /// whichever won. A press, a double click, a retry after a slow first and
+    /// two people in the same conversation all produce it.
+    ///
+    /// In memory rather than on the row: it is a thing in flight, and a
+    /// control plane that restarts mid-launch should not inherit a claim
+    /// nothing will ever release. A plain mutex rather than the async one
+    /// beside it, because nothing here waits while holding it — and because
+    /// that is what lets the claim be released by `Drop` instead of by every
+    /// caller remembering to.
+    starting: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
 }
 
 /// One child's result, on its way to a lead and not yet accounted for.
@@ -1478,6 +1493,57 @@ struct Held {
     /// re-queue one that had already arrived.
     host: HostId,
     body: String,
+}
+
+/// Whether a start is the recovery somebody pressed.
+///
+/// `Stranded` exists to hold one decision — **nothing restarts an agent unless
+/// a person asked** — and this is how a caller proves it is the exception.
+/// Only `api::sessions`' recovery endpoint answers [`Recovering::Yes`], and
+/// only an authenticated request reaches it, so the rule is a property of the
+/// call rather than something every call site has to remember.
+///
+/// Checked in [`Fleet::start_agent`], which is the one place a launch happens.
+/// It was checked at an entry point instead, and the ways in multiplied: a
+/// lead rerouting a child's subscription reaches a launch through `children` →
+/// `reroute` → `switch_for` → `continue_with_account`, and stopping an agent
+/// that is already absent *succeeds* — so that path would have started a
+/// stranded child with no person anywhere in it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Recovering {
+    /// Somebody pressed the recovery on this session, or on the lead it
+    /// belongs to.
+    Yes,
+    /// Anything else: an upgrade restarting an agent, a subscription change,
+    /// a second agent in a workspace, a message typed into a failed session.
+    No,
+}
+
+/// The right to start one session's agent, held for as long as it is starting.
+///
+/// See [`Fleet::claim_start`]. Nothing can be done with it; holding it is the
+/// whole of what it is for, and dropping it is what gives it back.
+pub struct Starting {
+    starting: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
+    session_id: String,
+}
+
+impl Starting {
+    /// Whether this claim is the one for that session.
+    ///
+    /// Asked by the launch, so a claim cannot be taken for one session and
+    /// spent on another by a caller that mixed two of them up.
+    fn is_for(&self, session_id: &SessionId) -> bool {
+        self.session_id == session_id.as_str()
+    }
+}
+
+impl Drop for Starting {
+    fn drop(&mut self) {
+        if let Ok(mut held) = self.starting.lock() {
+            held.remove(&self.session_id);
+        }
+    }
 }
 
 /// A word to a supervisor between attempts.
@@ -1542,6 +1608,7 @@ impl Fleet {
             vault: None,
             delegate: Arc::new(RwLock::new(None)),
             delivering: Arc::new(RwLock::new(HashMap::new())),
+            starting: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
         }
     }
 
@@ -1597,6 +1664,62 @@ impl Fleet {
                 tracing::warn!(session = %session_id, "refusing a delegation call: {e:#}");
             }
         }
+    }
+
+    /// The right to start this session's agent: that nothing else is starting
+    /// it, and that it is allowed to be started at all.
+    ///
+    /// **Both answers are one function, and [`Fleet::start_agent`] will not
+    /// run without what it returns.** That is the whole design: a check beside
+    /// a launch is a check the next call site forgets, and there are already
+    /// three ways in — a relaunch, a second agent in a workspace, and a
+    /// cross-engine continuation. A launch that cannot be called without this
+    /// token cannot skip what this token proves.
+    ///
+    /// *Nothing else is starting it*, tested and taken under one lock, which
+    /// is what makes it a claim rather than a check: two requests arriving
+    /// together both read "not starting" if the read and the insert are
+    /// separate statements. The worker's launch takes the tmux session named
+    /// for a session id, so the second of two would tear down the first while
+    /// it was still coming up.
+    ///
+    /// *And it may be started*: the status is read **here, now**, from the
+    /// row. Not from the `Session` the caller is holding, which was true when
+    /// it was fetched and can be false by the time it is used — a switch that
+    /// began while a machine was up and finished after the worker reported it
+    /// gone is the ordinary way to produce that gap. And not after the caller
+    /// has written `Starting` either, which is what made an earlier version of
+    /// this check dead code: a relaunch marks the session starting *before* it
+    /// launches, so by then the row no longer says what it has to be asked.
+    ///
+    /// The claim is released when the token is dropped — including by the `?`
+    /// in the middle of a launch, and including by a panic. A claim that
+    /// leaked would be a session nothing could ever start again.
+    pub async fn claim_start(
+        &self,
+        session_id: &SessionId,
+        recovering: Recovering,
+    ) -> Result<Starting> {
+        let claim = {
+            let mut held = self
+                .starting
+                .lock()
+                .map_err(|_| anyhow::anyhow!("the starting claims are poisoned"))?;
+            held.insert(session_id.to_string()).then(|| Starting {
+                starting: self.starting.clone(),
+                session_id: session_id.to_string(),
+            })
+        };
+        let claim = claim.context("it is already starting")?;
+
+        if recovering == Recovering::No {
+            let now = self.db.session_status(session_id).await.ok().flatten();
+            anyhow::ensure!(
+                now != Some(SessionStatus::Stranded),
+                "that machine restarted under this agent. Bring it back first, and then this."
+            );
+        }
+        Ok(claim)
     }
 
     /// A child handed back: tell its lead, between the lead's turns.
@@ -2729,8 +2852,8 @@ impl Fleet {
                                 ).await;
                             }
                         }
-                        Ok(ToServer::AgentClosed { session_id }) => {
-                            replying.agent_closed(&session_id).await;
+                        Ok(ToServer::AgentClosed { session_id, gone }) => {
+                            replying.agent_closed(&session_id, gone).await;
                         }
                         Ok(ToServer::AgentUnwatched { session_id }) => {
                             // The agent is still there. So what it is blocked
@@ -3648,13 +3771,32 @@ impl Fleet {
         Ok(())
     }
 
-    /// One message for the agent, in whatever shape that agent takes.
+    /// Start an agent for a session, which is the one place any of them start.
     ///
-    /// Takes what somebody typed rather than a finished frame: which protocol
-    /// a session speaks is this object's business, and a caller that built the
-    /// message itself would have to know too.
-    pub async fn start_agent(&self, host: &HostId, spec: ft_proto::StartAgent) -> Result<()> {
+    /// **Two rules are held here rather than at the ways in**, because the
+    /// ways in are not one and the next one somebody adds will not know about
+    /// them. A relaunch, a second agent in a workspace and a cross-engine
+    /// continuation all arrive here, and `api::sessions` had the check on the
+    /// first of the three.
+    ///
+    /// It cannot be called without a [`Starting`] claim, and
+    /// [`Fleet::claim_start`] is the only thing that makes one: that is where
+    /// *nothing restarts an agent unless a person asked* and *never two starts
+    /// of one session* are both decided. The worker holds the stronger half of
+    /// the second, which survives a control plane that restarts — see
+    /// `agentd::hold`.
+    pub async fn start_agent(
+        &self,
+        host: &HostId,
+        spec: ft_proto::StartAgent,
+        claim: &Starting,
+    ) -> Result<()> {
         let id = spec.session_id.clone();
+        anyhow::ensure!(
+            claim.is_for(&id),
+            "a launch claim belongs to one session, and this is not it"
+        );
+
         self.run_action(
             host,
             &id,
@@ -3738,7 +3880,16 @@ impl Fleet {
 
     /// A real process exit is different from losing its watcher. Persist a
     /// terminal status so historical permissions cannot survive this boundary.
-    async fn agent_closed(&self, session_id: &SessionId) {
+    ///
+    /// `gone` decides which status, and nothing else about this changes with
+    /// it: the questions are void either way, a child's unread result goes
+    /// back on its queue either way, and the progress entry — `in_turn` and
+    /// all — is dropped either way. That last one matters for a machine that
+    /// restarted: a lead that died mid-turn leaves `in_turn` true behind it,
+    /// and `drain_deliveries` refuses a lead that is mid-turn, so without this
+    /// cleanup a recovered lead would never be handed what its children
+    /// finished while it was down.
+    async fn agent_closed(&self, session_id: &SessionId, gone: ft_proto::Gone) {
         // Share the replay publication lock until the terminal status is durable.
         let mut readers = self.progress.write().await;
         self.asked.write().await.remove(session_id.as_str());
@@ -3765,7 +3916,25 @@ impl Fleet {
                 )
             })
         {
-            announce_status(&self.db, &self.events, session_id, SessionStatus::Failed, Some("The agent process exited. Restart it to continue; pending permissions were cancelled.")).await;
+            let (status, note) = match gone {
+                // Its process ended. Which may be a crash, a `/exit`, or an
+                // upgrade recreating the container under it — all of them
+                // things that happened to the agent.
+                ft_proto::Gone::Exited => (
+                    SessionStatus::Failed,
+                    "The agent exited. Any permission questions were cancelled.",
+                ),
+                // Nothing happened to the agent. The floor went: tmux is its
+                // parent, and the worker found no tmux session to ask about.
+                // `Stranded` rather than `Failed` because the workspace, the
+                // branch and whatever was already written are all still on the
+                // machine — see `SessionStatus::Stranded`.
+                ft_proto::Gone::Stranded => (
+                    SessionStatus::Stranded,
+                    "The machine restarted. The workspace is still there.",
+                ),
+            };
+            announce_status(&self.db, &self.events, session_id, status, Some(note)).await;
         }
         drop(readers);
         // Whatever a child handed back and this agent was given on the way out
@@ -5341,6 +5510,63 @@ mod tests {
         );
     }
 
+    /// Criterion 7: a lead that died mid-turn still drains.
+    ///
+    /// `in_turn` is set from the agent's own output and cleared by the line
+    /// that ends the turn — a line that never came, because the machine went
+    /// down in the middle of it. The control plane does not restart with the
+    /// machine, so it is still holding that `true` when the worker reconnects,
+    /// and `drain_deliveries` refuses a lead that is mid-turn. The cleanup in
+    /// `agent_closed` is what clears it, which is why stranding is routed
+    /// through there rather than through a path of its own.
+    #[tokio::test]
+    async fn a_lead_that_went_down_mid_turn_is_still_handed_what_its_team_finished() {
+        let mut it = lead_with_a_worker().await;
+
+        // Mid-turn, as the reader would have left it.
+        it.fleet.ensure_reader(&it.lead).await;
+        it.fleet
+            .progress
+            .write()
+            .await
+            .get_mut(it.lead.as_str())
+            .expect("the reader is there")
+            .in_turn = true;
+
+        it.fleet
+            .db
+            .queue_delivery(&it.lead, None, "what the child found")
+            .await
+            .unwrap();
+        it.fleet.drain_deliveries(&it.lead).await;
+        assert!(
+            it.turns_sent().is_empty(),
+            "a lead in the middle of a turn is told when the turn ends"
+        );
+
+        // The machine restarted, and the worker said so.
+        it.fleet
+            .agent_closed(&it.lead, ft_proto::Gone::Stranded)
+            .await;
+        assert_eq!(
+            it.fleet.db.session_status(&it.lead).await.unwrap(),
+            Some(SessionStatus::Stranded)
+        );
+        // Whatever was in flight to it went back on the queue, and the turn it
+        // was in the middle of went with its process.
+        assert_eq!(it.waiting().await, ["what the child found"]);
+        it.fleet
+            .db
+            .queue_delivery(&it.lead, None, "what the child found")
+            .await
+            .unwrap();
+
+        it.fleet.drain_deliveries(&it.lead).await;
+        let sent = it.turns_sent();
+        assert_eq!(sent.len(), 1, "the stale turn no longer blocks it");
+        assert!(sent[0].contains("what the child found"), "{sent:?}");
+    }
+
     /// And if the first never arrives, both are still accounted for.
     #[tokio::test]
     async fn a_failure_while_a_second_result_waits_loses_neither() {
@@ -5545,7 +5771,9 @@ mod tests {
         it.fleet.drain_deliveries(&it.lead).await;
         assert_eq!(it.turns_sent().len(), 1);
 
-        it.fleet.agent_closed(&it.lead).await;
+        it.fleet
+            .agent_closed(&it.lead, ft_proto::Gone::Exited)
+            .await;
 
         assert_eq!(
             it.waiting().await,
@@ -5817,7 +6045,9 @@ mod tests {
             "the original permission must remain answerable after restart"
         );
 
-        restarted.agent_closed(&session).await;
+        restarted
+            .agent_closed(&session, ft_proto::Gone::Exited)
+            .await;
         let after_exit = Fleet::new(db.clone());
         assert!(after_exit.asked(&session).await.is_empty(), "a real process exit must invalidate historical permissions across another server restart");
         db.record_local_event(

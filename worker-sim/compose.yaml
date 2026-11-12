@@ -1,0 +1,128 @@
+# A Firetower worker on a Linux machine you can pull the plug on.
+#
+# Three services: Postgres, a control plane, and a machine with an sshd on it
+# that the control plane reaches the way it reaches any other — over ssh, with
+# the key it made for itself. `run.sh` is the only thing meant to drive this
+# file; it hardcodes the project name and every container it acts on.
+#
+# **The project name is `ft-worker-sim`, and that matters.** A Compose project
+# name is the namespace for containers, networks *and* volumes, so sharing one
+# is how two unrelated stacks come to own each other's database — the warning at
+# the top of the repository's own `compose.yaml` is worth reading before
+# changing this line. `firetower` is the deployment's and `firetower-dev` is the
+# dev stack's; this is neither, and nothing here may resolve to either of them.
+# `run.sh` passes `-p ft-worker-sim` on every call rather than relying on this
+# line, and unsets `COMPOSE_PROJECT_NAME` so the environment cannot redirect it.
+name: ft-worker-sim
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: firetower
+      POSTGRES_PASSWORD: firetower
+      POSTGRES_DB: firetower
+    # Deliberately not published. Nothing outside this network needs it, and a
+    # published port is the one thing here that could collide with another
+    # session on this machine. `run.sh psql` is the way in.
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U firetower -d firetower"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    labels:
+      # So Firetower clears this up when the session that started it ends. The
+      # project name is fixed, so nothing else would.
+      com.firetower.session: "${FIRETOWER_SESSION:-}"
+
+  control:
+    # The development image, because it is already everything the control plane
+    # shells out to — ssh to reach a machine, git, and a Rust toolchain to
+    # build both halves of this from the checkout you are testing.
+    build:
+      context: ..
+      dockerfile: Dockerfile.development
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://firetower:firetower@postgres:5432/firetower
+      FIRETOWER_HOME: /home/firetower
+      FIRETOWER_BIND: 0.0.0.0
+      FIRETOWER_PORT: 4400
+      # So a browser can be the client.
+      #
+      # The desktop app is where a workspace, a conversation and the recovery
+      # card live — the web page this control plane serves is the installation
+      # as an institution and deliberately has no sessions on it. Run the
+      # desktop app from `pnpm --dir desktop dev` and it is an ordinary page on
+      # another port, which makes every call cross-origin; in production it is
+      # Tauri and the allowlist is three `tauri://` origins. Development mode
+      # is what opens that, exactly as `just dev` does for the web app.
+      FIRETOWER_DEV: "true"
+      # Deterministic, so `run.sh` can sign in without reading a password out
+      # of the log. It is a working credential, which is why the port below is
+      # bound to loopback and nowhere else.
+      #
+      # An account seeded this way is marked as needing a new password and
+      # every endpoint refuses until it has one, so `run.sh up` replaces it on
+      # the first run with the one the documentation advertises:
+      # worker-sim-admin.
+      ADMIN_USERNAME: admin
+      ADMIN_INITIAL_PASSWORD: worker-sim-initial
+      # Keeps the vault's key — and so the ssh identity the machine authorises —
+      # across a rebuild of this container.
+      FIRETOWER_ROOT_KEY: "${SIM_ROOT_KEY:-}"
+    volumes:
+      # What the control plane is built from. `..` is the checkout this file
+      # lives in; `SIM_REPO` points it at another one, which is how a commit
+      # is tested rather than somebody's editor — see `run.sh`'s banner.
+      - ${SIM_REPO:-..}:/workspace
+      - cargo:/cargo
+      - target:/target
+      - home:/home/firetower
+    ports:
+      # **Loopback, explicitly.** A published port with no host address binds
+      # 0.0.0.0, and this control plane has an administrator whose password is
+      # written in `run.sh` — so without the `127.0.0.1` this is a known
+      # credential on an admin API offered to every machine on the network,
+      # from a host that is often somebody's live worker. It said it was
+      # reachable from this machine only; it was not, until this line.
+      #
+      # 14400 rather than 4400: the dev stack and a real deployment both want
+      # 4400, and this has to be able to run beside either. Override with
+      # SIM_API_PORT if something already has it.
+      - "127.0.0.1:${SIM_API_PORT:-14400}:4400"
+    command: cargo run -p ft-cli -- serve
+    labels:
+      com.firetower.session: "${FIRETOWER_SESSION:-}"
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # The whole point of the harness: `docker kill` is a power cut and
+    # `docker start` is the reboot. What survives a restart is what survives a
+    # reboot on a real machine — the home directory, and nothing else.
+    tmpfs:
+      # tmux keeps its socket here and the agent supervisor keeps its own, so
+      # clearing it is part of what makes a restart a reboot rather than a
+      # process restart. On a real Linux host systemd does the same thing.
+      - /tmp
+    volumes:
+      # This machine's ssh identity, made on its first start rather than baked
+      # into the image — where it would be a private key shared by every
+      # container built from it. On a volume so that stopping and starting the
+      # container is the same machine, which is what a reboot is.
+      - sshd:/etc/ssh/keys
+    labels:
+      com.firetower.session: "${FIRETOWER_SESSION:-}"
+
+volumes:
+  postgres:
+  cargo:
+  target:
+  home:
+  sshd:

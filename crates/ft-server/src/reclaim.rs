@@ -15,10 +15,13 @@
 //! was not running — which is also what clears the backlog that built up
 //! before any of this existed.
 //!
-//! **There is no grace period.** A workspace that ends is reclaimed within the
-//! minute, and its conversation goes with it. That is a deliberate decision
-//! taken while the growth was the urgent problem; retention is a later feature
-//! and belongs here, as one predicate in `workspaces_to_purge`.
+//! **The conversation outlives the work by a week.** It did not: a workspace
+//! that ended was reclaimed within the minute and its conversation went with
+//! it, which is the record of what happened deleted in both places at once,
+//! since the transcript on the machine goes with the worktree. That window is
+//! `db::TRANSCRIPT_RETENTION`, and it is one predicate in
+//! `workspaces_to_purge` — where this module always said it belonged — so
+//! there is still nothing here that decides what is rubbish.
 
 use crate::AppState;
 use std::time::Duration;

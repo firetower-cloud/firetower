@@ -14,7 +14,10 @@ export const TONE: Record<SessionStatus, string> = Object.fromEntries(
 
 export function Signal({ status, size = 8 }: { status: SessionStatus; size?: number }) {
   const tone = TONE[status];
-  const hollow = status === "Ended" || status === "Starting" || status === "Ready";
+  /* Hollow, because hollow already means nothing is running here — and the
+     agent is the thing that is gone. */
+  const hollow =
+    status === "Ended" || status === "Starting" || status === "Ready" || status === "Stranded";
 
   return (
     <span

@@ -36,6 +36,7 @@ import {
   Loader2,
   Pencil,
   RotateCcw,
+  CircleSlash2,
   Search,
   Send,
   Diamond,
@@ -46,7 +47,7 @@ import {
 } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { HostMark, Icon } from "~/components/ui";
-import { useHostOf, useMachineGone } from "~/data";
+import { useHostOf, useHosts, useMachineGone } from "~/data";
 import { Markdown } from "~/components/Markdown";
 import { editFrom } from "~/components/EditCard";
 import { stepLines } from "~/components/Steps";
@@ -123,6 +124,7 @@ type Open = { onOpenDiff: () => void; onOpenFile: (path: string, keep?: boolean,
 export function Chat({
   session,
   lead = null,
+  team = [],
   branch,
   onOpenDiff,
   onOpenFile,
@@ -132,6 +134,16 @@ export function Chat({
   session: Session;
   /** The session that asked for this one, when one did and it is still listed. */
   lead?: Session | null;
+  /**
+   * The agents this one started.
+   *
+   * Here for one reason: a machine that restarts takes a whole family with
+   * it, and a lead brought back without its team reads its history, finds it
+   * delegated the work, and waits for reports nobody is writing. The card in
+   * the dock has to be able to say how many stopped and offer to bring them
+   * all back.
+   */
+  team?: Session[];
   branch?: string;
   artifacts?: ArtifactModel[];
   onOpenArtifact?: (id: string, title: string) => void;
@@ -221,6 +233,23 @@ export function Chat({
      not exist. */
   const gone = useMachineGone(session.hostId);
   const answerable = session.status !== "Ended" && !gone;
+  const recovery = useMemo(() => recoveryFor(session, team), [session, team]);
+  const fleet = useHosts();
+  const machine = fleet.data.find((h) => h.id === session.hostId)?.name;
+  /* The last thing the agent started and never reported finishing.
+   *
+   * It is the one row of what-a-crash-costs worth drawing: everything else is
+   * either safe (the workspace, the branch, this conversation) or obviously
+   * gone (the process). Whether a half-written edit landed is neither — there
+   * is no line saying it did, so the file on disk is the only answer, and
+   * nothing on this screen says so unless this does. */
+  /* What the last press of *Bring it back* did, kept here because the card
+     that made it is gone the moment the session starts. */
+  const [broughtBack, setBroughtBack] = useState<string | null>(null);
+  const unfinished = useMemo(
+    () => [...items].reverse().find((i) => i.status === undefined && DID[i.kind] !== undefined),
+    [items],
+  );
   /* Repositories being checked in, started from the toolbar's panel. Drawn
      here because this is where what happened to a workspace is written down. */
   const runs = useCheckouts(session.id);
@@ -494,7 +523,15 @@ export function Chat({
 
           {items.length === 0 && !working && steps.every((s) => s.state === "done") && (
             <p className="mt-10 text-read text-mute">
-              {conversation.trouble ?? "Nothing said yet. The agent is here and waiting for you."}
+              {/* "The agent is here" is the one thing that is not true of a
+                  session whose machine restarted, and this drew it under the
+                  card offering to bring the agent back. The same species of
+                  bug as the one this screen exists to fix: an interface
+                  asserting something about a session that is not so. */}
+              {conversation.trouble ??
+                (recovery
+                  ? "Nothing was said before the machine restarted."
+                  : "Nothing said yet. The agent is here and waiting for you.")}
             </p>
           )}
 
@@ -545,11 +582,40 @@ export function Chat({
           ))}
 
           {working && <Working heardAt={conversation.heardAt} items={items} delegates={running} inTurn={conversation.inTurn === true} />}
-          {stopped && <Stopped why={stopped} />}
+          {/* Not while a recovery card is up. The agent *was* stopped before
+              its turn finished, so the sentence is true — but the seam says it
+              in the right colour and the card says what to do about it, and
+              brick means *it broke* when nothing broke. Three statements of
+              one fact, one of them in the wrong tone. */}
+          {stopped && !recovery && <Stopped why={stopped} />}
           {/* The card that explains the whole state, and offers nothing.
               Instead of `Relaunch`, not beside it: starting again is the one
               thing that cannot happen here. */}
           {gone ? <MachineRemoved /> : session.status === "Failed" && <Relaunch session={session} />}
+          {/* Where *this* conversation was cut off. Not a card wrapped round
+              the turn above it: those words are genuinely what the agent wrote
+              and they should read as prose. This is the join, drawn as a join.
+              Two things have to be true of it. A join needs something on both
+              sides, so a session that said nothing before its machine went
+              gets the line above instead of a seam across nothing. And the
+              conversation has to be the one that was cut: a lead that handed
+              back before the machine went has a turn that *completed*, and
+              drawing a seam across it was the same untruth as the three this
+              screen just stopped telling — its team stopped, which is what the
+              card below says. */}
+          {!gone && cutOffHere(recovery, items.length > 0) && (
+            <Seam machine={machine} at={session.updatedAt} unfinished={unfinished} />
+          )}
+          {/* And what a press did, once it has. The card is in the composer's
+              place and goes the moment the session starts, so the answer to
+              the one question it cannot answer in advance — how many of a
+              family actually came back — belongs in the conversation. */}
+          {broughtBack && (
+            <p className="mt-6 flex items-center gap-2.5 text-ui text-dim">
+              <RotateCcw className="h-3.5 w-3.5 shrink-0 text-mute" strokeWidth={1.75} />
+              {broughtBack}
+            </p>
+          )}
 
           {questions.map((q) => (
             <Questions key={q.req} sessionId={session.id} asking={q} onAnswered={() => settle(q.req)} />
@@ -621,7 +687,23 @@ export function Chat({
           not send the field at all, and reading its absence as "you may only
           watch" would take the composer away from everybody on it — which it
           promptly did, to the owner of the workspace. */}
-      {mayAct ? (
+      {mayAct && !gone && recovery ? (
+        /* In the composer's place, not above it.
+           The composer's promise is that something will read this, and nothing
+           will: the agent is gone. A disabled box beside a card explaining why
+           is two objects saying one thing — and this is the same argument
+           `Watching` below already settled for a viewer. The dock is the most
+           valuable space on the screen, and the thing that belongs in it is
+           the thing that brings the agent back. */
+        <Recover
+          session={session}
+          team={recovery.team}
+          notYours={recovery.notYours}
+          itself={recovery.itself}
+          spoke={items.length > 0}
+          onDone={setBroughtBack}
+        />
+      ) : mayAct ? (
         <AccountSwitcher session={session} working={working}>
           <Composer
             session={session}
@@ -1447,20 +1529,268 @@ function Stopped({ why }: { why: string }) {
   );
 }
 
+/**
+ * Whether a machine restarting left this conversation needing a way back, and
+ * what a press would have to cover.
+ *
+ * Two shapes, and the second is the one that is easy to miss. This agent may
+ * be the one that stopped — `Stranded` — or it may have handed back before the
+ * machine went, in which case its own status is honest and the agents it
+ * delegated to are the ones that are gone. The second still needs the
+ * affordance: it is waiting for a report that is never coming, and `Chat` drew
+ * nothing at all for it.
+ *
+ * Pure, and exported, because the question is worth a test of its own: the
+ * cost of getting it wrong is a conversation with no way out of it, which is
+ * the bug this whole change is about.
+ */
+export function recoveryFor(
+  session: Session,
+  team: Session[],
+): { itself: boolean; team: Session[]; notYours: number } | null {
+  const stopped = team.filter((t) => t.status === "Stranded");
+  /* What this person may actually start, and what they may not.
+   *
+   * A workspace can be shared while the agents inside it are not, and a child
+   * runs on the subscription its own owner pinned to it — so a button that
+   * counted every stranded child would promise to spend somebody else's
+   * credit. The server refuses those and says how many it left; this is the
+   * same question asked early, so the number on the button is the number that
+   * will happen. `!== false` because a control plane older than this app sends
+   * neither field, and reading their absence as "not yours" would take the
+   * recovery away from the person whose work it is. */
+  const mine = stopped.filter((t) => t.mayWrite !== false);
+  const found = {
+    team: mine,
+    notYours: stopped.length - mine.length,
+  };
+  if (session.status === "Stranded") return { itself: true, ...found };
+  /* Only `HandedBack`. A lead that is `Working` is either working or waiting
+     on its children, and `Working` with a team that stopped is a lead whose
+     own agent is still there — it finds out the ordinary way, by being told
+     what became of them. */
+  if (session.status === "HandedBack" && stopped.length > 0) {
+    return { itself: false, ...found };
+  }
+  return null;
+}
+
+/**
+ * Whether a seam belongs in this conversation.
+ *
+ * Two things have to be true and each was wrong once. There has to be
+ * something on both sides of the join — a session that said nothing before
+ * its machine went gets a sentence, not a line across nothing. And the
+ * conversation has to be the one that was cut: a lead that handed back
+ * *before* the machine went has a final turn that completed, and drawing
+ * "cut off" over it was the same untruth as the three this screen stopped
+ * telling. Its team stopped; the card says so; the seam must not say
+ * otherwise a line above it.
+ */
+export const cutOffHere = (
+  recovery: { itself: boolean } | null,
+  saidAnything: boolean,
+): boolean => !!recovery?.itself && saidAnything;
+
+/**
+ * Where the transcript stops mid-sentence.
+ *
+ * One line, and it says the thing nobody can work out by looking: the last
+ * tool call started and nothing records whether it finished. The agent's log
+ * is flushed as it goes, so everything above is real — there is simply no line
+ * saying the write landed, which makes the file on disk the only answer.
+ */
+export function Seam({
+  machine,
+  at,
+  unfinished,
+}: {
+  /** The machine that restarted, when the fleet has said what it is called. */
+  machine?: string;
+  /** When this session was found stranded. */
+  at?: string;
+  /** The last thing the agent started and never reported finishing. */
+  unfinished?: Item;
+}) {
+  return (
+    <>
+      <div className="mt-6 flex items-center gap-3">
+        <span className="h-px flex-1 bg-amber-deep/50" />
+        <span className="text-meta text-amber">
+          cut off — {machine ?? "the machine"} restarted{at ? ` ${clock(at)}` : ""}
+        </span>
+        <span className="h-px flex-1 bg-amber-deep/50" />
+      </div>
+      {/* The sentence that makes the line above mean something. Everything a
+          crash costs is either plainly safe or plainly gone, except this: a
+          tool call that started and has no line saying it ended. Nothing else
+          on the screen says that the file on disk is now the only answer. */}
+      {unfinished && (
+        <p className="mt-2.5 text-meta text-mute">
+          <span className="font-mono text-code text-dim">{said(unfinished)}</span> was in flight.
+          Nothing records whether it finished.
+        </p>
+      )}
+    </>
+  );
+}
+
+/** A time of day, for a thing that happened today or yesterday. */
+function clock(iso: string): string {
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return "";
+  return at.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+}
+
+/**
+ * What stands in the composer's place when the machine under the work
+ * restarted.
+ *
+ * **The body is the promise the feature is judged against**, and it is the
+ * whole body: it comes back having read the conversation, and the turn it was
+ * cut off in is not finished for free. It deliberately does not say *resume*,
+ * *pick up where it left off* or *continue* — all three are true of the
+ * conversation and false of the work, and that gap is the thing a person gets
+ * wrong here.
+ *
+ * **The family is the default.** A lead that comes back alone finds it
+ * delegated the work and waits for reports nobody is writing, so the primary
+ * action brings the team back too — team first, lead last, which is the
+ * server's to order — with *this agent only* beside it for whoever wants just
+ * the one.
+ */
+export function Recover({
+  session,
+  team,
+  notYours = 0,
+  itself,
+  spoke = true,
+  onDone,
+}: {
+  session: Session;
+  /** Its agents that stopped with it, and that this person may start. */
+  team: Session[];
+  /** How many more stopped that are somebody else's to bring back. */
+  notYours?: number;
+  /** Whether this agent is one of the stopped ones, or is waiting on them. */
+  itself: boolean;
+  /** Whether there is a conversation above this to come back to. */
+  spoke?: boolean;
+  /** Told what a press did, because this card is gone by the time it lands. */
+  onDone?: (said: string) => void;
+}) {
+  const cache = useQueryClient();
+  const relaunch = useRelaunchSession();
+  const fleet = useHosts();
+  const machine = fleet.data.find((h) => h.id === session.hostId)?.name;
+  /* Everything a press would start, which always includes this agent: a lead
+     that handed back before its machine went has no agent either — that is why
+     it is being offered a way back — and it has to be there to read what its
+     team finished. */
+  const all = team.length + 1;
+  /* The note is the durable half and the error is the immediate one, and they
+     say the same thing when both are there. */
+  const refusal = session.note?.startsWith("Didn’t restart:")
+    ? session.note
+    : relaunch.error
+      ? why(relaunch.error)
+      : null;
+  const bring = (family: boolean) =>
+    relaunch.mutate(
+      { id: session.id, params: family ? { family: true } : undefined },
+      {
+        onSuccess: (done) => {
+          cache.invalidateQueries({ queryKey: getGetSessionQueryKey(session.id) });
+          // What the press actually did. The server counts it precisely —
+          // "3 starting again. 1 isn't yours to start." — for exactly this,
+          // and throwing it away left the one case where the button delivers
+          // less than it offered with nothing on screen to say so. Held by
+          // the conversation rather than by this card, which goes the moment
+          // the session starts.
+          onDone?.(done.detail);
+        },
+      },
+    );
+
+  return (
+    /* The composer's own slot and the composer's own measure, so what is in
+       the dock is the same shape whichever of the two it is. */
+    <div className="shrink-0 px-8 pb-6">
+      <div className="mx-auto w-full max-w-[46rem] rounded-2xl border border-amber-deep/60 bg-panel px-5 py-4 shadow-(--shadow-float)">
+        <div className="flex items-center gap-2.5">
+          <CircleSlash2 className="h-4 w-4 shrink-0 text-amber" strokeWidth={1.75} />
+          <p className="text-ui font-mid text-text">
+            {itself ? "Stopped when" : "Its team stopped when"} {machine ?? "the machine"} restarted
+          </p>
+        </div>
+        <p className="mt-2 text-meta text-dim">
+          {/* The promise has to be true of *this* session. A workspace whose
+              machine went before the agent said a word has no conversation to
+              come back having read, and saying it anyway is the same kind of
+              untruth as the spinner this screen replaced. */}
+          {!itself
+            ? "This agent is waiting for a report that isn’t coming."
+            : spoke
+              ? "Comes back having read this conversation. Won’t finish the cut-off turn."
+              : "Comes back to this workspace."}
+        </p>
+        {itself && team.length + notYours > 0 && (
+          <p className="mt-1 text-meta text-mute">
+            {team.length + notYours} of its team stopped too.
+            {notYours > 0 && ` ${notYours} ${notYours === 1 ? "isn’t" : "aren’t"} yours to start.`}
+          </p>
+        )}
+        <div className="mt-3.5 flex items-center gap-2">
+          <button
+            disabled={relaunch.isPending}
+            onClick={() => bring(all > 1)}
+            className="control bg-bone font-medium text-ground hover:opacity-90 disabled:bg-raise disabled:text-mute"
+          >
+            <RotateCcw className="h-3.5 w-3.5" strokeWidth={2} />
+            {all > 1 ? `Bring back all ${all}` : "Bring it back"}
+          </button>
+          {itself && team.length > 0 && (
+            <button
+              disabled={relaunch.isPending}
+              onClick={() => bring(false)}
+              className="control text-dim hover:bg-raise hover:text-bone disabled:text-mute"
+            >
+              This agent only
+            </button>
+          )}
+        </div>
+        {/* Why the last attempt did not take.
+            From the **note**, not from the mutation: a failed launch moves the
+            session to `Starting` and back, so this card unmounts and remounts
+            around its own request and whatever it was holding goes with it.
+            That is why a failure that was written down perfectly still showed
+            the person who pressed it nothing at all. The note survives it, a
+            reload, and somebody else opening the conversation.
+            `relaunch.error` stays for the failures that write no note —
+            a second press while the first is still starting. */}
+        {refusal && <p className="mt-2 text-meta text-brick">{refusal}</p>}
+      </div>
+    </div>
+  );
+}
+
 function Relaunch({ session }: { session: Session }) {
   const cache = useQueryClient();
   const relaunch = useRelaunchSession();
   return (
     <div className="mt-6 rounded-xl border border-ember-deep bg-panel px-4 py-3.5">
-      <p className="text-ui text-text">The agent is not running. Its workspace, its branch and everything said so far are still here — starting it again picks the conversation up where it stopped.</p>
-      {session.note && !session.note.startsWith("The agent is not running") && <p className="mt-2 font-mono text-meta text-mute">{session.note}</p>}
+      {/* Shorter than it was, and no longer promising something it cannot
+          deliver: nothing picks a turn up where it stopped. The same sentence
+          as the recovery card, because it is the same fact. */}
+      <p className="text-ui text-text">The agent stopped. Comes back having read this conversation; won&rsquo;t finish the cut-off turn.</p>
+      {session.note && !session.note.startsWith("The agent stopped") && <p className="mt-2 font-mono text-meta text-mute">{session.note}</p>}
       <button
         disabled={relaunch.isPending}
         onClick={() => relaunch.mutate({ id: session.id }, { onSuccess: () => cache.invalidateQueries({ queryKey: getGetSessionQueryKey(session.id) }) })}
         className="control mt-3 bg-bone font-medium text-ground hover:opacity-90 disabled:bg-raise disabled:text-mute"
       >
         <RotateCcw className="h-3.5 w-3.5" strokeWidth={2} />
-        Start it again
+        Bring it back
       </button>
       {/* A restart that does not take says why, here and now. The session's
           note carries the same reason for anybody who arrives later, but this

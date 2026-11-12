@@ -32,10 +32,21 @@ describe("what a status means", () => {
     }
   });
 
-  it("still calls all three of them worth your attention", () => {
+  it("still calls every one of them worth your attention", () => {
     // Attention and appearance are different questions; only the second moved.
-    expect(NEEDS_YOU).toEqual(["NeedsYou", "HandedBack", "Failed"]);
+    expect(NEEDS_YOU).toEqual(["NeedsYou", "HandedBack", "Failed", "Stranded"]);
     for (const status of NEEDS_YOU) expect(beatOf({ status })).not.toBe("working");
     for (const status of IN_FLIGHT) expect(beatOf({ status })).toBe("working");
+  });
+
+  /* A machine that restarted gets a mark of its own, and the argument is the
+     ember budget: twelve stranded workspaces drawn ember would spend the
+     whole of it on the one thing ember is not for, and bury the question
+     somebody was actually asked. Not brick either — nothing broke. */
+  it("gives a machine that restarted its own colour, and not ember", () => {
+    expect(beatOf({ status: "Stranded" })).toBe("stopped");
+    expect(TONE.Stranded).not.toBe(TONE.NeedsYou);
+    expect(TONE.Stranded).not.toBe(TONE.Failed);
+    expect(TONE.Stranded).not.toBe(TONE.HandedBack);
   });
 });

@@ -32,6 +32,21 @@ pub async fn run_agent(session: &str, workspace: PathBuf, agent: &str) -> Result
     let kind =
         ft_core::Agent::from_name(agent).with_context(|| format!("no agent called {agent}"))?;
 
+    // This session's claim, held until this process goes.
+    //
+    // Before anything is started, and fatal if somebody else has it: two
+    // agents in one worktree is the failure worth refusing a launch over.
+    // They would not see each other — not in the transcript, not in git —
+    // and the second would be started by somebody who had been told the
+    // first was gone, because every other way of asking goes through a
+    // socket in `/tmp` and `/tmp` is swept on a live machine. See
+    // `agentd::hold`.
+    //
+    // Held across both runs below: the retry that carries a summary is the
+    // same session's supervisor continuing, not a new one.
+    let _claim = crate::agentd::hold(&workspace, session)
+        .context("another agent is already running in this workspace")?;
+
     // Written before the agent starts, because it is what tells the agent how
     // to ask us anything. Losing it does not make the session unsafe — it makes
     // it silent, which is worse — so a failure here is fatal rather than best

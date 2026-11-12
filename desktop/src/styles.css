@@ -1591,6 +1591,14 @@
   .blocks[data-beat="broken"] { color: var(--color-brick); }
   .blocks[data-beat="broken"] i:nth-child(4) { opacity: 0; }
 
+  /* Stopped: still, amber, and short two quadrants on the diagonal rather
+     than one — so it is a different shape as well as a different hue, which
+     is what `STYLE.md` asks of a mark that has to read with the colour off.
+     Still, because movement means work is happening and nothing is. */
+  .blocks[data-beat="stopped"] { color: var(--color-amber-soft); }
+  .blocks[data-beat="stopped"] i:nth-child(1) { opacity: 0.18; }
+  .blocks[data-beat="stopped"] i:nth-child(4) { opacity: 0.18; }
+
   /* Over. Nothing in the app draws one, but the table has a row for it. */
   .blocks[data-beat="over"] { color: var(--color-mute); }
   .blocks[data-beat="over"] i:nth-child(4) { opacity: 0; }

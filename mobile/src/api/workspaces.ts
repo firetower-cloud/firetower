@@ -318,7 +318,17 @@ export function runAt(place: Workspace, address: string): Session {
  * the home's docked column, which is the same list previewed — and two copies
  * of a comparator are two chances to disagree about what comes first.
  */
-export const RANK: Record<Beat, number> = { blocked: 0, broken: 1, working: 2, done: 3, over: 4 };
+export const RANK: Record<Beat, number> = {
+  blocked: 0,
+  // Second, above working, for the reason blocked is first: a machine that
+  // restarted will not resolve itself either, and nothing else in the list is
+  // waiting on a press.
+  stopped: 1,
+  broken: 2,
+  working: 3,
+  done: 4,
+  over: 5,
+};
 
 /** The same list, in that order. A copy: `sort` is in place and the caller's
  *  array is memoised upstream. */

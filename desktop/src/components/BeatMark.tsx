@@ -1,4 +1,4 @@
-import { Check, TriangleAlert } from "lucide-react";
+import { Check, CircleSlash2, TriangleAlert } from "lucide-react";
 import { BEAT, BEAT_TONE, type Beat } from "~/api/view";
 import type { SessionStatus } from "~/api/generated/model";
 
@@ -32,6 +32,17 @@ export function BeatMark({ beat, says }: { beat: Beat; says?: string }) {
       </span>
     );
   }
+  /* Before the tick below, which is what this used to fall through to: a
+     workspace whose machine had restarted drew "handed back" in sage. */
+  if (beat === "stopped") {
+    return (
+      <CircleSlash2
+        className={`h-3.5 w-3.5 ${tone}`}
+        strokeWidth={2}
+        aria-label={says ?? "machine restarted"}
+      />
+    );
+  }
   if (beat === "broken") {
     return <TriangleAlert className={`h-3.5 w-3.5 ${tone}`} strokeWidth={2} aria-label={says ?? "failed"} />;
   }
@@ -52,6 +63,7 @@ export function StatusMark({ status }: { status: SessionStatus }) {
 /** What each status is called out loud, where it differs from its beat's. */
 const LABEL: Partial<Record<SessionStatus, string>> = {
   NeedsYou: "asked you a question",
+  Stranded: "machine restarted",
   HandedBack: "handed back",
   Ready: "handed back",
   Ended: "ended",

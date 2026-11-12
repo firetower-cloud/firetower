@@ -901,6 +901,30 @@ pub struct RepoSpec {
     pub credential: Option<Credential>,
 }
 
+/// How an agent came to be gone, as far as the worker can tell.
+///
+/// The distinction is not cosmetic: one of these is a process that ended and
+/// the other is a machine that restarted under a session whose workspace is
+/// still on disk, and the control plane owes them different states and
+/// different words. The worker is the only end that can tell them apart,
+/// because the evidence is tmux.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Gone {
+    /// The agent's process ended while the worker was watching it.
+    #[default]
+    Exited,
+    /// There was no agent to watch, and tmux has no session for this one
+    /// either — asked exactly, so a shell beside it cannot answer for it.
+    ///
+    /// tmux is the agent's parent, so this cannot be a worker that restarted,
+    /// a network that dropped or a laptop that closed: every one of those
+    /// leaves the tmux session standing. What is left is the tmux server
+    /// itself having gone, which on a machine that is answering again means it
+    /// restarted — and the workspace, the branch and whatever the agent had
+    /// already written are all still there.
+    Stranded,
+}
+
 /// Worker to control plane.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "frame")]
@@ -982,6 +1006,16 @@ pub enum ToServer {
     /// Nothing more is coming from this agent. It has exited.
     AgentClosed {
         session_id: SessionId,
+        /// Why the worker believes it is gone.
+        ///
+        /// **No protocol bump.** A worker too old to say this never sends the
+        /// field and `#[serde(default)]` reads it as [`Gone::Exited`], which
+        /// is what every one of them meant; a control plane too old to care
+        /// ignores a field it does not know. Bumping the version takes every
+        /// worker in a fleet offline until it is upgraded, and nothing here
+        /// needs that.
+        #[serde(default)]
+        gone: Gone,
     },
     /// The worker stopped following this agent, but the agent is still there.
     ///
