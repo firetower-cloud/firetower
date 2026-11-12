@@ -2866,6 +2866,21 @@ impl Db {
         .await?)
     }
 
+    /// Fix what a schedule runs with, without touching anything else.
+    ///
+    /// For the one thing resolved at approval rather than at creation: the
+    /// subscription it spends. Everything else in `pins` is written when the
+    /// schedule is, and this deliberately does not bump `revision` — nothing
+    /// about what was approved has changed, it has been *recorded*.
+    pub async fn set_schedule_pins(&self, id: &ScheduleId, pins: &serde_json::Value) -> Result<()> {
+        sqlx::query("UPDATE schedules SET pins = $2, updated_at = now() WHERE id = $1")
+            .bind(id.as_str())
+            .bind(pins)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     /// Turn a schedule on, or off, and say which rule did it.
     ///
     /// `paused_reason` is `None` for a person — "you paused this" and "this

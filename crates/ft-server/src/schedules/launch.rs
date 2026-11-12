@@ -293,11 +293,41 @@ async fn gate(
     // second copy of one predicate, free to disagree with the first.
 
     // 4 · The subscription is spendable.
+    //
+    // **A missing pin is a refusal, not a skip.** These checks used to sit
+    // behind "is there an account pinned", so a schedule approved while none
+    // was connected skipped both of them — and `pin_agent_account`, a
+    // `before insert` trigger, then selected whatever default had turned up
+    // since. The schedule spent an account nothing had authorized, against a
+    // limit nothing had read; and with no portable credential the launch
+    // falls through to host-local authentication, which is the worker's
+    // identity rather than the owner's.
+    //
+    // `accountNeeded` tells an approved credential-free engine — a plain
+    // shell has nothing to authenticate — from a pin that is simply absent.
+    // Absent is the state this refuses.
     let account = schedule
         .pins
         .get("accountId")
         .and_then(|v| v.as_str())
         .map(str::to_string);
+    let needs_account = schedule
+        .pins
+        .get("accountNeeded")
+        .and_then(|v| v.as_bool())
+        // A schedule approved before this was recorded. Fail closed: the
+        // engines that need none are the ones nothing offers.
+        .unwrap_or(true);
+    if needs_account && account.is_none() {
+        return Err(Stopped {
+            state: "failed",
+            detail: "This schedule does not say which subscription it spends, so it will not be \
+                     left to pick one. Edit it to choose, and approve it again."
+                .into(),
+            code: ErrorCode::InvalidRequest,
+            and_stop: None,
+        });
+    }
     if let Some(account) = &account {
         match state
             .db

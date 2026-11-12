@@ -391,17 +391,46 @@ async fn pins_for(
             .unwrap_or_default(),
     };
 
-    // The subscription this will spend, resolved now. Pinned because "the
-    // default" is a preference somebody can change, and a schedule approved
-    // against one subscription must not quietly start spending another.
+    // **The subscription this will spend, resolved now and required.**
+    //
+    // Pinned because "the default" is a preference somebody can change, and a
+    // schedule approved against one subscription must not quietly start
+    // spending another. A null pin was worse than that: `pin_agent_account`
+    // is a `before insert` trigger that selects the owner's current default
+    // when the column is null, so a schedule approved while no account was
+    // connected would later spend whichever one turned up — one the gate
+    // never authorized and never checked against its usage limit, because
+    // both of those checks sit behind "is there an account pinned". And with
+    // no portable credential the launch path falls through to host-local
+    // authentication, which is the worker's identity rather than the
+    // owner's.
+    //
+    // So resolution failure is a refusal rather than a null. There is no
+    // ambient fallback for something that runs with nobody present.
     let account = match &req.account_id {
         Some(id) => Some(id.clone()),
         None => super::accounts::default_account(&state.db, owner_id, req.agent)
             .await
-            .ok()
-            .flatten()
+            .map_err(|e| {
+                // **Not swallowed into a null.** An error reading the account
+                // is not the same answer as there being none.
+                ApiError::new(
+                    ErrorCode::ActionFailed,
+                    format!("could not read which subscription this would spend: {e:#}"),
+                )
+            })?
             .map(|a| a.id),
     };
+    // Distinguished from an approved credential-free mode, which is a real
+    // state: a plain shell authenticates nothing, so there is nothing to pin
+    // and nothing to fall back to either.
+    //
+    // **Not required here — required at approval.** Writing one down is inert
+    // for everybody, and refusing to let somebody draft a schedule because
+    // they have not connected a subscription yet would make the inert row
+    // unobtainable. [`approve_schedule`] is where the authorization is fixed,
+    // and that is where an account has to exist and be spendable.
+    let needs_account = req.agent.needs_credential();
 
     // The versions those skills resolve to **now**, so the gate can fail
     // closed when one has gone rather than substituting the current one —
@@ -429,6 +458,10 @@ async fn pins_for(
     Ok(serde_json::json!({
         "settings": settings,
         "agentDecides": decides_itself,
+        // Whether an account is a thing this engine has at all, so the gate
+        // can tell "approved with no credential, deliberately" from "the pin
+        // is missing".
+        "accountNeeded": needs_account,
         "skills": skills,
         "accountId": account,
         "profile": req.profile,
@@ -504,12 +537,100 @@ pub(super) async fn approve_schedule(
     Path(id): Path<String>,
 ) -> ApiResult<Json<Schedule>> {
     let row = mine(&state, &principal, &id).await?;
+    pin_a_spendable_account(&state, &row).await?;
     state
         .db
         .approve_schedule(&row.id, owner(&principal)?)
         .await?;
     turn_on(&state, &row).await?;
     reread(&state, &principal, &row.id).await
+}
+
+/// The subscription this schedule will spend, fixed at the moment it is
+/// authorized.
+///
+/// **A null pin cannot be allowed to survive activation.**
+/// `pin_agent_account` is a `before insert` trigger that fills the column
+/// from the owner's current default when it is null — so a schedule approved
+/// with no account would later spend whichever one happened to be connected
+/// by then, against a usage limit nothing had read, and with no portable
+/// credential the launch falls through to host-local authentication, which is
+/// the worker's identity rather than the owner's.
+///
+/// So the account is resolved here if the draft had none, and *written into
+/// the pins*, which is what makes "approved against this subscription" a
+/// fact rather than a hope. Approval is the right moment for it: it is when
+/// somebody is present and deciding.
+async fn pin_a_spendable_account(state: &AppState, row: &crate::db::ScheduleRow) -> ApiResult<()> {
+    // An engine that authenticates nothing has nothing to pin and nothing to
+    // fall back to. Told apart from an absent pin deliberately.
+    let needs = row
+        .pins
+        .get("accountNeeded")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+    if !needs {
+        return Ok(());
+    }
+
+    let agent: ft_core::Agent = row
+        .spec
+        .get("agent")
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or(ft_core::Agent::ClaudeCode);
+
+    let pinned = row.pins.get("accountId").and_then(|v| v.as_str());
+    let account = match pinned {
+        Some(id) => id.to_string(),
+        None => super::accounts::default_account(&state.db, &row.owner_id, agent)
+            .await
+            .map_err(|e| {
+                ApiError::new(
+                    ErrorCode::ActionFailed,
+                    format!("could not read which subscription this would spend: {e:#}"),
+                )
+            })?
+            .map(|a| a.id)
+            .ok_or_else(|| {
+                ApiError::new(
+                    ErrorCode::InvalidRequest,
+                    format!(
+                        "There is no connected {} subscription for this to spend, so it cannot \
+                         be turned on. Connect one and turn it on then — a schedule is not left \
+                         to pick whichever account turns up later, because nobody is there to \
+                         notice which it chose.",
+                        agent.label()
+                    ),
+                )
+            })?,
+    };
+
+    // Usable, now, and theirs. The gate re-reads this at every launch; what
+    // this adds is that it was true at the moment somebody said yes.
+    match state.db.account_spendable(&row.owner_id, &account).await? {
+        None => {
+            return Err(ApiError::new(
+                ErrorCode::InvalidRequest,
+                "That subscription is not one of yours any more, so this cannot be turned on.",
+            ))
+        }
+        Some((name, false)) => {
+            return Err(ApiError::new(
+                ErrorCode::InvalidRequest,
+                format!("The {name} subscription is not connected, so this cannot be turned on."),
+            ))
+        }
+        Some((_, true)) => {}
+    }
+
+    if pinned.is_none() {
+        let mut pins = row.pins.clone();
+        if let Some(obj) = pins.as_object_mut() {
+            obj.insert("accountId".into(), serde_json::json!(account));
+        }
+        state.db.set_schedule_pins(&row.id, &pins).await?;
+    }
+    Ok(())
 }
 
 /// Stop future runs. **Never touches a run in flight** — that is a separate
@@ -559,6 +680,10 @@ pub(super) async fn resume_schedule(
             "this schedule has not been approved yet, so there is nothing to turn back on",
         ));
     }
+    // Turning one back on is an activation too, so it answers the same
+    // question: the subscription it was approved against has to still be
+    // there and still be spendable.
+    pin_a_spendable_account(&state, &row).await?;
     turn_on(&state, &row).await?;
     reread(&state, &principal, &row.id).await
 }

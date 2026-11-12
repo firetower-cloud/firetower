@@ -5227,11 +5227,41 @@ fn a_schedule(name: &str, cadence: Cadence) -> super::schedules::NewSchedule {
     .unwrap()
 }
 
+/// The owner's default subscription.
+///
+/// **Every schedules test needs one**, because activating a schedule requires
+/// a connected subscription to spend: a null account pin cannot survive
+/// approval, or `pin_agent_account` would fill it from whatever default
+/// turned up later. The fixture starts with an empty fleet *and* no accounts,
+/// which is a fresh install; a schedule is something you make after
+/// connecting one.
+///
+/// Idempotent, so a test may ask twice.
+async fn the_owners_subscription(state: &AppState, owner: &str) -> String {
+    let id = format!("acct_{owner}");
+    sqlx::query(
+        "INSERT INTO agent_accounts(id,user_id,kind,name,mode,credential_key,state,enabled,\
+                                    is_default,path)
+         VALUES($1,$2,'ClaudeCode','Claude (work)','Subscription',$1,'connected',true,true,
+                ('u.' || (SELECT slug FROM principals WHERE id=$2) || '.' || $1)::ltree)
+         ON CONFLICT (id) DO NOTHING",
+    )
+    .bind(&id)
+    .bind(owner)
+    .execute(state.db.pool())
+    .await
+    .unwrap();
+    id
+}
+
 async fn create(
     state: &AppState,
     principal: &crate::auth::Principal,
     new: super::schedules::NewSchedule,
 ) -> Result<ft_core::schedule::Schedule, ApiError> {
+    if let Some(owner) = principal.owner() {
+        the_owners_subscription(state, owner).await;
+    }
     super::schedules::create_schedule(
         State(state.clone()),
         Extension(principal.clone()),
@@ -5388,6 +5418,138 @@ async fn a_schedule_cannot_be_asked_to_bypass_permissions() {
     .unwrap();
     let row = state.db.schedule(&made.id).await.unwrap().unwrap();
     assert_eq!(row.pins["settings"]["mode"], serde_json::json!("dontAsk"));
+}
+
+/// **Blocker 3: a schedule cannot be left to pick a subscription later.**
+///
+/// `pin_agent_account` is a `before insert` trigger that fills
+/// `sessions.agent_account_id` from the owner's current default when it is
+/// null. So a schedule approved while nothing was connected would later spend
+/// whichever account turned up — one the gate never authorized and never
+/// checked against its usage limit, because both checks sat behind "is there
+/// an account pinned". And with no portable credential the launch falls
+/// through to host-local authentication, which is the worker's identity.
+///
+/// Writing one down is still inert and still allowed: it is *activation* that
+/// has to be able to name what it spends.
+#[tokio::test]
+async fn a_schedule_cannot_be_turned_on_without_a_subscription_to_spend() {
+    let (state, principal, _, _, owner) = fixture().await;
+
+    // Drafted with nothing connected. Allowed — the row does nothing.
+    let id = ft_core::ScheduleId::new();
+    super::schedules::write_one(
+        &state,
+        &owner,
+        &owner,
+        &id,
+        a_schedule("Nothing to spend", weekdays_at("08:30")),
+        true,
+    )
+    .await
+    .expect("a draft needs no subscription");
+    let drafted = state.db.schedule(&id).await.unwrap().unwrap();
+    assert!(
+        drafted.pins["accountId"].is_null(),
+        "nothing resolved, which is the state under test"
+    );
+    assert_eq!(drafted.pins["accountNeeded"], serde_json::json!(true));
+
+    // Turning it on cannot be.
+    let refused = super::schedules::approve_schedule(
+        State(state.clone()),
+        Extension(principal.clone()),
+        Path(id.as_str().to_string()),
+    )
+    .await
+    .err()
+    .expect("there is nothing for it to spend");
+    assert!(matches!(refused.code, ErrorCode::InvalidRequest));
+    assert!(
+        refused.message.contains("no connected"),
+        "and it says what to do: {}",
+        refused.message
+    );
+    assert!(
+        !state.db.schedule(&id).await.unwrap().unwrap().active,
+        "and it stayed off"
+    );
+
+    // Connect one, and approving fixes it onto the row rather than leaving a
+    // null for the trigger to fill.
+    let account = the_owners_subscription(&state, &owner).await;
+    let Json(on) = super::schedules::approve_schedule(
+        State(state.clone()),
+        Extension(principal.clone()),
+        Path(id.as_str().to_string()),
+    )
+    .await
+    .expect("now it can say what it spends");
+    assert!(on.active);
+    let fixed = state.db.schedule(&id).await.unwrap().unwrap();
+    assert_eq!(
+        fixed.pins["accountId"],
+        serde_json::json!(account),
+        "pinned at approval, which is when somebody was present to decide"
+    );
+}
+
+/// **And the gate refuses a run whose pin is missing**, whatever let it
+/// through — a row written by an older build, or an edit that cleared it.
+/// Defence in depth: the pin being there is checked where it is used, not
+/// only where it is written.
+#[tokio::test]
+async fn a_run_whose_schedule_names_no_subscription_is_not_launched() {
+    let (state, principal, _, _, owner) = fixture().await;
+    let made = armed(&state, &principal, "Had one once").await;
+
+    // Clear the pin the way nothing in the product does, which is the point.
+    let row = state.db.schedule(&made.id).await.unwrap().unwrap();
+    let mut pins = row.pins.clone();
+    pins.as_object_mut()
+        .unwrap()
+        .insert("accountId".into(), serde_json::Value::Null);
+    state.db.set_schedule_pins(&made.id, &pins).await.unwrap();
+    let row = state.db.schedule(&made.id).await.unwrap().unwrap();
+
+    let claim = state
+        .db
+        .claim_run(
+            &ft_core::ScheduleRunId::new(),
+            &made.id,
+            None,
+            Utc::now(),
+            1,
+            "cron",
+            "claimed",
+            None,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    crate::schedules::launch::start(&state, &row, &claim)
+        .await
+        .expect("a refusal is an outcome");
+
+    let run = runs_of(&state, &made.id)
+        .await
+        .into_iter()
+        .find(|r| r.state.is_terminal())
+        .expect("it was recorded");
+    assert_eq!(
+        run.state,
+        ScheduleRunState::Failed,
+        "the schedule is wrong, not the fleet"
+    );
+    assert!(
+        run.detail
+            .as_deref()
+            .unwrap_or_default()
+            .contains("subscription"),
+        "{:?}",
+        run.detail
+    );
+    let _ = owner;
 }
 
 /// **Blocker 2: an unset control must not be filled from a later preference.**
@@ -6347,6 +6509,7 @@ async fn a_disabled_owner_stops_their_schedules() {
     // A colleague, because the administrator who runs the fixture is the only
     // one and `set_disabled` rightly refuses to lock an installation out.
     let (them, _) = somebody_elses_repository(&state, "ana").await;
+    the_owners_subscription(&state, &them).await;
     let id = ft_core::ScheduleId::new();
     super::schedules::write_one(
         &state,
