@@ -328,6 +328,52 @@ forget_host_key() {
         ssh-keygen -R worker -f /home/firetower/ssh/known_hosts >/dev/null 2>&1 || true
 }
 
+# One value out of the database, for the one question the API cannot answer.
+sql() {
+    compose exec -T postgres psql -U firetower -d firetower -tAc "$1" 2>/dev/null \
+        | tr -d '[:space:]'
+}
+
+# A machine with a new disk may not go on using the control plane's memory of
+# the old one.
+#
+# The worker numbers its own events, in `~/.firetower/worker/worker.db`. The
+# control plane stores each one under the pair (machine, number) and ignores
+# any pair it already holds — with no side effects and no log line, which is
+# correct, because that is how a reconnecting worker is allowed to resend. So a
+# machine that comes back with an empty disk counts from 1 again and everything
+# it says is discarded as a replay: every status, every line, every step.
+#
+# Nothing looks wrong. The API answers, the machine reads Online, agents launch
+# and run. They are simply never heard. A recovered session sat at `Starting`
+# for five minutes here while the agent behind it was alive, had resumed, and
+# had reported `HandedBack` — twice.
+#
+# `/home/firetower` is on a volume now, so an ordinary `up` no longer wipes the
+# disk. This is for the case where the volume went and the database stayed, and
+# it refuses rather than repairing: the two halves cannot be reconciled without
+# throwing one of them away, and which one is not this script's to choose.
+refuse_a_wiped_disk() {
+    local worker="$1" seen
+    if docker exec -u firetower "$worker" \
+        sh -c 'test -f "$HOME/.firetower/worker/worker.db"' 2>/dev/null; then
+        return 0
+    fi
+    seen="$(sql "SELECT count(*) FROM events e JOIN hosts h ON h.id = e.host_id
+                  WHERE h.name = '$MACHINE'")"
+    case "$seen" in ''|0) return 0 ;; *[!0-9]*) return 0 ;; esac
+
+    printf '\n  \033[1mThis machine has a new disk and the control plane remembers the old one\033[0m\n\n' >&2
+    say "$seen events from $MACHINE are already stored under numbers this" >&2
+    say "machine is about to hand out again, so the control plane will discard" >&2
+    say "everything it says — including every status — and show you a stack" >&2
+    say "that looks healthy and records nothing." >&2
+    printf '\n' >&2
+    say "Start the database over, which is the only way back:" >&2
+    say "  $0 down --volumes && $0 up" >&2
+    die "refusing to bring up a stack that cannot hear its own machine"
+}
+
 install_worker_binary() {
     local worker="$1"
     step "Building the worker for Linux, in the control plane's own toolchain"
@@ -470,6 +516,7 @@ cmd_up() {
     resolve control
     forget_host_key "$TARGET"
     resolve worker
+    refuse_a_wiped_disk "$TARGET"
     install_worker_binary "$TARGET"
     register_machine
     wait_until_online || true
@@ -684,7 +731,7 @@ cmd_down() {
         # volume whose label does not say so is left alone.
         local volume
         for volume in "${PROJECT}_postgres" "${PROJECT}_cargo" "${PROJECT}_target" \
-                      "${PROJECT}_home" "${PROJECT}_sshd"; do
+                      "${PROJECT}_home" "${PROJECT}_sshd" "${PROJECT}_worker-home"; do
             if [ "$(docker volume inspect -f '{{index .Labels "com.docker.compose.project"}}' "$volume" 2>/dev/null)" = "$PROJECT" ]; then
                 say "removing volume $volume"
                 docker volume rm "$volume" >/dev/null

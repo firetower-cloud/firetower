@@ -104,8 +104,9 @@ services:
       context: .
       dockerfile: Dockerfile
     # The whole point of the harness: `docker kill` is a power cut and
-    # `docker start` is the reboot. What survives a restart is what survives a
-    # reboot on a real machine — the home directory, and nothing else.
+    # `docker start` is the reboot. What survives a restart has to be what
+    # survives a reboot on a real machine — the disk, and nothing else. The
+    # tmpfs below takes `/tmp` away; the volume below keeps the home directory.
     tmpfs:
       # tmux keeps its socket here and the agent supervisor keeps its own, so
       # clearing it is part of what makes a restart a reboot rather than a
@@ -117,6 +118,26 @@ services:
       # container built from it. On a volume so that stopping and starting the
       # container is the same machine, which is what a reboot is.
       - sshd:/etc/ssh/keys
+      # The machine's disk, for the same reason and a sharper one.
+      #
+      # A real machine keeps its home directory across a reboot. A container
+      # keeps it across `docker start` and loses it the moment this file or the
+      # image changes and Compose recreates the container — so `up` was a disk
+      # wipe, which no reboot is.
+      #
+      # That difference does not fail loudly. The worker numbers its own events
+      # in `~/.firetower/worker/worker.db`, and the control plane stores each
+      # one under the pair (machine, number) and ignores any pair it already
+      # has — no side effects, no log line. A machine that comes back with an
+      # empty disk counts from 1 again, so everything it says is thrown away as
+      # a replay: every status, every line, every step. Nothing looks wrong.
+      # The API answers, the machine reads Online, agents launch and run. They
+      # are simply never heard, and a recovered session sits at `Starting`
+      # while the agent behind it is alive and has already reported otherwise.
+      #
+      # `run.sh up` refuses to continue if it finds that state. This volume is
+      # why it should not arise.
+      - worker-home:/home/firetower
     labels:
       com.firetower.session: "${FIRETOWER_SESSION:-}"
 
@@ -126,3 +147,4 @@ volumes:
   target:
   home:
   sshd:
+  worker-home:

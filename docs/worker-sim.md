@@ -98,11 +98,33 @@ refuses it: *worker answered with a different host key than last time*. That
 refusal is `StrictHostKeyChecking` doing its job. `up` answers it the way an
 operator would, by forgetting that one host's key before it reconnects.
 
-**The worker binary goes with the container, not with the volume.** Recreating
-the worker loses the install under `~/.firetower`, which is correct — it is a
-different machine — and `up` reinstalls it. `down` and `up` is therefore a
-fresh machine with the same name and the same sessions pointed at it, which is
-a useful thing to be able to make.
+**The machine's disk is a volume, and it has to be.** `~/.firetower` used to
+go with the container, so recreating the worker — which `up` does whenever the
+image or the compose file changes — wiped it. That reads like "a fresh machine
+with the same name", which sounds useful, and is in fact a stack that cannot
+hear its own machine.
+
+The worker numbers its own events in `~/.firetower/worker/worker.db`. The
+control plane stores each one under the pair (machine, number) and ignores any
+pair it already holds — no side effects, no log line — because that is how a
+reconnecting worker is allowed to resend what might have been missed. A machine
+with an empty disk counts from 1 again, so everything it says is thrown away as
+a replay: every status, every line, every step.
+
+Nothing about that looks wrong. The API answers, the machine reads `Online`,
+agents launch and run normally. They are simply never heard. It cost an
+afternoon here: a recovered session sat at `Starting` for five minutes while
+the agent behind it was alive, had resumed its conversation, and had reported
+`HandedBack` twice.
+
+So `/home/firetower` is on a volume, which is also what a reboot does to a
+real machine, and `up` refuses to continue if it ever finds the other state —
+a wiped disk in front of a database that remembers the old one. The only way
+out of it is to start the database over, so that is what the refusal says:
+
+```sh
+just sim down --volumes && just sim up
+```
 
 ## When it will not come up
 
