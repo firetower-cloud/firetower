@@ -234,6 +234,15 @@ export function Peek({
   /** Everyone waiting, including the ones past the cap. */
   waiting?: number;
   onAnswer?: (ask: Ask, yes: boolean) => void;
+  /**
+   * End the place, and everything it started.
+   *
+   * It used to dismiss the peek and do nothing else, at every call site —
+   * which was true on `main` as well, and this branch had given that dead
+   * control a count of what it would take with it. Both call sites now ask
+   * `useEndWorkspace`, the same flow the workspace's own menu asks, so the
+   * count means what it was drawn to mean.
+   */
   onEnd: () => void;
 }) {
   const { color } = useTheme();
@@ -256,6 +265,17 @@ export function Peek({
         go: true,
       }
     : null;
+  /* What goes with it. A parent's children are ended with it and they are no
+     longer rows you could have seen first, so the count beside the label is
+     the only place anybody is told — which is why it had to become true
+     rather than go. `ui/end.ts` is what makes it so.
+
+     Left out rather than shown refused where ending the place is not yours:
+     `may_share`, server side, and `mayWrite !== false` because a control
+     plane older than this app sends no such field. */
+  const toEnd: Answer | null = place.runs.some((r) => r.mayWrite !== false)
+    ? { label: "End this workspace", run: onEnd, tone: "loud", count: kids.length }
+    : null;
 
   const close = useCallback(() => onClose(), [onClose]);
 
@@ -266,9 +286,7 @@ export function Peek({
           { label: "Open the conversation", run: onOpen },
           toChildren,
           { label: "What it changed", run: onChanges },
-          /* What goes with it. A parent's children are ended with it and they
-             are no longer rows you could have seen first. */
-          { label: "End this workspace", run: onEnd, tone: "loud", count: kids.length },
+          toEnd,
         ]
   ).filter((item): item is Answer => !!item);
 
