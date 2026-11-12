@@ -76,15 +76,26 @@
  * Two things together, because neither is enough:
  *
  * - **The destination is bound.** Both calls name the Firetower they are for
- *   — see {@link Aimed} in `client/http.ts` — so the read and the teardown go
- *   to the same machine by construction rather than by the ordering of a
- *   check. Naming the workspace in the question does **not** fix this: an
- *   alert can accurately name A while the DELETE still leaves for B.
- * - **The operation is cancelled if the identity moves.** Bound or not, an
+ *   — see `aimOf` and {@link Aimed} in `client/http.ts` — so the read and the
+ *   teardown go to the same machine by construction rather than by the
+ *   ordering of a check. Naming the workspace in the question does **not**
+ *   fix this: an alert can accurately name A while the DELETE still leaves
+ *   for B.
+ * - **The operation is cancelled if the destination moves.** Bound or not, an
  *   answer given on one Firetower is not consent to act on another, so the
  *   target is rechecked after *each* await and the flow stops rather than
  *   sending. Which it is — the question, the screen, or both — is why
  *   {@link endAstray} says only that nothing was sent.
+ *
+ * **The destination, and not the identity.** The first version of this bound
+ * `[serverId, user]` and that was the same mistake one layer down. A
+ * `serverId` is derived from the organisation's database id, so it is the one
+ * field a restored copy keeps — the premise of the whole finding — and
+ * `remember()` replaces a connection by that id, URL and token together. So
+ * the pair matched while the address underneath it moved: the preflight read
+ * A, `remember()` pointed the same id and account at B, the recheck passed,
+ * and the DELETE left for B with B's token. `aimOf` carries the URL for that
+ * reason and this flow compares the whole of it at every check.
  *
  * ## When the host is not answering
  *
@@ -101,9 +112,8 @@ import { Alert } from "react-native";
 import { useQueryClient } from "@tanstack/react-query";
 import * as Haptics from "expo-haptics";
 import { destroySession, getListSessionsQueryKey, sessionWork } from "~/api/generated/sessions/sessions";
-import { identity } from "~/api/identity";
 import type { Workspace } from "~/api/workspaces";
-import { destination } from "~/client/http";
+import { aimOf, destination } from "~/client/http";
 import { why } from "~/data";
 import { servers } from "~/native/servers";
 
@@ -293,11 +303,21 @@ export function useEndWorkspace() {
        included, and the sentence that names it. Everything after this is
        about this workspace on this Firetower and nothing else. */
     const aimed = destination();
-    const firetower = identity(aimed);
+    const firetower = aimOf(aimed);
     /* Named only when the phone holds more than one; see `endTitle`. */
     const named = servers().length > 1 ? (aimed?.org ?? null) : null;
-    /** Still the same Firetower, and still somebody to answer to? */
-    const onTarget = () => alive.current && identity(destination()) === firetower;
+    /**
+     * Still the same Firetower — address included — and still somebody to
+     * answer to?
+     *
+     * `firetower` is tested for being *something* as well as for matching.
+     * `aimOf(undefined)` is the empty string, so a flow that started with no
+     * destination at all would otherwise compare equal to one and go on to
+     * ask a question about a machine it could not name. Nothing is sent
+     * either way — `http` refuses an aim that names nothing — but a question
+     * about an irreversible thing should not be asked in the first place.
+     */
+    const onTarget = () => alive.current && !!firetower && aimOf(destination()) === firetower;
 
     const work = await sessionWork(place.id, { firetower }).catch(() => null);
     /* Nothing has been asked and nothing promised, so this one is silent. */
