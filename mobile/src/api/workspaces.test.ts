@@ -1163,10 +1163,24 @@ describe("a status this app does not know", () => {
   it("is not fooled by a status named after something on Object", () => {
     /* `"toString" in BEAT` is `true` — the prototype — so a membership test
        by `in` would call that status recognised and hand a function back
-       where a `Beat` belongs. These are strings off the wire. */
-    for (const odd of ["toString", "constructor", "hasOwnProperty"] as unknown as SessionStatus[]) {
+       where a `Beat` belongs. These are strings off the wire.
+
+       `__proto__` is the worse one and the reason `statusLabel` is in here
+       too: every table over `SessionStatus` is a plain object literal, and
+       `STATUS_LABEL["__proto__"]` is an *object*. `??` only falls through on
+       `undefined`, so the label came back as that object and went to a
+       `<Text>`, where React throws rather than drawing nothing. */
+    for (const odd of [
+      "toString",
+      "constructor",
+      "hasOwnProperty",
+      "__proto__",
+      "valueOf",
+    ] as unknown as SessionStatus[]) {
       expect(unrecognised({ status: odd })).toBe(true);
       expect(beatOf({ status: odd })).toBe("unknown");
+      expect(statusLabel({ ...{ status: odd } }.status)).toBe(`${odd} — unknown to this app`);
+      expect(typeof statusLabel(odd)).toBe("string");
     }
   });
 

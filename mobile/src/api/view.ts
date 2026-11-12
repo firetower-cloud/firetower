@@ -212,7 +212,19 @@ export const STATUS_LABEL: Record<SessionStatus, string> = {
  * truncate below it.
  */
 export const statusLabel = (status: SessionStatus): string =>
-  STATUS_LABEL[status] ?? `${status} — unknown to this app`;
+  /* `Object.hasOwn`, the same door `unrecognised` closes on `BEAT`, and for a
+     worse reason here: `??` falls through on `undefined` only, and a prototype
+     name does not answer `undefined`. `statusLabel("toString")` handed back a
+     *function*, which React renders as nothing after a `console.error`;
+     `"__proto__"` hands back an object, and an object at `<Text>` throws
+     `Objects are not valid as a React child` in the production bundle too.
+     This string lands in two of them — `Overview.tsx` and the workspace
+     header. Hardening rather than a defect anybody can reach: the control
+     plane decodes the status into a Rust enum before it serialises, and QA
+     putting these two names into one got `500 decoding session status:
+     unknown variant` and no fleet at all. Nothing speaking this API can
+     produce one. */
+  Object.hasOwn(STATUS_LABEL, status) ? STATUS_LABEL[status] : `${status} — unknown to this app`;
 
 /** Terminal-state summary, derived rather than stored. */
 export function outcomeOf(session: Session): string {
