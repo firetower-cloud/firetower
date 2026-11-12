@@ -17,7 +17,9 @@
  *   not. Coverage §8 settles it: lose it.
  * - **The filter.** `All / Waiting / Working / Idle` is the dashboard's
  *   vocabulary and it was four controls to answer a question the order
- *   already answers. Ranked, not grouped and not filtered.
+ *   already answers. Ranked and labelled where the order turns, not filtered
+ *   and not grouped — the docked column's list is `banded`, which is one
+ *   order with a label in it and no sections. See `workspaces.tsx`.
  * - **The ember tint on a row.** Ember is the only loud thing on screen and it
  *   answers one question. A filled peach row spends it on a surface; the dot
  *   spends it on the mark, which is what it is for. The glyph stays.
@@ -34,7 +36,7 @@
  * are: both sections, typing, nothing waiting, nothing at all, seeded from a
  * task, no repository, and not answering.
  */
-import { useCallback, useMemo, useState } from "react";
+import { Fragment, useCallback, useMemo, useState } from "react";
 import { Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 import { BLEED, useEdges, useRail } from "~/ui/edges";
 import Animated from "react-native-reanimated";
@@ -45,7 +47,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { getListSessionsQueryKey } from "~/api/generated/sessions/sessions";
 import { useListArtifacts } from "~/api/generated/artifacts/artifacts";
 import type { Session } from "~/api/generated/model";
-import { childrenElsewhere, group, isChild, lead, ranked, waitingAgents, type Workspace } from "~/api/workspaces";
+import { banded, childrenElsewhere, fleetLine, group, lead, useSettled, type Workspace } from "~/api/workspaces";
 import { elapsed, minutesSince, needsYou } from "~/api/view";
 import { useAgents, useRepos, useSessions } from "~/data";
 import { useServer } from "~/native/current";
@@ -53,6 +55,7 @@ import { ServerChip } from "~/ui/ServerChip";
 import { ArtifactCard } from "~/ui/ArtifactCard";
 import { useAnswering } from "~/api/answering";
 import { useEndWorkspace } from "~/ui/end";
+import { BandLabel } from "~/ui/BandLabel";
 import { Peek, usePeekable } from "~/ui/Peek";
 import { Servers } from "~/ui/Servers";
 import { Unreachable } from "~/ui/Unreachable";
@@ -155,21 +158,25 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [live.map((s: Session) => s.id + s.status).join()],
   );
-  /* Flat and ranked, not grouped. `group` is still what knows how to assemble
-     a workspace out of its runs — that fold is shared with the other two
-     clients — so this takes its output and throws the grouping away rather
-     than re-deriving what a workspace is. */
+  /* Flat and ranked, not grouped by repository. `group` is still what knows
+     how to assemble a workspace out of its runs — that fold is shared with
+     the other two clients — so this takes its output and throws the
+     *repository* grouping away rather than re-deriving what a workspace is. */
   const places = useMemo(() => groups.flatMap(([, inRepo]) => inRepo), [groups]);
-  /* The docked column's order, which is the destination's order — `ranked` is
-     shared so the preview and the place cannot come to disagree about what
-     comes first. Flat and status-ordered, never status-grouped: a workspace
-     changes state while you are looking at it, and the row you reached for
-     jumps sections under your thumb.
+  /* The docked column's rows, which are the destination's rows — one call to
+     `banded`, shared, so the preview and the place cannot come to disagree
+     about the order or about which band a row reads under. A Duo rotating
+     from 669 to 951 reveals a column; it must not reveal a list that reads
+     differently.
 
-     **Parents only, and ranked before they are filtered**: a delegated child
-     belongs under its lead, and `ranked` reads the family off the whole list.
-     Same two lines as the destination, for the same reason. */
-  const byRank = useMemo(() => ranked(places).filter((p) => !isChild(p, places)), [places]);
+     Still one continuous order with a label where the band turns, and still
+     not sections — see `workspaces.tsx`, which carries that argument, and
+     `banded`, which is handed the whole fleet because a family cannot be read
+     out of a list its children have been taken out of. */
+  const rows = useMemo(() => banded(places), [places]);
+  /* And it holds its order while a row is held, for the same reason and in
+     the same window: the peek a press becomes. */
+  const shown = useSettled(rows, peeking !== null);
 
   /* Blocked, not `needsYou`. The wider grouping also covers finished and
      broken, which belong on the list but are not the thing that is asking —
@@ -179,10 +186,6 @@ export default function Home() {
      agent is reached from the home, and a child with no row needs one more,
      not fewer. */
   const blocked = places.filter((p) => p.runs.some((r) => r.status === "NeedsYou"));
-  /* Agents, not places — what the column's count says, and what it will one
-     day badge. See `waitingAgents`. */
-  const asked = waitingAgents(places);
-
   const fits = dottedChips(pose.content);
   const dotted = blocked.slice(0, fits);
   const rest = blocked.length - dotted.length;
@@ -464,17 +467,26 @@ export default function Home() {
    * Below a greeting that is a section; in a 307pt column 669 tall it was two
    * posters and then roughly 1,200pt of floor.
    *
-   * So it is the destination, previewed: head, count, and the flat
-   * status-ordered list, scrolling on its own and filling the column however
-   * many there are. Which is exactly what the desk does — the rail panel
-   * beside ⌘1 *is* this list.
+   * So it is the destination, previewed: head, count, and the one
+   * status-ordered list with a label where the band turns, scrolling on its
+   * own and filling the column however many there are. Which is exactly what
+   * the desk does — the rail panel beside ⌘1 *is* this list, labels included.
    *
-   * **The waiting chips fold into it rather than sitting above it.** `RANK`
-   * already sorts `blocked` first and every row already carries its beat
-   * mark, so the top rows of the column, with their ember marks, *are* the
-   * chips. A chip strip above a list whose first rows are the same workspaces
-   * draws one object twice and spends the ember budget twice to say one thing.
-   * The count survives as the line under the head.
+   * **The waiting chips fold into it rather than sitting above it.** The
+   * order already puts what wants you first and every row already carries its
+   * beat mark, so the top rows of the column, with their ember marks, *are*
+   * the chips. A chip strip above a list whose first rows are the same
+   * workspaces draws one object twice and spends the ember budget twice to say
+   * one thing. That argument finishes with the bands: the labels are what the
+   * chips' legend would have been, and *Waiting on you · 3* over those rows is
+   * the strip's whole content in one line of furniture.
+   *
+   * **And the count line gives way to them, not the other way round.** At
+   * 307pt the column has a head, a count line and three 12.5pt labels, and the
+   * first label would have sat directly under a line saying nearly the same
+   * thing — so the line drops its waiting clause while that label is drawn.
+   * `fleetLine` carries the reason; it is not only the repetition, it is that
+   * the two numbers disagree in both directions.
    *
    * **`Recent artifacts` moves to the head of the left column** rather than
    * being deleted. The alternative was to drop it here — Artifacts is its own
@@ -548,11 +560,14 @@ export default function Home() {
               </View>
             ) : (
               <>
+                {/* `micro` and `mute` where the destination's is `meta` and
+                    `dim`, which it already was — so it now sits one step
+                    quieter than the labels under it. The head names the panel,
+                    the labels organise the rows, this is a footnote about the
+                    fleet. */}
                 <View className="px-5 pb-1.5">
                   <Text className="font-sans text-mute" style={{ fontSize: size.micro }}>
-                    {asked
-                      ? `${asked} waiting on you · ${places.length} in all`
-                      : `${places.length} in all, none waiting`}
+                    {fleetLine(places, shown)}
                   </Text>
                 </View>
                 <ScrollView
@@ -560,8 +575,17 @@ export default function Home() {
                   showsVerticalScrollIndicator={false}
                   contentContainerStyle={{ paddingBottom: 20 }}
                 >
-                  {byRank.map((p) => (
-                    <WorkspaceRow key={p.id} place={p} places={places} onPeek={() => setPeeking(p.id)} />
+                  {shown.map((row, at) => (
+                    <Fragment key={row.place.id}>
+                      {row.turn ? (
+                        <BandLabel says={row.turn.says} count={row.turn.count} first={at === 0} />
+                      ) : null}
+                      <WorkspaceRow
+                        place={row.place}
+                        places={places}
+                        onPeek={() => setPeeking(row.place.id)}
+                      />
+                    </Fragment>
                   ))}
                 </ScrollView>
               </>

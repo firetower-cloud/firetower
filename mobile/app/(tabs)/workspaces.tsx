@@ -46,23 +46,52 @@
  * shared fold that decides which, so the phone cannot come to disagree with
  * the desk about what a status means.
  *
- * **Flat and status-ordered, never status-grouped.** Grouped is the one not to
- * ship: a workspace changes state while you are looking at it, and the row you
- * reached for jumps sections under your thumb. {@link RANK} is the order, and
- * it is the same order the home's docked column draws.
+ * ## Banded — which is not the sections this screen refused
+ *
+ * This comment used to end *flat and status-ordered, never status-grouped*,
+ * and gave the reason: a workspace changes state while you are looking at it,
+ * and the row you reached for jumps sections under your thumb. **The owner
+ * asked for status groups anyway**, on 2026-11-12, having been told that.
+ *
+ * The refusal was right and this is not a reversal of it, because **there are
+ * still no sections.** The desk resolves both and is what is ported:
+ * `desktop/src/ui/RailPanel.tsx`'s `Listing` sorts **one continuous list**
+ * with `worstFirst` and emits a label where the band *turns* — its own
+ * comment says what this one said, in the same words. So a row whose state
+ * changes moves *within* the one order and the labels re-land around it.
+ * Nothing is re-parented, nothing collapses, and an empty band is undrawable
+ * because there is no container to be empty.
+ *
+ * Two things close what the desk's rail leaves open, and both are in
+ * `~/api/workspaces`:
+ *
+ * - **{@link bandOf}, never `doing`.** The family's runs, and `needsYou`
+ *   tested before `inFlight` — or a parent idle in all its own agents with
+ *   one blocked child under it lands under *Idle* wearing an ember dot, which
+ *   is where the rail puts it today. {@link banded} takes the whole fleet for
+ *   the reason the sort always did.
+ * - **{@link useSettled}.** The order holds still while a row is held, so the
+ *   thing the original refusal was actually about cannot happen to this list
+ *   either — a flat list that re-sorts under a thumb is the same defect as a
+ *   sectioned one. The position only: a row going blocked under your thumb
+ *   still turns ember where it stands.
+ *
+ * The labels carry no colour and do not pin to the top of the scroll. The
+ * row's mark is the only loud thing in this list; see {@link BandLabel}.
  */
-import { useCallback, useMemo, useState } from "react";
+import { Fragment, useCallback, useMemo, useState } from "react";
 import { ScrollView, Text, View } from "react-native";
 import { BLEED, useEdges } from "~/ui/edges";
 import { router } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
 import type { Session } from "~/api/generated/model";
-import { childrenElsewhere, group, isChild, lead, ranked, waitingAgents } from "~/api/workspaces";
+import { banded, childrenElsewhere, fleetLine, group, lead, useSettled } from "~/api/workspaces";
 import { useSessions } from "~/data";
 import { useServer } from "~/native/current";
 import { getListSessionsQueryKey } from "~/api/generated/sessions/sessions";
 import { useAnswering } from "~/api/answering";
 import { useEndWorkspace } from "~/ui/end";
+import { BandLabel } from "~/ui/BandLabel";
 import { Peek } from "~/ui/Peek";
 import { Unreachable } from "~/ui/Unreachable";
 import { Waiting } from "~/ui/Waiting";
@@ -87,20 +116,28 @@ export default function Workspaces() {
    *  without it — see `familyOf`. */
   const every = useMemo(() => groups.flatMap(([, inRepo]) => inRepo), [groups]);
   /**
-   * The rows: parents only, in the family's order.
+   * The rows: parents only, in the family's order, each with the band it
+   * reads under and a label where that band turns.
    *
-   * **Ranked first and filtered after**, because `ranked` sorts on
-   * `placeBeat` and a family cannot be read out of a list its children have
-   * been taken out of. A child started by an agent in another workspace is a
-   * real checkout with a real agent in it, and it keeps that — it simply
-   * stops having a row, and its lead's row answers for it.
+   * **One argument, and it is the whole fleet.** `banded` ranks, filters and
+   * labels in that order inside itself, because the comparator and the labels
+   * have to be computed from the same list — handed the rows this screen
+   * draws, `familyOf` finds no children and the two disagree. A child started
+   * by an agent in another workspace is still a real checkout with a real
+   * agent in it; it simply stops having a row, and its lead's row answers
+   * for it.
    */
-  const places = useMemo(() => ranked(every).filter((p) => !isChild(p, every)), [every]);
-
-  /* Agents, not places, and the whole fleet rather than the rows drawn from
-     it — see `waitingAgents`. */
-  const waiting = waitingAgents(every);
-  const peeked = places.find((p) => p.id === peeking) ?? null;
+  const rows = useMemo(() => banded(every), [every]);
+  /**
+   * And the order holds still while a row is held, so it cannot move out from
+   * under a thumb. `peeking` is the hold: a press on a row becomes the peek,
+   * which covers the list with a scrim as it opens.
+   *
+   * The position only — every place in here is the live one, so a row that
+   * goes blocked while the peek is open still turns ember where it stands.
+   */
+  const shown = useSettled(rows, peeking !== null);
+  const peeked = rows.find((row) => row.place.id === peeking)?.place ?? null;
 
   /**
    * **The session id, not the workspace id.**
@@ -171,7 +208,7 @@ export default function Workspaces() {
      rather than sitting above an honest-looking zero. `live.length` is not
      consulted the way the home consults it: the home has a composer worth
      keeping on screen under a stale list, and this screen is the list. */
-  if (error && places.length === 0) {
+  if (error && rows.length === 0) {
     return (
       <View className="flex-1 bg-ground" style={edges}>
         {head}
@@ -182,7 +219,7 @@ export default function Workspaces() {
 
   /* **The wait is the screen**, so it centres rather than sitting under the
      count. The count is a claim about data that has not arrived. */
-  if (loading && places.length === 0) {
+  if (loading && rows.length === 0) {
     return (
       <View className="flex-1 bg-ground" style={edges}>
         {head}
@@ -197,7 +234,7 @@ export default function Workspaces() {
      is a claim, and above it the two states that are not it have already
      returned. The sentence says where a workspace comes from, because the
      answer to "nothing is running" is an action and not an apology. */
-  if (places.length === 0) {
+  if (rows.length === 0) {
     return (
       <View className="flex-1 bg-ground" style={edges}>
         {head}
@@ -230,17 +267,34 @@ export default function Workspaces() {
         {/* **"In all" keeps counting every workspace**, children included.
             Fourteen checkouts exist, fourteen hold a host, and ending a parent
             ends what it started — so the number to carry around is the fleet's
-            and not the list's. Each parent row says how many it stands for. */}
+            and not the list's. Each parent row says how many it stands for.
+
+            **The waiting clause goes while a *Waiting on you* label is drawn**
+            — it was two sizes of the same claim, and the two numbers disagree
+            in both directions. See `fleetLine`. Read off `shown` rather than
+            the fleet, so the line cannot contradict a label the hold is
+            keeping on screen. */}
         <View className="px-5 pb-2 pt-1.5">
           <Text className="font-medium text-dim" style={{ fontSize: size.meta }}>
-            {waiting
-              ? `${waiting} waiting on you · ${every.length} in all`
-              : `${every.length} in all, none waiting`}
+            {fleetLine(every, shown)}
           </Text>
         </View>
 
-        {places.map((p) => (
-          <WorkspaceRow key={p.id} place={p} places={every} onPeek={() => setPeeking(p.id)} />
+        {/* One map over one sorted array, with a label on the first row of
+            each band and nowhere else. There is no section view here and
+            nothing to collapse — that is the whole of what makes this a band
+            and not a group. */}
+        {shown.map((row, at) => (
+          <Fragment key={row.place.id}>
+            {row.turn ? (
+              <BandLabel says={row.turn.says} count={row.turn.count} first={at === 0} />
+            ) : null}
+            <WorkspaceRow
+              place={row.place}
+              places={every}
+              onPeek={() => setPeeking(row.place.id)}
+            />
+          </Fragment>
         ))}
       </ScrollView>
 
