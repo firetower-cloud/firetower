@@ -30,3 +30,7 @@ export const deleteItemAsync = async () => {};
  * the stub.
  */
 export const useSafeAreaInsets = () => ({ top: 0, bottom: 0, left: 0, right: 0 });
+
+/** Haptics, for a machine with nothing to knock. */
+export const impactAsync = async () => {};
+export const ImpactFeedbackStyle = { Light: "light", Medium: "medium", Heavy: "heavy" } as const;

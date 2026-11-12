@@ -169,6 +169,17 @@ export function last<T>(): T {
   return drawn as T;
 }
 
+/**
+ * Is anything mounted?
+ *
+ * For the stubs that stand in for something outside React and have to redraw
+ * what is under test when it changes — `test/router.stub.ts`'s navigator is
+ * the one — because after `unmount()` there is no body left to call.
+ */
+export function mounted(): boolean {
+  return body !== null;
+}
+
 /** Unmount: every effect torn down, every slot forgotten. */
 export function unmount() {
   for (const held of cells) {

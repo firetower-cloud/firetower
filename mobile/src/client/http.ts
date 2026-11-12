@@ -10,8 +10,13 @@
  * reason the desktop does it: every generated call would otherwise need it
  * threaded through, and a call that forgot would fail as a 401 rather than as
  * a type error.
+ *
+ * Reading it from module state is also the one thing a long operation cannot
+ * rely on, so a request may name the Firetower it is for and go there or
+ * nowhere — see {@link Aimed}, {@link aimOf} and {@link destination}.
  */
-import { servers, tokenFor } from "~/native/servers";
+import { identity, type Who } from "~/api/identity";
+import { servers, tokenFor, type Connected } from "~/native/servers";
 
 export class ApiError extends Error {
   constructor(
@@ -47,6 +52,54 @@ function here() {
   return all.find((s) => s.serverId === current) ?? all[0];
 }
 
+/**
+ * Which Firetower a request sent **right now** would reach — the whole of it,
+ * address and account included.
+ *
+ * `here()` itself rather than a second opinion about it: a flow that has to
+ * notice its destination moving must read the same resolution the request
+ * will. {@link currentBackend} answers a `serverId`, which is a third of the
+ * question — the same address with somebody else signed into it is not the
+ * same destination, *a different address under the same id is not either*,
+ * and `forget()` moves what `here()` resolves to without `current` changing
+ * at all.
+ */
+export const destination = (): Connected | undefined => here();
+
+/**
+ * A destination, written down: **the address as well as the id and the
+ * account.**
+ *
+ * This is what {@link Aimed} carries, and the three fields are the whole of
+ * the reason it exists. A pair of `[serverId, user]` was the first answer and
+ * it bound the *identity* rather than the destination — then resolved that
+ * pair against a registry the app rewrites underneath it, so the binding came
+ * apart at exactly the seam it was built to close:
+ *
+ * `serverId` comes from the organisation's database id
+ * (`crates/ft-server/src/api.rs:221`), so **it is precisely the thing a
+ * database clone keeps**. `remember()` files a connection by that id and
+ * replaces whatever was there (`native/servers.ts:97`), token included. So
+ * staging restored from production, signed into as the same person, is the
+ * same pair at a different address — and a request bound to the pair resolves
+ * to the new row, and leaves for the new machine with the new machine's
+ * token. The id pair was the premise of the original finding and not the
+ * answer to it.
+ *
+ * The URL closes it because the URL is what `fetch` is actually handed. There
+ * is nothing left for the registry to move that this does not notice.
+ *
+ * **It is `identity()`, and not a second opinion about it.** Keeping the two
+ * apart is what let the third round of this defect through: the aim carried
+ * the address while the cache, the provider and the socket were still keyed on
+ * the pair, so a workspace read from A could be displayed, retained and then
+ * acted on under a connection to B — every comparison the action made passing,
+ * because both sides of it had already moved. Where a request goes and whose
+ * cache it lands in are one question. Asked once, in one place, so there is
+ * nothing left to drift.
+ */
+export const aimOf = (s: Who | null | undefined): string => identity(s);
+
 export const apiBase = () => here()?.url ?? "";
 export const wsBase = () => apiBase().replace(/^http/, "ws");
 export const token = () => {
@@ -55,16 +108,67 @@ export const token = () => {
 };
 export const meansSignedOut = (code: string) => code === "Unauthorized";
 
-/** Called by every generated operation as `http(url, init)`. */
-export const http = async <T>(url: string, init: RequestInit = {}): Promise<T> => {
-  const server = here();
-  if (!server) throw new ApiError("NoServer", "no Firetower is selected", 0);
+/**
+ * A request, and optionally the Firetower it is **for**.
+ *
+ * `here()` reads module state the app changes underneath it: switch server and
+ * everything sent afterwards goes somewhere else. That is right for a screen
+ * reading data — it is the screen you are on — and wrong for a sequence that
+ * has already asked a person a question about one particular place. Read the
+ * workspace on one Firetower, ask, and the answer can arrive pointed at
+ * another: same operation, different machine.
+ *
+ * So a request may name its destination and then it goes there or nowhere.
+ * `ui/end.ts` is the one call in this app that cannot be taken back and is
+ * the reason this exists.
+ *
+ * **The whole destination, which is the whole identity.** The same address
+ * with somebody else signed into it is not the server the question was asked
+ * about, and neither is the same id and account at a *different* address — see
+ * {@link aimOf}, which is what this field holds and why it holds three things
+ * rather than two.
+ *
+ * `firetower?: string` and not `firetower: string | undefined` as far as any
+ * caller is concerned: **the key being present is itself part of the
+ * message.** See below.
+ */
+export type Aimed = RequestInit & { firetower?: string };
 
-  const headers = new Headers(init.headers);
+/** Called by every generated operation as `http(url, init)`. */
+export const http = async <T>(url: string, init: Aimed = {}): Promise<T> => {
+  const { firetower, ...rest } = init;
+  /* **Asked for, rather than truthy.** A caller that names its destination
+     and a caller that does not are two different requests, and `firetower:
+     ""` is neither: it is what {@link aimOf} answers when there was no
+     destination to write down. Read as falsy, that aim fell back to whatever
+     is current — so the one input that means *I do not know where this was
+     for* took the same path as *send it wherever I am*, which is the failure
+     naming a destination exists to prevent, arriving through the check
+     instead of around it. The key being there is the question; what is in it
+     only decides which answer. */
+  const aimed = "firetower" in init;
+  if (aimed && !firetower) {
+    throw new ApiError("NoTarget", "the Firetower this was for is not known", 0);
+  }
+
+  /* Named, or resolved. A named one that is no longer connected — signed out
+     of, or moved to another address under the same id — is refused rather
+     than quietly sent to whatever is current. Being pointed at the wrong
+     machine is the whole of what naming it prevents. */
+  const server = aimed ? servers().find((s) => aimOf(s) === firetower) : here();
+  if (!server) {
+    throw new ApiError(
+      "NoServer",
+      aimed ? "that Firetower is not connected any more" : "no Firetower is selected",
+      0,
+    );
+  }
+
+  const headers = new Headers(rest.headers);
   if (!headers.has("content-type")) headers.set("content-type", "application/json");
   headers.set("authorization", `Bearer ${tokenFor(server.serverId)}`);
 
-  const res = await fetch(`${server.url}${url}`, { ...init, headers });
+  const res = await fetch(`${server.url}${url}`, { ...rest, headers });
   if (!res.ok) throw await ApiError.from(res);
   if (res.status === 204 || res.headers.get("content-length") === "0") return undefined as T;
   const text = await res.text();
