@@ -151,7 +151,12 @@ export function stirFleet(serverId: string): void {
 let ticking: ReturnType<typeof setInterval> | undefined;
 function ensureTicking() {
   if (ticking) return;
-  const sweep = () => servers().forEach(ask);
+  /* Only the ones there is a credential for. A server whose token has not
+     arrived yet — the keychain is read behind the first frame now — or whose
+     token has gone has nothing to tell us, and asking it produces one 401 per
+     server per launch and draws that as a server that is not there. `hydrate`
+     calls `onServers` when a token lands, which sweeps again. */
+  const sweep = () => servers().forEach((s) => s.token && ask(s));
   sweep();
   ticking = setInterval(sweep, 10_000);
   onServers(sweep);

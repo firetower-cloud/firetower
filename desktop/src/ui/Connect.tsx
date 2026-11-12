@@ -108,6 +108,28 @@ export function Connect({
           </>
         )}
 
+        {/* **The moment after a sign-in, which drew nothing at all.** It is
+            normally invisible: `onIn` sets this and hands the server id up,
+            and the window swaps this whole screen for the app in the same
+            render. It stops being invisible the moment the window *does not*
+            swap — and there was a way for that to happen, because `remember`
+            announced the new row before the token reached memory, so the
+            window kept drawing this server's door. React reuses one
+            component for both of the door's branches, so the same instance
+            stayed mounted, on a stage with no case, with its `at` unchanged
+            and therefore no effect to rerun: an empty card until the app was
+            restarted. The notification is fixed in `servers.ts`; this is the
+            other half, because a stage that can be reached must draw. */}
+        {stage.at === "joining" && (
+          <>
+            <span className="mk">
+              <Mark size={24} />
+            </span>
+            <h1>Signing you in…</h1>
+            <p>One moment.</p>
+          </>
+        )}
+
         {stage.at === "unreachable" && (
           <NoRoute
             typed={stage.typed}

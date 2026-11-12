@@ -17,10 +17,6 @@ catchExternalLinks();
    webview navigates to it, and there is no browser chrome to come back with. */
 refuseStrayDrops();
 
-/* Tokens come from the keychain, and the registry is read synchronously
-   everywhere — so the keychain is read before the first render. */
-await hydrate();
-
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     {/* The last line of defence. A window with no browser chrome has nowhere
@@ -32,3 +28,22 @@ createRoot(document.getElementById("root")!).render(
     </Boundary>
   </StrictMode>,
 );
+
+/* **The keychain is read after the first frame, not before it.** This was
+   `await hydrate()` above the render, because the registry is read
+   synchronously all over the app and a keychain is not — and that made a
+   Secret Service read that does not answer into a window with nothing in it.
+   Which is not hypothetical: a gnome-keyring that is installed but whose
+   login keyring was never unlocked leaves the read pending behind an `Unlock
+   Login Keyring` prompt, and a prompt that opens behind the window or is
+   dismissed without being answered never resolves it. Photographed: two
+   colours, against the harness's one for an empty window, for as long as the
+   prompt was up — and that is the common Linux case.
+
+   So the window draws its chrome first and `App` holds its body back until
+   `tokensKnown()`, which `servers.ts` makes true either when the keychain has
+   answered or when it has waited long enough. The read is never abandoned, so
+   unlocking the keyring after that still signs you in. What it costs is that
+   somebody can act while the read is in flight, which is what the eras in
+   `servers.ts` are for. */
+void hydrate();

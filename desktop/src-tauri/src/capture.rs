@@ -35,6 +35,10 @@ const TALL: f64 = 737.0;
 /// transcript, at `max-w-[26rem]`, so 416 CSS px — which at 2x wants about 830
 /// pixels. 420 points lands there. 640 was the first guess and produced a
 /// 1280px, 170 KB image to be drawn into a 224px tile.
+///
+/// Only the two platforms that take a picture read it: the stub below never
+/// scales anything, so on Linux this is dead code and `-D warnings` says so.
+#[cfg(any(target_os = "macos", windows))]
 const POSTER: f64 = 420.0;
 
 /// How far past the last display the capture window is parked.
@@ -72,6 +76,19 @@ pub async fn capture_poster(
     url: String,
 ) -> Result<tauri::ipc::Response, String> {
     shoot(app, url).await.map(tauri::ipc::Response::new)
+}
+
+/// Whether this build can photograph a page at all.
+///
+/// A constant, and the renderer cannot see it: `platform` below compiles to
+/// `SUPPORTED = false` anywhere but macOS and Windows, so on Linux capture is
+/// not failing intermittently, it is impossible. The library used to work that
+/// out by counting refusals — two in a row, a poll apart, and only ever one of
+/// them actually arrived — and then draw a grid of grey plates for the whole
+/// session. Asking is both quicker and the truth.
+#[tauri::command]
+pub fn capture_supported() -> bool {
+    platform::SUPPORTED
 }
 
 async fn shoot(app: tauri::AppHandle, url: String) -> Result<Vec<u8>, String> {

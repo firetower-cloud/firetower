@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { Titlebar } from "~/ui/Titlebar";
+import { Resize } from "~/ui/Resize";
+import { KeychainRefused } from "~/ui/KeychainRefused";
 import { Rail } from "~/ui/Rail";
 import { Routes } from "~/Routes";
 import { Posters } from "~/artifacts/posters";
@@ -10,7 +12,7 @@ import { BackendProvider, dropCache } from "~/backend";
 import { bridge } from "~/bridge";
 import { StartProvider } from "~/start";
 import { Connect } from "~/ui/Connect";
-import { servers, onServers } from "~/servers";
+import { servers, onServers, tokensKnown } from "~/servers";
 import { Boundary } from "~/ui/Boundary";
 import { Gate } from "~/ui/Gate";
 import { navigate, usePathname } from "~/shims/next-navigation";
@@ -24,7 +26,83 @@ const WHICH = "firetower.current";
 /** What this used to be called, when it could also hold `"all"`. */
 const WAS = "firetower.scope";
 
+/**
+ * Which server this window is on, given what it last heard.
+ *
+ * The asked-for one where it is still here, and otherwise the first there is.
+ * **Pure, exported and tested, because the answer `null` while servers exist
+ * is a window with nothing in it** — `Window` draws no body for a server it
+ * cannot find, which is right when there are none and a bug every other time.
+ * It was reachable: the registry announces a new row before anything names
+ * it, so every sign-in passed through a render where the choice was stale.
+ */
+export function serverOn(real: { serverId: string }[], asked: string | null): string | null {
+  if (asked && real.some((s) => s.serverId === asked)) return asked;
+  return real[0]?.serverId ?? null;
+}
+
+/**
+ * What the window draws under its title bar.
+ *
+ * Here rather than inline so that the one answer that must never happen —
+ * `nothing` with servers in the registry — is something a test can ask for
+ * directly. `style` is a dev-build screen and is decided by the caller.
+ */
+export function bodyFor(
+  real: { serverId: string; token: string }[],
+  on: string | null,
+  path: string,
+): "connect" | "door" | "app" | "nothing" {
+  if (path.startsWith("/connect") || real.length === 0) return "connect";
+  if (real.some((s) => s.serverId === on && !s.token)) return "door";
+  return real.some((s) => s.serverId === on) ? "app" : "nothing";
+}
+
+/**
+ * The window, before the keychain has said anything.
+ *
+ * **The chrome, and nothing under it.** `hydrate` runs behind the first frame
+ * now, so for the first moments of a launch a registry row's token has not
+ * arrived yet — and a row with no token is indistinguishable from a row whose
+ * sign-in has died, which `Window` below draws as that server's door. Drawing
+ * it for the half-second a keychain read takes would be a password field
+ * flashing up on every launch; drawing the app instead would be a window full
+ * of panes asking an unauthenticated question each.
+ *
+ * So: the title bar, which moves and closes the window, and the edges, which
+ * resize it. Painted and styled, which is the whole of the fix — this used to
+ * be a window with nothing in it at all, because nothing rendered until the
+ * keychain answered, and a locked keyring means it never does. `servers.ts`
+ * stops waiting after a moment either way, so this is never what anybody is
+ * left looking at.
+ */
+function Starting() {
+  return (
+    <div className="flex h-full w-full flex-col overflow-hidden bg-ground text-text">
+      <Titlebar serverId={null} onSwitch={() => {}} />
+      <Resize />
+      <div className="relative flex min-h-0 flex-1" />
+    </div>
+  );
+}
+
 export function App() {
+  /* Whether the keychain has answered, or been waited out. The registry is
+     read synchronously everywhere and the keychain is not, so this is the one
+     thing the window has to wait for — and it waits with its chrome up. */
+  const [known, setKnown] = useState(tokensKnown);
+  useEffect(() => {
+    /* Read again here, and not only on the next notification. `hydrate` is
+       started right after `render`, so it can finish before this effect has
+       subscribed — and a window that missed that one notification would stay
+       on `Starting` for the rest of the launch. */
+    setKnown(tokensKnown());
+    return onServers(() => setKnown(tokensKnown()));
+  }, []);
+  return known ? <Window /> : <Starting />;
+}
+
+function Window() {
   /**
    * Which Firetower the window is in. One at a time.
    *
@@ -57,9 +135,13 @@ export function App() {
       /* private window; the choice just does not survive a reload */
     }
   };
-  /* The servers this Mac has connected to. */
+  /* The servers this Mac has connected to. Re-read on subscribing for the
+     same reason as above: a token can land between the render and this. */
   const [real$, setReal] = useState(servers);
-  useEffect(() => onServers(() => setReal(servers())), []);
+  useEffect(() => {
+    setReal(servers());
+    return onServers(() => setReal(servers()));
+  }, []);
   const path = usePathname();
   /* Is there a newer build: now, and every ten minutes after, so a window left
      open for a fortnight does not learn about a release by being restarted.
@@ -98,27 +180,45 @@ export function App() {
   const style = import.meta.env.DEV && path.startsWith("/style");
   const connecting = path.startsWith("/connect");
 
+  /* **Resolved during the render that needs it, not by an effect afterwards.**
+     A choice naming a server this Mac no longer has — or no choice yet,
+     which is every sign-in, because the row is announced before `onDone`
+     names it — used to leave `here` null for a render, and the branch for
+     that draws *nothing*: a window with a title bar and an empty body. An
+     effect then corrected it, which made the blank a flicker rather than a
+     state, and only while the effect actually ran. Falling back here means
+     there is no such render: with any server at all, one of them is the one
+     this window is on. */
+  const on = serverOn(real$, which);
   const asBackend = (id: string | null): Backend | null => {
     const real = id ? real$.find((s) => s.serverId === id) : undefined;
     return real ? liveBackend(real) : null;
   };
-  const here = asBackend(which);
-  /* A choice naming a server this Mac no longer has falls back to the next
-     one; with no server at all there is only connecting. */
+  const here = asBackend(on);
+  /* Written down so the correction survives a relaunch. */
   useEffect(() => {
-    if (!here) setWhich(real$[0]?.serverId ?? null);
-  }, [which, here, real$]);
+    if (on !== which) setWhich(on);
+  }, [on, which]);
   const none = real$.length === 0;
   /* A server this Mac is still connected to whose token has stopped working:
      a password replaced in a browser ends every other session, and so does an
      administrator resetting one. The address is still right, so what is owed
      is a password field for *that* server, not the whole app drawn around a
      refusal repeated in every pane. */
-  const adrift = real$.find((s) => s.serverId === which && !s.token) ?? null;
+  const adrift = real$.find((s) => s.serverId === on && !s.token) ?? null;
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-ground text-text">
-      <Titlebar serverId={which} onSwitch={pick} />
+      <Titlebar serverId={on} onSwitch={pick} />
+      {/* The window's own edges, where there is no frame to grab. Beside the
+          title bar and not inside it: nested, one mousedown would start a
+          move and a resize at once. */}
+      <Resize />
+      {/* Draws nothing until the OS keychain refuses a token, which can happen
+          on any of the three platforms and on Linux happens most. Above the
+          door as well as the app, because the sign-in it is about can be the
+          one that just happened on either. */}
+      <KeychainRefused />
 
       <div className="relative flex min-h-0 flex-1">
         {/* The style page first, and before the door. It is a dev build's
