@@ -370,6 +370,58 @@ pub fn never_asks_as(agent: crate::Agent) -> Option<&'static str> {
     }
 }
 
+/// The values this engine's picker would offer for a control.
+///
+/// Empty means the server cannot enumerate it — which is a third answer and
+/// not the same as the control being absent. Codex lists its models and
+/// efforts over its own protocol, so a caller validating a model against an
+/// empty list must not read that as "no such model".
+pub fn choices_for(agent: crate::Agent, kind: ControlKind) -> Vec<String> {
+    for_agent(agent, Vec::new(), Vec::new())
+        .into_iter()
+        .filter(|c| c.kind == kind)
+        .flat_map(|c| c.choices)
+        .map(|c| c.value)
+        .collect()
+}
+
+/// Whether this engine offers this control at all, and this value for it.
+///
+/// **Unknown is refused, not assumed safe.** [`grants_more`] answers `false`
+/// for a value it has never heard of, which read as "this does not grant
+/// anything" — so a sandbox value no catalogue lists passed a check meant to
+/// stop exactly that. Anything an unattended run is started on has to be a
+/// value the picker would have offered, because that is the set somebody has
+/// reasoned about.
+///
+/// `false` also for a control this engine does not have: a sandbox on Claude
+/// Code is not a safe no-op, it is a field that will be ignored while
+/// somebody believes it is in force.
+pub fn offers(agent: crate::Agent, kind: ControlKind, value: &str) -> bool {
+    for_agent(agent, Vec::new(), Vec::new())
+        .into_iter()
+        .filter(|c| c.kind == kind)
+        .flat_map(|c| c.choices)
+        .any(|choice| choice.value == value)
+}
+
+/// Whether this engine has such a control at all.
+///
+/// Told apart from "offers this value" because one engine lists its models
+/// at runtime: the control exists and the server cannot enumerate it, which
+/// is a third answer and not the same as the control being absent.
+pub fn has_control(agent: crate::Agent, kind: ControlKind) -> bool {
+    match (agent, kind) {
+        // Codex lists models and efforts over its own protocol, so
+        // `for_agent` leaves them out when it has not spoken yet. The control
+        // is still that engine's.
+        (crate::Agent::Codex, ControlKind::Model | ControlKind::Effort) => true,
+        _ => for_agent(agent, Vec::new(), Vec::new())
+            .into_iter()
+            .any(|c| c.kind == kind),
+    }
+}
+
 /// Whether a value for this control grants the agent more than it otherwise
 /// had — the `caution: Grants` the pickers draw a warning against.
 ///

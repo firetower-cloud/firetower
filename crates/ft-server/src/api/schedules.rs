@@ -222,8 +222,17 @@ pub(crate) async fn write_one(
     let clock = cadence::Clock::of(&req.cadence, &req.timezone)
         .map_err(|refused| ApiError::new(ErrorCode::InvalidRequest, refused.0))?;
 
-    let spec = spec_for(&req);
-    let pins = pins_for(state, owner_id, &req).await?;
+    // **The engine that will actually run, resolved before anything is
+    // validated against it.** A profile that pins an engine replaces the
+    // requested one inside `create_session_as` — so a schedule asking for
+    // `Shell` with a Codex profile was validated against `Shell`'s catalogue,
+    // which has no controls at all, and handed a worker Codex with whatever
+    // sandbox had been asked for. Everything below reads this, and the spec
+    // records it, so the thing that is checked is the thing that runs.
+    let profile = profile_for(state, owner_id, &req).await?;
+    let agent = effective_agent(&req, profile.as_ref());
+    let spec = spec_for(&req, agent);
+    let pins = pins_for(state, owner_id, &req, agent, profile.as_ref()).await?;
     let delete_clean_runs = req.repo_id.is_some() && req.delete_clean_runs;
 
     if fresh {
@@ -269,11 +278,16 @@ pub(crate) async fn write_one(
 /// Stored as the JSON it will be read back as rather than as a typed struct,
 /// because what was approved is a *text* — and a build that adds a field to
 /// `NewSession` must not retroactively change what an approved schedule does.
-fn spec_for(req: &NewSchedule) -> serde_json::Value {
+fn spec_for(req: &NewSchedule, agent: ft_core::Agent) -> serde_json::Value {
     let mut spec = serde_json::json!({
         "name": req.name.trim(),
         "prompt": req.prompt.trim(),
-        "agent": req.agent,
+        // **The effective engine**, not the requested one. A profile that
+        // pins an engine replaces the request inside `create_session_as`, so
+        // recording the request meant the stored spec named an engine that
+        // would not run — and everything validated against it was validated
+        // against the wrong catalogue.
+        "agent": agent,
         // Neither is a control on this surface, and both are written rather
         // than left to a default: `Equal` is what a workspace takes when
         // nobody says, and an unattended run should yield to whoever is at
@@ -308,6 +322,8 @@ async fn pins_for(
     state: &AppState,
     owner_id: &str,
     req: &NewSchedule,
+    agent: ft_core::Agent,
+    profile: Option<&crate::roles::Role>,
 ) -> ApiResult<serde_json::Value> {
     let mut settings = req.settings.clone();
 
@@ -318,7 +334,7 @@ async fn pins_for(
     // engine, which for Codex is a value it has never heard of, so the
     // control silently did nothing.
     if settings.mode.is_none() {
-        settings.mode = ft_core::controls::never_asks_as(req.agent).map(str::to_string);
+        settings.mode = ft_core::controls::never_asks_as(agent).map(str::to_string);
     }
 
     // **The sandbox, where the engine has one.** Left unset it used to be
@@ -328,7 +344,7 @@ async fn pins_for(
     // launch now, and this pins the fence rather than leaving it to the
     // agent's own default.
     if settings.sandbox.is_none() {
-        settings.sandbox = ft_core::controls::unattended_sandbox(req.agent).map(str::to_string);
+        settings.sandbox = ft_core::controls::unattended_sandbox(agent).map(str::to_string);
     }
 
     // **And nothing that grants more than the agent otherwise had**, asked of
@@ -358,7 +374,38 @@ async fn pins_for(
         ),
     ] {
         let Some(value) = value else { continue };
-        if ft_core::controls::grants_more(req.agent, kind, value) {
+        // **Unknown is refused, not assumed safe.** `grants_more` answers
+        // `false` for a value it has never heard of, so a sandbox value no
+        // catalogue lists passed the check meant to stop exactly that. And a
+        // control this engine does not have is not a harmless extra field —
+        // it is one that will be ignored while somebody believes it is in
+        // force.
+        if !ft_core::controls::has_control(agent, kind) {
+            return Err(ApiError::new(
+                ErrorCode::InvalidRequest,
+                format!(
+                    "{} has no such setting, and a schedule cannot be approved on one it would \
+                     ignore.",
+                    agent.label()
+                ),
+            ));
+        }
+        // Where the server can enumerate the choices, the value has to be one
+        // of them. Where it cannot — Codex lists its models and efforts over
+        // its own protocol — an empty list is "unknown to me", not "no such
+        // value", and refusing on it would refuse every Codex model.
+        let known = ft_core::controls::choices_for(agent, kind);
+        if !known.is_empty() && !known.iter().any(|k| k == value) {
+            return Err(ApiError::new(
+                ErrorCode::InvalidRequest,
+                format!(
+                    "“{value}” is not something {} offers for that setting, so a run started on \
+                     it would not do what it says.",
+                    agent.label()
+                ),
+            ));
+        }
+        if ft_core::controls::grants_more(agent, kind, value) {
             return Err(ApiError::new(
                 ErrorCode::InvalidRequest,
                 format!(
@@ -409,7 +456,7 @@ async fn pins_for(
     // ambient fallback for something that runs with nobody present.
     let account = match &req.account_id {
         Some(id) => Some(id.clone()),
-        None => super::accounts::default_account(&state.db, owner_id, req.agent)
+        None => super::accounts::default_account(&state.db, owner_id, agent)
             .await
             .map_err(|e| {
                 // **Not swallowed into a null.** An error reading the account
@@ -430,7 +477,7 @@ async fn pins_for(
     // they have not connected a subscription yet would make the inert row
     // unobtainable. [`approve_schedule`] is where the authorization is fixed,
     // and that is where an account has to exist and be spendable.
-    let needs_account = req.agent.needs_credential();
+    let needs_account = agent.needs_credential();
 
     // The versions those skills resolve to **now**, and what a run is pinned
     // to. Recording the ids was not enough on its own: the launch pinned
@@ -455,24 +502,12 @@ async fn pins_for(
     // The gate recomputes it and refuses rather than running something
     // nobody approved; refusing is right, because the remedy is a person
     // looking at what changed.
-    let (persona, fingerprint) = match &req.profile {
+    let (persona, fingerprint) = match profile {
         None => (None, None),
-        Some(id) => {
-            let role = state
-                .roles
-                .one(owner_id, id, crate::access::Level::Viewer)
-                .await?
-                .ok_or_else(|| {
-                    ApiError::new(
-                        ErrorCode::InvalidRequest,
-                        "that profile isn't one you can start a workspace as",
-                    )
-                })?;
-            (
-                Some(super::sessions::persona_for(state, owner_id, &role).await?),
-                Some(profile_fingerprint(&role)),
-            )
-        }
+        Some(role) => (
+            Some(super::sessions::persona_for(state, owner_id, role).await?),
+            Some(profile_fingerprint(role)),
+        ),
     };
 
     // **What the pins say about a control nobody can resolve here.** Codex
@@ -902,6 +937,53 @@ pub(super) async fn read_cadence(
         reads: clock.reads(),
         next_fires: clock.next_fires(chrono::Utc::now(), 3),
     }))
+}
+
+/// The engine that will actually run.
+///
+/// **A profile that pins one replaces whatever was requested**, and that
+/// happens inside `create_session_as` — so anything validated against the
+/// requested engine is validated against an engine that may never run. A
+/// schedule asking for `Shell` with a Codex profile was checked against
+/// `Shell`'s catalogue, which has no controls at all, and handed a worker
+/// Codex with whatever sandbox had been asked for.
+///
+/// Resolved here, recorded in the spec, and used for every per-engine
+/// question: the permission mode's word, the sandbox, whether a subscription
+/// is needed, and which account is the default.
+/// Pure, and resolved from the same field `create_session_as` reads, so the
+/// two cannot disagree about which engine this is.
+fn effective_agent(req: &NewSchedule, profile: Option<&crate::roles::Role>) -> ft_core::Agent {
+    profile
+        .and_then(|p| p.agent.as_deref())
+        .and_then(ft_core::Agent::from_name)
+        .unwrap_or(req.agent)
+}
+
+/// The profile this schedule runs as, read once as the person who named it.
+///
+/// Once, because the engine, the persona and the fingerprint all come off it
+/// and two reads could see two different profiles.
+async fn profile_for(
+    state: &AppState,
+    owner_id: &str,
+    req: &NewSchedule,
+) -> ApiResult<Option<crate::roles::Role>> {
+    let Some(id) = &req.profile else {
+        return Ok(None);
+    };
+    Ok(Some(
+        state
+            .roles
+            .one(owner_id, id, crate::access::Level::Viewer)
+            .await?
+            .ok_or_else(|| {
+                ApiError::new(
+                    ErrorCode::InvalidRequest,
+                    "that profile isn't one you can start a workspace as",
+                )
+            })?,
+    ))
 }
 
 /// Everything about a profile that decides what a run does.

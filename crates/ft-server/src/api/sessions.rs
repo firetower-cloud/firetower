@@ -1141,7 +1141,21 @@ pub(crate) async fn create_session_as(
     // there is nothing better to do: one process, one environment. What each
     // repository asked for in a *file* stays its own, inside its own checkout.
     let mut env: Vec<(String, String)> = Vec::new();
-    carry_preferences(&state, &mut env, &owner, req.agent, &req.settings, true).await;
+    // **`inherit_settings`, not `true`.** This is the path a scheduled run
+    // takes — a new workspace — and it was the one still passing a literal,
+    // so turning inheritance off in the caller closed it only for a second
+    // agent in an existing workspace. See [`Launch::inherit_settings`];
+    // `a_scheduled_run_is_handed_the_sandbox_it_was_approved_with` is what
+    // fails if this goes back to a literal.
+    carry_preferences(
+        &state,
+        &mut env,
+        &owner,
+        req.agent,
+        &req.settings,
+        inherit_settings,
+    )
+    .await;
     for vars in &per_repo_env {
         for v in vars {
             env.retain(|(existing, _)| *existing != v.name);

@@ -30,6 +30,15 @@ struct Worker {
     /// worker writes — so a test can assert on those rather than stopping at
     /// `skill_pins` and inferring the rest.
     launched: Launches,
+    /// **Every `CreateWorkspace` this worker was handed.**
+    ///
+    /// The frame is what a workspace *is*: the engine, the environment, the
+    /// sandbox, the skills, the persona and each checkout's credential. A
+    /// test that asserts on stored pins is asserting on an intention; this is
+    /// the thing that reaches a machine, and the two have disagreed — a
+    /// schedule whose pins said `Shell` handed a worker Codex with no
+    /// filesystem fence.
+    created: Created,
     /// What this machine says about its disk, if it says anything.
     ///
     /// `None` is a worker that has never reported, which is a real state and
@@ -40,6 +49,8 @@ struct Worker {
 
 /// What the control plane told the worker to start.
 type Launches = Arc<std::sync::Mutex<Vec<ft_proto::StartAgent>>>;
+/// What the control plane told the worker to make.
+type Created = Arc<std::sync::Mutex<Vec<ft_proto::CreateWorkspace>>>;
 #[async_trait::async_trait]
 impl Transport for Worker {
     fn describe(&self) -> String {
@@ -50,6 +61,7 @@ impl Transport for Worker {
         let ready = self.ready.clone();
         let probe = self.probe.clone();
         let launched = self.launched.clone();
+        let created = self.created.clone();
         let capacity = self.capacity;
         tokio::spawn(async move {
             let (r, w) = tokio::io::split(theirs);
@@ -120,6 +132,10 @@ impl Transport for Worker {
                             result: Ok("started".into()),
                         })
                     }
+                    ToWorker::CreateWorkspace(ref spec) => {
+                        created.lock().unwrap().push((**spec).clone());
+                        None
+                    }
                     ToWorker::ProbeRemote { req, .. } => Some(ToServer::RemoteProbed {
                         req,
                         result: match probe.clone() {
@@ -152,10 +168,106 @@ async fn fixture() -> (
     (state, principal, host, ready, owner)
 }
 
-/// The same fixture, and what the worker was told to start.
+/// The same fixture, and **every workspace the worker was told to create**.
 ///
-/// Separate only so the twenty tests that do not care keep their five-element
-/// tuple; there is one fixture, and this is it.
+/// Separate only so the tests that do not care keep their five-element tuple.
+///
+/// The harness for anything about what actually reaches a machine. A schedule
+/// is a chain of intentions — a request, a set of pins, a spec, a launch —
+/// and each link has been wrong at least once while the one before it looked
+/// right. This is the end of the chain.
+async fn frames_fixture() -> (
+    AppState,
+    crate::auth::Principal,
+    Host,
+    Arc<AtomicBool>,
+    String,
+    Created,
+) {
+    let (db, owner) = crate::db::Db::open_for_test_owned().await.unwrap();
+    let accounts = crate::accounts::Accounts::new(db.pool().clone());
+    let principal = crate::auth::Principal {
+        subject: "admin".into(),
+        via: crate::auth::Via::Session,
+        user: accounts.user_by_name("admin").await.unwrap(),
+    };
+    let host = db.ensure_host("native", native(), &owner).await.unwrap();
+    let ready = Arc::new(AtomicBool::new(true));
+    let created: Created = Default::default();
+    let fleet = crate::fleet::Fleet::new(db.clone());
+    fleet
+        .supervise(
+            host.id.clone(),
+            Arc::new(Worker {
+                ready: ready.clone(),
+                probe: Some(ft_proto::RemoteInfo {
+                    default_branch: "main".into(),
+                    branches: vec!["main".into()],
+                    empty: false,
+                }),
+                launched: Default::default(),
+                capacity: None,
+                created: created.clone(),
+            }),
+        )
+        .await;
+    let vault = Arc::new(crate::vault::Vault::new(
+        db.pool().clone(),
+        crate::vault::crypto::RootKey::generate(),
+    ));
+    let names = crate::preview::Names::from_vault(&vault);
+    let connections = crate::providers::Connections::opened(db.pool().clone())
+        .await
+        .unwrap();
+    let state = AppState {
+        updates: crate::updates::Updates::new(db.pool().clone()),
+        policy: crate::auth::Policy::open(),
+        access: crate::access::Access::new(db.pool().clone()),
+        skills: crate::skills::Skills::new(db.pool().clone()),
+        roles: crate::roles::Roles::new(db.pool().clone()),
+        connections,
+        db,
+        accounts,
+        fleet,
+        vault,
+        names,
+        key_source: "test".into(),
+        home: std::env::temp_dir(),
+        pending: Default::default(),
+        renewals: Default::default(),
+        forwards: Default::default(),
+        previews: Default::default(),
+        public_url: "http://localhost".into(),
+    };
+    state
+        .db
+        .mark_host_online(
+            &host.id,
+            "test",
+            4,
+            8192,
+            &ft_core::DockerState::running("27.0.3"),
+        )
+        .await
+        .unwrap();
+    (state, principal, host, ready, owner, created)
+}
+
+/// What the worker was handed for one run, waited for.
+///
+/// `fleet.send` queues the frame, so a test that reads the capture the
+/// instant a launch returns reads an empty list — which is also why the
+/// launch permit could not be released when `start` returned.
+async fn handed_to_worker(created: &Created) -> ft_proto::CreateWorkspace {
+    for _ in 0..200 {
+        if let Some(frame) = created.lock().unwrap().first().cloned() {
+            return frame;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    panic!("the worker was never handed a workspace to create");
+}
+
 async fn watched_fixture() -> (
     AppState,
     crate::auth::Principal,
@@ -183,6 +295,7 @@ async fn watched_fixture() -> (
                 probe: None,
                 launched: launched.clone(),
                 capacity: None,
+                created: Default::default(),
             }),
         )
         .await;
@@ -596,6 +709,7 @@ async fn connecting_a_host_path_defers_validation_to_the_execution_machine() {
                 probe: None,
                 launched: Default::default(),
                 capacity: None,
+                created: Default::default(),
             }),
         )
         .await;
@@ -1384,6 +1498,7 @@ async fn an_empty_repository_is_connected_rather_than_refused() {
                 }),
                 launched: Default::default(),
                 capacity: None,
+                created: Default::default(),
             }),
         )
         .await;
@@ -2753,6 +2868,7 @@ async fn another_machine(state: &AppState, owner: &str, name: &str) -> Host {
                 probe: None,
                 launched: Default::default(),
                 capacity: None,
+                created: Default::default(),
             }),
         )
         .await;
@@ -2807,6 +2923,7 @@ async fn says_its_disk(state: &AppState, host: &Host, total_mb: u64, used_mb: u6
                     disk_used_mb: used_mb,
                     ..Default::default()
                 }),
+                created: Default::default(),
             }),
         )
         .await;
@@ -6147,6 +6264,156 @@ async fn a_scheduled_launch_inherits_nothing_a_person_picked_later() {
 
     let spec = crate::schedules::launch::spec_of(&row).expect("it reads back as a launch");
     assert_eq!(spec.settings.sandbox.as_deref(), Some("workspace+network"));
+}
+
+/// **Blocker 2, as it survived the first fix: the engine checked was not the
+/// engine that ran.**
+///
+/// `create_session_as` replaces `req.agent` with the profile's pinned engine
+/// — that is the whole point of pinning one — and every per-engine question
+/// here was asked of the request. So a schedule saying `agent: Shell` with a
+/// Codex profile was checked against `Shell`'s catalogue, which has no
+/// controls at all: `everything` granted nothing it could name, the mode was
+/// a word nothing knew, and the thing that started was Codex with no
+/// filesystem fence.
+///
+/// Resolved once now, recorded in the spec, and used for all four questions.
+#[tokio::test]
+async fn a_schedules_controls_are_checked_against_the_engine_a_profile_pins() {
+    let (state, principal, _, _, owner) = fixture().await;
+    let profile = saved_profile(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Nightly",
+            "does": "Reads the dependency diff",
+            "instructions": "Take only patch bumps.",
+            "placement": "new",
+            "agent": "Codex",
+        }),
+    )
+    .await;
+
+    let mut sneaky = a_schedule("Looks like a shell", weekdays_at("08:30"));
+    sneaky.agent = Agent::Shell;
+    sneaky.profile = Some(profile.clone());
+    sneaky.settings.mode = Some("never".into());
+    sneaky.settings.sandbox = Some("everything".into());
+    let refused = create(&state, &principal, sneaky)
+        .await
+        .expect_err("Codex's catalogue is the one that applies");
+    assert!(
+        refused.message.contains("more than it otherwise could"),
+        "{}",
+        refused.message
+    );
+
+    // And what is written down names the engine that will run, so nothing
+    // downstream has to resolve it a second time and disagree.
+    let mut fine = a_schedule("Nightly", weekdays_at("08:30"));
+    fine.agent = Agent::Shell;
+    fine.profile = Some(profile);
+    let made = create(&state, &principal, fine).await.unwrap();
+    let row = state.db.schedule(&made.id).await.unwrap().unwrap();
+    assert_eq!(row.spec["agent"], serde_json::json!("Codex"));
+    assert_eq!(
+        row.pins["settings"]["sandbox"],
+        serde_json::json!("workspace+network"),
+        "the fence is Codex's, pinned from Codex's default"
+    );
+    assert_eq!(
+        row.pins["settings"]["mode"],
+        serde_json::json!("never"),
+        "and the word is the one Codex knows"
+    );
+    assert_eq!(
+        row.pins["accountNeeded"],
+        serde_json::json!(true),
+        "a shell authenticates nothing and Codex does — asked of the engine that runs"
+    );
+}
+
+/// **The same blocker, asserted on the frame the worker was handed.**
+///
+/// Everything above is about what was stored, and the stored pins were right
+/// before this round too. What was wrong was downstream of them:
+/// `create_session_as` passed a literal `true` for `inherit_settings` on the
+/// new-workspace path — the path a scheduled run takes — so the caller
+/// turning inheritance off changed nothing, and the frame carried whatever
+/// that person had picked since.
+///
+/// So this reads `FIRETOWER_AGENT_SETTINGS` out of the `CreateWorkspace` the
+/// fake worker received. That is the last link in the chain and the only one
+/// that decides what runs.
+#[tokio::test]
+async fn a_scheduled_run_is_handed_the_sandbox_it_was_approved_with() {
+    let (state, principal, host, ready, owner, created) = frames_fixture().await;
+    ready.store(true, Ordering::SeqCst);
+    says_it_has(&state, &host, &[(Agent::Codex, true)]).await;
+    let account = a_subscription(&state, &owner, "a_codex", Agent::Codex).await;
+
+    let mut new = a_schedule("Unattended", weekdays_at("08:30"));
+    new.agent = Agent::Codex;
+    new.account_id = Some(account);
+    let made = create(&state, &principal, new).await.unwrap();
+    let _ = super::schedules::approve_schedule(
+        State(state.clone()),
+        Extension(principal.clone()),
+        Path(made.id.as_str().to_string()),
+        Query(Default::default()),
+    )
+    .await
+    .expect("it activates");
+
+    // **Afterwards**, in an unrelated interactive session, they pick the
+    // sandbox that has none. This is the preference the launch used to read.
+    state
+        .db
+        .prefer_control(
+            &owner,
+            Agent::Codex,
+            ft_core::controls::ControlKind::Sandbox,
+            "everything",
+        )
+        .await
+        .unwrap();
+
+    let row = state.db.schedule(&made.id).await.unwrap().unwrap();
+    let claim = state
+        .db
+        .claim_run(
+            &ft_core::ScheduleRunId::new(),
+            &made.id,
+            None,
+            Utc::now(),
+            1,
+            "cron",
+            "claimed",
+            None,
+            false,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    crate::schedules::launch::start(&state, &row, &claim)
+        .await
+        .expect("it launches");
+
+    let frame = handed_to_worker(&created).await;
+    assert_eq!(frame.agent, Agent::Codex);
+    let carried = frame
+        .env
+        .iter()
+        .find(|(name, _)| name == ft_core::PREFERRED_ENV)
+        .map(|(_, value)| value.clone())
+        .expect("the approved controls crossed over");
+    let carried: serde_json::Value = serde_json::from_str(&carried).unwrap();
+    assert_eq!(
+        carried["sandbox"],
+        serde_json::json!("workspace+network"),
+        "the worker was handed a sandbox nobody approved: {carried}"
+    );
+    assert_eq!(carried["mode"], serde_json::json!("never"));
 }
 
 /// **And a value that grants more is refused on write, by engine.**
