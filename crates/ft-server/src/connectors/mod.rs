@@ -386,7 +386,7 @@ impl Connectors {
         .context("writing a connector")
         .map_err(internal)?;
 
-        record_probe(&mut tx, id.as_str(), &probe, sign_in)
+        record_probe(&mut tx, id.as_str(), &probe, Some(sign_in))
             .await
             .map_err(internal)?;
         tx.commit().await.map_err(internal)?;
@@ -476,10 +476,13 @@ impl Connectors {
             .headers_for(vault, &slug, me, &format!("probing the {slug} connector"))
             .await?;
 
+        // Whether this probe is evidence about signing in at all.
+        let anonymous = headers.is_empty();
+
         let mut tx = self.pool.begin().await?;
         match mcp::probe(&url, &headers).await {
             Ok(probe) => {
-                let sign_in = sign_in_for(&probe);
+                let sign_in = anonymous.then(|| sign_in_for(&probe));
                 record_probe(&mut tx, id, &probe, sign_in).await?;
             }
             Err(trouble) => {
@@ -769,6 +772,19 @@ impl Connectors {
             )
             .await?;
 
+        // **Now ask it what it can do.** Criterion 13's second half: a server
+        // that would not list its tools to a stranger lists them to a
+        // credential, and the moment one exists is the moment to ask — not the
+        // next time somebody opens the page, and not on a timer.
+        //
+        // Best effort. The grant is stored either way, and a connector that is
+        // signed in with no tool list yet is a page that says so; one that
+        // refused the sign-in because a second request failed would have lost
+        // a browser leg somebody already completed.
+        if let Err(e) = self.probe_again(vault, &me, &connector_id).await {
+            tracing::warn!(connector = %slug, "asking it what it can do: {e:#}");
+        }
+
         Ok(Landed {
             connector_id,
             name: slug,
@@ -807,8 +823,11 @@ impl Connectors {
                 )))))
             }
             Ok(probe) => {
+                // The token was accepted, so `token` is what opens it — and
+                // this probe *did* carry a credential, which is why the value
+                // is asserted rather than derived.
                 let mut tx = self.pool.begin().await?;
-                record_probe(&mut tx, id, &probe, HowToSignIn::Token).await?;
+                record_probe(&mut tx, id, &probe, Some(HowToSignIn::Token)).await?;
                 tx.commit().await?;
             }
             Err(trouble) => return Ok(Some(Err(Refused::Says(trouble.to_string())))),
@@ -1160,19 +1179,26 @@ impl Connectors {
         })
     }
 
-    /// Whether the server asked for a credential the last time it was probed.
+    /// Whether this server needs a credential at all.
+    ///
+    /// Off `sign_in` rather than off `shape`, and that distinction was a bug:
+    /// after somebody signs in, a re-probe *with* their credential comes back
+    /// with a tool list, so the shape becomes `tools` — and reading the shape
+    /// here would then have concluded the server needs nothing and sent it to
+    /// a worker with no header the moment the grant went. `sign_in` is only
+    /// ever written from an anonymous probe, which is why it can answer this.
+    ///
+    /// A connector nothing has probed is assumed to want one, which errs
+    /// towards not sending it.
     async fn wants_a_credential(&self, id: &str) -> Result<bool> {
         let row = sqlx::query(
-            "SELECT shape FROM connector_probes WHERE connector_id = $1 AND trouble IS NULL",
+            "SELECT sign_in FROM connector_probes WHERE connector_id = $1 AND trouble IS NULL",
         )
         .bind(id)
         .fetch_optional(&self.pool)
         .await?;
-        // Anything other than "it listed its tools to a stranger" means it
-        // refused — and a connector nothing has probed is assumed to want one,
-        // which errs towards not sending it.
         Ok(match row {
-            Some(row) => row.get::<String, _>("shape") != mcp::Shape::Tools.as_stored(),
+            Some(row) => row.get::<String, _>("sign_in") != HowToSignIn::None.as_stored(),
             None => true,
         })
     }
@@ -1588,6 +1614,14 @@ fn auth_host(issuer: &str) -> String {
 }
 
 /// How a server is signed in to, from what it said when asked.
+///
+/// **Only ever decided by a probe made with no credential.** A server that
+/// answers a *credentialed* probe with its tool list has told you nothing about
+/// whether it needs one — and concluding `None` there was a live bug: signing
+/// in to a connector re-probed it successfully, which recorded it as wanting
+/// nothing, which would have sent it to a worker with no header the moment the
+/// grant was removed. So `probe_again` passes `None` to [`record_probe`] when
+/// it had a credential, which leaves the stored answer alone.
 fn sign_in_for(probe: &mcp::Probe) -> HowToSignIn {
     match (&probe.challenge, probe.scopes.is_empty()) {
         // It answered without a credential and wants none.
@@ -1619,21 +1653,26 @@ fn version_trouble(server_said: Option<&str>, we_asked: Option<&str>) -> Option<
 }
 
 /// Write down what a probe found, replacing the last answer and recording drift.
+/// `sign_in` is `None` where the probe carried a credential: what a server
+/// says to somebody who is already signed in cannot settle whether it needs
+/// somebody to sign in. See [`sign_in_for`].
 async fn record_probe(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     id: &str,
     probe: &mcp::Probe,
-    sign_in: HowToSignIn,
+    sign_in: Option<HowToSignIn>,
 ) -> Result<()> {
     sqlx::query(
         "INSERT INTO connector_probes \
            (connector_id, at, protocol_version, asked_for, server_name, server_version, \
             capabilities, shape, scopes, authority, unmet, trouble, sign_in) \
-         VALUES ($1, now(), $2, $3, $4, $5, $6, $7, $8, $9, $10, NULL, $11) \
+         VALUES ($1, now(), $2, $3, $4, $5, $6, $7, $8, $9, $10, NULL, \
+                 COALESCE($11, 'token')) \
          ON CONFLICT (connector_id) DO UPDATE SET \
            at = now(), protocol_version = $2, asked_for = $3, server_name = $4, \
            server_version = $5, capabilities = $6, shape = $7, scopes = $8, \
-           authority = $9, unmet = $10, trouble = NULL, sign_in = $11",
+           authority = $9, unmet = $10, trouble = NULL, \
+           sign_in = COALESCE($11, connector_probes.sign_in)",
     )
     .bind(id)
     .bind(&probe.protocol_version)
@@ -1645,7 +1684,7 @@ async fn record_probe(
     .bind(serde_json::to_value(&probe.scopes)?)
     .bind(&probe.authority)
     .bind(serde_json::to_value(&probe.unmet)?)
-    .bind(sign_in.as_stored())
+    .bind(sign_in.map(HowToSignIn::as_stored))
     .execute(&mut **tx)
     .await
     .context("recording what the server said")?;
@@ -2256,6 +2295,74 @@ mod tests {
 
         connectors.set_for_session("s_c", &ana, &[]).await.unwrap();
         assert!(connectors.of_session("s_c").await.unwrap().is_empty());
+    }
+
+    /// **The bug the demo found, pinned.**
+    ///
+    /// Signing in to a connector re-probes it, and a server that refuses a
+    /// stranger answers a credential with its full tool list. Deriving "how is
+    /// this signed in to" from *that* answer recorded the connector as needing
+    /// nothing — and `for_session` would then have sent it to a worker with no
+    /// `Authorization` header the moment the grant was removed, producing a
+    /// server that fails to authenticate instead of one that is left out.
+    ///
+    /// So a probe made with a credential records everything it learned about
+    /// the server and **leaves `sign_in` alone**, and `wants_a_credential`
+    /// reads that column rather than the shape.
+    #[tokio::test]
+    async fn signing_in_does_not_turn_a_server_into_one_that_needs_nothing() {
+        let (db, vault, ana, _bob) = two_people().await;
+        let connectors = Connectors::new(db.pool().clone());
+        let id = a_connector(&db, &ana, "admin", "canva", mcp::Shape::Scopes).await;
+
+        // What an authenticated probe of an OAuth server comes back with: a
+        // clean handshake and a tool list, and no challenge anywhere in it.
+        let authenticated = mcp::Probe {
+            transport: Some(mcp::Transport::Http),
+            protocol_version: Some(mcp::PROTOCOL.into()),
+            tools: vec![tool("design_list", "List designs")],
+            ..Default::default()
+        };
+        assert_eq!(
+            sign_in_for(&authenticated),
+            HowToSignIn::None,
+            "which is exactly why this answer must not be recorded"
+        );
+
+        let mut tx = db.pool().begin().await.unwrap();
+        record_probe(&mut tx, &id, &authenticated, None)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        let after = connectors.one(&vault, &ana, &id).await.unwrap().unwrap();
+        assert_eq!(
+            after.sign_in,
+            HowToSignIn::OAuth,
+            "it is still an OAuth server; it just answered somebody who had signed in"
+        );
+        assert_eq!(
+            after.probed.unwrap().tool_count,
+            1,
+            "and the tools were kept"
+        );
+
+        // The consequence, which is the half that mattered: with the grant
+        // gone it is left out rather than sent unauthenticated.
+        connectors
+            .set_for_session("s_c", &ana, std::slice::from_ref(&id))
+            .await
+            .unwrap();
+        let sent = connectors
+            .for_session(
+                &vault,
+                &crate::oauth::Renewals::default(),
+                &SessionId::from_stored("s_c"),
+                &ana,
+            )
+            .await
+            .unwrap();
+        assert!(sent.is_empty(), "no grant, so not sent: {sent:?}");
     }
 
     /// The redirect seam: one shape built, one named and refused in words.

@@ -905,9 +905,9 @@ function Detail({
         >
           <div className="cx-tools">
             {(probed?.scopes ?? []).map((s: string) => (
-              <span key={s} className="cx-tool">
+              <span key={s} className="cx-tool" data-w={writes(s) ? 1 : 0}>
                 <span className="g">
-                  <Icon of={Eye} size={12} />
+                  <Icon of={writes(s) ? PencilLine : Eye} size={12} />
                 </span>
                 {s}
               </span>
@@ -1062,6 +1062,22 @@ function ToolChip({ tool }: { tool: ToolRow }) {
       {tool.name}
       {tool.writes && <span className="n">asks first</span>}
     </span>
+  );
+}
+
+/**
+ * Whether a scope's own name says it writes.
+ *
+ * **A guess, and the useful half of the list.** A scope carries no annotation
+ * the way a tool does, so there is nothing to read — but `design:content:write`
+ * and `chat:write` are not ambiguous, and every provider checked spells it the
+ * same way. Wrong in the safe direction either way: this decides a glyph, and
+ * what an agent is actually allowed to do is decided by the approval rule.
+ */
+function writes(scope: string): boolean {
+  const lowered = scope.toLowerCase();
+  return ["write", "create", "update", "delete", "manage", "admin", "post"].some((verb) =>
+    lowered.includes(verb),
   );
 }
 
