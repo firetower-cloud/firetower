@@ -125,7 +125,7 @@ export function ScheduleDetail({ schedule: given }: { schedule: Schedule }) {
   ];
 
   return (
-    <div className="scroll">
+    <div className="scroll-slim h-full overflow-y-auto">
       <div className="pg">
         <BackToSchedules />
 

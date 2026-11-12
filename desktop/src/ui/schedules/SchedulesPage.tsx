@@ -88,7 +88,7 @@ function Library({
   const proposals = waiting.filter((s) => s.made.byAgent && !s.approvedAt).length;
 
   return (
-    <div className="scroll">
+    <div className="scroll-slim h-full overflow-y-auto">
       <Section
         title="Schedules"
         note="Run an agent on a schedule. Each run starts a new workspace and follows the prompt you set."
@@ -347,7 +347,7 @@ function AllRuns() {
   }, [runs]);
 
   return (
-    <div className="scroll">
+    <div className="scroll-slim h-full overflow-y-auto">
       <Section
         title="All runs"
         note="Every run from every schedule, newest first."

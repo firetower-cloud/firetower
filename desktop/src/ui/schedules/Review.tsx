@@ -32,7 +32,7 @@ export function Review({ schedule }: { schedule: Schedule }) {
   const trigger = schedule.triggers[0];
 
   return (
-    <div className="scroll">
+    <div className="scroll-slim h-full overflow-y-auto">
       <div className="pg">
         <BackToSchedules />
 
