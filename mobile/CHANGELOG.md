@@ -1,5 +1,54 @@
 # Changelog
 
+## [0.17.0](https://github.com/firetower-cloud/firetower/compare/mobile-v0.16.0...mobile-v0.17.0) (2026-11-12)
+
+
+### Features
+
+* **mobile:** a workspace that leads others gets one row, and carries them ([6d22b52](https://github.com/firetower-cloud/firetower/commit/6d22b52a5677b944b2103110e58da68a459439ae))
+* **mobile:** a workspace whose machine is off can be removed from here ([2eee444](https://github.com/firetower-cloud/firetower/commit/2eee444c717038d030ff085fe4e7ef3e967ac12b))
+* **mobile:** End this workspace ends the workspace ([15143b7](https://github.com/firetower-cloud/firetower/commit/15143b7ce2c79d42295dd63a47031b6d8758792e))
+* **mobile:** End this workspace ends the workspace ([9bc1eff](https://github.com/firetower-cloud/firetower/commit/9bc1eff2ffaa89515ca452595fbf522c71e4400f))
+* **mobile:** the band a row reads under, and the order it makes ([ec8e22f](https://github.com/firetower-cloud/firetower/commit/ec8e22f7a6d5017d7fc0f9f50ac7fe5f0452677f))
+* **mobile:** the list says where the band turns ([c3d2483](https://github.com/firetower-cloud/firetower/commit/c3d24836ef4cd4290e89b6d3a8096947c370b35e))
+* **mobile:** where an artifact's card goes, as one pure rule ([7cb1232](https://github.com/firetower-cloud/firetower/commit/7cb12328e9c10b2be67a438be371761c1b87296f))
+
+
+### Bug Fixes
+
+* **mobile:** a bound teardown names the address, not just the account ([f97f665](https://github.com/firetower-cloud/firetower/commit/f97f6654105cfac2be442284cecb76749b9a469d))
+* **mobile:** a bound teardown names the address, not just the account ([066481e](https://github.com/firetower-cloud/firetower/commit/066481e5710847c7113a67f301ccf1c64867cd08))
+* **mobile:** a pending request belongs to the session it was read for ([f377028](https://github.com/firetower-cloud/firetower/commit/f3770284e2eb57c5a9918650a949fcc2f0a5beea))
+* **mobile:** a status this app cannot read is not an idle one ([78f44db](https://github.com/firetower-cloud/firetower/commit/78f44dbc9c14656ff2e065e15a40cb331f3d7db4))
+* **mobile:** a teardown that outlives its screen reports, and does not act ([5b6387c](https://github.com/firetower-cloud/firetower/commit/5b6387c5d6a2e7aea6c8c2cf5b0c32963d8c1012))
+* **mobile:** a teardown that outlives its screen reports, and does not act ([8a9e472](https://github.com/firetower-cloud/firetower/commit/8a9e472aeb9e6f6873f88bcb8ff2f357ef9f1171))
+* **mobile:** a teardown's continuation belongs to the visit that asked ([7a56b43](https://github.com/firetower-cloud/firetower/commit/7a56b4309c558218bdf83b0d9e741c27fb01501f))
+* **mobile:** an accepted teardown is not a finished one ([3159aac](https://github.com/firetower-cloud/firetower/commit/3159aac8c26a8a5d5c6a7f06a3fe1fbe6f3943d6))
+* **mobile:** an accepted teardown is not a finished one ([d199aea](https://github.com/firetower-cloud/firetower/commit/d199aeaf899174b98093abf7ea6ddda5adf88056))
+* **mobile:** an artifact's card goes where it was published ([f670860](https://github.com/firetower-cloud/firetower/commit/f6708609616777cd6a035dce6f39b6c031ecb799))
+* **mobile:** an artifact's card goes where it was published ([cebe8e0](https://github.com/firetower-cloud/firetower/commit/cebe8e0693df923673d463077dd2ee81e087a528))
+* **mobile:** an unreadable team member does not sort below Ended ([d095a56](https://github.com/firetower-cloud/firetower/commit/d095a56761770404bc8fce21b885a1ef8fefdfaa))
+* **mobile:** carry the agent's log line onto a transcript item ([01aaf09](https://github.com/firetower-cloud/firetower/commit/01aaf09d2e0610193ae96cb65e1b1c340b908f6e))
+* **mobile:** never anchor the scroller above the transcript ([714e4dc](https://github.com/firetower-cloud/firetower/commit/714e4dcf88dd1f4df5bb1ac4eabac880b7ff733c))
+* **mobile:** one answer to which Firetower, so a clone cannot be two ([b1b5ba9](https://github.com/firetower-cloud/firetower/commit/b1b5ba9cc0efd9440181f23e4897dec2d17dddd4))
+* **mobile:** statusLabel reads its own table, not Object's ([96c5bc1](https://github.com/firetower-cloud/firetower/commit/96c5bc1193657c173e1dc6b73c11f91e3cb46f66))
+* **mobile:** the band freeze ends when the row it was on does ([58ad184](https://github.com/firetower-cloud/firetower/commit/58ad1849bfe2826fd4c61a6b6a61a91442e4b654))
+* **mobile:** the end question says what the call it is on does ([0e58004](https://github.com/firetower-cloud/firetower/commit/0e5800428609b91bb85be23409318e7d93c42596))
+* **mobile:** the end question says which workspace, not whose ([b3401ba](https://github.com/firetower-cloud/firetower/commit/b3401ba56b96a09b21b355eefe617a71baaef227))
+* **mobile:** the end question says which workspace, not whose ([022540d](https://github.com/firetower-cloud/firetower/commit/022540d2da73d306e3c426f149effa741adced26))
+* **mobile:** the peek's End carries no count, because it ends nothing ([c9b39c8](https://github.com/firetower-cloud/firetower/commit/c9b39c8d7f5897709a9d0aefc72be3140a287f4d))
+* **mobile:** the peek's End ends the workspace, so its count is true ([8451c97](https://github.com/firetower-cloud/firetower/commit/8451c9723977ddcc898aef216a053396a462b6b0))
+* **mobile:** the peek's End ends the workspace, so its count is true ([8cf3959](https://github.com/firetower-cloud/firetower/commit/8cf3959b1a06c4ed7ca00c83785e80cd00ae57f1))
+* **mobile:** the teardown goes to the Firetower it was asked about ([940fe77](https://github.com/firetower-cloud/firetower/commit/940fe77a7da4c8ec0ada088b72cc0a41fbe9a16d))
+* **mobile:** the teardown goes to the Firetower it was asked about ([8d97858](https://github.com/firetower-cloud/firetower/commit/8d97858e867f9751c93a43dc2452b1c08e1381a9))
+
+
+### Reverts
+
+* **mobile:** the end question goes back to a teardown's words here ([a0482e4](https://github.com/firetower-cloud/firetower/commit/a0482e48eb08c6c94964fa05308602b436346485))
+* **mobile:** the forced removal promises something it does not do ([8ec0be6](https://github.com/firetower-cloud/firetower/commit/8ec0be61b0736d4a0bdaad08fa0c06ce33780fa9))
+* **mobile:** the workspace teardown goes to its own PR ([702ed38](https://github.com/firetower-cloud/firetower/commit/702ed387ad1ec503ad5011a38207e2eabe6339a0))
+
 ## [0.16.0](https://github.com/firetower-cloud/firetower/compare/mobile-v0.15.0...mobile-v0.16.0) (2026-11-11)
 
 
