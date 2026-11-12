@@ -49,7 +49,10 @@ readonly PROJECT=ft-worker-sim
 unset COMPOSE_PROJECT_NAME COMPOSE_FILE COMPOSE_PROFILES COMPOSE_ENV_FILES
 
 readonly HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-readonly REPO="$(cd "$HERE/.." && pwd)"
+# What gets mounted and compiled. The checkout this script lives in by
+# default; `SIM_REPO` points it at another one — a clean clone of the commit
+# under test is the honest way to test a commit.
+readonly REPO="$(cd "${SIM_REPO:-$HERE/..}" && pwd)"
 readonly API_PORT="${SIM_API_PORT:-14400}"
 readonly API="http://localhost:$API_PORT"
 readonly ADMIN_USER=admin
@@ -68,7 +71,11 @@ say()  { printf '  %s\n' "$*"; }
 step() { printf '\n  \033[1m%s\033[0m\n' "$*"; }
 die()  { printf '\n  error: %s\n\n' "$*" >&2; exit 1; }
 
-compose() { docker compose -p "$PROJECT" -f "$HERE/compose.yaml" "$@"; }
+compose() {
+    # `SIM_REPO` is read by the compose file's bind mount, so it has to be in
+    # the environment of the command rather than only in this shell.
+    SIM_REPO="$REPO" docker compose -p "$PROJECT" -f "$HERE/compose.yaml" "$@"
+}
 
 usage() {
     sed -n '3,10p' "${BASH_SOURCE[0]}" | sed 's/^#\{0,1\} \{0,1\}//'
@@ -372,6 +379,43 @@ wait_until_online() {
     return 1
 }
 
+# What the control plane will actually be built from, said out loud.
+#
+# **The binary follows your editor, not your git history.** The repository is
+# bind-mounted and the control plane is `cargo run`, so what comes up is the
+# working tree at the moment it compiles — uncommitted changes included. That
+# is the right default for developing, and a trap for testing: a QA pass ran
+# against 551 lines of somebody's unsaved work and was only caught because it
+# thought to check from inside the container.
+#
+# So it is printed every time, and a dirty tree stops `up` unless somebody
+# says they meant it. A harness that quietly tests something other than what
+# you asked it to is worse than no harness.
+say_what_is_mounted() {
+    local head dirty
+    head="$(git -C "$REPO" log -1 --format='%h %s' 2>/dev/null || echo 'not a git checkout')"
+    dirty="$(git -C "$REPO" status --porcelain 2>/dev/null | wc -l | tr -d ' ')"
+
+    say "building   $head"
+    if [ "${dirty:-0}" -eq 0 ]; then
+        say "tree       clean — this is that commit and nothing else"
+        return 0
+    fi
+
+    say "tree       ${dirty} uncommitted file(s) — THE CONTROL PLANE WILL INCLUDE THEM"
+    if [ "${SIM_ALLOW_DIRTY:-0}" = "1" ] || [ "${1:-}" = "--dirty" ]; then
+        say "           (--dirty given, carrying on)"
+        return 0
+    fi
+    printf '\n'
+    say "Refusing, because this is how a test pass comes to be about the wrong code."
+    say "To test the commit:   git stash push -u -m worker-sim   (or commit)"
+    say "To test what you have: $0 up --dirty"
+    say "Or point the harness at a clean clone: SIM_REPO=/path/to/clone $0 up"
+    printf '\n'
+    exit 1
+}
+
 cmd_up() {
     command -v docker >/dev/null 2>&1 || die "docker is not on PATH"
     command -v jq >/dev/null 2>&1 \
@@ -380,6 +424,8 @@ cmd_up() {
     step "Bringing up $PROJECT"
     say "project    $PROJECT"
     say "api        $API"
+    say "repo       $REPO"
+    say_what_is_mounted "${1:-}"
     compose up -d --build
     wait_for_api
     sign_in
@@ -449,6 +495,14 @@ cmd_restart_worker() {
 cmd_status() {
     step "$PROJECT"
     compose ps || true
+    step "What the control plane was built from"
+    # Asked of the container rather than of this shell: the mount is the
+    # answer, and a second checkout at a different commit is exactly the
+    # confusion this is here to end.
+    resolve control
+    docker exec "$TARGET" sh -c \
+        'cd /workspace && git log -1 --format="  %h %s" 2>/dev/null; printf "  "; git status --porcelain 2>/dev/null | wc -l | tr -d " "; echo " uncommitted file(s)"' \
+        2>/dev/null || say "  (the control plane is not running)"
     if curl -fsS "$API/readyz" >/dev/null 2>&1; then
         sign_in
         step "The fleet, as the control plane sees it"

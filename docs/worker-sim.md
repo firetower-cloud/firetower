@@ -60,6 +60,34 @@ host's tmux server is holding somebody's real work. So:
   resolved. The container's tmux server is not the host's, and that distinction
   is the whole safety model.
 
+## What it builds, and how to be sure
+
+**The binary follows your editor, not your git history.** The repository is
+bind-mounted and the control plane is `cargo run`, so what comes up is the
+working tree at the moment it compiles — uncommitted changes included. That is
+the right default for developing and a trap for testing: a QA pass on this
+feature ran against 551 lines of somebody's unsaved work, and only caught it
+because it thought to ask the container.
+
+So `up` prints what it is about to build, every time, and **refuses on a dirty
+tree** unless you say you meant it:
+
+```
+building   dc0dcf6b fix(sim): loopback only, host keys per machine…
+tree       clean — this is that commit and nothing else
+```
+
+Three ways to answer it:
+
+```sh
+just sim up                                  # a clean tree: this commit, nothing else
+just sim up --dirty                          # what you have, knowingly
+SIM_REPO=/tmp/clean just sim up              # a clone checked out at the commit under test
+```
+
+`just sim status` asks the same question of the running container, which is the
+one that cannot be wrong about which checkout is mounted.
+
 ## Two things worth knowing about rebuilding it
 
 **A recreated container is a new machine, and Firetower says so.** The host

@@ -76,7 +76,10 @@ services:
       # across a rebuild of this container.
       FIRETOWER_ROOT_KEY: "${SIM_ROOT_KEY:-}"
     volumes:
-      - ..:/workspace
+      # What the control plane is built from. `..` is the checkout this file
+      # lives in; `SIM_REPO` points it at another one, which is how a commit
+      # is tested rather than somebody's editor — see `run.sh`'s banner.
+      - ${SIM_REPO:-..}:/workspace
       - cargo:/cargo
       - target:/target
       - home:/home/firetower
