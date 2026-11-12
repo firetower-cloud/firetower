@@ -67,6 +67,37 @@ readonly ADMIN_FIRST_PASSWORD=worker-sim-initial
 # What the machine is called in the fleet. `run.sh up` is idempotent on it.
 readonly MACHINE=worker-sim
 
+# One run at a time, for the commands that change the stack.
+#
+# Two `up`s overlapping is not theoretical: it happened here, and the way it
+# failed is the reason this exists rather than a note in the documentation.
+# Both reached `install/worker.sh`, which stages the binary as `.incoming` and
+# then renames it into place — so the first run's rename took the file the
+# second was about to `chmod`, the second died, and the machine was left
+# holding whichever binary won. A QA agent with two terminals open finds this
+# before anybody else does.
+#
+# `mkdir` because it is atomic everywhere, including on the macOS shell that
+# has no `flock`. The pid inside it is what makes a lock left behind by a
+# killed run recoverable rather than permanent.
+readonly LOCK="${TMPDIR:-/tmp}/ft-worker-sim.lock"
+hold_the_stack() {
+    if ! mkdir "$LOCK" 2>/dev/null; then
+        local owner
+        owner="$(cat "$LOCK/pid" 2>/dev/null || echo "")"
+        if [ -n "$owner" ] && kill -0 "$owner" 2>/dev/null; then
+            die "another $0 is running (pid $owner). Wait for it, or stop it."
+        fi
+        # Nobody is behind it: a run that was killed between the mkdir and
+        # its own cleanup.
+        say "clearing a lock left by pid ${owner:-unknown}, which is gone"
+        rm -rf "$LOCK"
+        mkdir "$LOCK" 2>/dev/null || die "could not take the lock at $LOCK"
+    fi
+    echo "$$" > "$LOCK/pid"
+    trap 'rm -rf "$LOCK"; [ -n "$HEADERS" ] && rm -f "$HEADERS"' EXIT
+}
+
 say()  { printf '  %s\n' "$*"; }
 step() { printf '\n  \033[1m%s\033[0m\n' "$*"; }
 die()  { printf '\n  error: %s\n\n' "$*" >&2; exit 1; }
@@ -192,6 +223,7 @@ hold_token() {
     printf 'authorization: Bearer %s\n' "$TOKEN" > "$HEADERS"
 }
 trap '[ -n "$HEADERS" ] && rm -f "$HEADERS"' EXIT
+
 
 # A tiny JSON reader, so this needs nothing installed. Values here are ids,
 # names and states — no quotes, no nesting — and `jq` is used when it is there.
@@ -421,6 +453,7 @@ say_what_is_mounted() {
 }
 
 cmd_up() {
+    hold_the_stack
     command -v docker >/dev/null 2>&1 || die "docker is not on PATH"
     command -v jq >/dev/null 2>&1 \
         || die "jq is not on PATH, and reading a fleet of one out of a list by hand is how a harness lies to you"
@@ -620,6 +653,7 @@ cmd_ui() {
 # can prove belong to it. There is no prune here and there is no filter that
 # reaches a command which acts.
 cmd_down() {
+    hold_the_stack
     local volumes=0
     [ "${1:-}" = "--volumes" ] && volumes=1
 
