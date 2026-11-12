@@ -993,12 +993,17 @@ function Pill({
 /**
  * The scrolling part of a menu, and only that part.
  *
+ * Exported with `Head`, `Opt`, `RepoMenu` and `ProfileMenu` because the
+ * schedules sheet drops the same menus from the same chips. **Imported, not
+ * copied**: a lookalike is a control that drifts from the product the first
+ * time one of them is changed, and this page is where these were drawn.
+ *
  * `min-h-0` because `Pop` caps the card at the room the window actually has
  * and a flex child refuses to shrink below its content without it — the
  * flexbox rule in STYLE.md. Anything that should stay put while this scrolls,
  * a search box or a readiness footer, goes beside it rather than inside it.
  */
-function Menu({ children }: { children: React.ReactNode }) {
+export function Menu({ children }: { children: React.ReactNode }) {
   return <div className="scroll-slim max-h-80 min-h-0 overflow-y-auto py-1">{children}</div>;
 }
 
@@ -1029,7 +1034,7 @@ export function matching<T extends { slug: string }>(repos: T[], q: string): T[]
  * and the query where they are: the row you just ticked stays in front of you.
  * Remounts each time the menu opens, so the search starts empty.
  */
-function RepoMenu({
+export function RepoMenu({
   repos,
   checkouts,
   onToggle,
@@ -1136,7 +1141,7 @@ function RepoMenu({
  * top — the lead you'd start a board as is the one you reach for most.
  * Remounts each time the menu opens, so the search box starts empty.
  */
-function ProfileMenu({
+export function ProfileMenu({
   profiles,
   profileId,
   onPick,
@@ -1214,19 +1219,34 @@ function ProfileMenu({
           </div>
         )}
       </Menu>
+      {/* **What they are for, and a way to get one** — rather than a
+          definition of the word. Somebody meeting an empty list needs the
+          route, and the route is the Profiles page: making one there is two
+          choices (describe it to an agent, or fill in the form), which is not
+          a thing to reproduce inside a menu. */}
       <div className="pkfoot">
-        A profile is a saved way of working — what it is for, what it may do, and who it may hand work
-        to.
+        <p>
+          You can create agent profiles to divide your work across teams of agents (e.g. a
+          designer, an engineer, a security advisor, a QA, etc.)
+        </p>
+        {profiles.length === 0 && (
+          <button
+            onClick={() => navigate("/configuration/roles")}
+            className="control mt-2.5 border border-line bg-panel text-ui text-bone hover:bg-overlay"
+          >
+            Create a profile
+          </button>
+        )}
       </div>
     </>
   );
 }
 
-function Head({ children }: { children: React.ReactNode }) {
+export function Head({ children }: { children: React.ReactNode }) {
   return <div className="px-3 pt-2 pb-1 text-micro text-mute">{children}</div>;
 }
 
-function Opt({
+export function Opt({
   on,
   disabled,
   keepOpen,
