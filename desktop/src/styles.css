@@ -5587,6 +5587,47 @@ html:not([data-platform="macos"]) {
     color: var(--color-dim);
   }
 
+  /* ── A facts card whose values are sentences ──────────────────
+     `.facts-card dd` is `nowrap` with an ellipsis and right-aligned, which
+     is correct for the values it was built for — *First available*, a model
+     name, a branch. Two of the schedule cards hold whole sentences instead,
+     and all five of *When a run cannot finish* truncated at every width
+     with no tooltip to recover them.
+     
+     So the stacked variant, which is the artifact's own: the label above the
+     value rather than beside it, and the value wraps. A sentence does not
+     compete with its label for one line's width. */
+  .facts-card.s-stack dl {
+    display: block;
+    margin-top: 9px;
+  }
+  .facts-card.s-stack dt {
+    font-size: 13.5px;
+    line-height: 1.5;
+    color: var(--color-dim);
+    white-space: normal;
+  }
+  .facts-card.s-stack dd {
+    text-align: left;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--color-bone);
+    margin: 1px 0 10px;
+  }
+  .facts-card.s-stack dd:last-of-type {
+    margin-bottom: 0;
+  }
+  /* And the one-off: a value in an ordinary card that has to wrap, kept
+     right-aligned with the rest of them. */
+  .facts-card dd.s-wrap {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+  }
+
   /* The reason a schedule stopped itself, on its row. */
   .s-tag {
     flex: none;

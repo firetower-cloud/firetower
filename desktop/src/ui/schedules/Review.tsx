@@ -146,12 +146,16 @@ export function Review({ schedule }: { schedule: Schedule }) {
               <h3>Where it came from</h3>
               <dl>
                 <dt>Proposed by</dt>
-                <dd>{schedule.made.who}</dd>
+                <dd className="s-wrap" title={schedule.made.who}>
+                  {schedule.made.who}
+                </dd>
                 {/* The conversation that asked for it, which is what explains
                     why you have this at all. Copied text rather than a link
-                    that `reclaim` would empty within the minute. */}
+                    that `reclaim` would empty within the minute — and it
+                    wraps, because a workspace name loses its meaning from
+                    the end. */}
                 <dt>In</dt>
-                <dd>{schedule.made.fromWorkspaceName ?? "a conversation"}</dd>
+                <dd className="s-wrap">{schedule.made.fromWorkspaceName ?? "a conversation"}</dd>
               </dl>
             </div>
           </aside>

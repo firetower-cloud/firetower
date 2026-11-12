@@ -254,12 +254,17 @@ export function ScheduleDetail({ schedule: given }: { schedule: Schedule }) {
             <Facts
               title="Environment"
               rows={[
-                ["Repository", it.repoSlug ?? "None"],
-                ["Base branch", it.base ?? "—"],
+                ["Repository", it.repoSlug ?? "None", true],
+                ["Base branch", it.base ?? "—", true],
                 ["Machine", "First available"],
               ]}
             />
-            <div className="facts-card">
+            {/* **Stacked, because every value here is a sentence.** The
+                ordinary card puts the value beside its label on one line
+                with an ellipsis, which is right for *First available* and
+                wrong for five sentences — all five truncated, at every
+                width, with no tooltip to recover them. */}
+            <div className="facts-card s-stack">
               <h3>When a run cannot finish</h3>
               <dl>
                 <dt>If approval is needed</dt>
@@ -373,8 +378,8 @@ export function ScheduleDetail({ schedule: given }: { schedule: Schedule }) {
               rows={
                 it.made.byAgent
                   ? [
-                      ["Proposed by", it.made.who],
-                      ["In", it.made.fromWorkspaceName ?? "a conversation"],
+                      ["Proposed by", it.made.who, true],
+                      ["In", it.made.fromWorkspaceName ?? "a conversation", true],
                     ]
                   : [["Made by", "You"]]
               }
@@ -460,15 +465,26 @@ function History({
   );
 }
 
-function Facts({ title, rows }: { title: string; rows: [string, string][] }) {
+/**
+ * A card of short facts, label beside value.
+ *
+ * The third element of a row says the value may **wrap** rather than
+ * ellipsise: a repository slug and a workspace name are long enough to lose
+ * their ends on a 300px rail, and the end of `firetower-cloud/firetower` is
+ * the half that says which repository. A value that is a whole *sentence*
+ * belongs in `.s-stack` instead, not here.
+ */
+function Facts({ title, rows }: { title: string; rows: [string, string, boolean?][] }) {
   return (
     <div className="facts-card">
       <h3>{title}</h3>
       <dl>
-        {rows.map(([k, v]) => (
+        {rows.map(([k, v, wrap]) => (
           <div key={k} className="contents">
             <dt>{k}</dt>
-            <dd>{v}</dd>
+            <dd className={wrap ? "s-wrap" : undefined} title={v}>
+              {v}
+            </dd>
           </div>
         ))}
       </dl>
