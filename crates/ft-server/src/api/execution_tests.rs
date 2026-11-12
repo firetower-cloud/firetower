@@ -5420,6 +5420,109 @@ async fn a_schedule_cannot_be_asked_to_bypass_permissions() {
     assert_eq!(row.pins["settings"]["mode"], serde_json::json!("dontAsk"));
 }
 
+/// **Blocker 1: a shared profile cannot rewrite an approved schedule.**
+///
+/// A writer of a shared profile — or an agent with Writer on it calling
+/// `update_profile` — can change its instructions after somebody has
+/// approved a schedule that uses it. The live profile was resolved at every
+/// launch, so later runs executed the changed behaviour on the owner's
+/// credentials. And no persona and no revision were stored at all, so there
+/// was not even a check to sidestep.
+#[tokio::test]
+async fn a_profile_changed_after_approval_does_not_run() {
+    let (state, principal, _, _, owner) = fixture().await;
+    let profile = saved_profile(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Ada, the lead",
+            "does": "Reads the dependency diff",
+            "instructions": "Take only patch bumps. Never touch a major.",
+            "placement": "new",
+        }),
+    )
+    .await;
+
+    let mut new = a_schedule("Runs as a profile", weekdays_at("08:30"));
+    new.profile = Some(profile.clone());
+    let made = create(&state, &principal, new).await.unwrap();
+    let _ = super::schedules::approve_schedule(
+        State(state.clone()),
+        Extension(principal.clone()),
+        Path(made.id.as_str().to_string()),
+    )
+    .await
+    .unwrap();
+
+    // The approved behaviour is stored, not referenced.
+    let row = state.db.schedule(&made.id).await.unwrap().unwrap();
+    let approved = row.pins["persona"].as_str().unwrap_or_default().to_string();
+    assert!(
+        approved.contains("Never touch a major"),
+        "the composed system prompt is what was approved: {approved}"
+    );
+    assert!(row.pins["profileFingerprint"].is_string());
+
+    // Somebody with Writer changes what it does.
+    assert!(
+        state
+            .roles
+            .update(
+                &owner,
+                &profile,
+                &serde_json::from_value(serde_json::json!({
+                    "name": "Ada, the lead",
+                    "does": "Reads the dependency diff",
+                    "instructions": "Take every bump, including majors.",
+                    "placement": "new",
+                }))
+                .unwrap(),
+            )
+            .await
+            .expect("a writer may change a profile"),
+        "the change landed, which is the state under test"
+    );
+
+    let row = state.db.schedule(&made.id).await.unwrap().unwrap();
+    let claim = state
+        .db
+        .claim_run(
+            &ft_core::ScheduleRunId::new(),
+            &made.id,
+            None,
+            Utc::now(),
+            1,
+            "cron",
+            "claimed",
+            None,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    crate::schedules::launch::start(&state, &row, &claim)
+        .await
+        .expect("a refusal is an outcome");
+
+    let run = runs_of(&state, &made.id)
+        .await
+        .into_iter()
+        .find(|r| r.state.is_terminal())
+        .expect("it was recorded");
+    assert_eq!(run.state, ScheduleRunState::Failed);
+    assert!(
+        run.detail
+            .as_deref()
+            .unwrap_or_default()
+            .contains("has changed since this schedule was approved"),
+        "it refuses and says what to do: {:?}",
+        run.detail
+    );
+
+    // And the stored persona still says what was approved — the changed
+    // instructions never reached it.
+    assert!(!approved.contains("including majors"));
+}
+
 /// **Blocker 4: a scheduled run does not borrow the machine's git identity.**
 ///
 /// Owning the local `repos` row says somebody connected it once; it says

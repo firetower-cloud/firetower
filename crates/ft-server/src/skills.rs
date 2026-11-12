@@ -3370,6 +3370,48 @@ impl Skills {
     /// method's promise is that a session reads exactly what it is allowed to
     /// of what it was handed. Whoever has somebody to tell says so first —
     /// `api::roles::check_skills` refuses the write outright.
+    /// Pin a session to **named versions**, not to whatever is current.
+    ///
+    /// [`Skills::set_for_session`] pins `k.current_version_id`, which is right
+    /// for a person starting work: they get the library as it is. It is wrong
+    /// for a run that was approved against a particular set of instructions —
+    /// adding a version to a selected skill substituted it silently, and the
+    /// recorded old version still passed an existence check, so nothing
+    /// noticed.
+    ///
+    /// Visibility is still asked, with the same predicate: a version of a
+    /// skill that has since been filed somewhere this person cannot reach is
+    /// not deliverable to them, whatever was approved.
+    pub async fn pin_versions(
+        &self,
+        session: &str,
+        person: &str,
+        versions: &[String],
+    ) -> Result<()> {
+        if versions.is_empty() {
+            return Ok(());
+        }
+        let insert = format!(
+            "INSERT INTO skill_pins (session_id, skill_id, version_id, added_by) \
+             SELECT $1, k.id, v.id, $3 FROM skill_versions v \
+               JOIN skills k ON k.id = v.skill_id \
+              WHERE v.id = $2 AND {visible} \
+             ON CONFLICT (session_id, skill_id) DO NOTHING",
+            visible = filed_where("k", 3, Level::Viewer),
+        );
+        let mut tx = self.pool.begin().await?;
+        for version in versions {
+            sqlx::query(&insert)
+                .bind(session)
+                .bind(version)
+                .bind(person)
+                .execute(&mut *tx)
+                .await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
     pub async fn set_for_session(
         &self,
         session: &str,

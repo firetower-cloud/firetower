@@ -118,8 +118,17 @@ struct Stopped {
 
 /// Re-authorize, then launch.
 ///
-/// The gates are in this order and the vault is last. A failure on any of them
-/// is recorded and the run ends there — before any credential is read.
+/// The gates are in this order, and nothing a worker could use leaves this
+/// process until the last of them has passed: a failure is recorded and the
+/// run ends there, having put no repository secret and no agent token into a
+/// workspace.
+///
+/// **Which is not the same as "no credential is read", and the difference is
+/// worth keeping straight.** Gate 2 asks the vault whether the owner still
+/// holds git authorization for each remote, because the only honest way to
+/// ask is to try to resolve it — so the gate itself reads, and every read is
+/// a line in `secret_access` naming the session it was for. What the gates
+/// protect is what *reaches a machine*.
 ///
 /// `pub(crate)` for the tests rather than for any caller: [`spawn`] is how the
 /// sweep reaches this, and a test awaiting the spawned task would be racing it
@@ -170,6 +179,17 @@ pub(crate) async fn start(
                 Launch {
                     lineage: None,
                     id: Some(session.clone()),
+                    // What was approved, rather than what the profile and the
+                    // library say now. See `Launch::persona`.
+                    persona: schedule
+                        .pins
+                        .get("persona")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string),
+                    skill_versions: schedule
+                        .pins
+                        .get("skillVersionIds")
+                        .and_then(|v| serde_json::from_value::<Vec<String>>(v.clone()).ok()),
                     // **Nothing is inherited.** `carry_preferences` fills an
                     // unset control from whatever this person was last
                     // working with, so a schedule approved with an unset
@@ -446,9 +466,64 @@ async fn gate(
         });
     }
 
-    // 7 · Only now: the vault, inside `create_session_as`. Every secret is
-    // resolved fresh at its current value, which is the point — a rotated
-    // secret takes effect without re-approval.
+    // **And the profile is still the one that was approved.**
+    //
+    // A writer of a shared profile — or an agent with Writer on it calling
+    // `update_profile` — can change its instructions, its engine, its account
+    // or whether it may delegate, after somebody approved a schedule that
+    // uses it. The live profile used to be resolved at every launch, so later
+    // runs executed the changed behaviour on the owner's credentials.
+    //
+    // The persona is carried from the pins, so changed *instructions* do not
+    // reach a run at all. This catches the rest of it, and refuses rather
+    // than running: the remedy is a person looking at what changed, which is
+    // what re-approving is.
+    if let Some(approved) = schedule
+        .pins
+        .get("profileFingerprint")
+        .and_then(|v| v.as_str())
+    {
+        let id = schedule
+            .pins
+            .get("profile")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let live = state
+            .roles
+            .one(&schedule.owner_id, &id, crate::access::Level::Viewer)
+            .await
+            .ok()
+            .flatten();
+        let Some(live) = live else {
+            return Err(Stopped {
+                state: "failed",
+                detail: "The agent profile this schedule was approved with is gone.".into(),
+                code: ErrorCode::InvalidRequest,
+                and_stop: None,
+            });
+        };
+        if crate::api::schedules::profile_fingerprint(&live) != approved {
+            return Err(Stopped {
+                state: "failed",
+                detail: format!(
+                    "The “{}” profile has changed since this schedule was approved, so it will \
+                     not run on it. Open the schedule, read what it would do now, and approve \
+                     it again.",
+                    live.name
+                ),
+                code: ErrorCode::InvalidRequest,
+                and_stop: None,
+            });
+        }
+    }
+
+    // 7 · Only now: the repository's own secrets and the agent's token,
+    // inside `create_session_as`. Every one is resolved fresh at its current
+    // value, which is the point — a rotated secret takes effect without
+    // re-approval — and this is the first point at which anything a worker
+    // could use leaves this process. Gate 2 read a git credential to check
+    // it; nothing was sent anywhere.
     spec_of(schedule).map_err(|detail| Stopped {
         state: "failed",
         detail,

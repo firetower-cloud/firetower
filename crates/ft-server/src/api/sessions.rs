@@ -410,6 +410,22 @@ pub(crate) struct Launch {
     /// `true` for a person: starting work where you left off is the whole
     /// point of that behaviour, and somebody is present.
     pub inherit_settings: bool,
+    /// The system prompt this run was **approved** to carry, rather than one
+    /// composed from the profile as it stands now.
+    ///
+    /// A writer of a shared profile — or an agent with Writer on it calling
+    /// `update_profile` — can change its instructions after somebody has
+    /// approved a schedule that uses it. Composing at launch meant later runs
+    /// executed the changed behaviour on the owner's credentials. This is the
+    /// same discipline `sessions.persona` already follows for a different
+    /// reason: keep the system prompt this run was actually given.
+    pub persona: Option<String>,
+    /// The skill versions this run was approved to read.
+    ///
+    /// `set_for_session` pins whatever is current, which is right for a
+    /// person and wrong for an approved run: adding a version to a selected
+    /// skill substituted it silently.
+    pub skill_versions: Option<Vec<String>>,
 }
 
 impl Default for Launch {
@@ -421,6 +437,8 @@ impl Default for Launch {
             lineage: None,
             id: None,
             inherit_settings: true,
+            persona: None,
+            skill_versions: None,
         }
     }
 }
@@ -444,6 +462,8 @@ pub(crate) async fn create_session_as(
         lineage,
         id: given,
         inherit_settings,
+        persona: approved_persona,
+        skill_versions: approved_versions,
     } = launch;
     // Another agent in a place that already exists, which is a different job
     // from making one: the host, the repositories, the branch and the directory
@@ -478,9 +498,13 @@ pub(crate) async fn create_session_as(
     {
         req.agent = pinned;
     }
-    let persona = match &profile {
-        Some(p) => Some(persona_for(&state, &owner, p).await?),
-        None => None,
+    // **The persona this run was approved to carry**, where a caller has
+    // one, rather than one composed from the profile as it stands now. See
+    // [`Launch::persona`].
+    let persona = match (&approved_persona, &profile) {
+        (Some(approved), _) => Some(approved.clone()),
+        (None, Some(p)) => Some(persona_for(&state, &owner, p).await?),
+        (None, None) => None,
     };
 
     // What was actually asked for, if anything. A workspace may be created
@@ -1063,13 +1087,28 @@ pub(crate) async fn create_session_as(
                 }),
         },
     };
-    if !wanted.is_empty() {
-        if let Err(e) = state
-            .skills
-            .set_for_session(id.as_str(), &owner, &wanted)
-            .await
-        {
-            tracing::warn!("seeding this session's skills: {e:#}");
+    // Named versions where the caller was approved against particular ones,
+    // and whatever is current otherwise.
+    match &approved_versions {
+        Some(versions) => {
+            if let Err(e) = state
+                .skills
+                .pin_versions(id.as_str(), &owner, versions)
+                .await
+            {
+                tracing::warn!("pinning this session's approved skill versions: {e:#}");
+            }
+        }
+        None => {
+            if !wanted.is_empty() {
+                if let Err(e) = state
+                    .skills
+                    .set_for_session(id.as_str(), &owner, &wanted)
+                    .await
+                {
+                    tracing::warn!("seeding this session's skills: {e:#}");
+                }
+            }
         }
     }
 

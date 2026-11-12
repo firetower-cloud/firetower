@@ -432,14 +432,48 @@ async fn pins_for(
     // and that is where an account has to exist and be spendable.
     let needs_account = req.agent.needs_credential();
 
-    // The versions those skills resolve to **now**, so the gate can fail
-    // closed when one has gone rather than substituting the current one —
-    // which is the substitution pinning exists to prevent.
+    // The versions those skills resolve to **now**, and what a run is pinned
+    // to. Recording the ids was not enough on its own: the launch pinned
+    // whatever was current and the recorded version still passed an existence
+    // check, so adding a version to a selected skill substituted it silently.
     let versions = state
         .skills
         .current_versions(&skills)
         .await
         .unwrap_or_default();
+
+    // **The effective profile, snapshotted.** A writer of a shared profile —
+    // or an agent with Writer calling `update_profile` — can change its
+    // instructions, its engine, its account or its delegation after somebody
+    // has approved a schedule that uses it, and the live profile was resolved
+    // at every launch. So the composed system prompt is stored, and a
+    // fingerprint of everything else about it that decides behaviour.
+    //
+    // A fingerprint rather than a revision because `roles` has no revision
+    // column to read — there was nothing to check against at all, which is
+    // why this was worse than "a revision check somebody could sidestep".
+    // The gate recomputes it and refuses rather than running something
+    // nobody approved; refusing is right, because the remedy is a person
+    // looking at what changed.
+    let (persona, fingerprint) = match &req.profile {
+        None => (None, None),
+        Some(id) => {
+            let role = state
+                .roles
+                .one(owner_id, id, crate::access::Level::Viewer)
+                .await?
+                .ok_or_else(|| {
+                    ApiError::new(
+                        ErrorCode::InvalidRequest,
+                        "that profile isn't one you can start a workspace as",
+                    )
+                })?;
+            (
+                Some(super::sessions::persona_for(state, owner_id, &role).await?),
+                Some(profile_fingerprint(&role)),
+            )
+        }
+    };
 
     // **What the pins say about a control nobody can resolve here.** Codex
     // lists its own models over its protocol, so the server cannot name one
@@ -466,6 +500,8 @@ async fn pins_for(
         "accountId": account,
         "profile": req.profile,
         "skillVersionIds": versions,
+        "persona": persona,
+        "profileFingerprint": fingerprint,
     }))
 }
 
@@ -834,6 +870,45 @@ pub(super) async fn read_cadence(
         reads: clock.reads(),
         next_fires: clock.next_fires(chrono::Utc::now(), 3),
     }))
+}
+
+/// Everything about a profile that decides what a run does.
+///
+/// Hashed rather than stored field by field, because the question the gate
+/// asks is "is this still the profile somebody approved" and a hash answers
+/// exactly that — including for a field added later, which is the part a
+/// hand-written comparison gets wrong the first time somebody extends
+/// `Role`.
+///
+/// `name` is in it deliberately: it is in the composed persona, so a rename
+/// changes what the agent is told it is.
+pub(crate) fn profile_fingerprint(role: &crate::roles::Role) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    for part in [
+        role.name.as_str(),
+        role.does.as_str(),
+        role.instructions.as_str(),
+        role.placement.as_str(),
+        role.agent.as_deref().unwrap_or(""),
+        role.machine.as_deref().unwrap_or(""),
+        role.account.as_deref().unwrap_or(""),
+        role.on_usage_limit.as_str(),
+    ] {
+        hasher.update(part.as_bytes());
+        hasher.update([0u8]);
+    }
+    hasher.update([u8::from(role.can_delegate)]);
+    for scope in &role.delegate_scope {
+        hasher.update(scope.as_bytes());
+        hasher.update([0u8]);
+    }
+    hasher.update(
+        serde_json::to_vec(&role.settings)
+            .unwrap_or_default()
+            .as_slice(),
+    );
+    format!("{:x}", hasher.finalize())
 }
 
 /// Mine, or not found.
