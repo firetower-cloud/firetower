@@ -2396,19 +2396,8 @@ You are in the directory that holds them, not inside one of them.              P
             self.watch_agent(id, 0, out).await;
         }
 
-        // Whether anything was actually asked for. A workspace can be made
-        // without a task, and an agent that was sent nothing is not working: it
-        // is up and waiting, and nothing will ever arrive to correct a status
-        // that claimed otherwise.
-        //
-        // The prompt itself, not what `opening` produced: for one agent that is
-        // the prompt, and for another it is a handshake sent whether or not
-        // there is anything to ask.
-        let status = if !prompt.trim().is_empty() {
-            SessionStatus::Working
-        } else {
-            SessionStatus::Ready
-        };
+        // What a launch leaves the session in. See `just_started`.
+        let status = just_started(&prompt, after_line);
 
         self.store.set_status(id, status).await?;
         self.emit(id, EventKind::StatusChanged { status, note: None }, out)
@@ -3670,6 +3659,40 @@ async fn deliver_to_agent(session_id: &SessionId, sending: Sending) {
             message,
         })
         .await;
+}
+
+/// What a session is in once its agent is up, before the agent says anything.
+///
+/// Three answers and each was got wrong once.
+///
+/// **`Working` when something was asked.** The prompt itself, not whatever
+/// `opening` produced: for one agent that is the prompt, and for another it is
+/// a handshake sent whether or not there is anything to ask.
+///
+/// **`Ready` only for a workspace that has never been asked for anything**,
+/// which is exactly what that status means. It used to be the answer for every
+/// promptless launch, and a *resumption* is promptless — `relaunch` sends an
+/// empty prompt on purpose, because the conversation is being picked up rather
+/// than opened. So a session recovered after its machine restarted came back
+/// reading "Ready": never been asked for anything, about a session with a
+/// transcript behind it and a lead waiting on it.
+///
+/// **`HandedBack` for a resumption**, which is the honest resting state for an
+/// agent that is up, has its own history, and has not been given anything new
+/// to do. If it then reads that history and takes a turn, its own output says
+/// so and moves it on; if it does not, this is already true.
+///
+/// The evidence is the log, which the caller has already read to decide what
+/// to open the agent with: a line in it means this conversation existed before
+/// this launch.
+fn just_started(prompt: &str, lines_already_said: usize) -> SessionStatus {
+    if !prompt.trim().is_empty() {
+        SessionStatus::Working
+    } else if lines_already_said > 0 {
+        SessionStatus::HandedBack
+    } else {
+        SessionStatus::Ready
+    }
 }
 
 /// Which fault a frame that would not go is, given what tmux then said about
@@ -5414,6 +5437,29 @@ mod tests {
                 "how long it was given is the part somebody acts on: {said}"
             );
         }
+    }
+
+    /// What a launch leaves behind, and the one that was wrong.
+    ///
+    /// A recovery is launched with no prompt, and every promptless launch
+    /// reported `Ready` — "has never been asked for anything" — about a
+    /// session with a conversation behind it and, often, a lead waiting on
+    /// its report. QA saw it in the harness and could not tell whether it was
+    /// this or an agent with no credential reporting idle. It is this.
+    #[test]
+    fn a_resumed_agent_is_resting_rather_than_new() {
+        // A workspace somebody made without a task. Nothing has ever been
+        // asked of it, which is the whole of what `Ready` says.
+        assert_eq!(just_started("", 0), SessionStatus::Ready);
+        assert_eq!(just_started("   ", 0), SessionStatus::Ready);
+
+        // A session being picked up: no prompt, because the conversation is
+        // not being opened — and a transcript, because it already happened.
+        assert_eq!(just_started("", 412), SessionStatus::HandedBack);
+
+        // And anything actually asked for is work, whatever came before.
+        assert_eq!(just_started("do the thing", 0), SessionStatus::Working);
+        assert_eq!(just_started("do the thing", 412), SessionStatus::Working);
     }
 
     /// A pane that outlived its agent must not block the way back.
