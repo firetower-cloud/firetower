@@ -5148,10 +5148,16 @@ html:not([data-platform="macos"]) {
    be the duplication `components.html` measures. */
 @layer components {
   /* ── The trigger row ──────────────────────────────────────────
-     The first cell names the *kind* of trigger and wears no chevron —
-     this product's own statement for a cell that is a fact rather than a
-     choice. The day a webhook ships, the chevron appears and the row does
-     not change shape. */
+     Pills in a tray, wrapping: how often, then whatever that cadence asks
+     for next, then the time and the zone.
+
+     **`.s-kind` is kept and nothing uses it today.** It is the first
+     cell — the one naming the *kind* of trigger, wearing no chevron
+     because it states a fact rather than offering a choice — and it is
+     not drawn while there is one kind of trigger to name. The rule stays
+     for the day a second ships, which is also the day the row gets its
+     first cell back; `NewSchedule` carries the reasoning where the cell
+     used to be. */
   .s-trig {
     display: flex;
     align-items: center;

@@ -331,6 +331,22 @@ describe("the cadence row's pickers", () => {
     expect(sheet()).not.toContain("<select");
   });
 
+  /**
+   * **And no cell naming the trigger kind.** There is one kind, so *On a
+   * clock* stated the only fact the row could not get wrong, in the first
+   * slot. A deferral: the schema keeps `kind` and the cell comes back with
+   * the second kind of trigger.
+   */
+  it("opens with a control rather than a statement", () => {
+    const html = sheet();
+    expect(html).not.toContain("On a clock");
+    expect(html).not.toContain("s-kind");
+    // The row's first child is the cadence pill, so nothing is left holding
+    // the slot the statement had.
+    const row = html.slice(html.indexOf('class="s-trig"'));
+    expect(row.indexOf('aria-label="How often"')).toBeLessThan(row.indexOf('aria-label="Time zone"'));
+  });
+
   /** The rule, which the zone list is the reason for. */
   it("matches a zone on the part anybody remembers", () => {
     expect(looselyMatches("Europe/Paris", "paris")).toBe(true);

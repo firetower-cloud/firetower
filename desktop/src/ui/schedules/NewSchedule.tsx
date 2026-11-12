@@ -561,9 +561,19 @@ export function NewSchedule({
           <div className="fld">
             <label>Schedule</label>
             <div className="s-trig">
-              <span className="s-kind" title="A clock is the only trigger available.">
-                On a clock
-              </span>
+              {/* **The trigger kind is not drawn, for now.** A cell reading
+                  *On a clock* stated the one fact this row could not get
+                  wrong: there is one kind of trigger, so it told nobody
+                  anything and took the first slot in the row to do it.
+
+                  A deferral rather than a reversal. `schedule_triggers.kind`
+                  stays, the discriminator stays, and the data model is as
+                  ready for a webhook or an API trigger as it was — read the
+                  absence of this cell as "one kind today", not as a schema
+                  nobody uses. The cell comes back with the second kind, and
+                  the argument for its shape is still the right one: a cell
+                  that states a fact, not a one-item dropdown that reads as
+                  disabled, and not a list of triggers we have not built. */}
               {/* **The product's pill, not a native select.** Seven of these
                   were `<select>`s — the one control that cannot be made to
                   match anything around it, which is why they leapt out of a
