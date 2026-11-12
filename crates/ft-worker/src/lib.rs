@@ -2304,9 +2304,28 @@ You are in the directory that holds them, not inside one of them.              P
         // sent — after waiting for it to be listening, because a turn written
         // into a socket nobody has bound yet is simply lost.
         if structured {
-            structured::wait_until_listening(id)
-                .await
-                .context("waiting for the agent to start")?;
+            // **Named, and leading with the engine.** This said "waiting for
+            // the agent to start", and what followed was the session id and a
+            // timeout — a sentence whose first half is machinery and whose
+            // second half is an identifier. The reason now comes from the
+            // supervisor itself; this puts something a person recognises in
+            // front of it.
+            if let Err(waited) = structured::wait_until_listening(id).await {
+                // **And whether its terminal is still there**, which is the
+                // one fact this side has and the supervisor does not: a pane
+                // that has already closed means the command exited, so
+                // "look at its terminal" would be advice about something
+                // that is gone.
+                let gone = !tmux.exists().await;
+                anyhow::bail!(
+                    "{} did not start: {waited:#}{}",
+                    agent.label(),
+                    match gone {
+                        true => " Its terminal has closed, so whatever ran exited immediately.",
+                        false => "",
+                    }
+                );
+            }
             // Whatever this agent needs said first — for one that is a prompt,
             // for another it is a handshake with the prompt still to come. The
             // shapes belong to the control plane; this only puts them on the
