@@ -332,6 +332,7 @@ async fn due(state: &AppState, now: DateTime<Utc>, booted: DateTime<Utc>) -> any
                         last.format("%-d %B %H:%M"),
                         passed.len(),
                     )),
+                    false,
                 )
                 .await?;
             continue;
@@ -376,6 +377,7 @@ async fn due(state: &AppState, now: DateTime<Utc>, booted: DateTime<Utc>) -> any
                     source_of(&trigger.kind),
                     "skipped",
                     Some("Skipped. The previous run was still going."),
+                    false,
                 )
                 .await?;
             settle::after_terminal(state, &trigger.schedule_id).await?;
@@ -393,6 +395,7 @@ async fn due(state: &AppState, now: DateTime<Utc>, booted: DateTime<Utc>) -> any
                 source_of(&trigger.kind),
                 "claimed",
                 None,
+                true,
             )
             .await?
         else {
@@ -435,6 +438,7 @@ async fn record_missed(
                 "Missed. Firetower was not running at {}. A missed run is never made up.",
                 fire_at.format("%H:%M")
             )),
+            false,
         )
         .await?;
     if taken.is_some() {

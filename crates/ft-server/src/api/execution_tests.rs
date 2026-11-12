@@ -5420,6 +5420,107 @@ async fn a_schedule_cannot_be_asked_to_bypass_permissions() {
     assert_eq!(row.pins["settings"]["mode"], serde_json::json!("dontAsk"));
 }
 
+/// **A pause that lands after the due list is read stops the run anyway.**
+///
+/// `schedules_due` is a snapshot. Between it returning and the claim, a pause
+/// can land — and neither the claim nor the gate re-read the schedule, so one
+/// more credential-bearing run started after somebody had turned it off. The
+/// condition is in the insert, where it cannot be raced.
+#[tokio::test]
+async fn a_claim_does_not_land_for_a_schedule_that_has_just_been_paused() {
+    let (state, principal, _, _, _) = fixture().await;
+    let made = armed(&state, &principal, "Paused mid-pass").await;
+    due_since(&state, &made.id, Utc::now()).await;
+    let fire_at = clock_at(&state, &made.id).await.expect("armed");
+
+    // What the sweep holds: a due row read a moment ago.
+    let due = state.db.schedules_due(Utc::now(), 20).await.unwrap();
+    assert_eq!(due.len(), 1, "it is due, which is the state under test");
+
+    // The pause lands first.
+    let _ = super::schedules::pause_schedule(
+        State(state.clone()),
+        Extension(principal.clone()),
+        Path(made.id.as_str().to_string()),
+    )
+    .await
+    .unwrap();
+
+    // The claim the sweep was about to make finds nothing to claim for.
+    let taken = state
+        .db
+        .claim_run(
+            &ft_core::ScheduleRunId::new(),
+            &made.id,
+            None,
+            fire_at,
+            due[0].revision,
+            "cron",
+            "claimed",
+            None,
+            true,
+        )
+        .await
+        .unwrap();
+    assert!(taken.is_none(), "no run starts after the pause");
+    assert!(runs_of(&state, &made.id).await.is_empty());
+
+    // A history line about the schedule is still recorded, because that is a
+    // note rather than a run — and it is worth keeping whatever happened to
+    // the schedule since.
+    let noted = state
+        .db
+        .claim_run(
+            &ft_core::ScheduleRunId::new(),
+            &made.id,
+            None,
+            fire_at,
+            due[0].revision,
+            "cron",
+            "missed",
+            Some("Missed."),
+            false,
+        )
+        .await
+        .unwrap();
+    assert!(noted.is_some());
+}
+
+/// And an edit between the snapshot and the claim does not run the version
+/// nobody approved.
+#[tokio::test]
+async fn a_claim_does_not_land_for_a_revision_that_has_moved() {
+    let (state, principal, _, _, _) = fixture().await;
+    let made = armed(&state, &principal, "Edited mid-pass").await;
+    let was = state.db.schedule(&made.id).await.unwrap().unwrap().revision;
+
+    let _ = super::schedules::update_schedule(
+        State(state.clone()),
+        Extension(principal.clone()),
+        Path(made.id.as_str().to_string()),
+        Json(a_schedule("Edited mid-pass", weekdays_at("09:30"))),
+    )
+    .await
+    .unwrap();
+
+    let taken = state
+        .db
+        .claim_run(
+            &ft_core::ScheduleRunId::new(),
+            &made.id,
+            None,
+            Utc::now(),
+            was,
+            "cron",
+            "claimed",
+            None,
+            true,
+        )
+        .await
+        .unwrap();
+    assert!(taken.is_none(), "the revision the due list saw is gone");
+}
+
 /// **Blocker 1: a shared profile cannot rewrite an approved schedule.**
 ///
 /// A writer of a shared profile — or an agent with Writer on it calling
@@ -5495,6 +5596,7 @@ async fn a_profile_changed_after_approval_does_not_run() {
             "cron",
             "claimed",
             None,
+            false,
         )
         .await
         .unwrap()
@@ -5580,6 +5682,7 @@ async fn a_scheduled_run_is_refused_when_the_owner_holds_no_git_authorization() 
             "cron",
             "claimed",
             None,
+            false,
         )
         .await
         .unwrap()
@@ -5652,6 +5755,7 @@ async fn a_schedule_on_a_local_checkout_needs_no_git_authorization() {
             "cron",
             "claimed",
             None,
+            false,
         )
         .await
         .unwrap()
@@ -5779,6 +5883,7 @@ async fn a_run_whose_schedule_names_no_subscription_is_not_launched() {
             "cron",
             "claimed",
             None,
+            false,
         )
         .await
         .unwrap()
@@ -6163,6 +6268,7 @@ async fn an_occurrence_behind_a_running_one_is_skipped_and_says_so() {
             "cron",
             "claimed",
             None,
+            false,
         )
         .await
         .unwrap();
@@ -6247,6 +6353,7 @@ async fn record(
             "cron",
             "claimed",
             None,
+            false,
         )
         .await
         .unwrap();
@@ -6469,7 +6576,17 @@ async fn a_run_keeps_its_line_and_loses_its_workspace_when_reclaim_purges_it() {
     let run = ft_core::ScheduleRunId::new();
     state
         .db
-        .claim_run(&run, &made.id, None, Utc::now(), 1, "cron", "claimed", None)
+        .claim_run(
+            &run,
+            &made.id,
+            None,
+            Utc::now(),
+            1,
+            "cron",
+            "claimed",
+            None,
+            false,
+        )
         .await
         .unwrap();
     state
@@ -6675,6 +6792,7 @@ async fn a_refused_launch_is_recorded_refused_and_moves_nothing() {
             "cron",
             "claimed",
             None,
+            false,
         )
         .await
         .unwrap()

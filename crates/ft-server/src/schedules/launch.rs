@@ -258,6 +258,39 @@ async fn gate(
     state: &AppState,
     schedule: &crate::db::ScheduleRow,
 ) -> Result<ft_core::NewSession, Stopped> {
+    // 0 · The schedule is still on, still approved, and still the revision
+    // that was claimed.
+    //
+    // The claim itself is conditioned on all three, which is where the race
+    // is actually closed — an `INSERT … SELECT … WHERE` cannot be raced. This
+    // is the second half of that: a pause can also land between the claim and
+    // here, and a run that was claimed a moment before somebody pressed pause
+    // should not be the one more run that starts anyway.
+    //
+    // `refused` rather than `failed`: nothing was started and nothing is
+    // broken, and it is transparent to the pause rule — a schedule somebody
+    // turned off must not also look like it was failing.
+    match state.db.schedule(&schedule.id).await.ok().flatten() {
+        Some(now)
+            if now.active && now.approved_at.is_some() && now.revision == schedule.revision => {}
+        Some(_) => {
+            return Err(Stopped {
+                state: "refused",
+                detail: "The schedule was turned off before this run started.".into(),
+                code: ErrorCode::InvalidRequest,
+                and_stop: None,
+            })
+        }
+        None => {
+            return Err(Stopped {
+                state: "refused",
+                detail: "The schedule was deleted before this run started.".into(),
+                code: ErrorCode::NotFound,
+                and_stop: None,
+            })
+        }
+    }
+
     // 1 · The person still exists and is enabled.
     let owner = state
         .accounts
@@ -629,6 +662,10 @@ pub async fn run_now(
             "manual",
             "claimed",
             None,
+            // Not conditioned on the schedule being on: this is somebody
+            // pressing a button, and pressing it on a paused schedule is the
+            // ordinary way to try one without turning the clock back on.
+            false,
         )
         .await?
         .ok_or_else(|| anyhow::anyhow!("a run is already claimed for this moment"))?;

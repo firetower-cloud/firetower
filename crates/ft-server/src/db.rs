@@ -3095,12 +3095,33 @@ impl Db {
         source: &str,
         state: &str,
         detail: Option<&str>,
+        require_live: bool,
     ) -> Result<Option<ScheduleRunId>> {
+        // **`require_live` closes a race the due list cannot.**
+        //
+        // `schedules_due` is a snapshot. Between it returning and this insert,
+        // somebody can pause the schedule, turn it off, or edit it — and the
+        // claim went ahead, so one more credential-bearing run started after
+        // the pause. The condition is in the insert because that is the only
+        // place it cannot be raced: an `INSERT … SELECT … WHERE` evaluates
+        // against the row as it is at that instant.
+        //
+        // The revision is in it too, so an edit between the snapshot and the
+        // claim does not run the version nobody approved.
+        //
+        // Off for a run somebody started by hand — they are present and
+        // pressed it — and off for recording a `missed` or `skipped`
+        // occurrence, which is a history line about a schedule rather than a
+        // run of it, and is worth keeping whatever happened to the schedule
+        // since.
         let taken: Option<String> = sqlx::query_scalar(
             "INSERT INTO schedule_runs
                (id, schedule_id, trigger_id, fire_at, revision, state, source, detail, ended_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8,
-                     CASE WHEN $6 IN ('claimed', 'running') THEN NULL ELSE now() END)
+             SELECT $1, $2, $3, $4, $5, $6, $7, $8,
+                    CASE WHEN $6 IN ('claimed', 'running') THEN NULL ELSE now() END
+               FROM schedules s
+              WHERE s.id = $2
+                AND (NOT $9 OR (s.active AND s.approved_at IS NOT NULL AND s.revision = $5))
                  ON CONFLICT (schedule_id, fire_at) DO NOTHING
                RETURNING id",
         )
@@ -3112,6 +3133,7 @@ impl Db {
         .bind(state)
         .bind(source)
         .bind(detail)
+        .bind(require_live)
         .fetch_optional(&self.pool)
         .await?;
         Ok(taken.map(ScheduleRunId::from_stored))
