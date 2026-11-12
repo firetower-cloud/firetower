@@ -78,7 +78,7 @@ pub async fn in_flight() -> HashSet<String> {
 /// argued for: "starting a workspace waits on a host, and a second lead asking
 /// meanwhile should not queue behind the first". Twenty due schedules in one
 /// pass want the same treatment.
-pub fn spawn(state: AppState, schedule: crate::db::ScheduleRow, run: ScheduleRunId) {
+pub fn spawn(state: AppState, schedule: crate::db::ScheduleRow, run: ScheduleRunId, why: Why) {
     tokio::spawn(async move {
         // **The permit is held until the workspace exists**, which is the
         // whole of the bound: see [`permits`]. The run stays claimed while it
@@ -87,12 +87,36 @@ pub fn spawn(state: AppState, schedule: crate::db::ScheduleRow, run: ScheduleRun
         // claim that outlived the process that took it.
         launching().write().await.insert(run.as_str().to_string());
         let room = permits().acquire().await;
-        if let Err(e) = start(&state, &schedule, &run).await {
+        if let Err(e) = start(&state, &schedule, &run, why).await {
             tracing::warn!(run = %run, "starting a scheduled run: {e:#}");
         }
         drop(room);
         launching().write().await.remove(run.as_str());
     });
+}
+
+/// Why this run is starting — which decides one gate, and nothing else.
+///
+/// **Authorization and the clock are two questions.** Gate 0 re-reads the
+/// schedule because a pause can land between the claim and the launch, and it
+/// was written to require `active` whatever was starting — which broke *Run
+/// now* on a paused schedule, the one way there is to try a schedule without
+/// turning its clock back on. `claim_run` already made that distinction (it
+/// takes `require_live: false` for a press) and this is the other half of it.
+///
+/// An enum rather than a `bool`, because a literal at a call site is exactly
+/// how `inherit_settings` went wrong.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Why {
+    /// The clock reached an occurrence. The schedule has to still be on: a
+    /// run claimed a moment before somebody pressed pause is not the one more
+    /// run that starts anyway.
+    Clock,
+    /// Somebody pressed Run now, and is there. **Approval and the revision
+    /// are still checked** — pressing a button is not approving, and an
+    /// agent's proposal that nobody has read must not run because somebody
+    /// pressed the wrong thing — but being switched off is not a refusal.
+    ByHand,
 }
 
 /// Why a launch did not happen.
@@ -127,8 +151,9 @@ pub(crate) async fn start(
     state: &AppState,
     schedule: &crate::db::ScheduleRow,
     run: &ScheduleRunId,
+    why: Why,
 ) -> anyhow::Result<()> {
-    match gate(state, schedule).await {
+    match gate(state, schedule, why).await {
         Err(stopped) => {
             let settled = state
                 .db
@@ -247,9 +272,10 @@ pub(crate) async fn start(
 async fn gate(
     state: &AppState,
     schedule: &crate::db::ScheduleRow,
+    why: Why,
 ) -> Result<ft_core::NewSession, Stopped> {
-    // 0 · The schedule is still on, still approved, and still the revision
-    // that was claimed.
+    // 0 · The schedule is still approved, still the revision that was
+    // claimed — and, for a run the clock started, still on.
     //
     // The claim itself is conditioned on all three, which is where the race
     // is actually closed — an `INSERT … SELECT … WHERE` cannot be raced. This
@@ -257,12 +283,30 @@ async fn gate(
     // here, and a run that was claimed a moment before somebody pressed pause
     // should not be the one more run that starts anyway.
     //
+    // **`active` only for the clock.** Requiring it of every launch broke
+    // *Run now* on a paused schedule, which is the one way to try a schedule
+    // without turning its clock back on — and `claim_run` had already been
+    // written not to require it for a press. Two halves of one distinction,
+    // which is [`Why`].
+    //
     // `refused` rather than `failed`: nothing was started and nothing is
     // broken, and it is transparent to the pause rule — a schedule somebody
     // turned off must not also look like it was failing.
     match state.db.schedule(&schedule.id).await.ok().flatten() {
         Some(now)
-            if now.active && now.approved_at.is_some() && now.revision == schedule.revision => {}
+            if now.approved_at.is_some()
+                && now.revision == schedule.revision
+                && (now.active || why == Why::ByHand) => {}
+        Some(now) if now.approved_at.is_none() || now.revision != schedule.revision => {
+            return Err(Stopped {
+                state: "refused",
+                detail: "The schedule changed before this run started, so it was not run on \
+                         what nobody has approved."
+                    .into(),
+                code: ErrorCode::InvalidRequest,
+                and_stop: None,
+            })
+        }
         Some(_) => {
             return Err(Stopped {
                 state: "refused",
@@ -727,7 +771,12 @@ pub async fn run_now(
         .await?
         .ok_or_else(|| anyhow::anyhow!("a run is already claimed for this moment"))?;
 
-    spawn(state.clone(), schedule.clone(), claimed.clone());
+    spawn(
+        state.clone(),
+        schedule.clone(),
+        claimed.clone(),
+        Why::ByHand,
+    );
     Ok(claimed)
 }
 

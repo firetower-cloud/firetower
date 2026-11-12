@@ -5822,7 +5822,7 @@ async fn a_profile_changed_after_approval_does_not_run() {
         .await
         .unwrap()
         .unwrap();
-    crate::schedules::launch::start(&state, &row, &claim)
+    crate::schedules::launch::start(&state, &row, &claim, crate::schedules::launch::Why::Clock)
         .await
         .expect("a refusal is an outcome");
 
@@ -5913,7 +5913,7 @@ async fn a_scheduled_run_is_refused_when_the_owner_holds_no_git_authorization() 
         .await
         .unwrap()
         .unwrap();
-    crate::schedules::launch::start(&state, &row, &claim)
+    crate::schedules::launch::start(&state, &row, &claim, crate::schedules::launch::Why::Clock)
         .await
         .expect("a refusal is an outcome");
 
@@ -6008,7 +6008,7 @@ async fn a_scheduled_run_will_not_reach_a_remote_over_the_machines_own_identity(
         .await
         .unwrap()
         .unwrap();
-    crate::schedules::launch::start(&state, &row, &claim)
+    crate::schedules::launch::start(&state, &row, &claim, crate::schedules::launch::Why::Clock)
         .await
         .expect("a refusal is an outcome");
 
@@ -6083,7 +6083,7 @@ async fn a_schedule_on_a_local_checkout_needs_no_git_authorization() {
         .await
         .unwrap()
         .unwrap();
-    crate::schedules::launch::start(&state, &row, &claim)
+    crate::schedules::launch::start(&state, &row, &claim, crate::schedules::launch::Why::Clock)
         .await
         .expect("it runs, or is refused for a reason of the fleet's");
 
@@ -6308,7 +6308,7 @@ async fn a_run_whose_schedule_names_no_subscription_is_not_launched() {
         .await
         .unwrap()
         .unwrap();
-    crate::schedules::launch::start(&state, &row, &claim)
+    crate::schedules::launch::start(&state, &row, &claim, crate::schedules::launch::Why::Clock)
         .await
         .expect("a refusal is an outcome");
 
@@ -6484,7 +6484,7 @@ async fn an_approved_skill_that_cannot_be_delivered_stops_the_run() {
         .await
         .unwrap()
         .unwrap();
-    crate::schedules::launch::start(&state, &row, &claim)
+    crate::schedules::launch::start(&state, &row, &claim, crate::schedules::launch::Why::Clock)
         .await
         .expect("a refusal is an outcome");
 
@@ -6555,7 +6555,7 @@ async fn a_scheduled_run_is_handed_the_skills_it_was_approved_with() {
         .await
         .unwrap()
         .unwrap();
-    crate::schedules::launch::start(&state, &row, &claim)
+    crate::schedules::launch::start(&state, &row, &claim, crate::schedules::launch::Why::Clock)
         .await
         .expect("it launches");
 
@@ -6751,7 +6751,7 @@ async fn a_stored_claim_that_no_subscription_is_needed_does_not_survive_a_launch
         .await
         .unwrap()
         .unwrap();
-    crate::schedules::launch::start(&state, &row, &claim)
+    crate::schedules::launch::start(&state, &row, &claim, crate::schedules::launch::Why::Clock)
         .await
         .expect("a refusal is an outcome");
 
@@ -6837,7 +6837,7 @@ async fn a_scheduled_run_is_handed_the_sandbox_it_was_approved_with() {
         .await
         .unwrap()
         .unwrap();
-    crate::schedules::launch::start(&state, &row, &claim)
+    crate::schedules::launch::start(&state, &row, &claim, crate::schedules::launch::Why::Clock)
         .await
         .expect("it launches");
 
@@ -7219,6 +7219,72 @@ async fn run_now_is_marked_manual_and_leaves_the_clock_where_it_is() {
             .unwrap()
             .is_empty(),
         "ignored entirely, which is what the filter in the query means"
+    );
+}
+
+/// **#7's regression: Run now still works on a schedule somebody paused.**
+///
+/// Gate 0 was given `active` to check for every launch, to close the window
+/// between a claim and a pause. `claim_run` had already been written not to
+/// require it for a press — "pressing it on a paused schedule is the ordinary
+/// way to try one without turning the clock back on" — so the two halves of
+/// the same distinction disagreed, and the press lost.
+///
+/// Asserted on the frame, and on the clock staying where it was: the point of
+/// pressing it on a paused schedule is that it runs *and* stays paused.
+#[tokio::test]
+async fn run_now_works_on_a_schedule_somebody_paused() {
+    let (state, principal, host, ready, owner, created) = frames_fixture().await;
+    ready.store(true, Ordering::SeqCst);
+    says_it_has(&state, &host, &[(Agent::ClaudeCode, true)]).await;
+    let account = a_subscription(&state, &owner, "a_claude", Agent::ClaudeCode).await;
+
+    let mut new = a_schedule("Tried by hand", weekdays_at("08:30"));
+    new.account_id = Some(account);
+    let made = create(&state, &principal, new).await.unwrap();
+    let _ = super::schedules::approve_schedule(
+        State(state.clone()),
+        Extension(principal.clone()),
+        Path(made.id.as_str().to_string()),
+        Query(Default::default()),
+    )
+    .await
+    .expect("it activates");
+
+    // Switched off by a person, which is the state under test.
+    let _ = super::schedules::pause_schedule(
+        State(state.clone()),
+        Extension(principal.clone()),
+        Path(made.id.as_str().to_string()),
+    )
+    .await
+    .expect("a person may pause it");
+    let paused = state.db.schedule(&made.id).await.unwrap().unwrap();
+    assert!(!paused.active);
+
+    let _ = super::schedules::run_schedule_now(
+        State(state.clone()),
+        Extension(principal.clone()),
+        Path(made.id.as_str().to_string()),
+    )
+    .await
+    .expect("a person may still start one by hand");
+
+    // It reached the machine.
+    let frame = handed_to_worker(&created).await;
+    assert_eq!(frame.agent, Agent::ClaudeCode);
+
+    // And the clock is still off: this was a try, not a resume.
+    let after = state.db.schedule(&made.id).await.unwrap().unwrap();
+    assert!(
+        !after.active,
+        "pressing Run now turned the schedule back on"
+    );
+    assert!(
+        state.db.triggers_of(&made.id).await.unwrap()[0]
+            .next_fire_at
+            .is_none(),
+        "and gave it a clock again"
     );
 }
 
@@ -7689,7 +7755,7 @@ async fn a_refused_launch_is_recorded_refused_and_moves_nothing() {
         .await
         .unwrap()
         .unwrap();
-    crate::schedules::launch::start(&state, &row, &claim)
+    crate::schedules::launch::start(&state, &row, &claim, crate::schedules::launch::Why::Clock)
         .await
         .expect("a refusal is an outcome, not an error");
 

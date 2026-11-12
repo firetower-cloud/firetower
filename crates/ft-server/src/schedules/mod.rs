@@ -398,7 +398,7 @@ async fn due(state: &AppState, now: DateTime<Utc>, booted: DateTime<Utc>) -> any
         // which machine anything will land on, and that is what made the
         // per-host cap unreachable for an ordinary schedule. See
         // `launch::permits`.
-        launch::spawn(state.clone(), schedule, claim);
+        launch::spawn(state.clone(), schedule, claim, launch::Why::Clock);
         started += 1;
     }
 
