@@ -2933,7 +2933,10 @@ async fn says_its_disk(state: &AppState, host: &Host, total_mb: u64, used_mb: u6
     // offline, out of the candidate list, and the test asserting the floor
     // against a fleet of one. Waiting for the reading alone passed on a quiet
     // machine and failed under a full suite.
-    for _ in 0..200 {
+    // Ten seconds of patience rather than four: this is a fixture waiting for
+    // a handshake, not an assertion about how fast one is, and four was
+    // enough on a quiet machine and not under a full suite.
+    for _ in 0..500 {
         let said = state.fleet.capacity_of(&host.id).await.is_some();
         let online = state
             .db
