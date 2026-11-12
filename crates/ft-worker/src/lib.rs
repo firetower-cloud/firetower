@@ -91,6 +91,7 @@ pub mod attachments;
 pub mod capacity;
 pub mod cgroup;
 pub mod codex;
+pub mod connectors;
 pub mod cursor;
 pub mod describe;
 pub mod docker;
@@ -103,6 +104,7 @@ pub mod kimi;
 pub mod path;
 pub mod readiness;
 pub mod runtime;
+pub mod settings;
 pub mod skills;
 pub mod store;
 pub mod structured;
@@ -1080,6 +1082,25 @@ impl Worker {
                     Err(e) => tracing::warn!(session = %session_id, "changing its skills: {e:#}"),
                 }
             }
+
+            // The whole selection, not a change to it. Unlike skills, this
+            // does not reach the agent that is already running: an agent reads
+            // its MCP configuration and its permission rules once, when it
+            // starts. Both files are rewritten so the next launch is right,
+            // and the person was told it takes a restart.
+            ToWorker::SetConnectors {
+                session_id,
+                connectors,
+            } => match self.connectors_for(&session_id, &connectors).await {
+                Ok(()) => tracing::info!(
+                    session = %session_id,
+                    count = connectors.len(),
+                    "this session's connectors were changed"
+                ),
+                Err(e) => {
+                    tracing::warn!(session = %session_id, "changing its connectors: {e:#}")
+                }
+            },
 
             ToWorker::ListFiles {
                 req,
@@ -2537,6 +2558,15 @@ You are in the directory that holds them, not inside one of them.              P
         )
         .await?;
 
+        // Before the agent starts, and fatal: `arrange_asking` reads this
+        // file at launch, and a session that came up without it reaches none of
+        // its connectors — the harmless failure — while a half-written one
+        // could reach a server whose write tools nobody is asked about, which
+        // is not.
+        crate::connectors::apply(&path, &id, &spec.connectors)
+            .await
+            .context("writing this session's connectors")?;
+
         // Always, even with nothing selected: the directory has to exist
         // before the agent starts, or the first skill turned on mid-session
         // lands somewhere nothing is watching.
@@ -2705,6 +2735,15 @@ You are in the directory that holds them, not inside one of them.              P
         )
         .await?;
 
+        // Before the agent starts, and fatal: `arrange_asking` reads this
+        // file at launch, and a session that came up without it reaches none of
+        // its connectors — the harmless failure — while a half-written one
+        // could reach a server whose write tools nobody is asked about, which
+        // is not.
+        crate::connectors::apply(&path, &id, &spec.connectors)
+            .await
+            .context("writing this session's connectors")?;
+
         if let Err(e) = crate::skills::apply(&path, &id, spec.agent, &spec.skills).await {
             tracing::warn!(
                 "{}: writing this session's skills: {e:#}",
@@ -2801,6 +2840,23 @@ You are in the directory that holds them, not inside one of them.              P
         let workspace = self.workspace_of(session_id).await?;
         let (agent, _) = self.store.session_brief(session_id).await?;
         crate::skills::apply(&workspace, session_id, agent, skills).await
+    }
+
+    /// Put exactly this set of connectors where this session's launch reads
+    /// them, and write the permission rules they need.
+    ///
+    /// The rules are written now as well as at launch, so a set changed while
+    /// the agent is stopped is already safe when the supervisor restarts it —
+    /// and because `settings::ask_about` only ever adds, writing them twice
+    /// costs one read of a small file.
+    async fn connectors_for(
+        &self,
+        session_id: &SessionId,
+        connectors: &[ft_proto::McpServer],
+    ) -> Result<()> {
+        let workspace = self.workspace_of(session_id).await?;
+        crate::connectors::apply(&workspace, session_id, connectors).await?;
+        crate::settings::ask_about(&workspace, connectors).await
     }
 
     async fn workspace_of(&self, session_id: &SessionId) -> Result<PathBuf> {
@@ -5833,6 +5889,7 @@ mod tests {
             env: vec![],
             agent_home: vec![],
             skills: vec![],
+            connectors: vec![],
             persona: String::new(),
         }))
     }
@@ -6072,6 +6129,7 @@ mod tests {
                     env: vec![],
                     agent_home: vec![],
                     skills: vec![],
+                    connectors: vec![],
                     persona: String::new(),
                 })),
             ],
@@ -6129,6 +6187,7 @@ mod tests {
                     env: vec![],
                     agent_home: vec![],
                     skills: vec![],
+                    connectors: vec![],
                     persona: String::new(),
                 })),
             ],
@@ -6167,6 +6226,7 @@ mod tests {
                             env: vec![],
                             agent_home: vec![],
                             skills: vec![],
+                            connectors: vec![],
                             persona: String::new(),
                             workspace_session: None,
                         }),
@@ -6231,6 +6291,7 @@ mod tests {
                     env: vec![],
                     agent_home: vec![],
                     skills: vec![],
+                    connectors: vec![],
                     persona: String::new(),
                 })),
             ],
@@ -6263,6 +6324,7 @@ mod tests {
                     env: vec![],
                     agent_home: vec![],
                     skills: vec![],
+                    connectors: vec![],
                     persona: String::new(),
                     workspace_session: None,
                 })),

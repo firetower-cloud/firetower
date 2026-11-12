@@ -884,6 +884,12 @@ pub(crate) async fn create_session_as(
             Vec::new()
         });
 
+    // Nothing resolves these yet — the library and the sign-in are the next
+    // commit. The field is here now because the worker's half is: a session
+    // that *does* carry connectors has to have had its permission rules
+    // written before it starts, and that is what landed first.
+    let connectors: Vec<ft_proto::McpServer> = Vec::new();
+
     // Each repository's own variables, opened once. Every read is a line in the
     // vault's log naming the session it was for.
     let mut per_repo_env: Vec<Vec<ft_core::dotenv::Variable>> = Vec::new();
@@ -1016,6 +1022,9 @@ pub(crate) async fn create_session_as(
                 env,
                 agent_home,
                 skills,
+                // Resolved by the person whose session this is, never by
+                // what a directory holds — see `connectors::for_session`.
+                connectors,
                 persona: persona.clone().unwrap_or_default(),
             })),
         )
@@ -1351,6 +1360,12 @@ pub(crate) async fn relaunch(
         .await
         .unwrap_or_default();
 
+    // Nothing resolves these yet — the library and the sign-in are the next
+    // commit. The field is here now because the worker's half is: a session
+    // that *does* carry connectors has to have had its permission rules
+    // written before it starts, and that is what landed first.
+    let connectors: Vec<ft_proto::McpServer> = Vec::new();
+
     state
         .fleet
         .set_status(&session.id, ft_core::SessionStatus::Starting, None)
@@ -1379,6 +1394,9 @@ pub(crate) async fn relaunch(
                 env,
                 agent_home,
                 skills,
+                // Resolved by the person whose session this is — see
+                // `connectors::for_session`.
+                connectors,
                 persona,
             },
         )
@@ -1661,6 +1679,12 @@ async fn start_another_agent(
         .await
         .unwrap_or_default();
 
+    // Nothing resolves these yet — the library and the sign-in are the next
+    // commit. The field is here now because the worker's half is: a session
+    // that *does* carry connectors has to have had its permission rules
+    // written before it starts, and that is what landed first.
+    let connectors: Vec<ft_proto::McpServer> = Vec::new();
+
     state
         .fleet
         .start_agent(
@@ -1680,6 +1704,9 @@ async fn start_another_agent(
                 env,
                 agent_home,
                 skills,
+                // Resolved by the person whose session this is — see
+                // `connectors::for_session`.
+                connectors,
                 persona,
             },
         )

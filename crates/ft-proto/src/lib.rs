@@ -66,7 +66,14 @@ use serde::{Deserialize, Serialize};
 ///      command line and a long persona no longer fits in it. A worker older
 ///      than this reads the field as nothing, and a session started as a
 ///      profile on one would come up as a plain agent with no indication why.
-pub const PROTOCOL_VERSION: u32 = 22;
+/// 23 — connectors travel with a session, and can be changed while it runs.
+///      A worker older than this ignores the field, so a session would start
+///      with none of them — and, worse, would not write the
+///      `permissions.ask` rules that make a connector's write tools reach the
+///      approver at all. A connector that silently does nothing is better than
+///      one whose writes nobody is asked about, so the version moves rather
+///      than the frame being made optional.
+pub const PROTOCOL_VERSION: u32 = 23;
 
 mod codec;
 pub use codec::{Codec, CodecError, FrameReader, FrameWriter};
@@ -266,6 +273,18 @@ pub enum ToWorker {
     SetSkills {
         session_id: SessionId,
         skills: Vec<SkillBundle>,
+    },
+    /// Replace the connectors a session can reach with exactly this set.
+    ///
+    /// The **whole selection**, never a delta, for [`ToWorker::SetSkills`]'
+    /// reasons. Unlike skills, this one does not take effect until the agent
+    /// is started again: an agent reads its MCP configuration and its
+    /// permission rules once, when it launches. The worker writes both files
+    /// so the next launch is right, and whoever changed the set is told it
+    /// needs a restart.
+    SetConnectors {
+        session_id: SessionId,
+        connectors: Vec<McpServer>,
     },
     /// Attach a terminal.
     PtyOpen {
@@ -645,6 +664,63 @@ pub struct CreateWorkspace {
     /// with `command too long`. See `Tmux::start`.
     #[serde(default)]
     pub persona: String,
+    /// The remote MCP servers this session may reach, credentials resolved.
+    ///
+    /// The whole selection, never a delta — see [`ToWorker::SetConnectors`].
+    /// Only the ones the person whose session this is actually holds a
+    /// credential for: a server sent without one authenticates as nobody and
+    /// produces a failed connector and a confusing line in a transcript, so
+    /// the control plane drops it rather than sending it.
+    #[serde(default)]
+    pub connectors: Vec<McpServer>,
+}
+
+/// One remote MCP server, as a session is given it.
+///
+/// **A value, not a reference.** The credential is already resolved — by the
+/// person whose session this is, never by what a directory holds — and is a
+/// header here rather than a vault key, because the worker has no way to open
+/// a vault and should not grow one.
+///
+/// v1 is remote only: there is no command, no arguments and no environment, so
+/// nothing a connector brings runs on the machine. That is the whole reason
+/// this type is three fields.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct McpServer {
+    /// What the agent calls it, and so how its tools are addressed:
+    /// `mcp__<name>__<tool>`. One label, no separators — the worker checks
+    /// again before writing, because this is half of a permission rule.
+    pub name: String,
+    /// Where it is. Always `https`, except on a loopback address.
+    pub url: String,
+    /// Sent on every request. `Authorization: Bearer …` for an OAuth grant.
+    ///
+    /// A list rather than a map so the order is the order it was built in, and
+    /// so a server wanting two of one header name is expressible. [`Secret`]
+    /// for the value, for the reason that type exists: a frame gets logged, and
+    /// what keeps a bearer token out of the log is the type it arrives in.
+    #[serde(default)]
+    pub headers: Vec<(String, Secret)>,
+    /// Every tool the control plane saw when it last probed this server.
+    ///
+    /// Carried so the worker can write a `permissions.ask` rule naming each
+    /// one — the spelling an agent actually evaluates. Empty for a server that
+    /// would not list its tools without a credential, which is why the rule
+    /// for the server as a whole is written too and not only these.
+    #[serde(default)]
+    pub tools: Vec<String>,
+}
+
+impl std::fmt::Debug for McpServer {
+    /// Without the headers. One of them is a bearer token.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("McpServer")
+            .field("name", &self.name)
+            .field("url", &self.url)
+            .field("headers", &self.headers.len())
+            .field("tools", &self.tools.len())
+            .finish()
+    }
 }
 
 /// One file of a skill, on its way to a worker.
@@ -744,6 +820,11 @@ pub struct StartAgent {
     /// session, so it gets its own directory and its own selection.
     #[serde(default)]
     pub skills: Vec<SkillBundle>,
+    /// This run's own connectors, for the same reason — and a stronger one:
+    /// one of their headers is a credential, and it belongs to whoever started
+    /// *this* agent, not to whoever started the workspace.
+    #[serde(default)]
+    pub connectors: Vec<McpServer>,
     /// The system prompt this run carries — see [`CreateWorkspace::persona`].
     #[serde(default)]
     pub persona: String,
@@ -1186,6 +1267,48 @@ pub enum HandshakeError {
 mod tests {
     use super::*;
 
+    /// A session's connectors survive the wire, and the credential in them
+    /// does not survive a log line.
+    ///
+    /// Both halves matter. Frames are logged, and the `Debug` on a frame is
+    /// the only thing standing between a bearer token and somebody's
+    /// `journalctl` — which is why the header value is a [`Secret`] rather
+    /// than a `String`.
+    #[test]
+    fn connectors_round_trip_without_their_tokens_reaching_a_log() {
+        let frame = ToWorker::SetConnectors {
+            session_id: SessionId::from_stored("s_01example".to_string()),
+            connectors: vec![McpServer {
+                name: "slack".into(),
+                url: "https://mcp.slack.com/mcp".into(),
+                headers: vec![("Authorization".into(), "Bearer xoxp-very-secret".into())],
+                tools: vec!["slack_post_message".into()],
+            }],
+        };
+
+        let printed = format!("{frame:?}");
+        assert!(
+            !printed.contains("xoxp-very-secret"),
+            "a frame's Debug is what reaches a log: {printed}"
+        );
+        assert!(printed.contains("slack"), "and it still says which: {printed}");
+
+        let wire = serde_json::to_string(&frame).expect("encoding");
+        let back: ToWorker = serde_json::from_str(&wire).expect("decoding");
+        match back {
+            ToWorker::SetConnectors { connectors, .. } => {
+                assert_eq!(connectors[0].name, "slack");
+                assert_eq!(
+                    connectors[0].headers[0].1.as_str(),
+                    "Bearer xoxp-very-secret",
+                    "the wire still carries it — it is the log that must not"
+                );
+                assert_eq!(connectors[0].tools, ["slack_post_message"]);
+            }
+            other => panic!("decoded as {other:?}"),
+        }
+    }
+
     /// A second agent survives the wire.
     ///
     /// `ToWorker` is internally tagged, and an internally-tagged newtype
@@ -1209,6 +1332,7 @@ mod tests {
             agent_home: Vec::new(),
             workspace_session: None,
             skills: Vec::new(),
+            connectors: Vec::new(),
             persona: String::new(),
         }));
 
