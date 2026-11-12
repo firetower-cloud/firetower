@@ -12,9 +12,13 @@
  * and puts its input and output behind a fold, and this puts the row itself
  * behind one more.
  *
- * Deliberately not a component. The rules below are a list transform with
+ * `place` is here too, because where an artifact's card goes is decided
+ * against these rows and against nothing else.
+ *
+ * Deliberately not a component. The rules below are list transforms with
  * edges — a run broken by prose, a step still running, a failure inside a
- * group — and each of those is worth a test that does not need React to run.
+ * group, an artifact older than everything on screen — and each of those is
+ * worth a test that does not need React to run.
  */
 
 import type { ItemKind } from "./generated/model";
@@ -205,4 +209,106 @@ export function summarise(items: Item[]): Summary {
   }
 
   return { verb: "did", text: `${items.length} steps`, failed };
+}
+
+/** Where every artifact's card goes, against one list of rows. */
+export type Placed<A> = {
+  /** Cards that land after a row, by that row's index. */
+  at: Map<number, A[]>;
+  /** Published before every line on screen, so drawn above the first row. */
+  before: A[];
+  /** Nowhere to anchor to: drawn at the end of the transcript. */
+  loose: A[];
+};
+
+/**
+ * What the placement reads off an artifact, which is one field.
+ *
+ * Structural rather than `Artifact`, so the rule stays a transform over
+ * numbers — and so a test can say `{ firstSeenLine: 5311 }` instead of
+ * building a row of twenty generated fields to prove a boundary.
+ */
+type Published = { firstSeenLine?: number | null };
+
+/**
+ * Where each artifact's card goes.
+ *
+ * By **log line**, not by searching the transcript for the artifact's folder.
+ * That search could not work and three attempts at it on the desk did not: an
+ * agent names a file however it likes, and one real session ran
+ *
+ *     cd …/.firetower/artifacts && cp firetower-architecture/index.html \
+ *          firetower-architecture-copy/index.html
+ *
+ * after which the full path appears nowhere in the log, nothing matched, and
+ * the card fell to the end of the conversation and stayed there.
+ *
+ * `firstSeenLine` is stamped by the server when the artifact is first
+ * published, from the agent's own log. It is a position rather than a guess,
+ * it is unaffected by how the file was referred to, and because it is written
+ * once the card stops where it started instead of following later edits down
+ * the page.
+ *
+ * Three places a card can go, and getting this wrong is what kept every one
+ * of them at the bottom of this screen. The transcript is a *window* — a
+ * phone opens on the last few exchanges and pages backwards from there — so
+ * "no row matches" has two very different meanings:
+ *
+ *   - **inside the window**: after the row the conversation had reached;
+ *   - **before the window**: above the transcript, because it happened before
+ *     everything on screen. Sending that case to the end put the oldest
+ *     artifact under the newest message, which is the bug as it was reported;
+ *   - **no line at all** (published before the column existed, or a
+ *     transcript that is still only what somebody optimistically typed): the
+ *     end, which is the only honest answer when the position is unknown.
+ *
+ * Ported from the desktop's `placed` in `desktop/src/ui/Chat.tsx` rather than
+ * re-derived, so that an artifact published at line 5311 lands in the same
+ * place on both clients.
+ */
+export function place<A extends Published>(rows: Row[], artifacts: A[]): Placed<A> {
+  const at = new Map<number, A[]>();
+  const before: A[] = [];
+  const loose: A[] = [];
+
+  /* The highest log line each row covers, so a card lands after the row the
+     conversation had reached — not inside the middle of a folded group. A row
+     of optimistic items reaches 0, which is "says nothing about where it is"
+     rather than "line zero". */
+  const reach = rows.map((row) => {
+    const inRow = row.type === "item" ? [row.item] : row.items;
+    return inRow.reduce((high, item) => Math.max(high, item.lineNo ?? 0), 0);
+  });
+
+  /* The oldest line on screen: what a card has to be older than to belong
+     above the transcript. Reduced rather than spread into `Math.min`, which
+     is what the desk does — pulling down on a transcript here re-reads the
+     whole conversation, and one argument per row of a long one is an argument
+     list long enough to throw. */
+  const earliest = reach.reduce((low, r) => (r > 0 && (low === 0 || r < low) ? r : low), 0);
+
+  for (const artifact of artifacts) {
+    const line = artifact.firstSeenLine ?? 0;
+    if (line <= 0) {
+      loose.push(artifact);
+      continue;
+    }
+    if (earliest > 0 && line < earliest) {
+      before.push(artifact);
+      continue;
+    }
+    /* The last row at or below the line, which is what refuses to split a
+       folded group: a run whose reach is past the artifact's line is not
+       opened to put the card inside it, so the card stops at the row before
+       it. Within one row, and the alternative is a card that disappears when
+       somebody shuts the fold. */
+    let found = -1;
+    for (let i = 0; i < reach.length; i++) {
+      if (reach[i] > 0 && reach[i] <= line) found = i;
+    }
+    if (found >= 0) at.set(found, [...(at.get(found) ?? []), artifact]);
+    else loose.push(artifact);
+  }
+
+  return { at, before, loose };
 }

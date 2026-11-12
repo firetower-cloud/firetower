@@ -32,7 +32,7 @@ import {
   useInterruptSession,
   useSendTurn,
 } from "~/api/generated/sessions/sessions";
-import { elapsed, minutesSince, STATUS_LABEL } from "~/api/view";
+import { elapsed, minutesSince, statusLabel } from "~/api/view";
 import { useDiff, useSession, useSessions, why } from "~/data";
 import { group, placeOf, runAt, type Workspace } from "~/api/workspaces";
 import { AgentMark } from "~/ui/AgentMark";
@@ -42,7 +42,6 @@ import { Composer } from "~/ui/Composer";
 import { Sheen } from "~/ui/Sheen";
 import { Signal } from "~/ui/Signal";
 import { Transcript } from "~/ui/Transcript";
-import { ArtifactCard } from "~/ui/ArtifactCard";
 import { Overview } from "~/ui/Overview";
 import { ImagesFrom } from "~/ui/WorkspaceImage";
 import { Waiting } from "~/ui/Waiting";
@@ -143,22 +142,6 @@ function Conversation({ place, address }: { place: Workspace; address: string })
   );
 
   /**
-   * The artifacts this session published.
-   *
-   * Owned by a person rather than by the workspace — `reclaim.rs` deletes a
-   * workspace within a minute of its last session ending and the cascade
-   * takes the conversation with it, so these rows deliberately sit outside
-   * it. That is why they are fetched separately rather than folded into the
-   * conversation.
-   *
-   * **Grouped at the end rather than anchored inline.** The desktop places
-   * each card at its `firstSeenLine`; the phone's fold does not carry a line
-   * number onto an `Item`, and threading one through would change a contract
-   * shared with two other clients. The end of the transcript is the fallback
-   * the server already documents for rows with no line, so it is the same
-   * behaviour rather than a new one.
-   */
-  /**
    * The team around this workspace, one level up and one level down.
    *
    * The manager is this session when it leads and the session that started it
@@ -220,11 +203,40 @@ function Conversation({ place, address }: { place: Workspace; address: string })
   const beside = pose.docked && railOpen;
   const floating = rail === "float" && railOpen;
 
+  /**
+   * The artifacts around this workspace, which is two sets rather than one.
+   *
+   * Owned by a person rather than by the workspace — `reclaim.rs` deletes a
+   * workspace within a minute of its last session ending and the cascade
+   * takes the conversation with it, so these rows deliberately sit outside
+   * it. That is why they are fetched separately rather than folded into the
+   * conversation.
+   *
+   * `artifacts` is the whole family's and belongs to `Overview`: the panel's
+   * list is the index of everything this team produced, and a member's card
+   * is one tap from the manager's page there.
+   *
+   * `mine` is the transcript's, and it is narrower because the transcript
+   * says *when*. Anchoring is done by `firstSeenLine`, which is a position in
+   * the producing session's own log — so a member's line read against these
+   * rows lands somewhere arbitrary and confident, and left unanchored it
+   * piles up at the end of the conversation, which is the symptom that was
+   * reported, in the sessions that have the most artifacts. The desk shows
+   * `fromSessionId === session.id` here for the same reason.
+   */
   const { data: everyArtifact } = useListArtifacts();
   const family = useMemo(() => new Set([managerId, ...team.map((t) => t.id)]), [managerId, team]);
   const artifacts = useMemo(
     () => (everyArtifact ?? []).filter((a) => a.fromSessionId && family.has(a.fromSessionId)),
     [everyArtifact, family],
+  );
+  /* One line, and the one to take out if a member's card should be anchored
+     here after all — there is no field on the phone today linking a task to
+     the session that ran it, so anchoring one properly is its own piece of
+     work rather than a wider filter. */
+  const mine = useMemo(
+    () => artifacts.filter((a) => a.fromSessionId === speaker.id),
+    [artifacts, speaker.id],
   );
 
   const { conversation, echo, unecho, settle, unsettle, remember, stopping, reread, older } =
@@ -336,7 +348,7 @@ function Conversation({ place, address }: { place: Workspace; address: string })
           </Text>
           <View className="mt-0.5 flex-row items-center gap-1.5">
             <Signal status={speaker.status} size={6} />
-            <Text className="font-sans text-meta text-dim">{STATUS_LABEL[speaker.status]}</Text>
+            <Text className="font-sans text-meta text-dim">{statusLabel(speaker.status)}</Text>
             <Text className="font-sans text-meta text-mute">·</Text>
             <Text className="font-sans text-meta text-mute">
               {elapsed(minutesSince(speaker.updatedAt))}
@@ -427,8 +439,22 @@ function Conversation({ place, address }: { place: Workspace; address: string })
              instead of the offset, which is the one thing that makes reading
              backwards feel like reading rather than like fighting the list.
              Native on both platforms; there is no JS frame in which the jump
-             could be visible. */
-          maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+             could be visible.
+
+             **Index 1, not 0, and that is the whole of it.** The scroller
+             anchors on the first subview at or past the reader's offset and
+             moves the offset by however far that same view moved. History is
+             inserted at the head of the *rows*, so anything above them — the
+             branch, the bring-up, the spinner, a card published before the
+             window — never moves, and anchoring on one of those computes a
+             correction of zero: the page lands on top of the reader instead
+             of above them, and since the offset is then still near the top
+             `older()` fires again. Measured at 6,800pt and five pages from
+             one flick, with a card above the window as the anchor. Starting
+             at 1 says never anchor above the transcript, always anchor on a
+             row. It holds because `Transcript` draws all of that leading
+             content as exactly one subview — which is what `lead` is for. */
+          maintainVisibleContentPosition={{ minIndexForVisible: 1 }}
           onContentSizeChange={() => atEnd && scroller.current?.scrollToEnd({ animated: true })}
           /* Pull to read it again from nothing.
              A conversation holds on to whatever it first folded and claims to
@@ -447,61 +473,77 @@ function Conversation({ place, address }: { place: Workspace; address: string })
             />
           }
         >
-          <Text className="mb-3 font-mono text-meta text-mute">
-            {speaker.branch ?? place.branch}
-          </Text>
+          {/* Which workspace the pictures in the agent's prose are read from.
+              Without this a `![shot](docs/shot.png)` has nowhere to look. */}
+          <ImagesFrom.Provider value={{ session: speaker.id }}>
+            <Transcript
+              items={conversation.items}
+              tasks={conversation.tasks}
+              /* This session's own, placed by `firstSeenLine`. The family's
+                 set stays with `Overview`, above. */
+              artifacts={mine}
+              /* Everything that belongs above the conversation, handed over
+                 rather than drawn here, so it joins the cards published
+                 before the window inside the transcript's single leading
+                 subview. That is what lets the scroller above say
+                 `minIndexForVisible: 1` and mean "anchor on a row" — see the
+                 note on it. Drawn here they were four more subviews above the
+                 insertion point, and any of them under the reader's thumb
+                 when a page landed was a correction of zero. */
+              lead={
+                <>
+                  <Text className="mb-3 font-mono text-meta text-mute">
+                    {speaker.branch ?? place.branch}
+                  </Text>
 
-          {/* The bring-up sits above the transcript and scrolls away once the
-              agent is talking, which is the right amount of attention for it. */}
-          <Bringup lines={bringup} />
+                  {/* The bring-up sits above the transcript and scrolls away once
+                      the agent is talking, which is the right amount of attention
+                      for it. */}
+                  <Bringup lines={bringup} />
 
-          {/* The history arriving. Sits above the transcript because that is
-              where it is going, and says nothing when there is nothing left to
-              read — a conversation short enough to arrive whole should never
-              show a hint that it was cut. */}
-          {conversation.loadingOlder ? (
-            <View className="items-center py-3">
-              <ActivityIndicator size="small" color={color.mute} />
-            </View>
-          ) : null}
+                  {/* The history arriving. Sits above the transcript because that
+                      is where it is going, and says nothing when there is nothing
+                      left to read — a conversation short enough to arrive whole
+                      should never show a hint that it was cut. */}
+                  {conversation.loadingOlder ? (
+                    <View className="items-center py-3">
+                      <ActivityIndicator size="small" color={color.mute} />
+                    </View>
+                  ) : null}
 
-          {conversation.items.length > 0 ? (
-            <>
-              {/* Which workspace the pictures in the agent's prose are read
-                  from. Without this a `![shot](docs/shot.png)` has nowhere to
-                  look. */}
-              <ImagesFrom.Provider value={{ session: speaker.id }}>
-                <Transcript items={conversation.items} tasks={conversation.tasks} />
-              </ImagesFrom.Provider>
-
-            </>
-          ) : conversation.trouble ? (
-            <Text className="mt-2 font-sans text-meta text-brick">{conversation.trouble}</Text>
-          ) : !conversation.arrived ? (
-            /* Before this branch existed the fall-through below ran while the
-               snapshot was still crossing the wire, so a conversation that was
-               merely long was reported as one that had never happened. An
-               empty transcript is only empty once something has come back to
-               say so. */
-            <Waiting say="Loading the conversation" />
-          ) : bringup.some((l) => l.state !== "pending") ? null : (
-            /* Nothing said and nothing coming up: a workspace that is simply
-               waiting for you to open the conversation. */
-            <Text className="mt-2 font-sans text-meta text-mute">Nothing has been said yet.</Text>
-          )}
-
-          {/* Outside the conditional above on purpose. An artifact is owned by
-              a person and outlives the workspace that made it, so a session
-              whose transcript is empty — or has not arrived — can still have
-              published one. Nesting these in the transcript branch hid them
-              exactly when the card was the only thing worth seeing. */}
-          {artifacts.map((a) => (
-            <ArtifactCard
-              key={a.id}
-              artifact={a}
-              onOpen={() => router.push({ pathname: "/workspace/artifact", params: { id: a.id } })}
+                  {/* Why there is nothing to read, when there is nothing to read.
+                      Inverted from a branch that wrapped the transcript, because
+                      the transcript below now draws the artifact cards too and has
+                      to be reached whether or not a conversation arrived — an
+                      artifact is owned by a person and outlives the workspace that
+                      made it, so a session whose transcript has gone can still have
+                      published one. `place` sends every card to the end when there
+                      is no row to anchor it to, which is this case. */}
+                  {conversation.items.length === 0 ? (
+                    conversation.trouble ? (
+                      <Text className="mt-2 font-sans text-meta text-brick">
+                        {conversation.trouble}
+                      </Text>
+                    ) : !conversation.arrived ? (
+                      /* Before this branch existed the fall-through below ran
+                         while the snapshot was still crossing the wire, so a
+                         conversation that was merely long was reported as one that
+                         had never happened. An empty transcript is only empty once
+                         something has come back to say so. */
+                      <Waiting say="Loading the conversation" />
+                    ) : bringup.some((l) => l.state !== "pending") ? null : (
+                      /* Nothing said and nothing coming up: a workspace that is
+                         simply waiting for you to open the conversation. */
+                      <Text className="mt-2 font-sans text-meta text-mute">
+                        Nothing has been said yet.
+                      </Text>
+                    )
+                  ) : null}
+                </>
+              }
+              onOpenArtifact={(id) => router.push({ pathname: "/workspace/artifact", params: { id } })}
             />
-          ))}
+          </ImagesFrom.Provider>
 
           {/* A gap that admits it is one. Before `foldAll` this was the
               silent case: the transcript stopped at whatever line could not
