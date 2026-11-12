@@ -38,7 +38,9 @@
  * What that costs is said plainly because it is real: **every held transcript
  * is re-keyed.** The ones under the old key become unreachable and the LRU in
  * `api/conversation.ts` reclaims them, so re-opening a conversation after a
- * URL change reads it whole again — the path a cold open already takes. A URL
+ * URL change re-reads it the way a cold open does — the tail (`tail: 8`), with
+ * the rest paged back on scroll. Not the whole conversation: history somebody
+ * had already scrolled into view is fetched again rather than retained. A URL
  * only moves through `remember()`, which is a fresh `/bootstrap` and a
  * sign-in, and addresses are normalised before they reach the registry
  * (`api/probe.ts`'s `candidates`), so a trailing slash cannot spend it.
