@@ -235,21 +235,16 @@ export function WorkspaceMenu({
                  done — and what it asks is now what it does. `ui/end.ts` is
                  the desk's flow and the sentence that goes with it. */
               void end(place, delegated).then((ending) => {
-                /* **The two answers that finish this row here**, and the
-                   three left out are left out for three different reasons. A
-                   refusal has already said so in the control plane's own
-                   words; a question answered no leaves the menu where it was;
-                   and `orphaned` means the request went but this screen is no
-                   longer the one in front of the reader — see {@link Ending}.
-                   `onEnding()` is a global `router.back()`, so acting on that
-                   last one navigates somebody else's screen. The teardown is
-                   still happening and the list still says so.
-
-                   `removed` is the forced removal, which is not a teardown at
-                   all — the agents keep running on a machine that is not
-                   answering — but the row *is* finished on this Firetower, so
-                   the screen is left the same way. */
-                if (ending !== "requested" && ending !== "removed") return;
+                /* **`requested` and nothing else**, and the three it leaves
+                   out are left out for three different reasons. A refusal has
+                   already said so in the control plane's own words; a
+                   question answered no leaves the menu where it was; and
+                   `orphaned` means the DELETE went but this screen is no
+                   longer the one on it — see {@link Ending}. `onEnding()` is
+                   a global `router.back()`, so acting on that last one
+                   navigates somebody else's screen. The teardown is still
+                   happening and the list still says so. */
+                if (ending !== "requested") return;
                 onClose();
                 onEnding();
               });

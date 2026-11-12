@@ -107,15 +107,6 @@ export const token = () => {
   return s ? tokenFor(s.serverId) : "";
 };
 export const meansSignedOut = (code: string) => code === "Unauthorized";
-/**
- * The control plane's own name for *that machine is not answering*.
- *
- * A 409 with this code is the one refusal of a teardown that has a second
- * answer behind it — `?force=true`, which takes the workspace off this
- * Firetower without the machine ever being told. See `ui/end.ts`, which is the
- * only caller and asks before it does anything of the kind.
- */
-export const meansHostAway = (code: string | undefined) => code === "HostUnreachable";
 
 /**
  * A request, and optionally the Firetower it is **for**.
