@@ -592,6 +592,7 @@ function Conversation({ place, address }: { place: Workspace; address: string })
       {session ? (
         <WorkspaceMenu
           session={session}
+          place={place}
           conversation={conversation}
           runs={place.runs.map((r) => ({ id: r.id, agent: r.agent, status: r.status }))}
           delegated={delegated}

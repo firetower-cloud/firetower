@@ -19,3 +19,10 @@ export const AccessibilityInfo = {
   addEventListener: () => ({ remove: () => {} }),
 };
 export const Platform = { OS: "ios" as const, select: (o: Record<string, unknown>) => o.ios };
+/**
+ * `ui/end.ts` asks the one irreversible question through this, and the
+ * sentence it asks is a pure function worth pinning — the whole reason that
+ * file exists is that the sentence and the call it was attached to disagreed.
+ * Nothing under test presses a button, so this only has to exist.
+ */
+export const Alert = { alert: () => {} };

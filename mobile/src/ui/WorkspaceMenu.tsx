@@ -23,11 +23,11 @@ import {
   getListSessionsQueryKey,
   useRelaunchSession,
   useRenameSession,
-  useStopSession,
 } from "~/api/generated/sessions/sessions";
 import { answerable } from "~/api/view";
-import { why } from "~/data";
+import type { Workspace } from "~/api/workspaces";
 import { size } from "~/design/tokens.generated";
+import { useEndWorkspace } from "~/ui/end";
 import { Sheet } from "~/ui/Sheet";
 import { useTheme } from "~/design/theme";
 
@@ -41,6 +41,7 @@ type Row = {
 
 export function WorkspaceMenu({
   session,
+  place,
   conversation,
   runs,
   onReread,
@@ -50,6 +51,15 @@ export function WorkspaceMenu({
   onEnded,
 }: {
   session: Session;
+  /**
+   * The place this conversation is one run of.
+   *
+   * Ending is a fact about the *place* — its id, its branch, every run in it —
+   * and `session` is whichever run is being read. See `ui/end.ts` on why the
+   * difference between those two ids decides whether a workspace goes or the
+   * wrong thing does.
+   */
+  place: Workspace;
   /** For the diagnostics sheet; see `Conversation.delivered`. */
   conversation?: Conversation;
   /** Every run of this workspace, not just the one being read. */
@@ -75,7 +85,7 @@ export function WorkspaceMenu({
 
   const rename = useRenameSession();
   const relaunch = useRelaunchSession();
-  const stop = useStopSession();
+  const end = useEndWorkspace();
 
   const freshen = () => {
     cache.invalidateQueries({ queryKey: getListSessionsQueryKey() });
@@ -187,43 +197,32 @@ export function WorkspaceMenu({
         onClose();
       },
     } as Row,
-    {
-      id: "end",
-      label: "End this workspace",
-      icon: Trash2,
-      tone: "brick",
-      onPress: () => {
-        /* The one irreversible thing here, so it is asked rather than done.
-           The worktree goes with it. */
-        Alert.alert(
-          "End this workspace?",
-          delegated > 0
-            ? `The agent stops, and so ${delegated === 1 ? "does the agent" : `do the ${delegated} agents`} it started elsewhere. Their worktrees go from the host with this one, and anything not committed goes with them.`
-            : "The agent stops and its worktree is removed from the host. Anything not committed goes with it.",
-          [
-            { text: "Keep it", style: "cancel" },
-            {
-              text: "End it",
-              style: "destructive",
-              onPress: () => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-                stop.mutate(
-                  { id: session.id },
-                  {
-                    onSuccess: () => {
-                      freshen();
-                      onClose();
-                      onEnded();
-                    },
-                    onError: (e) => Alert.alert("That didn't work", why(e)),
-                  },
-                );
-              },
+    /* **Left out rather than shown refused**, which is this menu's own rule.
+       Ending a place is for whoever it belongs to — `may_share`, server side —
+       and a phone has no tooltip to explain a greyed row. `!== false` because
+       a control plane older than this app sends no such field, and reading
+       absence as "you may only watch" takes the control from the person whose
+       work it is. */
+    ...(place.runs.some((r) => r.mayWrite !== false)
+      ? [
+          {
+            id: "end",
+            label: "End this workspace",
+            icon: Trash2,
+            tone: "brick",
+            onPress: () => {
+              /* The one irreversible thing here, so it is asked rather than
+                 done — and what it asks is now what it does. `ui/end.ts` is
+                 the desk's flow and the sentence that goes with it. */
+              void end(place, delegated).then((ended) => {
+                if (!ended) return;
+                onClose();
+                onEnded();
+              });
             },
-          ],
-        );
-      },
-    },
+          } as Row,
+        ]
+      : []),
   ];
 
   return (
