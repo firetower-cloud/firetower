@@ -169,7 +169,18 @@ resolve() {
         die "no container called '$want' in project $PROJECT. Try: $0 status"
     fi
     if [ "${#found[@]}" -gt 1 ]; then
-        die "'$want' matches ${#found[@]} containers in $PROJECT. Name one exactly."
+        # Which ones, because the surprising case is not two of this project's
+        # own containers — compose will not make those — but something else
+        # wearing its label. A container started by hand with
+        # `com.docker.compose.project=ft-worker-sim` on it joins this project
+        # for every purpose, `down` included, and the only way anybody finds
+        # out is here. Naming them is the difference between "try again" and
+        # "that is not mine".
+        local one
+        for one in "${found[@]}"; do
+            say "  $(docker inspect -f '{{.Name}}' "$one" | sed 's|^/||')"
+        done
+        die "'$want' matches ${#found[@]} containers in $PROJECT, listed above. Name one exactly."
     fi
     TARGET="${found[0]}"
 }
