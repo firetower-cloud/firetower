@@ -87,6 +87,11 @@ export function WorkspaceMenu({
    * legible and the question now says so: the row is there until the host has
    * done it, and gone when it has. What changed is that nothing on this path
    * calls an acceptance an ending.
+   *
+   * **Not called once this screen is no longer the one that asked.** The
+   * teardown's two awaits can outlive the menu or the Firetower under it, and
+   * this is a global `router.back()` — so a request that comes back
+   * `orphaned` is reported and not acted on.
    */
   onEnding: () => void;
 }) {
@@ -227,9 +232,15 @@ export function WorkspaceMenu({
                  done — and what it asks is now what it does. `ui/end.ts` is
                  the desk's flow and the sentence that goes with it. */
               void end(place, delegated).then((ending) => {
-                /* `requested` and nothing else: a refusal has already said so
-                   in the control plane's own words, and a question answered
-                   no leaves the menu where it was. */
+                /* **`requested` and nothing else**, and the three it leaves
+                   out are left out for three different reasons. A refusal has
+                   already said so in the control plane's own words; a
+                   question answered no leaves the menu where it was; and
+                   `orphaned` means the DELETE went but this screen is no
+                   longer the one on it — see {@link Ending}. `onEnding()` is
+                   a global `router.back()`, so acting on that last one
+                   navigates somebody else's screen. The teardown is still
+                   happening and the list still says so. */
                 if (ending !== "requested") return;
                 onClose();
                 onEnding();

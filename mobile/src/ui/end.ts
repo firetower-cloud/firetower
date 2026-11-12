@@ -87,6 +87,24 @@
  *   sending. Which it is — the question, the screen, or both — is why
  *   {@link endAstray} says only that nothing was sent.
  *
+ * ## And after the send, where there is nothing left to cancel
+ *
+ * The rechecks above are all before the DELETE, which is the half that can
+ * still be stopped. The two awaits *after* it had none, and that was read as
+ * cancellation being complete. It was not: the DELETE and the invalidation
+ * each suspend, the screen can be unmounted or the Firetower moved while
+ * either is in flight, and the flow then came back `requested` to a caller
+ * that no longer existed. `WorkspaceMenu`'s continuation calls `onEnding()`,
+ * which is a global `router.back()` (`app/workspace/[id].tsx:604`), so a
+ * teardown asked for on one screen navigated whatever screen had replaced it;
+ * a late rejection put an unqualified *It did not end.* over a different
+ * workspace.
+ *
+ * Nothing here can un-send a DELETE and nothing here pretends to. **What is
+ * suppressed is the navigation and the alert, not the fact** — the request
+ * really went, so it is reported as {@link Ending}'s `orphaned` rather than
+ * relabelled `kept`. Trading one false sentence for another is not a fix.
+ *
  * **The destination, and not the identity.** The first version of this bound
  * `[serverId, user]` and that was the same mistake one layer down. A
  * `serverId` is derived from the organisation's database id, so it is the one
@@ -142,7 +160,7 @@ function ask(title: string, body: string): Promise<boolean> {
  * What came of asking — and **not** whether the teardown finished.
  *
  * A boolean here meant *ended*, and the control plane cannot answer that
- * question: see the section above on what a `202` is. Three states, named for
+ * question: see the section above on what a `202` is. Four states, named for
  * what this flow actually learns, so that nothing downstream can read an
  * acceptance as a completion by accident.
  */
@@ -159,8 +177,27 @@ export type Ending =
    */
   | "requested"
   /**
-   * It would not take the request and said why, which the reader has been
-   * shown as the control plane wrote it.
+   * **The request went, and there is nobody here to tell.**
+   *
+   * `requested` with the caller gone: the DELETE was sent and accepted, and
+   * by the time it came back the screen that asked had been unmounted or the
+   * Firetower had moved underneath it. The teardown is happening either way —
+   * nothing can call it back, and this must never be read as `kept`, which
+   * would be a fresh version of the lie this whole file exists to correct.
+   *
+   * What it withholds is the *acting on it*. `onEnding()` is a global
+   * `router.back()` and an alert is a window over whatever is in front now,
+   * so neither belongs to a caller that is no longer the one who asked. The
+   * row on the list is still where the answer is, and the list is still
+   * refreshed below — see the invalidation, which happens either way.
+   */
+  | "orphaned"
+  /**
+   * It would not take the request and said why — shown as the control plane
+   * wrote it, **when there is still somebody to show it to.** A refusal that
+   * lands after the caller or the destination has gone has nowhere to be
+   * displayed, and an unqualified alert over a different workspace is worse
+   * than silence.
    */
   | "refused";
 
@@ -340,16 +377,29 @@ export function useEndWorkspace() {
       await destroySession(place.id, { workspace: true }, { firetower });
       /* `cache` is the `QueryClient` of the identity this hook was mounted
          for, which is the one holding the list this workspace was on. It is
-         invalidated whether or not anybody is still looking at it. */
+         invalidated whether or not anybody is still looking at it — the cache
+         belongs to the identity and not to the screen, and the list is the
+         one thing that says whether the teardown finished. So this is above
+         the recheck rather than behind it. */
       await cache.invalidateQueries({ queryKey: getListSessionsQueryKey() });
+      /* Two awaits since the last recheck, and either can outlive the screen
+         that asked or the Firetower it asked about. One check covers both,
+         because it is the last thing before the answer goes back. The request
+         has gone and this says so; what it withholds is the navigation. */
+      if (!onTarget()) return "orphaned";
       /* **Asked for, not done.** Nothing above this line waited for a worker,
          so nothing below it may claim one finished. */
       return "requested";
     } catch (e) {
       /* The control plane's own sentence, as it came. When the host is not
          answering that sentence is the only thing that explains why a
-         workspace somebody just ended is still on the list. */
-      Alert.alert("It did not end.", why(e));
+         workspace somebody just ended is still on the list.
+
+         Unless there is nobody it would be explaining it to: a rejection that
+         lands after the screen has gone, or after the Firetower moved, puts
+         that sentence over a workspace it is not about. The refusal is still
+         the answer — it is just not shown to somebody who did not ask. */
+      if (onTarget()) Alert.alert("It did not end.", why(e));
       return "refused";
     }
   };
