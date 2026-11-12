@@ -151,7 +151,7 @@ create table schedule_runs (
                       'running',   -- a session exists
                       'finished',  -- it ended; see `outcome`
                       'skipped',   -- the previous run was still going
-                      'refused',   -- a gate said no; nothing was started
+                      'refused',   -- a gate said no, before the vault
                       'failed',    -- the launch or the run broke
                       'missed',    -- the control plane was not running
                       'lost')),    -- the control plane died mid-launch

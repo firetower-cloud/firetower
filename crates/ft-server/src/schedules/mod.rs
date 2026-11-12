@@ -189,8 +189,19 @@ pub async fn sweep(state: &AppState, booted: DateTime<Utc>) -> anyhow::Result<us
 ///
 /// What the id minted in the scheduler buys is the one question that separates
 /// the windows: **does a session with this id exist?** `insert_session` is the
-/// first thing in a launch that commits, so a claim naming no session means
-/// nothing ran and no credential was read. A claim naming one that exists is
+/// first thing in a launch that *commits a row*, so a claim naming no session
+/// means nothing was recorded and no workspace was made.
+///
+/// **It does not mean no credential was read**, and the backend scope and an
+/// earlier version of this comment both said it did. Choosing a host probes a
+/// repository whose trunk is still unknown, and that probe is handed a git
+/// credential — so a crash before `insert_session` can still have read one
+/// out of the vault. The vault's own log is the record of that, which is why
+/// every read names the session it was for. Nothing here changes; what
+/// changes is the claim, because the next person to reason about this window
+/// would otherwise build on a guarantee that does not exist.
+///
+/// A claim naming a session that exists is
 /// either a session no worker ever heard of or a real agent nobody is
 /// recording — and those two are *not* distinguishable here, because
 /// `fleet.send` writes to a socket and nothing in the database records that it
@@ -238,7 +249,8 @@ async fn reconcile(state: &AppState, now: DateTime<Utc>) -> anyhow::Result<()> {
         }
 
         // A sentence rather than a state. `lost` on its own is a word that
-        // invites a support ticket.
+        // invites a support ticket. It says nothing was *started*, which is
+        // true, and does not claim nothing was read — see above.
         let settled = state
             .db
             .settle_run(
