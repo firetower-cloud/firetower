@@ -15,6 +15,7 @@
  * rely on, so a request may name the Firetower it is for and go there or
  * nowhere — see {@link Aimed}, {@link aimOf} and {@link destination}.
  */
+import { identity, type Who } from "~/api/identity";
 import { servers, tokenFor, type Connected } from "~/native/servers";
 
 export class ApiError extends Error {
@@ -88,20 +89,16 @@ export const destination = (): Connected | undefined => here();
  * The URL closes it because the URL is what `fetch` is actually handed. There
  * is nothing left for the registry to move that this does not notice.
  *
- * `JSON.stringify` of the triple rather than a join, for the reason
- * `api/identity.ts` sets out at length: with any separator at all, `a<SEP>b` +
- * `c` and `a` + `b<SEP>c` are one string, so one destination could be made to
- * spell another. Encoding escapes its own quoting and is unambiguous for
- * every input.
- *
- * **Separate from `identity()` on purpose.** That answers whose *cache* this
- * is, and widening it would re-key every held transcript. This answers where
- * a request goes, which is a stricter question: every aim that differs from
- * the identity is a destination that moved, and an aim is allowed to refuse
- * where a cache would only be reused.
+ * **It is `identity()`, and not a second opinion about it.** Keeping the two
+ * apart is what let the third round of this defect through: the aim carried
+ * the address while the cache, the provider and the socket were still keyed on
+ * the pair, so a workspace read from A could be displayed, retained and then
+ * acted on under a connection to B — every comparison the action made passing,
+ * because both sides of it had already moved. Where a request goes and whose
+ * cache it lands in are one question. Asked once, in one place, so there is
+ * nothing left to drift.
  */
-export const aimOf = (s: Connected | null | undefined): string =>
-  s ? JSON.stringify([s.serverId, s.user, s.url]) : "";
+export const aimOf = (s: Who | null | undefined): string => identity(s);
 
 export const apiBase = () => here()?.url ?? "";
 export const wsBase = () => apiBase().replace(/^http/, "ws");
@@ -125,11 +122,11 @@ export const meansSignedOut = (code: string) => code === "Unauthorized";
  * `ui/end.ts` is the one call in this app that cannot be taken back and is
  * the reason this exists.
  *
- * **The whole destination, not the `serverId` and not the identity either.**
- * The same address with somebody else signed into it is not the server the
- * question was asked about, and neither is the same id and account at a
- * *different* address — see {@link aimOf}, which is what this field holds and
- * why it holds three things rather than two.
+ * **The whole destination, which is the whole identity.** The same address
+ * with somebody else signed into it is not the server the question was asked
+ * about, and neither is the same id and account at a *different* address — see
+ * {@link aimOf}, which is what this field holds and why it holds three things
+ * rather than two.
  *
  * `firetower?: string` and not `firetower: string | undefined` as far as any
  * caller is concerned: **the key being present is itself part of the

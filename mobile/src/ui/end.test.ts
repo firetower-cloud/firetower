@@ -15,6 +15,7 @@
  * is none. So the sentence is a pure function and this is what it says.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { identity } from "~/api/identity";
 import type { Session } from "~/api/generated/model";
 import { destroySession } from "~/api/generated/sessions/sessions";
 import { group, type Workspace } from "~/api/workspaces";
@@ -481,6 +482,92 @@ describe("a teardown goes to the Firetower it was asked about", () => {
     /* The encoding itself: this is what the two tests above rest on. */
     expect(aimOf(A)).not.toBe(aimOf(CLONE));
     expect(aimOf(A)).toBe(JSON.stringify([A.serverId, A.user, A.url]));
+  });
+
+  /* --------------------------------------------------------------------- *
+   * The swap before the action, not during it
+   * --------------------------------------------------------------------- */
+
+  /**
+   * **The reviewer's third reproduction, and the one the two fixes above do
+   * not touch.**
+   *
+   * Both of those move the registry *while something is in flight*, so there
+   * is a before and an after for a recheck to compare. Take the swap out of
+   * the operation entirely and there is nothing to catch:
+   *
+   * 1. A workspace is read from A and retained — a row on a list, a `place`
+   *    in a menu's props.
+   * 2. `remember()` points A's id and account at B's address and token, with
+   *    nothing in flight at all.
+   * 3. *End this workspace* is pressed on the retained workspace.
+   *
+   * A destination read when the **action starts** is already B, so the aim,
+   * the preflight, the recheck after the question and the DELETE all agree
+   * with each other — and all four are about a machine that supplied none of
+   * what the question says. The GET and the DELETE both reached B with B's
+   * token and the answer was `requested`.
+   *
+   * The capture point is the fix: the destination is written down when the
+   * screen that will ask is **mounted**, which is the destination whose cache
+   * produced the workspace. A swap cannot get in front of that, and in the app
+   * it cannot get past it either — `identity()` carries the address now, so
+   * `BackendProvider` remounts and the retained screen is gone.
+   */
+  it("sends nothing for a workspace retained from before the address moved", async () => {
+    /* Read from A, while A was still A. */
+    const retained = one();
+    /* One `remember()` of a clone's `/bootstrap`. Nothing is in flight. */
+    remember(CLONE, "tok_srv_b");
+
+    const ending = end(retained);
+
+    expect(await ending).toBe("kept");
+    /* **Not even the preflight.** A read on behalf of a question that will
+       not be asked is still A's workspace id sent to whatever is current. */
+    expect(sent).toEqual([]);
+    expect(Alert.asked).toEqual([]);
+  });
+
+  /**
+   * The same swap, and the half that says the binding is to a destination
+   * rather than to a moment: a screen mounted *after* it is bound to the
+   * clone, and acts on the clone, because the clone is what fed it.
+   *
+   * Note what the question would have said in the first half. `CLONE.org` is
+   * `Ravenholm` — a restored database keeps the organisation's name as well as
+   * its id — so the title names A's Firetower either way. **The sentence a
+   * person reads cannot tell these two apart**, which is the whole reason the
+   * action has to be bound to something other than the words.
+   */
+  it("is bound to the destination it was mounted on, not to when it is called", async () => {
+    remember(CLONE, "tok_srv_b");
+    expect(await end(one())).toBe("kept");
+    expect(sent).toEqual([]);
+
+    const fresh = hooks.mount(() => useEndWorkspace());
+    const ending = fresh(one());
+    await asked();
+    Alert.answer("End it");
+
+    expect(await ending).toBe("requested");
+    expect(sent).toEqual([
+      { url: "https://b.example/api/v1/sessions/w_1/work", method: "GET", token: "Bearer tok_srv_b" },
+      { url: "https://b.example/api/v1/sessions/w_1?workspace=true", method: "DELETE", token: "Bearer tok_srv_b" },
+    ]);
+  });
+
+  /**
+   * **And the cache the question's facts come out of is keyed on that same
+   * string.** `end.ts` can only bind to the destination that supplied its
+   * workspace if the thing supplying workspaces is partitioned by the
+   * destination — which is what `identity()` carrying the address buys, and
+   * what the previous round left out. `api/identity.test.ts` holds the rest of
+   * it; this is the join.
+   */
+  it("keys the provider and the cache on the destination the aim names", () => {
+    expect(identity(A)).toBe(aimOf(A));
+    expect(identity(CLONE)).not.toBe(identity(A));
   });
 
   /**

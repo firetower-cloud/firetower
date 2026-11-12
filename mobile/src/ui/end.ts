@@ -105,15 +105,37 @@
  * really went, so it is reported as {@link Ending}'s `orphaned` rather than
  * relabelled `kept`. Trading one false sentence for another is not a fix.
  *
- * **The destination, and not the identity.** The first version of this bound
- * `[serverId, user]` and that was the same mistake one layer down. A
- * `serverId` is derived from the organisation's database id, so it is the one
- * field a restored copy keeps — the premise of the whole finding — and
- * `remember()` replaces a connection by that id, URL and token together. So
- * the pair matched while the address underneath it moved: the preflight read
- * A, `remember()` pointed the same id and account at B, the recheck passed,
- * and the DELETE left for B with B's token. `aimOf` carries the URL for that
- * reason and this flow compares the whole of it at every check.
+ * **The destination, and the identity, and they are one thing now.** The
+ * first version of this bound `[serverId, user]` and that was the same
+ * mistake one layer down. A `serverId` is derived from the organisation's
+ * database id, so it is the one field a restored copy keeps — the premise of
+ * the whole finding — and `remember()` replaces a connection by that id, URL
+ * and token together. So the pair matched while the address underneath it
+ * moved: the preflight read A, `remember()` pointed the same id and account at
+ * B, the recheck passed, and the DELETE left for B with B's token.
+ *
+ * Carrying the URL in the aim closed that, and then the same defect came back
+ * through the one door left: **do the swap before the action rather than
+ * during it.** A destination captured when *the action starts* is already B,
+ * so there is nothing for any recheck to catch — while the `Workspace` the
+ * question names came out of a cache keyed on the narrow identity, which the
+ * URL change did not disturb. Every comparison passed because both sides of
+ * every comparison had moved together; the only thing left behind was the
+ * data on screen.
+ *
+ * So two things changed, and the second is not a guard:
+ *
+ * - `api/identity.ts` carries the address, so the aim **is** the identity.
+ *   `BackendProvider` is keyed on it, which means a URL change retires the
+ *   whole context — the `QueryClient`, the socket and this hook with them —
+ *   and the next render has to read the list from the new address before
+ *   there is a workspace to end at all. The cost is in that file's docblock:
+ *   held transcripts are re-keyed. They are another machine's transcripts.
+ * - This flow writes its destination down **when the screen that will ask is
+ *   mounted**, not when a button is pressed. That is the destination which
+ *   supplied the workspace in the question, which is the thing the reviewer
+ *   asked the action to be bound to — and it is the one capture point a
+ *   pre-action swap cannot get in front of.
  *
  * ## When the host is not answering
  *
@@ -334,14 +356,28 @@ export function useEndWorkspace() {
       alive.current = false;
     };
   }, []);
+  /**
+   * **The destination that supplied what this screen is showing.**
+   *
+   * Written down at mount, which is the point of it: `BackendProvider` is
+   * keyed on the identity and the identity now carries the address, so this
+   * hook exists for exactly as long as one destination does, and the cache
+   * that fed the workspace in the question is that destination's. Read when
+   * the action *starts* instead — which is what it did — and a registry
+   * already moved to B hands the action B, while the question still names A's
+   * retained workspace and nothing disagrees with anything.
+   *
+   * `useRef`, so every call from this screen names the same machine however
+   * many times it redraws.
+   */
+  const from = useRef(destination());
+  const aimed = from.current;
+  const firetower = aimOf(aimed);
 
   return async (place: Workspace, delegated = 0): Promise<Ending> => {
-    /* Captured once, before anything suspends: the whole destination, account
-       included, and the sentence that names it. Everything after this is
-       about this workspace on this Firetower and nothing else. */
-    const aimed = destination();
-    const firetower = aimOf(aimed);
-    /* Named only when the phone holds more than one; see `endTitle`. */
+    /* Named only when the phone holds more than one; see `endTitle`. Which
+       machine is a fact about the mounted destination; whether saying so is
+       worth the words is a fact about the registry now. */
     const named = servers().length > 1 ? (aimed?.org ?? null) : null;
     /**
      * Still the same Firetower — address included — and still somebody to
@@ -355,6 +391,18 @@ export function useEndWorkspace() {
      * about an irreversible thing should not be asked in the first place.
      */
     const onTarget = () => alive.current && !!firetower && aimOf(destination()) === firetower;
+
+    /* **Before the read, and not only after it.** The registry can have moved
+       before this was ever called — a workspace retained from before the swap,
+       asked about afterwards — and a preflight sent on behalf of a question
+       that will not be asked is a request about one machine's workspace made
+       to whatever is current.
+
+       Silent, for the same reason the check below the read is: nothing has
+       been asked and nothing promised. In the app this is a backstop rather
+       than a path — the provider is keyed on this destination, so a URL that
+       moved has already taken the screen down and there is nobody to tell. */
+    if (!onTarget()) return "kept";
 
     const work = await sessionWork(place.id, { firetower }).catch(() => null);
     /* Nothing has been asked and nothing promised, so this one is silent. */
