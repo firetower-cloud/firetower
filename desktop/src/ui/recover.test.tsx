@@ -105,7 +105,7 @@ const words = (markup: string) =>
 
 describe("what the card says", () => {
   it("names the machine, promises exactly what comes back, and asks", () => {
-    const said = words(drawn(<Recover session={run("s_1", "Stranded")} team={[]} itself />));
+    const said = words(drawn(<Recover session={run("s_1", "Stranded")} team={[]} itself onBring={() => {}} />));
     expect(said).toContain("Stopped when mac-mini restarted");
     expect(said).toContain(
       "Comes back having read this conversation. Won’t finish the cut-off turn.",
@@ -117,7 +117,7 @@ describe("what the card says", () => {
   });
 
   it("keeps the body to one line, and every button to a verb and an object", () => {
-    const said = words(drawn(<Recover session={run("s_1", "Stranded")} team={[]} itself />));
+    const said = words(drawn(<Recover session={run("s_1", "Stranded")} team={[]} itself onBring={() => {}} />));
     const body = said.slice(said.indexOf("Comes back"));
     expect(body.split(".").filter((s) => s.trim()).length).toBeLessThanOrEqual(3);
     expect(said).not.toContain("Everything above");
@@ -126,7 +126,7 @@ describe("what the card says", () => {
 
   it("offers the family first and the one agent beside it", () => {
     const team = [child("s_a", "Stranded"), child("s_b", "Stranded")];
-    const said = words(drawn(<Recover session={run("s_lead", "Stranded")} team={team} itself />));
+    const said = words(drawn(<Recover session={run("s_lead", "Stranded")} team={team} itself onBring={() => {}} />));
     expect(said).toContain("Bring back all 3");
     expect(said).toContain("This agent only");
     expect(said).toContain("2 of its team stopped too.");
@@ -135,7 +135,7 @@ describe("what the card says", () => {
   it("says what a resting lead is actually waiting for", () => {
     const team = [child("s_a", "Stranded")];
     const said = words(
-      drawn(<Recover session={run("s_lead", "HandedBack")} team={team} itself={false} />),
+      drawn(<Recover session={run("s_lead", "HandedBack")} team={team} itself={false} onBring={() => {}} />),
     );
     expect(said).toContain("Its team stopped when mac-mini restarted");
     expect(said).toContain("This agent is waiting for a report that isn’t coming.");
@@ -147,13 +147,13 @@ describe("what the card says", () => {
 
   it("says how many of the family are not yours, and only then", () => {
     const team = [child("s_a", "Stranded")];
-    const mine = words(drawn(<Recover session={run("s_lead", "Stranded")} team={team} itself />));
+    const mine = words(drawn(<Recover session={run("s_lead", "Stranded")} team={team} itself onBring={() => {}} />));
     expect(mine).toContain("1 of its team stopped too.");
     expect(mine).not.toContain("yours to start");
 
     const shared = words(
       drawn(
-        <Recover session={run("s_lead", "Stranded")} team={team} notYours={2} itself />,
+        <Recover session={run("s_lead", "Stranded")} team={team} notYours={2} itself onBring={() => {}} />,
       ),
     );
     expect(shared).toContain("3 of its team stopped too. 2 aren’t yours to start.");
@@ -167,7 +167,7 @@ describe("what the card says", () => {
      not exist is the species of untruth this whole screen replaced. */
   it("promises only what is true of a conversation that never started", () => {
     const empty = words(
-      drawn(<Recover session={run("s_1", "Stranded")} team={[]} itself spoke={false} />),
+      drawn(<Recover session={run("s_1", "Stranded")} team={[]} itself spoke={false} onBring={() => {}} />),
     );
     expect(empty).toContain("Comes back to this workspace.");
     expect(empty).not.toContain("having read this conversation");
@@ -222,7 +222,7 @@ describe("what the card says", () => {
     const refused = run("s_1", "Stranded", {
       note: "Didn’t restart: the workspace at /home/agent/work is not there any more. The workspace and account are unchanged.",
     });
-    const said = words(drawn(<Recover session={refused} team={[]} itself />));
+    const said = words(drawn(<Recover session={refused} team={[]} itself onBring={() => {}} />));
     expect(said).toContain("is not there any more");
     expect(said).toContain("Bring it back");
   });
@@ -231,7 +231,7 @@ describe("what the card says", () => {
     const fresh = run("s_1", "Stranded", {
       note: "The machine restarted. The workspace is still there.",
     });
-    const said = words(drawn(<Recover session={fresh} team={[]} itself />));
+    const said = words(drawn(<Recover session={fresh} team={[]} itself onBring={() => {}} />));
     expect(said).not.toContain("The machine restarted. The workspace is still there.");
   });
 });

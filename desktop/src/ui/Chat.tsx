@@ -371,6 +371,25 @@ export function Chat({
      are. So every finished edit or command is the cue to read the diff, the
      tree and any open file again — before the poll would have. */
   const cache = useQueryClient();
+  /* The press of *Bring it back*, here rather than on the card, which is the
+     whole of why the answer survives it. Relaunching moves the session off
+     `Stranded`, so the card unmounts — and a callback handed to `mutate` is
+     dropped when the component that called it goes. The count the server takes
+     care to get right ("3 starting again. 1 isn't yours to start.") was
+     computed, returned over the wire and thrown away on arrival, every time:
+     the response cannot win that race, because the status that causes the
+     unmount is broadcast before the response is delivered. Awaited by the
+     component that draws it, there is no race to lose. */
+  const relaunch = useRelaunchSession();
+  const bringBack = (family: boolean) =>
+    void relaunch
+      .mutateAsync({ id: session.id, params: family ? { family: true } : undefined })
+      .then((done) => setBroughtBack(done.detail))
+      // Held by `relaunch.error` for the card, and by the session's note for
+      // anybody who arrives later. Swallowed so a refusal the screen already
+      // explains is not also an unhandled rejection.
+      .catch(() => {})
+      .finally(() => cache.invalidateQueries({ queryKey: getGetSessionQueryKey(session.id) }));
   const settled = useMemo(
     () => items.filter((i) => (i.kind === "FileChange" || i.kind === "CommandExecution") && i.status !== undefined).length,
     [items],
@@ -701,7 +720,9 @@ export function Chat({
           notYours={recovery.notYours}
           itself={recovery.itself}
           spoke={items.length > 0}
-          onDone={setBroughtBack}
+          onBring={bringBack}
+          pending={relaunch.isPending}
+          failed={relaunch.error ? why(relaunch.error) : null}
         />
       ) : mayAct ? (
         <AccountSwitcher session={session} working={working}>
@@ -1665,7 +1686,9 @@ export function Recover({
   notYours = 0,
   itself,
   spoke = true,
-  onDone,
+  onBring,
+  pending = false,
+  failed = null,
 }: {
   session: Session;
   /** Its agents that stopped with it, and that this person may start. */
@@ -1676,11 +1699,19 @@ export function Recover({
   itself: boolean;
   /** Whether there is a conversation above this to come back to. */
   spoke?: boolean;
-  /** Told what a press did, because this card is gone by the time it lands. */
-  onDone?: (said: string) => void;
+  /**
+   * Start them. `true` for the family, `false` for this agent alone.
+   *
+   * Required, and the request is not made here, because this card is gone by
+   * the time the answer lands — see `bringBack` in `Chat`. A card that both
+   * asked and waited never showed the count it asked for.
+   */
+  onBring: (family: boolean) => void;
+  /** Whether a press is still in flight, so the buttons can say so. */
+  pending?: boolean;
+  /** Why the last press did not take, when there is no note for it yet. */
+  failed?: string | null;
 }) {
-  const cache = useQueryClient();
-  const relaunch = useRelaunchSession();
   const fleet = useHosts();
   const machine = fleet.data.find((h) => h.id === session.hostId)?.name;
   /* Everything a press would start, which always includes this agent: a lead
@@ -1690,27 +1721,7 @@ export function Recover({
   const all = team.length + 1;
   /* The note is the durable half and the error is the immediate one, and they
      say the same thing when both are there. */
-  const refusal = session.note?.startsWith("Didn’t restart:")
-    ? session.note
-    : relaunch.error
-      ? why(relaunch.error)
-      : null;
-  const bring = (family: boolean) =>
-    relaunch.mutate(
-      { id: session.id, params: family ? { family: true } : undefined },
-      {
-        onSuccess: (done) => {
-          cache.invalidateQueries({ queryKey: getGetSessionQueryKey(session.id) });
-          // What the press actually did. The server counts it precisely —
-          // "3 starting again. 1 isn't yours to start." — for exactly this,
-          // and throwing it away left the one case where the button delivers
-          // less than it offered with nothing on screen to say so. Held by
-          // the conversation rather than by this card, which goes the moment
-          // the session starts.
-          onDone?.(done.detail);
-        },
-      },
-    );
+  const refusal = session.note?.startsWith("Didn’t restart:") ? session.note : failed;
 
   return (
     /* The composer's own slot and the composer's own measure, so what is in
@@ -1742,8 +1753,8 @@ export function Recover({
         )}
         <div className="mt-3.5 flex items-center gap-2">
           <button
-            disabled={relaunch.isPending}
-            onClick={() => bring(all > 1)}
+            disabled={pending}
+            onClick={() => onBring(all > 1)}
             className="control bg-bone font-medium text-ground hover:opacity-90 disabled:bg-raise disabled:text-mute"
           >
             <RotateCcw className="h-3.5 w-3.5" strokeWidth={2} />
@@ -1751,8 +1762,8 @@ export function Recover({
           </button>
           {itself && team.length > 0 && (
             <button
-              disabled={relaunch.isPending}
-              onClick={() => bring(false)}
+              disabled={pending}
+              onClick={() => onBring(false)}
               className="control text-dim hover:bg-raise hover:text-bone disabled:text-mute"
             >
               This agent only
