@@ -162,12 +162,31 @@
  * ## When the host is not answering
  *
  * The control plane refuses with 409 `HostUnreachable` and a sentence of its
- * own, which is shown as it came. It also offers something no client of this
- * control plane implements — `?force=true`, which marks the session ended here
- * and puts the workspace in front of `reclaim::sweep` without the machine ever
- * being told. The desk does not offer it either. Writing the phone the first
- * one is a different and larger decision than the one that was made here, so
- * this reports and stops: it never claims a teardown it did not get.
+ * own, and behind that refusal it offers `?force=true`: the session is marked
+ * `Ended` here, the teardown that host owes is recorded against it
+ * (`db.rs`'s `forget_session`), and the workspace goes in front of
+ * `reclaim::sweep` without the machine ever being told. The owner asked for
+ * the desk's behaviour, and *"the phone cannot get rid of a workspace whose
+ * machine is off"* is the half of that which was missing — the workspace sits
+ * in the inbox for ever with no control that can touch it.
+ *
+ * **It is a second question, not a third branch of the first one.** Somebody
+ * who has just read *the agents stop, the workspace goes from the host* and
+ * pressed *End it* is being offered something close to the opposite: the row
+ * leaves their list and the work keeps running on a machine they cannot see.
+ * Folded into the first dialog that is a sentence nobody reads under a button
+ * they already decided to press. So the refusal is shown, in the control
+ * plane's own words — which are the only accurate ones, because it knows
+ * which machine and which of its two refusals this is — and the decision is
+ * asked again with its own title, its own body and its own verb. See
+ * {@link removeTitle}, {@link removeWording} and {@link Ending}'s `removed`,
+ * which is deliberately not `requested`: no teardown was queued, and nothing
+ * downstream may read one.
+ *
+ * The desk has no forced path to port. `desktop/src/ui/end.ts` reports the
+ * refusal and stops, and no client of this control plane passes `force`; the
+ * flow is the desk's shape — read, ask, send, invalidate — with the second
+ * decision written here first.
  */
 import { useEffect, useRef } from "react";
 import { Alert } from "react-native";
@@ -176,7 +195,7 @@ import { useIsFocused } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { destroySession, getListSessionsQueryKey, sessionWork } from "~/api/generated/sessions/sessions";
 import type { Workspace } from "~/api/workspaces";
-import { aimOf, destination } from "~/client/http";
+import { aimOf, destination, meansHostAway } from "~/client/http";
 import { why } from "~/data";
 import { servers } from "~/native/servers";
 
@@ -186,15 +205,20 @@ import { servers } from "~/native/servers";
  * `onDismiss` because Android lets an alert go without either button, and a
  * question nobody answered must settle rather than leave the caller waiting
  * for ever.
+ *
+ * `act` because there are two questions here and they are not the same
+ * decision: *End it* tears a workspace down, *Remove it here* takes one off
+ * this Firetower and leaves it running. A button that said the same thing in
+ * both would be the whole of what is wrong with folding them together.
  */
-function ask(title: string, body: string): Promise<boolean> {
+function ask(title: string, body: string, act: string): Promise<boolean> {
   return new Promise((settle) => {
     Alert.alert(
       title,
       body,
       [
         { text: "Keep it", style: "cancel", onPress: () => settle(false) },
-        { text: "End it", style: "destructive", onPress: () => settle(true) },
+        { text: act, style: "destructive", onPress: () => settle(true) },
       ],
       { onDismiss: () => settle(false) },
     );
@@ -239,11 +263,32 @@ export type Ending =
    */
   | "orphaned"
   /**
+   * **Taken off this Firetower without the machine ever being told.**
+   *
+   * The answer to the *second* question, and only reachable through it: the
+   * control plane refused the teardown because the host is not answering, said
+   * so in its own sentence, and that sentence was put to the reader as a
+   * different decision with a different button. `?force=true` marks the
+   * session `Ended` here and records the teardown that host still owes
+   * (`db.rs`'s `forget_session`), which is paid the next time it connects.
+   *
+   * **Not `requested`.** That answer claims a teardown was queued, and the
+   * whole content of this one is that it was not: the agents are still running
+   * over there. Callers leave the screen on it the way they do on `requested`,
+   * because the row is finished *here* either way and the list is still where
+   * that is visible — but nothing may read it as the workspace having gone.
+   */
+  | "removed"
+  /**
    * It would not take the request and said why — shown as the control plane
    * wrote it, **when there is still somebody to show it to.** A refusal that
    * lands after the caller or the destination has gone has nowhere to be
    * displayed, and an unqualified alert over a different workspace is worse
    * than silence.
+   *
+   * Also what comes back when the reader was offered {@link Ending}'s
+   * `removed` and said no. The teardown really was refused; they have been
+   * told why, in the control plane's words, by the question itself.
    */
   | "refused";
 
@@ -343,6 +388,48 @@ export function endWording(
  */
 export function endTitle(place: Workspace, server: string | null): string {
   return server ? `End ${place.name} on ${server}?` : `End ${place.name}?`;
+}
+
+/**
+ * The second question's title, when the machine is not answering.
+ *
+ * **"Remove", not "End".** The verb is the control plane's own — *"Remove it
+ * here anyway"* — and it is the difference between the two decisions said in
+ * one word: the first ends a workspace, this one takes a workspace off a list
+ * and leaves it running. Sharing a title with the first question is how a
+ * person agrees to the second without noticing there was one.
+ *
+ * `from ${server}` rather than `on ${server}`, for the same reason: what this
+ * removes it from is this Firetower, which is the whole of what it does.
+ */
+export function removeTitle(place: Workspace, server: string | null): string {
+  return server ? `Remove ${place.name} from ${server}?` : `Remove ${place.name}?`;
+}
+
+/**
+ * What the second question says: **the control plane's sentence, and what the
+ * button does.**
+ *
+ * The refusal is quoted rather than paraphrased because the control plane
+ * writes the only accurate version of it. It knows which machine, and it knows
+ * which of two refusals this is — a host that is merely away, where removing
+ * the row is the right trade and it says so; or one that has been retired,
+ * where the conversation is the only record of what ran there and it says that
+ * instead, and does not recommend it. Rewriting either here would be this app
+ * guessing at a fact it was told.
+ *
+ * One clause is added, and it is the one the server does not say because it is
+ * about *this* decision rather than about the machine: **nothing stops over
+ * there.** Everything the first question promised — the agents stopping, the
+ * workspace going from the host — is exactly what does not happen, and a
+ * person who has just read that question and pressed *End it* needs the
+ * negation out loud. "That machine", deliberately: a child of this workspace
+ * on a host that *is* answering really is torn down (`api/sessions.rs`'s
+ * `end_children`), so the clause is true of what it names and claims nothing
+ * about what it does not.
+ */
+export function removeWording(refusal: string): string {
+  return `${refusal} Nothing stops on that machine — this only takes it off the list here.`;
 }
 
 /**
@@ -472,6 +559,51 @@ export function useEndWorkspace() {
      */
     const inFront = () => alive.current && visit.current === since;
 
+    /**
+     * **The second decision**, asked only when the first one came back
+     * refused because the host is not answering.
+     *
+     * A separate question with its own words and its own button, not a third
+     * branch of the first: somebody who has just been told the machine cannot
+     * be reached is agreeing to something materially different from the
+     * teardown they asked for. The workspace leaves their list and keeps
+     * running on a machine they cannot see. {@link removeWording} is what
+     * says so, in the control plane's terms.
+     *
+     * Every guard the first half has, for the same reasons: the question is a
+     * native window and can outlive the screen or the destination, so the
+     * target is rechecked before the send, and the screen's visit decides
+     * what may be navigated or alerted afterwards.
+     */
+    const removeAnyway = async (refusal: string): Promise<Ending> => {
+      if (!(await ask(removeTitle(place, named), removeWording(refusal), "Remove it here"))) {
+        /* The teardown really was refused, and the question they just
+           declined is where they were told why. Nothing to add. */
+        return "refused";
+      }
+      if (!onTarget()) {
+        if (inFront()) {
+          Alert.alert("It was not removed.", endAstray(place, named ?? aimed?.org ?? null));
+        }
+        return "refused";
+      }
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+      try {
+        await destroySession(place.id, { workspace: true, force: true }, { firetower });
+        /* Above the guard, like the first one: the list belongs to the
+           destination and it is where the row going is visible. */
+        await cache.invalidateQueries({ queryKey: getListSessionsQueryKey() });
+        if (!onTarget() || !inFront()) return "orphaned";
+        return "removed";
+      } catch (e) {
+        /* A removal that will not even be *recorded* is its own failure and
+           gets its own title: *It did not end.* is about the teardown, which
+           this reader has already been told did not happen. */
+        if (onTarget() && inFront()) Alert.alert("It was not removed.", why(e));
+        return "refused";
+      }
+    };
+
     /* **Before the read, and not only after it.** The registry can have moved
        before this was ever called — a workspace retained from before the swap,
        asked about afterwards — and a preflight sent on behalf of a question
@@ -488,7 +620,9 @@ export function useEndWorkspace() {
     /* Nothing has been asked and nothing promised, so this one is silent. */
     if (!onTarget()) return "kept";
 
-    if (!(await ask(endTitle(place, named), endWording(place, delegated, work)))) return "kept";
+    if (!(await ask(endTitle(place, named), endWording(place, delegated, work), "End it"))) {
+      return "kept";
+    }
     /* The second recheck, and the one the defect lived behind: *End it* was
        pressed on a question about A, and a press is not consent to act on
        whatever is current when it lands. */
@@ -533,8 +667,21 @@ export function useEndWorkspace() {
          the reader has pushed something over the screen that asked, puts that
          sentence over a workspace it is not about. The refusal is still the
          answer — it is just not shown to somebody who did not ask. */
-      if (onTarget() && inFront()) Alert.alert("It did not end.", why(e));
-      return "refused";
+      if (!onTarget() || !inFront()) return "refused";
+      /* **One refusal has a second answer behind it.** A host that is not
+         answering cannot be told to tear anything down, and the control plane
+         offers `?force=true` for exactly that — so the refusal is not the end
+         of the road, it is the start of a different question. Every other
+         refusal is shown and stopped at.
+
+         The code rather than `instanceof`, which is how `data.ts` reads an
+         error for the same reason: one `ApiError` class per bundle is not
+         something this file can be sure of, and the code is the contract. */
+      if (!meansHostAway((e as { code?: string })?.code)) {
+        Alert.alert("It did not end.", why(e));
+        return "refused";
+      }
+      return await removeAnyway(why(e));
     }
   };
 }

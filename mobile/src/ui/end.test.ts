@@ -24,7 +24,15 @@ import { forget, remember, servers, type Connected } from "~/native/servers";
 import { Alert } from "~/test/react-native.stub";
 import { screen } from "~/test/router.stub";
 import * as hooks from "~/test/hooks";
-import { endAstray, endTitle, endWording, useEndWorkspace, type Ending } from "~/ui/end";
+import {
+  endAstray,
+  endTitle,
+  endWording,
+  removeTitle,
+  removeWording,
+  useEndWorkspace,
+  type Ending,
+} from "~/ui/end";
 
 /* The hooks come from `test/hooks.ts`, which this project uses in place of a
    renderer it does not have — see its own docblock. `useEndWorkspace` needs
@@ -63,6 +71,22 @@ const B: Connected = { url: "https://b.example", serverId: "srv_b", org: "Stagin
  * one `remember()` of a `/bootstrap` answer from the clone.
  */
 const CLONE: Connected = { ...A, url: B.url };
+
+/**
+ * A refusal with nothing behind it, and the one that has a second answer.
+ *
+ * `AWAY` is the control plane's own sentence for an unreachable host, as it
+ * writes it (`api/sessions.rs:1780`), and the phone quotes rather than
+ * paraphrases it — so this fixture is the real string and the assertions below
+ * read the words a person would see. `REFUSAL` is `may_share`: there is no
+ * parameter that makes somebody else's workspace yours to end, so it is shown
+ * and stopped at.
+ */
+const AWAY =
+  "ft-e1 isn't answering, so the workspace can't be torn down. Remove it here anyway to " +
+  "stop it filling the inbox — it keeps running there until that machine comes back.";
+const REFUSAL =
+  "ending this workspace ends every agent in it, which is for whoever it belongs to";
 
 /** The registry, as the app would have left it. */
 const connect = (...list: [Connected, string][]) => {
@@ -382,14 +406,20 @@ describe("a teardown goes to the Firetower it was asked about", () => {
   });
 
   it("reports the control plane's own refusal rather than claiming an end", async () => {
-    answers = { status: 409, body: JSON.stringify({ code: "HostUnreachable", message: "That machine is not answering." }) };
+    /* `may_share`, which is the refusal with nothing behind it: whoever this
+       workspace belongs to is the only person who can end it, and no
+       parameter changes that. Shown as it came, and stopped at. */
+    answers = { status: 403, body: JSON.stringify({ code: "Forbidden", message: REFUSAL }) };
     const ending = end(one());
     await asked();
     Alert.answer("End it");
 
     expect(await ending).toBe("refused");
     expect(Alert.up()?.title).toBe("It did not end.");
-    expect(Alert.up()?.body).toBe("That machine is not answering.");
+    expect(Alert.up()?.body).toBe(REFUSAL);
+    /* One alert, not a second question: `HostUnreachable` is the only
+       refusal with another decision behind it. */
+    expect(Alert.asked).toHaveLength(2);
   });
 
   /**
@@ -787,6 +817,11 @@ describe("a teardown goes to the Firetower it was asked about", () => {
 
       expect(await ending).toBe("refused");
       expect(Alert.asked.filter((a) => a.title === "It did not end.")).toEqual([]);
+      /* And no second decision either. `HostUnreachable` is the refusal that
+         has one behind it, and a question nobody can see is not a question —
+         it is a forced removal waiting to be agreed to by whoever picks the
+         phone up next. The one asked is the teardown's own. */
+      expect(Alert.asked).toHaveLength(1);
     });
 
     /**
@@ -843,16 +878,13 @@ describe("a teardown goes to the Firetower it was asked about", () => {
     it("still shows a refusal to the screen that asked for it", async () => {
       /* The half that must not be lost: a reader who is still there is still
          told, in the control plane's own words. */
-      answers = {
-        status: 409,
-        body: JSON.stringify({ code: "HostUnreachable", message: "That machine is not answering." }),
-      };
+      answers = { status: 403, body: JSON.stringify({ code: "Forbidden", message: REFUSAL }) };
       const { ending, release } = await sendAndStop();
       release();
 
       expect(await ending).toBe("refused");
       expect(Alert.up()?.title).toBe("It did not end.");
-      expect(Alert.up()?.body).toBe("That machine is not answering.");
+      expect(Alert.up()?.body).toBe(REFUSAL);
     });
 
     it("still answers requested, and navigates, when the caller is still there", async () => {
@@ -872,5 +904,228 @@ describe("a teardown goes to the Firetower it was asked about", () => {
     expect(Alert.up()?.title).toBe("End Quota meter rounding?");
     Alert.answer("Keep it");
     await ending;
+  });
+
+  /* ----------------------------------------------------------------------- *
+   * When the host is not answering
+   * ----------------------------------------------------------------------- */
+
+  /**
+   * **The half of the owner's instruction that was missing**: a workspace
+   * whose machine is off could not be got rid of from the phone at all. It sat
+   * in the inbox with every control refusing it.
+   *
+   * The control plane offers `?force=true` for exactly that, and writes the
+   * sentence explaining what it costs. So the refusal is shown in its words
+   * and the decision is asked **again** — a second question, because somebody
+   * who has just read *the agents stop, the workspace goes from the host* and
+   * pressed *End it* is being offered close to the opposite: the row leaves
+   * their list and the work keeps running where they cannot see it.
+   */
+  describe("the forced removal, when the machine is not answering", () => {
+    /**
+     * Ask, confirm, and let the control plane refuse because the host is not
+     * answering — leaving the second question on screen.
+     *
+     * `{ ending }` rather than the promise itself: an `async` function
+     * flattens a promise it returns, so handing the teardown's own back would
+     * make awaiting the helper wait for a question nobody has answered yet.
+     */
+    const refusedForHost = async () => {
+      answers = { status: 409, body: JSON.stringify({ code: "HostUnreachable", message: AWAY }) };
+      const ending = end(one());
+      await asked();
+      Alert.answer("End it");
+      await vi.waitFor(() => expect(Alert.up()?.title).toBe(removeTitle(one(), "Ravenholm")));
+      return { ending };
+    };
+
+    it("asks a second question, in the control plane's own words", async () => {
+      const { ending } = await refusedForHost();
+
+      /* The refusal is quoted, not paraphrased — it is the only sentence that
+         knows which machine, and which of the two refusals this is. */
+      expect(Alert.up()?.body).toBe(
+        `${AWAY} Nothing stops on that machine — this only takes it off the list here.`,
+      );
+      /* **A different verb on the button.** Agreeing to this is not agreeing
+         to a teardown, and a button that said *End it* twice is how somebody
+         presses the second one without noticing there was a second one. */
+      expect(Alert.up()?.buttons?.map((b) => b.text)).toEqual(["Keep it", "Remove it here"]);
+
+      Alert.answer("Keep it");
+      expect(await ending).toBe("refused");
+    });
+
+    /**
+     * **Not a third branch of the first dialog.** The first question still
+     * says what a teardown does and nothing about removal — the owner asked
+     * for a distinct decision, and QA had already measured that body at the
+     * limit of what gets read on a phone.
+     */
+    it("says nothing about removal in the first question", async () => {
+      const { ending } = await refusedForHost();
+
+      const first = Alert.asked[0];
+      expect(first.title).toBe("End Quota meter rounding on Ravenholm?");
+      expect(first.body).toBe(endWording(one(), 0, clean));
+      expect(first.buttons?.map((b) => b.text)).toEqual(["Keep it", "End it"]);
+      expect(Alert.asked).toHaveLength(2);
+
+      Alert.answer("Keep it");
+      await ending;
+    });
+
+    it("forces the removal on the Firetower it was asked about, and says so", async () => {
+      const { ending } = await refusedForHost();
+      answers = { status: 202, body: "" };
+      Alert.answer("Remove it here");
+
+      /* **`removed`, not `requested`.** No teardown was queued; the agents
+         are still running over there. The row is finished here, which is why
+         the caller still leaves the screen. */
+      expect(await ending).toBe("removed");
+      expect(sent).toEqual([
+        { url: "https://a.example/api/v1/sessions/w_1/work", method: "GET", token: "Bearer tok_srv_a" },
+        { url: "https://a.example/api/v1/sessions/w_1?workspace=true", method: "DELETE", token: "Bearer tok_srv_a" },
+        {
+          url: "https://a.example/api/v1/sessions/w_1?workspace=true&force=true",
+          method: "DELETE",
+          token: "Bearer tok_srv_a",
+        },
+      ]);
+      /* Once, not twice: the teardown's own invalidation sits behind its
+         DELETE and that DELETE threw. This one is the row leaving the list,
+         which for a forced removal is the only place it shows at all. */
+      expect(invalidated).toBe(1);
+    });
+
+    it("sends nothing more when the second question is answered no", async () => {
+      const { ending } = await refusedForHost();
+      Alert.answer("Keep it");
+
+      expect(await ending).toBe("refused");
+      expect(sent.filter((r) => r.url.includes("force=true"))).toEqual([]);
+    });
+
+    /**
+     * The second question is a native window like the first, so it gets the
+     * first's guards and for the first's reasons: an answer given about one
+     * Firetower is not consent to act on another.
+     */
+    it("sends nothing when the address moved while the second question was open", async () => {
+      const { ending } = await refusedForHost();
+      remember(CLONE, "tok_srv_b");
+      Alert.answer("Remove it here");
+
+      expect(await ending).toBe("refused");
+      expect(sent.filter((r) => r.url.includes("force=true"))).toEqual([]);
+      expect(Alert.up()?.title).toBe("It was not removed.");
+      expect(Alert.up()?.body).toContain("still on Ravenholm");
+    });
+
+    it("does not navigate when the screen was pushed over while the forced DELETE was in flight", async () => {
+      const { ending } = await refusedForHost();
+      const gate = holding();
+      holdDelete = gate.until;
+      answers = { status: 202, body: "" };
+      Alert.answer("Remove it here");
+      await vi.waitFor(() => expect(sent.filter((r) => r.url.includes("force=true"))).toHaveLength(1));
+
+      screen.blur();
+      gate.open();
+
+      /* The request went and this says so. `orphaned` covers the forced half
+         the same way it covers the teardown. */
+      expect(await ending).toBe("orphaned");
+    });
+
+    it("asks nothing when the refusal lands after the screen has gone", async () => {
+      answers = { status: 409, body: JSON.stringify({ code: "HostUnreachable", message: AWAY }) };
+      const gate = holding();
+      holdDelete = gate.until;
+      const ending = end(one());
+      await asked();
+      Alert.answer("End it");
+      await vi.waitFor(() => expect(sent.map((r) => r.method)).toEqual(["GET", "DELETE"]));
+
+      hooks.unmount();
+      gate.open();
+
+      expect(await ending).toBe("refused");
+      /* The one question, and no second one: there is nobody to put a
+         decision to, so none is offered and nothing is forced. */
+      expect(Alert.asked).toHaveLength(1);
+      expect(sent.filter((r) => r.url.includes("force=true"))).toEqual([]);
+    });
+
+    it("says it was not removed when the forced removal is refused too", async () => {
+      const { ending } = await refusedForHost();
+      answers = { status: 403, body: JSON.stringify({ code: "Forbidden", message: REFUSAL }) };
+      Alert.answer("Remove it here");
+
+      expect(await ending).toBe("refused");
+      /* Its own title: *It did not end.* is about the teardown, which this
+         reader has already been told did not happen. */
+      expect(Alert.up()?.title).toBe("It was not removed.");
+      expect(Alert.up()?.body).toBe(REFUSAL);
+    });
+
+    it("offers nothing for a refusal that has no second answer behind it", async () => {
+      answers = { status: 403, body: JSON.stringify({ code: "Forbidden", message: REFUSAL }) };
+      const ending = end(one());
+      await asked();
+      Alert.answer("End it");
+
+      expect(await ending).toBe("refused");
+      expect(Alert.up()?.title).toBe("It did not end.");
+      expect(sent.filter((r) => r.url.includes("force=true"))).toEqual([]);
+    });
+  });
+});
+
+/* ------------------------------------------------------------------------- *
+ * What the second question says
+ * ------------------------------------------------------------------------- */
+
+describe("the words of the forced removal", () => {
+  it("names the workspace and what it is being removed from", () => {
+    /* *Remove* and *from*, not *End* and *on*: the verb is the control
+       plane's own, and the preposition is the whole of what this does. */
+    expect(removeTitle(one(), "Ravenholm")).toBe("Remove Quota meter rounding from Ravenholm?");
+    expect(removeTitle(one(), null)).toBe("Remove Quota meter rounding?");
+  });
+
+  it("quotes the control plane and adds the one thing it does not say", () => {
+    expect(removeWording(AWAY)).toBe(
+      `${AWAY} Nothing stops on that machine — this only takes it off the list here.`,
+    );
+  });
+
+  /**
+   * The other refusal the control plane writes: a host that is not in this
+   * Firetower any more, where it states the opposite trade and does not
+   * recommend it. Passed through unchanged, because this app does not know
+   * which of the two it is and the control plane does.
+   */
+  it("passes the retired-host refusal through as it came", () => {
+    const retired =
+      "ft-e1 is not in this Firetower any more, so the workspace cannot be torn down. Its " +
+      "conversation is the only record of what ran there: removing it here would end the " +
+      "session, and what a workspace holds is reclaimed once it has ended.";
+    expect(removeWording(retired).startsWith(retired)).toBe(true);
+  });
+
+  /**
+   * **It is the negation of the first question's promise, and that is the
+   * point.** Everything the teardown's sentence undertakes is what a forced
+   * removal does not do, and a person who has just read that sentence and
+   * pressed *End it* is the one who needs it said.
+   */
+  it("promises none of what a teardown promises", () => {
+    const said = removeWording(AWAY);
+    expect(said).not.toContain("leaves the list once the host has done it");
+    expect(said).not.toContain("goes from the host");
+    expect(said).toContain("Nothing stops on that machine");
   });
 });
