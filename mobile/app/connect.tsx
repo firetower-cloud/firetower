@@ -28,6 +28,7 @@ import { ActivityIndicator, Pressable, Text, TextInput, View } from "react-nativ
 import { LEDE_GUTTER, useEdges } from "~/ui/edges";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { router } from "expo-router";
+import * as Linking from "expo-linking";
 import { ArrowRight, CircleSlash2, Lock, ShieldOff } from "lucide-react-native";
 import { cleartext, reach, signIn, type Bootstrap } from "~/api/probe";
 import { remember } from "~/native/servers";
@@ -36,6 +37,9 @@ import { ReplacePassword } from "~/ui/ReplacePassword";
 import { READING } from "~/ui/measure";
 import { size } from "~/design/tokens.generated";
 import { useTheme } from "~/design/theme";
+
+/** Where somebody with no Firetower yet goes to get one. */
+const DOCS = "https://usefiretower.com/docs";
 
 type Stage =
   | { at: "where" }
@@ -260,17 +264,13 @@ function Where({
           <Mark size={30} />
         </View>
         <Text className="mt-5 font-semibold text-display text-bone">Connect to a Firetower</Text>
-        {/* **v54's copy.** It was "the address of the control plane your team
-            runs"; the revision the user validated says where you *get* it and
-            rules out the thing people reach for instead. A join code would
-            have to be resolved by somebody, and that somebody would be a
-            service holding every install's whereabouts — which is the one
-            thing a self-hosted product cannot have. */}
-        <Text className="mt-2 text-center font-sans text-read text-dim">
-          The address somebody at your company gave you. Not a code — a code carries no address,
-          and there is nowhere to look one up that would not be a service holding every install’s
-          whereabouts.
-        </Text>
+        {/* **The paragraph that sat here is gone, and nothing replaces it.**
+            It argued the architecture — why there is no join code, and where
+            one would have to be looked up. That is a good argument and it is
+            still written down, at the top of this file; it is not what
+            somebody holding a phone in front of an empty field needs read to
+            them. The field’s own placeholder shows the shape of an address,
+            which is the whole of the instruction. */}
       </View>
 
       <Field
@@ -287,9 +287,28 @@ function Where({
 
       <Primary label="Connect" onPress={onGo} disabled={!typed.trim()} />
 
-      <Text className="mt-4 text-center font-sans text-meta text-mute">
-        Nothing is sent until this reaches a server you named.
-      </Text>
+      {/* **Somewhere to go when the answer to “where is it” is “nowhere
+          yet”.** The line this replaces — *nothing is sent until this reaches
+          a server you named* — reassured somebody who had already decided to
+          type an address, which is not who is stuck on this screen. The
+          `http` notice below still says the security half, and says it on the
+          one input where it is actually true.
+
+          The whole line is the target rather than the two words: `STYLE.md`
+          puts the floor for anything tappable at 44pt, the words are about 20
+          of it, and there is nothing else on this line to hit by accident.
+          The words still carry the link’s own colour and rule, because a
+          target you cannot see is not an affordance. */}
+      <Pressable
+        testID="self-host"
+        onPress={() => void Linking.openURL(DOCS).catch(() => {})}
+        className="mt-4 min-h-[44px] items-center justify-center"
+      >
+        <Text className="text-center font-sans text-meta text-mute">
+          You don’t have a Firetower yet?{" "}
+          <Text className="font-medium text-slate underline">Self host one</Text>
+        </Text>
+      </Pressable>
 
       {plain ? (
         <View className="mt-4 flex-row items-start gap-2 rounded-xl border border-line bg-panel px-4 py-3">

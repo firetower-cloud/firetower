@@ -296,4 +296,24 @@ describe("what a row says about a place", () => {
     const place = placeOf(places(all), "s_1")!;
     expect(place.startedAt).toBe(run("s_3", "s_1").createdAt);
   });
+
+  /**
+   * **And all of that where the workspace has an id of its own.**
+   *
+   * The founder was looked up as `r.id === place.id`, which can only match a
+   * place filed under one of its own runs. Every workspace the control plane
+   * cuts has an id of its own, so there it found nobody at all: the place was
+   * named, aged and nested from whichever run sorted first — needs-you, then
+   * newest — which is a subagent as soon as one is asking something. The
+   * phone wears it worst, where `runAt` opens a workspace at its founder.
+   */
+  it("is named, aged and nested from its founder, not from a child in it", () => {
+    const lead = { ...run("s_1", "w_1"), name: "auth refactor", parentId: "s_up" } as unknown as Session;
+    const kid = { ...child("s_5", "s_1", "w_1", "NeedsYou"), name: "Quota band thresholds" } as unknown as Session;
+    const place = placeOf(places([lead, kid]), "w_1")!;
+    expect(place.runs[0].id, "the needs-you child sorts to the front").toBe("s_5");
+    expect(place.name).toBe("auth refactor");
+    expect(place.startedAt).toBe(run("s_1", "w_1").createdAt);
+    expect(place.leadOf, "and whose place it is is the founder's lead").toBe("s_up");
+  });
 });

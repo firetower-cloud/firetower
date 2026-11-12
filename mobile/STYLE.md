@@ -54,8 +54,12 @@ here.
 A window has a title bar, a server strip, a rail and ⌘-numbered tabs. A phone
 has a stack and a back gesture.
 
-- **Four tabs**: Inbox, Tasks, Config, You. The inbox carries the dashboard's
-  own filter, because that is the vocabulary.
+- **Five tabs**: Dashboard, Workspaces, Tasks, Artifacts, You. Four of the
+  five are the desk's own words for the same objects, and the fifth is too —
+  `RailPanel.tsx` already calls that list Workspaces. Five is the ceiling on
+  both platforms, so a sixth destination has to displace one of these.
+  (This line read *Inbox, Tasks, Config, You*, which was already stale against
+  the shipped four; `(tabs)/_layout.tsx` has the argument.)
 - **Config and You are not one tab.** They were, briefly, and a server's
   repositories under the list of servers reads as a thing and the things
   inside it at the same level. `You` is this phone's — which Firetowers it

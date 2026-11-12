@@ -1,0 +1,106 @@
+# The app starts, and the furniture is there.
+#
+# The only flow in here that is not about a feature. It exists because every
+# other gate this repository has is a compiler — types, tests over pure
+# functions, a contract diff, and a Gradle build that links the Android app
+# without ever starting it. All of them were green on a build whose tab bar
+# threw on its first render, and the Android app showed a blank screen on
+# every device. Nothing compiles an app's first frame.
+#
+# So this asserts the one thing no compiler can: the process came up, the
+# router resolved, and the four destinations are on screen. The icons beside
+# them it cannot read — Maestro matches text — which is what the screenshots
+# are for, the same bargain `answer.yaml` makes about the composer's height.
+#
+#   maestro test e2e/launch.yaml -e ADDRESS=10.0.2.2:4411 -e USER=admin -e PASS=…
+#
+# `desktop/scripts/mock-server.mjs` answers enough of the contract to stand in
+# for a Firetower, which is what lets this run with no Postgres and no worker
+# anywhere near it. That is how `.github/workflows/mobile.yml` runs it.
+appId: com.usefiretower.app
+---
+# **One.** The process came up and the shell drew something.
+#
+# Its own launch rather than leaning on `connect.yaml`'s, so that an app which
+# renders nothing at all fails on a step named for launching. `connect.yaml`
+# launches again below — five seconds, and worth it: a red step called
+# "Connect to a Firetower" would send the next person to read the network, the
+# keychain and the mock, none of which had anything to do with it.
+#
+# `clearState` because the assertion only holds with no server stored, and a
+# previous run on the same device leaves one.
+- launchApp:
+    clearState: true
+    permissions: { all: allow }
+    label: "Start the app"
+#
+# `extendedWaitUntil`, not `assertVisible`, and this is the one place this
+# flow waits long. A debug APK carries no JavaScript — `debuggableVariants`
+# leaves `debug` to fetch it from Metro — so every launch downloads and parses
+# the whole bundle before a pixel is drawn. On a laptop that is a couple of
+# seconds; on a CI emulator it measured past Maestro's default patience, and
+# the flow failed on a black screen that was only an app still starting.
+# A long wait costs nothing when the app is healthy: it returns the moment the
+# text appears.
+- extendedWaitUntil:
+    visible: "Connect to a Firetower"
+    timeout: 180000
+    label: "The app drew its first screen"
+
+# **Two.** Sign in, which is the only way to the tab bar.
+#
+# Not incidental: with no server `(tabs)/_layout` returns a `Redirect` before
+# a single trigger is built, so the bug this flow exists for cannot appear
+# until there is one. A flow that launched and stopped above would have
+# watched it go straight past.
+#
+# The label matters. `connect.yaml`'s own last line asserts `Dashboard` —
+# a tab label — so on an app whose tab bar throws, that is the step that
+# trips, and unlabelled this would report as `Run connect.yaml... FAILED` for
+# a fault that has nothing to do with connecting. Named for where it is going
+# instead, a reader is pointed at the tab bar, which is where the fault is.
+- runFlow:
+    file: connect.yaml
+    label: "Sign in and reach the tab bar"
+
+# **Three.** The bar. Four labels is four triggers that each came through the
+# icon converter — the step that threw, once, for every `md` name it was given.
+- assertVisible:
+    text: "Dashboard"
+    label: "The tab bar drew all four destinations"
+- assertVisible: "Tasks"
+- assertVisible: "Artifacts"
+- assertVisible: "You"
+- takeScreenshot: launch-tab-bar
+
+# **Four.** And each destination mounts.
+#
+# What is asserted after each tap is a *sibling tab's* label, not anything on
+# the page that opened. That is deliberate and it is the whole trick: a screen
+# that throws during render takes the tree down with it, tab bar included, so
+# the bar still being there is the assertion that the page rendered. Asserting
+# on the page's own contents instead would tie this flow to whatever the mock
+# happens to answer, and a boot check that fails when a fixture changes is one
+# somebody turns off.
+- tapOn: "Tasks"
+- assertVisible:
+    text: "Dashboard"
+    label: "Tasks rendered — the bar survived it"
+- takeScreenshot: launch-tasks
+
+- tapOn: "Artifacts"
+- assertVisible:
+    text: "Dashboard"
+    label: "Artifacts rendered — the bar survived it"
+- takeScreenshot: launch-artifacts
+
+- tapOn: "You"
+- assertVisible:
+    text: "Dashboard"
+    label: "You rendered — the bar survived it"
+- takeScreenshot: launch-you
+
+- tapOn: "Dashboard"
+- assertVisible:
+    text: "You"
+    label: "Back on the home, with the bar intact"

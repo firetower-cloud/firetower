@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.16.0](https://github.com/firetower-cloud/firetower/compare/mobile-v0.15.0...mobile-v0.16.0) (2026-11-11)
+
+
+### Features
+
+* **mobile:** the docked home's second column is the workspaces list ([07270ff](https://github.com/firetower-cloud/firetower/commit/07270ff8eb783fa6d22612f398c59b88452feeae))
+* **mobile:** Workspaces is a destination, not a pushed route ([f86049e](https://github.com/firetower-cloud/firetower/commit/f86049ec32da81bea3d94bb52174abf2c1269a16))
+
+
+### Bug Fixes
+
+* **mobile:** a 36pt floor on the air above a screen's first line ([964c079](https://github.com/firetower-cloud/firetower/commit/964c079f81dc420848f8e535a28390ab6ca944fd))
+* **mobile:** a workspace is named after its founder, not whichever run sorted first ([40737c8](https://github.com/firetower-cloud/firetower/commit/40737c8a4243fbbaa4568ead54c80c9df69d0021))
+* **mobile:** every team row but the one you are reading opens ([952bafa](https://github.com/firetower-cloud/firetower/commit/952bafa48805328b0f68d2590550490f4d7ad3f9))
+* **mobile:** name every Android tab, not only the selected one ([96d5107](https://github.com/firetower-cloud/firetower/commit/96d5107482bbb358d4ff94e1d2b1460f463ee863))
+* **mobile:** the Android tab bar needs expo-symbols to draw an icon ([ef79c1d](https://github.com/firetower-cloud/firetower/commit/ef79c1dbac8cda5599b33319afb9465b445d29a7))
+* **mobile:** the connect screen has somewhere to send you when you have no Firetower ([6b1ebdc](https://github.com/firetower-cloud/firetower/commit/6b1ebdcbcc26da4d5482a134b9a05367e3909ed1))
+* **mobile:** the docked column says it is reading, not that there are none ([aca5967](https://github.com/firetower-cloud/firetower/commit/aca59678c0022c45d4c77231967cfdc9005e22c6))
+* **mobile:** the phone can tell a lead's workspace from its child's ([74b09a5](https://github.com/firetower-cloud/firetower/commit/74b09a519a9f0c644e06eb9f64a404b95d960bb4))
+* **mobile:** the popover takes the float fill, like the other four ([41fe42e](https://github.com/firetower-cloud/firetower/commit/41fe42ed310cd30ac05c26e5e9683fa0614b0b2f))
+* **mobile:** the team panel indents its roster, and a row opens what it names ([6338bd1](https://github.com/firetower-cloud/firetower/commit/6338bd1babf42bce19496620c8b3d5de5e7f47e3))
+
 ## [0.15.0](https://github.com/firetower-cloud/firetower/compare/mobile-v0.14.0...mobile-v0.15.0) (2026-11-10)
 
 

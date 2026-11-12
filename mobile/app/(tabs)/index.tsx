@@ -36,7 +36,7 @@
  */
 import { useCallback, useMemo, useState } from "react";
 import { Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
-import { BLEED, useEdges } from "~/ui/edges";
+import { BLEED, useEdges, useRail } from "~/ui/edges";
 import Animated from "react-native-reanimated";
 import { GestureDetector } from "react-native-gesture-handler";
 import { router } from "expo-router";
@@ -45,7 +45,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { getListSessionsQueryKey } from "~/api/generated/sessions/sessions";
 import { useListArtifacts } from "~/api/generated/artifacts/artifacts";
 import type { Session } from "~/api/generated/model";
-import { group, lead, type Workspace } from "~/api/workspaces";
+import { group, lead, ranked, type Workspace } from "~/api/workspaces";
 import { elapsed, minutesSince, needsYou } from "~/api/view";
 import { useAgents, useRepos, useSessions } from "~/data";
 import { useServer } from "~/native/current";
@@ -55,6 +55,8 @@ import { usePending } from "~/api/pending";
 import { useAnswerRequest } from "~/api/generated/sessions/sessions";
 import { Peek, usePeekable } from "~/ui/Peek";
 import { Servers } from "~/ui/Servers";
+import { Unreachable } from "~/ui/Unreachable";
+import { WorkspaceRow } from "~/ui/WorkspaceRow";
 import { StartBox, type Chip, type Pick_ } from "~/ui/StartBox";
 import { Waiting } from "~/ui/Waiting";
 import { COLUMN, dottedChips, posterColumns } from "~/ui/measure";
@@ -134,6 +136,7 @@ export default function Home() {
   const { color } = useTheme();
   const edges = useEdges({ gutter: BLEED });
   const pose = usePose();
+  const rail = useRail();
   const here = useServer();
   const cache = useQueryClient();
 
@@ -157,6 +160,12 @@ export default function Home() {
      clients — so this takes its output and throws the grouping away rather
      than re-deriving what a workspace is. */
   const places = useMemo(() => groups.flatMap(([, inRepo]) => inRepo), [groups]);
+  /* The docked column's order, which is the destination's order — `ranked` is
+     shared so the preview and the place cannot come to disagree about what
+     comes first. Flat and status-ordered, never status-grouped: a workspace
+     changes state while you are looking at it, and the row you reached for
+     jumps sections under your thumb. */
+  const byRank = useMemo(() => ranked(places), [places]);
 
   /* Blocked, not `needsYou`. The wider grouping also covers finished and
      broken, which belong on the list but are not the thing that is asking —
@@ -222,7 +231,16 @@ export default function Home() {
   const header = (
     /* `z-index: 20` in the drawing, the same rung as the composer:
        both are chrome the content scrolls under, and both have to sit
-       above it to do that. */
+       above it to do that.
+
+       **`pt-0.5` stays, and it is 2 pt on top of the root's own air rather
+       than instead of it.** It was the whole of the air above this chip on
+       any surface that reserves nothing — the Duo's inner display sat the
+       server chip 2 pt from the frame — and the fix for that is `TOP_AIR` in
+       `edges.ts`, a floor on the root's resolved total, because fourteen
+       screen roots go through that hook and only one of them is this one.
+       Raising the 2 here instead would have fixed the home and left Tasks,
+       Artifacts, You and Workspaces exactly as they were. */
     <View className="flex-row items-center px-2 pb-2 pt-0.5" style={[COLUMN, { zIndex: 20 }]}>
       <ServerChip
         org={here?.org ?? "—"}
@@ -232,11 +250,8 @@ export default function Home() {
     </View>
   );
 
-  /* **Not answering.** Said as its own screen rather than as an empty list:
-     reading "nothing is running" when the server is unreachable is the lie
-     that costs the most trust. The guidance is the phone's own — a Firetower
-     is never on the public internet, so a phone reaches one over a mesh VPN,
-     and *is Tailscale on* is the question that actually fixes it. */
+  /* **Not answering.** Said as its own screen rather than as an empty list —
+     see `Unreachable`, which the Workspaces destination draws too. */
   if (error && live.length === 0) {
     return (
       <View
@@ -245,28 +260,7 @@ export default function Home() {
         style={edges}
       >
         {header}
-        <View className="flex-1 items-center justify-center gap-2.5 px-9">
-          <Text className="text-center font-medium text-bone" style={{ fontSize: size.display, lineHeight: size.display * 1.18 }}>
-            {here?.org ?? "That server"} is not answering.
-          </Text>
-          <Text
-            className="max-w-[30ch] text-center font-sans text-dim"
-            style={{ fontSize: size.read, lineHeight: size.read * 1.6 }}
-          >
-            A Firetower is never on the public internet, so this phone reaches one over your mesh
-            VPN. Is Tailscale on?
-          </Text>
-          <Pressable
-            testID="retry"
-            onPress={refresh}
-            className="mt-2.5 rounded-full bg-raise px-5 py-2.5"
-            android_ripple={{ color: color.overlay }}
-          >
-            <Text className="font-sans text-dim" style={{ fontSize: size.body }}>
-              Try again
-            </Text>
-          </Pressable>
-        </View>
+        <Unreachable org={here?.org ?? "That server"} onRetry={refresh} />
         {servers ? <Servers onClose={() => setServers(false)} /> : null}
       </View>
     );
@@ -342,7 +336,12 @@ export default function Home() {
           {rest > 0 ? (
             <Pressable
               testID="more-waiting"
-              onPress={() => router.push("/workspaces")}
+              /* **`navigate`, not `push`.** Workspaces is a destination now,
+                 and pushing one puts a second copy on the stack with a back
+                 chevron the tab has no use for — the same screen arriving two
+                 ways with two back behaviours, while the system tab bar
+                 lights the wrong item. */
+              onPress={() => router.navigate("/(tabs)/workspaces")}
               className="h-11 flex-row items-center rounded-full border border-line px-4"
               android_ripple={{ color: color.overlay }}
             >
@@ -436,12 +435,46 @@ export default function Home() {
    * It is the only pose with room for two things and the only one that is
    * *short* — 669 against the others' 844 to 951. The composer is pinned to
    * the foot of the left column, where a thumb is on a device held in two
-   * hands, and the sections sit beside it rather than under it.
+   * hands, and the second column sits beside it rather than under it.
    *
    * The greeting **sinks to meet the box** rather than floating at the top of
    * a column with 280pt of nothing under it. It is a salutation *to the
    * composer*, so the two read as one thing; at every other pose the sections
    * fill that gap and the question does not arise.
+   *
+   * ## The right column is Workspaces, and that is a change
+   *
+   * It used to wrap `under` — the waiting chips and *Recent artifacts*, which
+   * is what the single-column home puts *below* the greeting, moved sideways.
+   * Below a greeting that is a section; in a 307pt column 669 tall it was two
+   * posters and then roughly 1,200pt of floor.
+   *
+   * So it is the destination, previewed: head, count, and the flat
+   * status-ordered list, scrolling on its own and filling the column however
+   * many there are. Which is exactly what the desk does — the rail panel
+   * beside ⌘1 *is* this list.
+   *
+   * **The waiting chips fold into it rather than sitting above it.** `RANK`
+   * already sorts `blocked` first and every row already carries its beat
+   * mark, so the top rows of the column, with their ember marks, *are* the
+   * chips. A chip strip above a list whose first rows are the same workspaces
+   * draws one object twice and spends the ember budget twice to say one thing.
+   * The count survives as the line under the head.
+   *
+   * **`Recent artifacts` moves to the head of the left column** rather than
+   * being deleted. The alternative was to drop it here — Artifacts is its own
+   * destination — and it loses on continuity: rotating from 669 to 951 would
+   * make a whole section vanish, and rotating changes where a panel lands,
+   * never what is on the screen. At 560 of left column its two posters are
+   * 252pt each, against 167 on a 390pt phone.
+   *
+   * ## And the column runs to the frame
+   *
+   * `width: panel + rail, marginRight: -rail, paddingRight: rail` — the fill
+   * and the divider reach the edge of the display while every row, press
+   * highlight and timestamp stays inside the reserved 84. See `useRail`. The
+   * left column is unaffected: it is still `content − panel` = 560, exactly
+   * `READING_MAX`, and `pose.ts` still measures the frame.
    */
   if (pose.docked && !bare) {
     return (
@@ -454,26 +487,99 @@ export default function Home() {
         <View className="min-h-0 flex-1 flex-row">
           <View className="min-w-0 flex-1 flex-col">
             <ScrollView className="flex-1" contentContainerStyle={{ flexGrow: 1, justifyContent: "flex-end" }}>
+              {made}
+              {/* The posters sit at the head and the greeting at the foot, so
+                  the 280pt the greeting used to float above is what separates
+                  them rather than nothing. */}
+              <View className="flex-1" />
               {head}
             </ScrollView>
             {box}
           </View>
-          <View className="border-l border-line-soft" style={{ width: pose.panel }}>
-            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingTop: 8 }}>
-              {under}
-              <View style={{ height: 20 }} />
-            </ScrollView>
+          {/* `ground`, not a fill of its own: one page colour, and space
+              separates the two columns — STYLE.md's rule, no cards. The
+              divider is what says where the column starts. */}
+          <View
+            className="min-h-0 border-l border-line-soft"
+            style={{ width: pose.panel + rail, marginRight: -rail, paddingRight: rail }}
+          >
+            {/* Its own head rather than `Heading`: this is a panel's head and
+                not one of the home's sections, and at 307pt the control says
+                *All* where a full-width section says *View all*. */}
+            <View className="flex-row items-baseline gap-2.5 px-5 pb-1 pt-3.5">
+              <Text className="font-medium text-dim" style={{ fontSize: size.meta }}>
+                Workspaces
+              </Text>
+              <View className="flex-1" />
+              <Pressable
+                testID="all-workspaces"
+                onPress={() => router.navigate("/(tabs)/workspaces")}
+                hitSlop={8}
+                className="flex-row items-center gap-0.5"
+              >
+                <Text className="font-sans text-dim" style={{ fontSize: size.meta }}>
+                  All
+                </Text>
+                <ChevronRight color={color.dim} size={13} />
+              </Pressable>
+            </View>
+            {/* The count waits for an answer. *0 in all, none waiting* over a
+                list that has not arrived is the same lie the destination was
+                drawing before it had a loading state — it just costs less
+                here, because the left column still has the composer on it. */}
+            {loading && places.length === 0 ? (
+              <View className="flex-1 items-center justify-center px-5">
+                <Waiting say="Reading your workspaces" />
+              </View>
+            ) : (
+              <>
+                <View className="px-5 pb-1.5">
+                  <Text className="font-sans text-mute" style={{ fontSize: size.micro }}>
+                    {blocked.length
+                      ? `${blocked.length} waiting on you · ${places.length} in all`
+                      : `${places.length} in all, none waiting`}
+                  </Text>
+                </View>
+                <ScrollView
+                  className="min-h-0 flex-1"
+                  showsVerticalScrollIndicator={false}
+                  contentContainerStyle={{ paddingBottom: 20 }}
+                >
+                  {byRank.map((p) => (
+                    <WorkspaceRow key={p.id} place={p} onPeek={() => setPeeking(p.id)} />
+                  ))}
+                </ScrollView>
+              </>
+            )}
           </View>
         </View>
         {peeked ? (
+          /* **The same peek the other two poses get, including the answer.**
+             This branch was passing neither `pending` nor `onAnswer`, so
+             holding a row at 951 previewed a blocked run and then offered no
+             way to unblock it — coverage §5's P4 failing in exactly the pose
+             that has the most room for it. Now that the column is the
+             workspaces list the peek is the main thing it is held for. */
           <Peek
             place={peeked}
             onClose={() => setPeeking(null)}
             onOpen={() => router.push(`/workspace/${peeked.id}`)}
             /* `repo.tsx` reads its param with `useSession`, so this is the
-             session id — unlike `/workspace/{id}`, which resolves a workspace.
-             Two routes, two kinds of id, one field name. */
-          onChanges={() => router.push(`/workspace/repo?id=${speakerId}`)}
+               session id — unlike `/workspace/{id}`, which resolves a
+               workspace. Two routes, two kinds of id, one field name. */
+            onChanges={() => router.push(`/workspace/repo?id=${speakerId}`)}
+            pending={pending.asked}
+            reading={pending.reading}
+            onAnswer={(yes) => {
+              if (!pending.asked || !speakerId) return;
+              answer.mutate({
+                id: speakerId,
+                data: {
+                  req: pending.asked.req,
+                  decision: yes ? { decision: "Allow" } : { decision: "Deny", reason: null },
+                },
+              });
+            }}
             onEnd={() => setPeeking(null)}
           />
         ) : null}

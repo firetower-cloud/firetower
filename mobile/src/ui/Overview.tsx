@@ -19,6 +19,7 @@ import { Pressable, Text, View } from "react-native";
 import { ChevronRight, GitBranch, GitPullRequest, Link2, Shapes } from "lucide-react-native";
 import type { Artifact, PlanStep, Session } from "~/api/generated/model";
 import { BEAT, BEAT_TOKEN, STATUS_LABEL, elapsed, minutesSince } from "~/api/view";
+import { opens } from "~/api/workspaces";
 import { AgentMark } from "~/ui/AgentMark";
 import { Blocks } from "~/ui/Blocks";
 import { useTheme } from "~/design/theme";
@@ -55,18 +56,27 @@ function Member({
   active,
   leads = false,
   shared = false,
+  onOpen,
 }: {
   session: Session;
   active: boolean;
   leads?: boolean;
   /** Running in the manager's own workspace rather than one of its own. */
   shared?: boolean;
+  /**
+   * Opens the session this row names. Absent for one row only — the one you
+   * are already reading. Every other member is a link, which is the desk's
+   * rule and the only one: a row that names a real session is never dead
+   * under a thumb, whether it has a workspace of its own or shares one.
+   */
+  onOpen?: () => void;
 }) {
   const { color } = useTheme();
   const beat = BEAT[session.status];
   const tone = BEAT_TOKEN[beat];
-  return (
-    <View className={`flex-row items-start gap-2 rounded-lg px-3 py-2.5 ${active ? "bg-raise" : ""}`}>
+  const row = `flex-row items-start gap-2 rounded-lg px-3 py-2.5 ${active ? "bg-raise" : ""}`;
+  const inner = (
+    <>
       <View className="pr-0.5 pt-[5px]">
         <Blocks beat={beat} />
       </View>
@@ -92,7 +102,34 @@ function Member({
           <AgentMark agent={session.agent} size={11} tone={color.mute} />
         </View>
       </View>
-    </View>
+      {/* The desk says *this opens something* by lighting the row under the
+          pointer. A phone has no pointer, so the affordance has to be drawn —
+          and this is the glyph the Made rows below already use for it. Every
+          row but the one you are reading carries it, so the panel reads as a
+          list of places to go rather than a list with one or two. */}
+      {onOpen ? (
+        <View className="pt-[7px]">
+          <ChevronRight color={color.mute} size={14} />
+        </View>
+      ) : null}
+    </>
+  );
+  /* The row is already two lines and well past the 44pt floor `STYLE.md` sets
+     for anything tappable, so the target is the row itself rather than a
+     control inside it. A pressable row is never the active one — `opens`
+     returns nothing for the session you are already reading — so the two
+     `bg-raise` states cannot land on the same row. */
+  return onOpen ? (
+    <Pressable
+      testID="overview-member"
+      onPress={onOpen}
+      className={`${row} active:bg-raise`}
+      android_ripple={{ color: color.overlay }}
+    >
+      {inner}
+    </Pressable>
+  ) : (
+    <View className={row}>{inner}</View>
   );
 }
 
@@ -134,6 +171,7 @@ export function Overview({
   plan,
   artifacts,
   onOpenArtifact,
+  onOpenSession,
 }: {
   session: Session;
   /** The workspace that started this one, when it is a child. */
@@ -142,6 +180,12 @@ export function Overview({
   plan: PlanStep[];
   artifacts: Artifact[];
   onOpenArtifact: (id: string) => void;
+  /**
+   * Opens one session of the team. The phone has no session route, so this is
+   * `/workspace/<session id>` — `runAt` is what the route does with an
+   * address that names a run rather than a place.
+   */
+  onOpenSession: (id: string) => void;
 }) {
   const { color } = useTheme();
   const manager = lead ?? session;
@@ -150,6 +194,27 @@ export function Overview({
   );
   const hasTeam = !!lead || roster.length > 0;
   const done = plan.filter((s) => String(s.status) === "Completed").length;
+
+  /**
+   * Where a team row goes, which is the desk's answer and nothing added to it.
+   *
+   * The resolution that used to live here — session to workspace, through
+   * `placeOf`, before the row was allowed to be a button at all — is the bug
+   * this panel shipped twice. It could fail, and a row that failed it went
+   * silently dead: no chevron, no press, a name under a thumb that does
+   * nothing. Worst of all on the commonest team there is, a manager with
+   * subagents in its own checkout, where *every* row resolved back to the
+   * workspace being read and the whole panel was furniture.
+   *
+   * The resolving still has to happen — `/workspace/<id>` is the only route
+   * the phone has. It happens on the other side of the tap now, in the route,
+   * where failing means a screen that says so rather than a row that says
+   * nothing. See `opens` and `runAt` in `~/api/workspaces`.
+   */
+  const tap = (member: Session) => {
+    const to = opens(member, session);
+    return to ? () => onOpenSession(to) : undefined;
+  };
 
   const links: { icon: typeof GitBranch; label: string }[] = [];
   if (session.branch) links.push({ icon: GitBranch, label: session.branch });
@@ -173,15 +238,34 @@ export function Overview({
         <View className="border-b border-line-soft pb-2">
           <Legend>Team</Legend>
           <View className="px-1">
-            <Member session={manager} active={manager.id === session.id} leads={roster.length > 0} />
-            {roster.map((m) => (
-              <Member
-                key={m.id}
-                session={m}
-                active={m.id === session.id}
-                shared={!!manager.workspaceId && m.workspaceId === manager.workspaceId}
-              />
-            ))}
+            <Member
+              session={manager}
+              active={manager.id === session.id}
+              leads={roster.length > 0}
+              onOpen={tap(manager)}
+            />
+            {/* **A step in from the manager, under a hairline dropped from its
+                own mark.** The desk's `.kids` — 17 of margin, 13 of padding,
+                one line of `--color-line` — and the same depth here, because
+                what a child *is* does not change with the screen it is drawn
+                on. 18 rather than 17 only because the phone's mark is 13pt
+                inside 12 of row padding, so that is where its centre lands.
+
+                Without it the roster sat at the manager's own indent and a
+                team of four read as a flat list of five peers. */}
+            {roster.length > 0 ? (
+              <View className="ml-[18px] border-l border-line pl-[13px]">
+                {roster.map((m) => (
+                  <Member
+                    key={m.id}
+                    session={m}
+                    active={m.id === session.id}
+                    shared={!!manager.workspaceId && m.workspaceId === manager.workspaceId}
+                    onOpen={tap(m)}
+                  />
+                ))}
+              </View>
+            ) : null}
           </View>
         </View>
       ) : null}

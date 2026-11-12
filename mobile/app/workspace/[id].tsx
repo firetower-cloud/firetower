@@ -34,7 +34,7 @@ import {
 } from "~/api/generated/sessions/sessions";
 import { elapsed, minutesSince, STATUS_LABEL } from "~/api/view";
 import { useDiff, useSession, useSessions, why } from "~/data";
-import { group, lead, type Workspace } from "~/api/workspaces";
+import { group, placeOf, runAt, type Workspace } from "~/api/workspaces";
 import { AgentMark } from "~/ui/AgentMark";
 import { Approval } from "~/ui/Approval";
 import { Changes } from "~/ui/Changes";
@@ -57,6 +57,14 @@ import { useTheme } from "~/design/theme";
  * what resolves one to the other — and until it has loaded there is no session
  * to follow.
  *
+ * **And the address may name a run instead.** That is what a Team row hands
+ * over: the desk links a member to `/sessions/<id>` and the phone has no such
+ * route, so the session id arrives here and `placeOf` finds the workspace
+ * holding it. `runAt` then puts *that* run on screen rather than whichever
+ * one speaks for the place — otherwise three subagents sharing one checkout
+ * would all open the same transcript, which is the same dead row by another
+ * name.
+ *
  * Split in two for that reason rather than for tidiness. Hooks cannot be
  * skipped, so a single component had to call `useConversation("")` while the
  * list was in flight — which asked the control plane for the conversation of a
@@ -68,7 +76,12 @@ export default function WorkspaceScreen() {
 
   const place = useMemo(() => {
     const { groups } = group(sessions.filter((s) => s.status !== "Ended"));
-    return groups.flatMap(([, places]) => places).find((p) => p.id === id) ?? null;
+    const places = groups.flatMap(([, inRepo]) => inRepo);
+    /* A run that has ended is in no place's `runs` any more, so its id alone
+       finds nothing. Its `workspaceId` outlives it and the unfiltered list
+       still carries it, which is what `belongsTo` is for. */
+    const named = sessions.find((s: Session) => s.id === id);
+    return placeOf(places, id, named?.workspaceId) ?? null;
   }, [sessions, id]);
 
   if (!place) {
@@ -83,17 +96,35 @@ export default function WorkspaceScreen() {
     );
   }
 
-  return <Conversation place={place} />;
+  return <Conversation place={place} address={id} />;
 }
 
-function Conversation({ place }: { place: Workspace }) {
+function Conversation({ place, address }: { place: Workspace; address: string }) {
   const { color } = useTheme();
   const insets = useSafeAreaInsets();
   const edges = useEdges({ gutter: BLEED });
   const scroller = useRef<ScrollViewInstance>(null);
   const [atEnd, setAtEnd] = useState(true);
 
-  const speaker = lead(place);
+  /* The run the address named, or the one that speaks for the place when it
+     named the place. */
+  const speaker = runAt(place, address);
+  /**
+   * What the page is called, when the address named a run rather than a place.
+   *
+   * A subagent started in the manager's own checkout carries the *workspace's*
+   * name, so three of them under one header read as the same page three
+   * times — and tapping `Token audit` to arrive somewhere called `Quota band
+   * thresholds` looks exactly like the wrong row opened. Its `title` is the
+   * only field that says which agent this is, which is why the Team row shows
+   * that one too: the page should be called what the row that opened it said.
+   *
+   * Only for an address that named a run. A workspace opened from a list is
+   * asking for the workspace and keeps its name.
+   */
+  const asked = speaker.id === address && speaker.id !== place.id;
+  const sharing = asked && !!speaker.parentId && place.runs.some((r) => r.id === speaker.parentId);
+  const heading = sharing ? speaker.title || place.name : place.name;
   const { data: session } = useSession(speaker.id);
   const { data: files } = useDiff(session);
   const [menu, setMenu] = useState(false);
@@ -144,7 +175,6 @@ function Conversation({ place }: { place: Workspace }) {
   );
   const managerId = above?.id ?? speaker.id;
   const team = useMemo(() => sessions.filter((s: Session) => s.parentId === managerId), [sessions, managerId]);
-
   /**
    * Where the overview goes, which is three answers and not two.
    *
@@ -279,6 +309,10 @@ function Conversation({ place }: { place: Workspace }) {
       plan={plan}
       artifacts={artifacts}
       onOpenArtifact={(id) => router.push({ pathname: "/workspace/artifact", params: { id } })}
+      /* The same route the Workspaces list and the home push — addressed by
+         the member's session rather than its workspace, which is the only
+         part a team row does differently. */
+      onOpenSession={(to) => router.push(`/workspace/${to}`)}
     />
   ) : null;
 
@@ -298,7 +332,7 @@ function Conversation({ place }: { place: Workspace }) {
 
         <View className="min-w-0 flex-1">
           <Text numberOfLines={1} className="font-medium text-title text-bone">
-            {place.name}
+            {heading}
           </Text>
           <View className="mt-0.5 flex-row items-center gap-1.5">
             <Signal status={speaker.status} size={6} />
@@ -324,7 +358,7 @@ function Conversation({ place }: { place: Workspace }) {
           testID="overview"
           onPress={() =>
             rail === "push"
-              ? router.push({ pathname: "/workspace/overview", params: { id: place.id } })
+              ? router.push({ pathname: "/workspace/overview", params: { id: speaker.id } })
               : setRailChoice(!railOpen)
           }
           className={`h-10 w-10 items-center justify-center rounded-md ${railOpen && rail !== "push" ? "bg-raise" : ""}`}

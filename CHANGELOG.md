@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.54.1](https://github.com/firetower-cloud/firetower/compare/firetower-v0.54.0...firetower-v0.54.1) (2026-11-11)
+
+
+### Bug Fixes
+
+* **desktop:** reduce inner padding in the macOS app icon ([33705d9](https://github.com/firetower-cloud/firetower/commit/33705d94f7ad6c62d0a37d195a12e1b890e9f7d2))
+* **web:** a child workspace nests under its lead again ([9e2867a](https://github.com/firetower-cloud/firetower/commit/9e2867ad6c96944e9853eb461f0eacfe125b5507))
+
 ## [0.54.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.53.1...firetower-v0.54.0) (2026-11-10)
 
 
