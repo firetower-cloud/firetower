@@ -17,6 +17,7 @@ import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { NewSchedule } from "./NewSchedule";
+import { actions } from "./ScheduleDetail";
 import { Menu, Opt, ProfileMenu, RepoMenu } from "~/ui/StartComposer";
 import { unattendedValue } from "./controls";
 import { getListReposQueryKey } from "~/api/generated/repos/repos";
@@ -301,6 +302,32 @@ describe("the sheet, editing one that exists", () => {
       </QueryClientProvider>,
     );
     expect(html).toContain("It stays switched off until you turn it on.");
+  });
+});
+
+/**
+ * **The `…` on a schedule's page, which held one item.**
+ *
+ * A menu concealing a single thing reads as a disabled control — the
+ * objection the trigger cell's one-item dropdown was rejected for — and that
+ * is the "ugly" in the report, rather than Delete being hidden. Delete
+ * belongs in overflow: drawn beside *Run now*, a control pressed repeatedly,
+ * it is how a schedule somebody meant to pause gets deleted.
+ */
+describe("the schedule page's overflow menu", () => {
+  const menu = actions({ onCopy: () => {}, onDelete: () => {} });
+
+  it("holds more than one thing, so it is a menu", () => {
+    const real = menu.filter((i) => i !== "-");
+    expect(real.length).toBeGreaterThan(1);
+  });
+
+  it("keeps the destructive one last, behind a separator", () => {
+    expect(menu[menu.length - 2]).toBe("-");
+    const last = menu[menu.length - 1];
+    expect(last).not.toBe("-");
+    expect(last !== "-" && last.label).toBe("Delete");
+    expect(last !== "-" && last.tone).toBe("danger");
   });
 });
 

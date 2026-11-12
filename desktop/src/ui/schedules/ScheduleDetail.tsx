@@ -48,6 +48,31 @@ import { NewSchedule } from "./NewSchedule";
 import { RunMark, fires, inFlight, keptWhy, ran, runLine, stillMoving, took } from "./view";
 import { pauseSays, stoppedByFiretower } from "./words";
 
+/**
+ * What the `…` offers.
+ *
+ * **Delete stays in here**, and that is deliberate: a destructive action
+ * drawn beside *Run now* — a control somebody presses repeatedly — is how a
+ * schedule somebody meant to pause gets deleted. Overflow is the right home
+ * for it.
+ *
+ * **But a `…` concealing one item reads as a disabled control**, which is the
+ * objection the trigger cell's one-item dropdown was rejected for, and this
+ * menu held only Delete. So it holds the other act a schedule has — making
+ * another one like it — with the separator the product uses to set a
+ * destructive item apart.
+ *
+ * Pure and exported so `sheet.test.tsx` can hold the rule: more than one
+ * item, and the destructive one last.
+ */
+export function actions(acts: { onCopy: () => void; onDelete: () => void }): MenuItem[] {
+  return [
+    { label: "Duplicate", onPick: acts.onCopy },
+    "-",
+    { label: "Delete", tone: "danger", onPick: acts.onDelete },
+  ];
+}
+
 export function ScheduleDetail({ schedule: given }: { schedule: Schedule }) {
   const client = useQueryClient();
   const confirm = useConfirm();
@@ -71,13 +96,17 @@ export function ScheduleDetail({ schedule: given }: { schedule: Schedule }) {
      once on the way in, for the rail's row and for a link somebody kept;
      afterwards this is ordinary state, like the create sheet on the library
      screen. */
+  /* Opens the same sheet with every control filled in and Create writing a
+     new schedule — which, like everything that merely creates, arrives
+     switched off for somebody to read and turn on. */
+  const [copying, setCopying] = useState(false);
   const [editing, setEditing] = useState(
     () => typeof window !== "undefined" && window.location.hash.includes("edit=1"),
   );
   const watch = moving ? 5_000 : false;
   const history = useScheduleRuns(given.id, { limit: 20 }, { query: { refetchInterval: watch } });
   const runs = useMemo(() => history.data ?? [], [history.data]);
-  /* The it itself, read here rather than taken from the list, so the
+  /* The schedule itself, read here rather than taken from the list, so the
      count of runs and the rows under it come from the same moment. They did
      not, and the footnote said "the last 2 of 1 runs". */
   const fresh = useOneSchedule(given.id, { query: { refetchInterval: watch } });
@@ -103,26 +132,23 @@ export function ScheduleDetail({ schedule: given }: { schedule: Schedule }) {
   const refused = runs[0]?.state === "refused" ? runs[0] : null;
   const said = pauseSays(it, machineNamed(runs));
 
-  const items: MenuItem[] = [
-    {
-      label: "Delete",
-      tone: "danger",
-      onPick: async () => {
-        const sure = await confirm({
-          title: `Delete ${it.name}?`,
-          body: live
-            ? "The it stops. Its run history is deleted and cannot be recovered. One run is in progress — it will finish and its workspace stays. To stop it, close this and use Stop the run."
-            : "The it stops. Its run history is deleted and cannot be recovered. Workspaces from past runs are not affected.",
-          action: "Delete it",
-          tone: "danger",
-        });
-        if (!sure) return;
-        await deleteSchedule(it.id);
-        await refresh();
-        navigate("/schedules");
-      },
+  const items: MenuItem[] = actions({
+    onCopy: () => setCopying(true),
+    onDelete: async () => {
+      const sure = await confirm({
+        title: `Delete ${it.name}?`,
+        body: live
+          ? "The schedule stops. Its run history is deleted and cannot be recovered. One run is in progress — it will finish and its workspace stays. To stop it, close this and use Stop the run."
+          : "The schedule stops. Its run history is deleted and cannot be recovered. Workspaces from past runs are not affected.",
+        action: "Delete it",
+        tone: "danger",
+      });
+      if (!sure) return;
+      await deleteSchedule(it.id);
+      await refresh();
+      navigate("/schedules");
     },
-  ];
+  });
 
   return (
     <div className="scroll-slim h-full overflow-y-auto">
@@ -140,7 +166,7 @@ export function ScheduleDetail({ schedule: given }: { schedule: Schedule }) {
           <div className="acts">
             {/* **Stopping a run and pausing the clock are two controls**, and
                 this one is only here while a run is going. Pausing never
-                touches a run in flight — the it that paused itself with
+                touches a run in flight — the schedule that paused itself with
                 a run still going is the shape of the overrun stop, and it is
                 why these cannot be one button.
 
@@ -158,8 +184,8 @@ export function ScheduleDetail({ schedule: given }: { schedule: Schedule }) {
                   const sure = await confirm({
                     title: "Stop this run?",
                     body: uncommitted
-                      ? `The agent stops and its workspace stays, with ${uncommitted} uncommitted file${uncommitted === 1 ? "" : "s"} in it. The it is unchanged and will run again at its usual time.`
-                      : "The agent stops and its workspace stays. The it is unchanged and will run again at its usual time.",
+                      ? `The agent stops and its workspace stays, with ${uncommitted} uncommitted file${uncommitted === 1 ? "" : "s"} in it. The schedule is unchanged and will run again at its usual time.`
+                      : "The agent stops and its workspace stays. The schedule is unchanged and will run again at its usual time.",
                     action: "Stop the run",
                   });
                   if (!sure) return;
@@ -178,11 +204,16 @@ export function ScheduleDetail({ schedule: given }: { schedule: Schedule }) {
               <Icon of={Pencil} size={14} />
               Edit
             </button>
-            <span
+            {/* **A button, like `SkillSources`' own switch.** A `span` with
+                `tabIndex` draws correctly and does nothing from a keyboard —
+                no Enter, no Space — because nothing gives a span a button's
+                activation behaviour. */}
+            <button
+              type="button"
               className="tog"
               role="switch"
               aria-checked={it.active}
-              tabIndex={0}
+              aria-label={it.active ? "Pause future runs" : "Turn it on"}
               title={it.active ? "Pause future runs" : "Turn it on"}
               onClick={async () => {
                 if (it.active) await pauseSchedule(it.id);
@@ -192,7 +223,7 @@ export function ScheduleDetail({ schedule: given }: { schedule: Schedule }) {
               }}
             >
               <i />
-            </span>
+            </button>
             <span className="text-body text-dim">{it.active ? "On" : "Off"}</span>
             <IconButton of={MoreHorizontal} label="More" onClick={(e) => menu.show(e, it)} />
           </div>
@@ -251,8 +282,8 @@ export function ScheduleDetail({ schedule: given }: { schedule: Schedule }) {
               {refused && refused.errorCode === "NoCapacity" && (
                 <WhereTo className="mt-[22px]">
                   <b>Runs are being refused rather than started.</b> Nothing is deleted to make
-                  room. A refused run is not a failure, so this is not moving the it towards
-                  pausing itself, and the next run will be attempted at its usual time.
+                  room. A refused run is not a failure, so this is not moving the schedule
+                  towards pausing itself, and the next run will be attempted at its usual time.
                 </WhereTo>
               )}
             </div>
@@ -296,13 +327,13 @@ export function ScheduleDetail({ schedule: given }: { schedule: Schedule }) {
                 </dd>
                 <dt>If a run overruns</dt>
                 <dd>
-                  It is never stopped. The next run is skipped, and a second overrun pauses the
-                  it.
+                  It is never stopped. The next run is skipped, and a second overrun pauses
+                  the schedule.
                 </dd>
                 <dt>If a machine is low on disk</dt>
                 <dd>
                   The run is refused and nothing starts. It does not count as a failure, so this
-                  never pauses the it.
+                  never pauses the schedule.
                 </dd>
               </dl>
             </div>
@@ -412,6 +443,9 @@ export function ScheduleDetail({ schedule: given }: { schedule: Schedule }) {
             void refresh();
           }}
         />
+      )}
+      {copying && (
+        <NewSchedule from={null} copyOf={it} onClose={() => setCopying(false)} />
       )}
     </div>
   );

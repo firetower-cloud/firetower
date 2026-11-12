@@ -83,6 +83,7 @@ type Checkout = { id: string; slug: string };
 export function NewSchedule({
   from,
   editing,
+  copyOf,
   onClose,
 }: {
   from: Example | null;
@@ -100,6 +101,17 @@ export function NewSchedule({
    * whatever a fresh one defaults to.
    */
   editing?: Schedule | null;
+  /**
+   * A schedule to copy: every control filled in from it, and **Create writes
+   * a new one**.
+   *
+   * The same prefill as an edit and a different act, which is why it is a
+   * second prop rather than a flag — `editing` is what decides where Save
+   * goes, and conflating the two would make a copy overwrite the thing it
+   * was copied from. `create_schedule`'s own doc already counted a copy among
+   * the things that merely create, and so arrive switched off.
+   */
+  copyOf?: Schedule | null;
   onClose: () => void;
 }) {
   const client = useQueryClient();
@@ -110,16 +122,23 @@ export function NewSchedule({
   const { data: accounts } = useAccounts();
   const profiles = useListRoles().data ?? [];
 
-  const [name, setName] = useState(editing?.name ?? from?.name ?? "");
-  const [prompt, setPrompt] = useState(editing?.prompt ?? from?.prompt ?? "");
-  const [checkouts, setCheckouts] = useState<Checkout[]>(
-    editing ? editing.repos.map((r) => ({ id: r.id, slug: r.slug })) : [],
+  /* What this sheet opens on. An edit and a copy fill in from the same
+     place; only where Save goes differs. */
+  const like = editing ?? copyOf ?? null;
+  const [name, setName] = useState(
+    // A copy says so in its name: two rows called the same thing, one of them
+    // off, is a list nobody can read.
+    (copyOf ? `${copyOf.name} (copy)` : editing?.name) ?? from?.name ?? "",
   );
-  const [profileId, setProfileId] = useState<string | null>(editing?.choices.profile ?? null);
-  const [base, setBase] = useState(editing?.base ?? "");
+  const [prompt, setPrompt] = useState(like?.prompt ?? from?.prompt ?? "");
+  const [checkouts, setCheckouts] = useState<Checkout[]>(
+    like ? like.repos.map((r) => ({ id: r.id, slug: r.slug })) : [],
+  );
+  const [profileId, setProfileId] = useState<string | null>(like?.choices.profile ?? null);
+  const [base, setBase] = useState(like?.base ?? "");
   // Open where there is something in it to see.
-  const [advanced, setAdvanced] = useState(!!editing?.base);
-  const [deleteClean, setDeleteClean] = useState(editing?.deleteCleanRuns ?? true);
+  const [advanced, setAdvanced] = useState(!!like?.base);
+  const [deleteClean, setDeleteClean] = useState(like?.deleteCleanRuns ?? true);
   const [saving, setSaving] = useState(false);
   const [refused, setRefused] = useState<string | null>(null);
   /** Which menu is open, and what it drops from. The composer's own idiom. */
@@ -129,12 +148,12 @@ export function NewSchedule({
      The same state the composer keeps, so the same components can be fed. */
   const [where, setWhere] = useState<Where>({
     machine: "",
-    hostId: editing?.hostId ?? "",
-    agent: editing?.choices.agent ?? "",
+    hostId: like?.hostId ?? "",
+    agent: like?.choices.agent ?? "",
   });
-  const [accountId, setAccountId] = useState(editing?.choices.accountId ?? "");
+  const [accountId, setAccountId] = useState(like?.choices.accountId ?? "");
   const [chosen, setChosen] = useState<Partial<Record<ControlKind, string>>>(() => {
-    const was = editing?.choices.settings;
+    const was = like?.choices.settings;
     if (!was) return {};
     const seed: Partial<Record<ControlKind, string>> = {};
     (["model", "effort", "mode", "sandbox"] as ControlKind[]).forEach((k) => {
@@ -142,7 +161,7 @@ export function NewSchedule({
     });
     return seed;
   });
-  const [skillIds, setSkillIds] = useState<string[] | null>(editing?.choices.skills ?? null);
+  const [skillIds, setSkillIds] = useState<string[] | null>(like?.choices.skills ?? null);
 
   const all = useMemo(() => machines(hosts), [hosts]);
   const { host } = useMemo(() => resolve(hosts, where), [hosts, where]);
@@ -158,13 +177,13 @@ export function NewSchedule({
   // wrong one.
   const placed = useRef(false);
   useEffect(() => {
-    const named = editing?.hostId;
+    const named = like?.hostId;
     if (placed.current || !named || all.length === 0) return;
     const its = all.find((m) => m.hosts.some((h) => h.id === named));
     if (!its) return;
     placed.current = true;
     setWhere((w) => ({ ...w, machine: its.key, hostId: named }));
-  }, [all, editing?.hostId]);
+  }, [all, like?.hostId]);
 
   const profile = profiles.find((p) => p.id === profileId);
   const pinned = (profile?.agent ?? undefined) as Agent | undefined;
@@ -220,7 +239,7 @@ export function NewSchedule({
   /* The cadence this opens on: the one it already has when this is an edit,
      the example's when one was picked, and weekdays otherwise. One name for
      all three so each control below reads one thing. */
-  const was: Cadence | undefined = editing?.triggers[0]?.cadence ?? from?.cadence;
+  const was: Cadence | undefined = like?.triggers[0]?.cadence ?? from?.cadence;
   const [kindOf, setKind] = useState<Cadence["kind"]>(was?.kind ?? "weekdays");
   const [at, setAt] = useState(("at" in (was ?? {}) ? (was as { at: string }).at : "") || "08:30");
   const [day, setDay] = useState<Weekday>(
@@ -255,7 +274,7 @@ export function NewSchedule({
      because an offset is wrong twice a year. */
   const [zone, setZone] = useState(
     () =>
-      editing?.triggers[0]?.timezone ||
+      like?.triggers[0]?.timezone ||
       Intl.DateTimeFormat().resolvedOptions().timeZone ||
       "UTC",
   );
@@ -735,16 +754,17 @@ export function NewSchedule({
                       Everything is <b>kept</b>
                     </span>
                   ) : (
-                    <span
+                    <button
+                      type="button"
                       className="tog"
                       role="switch"
                       aria-checked={deleteClean}
-                      tabIndex={0}
+                      aria-label="Delete the workspace after a clean run"
                       title={deleteClean ? "Keep every workspace instead" : "Delete clean runs again"}
                       onClick={() => setDeleteClean((o) => !o)}
                     >
                       <i />
-                    </span>
+                    </button>
                   )}
                 </span>
               </div>

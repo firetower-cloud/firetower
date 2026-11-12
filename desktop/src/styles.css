@@ -3591,6 +3591,12 @@ html:not([data-platform="macos"]) {
   .src-row:hover {
     background: var(--color-raise);
   }
+  /* The nudge `.tog` used to carry for everybody: this row starts its
+     children at the top, so the switch is brought down to the first line of
+     the text beside it. */
+  .src-row .tog {
+    margin-top: 11px;
+  }
   .src-row.dark .tx {
     opacity: 0.55;
   }
@@ -3660,12 +3666,18 @@ html:not([data-platform="macos"]) {
 
   /* The switch. **Neutral, never green** — on is `--body`, because a source
      being included is a state and not a success. */
+  /* **No margin of its own.** `margin-top: 11px` lived here and is
+     positional: it drops the 17px switch onto the centre of the first text
+     line in `.src-row`, which is `align-items: flex-start`. Every other row
+     that has since taken a switch centres its children — a switch beside two
+     pill buttons, a switch beside a centred label — and inherited an 11px
+     push downward, which is the misalignment reported on the schedule
+     page's action row. The nudge belongs to the row that wants it. */
   .tog {
     position: relative;
     flex: none;
     width: 28px;
     height: 17px;
-    margin-top: 11px;
     border-radius: 99px;
     background: var(--color-overlay);
     transition: background var(--dur-native) var(--ease-swift);

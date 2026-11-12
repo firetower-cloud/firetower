@@ -250,11 +250,12 @@ function Row({ schedule }: { schedule: Schedule }) {
         <span className="w-[108px] tabular-nums">
           {schedule.lastRun ? ran(schedule.lastRun.fireAt) : "—"}
         </span>
-        <span
+        <button
+          type="button"
           className="tog"
           aria-checked={schedule.active}
           role="switch"
-          tabIndex={0}
+          aria-label={schedule.active ? "Pause future runs" : "Turn it on"}
           title={schedule.active ? "Pause future runs" : "Turn it on"}
           onClick={async (e) => {
             e.stopPropagation();
@@ -262,7 +263,7 @@ function Row({ schedule }: { schedule: Schedule }) {
           }}
         >
           <i />
-        </span>
+        </button>
         <IconButton
           of={MoreHorizontal}
           label="More"
