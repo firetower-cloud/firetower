@@ -586,11 +586,31 @@ pub(crate) async fn create_session_as(
     // front of this is absent or it is about a minute old; it is never older.
     let mut room = std::collections::HashMap::new();
     for h in &hosts {
-        let free = state
-            .fleet
-            .capacity_of(&h.id)
-            .await
-            .map(|c| c.disk_total_mb.saturating_sub(c.disk_used_mb));
+        let free = state.fleet.capacity_of(&h.id).await.and_then(|c| {
+            // **A total of zero is a probe that failed, not a disk with
+            // nothing left on it.** `capacity.rs` answers `(0, 0)` when `df`
+            // or `docker system df` cannot be read at all — a machine with no
+            // Docker, a wedged daemon, a command that is not there — so a
+            // failed reading arrives here looking exactly like a full disk.
+            //
+            // Failing open on an *absent* report was never enough, because
+            // this is a *present* report of nothing. Read literally it refused
+            // every launch on that machine, interactive work as much as
+            // scheduled, which is the one direction this floor must never
+            // fail in: refusing a run that would have fitted costs one run,
+            // and refusing every run costs the machine.
+            //
+            // There is no machine whose disk is genuinely zero megabytes, so
+            // the sentinel is unambiguous. The better shape is for the worker
+            // to report an explicit unknown rather than a zero, and that is
+            // worth doing — it is a change to `Capacity`, which is a contract
+            // type three clients are generated from, and it does not belong
+            // inside a guard that has to stay revertible on its own.
+            match c.disk_total_mb {
+                0 => None,
+                total => Some(total.saturating_sub(c.disk_used_mb)),
+            }
+        });
         room.insert(
             h.id.as_str().to_string(),
             free.is_none_or(|mb| mb >= DISK_FLOOR_MB),

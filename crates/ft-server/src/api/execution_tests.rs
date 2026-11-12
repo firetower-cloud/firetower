@@ -2921,6 +2921,52 @@ async fn a_fleet_missing_an_engine_is_not_told_its_disks_are_full() {
     state.fleet.stop_supervising(&host.id).await;
 }
 
+/// **A machine whose disk probe failed is not a machine with a full disk.**
+///
+/// `capacity.rs` answers `(0, 0)` when `df` or `docker system df` cannot be
+/// read at all, so a failed probe is *reported* rather than absent — and read
+/// literally it is a present reading of no free space. That refused every
+/// launch on the machine, interactive work as much as scheduled, which is the
+/// one direction this floor must never fail in.
+#[tokio::test]
+async fn a_machine_whose_disk_probe_failed_still_takes_work() {
+    let (state, _, host, ready, owner) = fixture().await;
+    ready.store(true, Ordering::SeqCst);
+    says_it_has(&state, &host, &[(Agent::ClaudeCode, true)]).await;
+    // What a worker sends when its probe failed: zeroes, not silence.
+    says_its_disk(&state, &host, 0, 0).await;
+    assert_eq!(
+        state
+            .fleet
+            .capacity_of(&host.id)
+            .await
+            .map(|c| c.disk_total_mb),
+        Some(0),
+        "the reading is present and it is zero, which is the state under test"
+    );
+
+    launch_on(&state, &owner, None)
+        .await
+        .expect("a reading nobody could take is not a refusal");
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// And a machine that named itself is refused on a real reading rather than
+/// on a failed one — the sentinel must not become a way to bypass the floor.
+#[tokio::test]
+async fn the_failed_probe_sentinel_does_not_disarm_a_real_low_reading() {
+    let (state, _, host, ready, owner) = fixture().await;
+    ready.store(true, Ordering::SeqCst);
+    says_its_disk(&state, &host, 60_000, 59_000).await;
+
+    let refused = launch_on(&state, &owner, Some(&host))
+        .await
+        .expect_err("a real reading below the floor still refuses");
+    assert!(matches!(refused.code, ErrorCode::NoCapacity));
+    state.fleet.stop_supervising(&host.id).await;
+}
+
 /// **Fail open: unknown is unknown, not low.**
 ///
 /// A machine that has never reported is still a candidate — the same answer
