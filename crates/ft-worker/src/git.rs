@@ -1619,10 +1619,7 @@ mod tests {
                 .map(|(_, v)| v.clone())
         };
         assert_eq!(by("GIT_CONFIG_COUNT").as_deref(), Some("1"));
-        assert_eq!(
-            by("GIT_CONFIG_KEY_0").as_deref(),
-            Some("credential.helper")
-        );
+        assert_eq!(by("GIT_CONFIG_KEY_0").as_deref(), Some("credential.helper"));
         assert_eq!(
             by("GIT_CONFIG_VALUE_0").as_deref(),
             Some(""),
