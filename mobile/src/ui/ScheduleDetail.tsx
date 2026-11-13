@@ -188,6 +188,19 @@ export function Detail({ id, framed }: { id: string; framed?: boolean }) {
                 : "No runs yet."}
             </Text>
           ) : null}
+          {/* **One scrolling page, and it says so.**
+
+              The desktop pages this history with a 5/10/20 control, because
+              there a year of daily runs is 365 rows in a window somebody is
+              reading at a desk. A phone is scrolled rather than paged, and
+              three taps to change a page size is a worse answer than a thumb
+              — so this keeps its twenty and stops implying they are all of
+              them. The desktop is where the rest is. */}
+          {it.runsTotal > runs.length ? (
+            <Text className="px-5 py-3 font-sans text-mute" style={{ fontSize: size.meta }}>
+              The newest {runs.length} of {it.runsTotal} runs.
+            </Text>
+          ) : null}
           <View style={{ height: 24 }} />
         </ScrollView>
       )}

@@ -5595,6 +5595,18 @@ html:not([data-platform="macos"]) {
   .s-run[data-gone="true"] {
     cursor: default;
   }
+  /* Under the history: where in it you are, and how much of it to show.
+     `margin-left: auto` on the size picker so the two steps stay together on
+     the left and the choice sits apart from them — it is not a third step. */
+  .s-pager {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin-top: 14px;
+  }
+  .s-pager .s-pagesize {
+    margin-left: auto;
+  }
   .s-foot-note {
     margin-top: 14px;
     font-size: 13.5px;

@@ -8,8 +8,15 @@
 
 export type ScheduleRunsParams = {
 /**
- * How many to return. Twenty is what the page draws.
+ * How many to return. Ten is what the page draws; a person can ask for
+ * five or twenty.
  * @nullable
  */
 limit?: number | null;
+/**
+ * Only runs that were due strictly before this. Omit for the newest
+ * page, which is what opening the screen asks for.
+ * @nullable
+ */
+before?: string | null;
 };

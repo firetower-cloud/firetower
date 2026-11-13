@@ -1132,7 +1132,8 @@ export const ScheduleRunsParams = zod.object({
 })
 
 export const ScheduleRunsQueryParams = zod.object({
-  "limit": zod.int().nullish().describe('How many to return. Twenty is what the page draws.')
+  "limit": zod.int().nullish().describe('How many to return. Ten is what the page draws; a person can ask for\nfive or twenty.'),
+  "before": zod.iso.datetime({"offset":true}).nullish().describe('Only runs that were due strictly before this. Omit for the newest\npage, which is what opening the screen asks for.')
 })
 
 export const ScheduleRunsResponseItem = zod.object({

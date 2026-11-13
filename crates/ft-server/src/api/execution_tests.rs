@@ -6632,6 +6632,57 @@ async fn a_launch_approved_against_named_versions_will_not_start_with_fewer() {
     );
 }
 
+/// **A page of history is a page, and the next one starts where it stopped.**
+///
+/// Cursor rather than offset, so this is also the test that the two pages do
+/// not overlap and do not skip: the newest page's last run is the boundary,
+/// and asking for runs older than it returns the next ones with nothing in
+/// common.
+#[tokio::test]
+async fn a_page_of_history_is_a_page_and_the_next_one_follows_it() {
+    let (state, principal, _, _, _) = fixture().await;
+    let made = armed(&state, &principal, "Has run a lot").await;
+
+    // Twelve, oldest first, so the newest page is the last four written.
+    for minutes in (1..=12).rev() {
+        record(&state, &made.id, minutes, "finished", Some("clean"), None).await;
+    }
+    assert_eq!(state.db.run_counts(&made.id).await.unwrap().0, 12);
+
+    let first = state.db.runs_of(&made.id, 5, None).await.unwrap();
+    assert_eq!(first.len(), 5, "a page is the size that was asked for");
+    let newest: Vec<_> = first.iter().map(|r| r.fire_at).collect();
+    assert!(
+        newest.windows(2).all(|w| w[0] > w[1]),
+        "newest first, which is what the screen opens on"
+    );
+
+    // The next page starts strictly after the boundary, which is what makes
+    // a cursor a cursor: no row is drawn twice and none is stepped over.
+    let next = state
+        .db
+        .runs_of(&made.id, 5, Some(*newest.last().unwrap()))
+        .await
+        .unwrap();
+    assert_eq!(next.len(), 5);
+    assert!(
+        next.iter().all(|r| !newest.contains(&r.fire_at)),
+        "the second page repeated a run from the first"
+    );
+    assert!(
+        next.first().map(|r| r.fire_at) < newest.last().copied(),
+        "and it carried on downward rather than starting again"
+    );
+
+    // And the tail is short rather than padded.
+    let last = state
+        .db
+        .runs_of(&made.id, 5, Some(next.last().unwrap().fire_at))
+        .await
+        .unwrap();
+    assert_eq!(last.len(), 2, "twelve runs in pages of five");
+}
+
 /// **A run's workspace is a workspace, and the lists say so.**
 ///
 /// Asked for after a report that scheduled runs were missing from the home
@@ -7106,7 +7157,7 @@ async fn runs_of(
 ) -> Vec<ft_core::schedule::ScheduleRun> {
     state
         .db
-        .runs_of(id, 50)
+        .runs_of(id, 50, None)
         .await
         .unwrap()
         .iter()

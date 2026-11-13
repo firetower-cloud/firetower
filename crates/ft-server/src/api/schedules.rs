@@ -145,6 +145,33 @@ pub struct Limit {
     pub limit: Option<i64>,
 }
 
+/// One page of a schedule's history.
+///
+/// **A cursor, not an offset**, and the reason is the index that already
+/// exists: `schedule_runs_history` is `(schedule_id, fire_at desc)`, so
+/// "older than this instant" is a range scan from where the last page
+/// stopped, while an offset walks and discards every row in front of it. At a
+/// year of daily runs that is 365 rows read to draw the last ten.
+///
+/// The other half is correctness. A page offset shifts under somebody when a
+/// run settles between two reads — the row they were looking at moves down
+/// and one slides past unseen. A cursor names a fixed point, and `fire_at` is
+/// unique within a schedule because the claim's own `ON CONFLICT
+/// (schedule_id, fire_at)` makes it so, which is also why it needs no
+/// tie-break.
+#[derive(Debug, Deserialize, ToSchema, utoipa::IntoParams)]
+#[serde(rename_all = "camelCase")]
+pub struct RunPage {
+    /// How many to return. Ten is what the page draws; a person can ask for
+    /// five or twenty.
+    #[serde(default)]
+    pub limit: Option<i64>,
+    /// Only runs that were due strictly before this. Omit for the newest
+    /// page, which is what opening the screen asks for.
+    #[serde(default)]
+    pub before: Option<chrono::DateTime<chrono::Utc>>,
+}
+
 /// Every schedule of yours, newest change first.
 #[utoipa::path(
     get, path = "/api/v1/schedules", tag = "schedules",
@@ -997,19 +1024,22 @@ pub(super) async fn delete_schedule(
 /// This schedule's runs, newest first.
 #[utoipa::path(
     get, path = "/api/v1/schedules/{id}/runs", tag = "schedules",
-    params(("id" = String, Path, description = "Schedule id"), Limit),
+    params(("id" = String, Path, description = "Schedule id"), RunPage),
     responses((status = 200, body = Vec<ScheduleRun>), (status = 404, body = ApiError)),
 )]
 pub(super) async fn schedule_runs(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
     Path(id): Path<String>,
-    Query(limit): Query<Limit>,
+    Query(page): Query<RunPage>,
 ) -> ApiResult<Json<Vec<ScheduleRun>>> {
     let row = mine(&state, &principal, &id).await?;
     let rows = state
         .db
-        .runs_of(&row.id, limit.limit.unwrap_or(20).clamp(1, 200))
+        // Ten by default, which is the page. The ceiling is what a client may
+        // ask for rather than what it draws: nothing reads a year of history
+        // into a browser, and the screen's own control offers 5, 10 and 20.
+        .runs_of(&row.id, page.limit.unwrap_or(10).clamp(1, 200), page.before)
         .await?;
     Ok(Json(rows.iter().map(as_run).collect()))
 }
@@ -1214,7 +1244,12 @@ async fn assemble(state: &AppState, row: crate::db::ScheduleRow) -> ApiResult<Sc
     let counted: Vec<_> = window.iter().map(settle::as_counted).collect();
     let streak = pause::streak(&counted);
 
-    let last_run = state.db.runs_of(&row.id, 1).await?.first().map(as_run);
+    let last_run = state
+        .db
+        .runs_of(&row.id, 1, None)
+        .await?
+        .first()
+        .map(as_run);
 
     // **Read out of the spec the way the launch reads it**, so the screen and
     // the run cannot disagree about which repositories these are.

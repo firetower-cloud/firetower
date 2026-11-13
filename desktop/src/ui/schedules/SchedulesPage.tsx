@@ -351,7 +351,13 @@ function AllRuns() {
     <div className="scroll-slim h-full overflow-y-auto">
       <Section
         title="All runs"
-        note="Every run from every schedule, newest first."
+        // **"The newest", not "every".** This reads a bounded window —
+        // `useAllRuns({ limit })` — so a fleet with a year of history has
+        // more than is on screen, and the heading was promising all of it.
+        // Not paged like one schedule's history is: a cursor across
+        // schedules needs a tie-break, because two of them can fire at the
+        // same instant, and that wants `(fire_at, id)` and an index to match.
+        note="The newest runs from every schedule."
         settling={feed.isPending}
       >
         {bands

@@ -46,6 +46,7 @@ import { useRepos } from "~/data";
 import type { Schedule, ScheduleRun } from "~/api/generated/model";
 import { BackToSchedules, RunNowButton, saysWhen } from "./SchedulesPage";
 import { NewSchedule } from "./NewSchedule";
+import { PickOne } from "~/ui/menus";
 import { RunMark, fires, inFlight, keptWhy, ran, runLine, stillMoving, took } from "./view";
 import { pauseSays, stoppedByFiretower } from "./words";
 
@@ -104,11 +105,42 @@ export function ScheduleDetail({ schedule: given }: { schedule: Schedule }) {
      new schedule — which, like everything that merely creates, arrives
      switched off for somebody to read and turn on. */
   const [copying, setCopying] = useState(false);
+  /* Changing the page size starts again at the newest page: the cursors in
+     the stack are boundaries of pages that no longer exist at the new size,
+     and keeping them would skip or repeat whatever fell across the seam. */
+  const resize = (n: number) => {
+    setSize(n);
+    setOlder([]);
+  };
   const [editing, setEditing] = useState(
     () => typeof window !== "undefined" && window.location.hash.includes("edit=1"),
   );
   const watch = moving ? 5_000 : false;
-  const history = useScheduleRuns(given.id, { limit: 20 }, { query: { refetchInterval: watch } });
+
+  /**
+   * **A page of history, and a stack of where the pages began.**
+   *
+   * Ten by default. The screen used to read a fixed twenty and draw the lot,
+   * which is fine for a schedule that has run twice and is 365 rows in a
+   * browser for one that has run daily for a year.
+   *
+   * The cursor is the `fireAt` of the last row drawn, and going back is
+   * popping the stack rather than subtracting a page — see
+   * `api::schedules::RunPage` for why this is a cursor at all. A stack
+   * because a cursor only knows how to go forward: `older` holds the
+   * boundary each page after the first started at, so its depth is also the
+   * page number.
+   */
+  const [size, setSize] = useState(10);
+  const [older, setOlder] = useState<string[]>([]);
+  const before = older[older.length - 1];
+  const history = useScheduleRuns(
+    given.id,
+    { limit: size, before },
+    // **Only the newest page follows a moving run.** An older page cannot
+    // change: every run on it settled before the one that is moving started.
+    { query: { refetchInterval: before ? false : watch } },
+  );
   const runs = useMemo(() => history.data ?? [], [history.data]);
   /* The schedule itself, read here rather than taken from the list, so the
      count of runs and the rows under it come from the same moment. They did
@@ -282,7 +314,25 @@ export function ScheduleDetail({ schedule: given }: { schedule: Schedule }) {
               <h2 className="s-h3">
                 Run history <span className="n">{it.runsTotal}</span>
               </h2>
-              <History runs={runs} norepo={norepo} keepall={keepall} total={it.runsTotal} />
+              <History
+                runs={runs}
+                norepo={norepo}
+                keepall={keepall}
+                total={it.runsTotal}
+                size={size}
+                onSize={resize}
+                page={older.length + 1}
+                onOlder={() =>
+                  setOlder((seen) =>
+                    runs.length > 0 ? [...seen, runs[runs.length - 1].fireAt] : seen,
+                  )
+                }
+                onNewer={() => setOlder((seen) => seen.slice(0, -1))}
+                /* There is more below when this page came back full. A short
+                   page is the end of the history, which is cheaper and more
+                   honest than counting what is left. */
+                more={runs.length === size}
+              />
               {refused && refused.errorCode === "NoCapacity" && (
                 <WhereTo className="mt-[22px]">
                   <b>Runs are being refused rather than started.</b> Nothing is deleted to make
@@ -495,11 +545,26 @@ function History({
   norepo,
   keepall,
   total,
+  size,
+  onSize,
+  page,
+  more,
+  onOlder,
+  onNewer,
 }: {
   runs: ScheduleRun[];
   norepo: boolean;
   keepall: boolean;
+  /** Every run this schedule has ever had, which is what the heading counts. */
   total: number;
+  size: number;
+  onSize: (n: number) => void;
+  /** Which page this is, counting from one. */
+  page: number;
+  /** Whether there is anything older than this page. */
+  more: boolean;
+  onOlder: () => void;
+  onNewer: () => void;
 }) {
   if (runs.length === 0) {
     return <p className="s-foot-note">No runs yet. It will not run until you turn it on.</p>;
@@ -534,14 +599,40 @@ function History({
           </button>
         ))}
       </div>
+      {/* **The pager, and only when there is something to page.** A
+          schedule with four runs and a page of ten is the whole history, and
+          a row of controls under it would be furniture. */}
+      {(more || page > 1) && (
+        <div className="s-pager">
+          <button className="btn plain" disabled={page === 1} onClick={onNewer}>
+            Newer
+          </button>
+          <button className="btn plain" disabled={!more} onClick={onOlder}>
+            Older
+          </button>
+          <span className="s-pagesize">
+            <PickOne
+              label="Runs per page"
+              value={String(size)}
+              options={[5, 10, 20].map((n) => ({ value: String(n), label: `${n} per page` }))}
+              onPick={(v) => onSize(Number(v))}
+            />
+          </span>
+        </div>
+      )}
       <p className="s-foot-note">
         {/* **It cannot say "the last 2 of 1".** It did, because the rows came
             from one read and the total from another, taken at a different
             moment. Both come from the same refetch now, and the sentence is
             still written so that a total which has not caught up says the
-            plain thing rather than an impossible one. */}
+            plain thing rather than an impossible one.
+            **And it cannot say "all 10" of a history with 365.** A page is a
+            subset the moment paging exists, so the sentence says which page
+            it is rather than implying there is nothing else. */}
         {total > runs.length
-          ? `Showing the last ${runs.length} of ${total} runs. `
+          ? page === 1
+            ? `Showing the newest ${runs.length} of ${total} runs. `
+            : `Page ${page}, showing ${runs.length} of ${total} runs. `
           : `Showing ${runs.length === 1 ? "the one run" : `all ${runs.length} runs`}. `}
         {norepo
           ? "Without a repository, runs are not summarised. The outcome and the timing are still kept."

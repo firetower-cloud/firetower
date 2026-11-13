@@ -4172,7 +4172,7 @@
           {
             "name": "limit",
             "in": "query",
-            "description": "How many to return. Twenty is what the page draws.",
+            "description": "How many to return. Ten is what the page draws; a person can ask for\nfive or twenty.",
             "required": false,
             "schema": {
               "type": [
@@ -4180,6 +4180,19 @@
                 "null"
               ],
               "format": "int64"
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "description": "Only runs that were due strictly before this. Omit for the newest\npage, which is what opening the screen asks for.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date-time"
             }
           }
         ],

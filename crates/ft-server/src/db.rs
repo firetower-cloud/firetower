@@ -3311,15 +3311,27 @@ impl Db {
     }
 
     /// The history a page draws, newest first.
-    pub async fn runs_of(&self, schedule: &ScheduleId, limit: i64) -> Result<Vec<RunRow>> {
+    ///
+    /// `before` is a cursor, not an offset — see
+    /// [`crate::api::schedules::RunPage`]. `schedule_runs_history` is
+    /// `(schedule_id, fire_at desc)`, so this is a range scan from where the
+    /// last page stopped whether it is the first page or the fortieth.
+    pub async fn runs_of(
+        &self,
+        schedule: &ScheduleId,
+        limit: i64,
+        before: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> Result<Vec<RunRow>> {
         Ok(sqlx::query(&format!(
             "SELECT {RUN_COLUMNS} FROM schedule_runs r
               WHERE r.schedule_id = $1
+                AND ($3::timestamptz IS NULL OR r.fire_at < $3)
               ORDER BY r.fire_at DESC
               LIMIT $2"
         ))
         .bind(schedule.as_str())
         .bind(limit)
+        .bind(before)
         .fetch_all(&self.pool)
         .await?
         .iter()
