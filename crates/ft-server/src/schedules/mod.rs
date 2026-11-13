@@ -99,23 +99,26 @@ pub(crate) const AT_ONCE_PER_HOST: usize = 3;
 /// live, the reconciler still has `ORPHAN_AFTER`, and the worst case is the
 /// overshoot that used to be the only case.
 ///
-/// **So past this, [`AT_ONCE_PER_HOST`] is a throttle and not a bound, and
-/// three minutes is not a generous allowance.** A launch measured here took
-/// 181.22 seconds — over the wait by a second and a bit — and the worker
-/// allows a single git transfer thirty minutes before calling it stalled
-/// (`ft-worker/src/git.rs`, `transferring`), with one retry on a transient
-/// failure. A first clone of a large repository is therefore *expected* to
-/// outlast this, and when it does, a fourth workspace starts while three are
-/// still filling and the disk floor is consulted against a reading that is
-/// stale by the overrun.
+/// **So past this, [`AT_ONCE_PER_HOST`] is a throttle and not a bound.** The
+/// bound it gives is over creations that finish inside the wait, which is
+/// what turned twenty worktrees against one disk reading into three; past the
+/// wait the permit goes back whatever the worker is still doing.
+///
+/// And three minutes is not a generous allowance, on the worker's own
+/// numbers: a single git transfer is given **thirty minutes** before it is
+/// called stalled (`ft-worker/src/git.rs`, `transferring`), with one retry on
+/// a transient failure. A first clone of a large repository is therefore
+/// *expected* to outlast this, and when it does a fourth workspace starts
+/// while three are still filling and the disk floor is read against a number
+/// that is stale by the overrun.
 ///
 /// Holding instead until every creation completes was considered and not
 /// done: with three permits, three creations that never complete would stop
 /// every scheduled launch in the process for as long as they lasted, which
-/// trades a capacity overshoot for an outage. What is done instead is that
-/// the wait ends early on *evidence* rather than only on the clock — see
-/// [`launch::created`] — so the timer is reached only when nothing is known,
-/// which is the one case it was ever meant to cover.
+/// trades a capacity overshoot for an outage. Ending the wait on anything
+/// short of the acknowledgement was tried and is worse — see
+/// [`launch::created`] for the two facts that look like evidence that a
+/// creation stopped and are not.
 pub(crate) const CREATION_WAIT: Duration = Duration::from_secs(180);
 
 /// How long before the first pass.

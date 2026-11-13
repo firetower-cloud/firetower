@@ -156,15 +156,23 @@ pub fn spawn(state: AppState, schedule: crate::db::ScheduleRow, run: ScheduleRun
 /// `ToServer::WorkspaceCreated` is the worker saying it is done, on both the
 /// success and the failure path — a creation that failed holds nothing.
 ///
-/// **Or until no acknowledgement can be coming.** A creation that has already
-/// ended holds nothing, and a permit held for it is three minutes of delay
-/// bounding an empty machine: so the session failing, the session being gone,
-/// and the machine being gone each end the wait at once. This is the "or
-/// confirmed cancelled" half, and it is read as evidence rather than as a
-/// timeout.
+/// The acknowledgement is sent on **both** paths — a creation that failed
+/// holds nothing and says so — so this one fact covers completion and
+/// acknowledged cancellation together, which is the whole of what can end
+/// this wait early.
 ///
-/// Still capped, for the cases where neither answer ever arrives: a worker
-/// too old to acknowledge, a control plane that restarted while this was
+/// **Two things that look like evidence and are not, and both were tried
+/// here.** A disconnected worker has not stopped: it waits for its
+/// outstanding tasks (`ft-worker/src/lib.rs`, the shutdown path) and
+/// acknowledges completion after the connection has gone, so releasing on
+/// disconnection releases against a worktree still being cut. And a session
+/// going `Failed` is not this creation failing: a turn sent during a blocked
+/// setup answers `AgentUnavailable` and fails the *session* at
+/// `fleet.rs:3071` while the creation carries on underneath it. Both are
+/// uncertainty, and uncertainty is what the cap is for.
+///
+/// Still capped, for the cases where no acknowledgement ever arrives: a
+/// worker too old to send one, a control plane that restarted while this was
 /// waiting — and **a creation that is simply slower than the cap**, which is
 /// the honest one and is why [`super::CREATION_WAIT`] says the cap is a
 /// throttle past it. Past the cap it gives up and says so; the run is live,
@@ -175,28 +183,6 @@ async fn created(state: &AppState, session: &SessionId) {
     while tokio::time::Instant::now() < until {
         if state.fleet.workspace_created(session).await {
             return;
-        }
-        match state.db.session(session).await {
-            // Gone, or it failed before the workspace existed. Nothing is
-            // being cut on this permit's behalf.
-            Ok(None) => return,
-            Ok(Some(it)) => {
-                if matches!(
-                    it.status,
-                    ft_core::SessionStatus::Failed | ft_core::SessionStatus::Ended
-                ) {
-                    return;
-                }
-                // The machine went away mid-creation. The frame is not
-                // re-sent on reconnect, so this creation is over however the
-                // directory on that disk ended up.
-                if !state.fleet.is_connected(&it.host_id).await {
-                    return;
-                }
-            }
-            // The database is what is unwell, not the creation. Keep waiting:
-            // the only thing this decides is when the next launch may start.
-            Err(_) => {}
         }
         // A quarter of a second: the acknowledgement arrives when the work is
         // done rather than on a timer, so this is about how promptly the next
