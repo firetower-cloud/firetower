@@ -49,15 +49,23 @@ fn launching() -> &'static Arc<RwLock<HashSet<String>>> {
 /// The cap used to be applied before a launch, against the machine the
 /// schedule had pinned — which a schedule deliberately never does, so it was
 /// unreachable for every ordinary one. It is applied here instead, where it
-/// does not need to know which machine anything will land on: at most
-/// [`super::AT_ONCE_PER_HOST`] launches are in flight, each holding its
-/// permit until its workspace exists, so the floor is consulted against a
-/// reading at most about five seconds stale and the worst overshoot is three
-/// worktrees rather than twenty.
+/// does not need to know which machine anything will land on.
 ///
 /// Across passes as well as within one, which is stronger than the scope
 /// asked for and free: a process-wide semaphore cannot be defeated by two
 /// passes each starting three.
+///
+/// **It is a throttle, not a bound, and the difference is
+/// [`super::CREATION_WAIT`].** A permit is held until the worker says the
+/// workspace is made, or until that wait runs out — and a first clone of a
+/// large repository can legitimately take longer than the wait, because the
+/// worker allows a transfer thirty minutes (`ft-worker/src/git.rs`,
+/// `transferring`) and retries once on a transient failure. So three slow
+/// creations release three permits while all three worktrees are still
+/// filling, and a fourth launch starts against a reading that is stale by as
+/// much as the overrun. What it does bound is the ordinary case: a creation
+/// that finishes inside the wait holds its permit for all of it, which is
+/// what turned twenty worktrees against one disk reading into three.
 ///
 /// It is not a reservation system and does not pretend to be one. Threat-model
 /// item 17 asks for atomic capacity reservation; this is the ninety per cent
@@ -89,12 +97,13 @@ pub fn spawn(state: AppState, schedule: crate::db::ScheduleRow, run: ScheduleRun
         let room = permits().acquire().await;
         match start(&state, &schedule, &run, why).await {
             Err(e) => tracing::warn!(run = %run, "starting a scheduled run: {e:#}"),
-            // **And this is what makes the permit a bound at all.**
+            // **And this is what makes the permit mean anything at all.**
             // `create_session_as` returns when `CreateWorkspace` has been
             // *queued*, so releasing here released it before the worktree
             // existed — three permits admitted three launches that each freed
             // their permit milliseconds later, and eight workspaces landed on
-            // one machine. See [`super::CREATION_WAIT`].
+            // one machine. How far it holds, and where it stops holding, is
+            // on [`super::CREATION_WAIT`].
             Ok(Some(session)) => created(&state, &session).await,
             // Nothing was started, so there is nothing to wait for: a gate
             // refused it, and the next launch may have the permit now.
@@ -120,16 +129,47 @@ pub fn spawn(state: AppState, schedule: crate::db::ScheduleRow, run: ScheduleRun
 /// `ToServer::WorkspaceCreated` is the worker saying it is done, on both the
 /// success and the failure path — a creation that failed holds nothing.
 ///
-/// Still capped, for the two cases an acknowledgement cannot cover: a worker
-/// too old to send one, and a control plane that restarted while this was
-/// waiting. Past the cap it gives up and says so; the run is live, the
-/// reconciler still has its fence, and the consequence is the overshoot that
-/// used to happen every time.
+/// **Or until no acknowledgement can be coming.** A creation that has already
+/// ended holds nothing, and a permit held for it is three minutes of delay
+/// bounding an empty machine: so the session failing, the session being gone,
+/// and the machine being gone each end the wait at once. This is the "or
+/// confirmed cancelled" half, and it is read as evidence rather than as a
+/// timeout.
+///
+/// Still capped, for the cases where neither answer ever arrives: a worker
+/// too old to acknowledge, a control plane that restarted while this was
+/// waiting — and **a creation that is simply slower than the cap**, which is
+/// the honest one and is why [`super::CREATION_WAIT`] says the cap is a
+/// throttle past it. Past the cap it gives up and says so; the run is live,
+/// the reconciler still has its fence, and the consequence is the overshoot
+/// that used to happen every time.
 async fn created(state: &AppState, session: &SessionId) {
     let until = tokio::time::Instant::now() + super::CREATION_WAIT;
     while tokio::time::Instant::now() < until {
         if state.fleet.workspace_created(session).await {
             return;
+        }
+        match state.db.session(session).await {
+            // Gone, or it failed before the workspace existed. Nothing is
+            // being cut on this permit's behalf.
+            Ok(None) => return,
+            Ok(Some(it)) => {
+                if matches!(
+                    it.status,
+                    ft_core::SessionStatus::Failed | ft_core::SessionStatus::Ended
+                ) {
+                    return;
+                }
+                // The machine went away mid-creation. The frame is not
+                // re-sent on reconnect, so this creation is over however the
+                // directory on that disk ended up.
+                if !state.fleet.is_connected(&it.host_id).await {
+                    return;
+                }
+            }
+            // The database is what is unwell, not the creation. Keep waiting:
+            // the only thing this decides is when the next launch may start.
+            Err(_) => {}
         }
         // A quarter of a second: the acknowledgement arrives when the work is
         // done rather than on a timer, so this is about how promptly the next
@@ -139,7 +179,7 @@ async fn created(state: &AppState, session: &SessionId) {
     tracing::warn!(
         session = %session,
         "no worker acknowledgement that this workspace was made within {:?}; releasing the \
-         launch permit",
+         launch permit, so the cap is a throttle for this launch rather than a bound",
         super::CREATION_WAIT
     );
 }

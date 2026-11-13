@@ -7515,6 +7515,97 @@ async fn no_more_than_three_launches_reach_a_worker_at_once() {
     );
 }
 
+/// **A permit is given back the moment there is nothing left to wait for.**
+///
+/// The wait is for `WorkspaceCreated`, and the cap is otherwise three minutes
+/// — so a creation that *ended* held a permit for the rest of them, bounding
+/// a machine that was making nothing and delaying every scheduled run behind
+/// it. A session that failed is one of the two ways the acknowledgement can
+/// never come; the other is the machine going away, which cannot be staged
+/// here because a fourth launch needs a machine to land on.
+///
+/// Timed against [`REPORTED_AFTER`] rather than against `CREATION_WAIT`:
+/// waiting out three minutes in a test is not worth anybody's patience, and
+/// the fourth workspace arriving before the worker could possibly have
+/// acknowledged anything is the same fact.
+#[tokio::test]
+async fn a_launch_that_failed_hands_its_permit_straight_back() {
+    let (state, principal, host, ready, owner, created, _frames) = frames_fixture().await;
+    ready.store(true, Ordering::SeqCst);
+    says_it_has(&state, &host, &[(Agent::ClaudeCode, true)]).await;
+    let account = a_subscription(&state, &owner, "a_claude", Agent::ClaudeCode).await;
+
+    for n in 0..4 {
+        let mut new = a_schedule(&format!("Due at nine, {n}"), weekdays_at("09:00"));
+        new.account_id = Some(account.clone());
+        let made = create(&state, &principal, new).await.unwrap();
+        let _ = super::schedules::approve_schedule(
+            State(state.clone()),
+            Extension(principal.clone()),
+            Path(made.id.as_str().to_string()),
+            Query(Default::default()),
+        )
+        .await
+        .expect("it activates");
+        let row = state.db.schedule(&made.id).await.unwrap().unwrap();
+        let claim = state
+            .db
+            .claim_run(
+                &ft_core::ScheduleRunId::new(),
+                &made.id,
+                None,
+                Utc::now(),
+                1,
+                "cron",
+                "claimed",
+                None,
+                false,
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        crate::schedules::launch::spawn(
+            state.clone(),
+            row,
+            claim,
+            crate::schedules::launch::Why::Clock,
+        );
+    }
+
+    let handed = || created.lock().unwrap().len();
+    for _ in 0..80 {
+        if handed() >= crate::schedules::AT_ONCE_PER_HOST {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    assert_eq!(handed(), crate::schedules::AT_ONCE_PER_HOST);
+
+    // **One of the three is over.** Nothing is being cut on its permit's
+    // behalf, and no acknowledgement is coming for it ever.
+    let failed = created.lock().unwrap()[0].session_id.clone();
+    state
+        .fleet
+        .set_status(&failed, ft_core::SessionStatus::Failed, None)
+        .await;
+
+    // Half of `REPORTED_AFTER`, so the only thing that can have freed a slot
+    // is the failure: the worker has acknowledged nothing yet and will not
+    // for seconds.
+    for _ in 0..50 {
+        if handed() == 4 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert_eq!(
+        handed(),
+        4,
+        "a launch that had already failed held its permit anyway, so the fourth waited on a \
+         three-minute clock for a workspace nothing was making"
+    );
+}
+
 /// **A page of history is a page, and the next one starts where it stopped.**
 ///
 /// Cursor rather than offset, so this is also the test that the two pages do
