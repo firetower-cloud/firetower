@@ -81,10 +81,10 @@ use serde::{Deserialize, Serialize};
 ///      profile on one would come up as a plain agent with no indication why.
 /// 23 — a scheduled run's two properties, which both need the worker's half.
 ///      A session can **require** its skills (`CreateWorkspace.skills_required`):
-///      a workspace approved against a safety skill is not created without
-///      it, and a worker that treats the set as best effort cannot give even
-///      that. It is the creation that is covered, not the run — see the
-///      field. And a
+///      the initial agent is not launched unless every approved skill is
+///      installed, and a worker that treats the set as best effort cannot
+///      give even that. It is the initial launch that is covered, not the
+///      run — see the field. And a
 ///      worker **says when a workspace has been made**
 ///      (`ToServer::WorkspaceCreated`): the scheduler's launch permit waits
 ///      for that acknowledgement rather than for resource accounting, which
@@ -669,8 +669,12 @@ pub struct CreateWorkspace {
     ///
     /// An *approved* session is the other case. A schedule is approved
     /// against a named set of skill versions — a safety skill among them, as
-    /// often as not — with nobody present to notice one is absent, so a
-    /// workspace that could not install one is not created. The server
+    /// often as not — with nobody present to notice one is absent, so **the
+    /// initial agent is not launched unless every approved skill is
+    /// installed**. Not "the workspace is not created": the directory and the
+    /// workspace record both exist by the time skills are written, and what
+    /// this stops is the agent starting in one that is missing them. The
+    /// server
     /// already refuses to dispatch unless every approved bundle is in the
     /// frame; this is the other half, because **the server deciding something
     /// is required does not make the worker install it**.
