@@ -51,6 +51,21 @@ struct Worker {
 type Launches = Arc<std::sync::Mutex<Vec<ft_proto::StartAgent>>>;
 /// What the control plane told the worker to make.
 type Created = Arc<std::sync::Mutex<Vec<ft_proto::CreateWorkspace>>>;
+
+/// How long this worker takes to admit to a workspace it was told to make.
+///
+/// **A real worker cuts a worktree and starts a container before its next
+/// `Usage` report names the new workspace**, which is seconds. The fake one
+/// answered instantly or never, and neither is the shape the launch permit is
+/// bounded by: `launch::spawn` holds its permit until `Fleet::usage_of` can
+/// see the workspace, so a worker that reports immediately makes that bound
+/// unobservable and one that never reports makes it look infinite.
+///
+/// Five seconds, chosen against the test that watches it: the cap has to be
+/// seen to *hold* for a moment, so the gap between a workspace being asked
+/// for and the worker admitting to it has to be longer than the time three
+/// launches take to reach the worker, with room to look in between.
+const REPORTED_AFTER: std::time::Duration = std::time::Duration::from_secs(5);
 #[async_trait::async_trait]
 impl Transport for Worker {
     fn describe(&self) -> String {
@@ -63,6 +78,13 @@ impl Transport for Worker {
         let launched = self.launched.clone();
         let created = self.created.clone();
         let capacity = self.capacity;
+        /* When each workspace was asked for, so the `Usage` report below can
+        name it the way a real worker does: a little after the fact. The
+        `created` list has no clock on it and three tests read it, so this
+        is beside it rather than in it. */
+        let made: Arc<std::sync::Mutex<Vec<(tokio::time::Instant, ft_core::SessionId)>>> =
+            Default::default();
+        let making = made.clone();
         tokio::spawn(async move {
             let (r, w) = tokio::io::split(theirs);
             let (mut reader, writer) = Codec::new(r, w).split();
@@ -80,9 +102,20 @@ impl Transport for Worker {
                 tokio::spawn(async move {
                     tokio::time::sleep(std::time::Duration::from_millis(120)).await;
                     loop {
+                        // Every workspace this worker was told to make and has
+                        // had time to make, which is what a real `Usage`
+                        // report carries — and what the launch permit waits
+                        // for. See [`REPORTED_AFTER`].
+                        let workspaces: Vec<(ft_core::SessionId, ft_core::WorkspaceUsage)> = making
+                            .lock()
+                            .unwrap()
+                            .iter()
+                            .filter(|(at, _)| at.elapsed() >= REPORTED_AFTER)
+                            .map(|(_, id)| (id.clone(), Default::default()))
+                            .collect();
                         let frame = ToServer::Usage {
                             capacity: said,
-                            workspaces: Default::default(),
+                            workspaces,
                         };
                         if writer.lock().await.write(&frame).await.is_err() {
                             return;
@@ -133,6 +166,9 @@ impl Transport for Worker {
                         })
                     }
                     ToWorker::CreateWorkspace(ref spec) => {
+                        made.lock()
+                            .unwrap()
+                            .push((tokio::time::Instant::now(), spec.session_id.clone()));
                         created.lock().unwrap().push((**spec).clone());
                         None
                     }
@@ -206,7 +242,16 @@ async fn frames_fixture() -> (
                     empty: false,
                 }),
                 launched: Default::default(),
-                capacity: None,
+                // **Roomy, and present.** A worker with no reading sends no
+                // `Usage` at all, so nothing it was told to make is ever
+                // named — and `launch::spawn` holds its permit until one is.
+                // A fixture about what reaches a machine needs the frame that
+                // says it arrived.
+                capacity: Some(ft_core::Capacity {
+                    disk_total_mb: 200_000,
+                    disk_used_mb: 10_000,
+                    ..Default::default()
+                }),
                 created: created.clone(),
             }),
         )
@@ -6629,6 +6674,112 @@ async fn a_launch_approved_against_named_versions_will_not_start_with_fewer() {
     assert!(
         created.lock().unwrap().is_empty(),
         "a workspace was created for a run that could not be given what it was approved"
+    );
+}
+
+/// **#9: three launches reach a worker at once, not eight.**
+///
+/// The permit was released when `start` returned, and `create_session_as`
+/// returns once `CreateWorkspace` has been *queued* — so three permits
+/// admitted three launches that each freed their permit milliseconds later,
+/// with no worktree anywhere yet. The reviewer put eight workspaces onto one
+/// machine that way, against a stated cap of three.
+///
+/// The bound is only observable if the worker takes a moment to admit to a
+/// workspace, which is what a real one does and what [`REPORTED_AFTER`] makes
+/// this one do. Both halves are asserted: the cap holds while nothing has
+/// been reported, and the rest follow once it has — a permit held for ever
+/// would pass the first half and fail the second.
+///
+/// Four schedules due at once, which is what a sweep hands to `spawn`.
+#[tokio::test]
+async fn no_more_than_three_launches_reach_a_worker_at_once() {
+    let (state, principal, host, ready, owner, created) = frames_fixture().await;
+    ready.store(true, Ordering::SeqCst);
+    says_it_has(&state, &host, &[(Agent::ClaudeCode, true)]).await;
+    let account = a_subscription(&state, &owner, "a_claude", Agent::ClaudeCode).await;
+
+    for n in 0..4 {
+        let mut new = a_schedule(&format!("Due at nine, {n}"), weekdays_at("09:00"));
+        new.account_id = Some(account.clone());
+        let made = create(&state, &principal, new).await.unwrap();
+        let _ = super::schedules::approve_schedule(
+            State(state.clone()),
+            Extension(principal.clone()),
+            Path(made.id.as_str().to_string()),
+            Query(Default::default()),
+        )
+        .await
+        .expect("it activates");
+        let row = state.db.schedule(&made.id).await.unwrap().unwrap();
+        let claim = state
+            .db
+            .claim_run(
+                &ft_core::ScheduleRunId::new(),
+                &made.id,
+                None,
+                Utc::now(),
+                1,
+                "cron",
+                "claimed",
+                None,
+                false,
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        // Through `spawn`, because the permit is `spawn`'s: `start` knows
+        // nothing about the cap.
+        crate::schedules::launch::spawn(
+            state.clone(),
+            row,
+            claim,
+            crate::schedules::launch::Why::Clock,
+        );
+    }
+
+    // Wait for the cap to fill, then look. With the permit released at queue
+    // time all four arrive in milliseconds, which is the regression.
+    let handed = || created.lock().unwrap().len();
+    for _ in 0..40 {
+        if handed() >= crate::schedules::AT_ONCE_PER_HOST {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    assert_eq!(
+        handed(),
+        crate::schedules::AT_ONCE_PER_HOST,
+        "the cap is {}",
+        crate::schedules::AT_ONCE_PER_HOST
+    );
+
+    // **And it has to hold, not merely be reached in order.** Four launches
+    // staggered by a database and a readiness round trip arrive a few tens of
+    // milliseconds apart, so "three, then look" passes with no cap at all —
+    // which is exactly what it did when this was first written. A second and
+    // a half is far longer than that stagger and far shorter than
+    // `REPORTED_AFTER`, so nothing has been reported yet and nothing may
+    // start.
+    tokio::time::sleep(std::time::Duration::from_millis(1_500)).await;
+    assert_eq!(
+        handed(),
+        crate::schedules::AT_ONCE_PER_HOST,
+        "a fourth workspace reached the worker before any of the three existed"
+    );
+
+    // And the permit is a delay rather than a wall: once the worker names the
+    // workspaces, the fourth launch takes a freed slot.
+    for _ in 0..400 {
+        if handed() == 4 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert_eq!(
+        handed(),
+        4,
+        "the fourth never started, so the permit is held past the workspace existing"
     );
 }
 
