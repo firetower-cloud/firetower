@@ -80,6 +80,18 @@ export interface Bridge {
    */
   shoot(url: string): Promise<ArrayBuffer | null>;
   /**
+   * Whether this shell can photograph a page at all.
+   *
+   * **Here, in the shell's surface, because nothing above this line can find
+   * it out.** `capture.rs` compiles to `SUPPORTED = false` anywhere but macOS and
+   * Windows, so on Linux capture is not unreliable, it is absent — and the
+   * only other way to learn that is to call `shoot` and count the refusals,
+   * which is slow, needs two of them, and says "this page would not render"
+   * when the truth is "this machine cannot render any". A build-time fact the
+   * interface has to act on is exactly what this file is for.
+   */
+  canShoot(): Promise<boolean>;
+  /**
    * An artifact's HTML, read natively so a secure webview can show it.
    *
    * A browser tab (`null`) loads the artifact URL straight into the iframe and
@@ -90,11 +102,62 @@ export interface Bridge {
    */
   loadArtifact: ((url: string) => Promise<string>) | null;
   /** The OS keychain, for tokens. A browser tab has none and keeps them beside the registry. */
-  secrets: {
-    get(key: string): Promise<string | null>;
-    set(key: string, value: string): Promise<void>;
-    delete(key: string): Promise<void>;
-  } | null;
+  secrets: Keychain | null;
+}
+
+/**
+ * What the OS keychain said when it was asked for a credential.
+ *
+ * **`unknown` is not `absent`, and keeping those apart is the whole of this
+ * type.** `main.rs`'s `Said` has the long version: `keyring` answers "nothing
+ * is filed here" for exactly one situation and treats every other outcome as
+ * an error — no Secret Service on the bus, a locked login keyring, a macOS
+ * keychain that will not grant access without a prompt, a Credential Manager
+ * a policy has closed. This surface used to be `Promise<string | null>` and a
+ * `.catch(() => null)` in `servers.ts` turned all of those into "there is no
+ * credential here", which is the one answer that is permission to forget that
+ * somebody signed out.
+ */
+export type Said =
+  | { says: "held"; token: string }
+  | { says: "absent" }
+  | { says: "unknown"; why: string };
+
+/** Whether a keychain write or deletion actually happened. */
+export type Done = { says: "done" } | { says: "refused"; why: string };
+
+/**
+ * The OS keychain, as three total functions.
+ *
+ * **None of them rejects**, and that is deliberate rather than lax: a
+ * rejection is a thing a caller can discard with one `.catch`, and every
+ * credential bug on this path has been a discarded rejection. Each answer is
+ * a value the caller has to read, and the unsafe reading of each — `absent`,
+ * `refused` — is the one a failure maps to.
+ */
+export interface Keychain {
+  get(key: string): Promise<Said>;
+  set(key: string, value: string): Promise<Done>;
+  delete(key: string): Promise<Done>;
+}
+
+/** Whatever came back over the bridge, read as an answer, or as none. */
+function asSaid(answer: unknown): Said {
+  const said = (answer as Said | undefined)?.says;
+  if (said === "absent") return { says: "absent" };
+  if (said === "held" && typeof (answer as { token?: unknown }).token === "string") {
+    return answer as Said;
+  }
+  if (said === "unknown") return { says: "unknown", why: String((answer as { why?: unknown }).why ?? "") };
+  /* A shell that answered something this does not understand has not told us
+     the credential is missing. Anything unrecognised is the safe reading. */
+  return { says: "unknown", why: `the shell answered ${JSON.stringify(answer)}` };
+}
+
+function asDone(answer: unknown): Done {
+  return (answer as Done | undefined)?.says === "done"
+    ? { says: "done" }
+    : { says: "refused", why: String((answer as { why?: unknown } | undefined)?.why ?? "the shell did not say") };
 }
 
 const browser: Bridge = {
@@ -130,6 +193,7 @@ const browser: Bridge = {
     return suggested;
   },
   shoot: async () => null,
+  canShoot: async () => false,
   loadArtifact: null,
   secrets: null,
 };
@@ -170,6 +234,7 @@ function tauri(): Bridge | null {
       }
     },
     loadArtifact: (url) => invoke("load_artifact", { url }) as Promise<string>,
+    canShoot: () => invoke("capture_supported").then((v) => v !== false),
     shoot: async (url) => {
       const bytes = await invoke("capture_poster", { url });
       /* Tauri hands a `Response` back as an ArrayBuffer, but a failure that
@@ -177,10 +242,14 @@ function tauri(): Bridge | null {
          than be uploaded as a poster. */
       return bytes instanceof ArrayBuffer ? bytes : null;
     },
+    /* The one place a rejection is turned into an answer, and it is turned
+       into the *safe* answer every time: a command that could not be reached
+       has told us nothing about what is stored. There is deliberately no
+       `.catch` anywhere downstream of here. */
     secrets: {
-      get: (key) => invoke("secret_get", { key }) as Promise<string | null>,
-      set: (key, value) => invoke("secret_set", { key, value }) as Promise<void>,
-      delete: (key) => invoke("secret_delete", { key }) as Promise<void>,
+      get: (key) => invoke("secret_get", { key }).then(asSaid, (e) => asSaid({ says: "unknown", why: String(e) })),
+      set: (key, value) => invoke("secret_set", { key, value }).then(asDone, (e) => asDone({ why: String(e) })),
+      delete: (key) => invoke("secret_delete", { key }).then(asDone, (e) => asDone({ why: String(e) })),
     },
   };
 }

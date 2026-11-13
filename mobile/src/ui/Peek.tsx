@@ -41,12 +41,14 @@ import Animated, {
   ZoomIn,
 } from "react-native-reanimated";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import { ChevronRight } from "lucide-react-native";
 import * as Haptics from "expo-haptics";
 import { useWindowDimensions } from "react-native";
-import type { Asked } from "~/api/conversation";
+import { type Ask } from "~/api/answering";
 import type { Workspace } from "~/api/workspaces";
-import { lead } from "~/api/workspaces";
+import { childrenElsewhere, lastMoved, familyOf, placeBeat, placeOf, rowLabel } from "~/api/workspaces";
 import { elapsed, minutesSince } from "~/api/view";
+import { Blocks } from "~/ui/Blocks";
 import { useTheme } from "~/design/theme";
 import { size } from "~/design/tokens.generated";
 
@@ -119,58 +121,174 @@ export function usePeekable(onPeek: () => void, onOpen: () => void) {
   return { gesture: Gesture.Exclusive(hold, tap), pressed };
 }
 
-type Answer = { label: string; run: () => void; tone?: "loud" | "quiet" };
+type Answer = { label: string; run: () => void; tone?: "loud" | "quiet"; count?: number; go?: boolean };
+
+/**
+ * What one agent asked, and both answers to it.
+ *
+ * **Clamped to three lines.** A peek is a preview and the whole question is in
+ * the conversation; two unclamped questions on one card is taller than the
+ * phone, and this has no scroll in it.
+ */
+function Asking({
+  ask,
+  at,
+  onAnswer,
+  close,
+}: {
+  ask: Ask;
+  at: number;
+  onAnswer?: (ask: Ask, yes: boolean) => void;
+  close: () => void;
+}) {
+  /* The agent's own note is better than anything derivable, and it is what
+     the row already shows. The request's detail is the fallback once it has
+     been read. */
+  const said = ask.run.note ?? ask.asked?.detail;
+  /* Only once the request it is blocked on has actually been read: answering
+     needs its `req`, and a button that cannot carry one does nothing. */
+  const answerable = !!ask.asked && !!onAnswer;
+  const suffix = at === 0 ? "" : `-${at}`;
+
+  return (
+    <>
+      {said ? (
+        <Text
+          numberOfLines={3}
+          className="font-sans text-bone"
+          style={{ fontSize: size.read, lineHeight: size.read * 1.62 }}
+        >
+          {said}
+        </Text>
+      ) : null}
+
+      {answerable ? (
+        <View className="mt-0.5 flex-row gap-3">
+          <Pressable
+            testID={`peek-no${suffix}`}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              onAnswer?.(ask, false);
+              close();
+            }}
+            className="h-12 flex-1 items-center justify-center rounded-field bg-ground"
+          >
+            <Text className="font-medium text-bone" style={{ fontSize: size.read }}>
+              No
+            </Text>
+          </Pressable>
+          <Pressable
+            testID={`peek-yes${suffix}`}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+              onAnswer?.(ask, true);
+              close();
+            }}
+            className="h-12 flex-1 items-center justify-center rounded-field bg-bone"
+          >
+            <Text className="font-medium text-ground" style={{ fontSize: size.read }}>
+              Allow
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
+    </>
+  );
+}
 
 export function Peek({
   place,
+  places,
   onClose,
   onOpen,
+  onChildren,
   onChanges,
-  pending,
-  reading,
+  asks = [],
+  waiting = 0,
   onAnswer,
   onEnd,
 }: {
   place: Workspace;
+  /** The whole fleet, children included. See `WorkspaceRow`'s `places`. */
+  places: Workspace[];
   onClose: () => void;
   onOpen: () => void;
+  /** The pushed overview, which is where the children are. */
+  onChildren: () => void;
   onChanges: () => void;
   /**
-   * What it is blocked on, read without opening the workspace.
+   * What the family is blocked on, read without opening anything — **capped
+   * at `ANSWERS`**, and each one is an agent, not a workspace.
    *
-   * `undefined` while the one request is in flight, `null` when there is
-   * nothing pending or it could not be read. The buttons appear only on a
-   * real `Asked`, because that is the only state in which pressing one does
-   * anything — see `api/pending.ts`.
+   * It used to be one `Asked` for one blocked run of this place. A child with
+   * a workspace of its own no longer has a row, so its question has nowhere
+   * else to be asked: a long press on the parent is now the only way to
+   * answer it without three taps and a screen.
+   *
+   * `asked` is `undefined` while the one request is in flight and `null` when
+   * there is nothing pending or it could not be read. The buttons appear only
+   * on a real `Asked`, because that is the only state in which pressing one
+   * does anything — see `api/pending.ts`.
    */
-  pending?: Asked | null;
-  reading?: boolean;
-  onAnswer?: (yes: boolean) => void;
+  asks?: Ask[];
+  /** Everyone waiting, including the ones past the cap. */
+  waiting?: number;
+  onAnswer?: (ask: Ask, yes: boolean) => void;
+  /**
+   * End the place, and everything it started.
+   *
+   * It used to dismiss the peek and do nothing else, at every call site —
+   * which was true on `main` as well, and this branch had given that dead
+   * control a count of what it would take with it. Both call sites now ask
+   * `useEndWorkspace`, the same flow the workspace's own menu asks, so the
+   * count means what it was drawn to mean.
+   */
   onEnd: () => void;
 }) {
   const { color } = useTheme();
   const { height } = useWindowDimensions();
-  const speaker = lead(place);
+  const family = familyOf(place, places);
+  const kids = childrenElsewhere(place, places);
+  const blocked = placeBeat(place, places) === "blocked";
+  /* Past the two it offers buttons for. The rest are in the workspace. */
+  const rest = waiting - asks.length;
 
-  /* Blocked is a narrower question than "wants a human": `needsYou` also
-     covers finished and broken, and neither of those has an answer to give.
-     Only a genuine block gets the two buttons — and only once the request it
-     is blocked on has actually been read, because answering needs its `req`. */
-  const run = place.runs.find((r) => r.status === "NeedsYou");
-  const blocked = Boolean(run);
-  /* The agent's own note is better than anything derivable, and it is what
-     the row already shows. The request's detail is the fallback once it has
-     been read. */
-  const said = run?.note ?? pending?.detail ?? place.runs.find((r) => r.note)?.note;
-  const answerable = blocked && !!pending && !!onAnswer;
+  /* Two questions and a four-row menu is taller than a phone. When the peek
+     is carrying more than one answer, **answering wins** and the rest of the
+     menu stays in the workspace — it is the navigation that gives way, because
+     answering is what this is for. */
+  const crowded = asks.length > 1;
+  const toChildren: Answer | null = kids.length
+    ? {
+        label: kids.length === 1 ? "The agent it started" : `The ${kids.length} agents it started`,
+        run: onChildren,
+        go: true,
+      }
+    : null;
+  /* What goes with it. A parent's children are ended with it and they are no
+     longer rows you could have seen first, so the count beside the label is
+     the only place anybody is told — which is why it had to become true
+     rather than go. `ui/end.ts` is what makes it so.
+
+     Left out rather than shown refused where ending the place is not yours:
+     `may_share`, server side, and `mayWrite !== false` because a control
+     plane older than this app sends no such field. */
+  const toEnd: Answer | null = place.runs.some((r) => r.mayWrite !== false)
+    ? { label: "End this workspace", run: onEnd, tone: "loud", count: kids.length }
+    : null;
 
   const close = useCallback(() => onClose(), [onClose]);
 
-  const items: Answer[] = [
-    { label: "Open the conversation", run: onOpen },
-    { label: "What it changed", run: onChanges },
-    { label: "End this workspace", run: onEnd, tone: "loud" },
-  ];
+  const items: Answer[] = (
+    crowded
+      ? [{ label: "Open the conversation", run: onOpen }, toChildren]
+      : [
+          { label: "Open the conversation", run: onOpen },
+          toChildren,
+          { label: "What it changed", run: onChanges },
+          toEnd,
+        ]
+  ).filter((item): item is Answer => !!item);
 
   return (
     <>
@@ -204,60 +322,59 @@ export function Peek({
           shadowOffset: { width: 0, height: 18 },
         }}
       >
-        <View className="gap-3 px-5 pb-5 pt-5">
+        <View className={`gap-3 px-5 pt-5 ${asks.length > 0 ? "pb-[18px]" : "pb-3.5"}`}>
           <View className="flex-row items-center gap-3">
             {blocked ? <View className="h-2 w-2 rounded-full bg-ember" /> : null}
             <Text numberOfLines={1} className="min-w-0 flex-1 font-medium text-title text-bone">
-              {place.name}
+              {rowLabel(place, places)}
             </Text>
             <Text className="font-sans text-meta text-mute">
-              {elapsed(minutesSince(speaker.updatedAt))}
+              {elapsed(minutesSince(lastMoved(family)))}
             </Text>
           </View>
 
-          {/* The question, at reading size. It is the whole reason the peek
-              saves a round trip: you can answer without opening anything. */}
-          {said ? (
-            <Text className="font-sans text-bone" style={{ fontSize: size.read, lineHeight: size.read * 1.62 }}>
-              {said}
-            </Text>
-          ) : null}
-
-          {answerable ? (
-            <View className="mt-0.5 flex-row gap-3">
-              <Pressable
-                testID="peek-no"
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  onAnswer?.(false);
-                  close();
-                }}
-                className="h-12 flex-1 items-center justify-center rounded-field bg-ground"
-              >
-                <Text className="font-medium text-bone" style={{ fontSize: size.read }}>
-                  No
-                </Text>
-              </Pressable>
-              <Pressable
-                testID="peek-yes"
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                  onAnswer?.(true);
-                  close();
-                }}
-                className="h-12 flex-1 items-center justify-center rounded-field bg-bone"
-              >
-                <Text className="font-medium text-ground" style={{ fontSize: size.read }}>
-                  Allow
-                </Text>
-              </Pressable>
-            </View>
-          ) : null}
+          {/* The place's own question stays under the header, where it has
+              always been: it belongs to the row you are holding and needs
+              nothing to say whose it is. */}
+          {asks.map((ask, i) =>
+            place.runs.some((r) => r.id === ask.run.id) ? (
+              <Asking key={ask.run.id} ask={ask} at={i} onAnswer={onAnswer} close={close} />
+            ) : null,
+          )}
         </View>
+
+        {/* A child's question is a block of its own, divided off and named.
+            Whose question it is is the thing the row no longer says. */}
+        {asks.map((ask, i) =>
+          place.runs.some((r) => r.id === ask.run.id) ? null : (
+            <View key={ask.run.id} className="gap-3 border-t border-line-soft px-5 pb-[18px] pt-4">
+              <View className="flex-row items-center gap-2">
+                <Blocks beat="blocked" />
+                <Text numberOfLines={1} className="min-w-0 flex-1 font-medium text-ui text-bone">
+                  {rowLabel(placeOf(places, ask.run.id) ?? place, places)}
+                </Text>
+                <Text className="font-sans text-micro text-mute">
+                  {elapsed(minutesSince(ask.run.updatedAt))}
+                </Text>
+              </View>
+              <Asking ask={ask} at={i} onAnswer={onAnswer} close={close} />
+            </View>
+          ),
+        )}
+
+        {/* The ones past the cap. They are answered in the workspace; saying
+            how many stops the peek reading as the whole of it. */}
+        {rest > 0 ? (
+          <View className="border-t border-line-soft px-5 pb-3 pt-3">
+            <Text className="font-sans text-meta text-dim">
+              {rest === 1 ? "1 more is waiting." : `${rest} more are waiting.`}
+            </Text>
+          </View>
+        ) : null}
 
         <View className="h-px bg-line-soft" />
 
-        {items.map(({ label, run, tone }, i) => (
+        {items.map(({ label, run, tone, count, go }, i) => (
           <View key={label}>
             {tone === "loud" && i > 0 ? <View className="my-2 h-px bg-line-soft" /> : null}
             <Pressable
@@ -266,7 +383,7 @@ export function Peek({
                 run();
                 close();
               }}
-              className="min-h-[54px] flex-row items-center px-5 active:bg-raise"
+              className="min-h-[54px] flex-row items-center gap-2.5 px-5 active:bg-raise"
               android_ripple={{ color: color.raise }}
             >
               <Text
@@ -275,6 +392,8 @@ export function Peek({
               >
                 {label}
               </Text>
+              {count ? <Text className="font-sans text-meta text-mute">{`(${count})`}</Text> : null}
+              {go ? <ChevronRight color={color.mute} size={16} style={{ marginLeft: "auto" }} /> : null}
             </Pressable>
           </View>
         ))}

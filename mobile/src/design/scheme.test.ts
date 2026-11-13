@@ -5,6 +5,7 @@
  * where the choice and the system disagree, and the one where the system has
  * not answered yet — because that frame gets drawn either way.
  */
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { CHOICES, resolve } from "~/design/scheme";
 import { dark, light } from "~/design/tokens.generated";
@@ -77,6 +78,50 @@ describe("the float surface is not the page", () => {
     // black. The desk's complaint was chrome beside content, which a
     // full-bleed phone has not got.
     expect(dark.ground).toBe("#0b0b0c");
+  });
+});
+
+/**
+ * **And the token being right is not the fix.**
+ *
+ * `dark.float` lifting off `dark.ground` says nothing about whether the five
+ * surfaces take it. That is a claim about five files, so this reads them —
+ * the same level `edges.test.ts` works at, and for the same reason: the
+ * failure was never an arithmetic error, it was a fill copied across a
+ * directory before the token existed.
+ *
+ * It caught one. `Picker` — the popover, and the fifth of the five — was still
+ * `bg-panel` when the other four were swept, which in dark is #111113 against
+ * a #0b0b0c page: a lift, but a sixth of the one the design asks for, on a
+ * surface that is over the page with a scrim behind it.
+ */
+describe("the five surfaces that float take the float fill", () => {
+  /** What the file has to say, and what it is in coverage §7's list. */
+  const FIVE = [
+    ["the composer", "../ui/StartBox.tsx"],
+    ["the composer, in a conversation", "../ui/Composer.tsx"],
+    ["an artifact card", "../ui/ArtifactCard.tsx"],
+    ["a sheet", "../ui/Sheet.tsx"],
+    ["a popover", "../ui/Picker.tsx"],
+    ["the peek", "../ui/Peek.tsx"],
+  ] as const;
+
+  it.each(FIVE)("fills %s from the float token", (_what, file) => {
+    const src = readFileSync(new URL(file, import.meta.url), "utf8");
+    // Either spelling: a class name, or the resolved colour on a style prop
+    // where the surface is animated and NativeWind cannot reach it.
+    expect(src).toMatch(/bg-float|color\.float/);
+  });
+
+  it("fills none of them with the page's own colour", () => {
+    // `bg-ground` inside one of these is the regression itself. The peek's
+    // *No* button is deliberately `bg-ground` — a control on a float surface,
+    // not the surface — so this asserts the fill beside a radius, which is
+    // how a surface is spelled here and a button is not.
+    for (const [, file] of FIVE) {
+      const src = readFileSync(new URL(file, import.meta.url), "utf8");
+      expect(src).not.toMatch(/rounded-(?:peek|sheet|box|card|t-2xl)[^"']*bg-ground/);
+    }
   });
 });
 

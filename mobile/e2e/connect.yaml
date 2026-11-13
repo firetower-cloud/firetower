@@ -14,7 +14,14 @@ appId: com.usefiretower.app
     # so the prompt is not sitting over the screen being asserted on.
     permissions: { all: allow }
 
-- assertVisible: "Connect to a Firetower"
+# Waited for rather than asserted: a debug build fetches and parses its
+# JavaScript from Metro on every launch, which is seconds on a laptop and
+# measured past Maestro's default patience on a CI emulator — a black screen
+# that is only an app still starting. It returns as soon as the text is there,
+# so a healthy run pays nothing for the headroom.
+- extendedWaitUntil:
+    visible: "Connect to a Firetower"
+    timeout: 180000
 - tapOn:
     id: "address"
 - inputText: "${ADDRESS}"

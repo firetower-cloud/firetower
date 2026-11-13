@@ -4,3 +4,6 @@ node_modules
 src-tauri/target
 # Regenerated on every build from capabilities/ and the plugin set.
 src-tauri/gen/schemas
+# What the Linux harness photographs. A megabyte of regenerable output that
+# goes stale the first time the UI moves; `linux/run.sh` makes it again.
+linux/shots/

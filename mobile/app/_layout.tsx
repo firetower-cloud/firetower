@@ -113,8 +113,8 @@ const screens = (ground: string) =>
   }) as const;
 
 /**
- * Everything below here belongs to one **identity** — a server and the
- * account signed into it.
+ * Everything below here belongs to one **identity** — an address, a server and
+ * the account signed into it.
  *
  * Keyed on it, so switching throws away the tree rather than letting a screen
  * render one identity's ids against another's cache — which is the bug the
@@ -125,6 +125,15 @@ const screens = (ground: string) =>
  * changing *accounts on one server*, where the id is identical — so the tree
  * was reused across a sign-out and the next person inherited the last one's
  * warm screens. Both halves take `identity()` now; see `api/identity.ts`.
+ *
+ * **And `identity()` carries the address**, which is what makes this line the
+ * answer to a security finding rather than a tidy-up. A server id is the
+ * organisation's database id, so a copy restored elsewhere keeps it: the same
+ * id and account at another URL was the same key, so this tree was *not*
+ * thrown away, and a workspace read from one machine could be retained on
+ * screen and then acted on over a connection to another. A URL change is a
+ * remount now, and what is drawn afterwards has been read from the address it
+ * is drawn against.
  *
  * With no server at all there is no provider: there is nothing to be a client
  * of, and the only route that means anything is connecting.

@@ -10,13 +10,20 @@
 import { View } from "react-native";
 import Svg, { Path } from "react-native-svg";
 import type { SessionStatus } from "~/api/generated/model";
-import { BEAT, BEAT_TOKEN } from "~/api/view";
+import { BEAT_TOKEN, beatOf } from "~/api/view";
 import { useTheme } from "~/design/theme";
 
 export function Signal({ status, size = 9 }: { status: SessionStatus; size?: number }) {
   const { color } = useTheme();
-  const tone = color[BEAT_TOKEN[BEAT[status]]];
-  const hollow = status === "Ended" || status === "Starting" || status === "Ready";
+  /* `beatOf`, because the table has nothing for a status this app has never
+     heard of and `color[undefined]` draws a dot with no colour at all. */
+  const beat = beatOf({ status });
+  const tone = color[BEAT_TOKEN[beat]];
+  /* Hollow for the three that are up and owing nothing — and for a state the
+     app cannot read, where a filled mute dot would read as `Ended`. An empty
+     ring is the nearest thing to "something is here, and I cannot say what". */
+  const hollow =
+    status === "Ended" || status === "Starting" || status === "Ready" || beat === "unknown";
 
   return (
     <View

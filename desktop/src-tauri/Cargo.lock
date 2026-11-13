@@ -1100,7 +1100,7 @@ checksum = "3e0f1c7c3a72c66fd80abe965175f7523475c0489a87d3ff9d6e8c87d87a9d2d"
 
 [[package]]
 name = "firetower-desktop"
-version = "0.29.0"
+version = "0.29.1"
 dependencies = [
  "block2",
  "image",
@@ -1109,6 +1109,7 @@ dependencies = [
  "objc2-app-kit",
  "objc2-foundation",
  "reqwest 0.12.28",
+ "serde",
  "serde_json",
  "tauri",
  "tauri-build",

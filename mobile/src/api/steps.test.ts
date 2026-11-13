@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { delegated, fold, mainline, summarise } from "./steps";
+import { delegated, fold, mainline, place, summarise } from "./steps";
 import type { Item } from "./conversation";
 import type { ItemKind, ItemStatus } from "./generated/model";
 
@@ -172,5 +172,111 @@ describe("whose work it is", () => {
     const items = [mine("b"), mine("c"), mine("d")];
     const rows = fold(mainline(items));
     expect(rows).toEqual([]);
+  });
+});
+
+/**
+ * Where an artifact's card goes.
+ *
+ * The reported bug was that it went nowhere: every card was appended after the
+ * transcript, so an artifact published an hour ago sat under the newest
+ * message. These are the three answers, and the two shapes of "no row
+ * matches" that have to stay apart — a window that starts after the artifact
+ * is not the same thing as an artifact with no position at all.
+ */
+describe("place", () => {
+  /** A line of prose at a log line: one item, one row, one reach. */
+  const spoke = (id: string, lineNo: number): Item => ({ ...said(id), lineNo });
+  /** A command at a log line, for the runs that fold. */
+  const step = (id: string, lineNo: number): Item => ({ ...ran(id), lineNo });
+  /** An artifact, as the placement reads one. */
+  const made = (id: string, firstSeenLine: number | null) => ({ id, firstSeenLine });
+
+  /** Three exchanges, each its own row, reaching 10, 20 and 30. */
+  const loaded = () => fold([spoke("m1", 10), spoke("m2", 20), spoke("m3", 30)]);
+
+  test("lands after the row the conversation had reached", () => {
+    const placed = place(loaded(), [made("a1", 25)]);
+    expect(placed.at.get(1)?.map((a) => a.id)).toEqual(["a1"]);
+    expect(placed.before).toEqual([]);
+    expect(placed.loose).toEqual([]);
+  });
+
+  test("lands on the row whose reach is exactly its line", () => {
+    // The boundary the `<=` is for: the artifact was published *by* that line,
+    // so the row that reached it is the row it belongs after.
+    expect(place(loaded(), [made("a1", 20)]).at.get(1)?.map((a) => a.id)).toEqual(["a1"]);
+  });
+
+  test("newer than every loaded row sits after the last of them", () => {
+    // Which is the bottom of the transcript — correctly, this time, because it
+    // really is the newest thing that happened.
+    const placed = place(loaded(), [made("a1", 99)]);
+    expect(placed.at.get(2)?.map((a) => a.id)).toEqual(["a1"]);
+    expect(placed.loose).toEqual([]);
+  });
+
+  test("older than every loaded row goes above the transcript", () => {
+    // The bug as it was reported. A phone opens on the last few exchanges, so
+    // this is the common case rather than the corner — and sending it to the
+    // end puts the oldest artifact under the newest message.
+    const placed = place(loaded(), [made("a1", 5)]);
+    expect(placed.before.map((a) => a.id)).toEqual(["a1"]);
+    expect(placed.at.size).toBe(0);
+    expect(placed.loose).toEqual([]);
+  });
+
+  test("a row written before the column existed goes to the end", () => {
+    const placed = place(loaded(), [made("a1", null)]);
+    expect(placed.loose.map((a) => a.id)).toEqual(["a1"]);
+    expect(placed.before).toEqual([]);
+    expect(placed.at.size).toBe(0);
+  });
+
+  test("with no transcript to anchor to, every card goes to the end", () => {
+    // An artifact outlives the workspace that made it, so this is a session
+    // that still has cards and nothing to hang them on. Not `before`: above
+    // nothing is not a position.
+    const placed = place([], [made("a1", 5311), made("a2", null)]);
+    expect(placed.loose.map((a) => a.id)).toEqual(["a1", "a2"]);
+    expect(placed.before).toEqual([]);
+    expect(placed.at.size).toBe(0);
+  });
+
+  test("two artifacts against the same row stay together, in order", () => {
+    const placed = place(loaded(), [made("a1", 21), made("a2", 29)]);
+    expect(placed.at.get(1)?.map((a) => a.id)).toEqual(["a1", "a2"]);
+    expect(placed.at.size).toBe(1);
+  });
+
+  test("a transcript of nothing but what somebody typed anchors nothing", () => {
+    // An optimistic item has no line, so the rows reach 0 — which says nothing
+    // about where they are rather than "line zero". Read as a position it
+    // would make every real artifact older than the window, and a card that
+    // belongs halfway down would be captioned as published before a message
+    // sent ten seconds ago.
+    const placed = place(fold([said("typed-1")]), [made("a1", 5311)]);
+    expect(placed.loose.map((a) => a.id)).toEqual(["a1"]);
+    expect(placed.before).toEqual([]);
+    expect(placed.at.size).toBe(0);
+  });
+
+  test("a folded group is not opened to put a card inside it", () => {
+    // The publish was a shell command in the middle of a run of three. The
+    // group's reach is past the artifact's line, so the card stops at the row
+    // before it. Within one row, and the alternative is a card that vanishes
+    // when somebody shuts the fold.
+    const rows = fold([spoke("m1", 10), step("c1", 20), step("c2", 21), step("c3", 22)]);
+    expect(rows.map((r) => r.type)).toEqual(["item", "group"]);
+    expect(place(rows, [made("a1", 21)]).at.get(0)?.map((a) => a.id)).toEqual(["a1"]);
+  });
+
+  test("a page of history moves the card off the top and inline", () => {
+    // Criterion 5, as data: the same artifact against a window that grew
+    // upwards. Above the transcript while the row it anchors to is unread,
+    // inline the moment it arrives.
+    const artifact = made("a1", 15);
+    expect(place(fold([spoke("m3", 30)]), [artifact]).before.map((a) => a.id)).toEqual(["a1"]);
+    expect(place(loaded(), [artifact]).at.get(0)?.map((a) => a.id)).toEqual(["a1"]);
   });
 });

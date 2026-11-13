@@ -41,6 +41,7 @@ import { why } from "~/data";
 import { useOpened } from "~/ui/opened";
 import { useStart } from "~/start";
 import { ArtifactShot } from "~/components/ArtifactShot";
+import { useExpectPoster } from "~/artifacts/posters";
 
 type Scope = "all" | "mine" | "shared";
 type Sort = "recent" | "name";
@@ -60,20 +61,45 @@ export function ArtifactsPage({ open: asked = null }: { open?: string | null }) 
   const [query, setQuery] = useState("");
   const [open, setOpen] = useOpened(asked);
   const [expanded, setExpanded] = useState(false);
-  const [look, setLook] = useState<Look>(() => {
+  /* Whether this machine can photograph a page at all. On Linux `capture.rs`
+     is a stub, so it cannot, and every tile draws the same grey plate — which
+     is exactly what this screen looks like on a Mac for the two seconds before
+     the pictures arrive. A library of them reads as *loading*, and then as
+     broken. The list is the view that never needed a picture. */
+  const posters = useExpectPoster();
+  /* The view somebody chose, if anybody ever did. `null` is "nobody has". */
+  const [chosen, setChosen] = useState<Look | null>(() => {
     try {
-      return window.localStorage.getItem(LOOK_KEY) === "list" ? "list" : "grid";
+      const held = window.localStorage.getItem(LOOK_KEY);
+      if (held === "grid" || held === "list") return held;
     } catch {
-      return "grid";
+      /* A window told to keep nothing opens on the default. */
     }
+    return null;
   });
-  useEffect(() => {
+  /* **Derived, not frozen at mount, and that is the fix for the bug this
+     screen shipped with.** It used to read `posters` once in the initialiser
+     above — and the shell's answer about whether anything can be photographed
+     arrives a tick after launch, so on Linux the initialiser always ran while
+     nobody had asked yet, always chose the grid, and the library opened as
+     seven identical grey plates for the whole session. Reading it live costs
+     the thing the old comment was protecting — a view that does not move under
+     the person holding it — and buys the view being right on the first launch,
+     which is what it is for. The only motion it can produce is in the app's
+     first frames, behind the list's own pending state, or at the moment two
+     captures fail in a row, which is the moment the sentence below appears
+     saying why. Once anybody picks, nothing moves again. */
+  const look: Look = chosen ?? (posters ? "grid" : "list");
+  /* Persisted when it is *chosen* and not when it is defaulted, so "nobody has
+     chosen" is still true at the next launch. */
+  const choose = (next: Look) => {
+    setChosen(next);
     try {
-      window.localStorage.setItem(LOOK_KEY, look);
+      window.localStorage.setItem(LOOK_KEY, next);
     } catch {
       /* A window told to keep nothing still works for this visit. */
     }
-  }, [look]);
+  };
 
   /* `mine` comes from the server, decided on the path, so this cannot
      disagree with what `filed_where` let through in the first place. */
@@ -280,7 +306,7 @@ export function ArtifactsPage({ open: asked = null }: { open?: string | null }) 
             </button>
             <span className="ml-2 flex items-center gap-1">
               <button
-                onClick={() => setLook("grid")}
+                onClick={() => choose("grid")}
                 title="Grid"
                 aria-label="Grid"
                 className={`grid h-7 w-7 place-items-center rounded-md ${look === "grid" ? "text-bone" : "text-mute hover:text-text"}`}
@@ -288,7 +314,7 @@ export function ArtifactsPage({ open: asked = null }: { open?: string | null }) 
                 <LayoutGrid className="h-4 w-4" strokeWidth={1.75} />
               </button>
               <button
-                onClick={() => setLook("list")}
+                onClick={() => choose("list")}
                 title="List"
                 aria-label="List"
                 className={`grid h-7 w-7 place-items-center rounded-md ${look === "list" ? "text-bone" : "text-mute hover:text-text"}`}
@@ -298,6 +324,13 @@ export function ArtifactsPage({ open: asked = null }: { open?: string | null }) 
             </span>
           </span>
         </div>
+
+        {/* The only new copy on the screen, and it is owed: without it the
+            plates are a page that never finishes loading. Said whichever view
+            is up, because it is about the pictures and not about the list. */}
+        {!posters && (
+          <p className="mt-2 text-meta text-mute">This machine can’t photograph a page, so these have no pictures.</p>
+        )}
 
         {/* **A `Note`, and the real instance of the bug.** This drew the full
             centred plate *and* the filled *Ask for one*, so searching for a

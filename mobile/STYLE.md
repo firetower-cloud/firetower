@@ -54,8 +54,12 @@ here.
 A window has a title bar, a server strip, a rail and ⌘-numbered tabs. A phone
 has a stack and a back gesture.
 
-- **Four tabs**: Inbox, Tasks, Config, You. The inbox carries the dashboard's
-  own filter, because that is the vocabulary.
+- **Five tabs**: Dashboard, Workspaces, Tasks, Artifacts, You. Four of the
+  five are the desk's own words for the same objects, and the fifth is too —
+  `RailPanel.tsx` already calls that list Workspaces. Five is the ceiling on
+  both platforms, so a sixth destination has to displace one of these.
+  (This line read *Inbox, Tasks, Config, You*, which was already stale against
+  the shipped four; `(tabs)/_layout.tsx` has the argument.)
 - **Config and You are not one tab.** They were, briefly, and a server's
   repositories under the list of servers reads as a thing and the things
   inside it at the same level. `You` is this phone's — which Firetowers it
@@ -355,6 +359,36 @@ chrome stacked in the most crowded place on a phone, between the conversation
 and the thing you type into.
 
 Nothing lives under the transcript except the composer and what belongs to it.
+
+## An artifact's card goes where it was published
+
+The end of the transcript is the loudest place on a phone — it is directly
+above the composer, and whatever is there reads as the newest thing that
+happened. So a card appended after the conversation says *this was just made*
+about a poster from an hour ago, which is how every artifact on this screen
+came to be reported as a bug.
+
+Anchored by log line, which is the only thing that can carry it: `firstSeenLine`
+is stamped once, when the artifact is first published, and it survives the file
+being renamed, copied or edited again. Three positions and no fourth — inline
+after the row the conversation had reached, above the transcript when it is
+older than every line in the loaded window, and the end only when there is no
+position to claim. The window is the last few exchanges, so the second of those
+is common rather than a corner, and it is the one that needs a word: `Published
+before the messages below.`
+
+**Inline, the card hangs off the hairline**, and this is one of the places
+being a phone changes the answer. The desk draws tool work at the gutter and
+has no rail for a card to cut; here the edit above and the folded run below
+both hang from one, and a poster run out to both edges crosses it — after
+which the group underneath reads as belonging to the card rather than to the
+turn. On the rail it takes the same 12pt indent as everything else that turn
+did, and it cannot be mistaken for the agent's own illustration, because the
+agent's prose and the screenshots it pastes both start at the gutter.
+
+**416pt is the widest it goes**, matching the desk. Nothing changes at phone
+width; what it stops is a 316pt-tall poster on the inner display, which is a
+third of the screen for one card.
 
 ## Gestures replace keycaps
 

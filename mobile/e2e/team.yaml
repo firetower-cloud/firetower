@@ -1,0 +1,100 @@
+# A Team row opening the member it names.
+#
+# This panel shipped twice with rows that drew correctly and did nothing under
+# a thumb, and both times it was caught on hardware rather than here. A unit
+# test that the rule returns a handler is not the same claim: the rule has to
+# be wired to a `Pressable`, the `Pressable` has to be the row, and the route
+# on the other side has to find the session the row names. Four things, and
+# only a device touches all four.
+#
+# The `team` scene is the point — a manager with three subagents **in its own
+# checkout**, which is the commonest team there is and the one where every row
+# resolved back to the workspace being read. Any other scene leaves `s_1` solo
+# and draws no panel at all.
+#
+#   node desktop/scripts/mock-server.mjs 4488
+#   curl "http://localhost:4488/__reset?scene=team"
+#   maestro test e2e/team.yaml -e ADDRESS=192.168.50.174:4488 -e USER=admin -e PASS=admin
+appId: com.usefiretower.app
+---
+- launchApp:
+    clearState: true
+    permissions: { all: allow }
+
+- assertVisible: "Connect to a Firetower"
+- tapOn:
+    id: "address"
+- inputText: "${ADDRESS}"
+- tapOn: "Connect"
+
+- assertVisible: "Sign in"
+- tapOn:
+    id: "username"
+- inputText: "${USER}"
+- tapOn:
+    id: "password"
+- inputText: "${PASS}"
+- tapOn: "Sign in"
+
+# iOS offers to save the password over the top of the home.
+- runFlow:
+    when:
+      visible: "Not Now"
+    commands:
+      - tapOn: "Not Now"
+
+- assertVisible: "Dashboard"
+
+# The quickest path to the workspace with the team in it: the subagent that is
+# asking something is a chip on the home, and the chip opens its workspace.
+- tapOn:
+    id: "waiting-chip"
+    index: 0
+- assertVisible:
+    id: "composer"
+
+# 390pt wide, so the overview is a pushed page rather than a column beside.
+- tapOn:
+    id: "overview"
+- assertVisible: "Team"
+# Every row but the one being read is a `Pressable` with a chevron. Before the
+# fix this screenshot has four rows and no chevron on any of them.
+- takeScreenshot: team-rows
+
+# **Three rows carry `overview-member`, and there are four rows.** That is the
+# assertion, and it is why this is by id and not by the name on the row: a
+# `Pressable` collapses its children for accessibility, so the row's text is
+# not reachable and the id is the only thing that says *this one is a button*.
+# Asserting the third one exists is asserting the first three are links —
+# before the fix there were none at all.
+- assertVisible:
+    id: "overview-member"
+    index: 2
+
+# A member with no workspace of its own — a subagent in the manager's
+# checkout, which is what every row here is. Third row: `Token audit`, under
+# the manager and the one that is asking something. The desk links it to its
+# session and so does this, through the only route the phone has.
+- tapOn:
+    id: "overview-member"
+    index: 2
+# The conversation, which the overview has not got: we have left the panel.
+- assertVisible:
+    id: "composer"
+# And it is *that* member's. Both halves matter: the header is the name the
+# row carried, and the status is the one the row showed — not the workspace's
+# name and not whichever run speaks for it.
+- assertVisible: "Token audit"
+- assertVisible: "Handed it back"
+- takeScreenshot: member-opened
+
+# And the panel from there, which is the other half of the claim: the row that
+# was a link is now the one you are reading, and the one you came from is a
+# link back.
+- tapOn:
+    id: "overview"
+- assertVisible: "Team"
+- assertVisible:
+    id: "overview-member"
+    index: 2
+- takeScreenshot: team-rows-after

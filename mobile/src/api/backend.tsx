@@ -16,6 +16,14 @@
  * in the held transcripts — so the original invariant holds for the case it
  * was written for and for the one it missed.
  *
+ * **And the identity carries the address.** A `serverId` is the organisation's
+ * database id, so a restored copy keeps it: the same id and account at a new
+ * URL used to be the same key, which left this client warm — and its socket
+ * dialled — while every request under it went to another machine. The whole
+ * destination is the key now, so a URL change is a remount: an empty client,
+ * a socket redialled at the new address, and nothing on screen that was not
+ * read from there. `api/identity.ts` says what that costs.
+ *
  * Freshness is the event stream, not a poll. `Sessions` below follows the
  * `sessions` topic on this server's socket and folds every event into the
  * cache, so nothing here asks the control plane for anything it was just told.
@@ -76,7 +84,7 @@ const Ctx = createContext<string | null>(null);
  * the HTTP layer resolves a URL and a keychain slot from the **`serverId`**,
  * while the cache has to be partitioned by the **identity**. Passing only the
  * id made those indistinguishable, which is how the account fell out of the
- * key.
+ * key, and then the address after it.
  */
 export function BackendProvider({ server, children }: { server: Who; children: ReactNode }) {
   // The mutator is shared by every generated call, so it has to be told which

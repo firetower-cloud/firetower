@@ -46,6 +46,17 @@
  * one, and additive is the defensible alternative. It differs only on the two
  * lede screens: 84 against 110.
  *
+ * ## And the top takes a floor as well, which is not the same `Math.max`
+ *
+ * The section above argues that `Math.max(insets.top, want.top)` would put a
+ * title under the clock, and that is still true. {@link TOP_AIR} is a third
+ * clause rather than a reversal of it: the addition happens first and the
+ * floor is applied to the **total**. `max(59 + 0, 36)` is 59 and `max(59 + 24,
+ * 36)` is 83 — nothing that clears the hardware today stops clearing it. What
+ * it catches is the pose where the hardware reserves nothing and the design
+ * never said how much it wanted, which is every screen in this app on the
+ * Duo's inner display.
+ *
  * ## The gutter is not one number
  *
  * Read off `../.firetower/attachments/firetower-mobile-v54.html` rather than
@@ -74,6 +85,37 @@ import type { ViewStyle } from "react-native";
 export const GUTTER = 20;
 
 /**
+ * **The least air above a screen's first line, whatever the hardware
+ * reserves.** A floor on the resolved total, not a replacement for it.
+ *
+ * Every screen root takes `paddingTop: insets.top + (want.top ?? 0)`, and all
+ * fourteen of them pass no `top` at all — the design contributes nothing, so
+ * the air above the first thing on the screen *is* the status bar's inset. On
+ * a notched iPhone the 59 hides that; on the Duo's inner display, where the
+ * clock sits over the trailing rail and outside the content, the inset is 0
+ * and the home's header lands 2 pt from the frame. Android reports its
+ * status-bar height, usually 24, and is the same defect one notch smaller.
+ *
+ * **36, and the same at every pose.** How much air a first line wants from a
+ * frame is a fact about the design, not about the device, and a per-pose
+ * number would be a second rule to keep in step with this one. It is also
+ * right under either answer to the number nobody has measured — the inner
+ * display's top inset is 0 if the status bar lives over the rail and 24 if iOS
+ * overlays an iPad-style bar, and 36 lands on 36 either way.
+ *
+ * Not 54, which is the drawing's status bar and would spend 54 pt of a
+ * 669-tall landscape pose on nothing. Not 28, which changes nothing but the
+ * Duo and leaves Android two points short of a number chosen as a minimum.
+ *
+ * **The bottom deliberately gets no twin.** `STYLE.md`'s most specific
+ * composer rule is that the composer sits on the keyboard, not on the home
+ * indicator, and a `BOTTOM_AIR` would hold air open under the box once the
+ * keys are up. The top is a status bar you read past; the bottom is a thing
+ * the keyboard covers.
+ */
+export const TOP_AIR = 36;
+
+/**
  * The connect family's own, wider: `wrap()` in the drawing is
  * `padding:0 26px`. Five screens — looking for it, who are you, replace the
  * password, not a Firetower, not authorised — all one centred prose column
@@ -98,7 +140,8 @@ export const BLEED = 0;
 export type Insets = { top: number; bottom: number; left: number; right: number };
 
 export type Edges = {
-  /** Air below the status bar, *added* to whatever it occupies. */
+  /** Air below the status bar, *added* to whatever it occupies — and the
+   *  total then floored at {@link TOP_AIR}. */
   top?: number;
   /** Air above the home indicator, likewise. */
   bottom?: number;
@@ -116,7 +159,9 @@ export type Edges = {
 export function screenEdges(insets: Insets, want: Edges = {}): ViewStyle {
   const gutter = want.gutter ?? GUTTER;
   return {
-    paddingTop: insets.top + (want.top ?? 0),
+    /* The addition first, then the floor on the total — see {@link TOP_AIR}.
+       Reversing those two is the `Math.max` this file argues against. */
+    paddingTop: Math.max(insets.top + (want.top ?? 0), TOP_AIR),
     paddingBottom: insets.bottom + (want.bottom ?? 0),
     paddingLeft: Math.max(insets.left, gutter),
     paddingRight: Math.max(insets.right, gutter),
@@ -145,6 +190,41 @@ export function screenEdges(insets: Insets, want: Edges = {}): ViewStyle {
  */
 export function useEdges(want: Edges = {}): ViewStyle {
   return screenEdges(useInsets(), want);
+}
+
+/**
+ * **What the system reserves at the trailing edge**, for the one thing that is
+ * allowed to cross it.
+ *
+ * The rule, and it is a rule about layers rather than about widths: *a
+ * surface's background and its own fill run to the frame; anything you read,
+ * touch or scroll stays inside the reserved 84.* The reserved space is a
+ * margin **inside** the app, not a margin outside it.
+ *
+ * `bg-ground` already satisfies the first half for free — {@link screenEdges}
+ * emits *padding*, which is inside the border box, so the page colour paints
+ * the full window width and there was never an unpainted strip. What does not
+ * satisfy it is a child that stops where the root's padding begins: the
+ * docked column at 951 ended at 867 with a divider and a fill that visibly
+ * fell 84 short of the frame, beside a floating tab pill, which reads as a
+ * dead strip the app does not own.
+ *
+ * The fix is three properties at the one call site that wants it:
+ *
+ * ```js
+ * { width: pose.panel + rail, marginRight: -rail, paddingRight: rail }
+ * ```
+ *
+ * The negative margin pulls the column's fill out into the root's padding and
+ * the padding puts its content back. The left column's width does not move —
+ * it is still `content − panel` — and neither does anything `pose.ts`
+ * measures, because `onLayout` reports a view's *frame*.
+ *
+ * Here rather than on `Pose` so this file stays the only reader of
+ * `insets.right`, which is the rule its own docblock makes.
+ */
+export function useRail(): number {
+  return useInsets().right;
 }
 
 /**
