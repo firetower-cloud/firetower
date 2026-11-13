@@ -11,7 +11,20 @@
 use ft_core::{Agent, AgentPresence, EventKind, SessionId, Share, WorkspaceSize};
 use serde::{Deserialize, Serialize};
 
-/// Bumped when a frame changes shape incompatibly. Checked during the handshake.
+/// Bumped when a frame changes shape incompatibly. Checked during the
+/// handshake, and **checked for equality**: `fleet.rs` refuses a worker whose
+/// number is not this one, the host goes to *needs setup* with a diagnosis
+/// whose remedy is a reinstall, and nothing upgrades a worker by itself.
+///
+/// **So a bump is a decision about operators, not only about frames.** Moving
+/// this number stops every worker in every fleet until somebody reinstalls
+/// it. The notes below say what each version added and why a worker without
+/// it cannot be trusted with the work — they are not descriptions of what
+/// happens on an older worker, because what happens is that it is refused
+/// before a frame is exchanged. Several of them were written as though an
+/// old worker would carry on with the feature missing; it will not, and
+/// believing it does is how somebody plans a merge that takes a fleet
+/// offline.
 ///
 /// 6 — `CreateWorkspace` gathered the checkout into an optional `RepoSpec`, so
 /// a session can have no repository. An older worker accepts the handshake and
@@ -66,19 +79,17 @@ use serde::{Deserialize, Serialize};
 ///      command line and a long persona no longer fits in it. A worker older
 ///      than this reads the field as nothing, and a session started as a
 ///      profile on one would come up as a plain agent with no indication why.
-/// 24 — a worker says when a workspace has been made. The scheduler's launch
-///      permit waits for it, and a worker that never sends it holds one for
-///      the whole three-minute cap — so three due schedules on an older
-///      worker become one launch every three minutes rather than three at
-///      once. Visible as the feature being slow rather than as a worker
-///      needing an upgrade, which is what this number is for.
-/// 23 — a session can require its skills. An older worker reads the frame
-///      perfectly and ignores the requirement, so a scheduled run approved
-///      against a safety skill would start on one without it and nothing
-///      would say so. That is the same silent-degradation case 19 was bumped
-///      for, and the guarantee is worth less than nothing if it holds only
-///      on workers that happen to be new.
-pub const PROTOCOL_VERSION: u32 = 24;
+/// 23 — a scheduled run's two guarantees, which both need the worker's half.
+///      A session can **require** its skills (`CreateWorkspace.skills_required`):
+///      a run approved against a safety skill must not start without it, and
+///      a worker that treats the set as best effort cannot give that. And a
+///      worker **says when a workspace has been made**
+///      (`ToServer::WorkspaceCreated`): the scheduler's launch permit waits
+///      for that acknowledgement rather than for resource accounting, which
+///      answers before a checkout starts on Linux and never at all on macOS.
+///      One number for both because they landed hours apart in one branch and
+///      nothing was ever released between them.
+pub const PROTOCOL_VERSION: u32 = 23;
 
 mod codec;
 pub use codec::{Codec, CodecError, FrameReader, FrameWriter};
@@ -662,9 +673,10 @@ pub struct CreateWorkspace {
     /// other half, because **the server deciding something is required does
     /// not make the worker install it**.
     ///
-    /// Defaulted, so a worker from before this understands the frame — and
-    /// cannot honour it. A control plane that needs the guarantee needs a
-    /// worker that has this.
+    /// `#[serde(default)]` for the shape of the type, not as a fallback: a
+    /// worker old enough to lack this is refused at the handshake, so no
+    /// frame carrying it is ever read by one. See [`PROTOCOL_VERSION`], which
+    /// moved for this.
     #[serde(default)]
     pub skills_required: bool,
     /// The system prompt this session carries, when it was started as a
@@ -1108,6 +1120,10 @@ pub enum ToServer {
     /// `ok` is false for a creation that failed, and it is still an
     /// acknowledgement: a failed creation holds nothing and the permit should
     /// go back at once.
+    ///
+    /// A worker old enough not to send this is refused at the handshake
+    /// rather than quietly holding permits — see [`PROTOCOL_VERSION`], which
+    /// moved for this and for `CreateWorkspace::skills_required` together.
     WorkspaceCreated {
         session_id: SessionId,
         ok: bool,
