@@ -75,6 +75,33 @@ fn permits() -> &'static tokio::sync::Semaphore {
     ROOM.get_or_init(|| tokio::sync::Semaphore::new(super::AT_ONCE_PER_HOST))
 }
 
+/// **One cap-asserting test at a time, and only once the cap is clear.**
+///
+/// [`permits`] is process-wide on purpose — a semaphore two passes cannot
+/// defeat — which also makes it the one piece of state every test in this
+/// process shares. Two tests that each assert "three launches and no more
+/// reached *my* worker" are two tests drawing on the same three permits, and
+/// each reads the other's launches as its own cap being wrong. Forced to
+/// overlap, that is three failures in six runs.
+///
+/// The lock alone is not enough. A launch holds its permit for seconds after
+/// the test that started it has stopped asserting, so this also waits for the
+/// cap to come back before handing over. The wait is bounded: a permit parked
+/// by something else is a worse thing to hang the suite on than a test that
+/// runs anyway and says what it saw.
+#[cfg(test)]
+pub(crate) async fn one_cap_test_at_a_time() -> tokio::sync::MutexGuard<'static, ()> {
+    static TURN: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+    let turn = TURN.get_or_init(Default::default).lock().await;
+    for _ in 0..200 {
+        if permits().available_permits() == super::AT_ONCE_PER_HOST {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    turn
+}
+
 /// The run ids currently being launched here.
 pub async fn in_flight() -> HashSet<String> {
     launching().read().await.clone()

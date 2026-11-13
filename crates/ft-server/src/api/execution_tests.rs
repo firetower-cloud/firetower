@@ -78,8 +78,16 @@ type Summaries = Arc<std::sync::Mutex<Vec<ft_core::CheckoutSummary>>>;
 /// deferred teardown has to survive is somebody resuming *inside* it. That
 /// window opens and closes in a few milliseconds, so there is no reaching it
 /// from outside; this holds the answer open until the test has had its
-/// moment. Run once per `Summarize`, before the reply is written.
-type Meanwhile = Arc<std::sync::Mutex<Option<Box<dyn Fn() + Send>>>>;
+/// moment. Run once per `Summarize`, before the reply is written — and
+/// **awaited**, not slept past. A test about a window a few milliseconds wide
+/// cannot ask for a thing to happen and then guess how long it took.
+type Meanwhile = Arc<
+    std::sync::Mutex<
+        Option<
+            Box<dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> + Send>,
+        >,
+    >,
+>;
 
 /// One checkout with nothing outstanding in it, which is what a clean run
 /// leaves and what a fixture should start from.
@@ -249,12 +257,14 @@ impl Transport for Worker {
                     // deferred.
                     ToWorker::Summarize { req, .. } => {
                         // Whatever the test asked to have happen while the
-                        // control plane is waiting on this, and then long
-                        // enough for it to have happened.
-                        if let Some(meanwhile) = before_answering.lock().unwrap().as_ref() {
-                            meanwhile();
+                        // control plane is waiting on this — started and
+                        // **finished** before the answer goes back. The guard
+                        // is taken and dropped on its own line: it is a `std`
+                        // lock and what follows awaits.
+                        let meanwhile = before_answering.lock().unwrap().as_ref().map(|f| f());
+                        if let Some(done) = meanwhile {
+                            done.await;
                         }
-                        tokio::time::sleep(std::time::Duration::from_millis(120)).await;
                         Some(ToServer::Summarized {
                             req,
                             summaries: sees.lock().unwrap().clone(),
@@ -7220,10 +7230,11 @@ async fn resuming_while_git_is_being_asked_keeps_the_workspace() {
         .unwrap();
 
     // **Somebody opens the workspace while git is being asked about it.**
-    // The fixture worker runs this before it answers `Summarize` and then
-    // holds the answer long enough for it to have landed, which is the one
-    // instant the old guard could not see: past its read of the session, and
-    // before its delete.
+    // The fixture worker runs this to completion before it answers
+    // `Summarize`, which is the one instant the old guard could not see: past
+    // its read of the session and before its delete. Awaited rather than
+    // spawned — the status has to have *moved* by the time the answer goes
+    // back, and a sleep long enough to assume that is the next intermittency.
     {
         let state = state.clone();
         let session = session.clone();
@@ -7234,12 +7245,13 @@ async fn resuming_while_git_is_being_asked_keeps_the_workspace() {
             .replace(Box::new(move || {
                 let state = state.clone();
                 let session = session.clone();
-                tokio::spawn(async move {
+                Box::pin(async move {
                     state
                         .fleet
                         .set_status(&session, ft_core::SessionStatus::Working, None)
                         .await;
-                });
+                })
+                    as std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
             }));
     }
 
@@ -7424,6 +7436,7 @@ async fn a_clean_run_nobody_touched_still_loses_its_workspace() {
 /// Four schedules due at once, which is what a sweep hands to `spawn`.
 #[tokio::test]
 async fn no_more_than_three_launches_reach_a_worker_at_once() {
+    let _turn = crate::schedules::launch::one_cap_test_at_a_time().await;
     let (state, principal, host, ready, owner, created, _frames) = frames_fixture().await;
     ready.store(true, Ordering::SeqCst);
     says_it_has(&state, &host, &[(Agent::ClaudeCode, true)]).await;
@@ -7528,6 +7541,7 @@ async fn no_more_than_three_launches_reach_a_worker_at_once() {
 /// acknowledged anything is the same fact.
 #[tokio::test]
 async fn a_launch_that_failed_hands_its_permit_straight_back() {
+    let _turn = crate::schedules::launch::one_cap_test_at_a_time().await;
     let (state, principal, host, ready, owner, created, _frames) = frames_fixture().await;
     ready.store(true, Ordering::SeqCst);
     says_it_has(&state, &host, &[(Agent::ClaudeCode, true)]).await;
