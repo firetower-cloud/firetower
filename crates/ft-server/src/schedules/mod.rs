@@ -86,10 +86,11 @@ pub(crate) const AT_ONCE_PER_HOST: usize = 3;
 /// which freed its permit a few milliseconds later while the worker had not
 /// yet cut a worktree. The reviewer put eight onto one machine that way.
 ///
-/// So the permit is held until `Fleet::usage_of` can see the workspace, which
-/// is the moment the worker's five-second `Usage` report includes it: the
-/// workspace exists *and* the next disk reading covers it, which is exactly
-/// what the floor needs to be true.
+/// So the permit is held until the worker says it has finished making the
+/// workspace — `ToServer::WorkspaceCreated`, which is an acknowledgement and
+/// not a reading. It waited on `Fleet::usage_of` first, and resource
+/// accounting is a different fact: on Linux it answers before the checkout
+/// starts, and on macOS it never answers at all.
 ///
 /// Three minutes, which is a compromise in one direction only. It is longer
 /// than an ordinary clone and container start — [`ORPHAN_AFTER`]'s note

@@ -66,13 +66,19 @@ use serde::{Deserialize, Serialize};
 ///      command line and a long persona no longer fits in it. A worker older
 ///      than this reads the field as nothing, and a session started as a
 ///      profile on one would come up as a plain agent with no indication why.
+/// 24 — a worker says when a workspace has been made. The scheduler's launch
+///      permit waits for it, and a worker that never sends it holds one for
+///      the whole three-minute cap — so three due schedules on an older
+///      worker become one launch every three minutes rather than three at
+///      once. Visible as the feature being slow rather than as a worker
+///      needing an upgrade, which is what this number is for.
 /// 23 — a session can require its skills. An older worker reads the frame
 ///      perfectly and ignores the requirement, so a scheduled run approved
 ///      against a safety skill would start on one without it and nothing
 ///      would say so. That is the same silent-degradation case 19 was bumped
 ///      for, and the guarantee is worth less than nothing if it holds only
 ///      on workers that happen to be new.
-pub const PROTOCOL_VERSION: u32 = 23;
+pub const PROTOCOL_VERSION: u32 = 24;
 
 mod codec;
 pub use codec::{Codec, CodecError, FrameReader, FrameWriter};
@@ -1082,6 +1088,29 @@ pub enum ToServer {
     ActionDone {
         req: ReqId,
         result: Result<String, String>,
+    },
+    /// **This workspace has been made, or has failed to be.**
+    ///
+    /// Not an answer to a request — `CreateWorkspace` is one-way, and the
+    /// events it emits are what a person watches. This is for the one caller
+    /// that has to know *when it is over*: the scheduler holds a launch
+    /// permit, capped at three per pass, and releasing it any earlier than
+    /// this means the next three launches start while the last three are
+    /// still cutting worktrees.
+    ///
+    /// It replaces reading `Usage`, which is resource accounting and not
+    /// completion. On Linux the workspace is recorded and its cgroup made
+    /// *before* checkout, so usage answers while the disk is still filling;
+    /// on macOS per-workspace usage is omitted entirely, so it never answers
+    /// and every permit was held to the timeout. Neither is a fact about
+    /// whether the work is done.
+    ///
+    /// `ok` is false for a creation that failed, and it is still an
+    /// acknowledgement: a failed creation holds nothing and the permit should
+    /// go back at once.
+    WorkspaceCreated {
+        session_id: SessionId,
+        ok: bool,
     },
     /// The answer to [`ToWorker::Summarize`].
     Summarized {

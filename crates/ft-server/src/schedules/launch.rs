@@ -105,30 +105,41 @@ pub fn spawn(state: AppState, schedule: crate::db::ScheduleRow, run: ScheduleRun
     });
 }
 
-/// Wait until the worker's own accounting covers this workspace.
+/// Wait until the worker says it has finished making this workspace.
 ///
-/// `Fleet::usage_of` answers once a `Usage` report has named it, which the
-/// worker sends every five seconds — so this returns when the workspace
-/// exists *and* the disk reading the floor consults includes it. Those are
-/// the two things the permit is protecting, and they become true together.
+/// **Completion, asked for as completion.** This waited on `Fleet::usage_of`
+/// — the worker's resource accounting — and that is a different fact wearing
+/// the same clothes. On Linux the workspace is recorded and its cgroup made
+/// *before* the checkout, so usage answers while the disk is still filling
+/// and three more launches start against a reading that is already stale. On
+/// macOS per-workspace usage is omitted entirely, because it is built on
+/// cgroups, so it never answered: every successful launch held a
+/// process-wide permit until the cap, and three due schedules became one
+/// launch every three minutes.
 ///
-/// Capped, because a worker that never reports must not hold a permit for
-/// ever. Past the cap this gives up and says nothing: the run is live, the
-/// reconciler still has its fence, and the only consequence is the overshoot
-/// that used to happen every time.
+/// `ToServer::WorkspaceCreated` is the worker saying it is done, on both the
+/// success and the failure path — a creation that failed holds nothing.
+///
+/// Still capped, for the two cases an acknowledgement cannot cover: a worker
+/// too old to send one, and a control plane that restarted while this was
+/// waiting. Past the cap it gives up and says so; the run is live, the
+/// reconciler still has its fence, and the consequence is the overshoot that
+/// used to happen every time.
 async fn created(state: &AppState, session: &SessionId) {
     let until = tokio::time::Instant::now() + super::CREATION_WAIT;
     while tokio::time::Instant::now() < until {
-        if state.fleet.usage_of(session).await.is_some() {
+        if state.fleet.workspace_created(session).await {
             return;
         }
-        // A second is well under the worker's own five, so this notices the
-        // first report that covers it rather than the second.
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        // A quarter of a second: the acknowledgement arrives when the work is
+        // done rather than on a timer, so this is about how promptly the next
+        // launch may start rather than about a reporting interval.
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
     }
     tracing::warn!(
         session = %session,
-        "the worker has not reported this workspace within {:?}; releasing the launch permit",
+        "no worker acknowledgement that this workspace was made within {:?}; releasing the \
+         launch permit",
         super::CREATION_WAIT
     );
 }

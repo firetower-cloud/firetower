@@ -88,18 +88,18 @@ fn nothing_outstanding() -> ft_core::CheckoutSummary {
     }
 }
 
-/// How long this worker takes to admit to a workspace it was told to make.
+/// How long this worker takes to make a workspace it was told to make.
 ///
-/// **A real worker cuts a worktree and starts a container before its next
-/// `Usage` report names the new workspace**, which is seconds. The fake one
-/// answered instantly or never, and neither is the shape the launch permit is
-/// bounded by: `launch::spawn` holds its permit until `Fleet::usage_of` can
-/// see the workspace, so a worker that reports immediately makes that bound
-/// unobservable and one that never reports makes it look infinite.
+/// **A real worker cuts a worktree and starts a container before it can say
+/// it is done**, which is seconds. The fake one was instant, and that makes
+/// the launch permit's bound unobservable: `launch::spawn` holds its permit
+/// until the worker acknowledges the workspace, so a worker that
+/// acknowledges in the same breath as receiving the frame is a worker with no
+/// bound to test.
 ///
 /// Five seconds, chosen against the test that watches it: the cap has to be
 /// seen to *hold* for a moment, so the gap between a workspace being asked
-/// for and the worker admitting to it has to be longer than the time three
+/// for and the worker saying it is made has to be longer than the time three
 /// launches take to reach the worker, with room to look in between.
 const REPORTED_AFTER: std::time::Duration = std::time::Duration::from_secs(5);
 #[async_trait::async_trait]
@@ -140,23 +140,45 @@ impl Transport for Worker {
                 tokio::spawn(async move {
                     tokio::time::sleep(std::time::Duration::from_millis(120)).await;
                     loop {
-                        // Every workspace this worker was told to make and has
-                        // had time to make, which is what a real `Usage`
-                        // report carries — and what the launch permit waits
-                        // for. See [`REPORTED_AFTER`].
-                        let workspaces: Vec<(ft_core::SessionId, ft_core::WorkspaceUsage)> = making
-                            .lock()
-                            .unwrap()
-                            .iter()
-                            .filter(|(at, _)| at.elapsed() >= REPORTED_AFTER)
-                            .map(|(_, id)| (id.clone(), Default::default()))
-                            .collect();
+                        // **Usage at once, as a real worker reports it.** On
+                        // Linux the workspace is recorded and its cgroup made
+                        // before the checkout starts, so this answers while
+                        // the disk is still filling — which is why a permit
+                        // that waited on it released too early, and why this
+                        // fixture reports it immediately rather than late.
+                        let (asked, done): (Vec<_>, Vec<_>) = {
+                            let made = making.lock().unwrap();
+                            (
+                                made.iter().map(|(_, id)| id.clone()).collect(),
+                                made.iter()
+                                    .filter(|(at, _)| at.elapsed() >= REPORTED_AFTER)
+                                    .map(|(_, id)| id.clone())
+                                    .collect(),
+                            )
+                        };
                         let frame = ToServer::Usage {
                             capacity: said,
-                            workspaces,
+                            workspaces: asked
+                                .iter()
+                                .map(|id| (id.clone(), Default::default()))
+                                .collect(),
                         };
                         if writer.lock().await.write(&frame).await.is_err() {
                             return;
+                        }
+                        // **And the acknowledgement only once it is made**,
+                        // which is the fact the permit waits on and the one
+                        // usage above cannot stand in for. Repeated
+                        // harmlessly: the control plane holds a set, and a
+                        // real worker says it once.
+                        for id in done {
+                            let frame = ToServer::WorkspaceCreated {
+                                session_id: id,
+                                ok: true,
+                            };
+                            if writer.lock().await.write(&frame).await.is_err() {
+                                return;
+                            }
                         }
                         tokio::time::sleep(std::time::Duration::from_millis(25)).await;
                     }

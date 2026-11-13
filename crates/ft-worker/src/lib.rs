@@ -784,7 +784,18 @@ impl Worker {
             }
             ToWorker::CreateWorkspace(spec) => {
                 let session_id = spec.session_id.clone();
-                if let Err(e) = self.create_workspace(*spec, out).await {
+                let made = self.create_workspace(*spec, out).await;
+                // **Said when it is over, either way.** The scheduler holds a
+                // launch permit until this arrives — see
+                // `ToServer::WorkspaceCreated` — and a creation that failed
+                // holds no disk, so the permit goes back on both paths.
+                let _ = out
+                    .send(ToServer::WorkspaceCreated {
+                        session_id: session_id.clone(),
+                        ok: made.is_ok(),
+                    })
+                    .await;
+                if let Err(e) = made {
                     let kind = EventKind::Failed {
                         code: "SetupFailed".into(),
                         message: format!("{e:#}"),
