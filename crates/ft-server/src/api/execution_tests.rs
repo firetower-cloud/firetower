@@ -45,12 +45,48 @@ struct Worker {
     /// the one the disk floor fails open on — so it is the default here too
     /// rather than a convenient zero.
     capacity: Option<ft_core::Capacity>,
+    /// **What git sees in the workspace**, which is what `Summarize` answers
+    /// and therefore what decides whether a run was clean.
+    ///
+    /// A handle rather than a constant because it is a thing that *changes*:
+    /// a workspace resumed and written in is clean one minute and not the
+    /// next, and a teardown deferred across that minute is the difference
+    /// between tidying up and destroying somebody's work.
+    sees: Summaries,
+    /// **Every workspace this worker was told to tear down.**
+    ///
+    /// The frame that destroys somebody's work — `destroy_as` ends in `git
+    /// worktree remove --force` — so a test about not destroying it asserts
+    /// on this rather than on what the control plane decided.
+    destroyed: Destroyed,
 }
 
 /// What the control plane told the worker to start.
 type Launches = Arc<std::sync::Mutex<Vec<ft_proto::StartAgent>>>;
 /// What the control plane told the worker to make.
 type Created = Arc<std::sync::Mutex<Vec<ft_proto::CreateWorkspace>>>;
+/// What the control plane told the worker to tear down.
+type Destroyed = Arc<std::sync::Mutex<Vec<ft_core::SessionId>>>;
+/// What git sees in the workspace, as the worker would report it.
+type Summaries = Arc<std::sync::Mutex<Vec<ft_core::CheckoutSummary>>>;
+
+/// One checkout with nothing outstanding in it, which is what a clean run
+/// leaves and what a fixture should start from.
+fn nothing_outstanding() -> ft_core::CheckoutSummary {
+    ft_core::CheckoutSummary {
+        path: String::new(),
+        slug: "acme/web".into(),
+        summary: ft_core::WorkSummary {
+            branch: "agent/nightly".into(),
+            uncommitted: 0,
+            ahead: 0,
+            pushed: true,
+            commits: Some(1),
+            unborn: false,
+        },
+        trouble: None,
+    }
+}
 
 /// How long this worker takes to admit to a workspace it was told to make.
 ///
@@ -78,6 +114,8 @@ impl Transport for Worker {
         let launched = self.launched.clone();
         let created = self.created.clone();
         let capacity = self.capacity;
+        let sees = self.sees.clone();
+        let destroyed = self.destroyed.clone();
         /* When each workspace was asked for, so the `Usage` report below can
         name it the way a real worker does: a little after the fact. The
         `created` list has no clock on it and three tests read it, so this
@@ -172,6 +210,18 @@ impl Transport for Worker {
                         created.lock().unwrap().push((**spec).clone());
                         None
                     }
+                    // What git sees, which is what decides whether a run was
+                    // clean — and is a thing that changes while a teardown is
+                    // deferred.
+                    ToWorker::Summarize { req, .. } => Some(ToServer::Summarized {
+                        req,
+                        summaries: sees.lock().unwrap().clone(),
+                    }),
+                    // **The frame that destroys somebody's work.**
+                    ToWorker::Destroy { session_id, .. } => {
+                        destroyed.lock().unwrap().push(session_id);
+                        None
+                    }
                     ToWorker::ProbeRemote { req, .. } => Some(ToServer::RemoteProbed {
                         req,
                         result: match probe.clone() {
@@ -219,6 +269,9 @@ async fn frames_fixture() -> (
     Arc<AtomicBool>,
     String,
     Created,
+    // What git sees, and what the worker was told to destroy: handles a test
+    // writes to or reads from while a deferral is open.
+    Frames,
 ) {
     let (db, owner) = crate::db::Db::open_for_test_owned().await.unwrap();
     let accounts = crate::accounts::Accounts::new(db.pool().clone());
@@ -230,6 +283,8 @@ async fn frames_fixture() -> (
     let host = db.ensure_host("native", native(), &owner).await.unwrap();
     let ready = Arc::new(AtomicBool::new(true));
     let created: Created = Default::default();
+    let sees: Summaries = Arc::new(std::sync::Mutex::new(vec![nothing_outstanding()]));
+    let destroyed: Destroyed = Default::default();
     let fleet = crate::fleet::Fleet::new(db.clone());
     fleet
         .supervise(
@@ -253,6 +308,8 @@ async fn frames_fixture() -> (
                     ..Default::default()
                 }),
                 created: created.clone(),
+                sees: sees.clone(),
+                destroyed: destroyed.clone(),
             }),
         )
         .await;
@@ -295,7 +352,24 @@ async fn frames_fixture() -> (
         )
         .await
         .unwrap();
-    (state, principal, host, ready, owner, created)
+    (
+        state,
+        principal,
+        host,
+        ready,
+        owner,
+        created,
+        Frames { sees, destroyed },
+    )
+}
+
+/// The two handles that make a deferred teardown testable.
+struct Frames {
+    /// What git sees in the workspace. A test writes to this to make a
+    /// workspace dirty while a teardown is deferred.
+    sees: Summaries,
+    /// What the worker was told to tear down. The frame that destroys work.
+    destroyed: Destroyed,
 }
 
 /// What the worker was handed for one run, waited for.
@@ -341,6 +415,8 @@ async fn watched_fixture() -> (
                 launched: launched.clone(),
                 capacity: None,
                 created: Default::default(),
+                sees: Arc::new(std::sync::Mutex::new(vec![nothing_outstanding()])),
+                destroyed: Default::default(),
             }),
         )
         .await;
@@ -755,6 +831,8 @@ async fn connecting_a_host_path_defers_validation_to_the_execution_machine() {
                 launched: Default::default(),
                 capacity: None,
                 created: Default::default(),
+                sees: Arc::new(std::sync::Mutex::new(vec![nothing_outstanding()])),
+                destroyed: Default::default(),
             }),
         )
         .await;
@@ -1544,6 +1622,8 @@ async fn an_empty_repository_is_connected_rather_than_refused() {
                 launched: Default::default(),
                 capacity: None,
                 created: Default::default(),
+                sees: Arc::new(std::sync::Mutex::new(vec![nothing_outstanding()])),
+                destroyed: Default::default(),
             }),
         )
         .await;
@@ -2914,6 +2994,8 @@ async fn another_machine(state: &AppState, owner: &str, name: &str) -> Host {
                 launched: Default::default(),
                 capacity: None,
                 created: Default::default(),
+                sees: Arc::new(std::sync::Mutex::new(vec![nothing_outstanding()])),
+                destroyed: Default::default(),
             }),
         )
         .await;
@@ -2969,6 +3051,8 @@ async fn says_its_disk(state: &AppState, host: &Host, total_mb: u64, used_mb: u6
                     ..Default::default()
                 }),
                 created: Default::default(),
+                sees: Arc::new(std::sync::Mutex::new(vec![nothing_outstanding()])),
+                destroyed: Default::default(),
             }),
         )
         .await;
@@ -6472,7 +6556,7 @@ async fn a_scheduled_launch_inherits_nothing_a_person_picked_later() {
 /// to be missing its skills is a workspace that already ran.
 #[tokio::test]
 async fn an_approved_skill_that_cannot_be_delivered_stops_the_run() {
-    let (state, principal, host, ready, owner, created) = frames_fixture().await;
+    let (state, principal, host, ready, owner, created, _frames) = frames_fixture().await;
     ready.store(true, Ordering::SeqCst);
     says_it_has(&state, &host, &[(Agent::ClaudeCode, true)]).await;
     let skill = a_skill(&state, &owner, "safety-rails").await;
@@ -6565,7 +6649,7 @@ async fn an_approved_skill_that_cannot_be_delivered_stops_the_run() {
 /// skill has to arrive with it.
 #[tokio::test]
 async fn a_scheduled_run_is_handed_the_skills_it_was_approved_with() {
-    let (state, principal, host, ready, owner, created) = frames_fixture().await;
+    let (state, principal, host, ready, owner, created, _frames) = frames_fixture().await;
     ready.store(true, Ordering::SeqCst);
     says_it_has(&state, &host, &[(Agent::ClaudeCode, true)]).await;
     let skill = a_skill(&state, &owner, "house-style").await;
@@ -6641,7 +6725,7 @@ async fn a_scheduled_run_is_handed_the_skills_it_was_approved_with() {
 /// queued.
 #[tokio::test]
 async fn a_launch_approved_against_named_versions_will_not_start_with_fewer() {
-    let (state, _principal, host, ready, owner, created) = frames_fixture().await;
+    let (state, _principal, host, ready, owner, created, _frames) = frames_fixture().await;
     ready.store(true, Ordering::SeqCst);
     says_it_has(&state, &host, &[(Agent::ClaudeCode, true)]).await;
 
@@ -6677,6 +6761,277 @@ async fn a_launch_approved_against_named_versions_will_not_start_with_fewer() {
     );
 }
 
+/// Long enough for a teardown frame to arrive, if one was sent.
+///
+/// **`fleet.send` queues**, so reading the capture the instant `owed` returns
+/// reads an empty list whether or not anything was destroyed — which is how
+/// the first version of these assertions passed against the very bug they
+/// were written for. The positive case waits for a frame; the negative ones
+/// have to wait too, or they assert nothing.
+async fn let_a_teardown_arrive() {
+    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+}
+
+/// A clean run that has settled and is still owed its teardown.
+///
+/// The window the deferral opens: the state is `finished`, the outcome is
+/// `clean`, the workspace is standing, and `settle::owed` is going to delete
+/// it as soon as the agent's summary lands.
+async fn a_run_awaiting_teardown(
+    state: &AppState,
+    principal: &crate::auth::Principal,
+    host: &Host,
+    owner: &str,
+) -> (ft_core::ScheduleId, ft_core::SessionId) {
+    // **With a repository**, because `deleteCleanRuns` is false without one:
+    // nothing is checked out, so git cannot say what a run left and nothing
+    // is ever deleted. A schedule with no repository has no teardown to
+    // defer, which is also why the first version of this fixture tested
+    // nothing at all.
+    let repo = state
+        .db
+        .ensure_repo(
+            "acme/web",
+            "https://example.test/acme/web.git",
+            Some("main"),
+            None,
+            owner,
+            None,
+        )
+        .await
+        .unwrap();
+    let mut new = a_schedule("Tidies up after itself", weekdays_at("08:30"));
+    new.repo_id = Some(repo.id.clone());
+    let made = create(state, principal, new).await.unwrap();
+    let _ = super::schedules::approve_schedule(
+        State(state.clone()),
+        Extension(principal.clone()),
+        Path(made.id.as_str().to_string()),
+        Query(Default::default()),
+    )
+    .await
+    .expect("it activates");
+    assert!(
+        state
+            .db
+            .schedule(&made.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .delete_clean_runs,
+        "a clean run's workspace is deleted, which is the teardown being tested"
+    );
+
+    let session = super::sessions::create_session_as(
+        state.clone(),
+        owner.to_string(),
+        "admin".into(),
+        serde_json::from_value(serde_json::json!({
+            "prompt": "a clean run",
+            "hostId": host.id.as_str(),
+        }))
+        .unwrap(),
+        super::sessions::Launch::default(),
+    )
+    .await
+    .expect("a workspace");
+
+    let run = ft_core::ScheduleRunId::new();
+    state
+        .db
+        .claim_run(
+            &run,
+            &made.id,
+            None,
+            Utc::now(),
+            1,
+            "cron",
+            "claimed",
+            None,
+            false,
+        )
+        .await
+        .unwrap();
+    state
+        .db
+        .run_launched(&run, &session.id, &host.name)
+        .await
+        .unwrap();
+    // Handed back with no summary yet, which is the state that settles
+    // immediately and defers the teardown.
+    state
+        .fleet
+        .set_status(&session.id, ft_core::SessionStatus::HandedBack, None)
+        .await;
+    crate::schedules::settle::pass(state, Utc::now())
+        .await
+        .unwrap();
+
+    let settled = runs_of(state, &made.id)
+        .await
+        .into_iter()
+        .find(|r| r.id == run)
+        .expect("the run is there");
+    assert_eq!(
+        settled.outcome,
+        Some(ft_core::schedule::Outcome::Clean),
+        "{settled:?}"
+    );
+    assert!(settled.workspace_kept, "the teardown is still owed");
+    (made.id, session.id)
+}
+
+/// **Blocker A: a deferred teardown does not destroy work somebody resumed.**
+///
+/// Deferring the teardown until the agent's own summary arrives was the right
+/// half of settling a run promptly — deleting the workspace takes the session
+/// with it, and with it the words. But a deferral is a window, and a window
+/// is a thing somebody can walk into: open the workspace, start working, and
+/// a teardown decided a minute ago destroys work that did not exist when it
+/// was decided. `destroy_as` ends in `git worktree remove --force`.
+///
+/// Asserted on the frame the worker receives, because that is the thing that
+/// deletes the files. The reviewer reproduced `Destroy` sent to a `Working`
+/// session.
+#[tokio::test]
+async fn a_resumed_workspace_is_not_destroyed_by_a_deferred_teardown() {
+    let (state, principal, host, ready, owner, _created, frames) = frames_fixture().await;
+    ready.store(true, Ordering::SeqCst);
+    let (schedule, session) = a_run_awaiting_teardown(&state, &principal, &host, &owner).await;
+
+    // **Somebody picks the workspace up** and starts working in it, which is
+    // the whole of the report.
+    state
+        .fleet
+        .set_status(&session, ft_core::SessionStatus::Working, None)
+        .await;
+    // And the summary lands, which is what used to release the teardown.
+    state
+        .db
+        .record_proposal(&session, "Bumped four patch versions", "")
+        .await
+        .unwrap();
+
+    crate::schedules::settle::owed(&state, Utc::now())
+        .await
+        .unwrap();
+    let_a_teardown_arrive().await;
+
+    assert!(
+        frames.destroyed.lock().unwrap().is_empty(),
+        "a workspace somebody was working in was sent to be destroyed"
+    );
+    let row = runs_of(&state, &schedule)
+        .await
+        .into_iter()
+        .next()
+        .expect("the run is there");
+    assert!(row.workspace_kept, "and the row still says it has one");
+    assert!(
+        row.detail
+            .as_deref()
+            .unwrap_or_default()
+            .contains("opened again"),
+        "and says why it was kept: {:?}",
+        row.detail
+    );
+
+    // **Abandoned, not deferred again.** Handing back a second time must not
+    // hand the teardown a second chance: whether somebody's work survives
+    // cannot depend on whether they were mid-turn when a sweep ran.
+    state
+        .fleet
+        .set_status(&session, ft_core::SessionStatus::HandedBack, None)
+        .await;
+    crate::schedules::settle::owed(&state, Utc::now())
+        .await
+        .unwrap();
+    let_a_teardown_arrive().await;
+    assert!(
+        frames.destroyed.lock().unwrap().is_empty(),
+        "the teardown came back for a workspace it had already given up on"
+    );
+}
+
+/// **And work that appeared while the teardown waited keeps the workspace.**
+///
+/// The other half of re-reading the state rather than the record: a run that
+/// settled clean is clean *as it ended*, and the deferral means that is a
+/// minute old. Somebody who opened the workspace, wrote a file and closed it
+/// again leaves a session that is handed back and a checkout that is not
+/// clean, and the recorded outcome cannot tell the difference.
+#[tokio::test]
+async fn a_workspace_with_new_work_in_it_survives_a_deferred_teardown() {
+    let (state, principal, host, ready, owner, _created, frames) = frames_fixture().await;
+    ready.store(true, Ordering::SeqCst);
+    let (schedule, session) = a_run_awaiting_teardown(&state, &principal, &host, &owner).await;
+
+    // What git sees now: a file nobody committed.
+    {
+        let mut sees = frames.sees.lock().unwrap();
+        sees[0].summary.uncommitted = 2;
+    }
+    state
+        .db
+        .record_proposal(&session, "Bumped four patch versions", "")
+        .await
+        .unwrap();
+
+    crate::schedules::settle::owed(&state, Utc::now())
+        .await
+        .unwrap();
+    let_a_teardown_arrive().await;
+
+    assert!(
+        frames.destroyed.lock().unwrap().is_empty(),
+        "a workspace with uncommitted work in it was sent to be destroyed"
+    );
+    let row = runs_of(&state, &schedule)
+        .await
+        .into_iter()
+        .next()
+        .expect("the run is there");
+    assert!(
+        row.detail
+            .as_deref()
+            .unwrap_or_default()
+            .contains("work in it"),
+        "and says why: {:?}",
+        row.detail
+    );
+}
+
+/// **The ordinary case still tidies up.** A clean run nobody touched loses
+/// its workspace once the words are in, which is what the switch asks for.
+#[tokio::test]
+async fn a_clean_run_nobody_touched_still_loses_its_workspace() {
+    let (state, principal, host, ready, owner, _created, frames) = frames_fixture().await;
+    ready.store(true, Ordering::SeqCst);
+    let (_schedule, session) = a_run_awaiting_teardown(&state, &principal, &host, &owner).await;
+
+    state
+        .db
+        .record_proposal(&session, "Bumped four patch versions", "")
+        .await
+        .unwrap();
+    crate::schedules::settle::owed(&state, Utc::now())
+        .await
+        .unwrap();
+    let_a_teardown_arrive().await;
+
+    for _ in 0..200 {
+        if !frames.destroyed.lock().unwrap().is_empty() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert_eq!(
+        frames.destroyed.lock().unwrap().as_slice(),
+        &[session],
+        "a clean run that nobody opened keeps its workspace for ever"
+    );
+}
+
 /// **#9: three launches reach a worker at once, not eight.**
 ///
 /// The permit was released when `start` returned, and `create_session_as`
@@ -6694,7 +7049,7 @@ async fn a_launch_approved_against_named_versions_will_not_start_with_fewer() {
 /// Four schedules due at once, which is what a sweep hands to `spawn`.
 #[tokio::test]
 async fn no_more_than_three_launches_reach_a_worker_at_once() {
-    let (state, principal, host, ready, owner, created) = frames_fixture().await;
+    let (state, principal, host, ready, owner, created, _frames) = frames_fixture().await;
     ready.store(true, Ordering::SeqCst);
     says_it_has(&state, &host, &[(Agent::ClaudeCode, true)]).await;
     let account = a_subscription(&state, &owner, "a_claude", Agent::ClaudeCode).await;
@@ -6848,7 +7203,7 @@ async fn a_page_of_history_is_a_page_and_the_next_one_follows_it() {
 /// list the panel reads.
 #[tokio::test]
 async fn a_scheduled_runs_workspace_is_in_the_list_the_home_page_reads() {
-    let (state, principal, host, ready, owner, created) = frames_fixture().await;
+    let (state, principal, host, ready, owner, created, _frames) = frames_fixture().await;
     ready.store(true, Ordering::SeqCst);
     says_it_has(&state, &host, &[(Agent::ClaudeCode, true)]).await;
     let account = a_subscription(&state, &owner, "a_claude", Agent::ClaudeCode).await;
@@ -6990,7 +7345,7 @@ async fn a_schedules_controls_are_checked_against_the_engine_a_profile_pins() {
 /// and the launch refuses on the engine rather than believing the row.
 #[tokio::test]
 async fn a_stored_claim_that_no_subscription_is_needed_does_not_survive_a_launch() {
-    let (state, principal, host, ready, _owner, created) = frames_fixture().await;
+    let (state, principal, host, ready, _owner, created, _frames) = frames_fixture().await;
     ready.store(true, Ordering::SeqCst);
     says_it_has(&state, &host, &[(Agent::ClaudeCode, true)]).await;
 
@@ -7067,7 +7422,7 @@ async fn a_stored_claim_that_no_subscription_is_needed_does_not_survive_a_launch
 /// that decides what runs.
 #[tokio::test]
 async fn a_scheduled_run_is_handed_the_sandbox_it_was_approved_with() {
-    let (state, principal, host, ready, owner, created) = frames_fixture().await;
+    let (state, principal, host, ready, owner, created, _frames) = frames_fixture().await;
     ready.store(true, Ordering::SeqCst);
     says_it_has(&state, &host, &[(Agent::Codex, true)]).await;
     let account = a_subscription(&state, &owner, "a_codex", Agent::Codex).await;
@@ -7512,7 +7867,7 @@ async fn run_now_is_marked_manual_and_leaves_the_clock_where_it_is() {
 /// pressing it on a paused schedule is that it runs *and* stays paused.
 #[tokio::test]
 async fn run_now_works_on_a_schedule_somebody_paused() {
-    let (state, principal, host, ready, owner, created) = frames_fixture().await;
+    let (state, principal, host, ready, owner, created, _frames) = frames_fixture().await;
     ready.store(true, Ordering::SeqCst);
     says_it_has(&state, &host, &[(Agent::ClaudeCode, true)]).await;
     let account = a_subscription(&state, &owner, "a_claude", Agent::ClaudeCode).await;

@@ -223,7 +223,24 @@ create table schedule_runs (
     workspace_kept boolean not null default false,
     claimed_at    timestamptz not null default now(),
     launched_at   timestamptz,
-    ended_at      timestamptz
+    ended_at      timestamptz,
+    -- **When this run stopped being owed a teardown**, and why is on
+    -- `detail`.
+    --
+    -- A clean run's workspace is deleted — but not at the moment the run
+    -- settles, because deleting it takes the session with it and the agent's
+    -- own summary lands seconds later. So the state settles immediately and
+    -- the teardown is deferred to `settle::owed`, which is a window, and a
+    -- window is a thing somebody can walk into: resume the workspace, start
+    -- working in it, and a teardown decided a minute ago destroys work that
+    -- did not exist when it was decided.
+    --
+    -- So the deferred teardown re-reads the world and **abandons** rather
+    -- than retrying when the answer has changed. This is what makes
+    -- abandoning stick: null is "still owed", and a time here means nobody
+    -- is going to delete this workspace, whatever the outcome column says
+    -- about how the run ended.
+    teardown_abandoned_at timestamptz
 );
 
 -- **Not for reading.** It is the claim — the `on conflict` target, and the

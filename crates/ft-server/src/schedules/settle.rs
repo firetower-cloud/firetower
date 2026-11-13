@@ -272,6 +272,80 @@ pub async fn owed(state: &AppState, now: DateTime<Utc>) -> anyhow::Result<()> {
         if still_coming || outcome != Outcome::Clean || !run.delete_clean_runs {
             continue;
         }
+
+        // **The world is re-read before anything is destroyed, because the
+        // deferral is a window and a window is a thing somebody can walk
+        // into.**
+        //
+        // The run settled clean and the teardown waits for the agent's own
+        // summary. In that minute the owner can open the workspace and start
+        // working in it — and a teardown decided before that would destroy
+        // work that did not exist when it was decided. `destroy_as` ends in
+        // `git worktree remove --force`, so there is nothing to recover.
+        //
+        // Not re-reading the *outcome*, which is what was recorded a minute
+        // ago and is the thing that cannot be trusted here. Re-reading the
+        // state: who has the workspace now, and what is in it now.
+        match session.status {
+            // Where the run left it. Nobody has picked it up.
+            SessionStatus::HandedBack | SessionStatus::Ready => {}
+            // Somebody is using it. **Abandoned rather than deferred again**,
+            // because retrying next sweep would make this a question of
+            // whether they happened to be mid-turn when the sweep ran.
+            SessionStatus::Working | SessionStatus::Starting | SessionStatus::NeedsYou => {
+                state
+                    .db
+                    .abandon_teardown(
+                        &run.id,
+                        &format!(
+                            "{} The workspace was kept: it was opened again before this run's \
+                             was deleted.",
+                            line_for(outcome, session.proposed_title.as_deref(), &session, None)
+                        ),
+                    )
+                    .await?;
+                continue;
+            }
+            // Already gone, or broken after the fact. Nothing to delete and
+            // nothing to say that the line does not say already.
+            SessionStatus::Ended | SessionStatus::Failed => {
+                state
+                    .db
+                    .abandon_teardown(
+                        &run.id,
+                        &line_for(outcome, session.proposed_title.as_deref(), &session, None),
+                    )
+                    .await?;
+                continue;
+            }
+        }
+
+        // **And clean *now*, asked of git rather than of the row.** A
+        // workspace that was resumed, written in and handed back again is
+        // clean by its own outcome and is not clean on disk.
+        let elapsed = run.ended_at.unwrap_or(now) - run.launched_at.unwrap_or(run.claimed_at);
+        let (still, _) = classify(
+            state,
+            &session,
+            elapsed,
+            chrono::TimeDelta::seconds(run.max_runtime_secs),
+        )
+        .await;
+        if still != Outcome::Clean {
+            state
+                .db
+                .abandon_teardown(
+                    &run.id,
+                    &format!(
+                        "{} The workspace was kept: there is work in it that was not there when \
+                         the run ended.",
+                        line_for(outcome, session.proposed_title.as_deref(), &session, None)
+                    ),
+                )
+                .await?;
+            continue;
+        }
+
         if let Err(why) = delete_workspace(state, &run, &session).await {
             // Said on the row rather than only in the log, for the reason the
             // settle path says it: a workspace that should have gone and has

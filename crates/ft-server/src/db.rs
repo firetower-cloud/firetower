@@ -3301,6 +3301,25 @@ impl Db {
         Ok(written > 0)
     }
 
+    /// Stop owing this run a teardown, and say on the line why.
+    ///
+    /// **The workspace stays and nothing will come back for it.** Called when
+    /// the deferred teardown re-reads the world and finds a different one —
+    /// somebody working in the workspace, or work in it that was not there
+    /// when the run ended. Both are states where deleting is the wrong act,
+    /// and retrying next sweep would make it a question of timing.
+    pub async fn abandon_teardown(&self, id: &ScheduleRunId, detail: &str) -> Result<()> {
+        sqlx::query(
+            "UPDATE schedule_runs SET teardown_abandoned_at = now(), detail = $2
+              WHERE id = $1 AND teardown_abandoned_at IS NULL",
+        )
+        .bind(id.as_str())
+        .bind(detail)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
     pub async fn set_run_detail(&self, id: &ScheduleRunId, detail: &str) -> Result<()> {
         sqlx::query("UPDATE schedule_runs SET detail = $2 WHERE id = $1")
             .bind(id.as_str())
@@ -3440,7 +3459,8 @@ impl Db {
                 AND r.session_id IS NOT NULL
                 AND r.ended_at > $1
                 AND (r.summary IS NULL
-                  OR (r.workspace_kept AND r.outcome = 'clean' AND s.delete_clean_runs))
+                  OR (r.workspace_kept AND r.outcome = 'clean' AND s.delete_clean_runs
+                      AND r.teardown_abandoned_at IS NULL))
               ORDER BY r.ended_at"
         ))
         .bind(since)
