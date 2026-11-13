@@ -66,7 +66,13 @@ use serde::{Deserialize, Serialize};
 ///      command line and a long persona no longer fits in it. A worker older
 ///      than this reads the field as nothing, and a session started as a
 ///      profile on one would come up as a plain agent with no indication why.
-pub const PROTOCOL_VERSION: u32 = 22;
+/// 23 — a session can require its skills. An older worker reads the frame
+///      perfectly and ignores the requirement, so a scheduled run approved
+///      against a safety skill would start on one without it and nothing
+///      would say so. That is the same silent-degradation case 19 was bumped
+///      for, and the guarantee is worth less than nothing if it holds only
+///      on workers that happen to be new.
+pub const PROTOCOL_VERSION: u32 = 23;
 
 mod codec;
 pub use codec::{Codec, CodecError, FrameReader, FrameWriter};
@@ -634,6 +640,27 @@ pub struct CreateWorkspace {
     /// The whole selection, never a delta — see [`ToWorker::SetSkills`].
     #[serde(default)]
     pub skills: Vec<SkillBundle>,
+    /// **Whether every one of those skills has to be installed for this
+    /// session to run at all.**
+    ///
+    /// Writing them is best effort by default, and that is right for a
+    /// session somebody is sitting in front of: a skill shaped in a way one
+    /// filesystem refuses should cost that skill rather than the session, and
+    /// whoever is there can see what is missing.
+    ///
+    /// An *approved* session is the other case. A schedule is approved
+    /// against a named set of skill versions — a safety skill among them, as
+    /// often as not — with nobody present to notice one is absent, so a run
+    /// that could not install one must not run. The server already refuses to
+    /// dispatch unless every approved bundle is in the frame; this is the
+    /// other half, because **the server deciding something is required does
+    /// not make the worker install it**.
+    ///
+    /// Defaulted, so a worker from before this understands the frame — and
+    /// cannot honour it. A control plane that needs the guarantee needs a
+    /// worker that has this.
+    #[serde(default)]
+    pub skills_required: bool,
     /// The system prompt this session carries, when it was started as a
     /// profile. Empty for a plain agent, which is the ordinary case.
     ///

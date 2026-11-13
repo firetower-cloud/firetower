@@ -629,11 +629,33 @@ async fn pins_for(
     // to. Recording the ids was not enough on its own: the launch pinned
     // whatever was current and the recorded version still passed an existence
     // check, so adding a version to a selected skill substituted it silently.
-    let versions = state
-        .skills
-        .current_versions(&skills)
-        .await
-        .unwrap_or_default();
+    //
+    // **Every selected skill has to resolve, and a failure is not an empty
+    // set.** This was `unwrap_or_default()`, so a query that failed — or a
+    // selection naming a skill that has since been deleted — pinned *no*
+    // versions, approval succeeded, and the gate's "every approved version
+    // can still be delivered" was vacuously true of nothing. The worker
+    // received zero skills and nothing said so.
+    //
+    // One count against the other, because the query silently drops a skill
+    // with no `current_version_id` — a skill whose only version is held for
+    // review is real, selectable, and has nothing to pin.
+    let versions = state.skills.current_versions(&skills).await.map_err(|e| {
+        ApiError::new(
+            ErrorCode::ActionFailed,
+            format!("could not read which version of each skill this would read: {e:#}"),
+        )
+    })?;
+    if versions.len() != skills.len() {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            format!(
+                "{} of the skills this would read cannot be pinned to a version, so a run would \
+                 not read what this says. Open the skills and check they are still there.",
+                skills.len() - versions.len()
+            ),
+        ));
+    }
 
     // **The effective profile, snapshotted.** A writer of a shared profile —
     // or an agent with Writer calling `update_profile` — can change its

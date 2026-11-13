@@ -2574,7 +2574,13 @@ You are in the directory that holds them, not inside one of them.              P
         // Always, even with nothing selected: the directory has to exist
         // before the agent starts, or the first skill turned on mid-session
         // lands somewhere nothing is watching.
-        if let Err(e) = crate::skills::apply(&path, &id, spec.agent, &spec.skills).await {
+        // Best effort. `StartAgent` carries no requirement of its own —
+        // starting a second agent in a workspace, or restarting one, is a
+        // path where the set has already been delivered once and where
+        // nothing here knows whether it was approved. A scheduled run
+        // *relaunched* on this path can therefore come up without a skill it
+        // was approved with, which is a gap rather than a decision.
+        if let Err(e) = crate::skills::apply(&path, &id, spec.agent, &spec.skills, false).await {
             tracing::warn!(
                 "{}: writing this session's skills: {e:#}",
                 spec.agent.label()
@@ -2739,7 +2745,25 @@ You are in the directory that holds them, not inside one of them.              P
         )
         .await?;
 
-        if let Err(e) = crate::skills::apply(&path, &id, spec.agent, &spec.skills).await {
+        // **A run approved to read a set of skills does not start without
+        // them.** Best effort otherwise, which is right for a session
+        // somebody is in front of: the one skill nobody can write is worth
+        // less than the session, and whoever is there can see it is missing.
+        // With nobody there, a safety skill that silently failed to install
+        // is a run nobody would know was unguarded — so this fails the launch
+        // before the agent is started rather than after.
+        if let Err(e) =
+            crate::skills::apply(&path, &id, spec.agent, &spec.skills, spec.skills_required).await
+        {
+            if spec.skills_required {
+                return Err(e).with_context(|| {
+                    format!(
+                        "{} was approved to read {} skill(s) and they could not all be installed",
+                        spec.agent.label(),
+                        spec.skills.len()
+                    )
+                });
+            }
             tracing::warn!(
                 "{}: writing this session's skills: {e:#}",
                 spec.agent.label()
@@ -2834,7 +2858,10 @@ You are in the directory that holds them, not inside one of them.              P
     ) -> Result<()> {
         let workspace = self.workspace_of(session_id).await?;
         let (agent, _) = self.store.session_brief(session_id).await?;
-        crate::skills::apply(&workspace, session_id, agent, skills).await
+        // `SetSkills`, which is somebody changing the set on a running
+        // session: best effort, and they are looking at the screen that shows
+        // what landed.
+        crate::skills::apply(&workspace, session_id, agent, skills, false).await
     }
 
     async fn workspace_of(&self, session_id: &SessionId) -> Result<PathBuf> {
@@ -5867,6 +5894,7 @@ mod tests {
             env: vec![],
             agent_home: vec![],
             skills: vec![],
+            skills_required: false,
             persona: String::new(),
         }))
     }
@@ -6106,6 +6134,7 @@ mod tests {
                     env: vec![],
                     agent_home: vec![],
                     skills: vec![],
+                    skills_required: false,
                     persona: String::new(),
                 })),
             ],
@@ -6163,6 +6192,7 @@ mod tests {
                     env: vec![],
                     agent_home: vec![],
                     skills: vec![],
+                    skills_required: false,
                     persona: String::new(),
                 })),
             ],
@@ -6265,6 +6295,7 @@ mod tests {
                     env: vec![],
                     agent_home: vec![],
                     skills: vec![],
+                    skills_required: false,
                     persona: String::new(),
                 })),
             ],

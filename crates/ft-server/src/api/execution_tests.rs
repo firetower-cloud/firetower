@@ -6642,6 +6642,127 @@ async fn an_approved_skill_that_cannot_be_delivered_stops_the_run() {
     );
 }
 
+/// **Blocker B: a skill that cannot be pinned to a version stops the
+/// approval, rather than pinning none.**
+///
+/// `current_versions` was read with `unwrap_or_default()`, so a query that
+/// failed — or a selection naming a skill with no current version — pinned
+/// *no* versions. Approval succeeded, the gate's "every approved version can
+/// still be delivered" was vacuously true of nothing, and the worker received
+/// zero skills with nothing anywhere saying so.
+///
+/// A skill whose only version is held for review is the state that reproduces
+/// it without reaching into the database: it is real, it is selectable, and
+/// it has nothing to pin.
+#[tokio::test]
+async fn a_skill_with_no_version_to_pin_stops_the_approval() {
+    let (state, principal, _, _, owner) = fixture().await;
+    let skill = a_skill(&state, &owner, "safety-rails").await;
+
+    // Its current version taken away, which is what a held or deleted
+    // version leaves behind.
+    sqlx::query("UPDATE skills SET current_version_id = NULL WHERE id = $1")
+        .bind(&skill)
+        .execute(state.db.pool())
+        .await
+        .unwrap();
+
+    let mut new = a_schedule("Reads a safety skill", weekdays_at("08:30"));
+    new.skills = Some(vec![skill]);
+    let refused = create(&state, &principal, new)
+        .await
+        .expect_err("a schedule cannot be approved to read something it cannot pin");
+    assert!(
+        refused.message.contains("cannot be pinned to a version"),
+        "{}",
+        refused.message
+    );
+}
+
+/// **And two approved skills may not want the same folder.**
+///
+/// A bundle is written under its skill's *current* name, so renaming one
+/// approved skill to match another leaves two bundles in the frame — the
+/// count is satisfied, because nothing was lost on the way — and one folder
+/// on the worker. Only one of them is ever read.
+///
+/// **Renamed by case**, which is the shape the database permits: the unique
+/// index is `(org_id, subpath(path, 0, 2), name)` and does not fold case, so
+/// two skills in one person's space may be `house-style` and `House-Style`.
+/// They are two folders on Linux and one on a Mac — which is why the check
+/// folds case, and why a guarantee that held only on Linux would not be one.
+/// The same collision across two spaces, a personal skill and a directory's,
+/// needs no rename at all.
+#[tokio::test]
+async fn two_approved_skills_that_want_one_folder_stop_the_run() {
+    let (state, principal, host, ready, owner, created, _frames) = frames_fixture().await;
+    ready.store(true, Ordering::SeqCst);
+    says_it_has(&state, &host, &[(Agent::ClaudeCode, true)]).await;
+    let account = a_subscription(&state, &owner, "a_claude", Agent::ClaudeCode).await;
+    let one = a_skill(&state, &owner, "house-style").await;
+    let two = a_skill(&state, &owner, "safety-rails").await;
+
+    let mut new = a_schedule("Reads two skills", weekdays_at("08:30"));
+    new.skills = Some(vec![one, two.clone()]);
+    new.account_id = Some(account);
+    let made = create(&state, &principal, new).await.unwrap();
+    let _ = super::schedules::approve_schedule(
+        State(state.clone()),
+        Extension(principal.clone()),
+        Path(made.id.as_str().to_string()),
+        Query(Default::default()),
+    )
+    .await
+    .expect("two differently-named skills approve cleanly");
+
+    // **Renamed afterwards**, which is the whole of it: approval saw two
+    // names and the launch sees one.
+    sqlx::query("UPDATE skills SET name = 'House-Style' WHERE id = $1")
+        .bind(&two)
+        .execute(state.db.pool())
+        .await
+        .unwrap();
+
+    let row = state.db.schedule(&made.id).await.unwrap().unwrap();
+    let claim = state
+        .db
+        .claim_run(
+            &ft_core::ScheduleRunId::new(),
+            &made.id,
+            None,
+            Utc::now(),
+            1,
+            "cron",
+            "claimed",
+            None,
+            false,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    crate::schedules::launch::start(&state, &row, &claim, crate::schedules::launch::Why::Clock)
+        .await
+        .expect("a refusal is an outcome");
+
+    let run = runs_of(&state, &made.id)
+        .await
+        .into_iter()
+        .find(|r| r.state.is_terminal())
+        .expect("it was recorded");
+    assert!(
+        run.detail
+            .as_deref()
+            .unwrap_or_default()
+            .contains("one folder on the machine"),
+        "{:?}",
+        run.detail
+    );
+    assert!(
+        created.lock().unwrap().is_empty(),
+        "a run went to the worker with two skills that would have been one"
+    );
+}
+
 /// **And the ordinary case still carries its skills to the worker.**
 ///
 /// The other half of failing closed: a count that has to match is a count

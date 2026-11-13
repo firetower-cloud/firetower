@@ -1249,6 +1249,28 @@ pub(crate) async fn create_session_as(
                     ),
                 ));
             }
+            // **And no two of them may want the same folder.** A bundle is
+            // written under its skill's *current* name, so renaming one
+            // approved skill to match another leaves two bundles in the frame
+            // — the count is satisfied — and one folder on the worker. The
+            // count cannot see it, because nothing was lost on the way here.
+            //
+            // Folded, because the folder is a filename: `Dataviz` and
+            // `dataviz` are two names on Linux and one on a Mac, and a
+            // guarantee that holds on one filesystem is not one.
+            let mut folders: Vec<String> = got.iter().map(|b| b.name.to_lowercase()).collect();
+            folders.sort();
+            if let Some(clash) = folders.windows(2).find(|two| two[0] == two[1]) {
+                return Err(ApiError::new(
+                    ErrorCode::ActionFailed,
+                    format!(
+                        "two of the skills this run was approved to read are both called \
+                         “{}”, and they would be one folder on the machine — so only one of them \
+                         would be read. Rename one and approve this again.",
+                        clash[0]
+                    ),
+                ));
+            }
             got
         }
         // Best effort for the reason the seeding is: a workspace that comes
@@ -1406,6 +1428,13 @@ pub(crate) async fn create_session_as(
                 env,
                 agent_home,
                 skills,
+                // **And the worker has to install all of them.** The count
+                // above refuses to dispatch unless every approved bundle is
+                // in this frame; this is the other half, because the server
+                // deciding something is required does not make the worker
+                // install it. Writing them is best effort otherwise, which is
+                // right for a session somebody is sitting in front of.
+                skills_required: approved_versions.is_some(),
                 persona: persona.clone().unwrap_or_default(),
             })),
         )
