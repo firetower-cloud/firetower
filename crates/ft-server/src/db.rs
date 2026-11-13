@@ -3310,8 +3310,8 @@ impl Db {
     /// and retrying next sweep would make it a question of timing.
     pub async fn abandon_teardown(&self, id: &ScheduleRunId, detail: &str) -> Result<()> {
         sqlx::query(
-            "UPDATE schedule_runs SET teardown_abandoned_at = now(), detail = $2
-              WHERE id = $1 AND teardown_abandoned_at IS NULL",
+            "UPDATE schedule_runs SET teardown_at = now(), detail = $2
+              WHERE id = $1 AND teardown_at IS NULL",
         )
         .bind(id.as_str())
         .bind(detail)
@@ -3435,21 +3435,16 @@ impl Db {
         Ok(rows.iter().map(as_live_run).collect())
     }
 
-    /// Runs that have ended with something still owed: the agent's own
-    /// summary, or a workspace a clean run is to be deleted with.
+    /// Runs that have ended and whose summary has not arrived yet.
     ///
-    /// **Two things the sweep used to wait for before settling anything.**
-    /// `describe()` writes a summary seconds after a hand-back, and waiting
-    /// for it meant a run that had plainly finished was recorded as still
-    /// running for up to a sweep plus the grace. The state settles at once
-    /// now and these come afterwards, so the bound has to be read from the
-    /// row rather than from the schedule.
+    /// `describe()` writes one seconds after a hand-back, and waiting for it
+    /// before settling meant a run that had plainly finished was recorded as
+    /// still running for up to a sweep plus the grace. The state settles at
+    /// once now and the words come afterwards.
     ///
-    /// Bounded by `ended_at` so this is the recent tail of the history rather
-    /// than all of it, and narrowed to rows that are actually owed something:
-    /// a kept run of any other kind is finished with and never looked at
-    /// again.
-    pub async fn runs_awaiting_their_end(
+    /// Bounded by `ended_at`, so this is the recent tail of the history
+    /// rather than all of it.
+    pub async fn runs_awaiting_a_summary(
         &self,
         since: chrono::DateTime<chrono::Utc>,
     ) -> Result<Vec<LiveRun>> {
@@ -3458,9 +3453,7 @@ impl Db {
               WHERE r.state = 'finished'
                 AND r.session_id IS NOT NULL
                 AND r.ended_at > $1
-                AND (r.summary IS NULL
-                  OR (r.workspace_kept AND r.outcome = 'clean' AND s.delete_clean_runs
-                      AND r.teardown_abandoned_at IS NULL))
+                AND r.summary IS NULL
               ORDER BY r.ended_at"
         ))
         .bind(since)
@@ -3468,6 +3461,86 @@ impl Db {
         .await?;
 
         Ok(rows.iter().map(as_live_run).collect())
+    }
+
+    /// Clean runs whose workspace is still to be deleted.
+    ///
+    /// **Its own question, asked of its own column.** This used to be the
+    /// other half of an `OR` with the summary, and `summary IS NULL`
+    /// therefore let a run back in for a teardown that had already been given
+    /// up on: abandon it while somebody was working, wait past the grace with
+    /// no summary ever arriving, and the next sweep deleted the workspace it
+    /// had just decided to keep. One column, one meaning, and the two
+    /// questions are asked separately.
+    pub async fn runs_awaiting_teardown(
+        &self,
+        since: chrono::DateTime<chrono::Utc>,
+    ) -> Result<Vec<LiveRun>> {
+        let rows = sqlx::query(&format!(
+            "SELECT {RUN_WORK}
+              WHERE r.state = 'finished'
+                AND r.session_id IS NOT NULL
+                AND r.ended_at > $1
+                AND r.teardown_at IS NULL
+                AND r.workspace_kept
+                AND r.outcome = 'clean'
+                AND s.delete_clean_runs
+              ORDER BY r.ended_at"
+        ))
+        .bind(since)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows.iter().map(as_live_run).collect())
+    }
+
+    /// **Take the right to delete this run's workspace, if nobody is in it.**
+    ///
+    /// The one statement everything destructive about a deferred teardown
+    /// hangs off, and it is a compare-and-set for the same reason the claim
+    /// and the approval are. Reading the session's status and then deleting
+    /// is not a guard: there is a git round trip in between, and a resume can
+    /// land inside it. Here the proof and the act of taking it are the same
+    /// write.
+    ///
+    /// **Every session in the workspace**, not the one the run started. A
+    /// person who opens a finished run and picks the work up is a *second*
+    /// agent in that workspace — the scheduled session is still handed back,
+    /// and tearing the workspace down takes the sibling with it.
+    ///
+    /// `true` means this sweep owns the teardown and nobody else will try.
+    /// `false` means somebody is working, or it is already settled.
+    pub async fn claim_teardown(&self, id: &ScheduleRunId) -> Result<bool> {
+        let won = sqlx::query(
+            "UPDATE schedule_runs r
+                SET teardown_at = now()
+              WHERE r.id = $1
+                AND r.teardown_at IS NULL
+                AND r.workspace_kept
+                AND NOT EXISTS (
+                      SELECT 1
+                        FROM sessions mine
+                        JOIN sessions kin
+                          ON kin.workspace_id = mine.workspace_id
+                       WHERE mine.id = r.session_id
+                         AND kin.status IN ('Starting', 'Working', 'NeedsYou'))",
+        )
+        .bind(id.as_str())
+        .execute(&self.pool)
+        .await?
+        .rows_affected();
+        Ok(won > 0)
+    }
+
+    /// Give the claim back, for a teardown that was owned and could not be
+    /// done — a host that stopped answering mid-delete. The next sweep
+    /// re-asks every question from the beginning.
+    pub async fn release_teardown(&self, id: &ScheduleRunId) -> Result<()> {
+        sqlx::query("UPDATE schedule_runs SET teardown_at = NULL WHERE id = $1")
+            .bind(id.as_str())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
     }
 }
 

@@ -213,25 +213,78 @@ pub async fn pass(state: &AppState, now: DateTime<Utc>) -> anyhow::Result<()> {
 /// moment a session hands back, because claiming an agent is still running
 /// when it has stopped is telling somebody something untrue about their own
 /// work. Two things genuinely cannot be known yet at that moment, and this is
-/// where they land:
-///
-/// - **The summary.** `describe()` writes `proposed_title` seconds after the
-///   hand-back. The line settles with what git can see — which is a real
-///   sentence, not a blank — and is rewritten in the agent's own words when
-///   they arrive.
-/// - **The teardown.** Deleting a clean run's workspace takes the session
-///   with it, so doing it before the summary lands would lose the words for
-///   good. It happens here instead, once they have arrived or the grace has
-///   run out.
-///
-/// Past the grace nothing more is owed: the line keeps what git said, and a
-/// clean run is deleted on that last look. The query is bounded by `ended_at`
-/// so a control plane that restarted still finishes what the one before it
-/// started, rather than scanning the whole history to find out.
+/// where they land — **as two passes, asked separately.** They were one query
+/// with an `OR`, and `summary IS NULL` let a run back in for a teardown it
+/// had already been given up on.
 pub async fn owed(state: &AppState, now: DateTime<Utc>) -> anyhow::Result<()> {
     // Wide enough to cover a restart, narrow enough to be the recent tail.
     let since = now - super::SUMMARY_GRACE * 10;
-    for run in state.db.runs_awaiting_their_end(since).await? {
+    words(state, since).await?;
+    teardowns(state, now, since).await
+}
+
+/// The agent's own account of a run, once it arrives.
+///
+/// `describe()` writes `proposed_title` seconds after a hand-back. The line
+/// settles with what git can see — a real sentence, not a blank — and is
+/// rewritten in the agent's own words when they land. Nothing here destroys
+/// anything, which is why it is the half with no fence around it.
+async fn words(state: &AppState, since: DateTime<Utc>) -> anyhow::Result<()> {
+    for run in state.db.runs_awaiting_a_summary(since).await? {
+        let Some(session_id) = run.session_id.clone() else {
+            continue;
+        };
+        let Some(session) = state.db.session(&session_id).await? else {
+            continue;
+        };
+        let Some(wrote) = session.proposed_title.as_deref() else {
+            continue;
+        };
+        let outcome = outcome_of(run.outcome.as_deref());
+        state
+            .db
+            .set_run_summary(
+                &run.id,
+                wrote,
+                &line_for(outcome, Some(wrote), &session, None),
+            )
+            .await?;
+    }
+    Ok(())
+}
+
+/// Deleting the workspace a clean run left.
+///
+/// **Deferred, because deleting it takes the session with it** and the
+/// agent's summary lands seconds after the run settles — so doing it at
+/// settle time loses the words for good. That deferral is a window, and this
+/// is the function that has to survive somebody walking into it: the owner
+/// opening the workspace and picking the work up, which is the ordinary way
+/// a finished run is used.
+///
+/// Three things in order, and the order is the whole design:
+///
+/// 1. **Wait for the words**, or for the grace to run out.
+/// 2. **Ask git what is in there now**, because a run that settled clean is
+///    clean *as it ended* and that is a minute old. A workspace resumed,
+///    written in and handed back again is clean by its own outcome and is
+///    not clean on disk.
+/// 3. **Claim the teardown**, which is the one conditional statement that
+///    both proves nothing in the workspace is working and takes the right to
+///    delete. Last, so that a resume arriving during the git round trip —
+///    which is a network call, and anything can happen inside it — loses the
+///    claim rather than losing somebody's work.
+///
+/// What is left is the moment between winning the claim and the `Destroy`
+/// frame being queued. Resuming inside that still races, and no amount of
+/// re-reading closes it; what closes it is that the claim has already been
+/// taken, so a second sweep cannot follow it in.
+async fn teardowns(
+    state: &AppState,
+    now: DateTime<Utc>,
+    since: DateTime<Utc>,
+) -> anyhow::Result<()> {
+    for run in state.db.runs_awaiting_teardown(since).await? {
         let Some(session_id) = run.session_id.clone() else {
             continue;
         };
@@ -243,86 +296,15 @@ pub async fn owed(state: &AppState, now: DateTime<Utc>) -> anyhow::Result<()> {
             state.db.run_workspace_gone(&run.id).await?;
             continue;
         };
+        let outcome = outcome_of(run.outcome.as_deref());
 
-        let outcome = match run.outcome.as_deref() {
-            Some("clean") => Outcome::Clean,
-            Some("kept") => Outcome::Kept,
-            Some("needs_you") => Outcome::NeedsYou,
-            Some("overran") => Outcome::Overran,
-            _ => Outcome::Unknown,
-        };
-
-        // The words, if they have arrived. Written once — `set_run_summary`
-        // will not overwrite one — so two control planes both seeing this
-        // land write the same thing once.
-        if let Some(words) = session.proposed_title.as_deref() {
-            state
-                .db
-                .set_run_summary(
-                    &run.id,
-                    words,
-                    &line_for(outcome, Some(words), &session, None),
-                )
-                .await?;
-        }
-
-        // And the teardown, once there is nothing left to wait for.
+        // 1 · The words, or the grace.
         let waited = now - run.ended_at.unwrap_or(run.claimed_at);
-        let still_coming = session.proposed_title.is_none() && waited < super::SUMMARY_GRACE;
-        if still_coming || outcome != Outcome::Clean || !run.delete_clean_runs {
+        if session.proposed_title.is_none() && waited < super::SUMMARY_GRACE {
             continue;
         }
 
-        // **The world is re-read before anything is destroyed, because the
-        // deferral is a window and a window is a thing somebody can walk
-        // into.**
-        //
-        // The run settled clean and the teardown waits for the agent's own
-        // summary. In that minute the owner can open the workspace and start
-        // working in it — and a teardown decided before that would destroy
-        // work that did not exist when it was decided. `destroy_as` ends in
-        // `git worktree remove --force`, so there is nothing to recover.
-        //
-        // Not re-reading the *outcome*, which is what was recorded a minute
-        // ago and is the thing that cannot be trusted here. Re-reading the
-        // state: who has the workspace now, and what is in it now.
-        match session.status {
-            // Where the run left it. Nobody has picked it up.
-            SessionStatus::HandedBack | SessionStatus::Ready => {}
-            // Somebody is using it. **Abandoned rather than deferred again**,
-            // because retrying next sweep would make this a question of
-            // whether they happened to be mid-turn when the sweep ran.
-            SessionStatus::Working | SessionStatus::Starting | SessionStatus::NeedsYou => {
-                state
-                    .db
-                    .abandon_teardown(
-                        &run.id,
-                        &format!(
-                            "{} The workspace was kept: it was opened again before this run's \
-                             was deleted.",
-                            line_for(outcome, session.proposed_title.as_deref(), &session, None)
-                        ),
-                    )
-                    .await?;
-                continue;
-            }
-            // Already gone, or broken after the fact. Nothing to delete and
-            // nothing to say that the line does not say already.
-            SessionStatus::Ended | SessionStatus::Failed => {
-                state
-                    .db
-                    .abandon_teardown(
-                        &run.id,
-                        &line_for(outcome, session.proposed_title.as_deref(), &session, None),
-                    )
-                    .await?;
-                continue;
-            }
-        }
-
-        // **And clean *now*, asked of git rather than of the row.** A
-        // workspace that was resumed, written in and handed back again is
-        // clean by its own outcome and is not clean on disk.
+        // 2 · What is in there *now*, asked of git rather than of the row.
         let elapsed = run.ended_at.unwrap_or(now) - run.launched_at.unwrap_or(run.claimed_at);
         let (still, _) = classify(
             state,
@@ -346,18 +328,54 @@ pub async fn owed(state: &AppState, now: DateTime<Utc>) -> anyhow::Result<()> {
             continue;
         }
 
+        // 3 · The claim, which is the guard and the act of taking it at once.
+        // Losing it is not a race to retry — it is somebody working, which is
+        // an answer.
+        if !state.db.claim_teardown(&run.id).await? {
+            state
+                .db
+                .abandon_teardown(
+                    &run.id,
+                    &format!(
+                        "{} The workspace was kept: it was opened again before this run's was \
+                         deleted.",
+                        line_for(outcome, session.proposed_title.as_deref(), &session, None)
+                    ),
+                )
+                .await?;
+            continue;
+        }
+
         if let Err(why) = delete_workspace(state, &run, &session).await {
-            // Said on the row rather than only in the log, for the reason the
-            // settle path says it: a workspace that should have gone and has
-            // not is a fact about somebody's disk.
-            let line = format!(
-                "{} The workspace could not be deleted: {why}",
-                line_for(outcome, session.proposed_title.as_deref(), &session, None)
-            );
-            state.db.set_run_detail(&run.id, &line).await?;
+            // The claim goes back, so the next sweep re-asks every question
+            // from the beginning: a host that stopped answering mid-delete is
+            // a thing to try again, and trying again must not skip the
+            // guards.
+            state.db.release_teardown(&run.id).await?;
+            state
+                .db
+                .set_run_detail(
+                    &run.id,
+                    &format!(
+                        "{} The workspace could not be deleted: {why}",
+                        line_for(outcome, session.proposed_title.as_deref(), &session, None)
+                    ),
+                )
+                .await?;
         }
     }
     Ok(())
+}
+
+/// The outcome a run recorded, by name.
+fn outcome_of(name: Option<&str>) -> Outcome {
+    match name {
+        Some("clean") => Outcome::Clean,
+        Some("kept") => Outcome::Kept,
+        Some("needs_you") => Outcome::NeedsYou,
+        Some("overran") => Outcome::Overran,
+        _ => Outcome::Unknown,
+    }
 }
 
 /// A run that has been going too long.

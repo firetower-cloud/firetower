@@ -59,6 +59,9 @@ struct Worker {
     /// worktree remove --force` — so a test about not destroying it asserts
     /// on this rather than on what the control plane decided.
     destroyed: Destroyed,
+    /// What happens while this worker is answering `Summarize`. See
+    /// [`Meanwhile`]. Empty in every test that is not about that window.
+    before_answering: Meanwhile,
 }
 
 /// What the control plane told the worker to start.
@@ -69,6 +72,14 @@ type Created = Arc<std::sync::Mutex<Vec<ft_proto::CreateWorkspace>>>;
 type Destroyed = Arc<std::sync::Mutex<Vec<ft_core::SessionId>>>;
 /// What git sees in the workspace, as the worker would report it.
 type Summaries = Arc<std::sync::Mutex<Vec<ft_core::CheckoutSummary>>>;
+/// **Something for a test to do while the worker is answering `Summarize`.**
+///
+/// Asking git what is in a workspace is a network call, and the window a
+/// deferred teardown has to survive is somebody resuming *inside* it. That
+/// window opens and closes in a few milliseconds, so there is no reaching it
+/// from outside; this holds the answer open until the test has had its
+/// moment. Run once per `Summarize`, before the reply is written.
+type Meanwhile = Arc<std::sync::Mutex<Option<Box<dyn Fn() + Send>>>>;
 
 /// One checkout with nothing outstanding in it, which is what a clean run
 /// leaves and what a fixture should start from.
@@ -116,6 +127,7 @@ impl Transport for Worker {
         let capacity = self.capacity;
         let sees = self.sees.clone();
         let destroyed = self.destroyed.clone();
+        let before_answering = self.before_answering.clone();
         /* When each workspace was asked for, so the `Usage` report below can
         name it the way a real worker does: a little after the fact. The
         `created` list has no clock on it and three tests read it, so this
@@ -235,10 +247,19 @@ impl Transport for Worker {
                     // What git sees, which is what decides whether a run was
                     // clean — and is a thing that changes while a teardown is
                     // deferred.
-                    ToWorker::Summarize { req, .. } => Some(ToServer::Summarized {
-                        req,
-                        summaries: sees.lock().unwrap().clone(),
-                    }),
+                    ToWorker::Summarize { req, .. } => {
+                        // Whatever the test asked to have happen while the
+                        // control plane is waiting on this, and then long
+                        // enough for it to have happened.
+                        if let Some(meanwhile) = before_answering.lock().unwrap().as_ref() {
+                            meanwhile();
+                        }
+                        tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+                        Some(ToServer::Summarized {
+                            req,
+                            summaries: sees.lock().unwrap().clone(),
+                        })
+                    }
                     // **The frame that destroys somebody's work.**
                     ToWorker::Destroy { session_id, .. } => {
                         destroyed.lock().unwrap().push(session_id);
@@ -307,6 +328,7 @@ async fn frames_fixture() -> (
     let created: Created = Default::default();
     let sees: Summaries = Arc::new(std::sync::Mutex::new(vec![nothing_outstanding()]));
     let destroyed: Destroyed = Default::default();
+    let before_answering: Meanwhile = Default::default();
     let fleet = crate::fleet::Fleet::new(db.clone());
     fleet
         .supervise(
@@ -332,6 +354,7 @@ async fn frames_fixture() -> (
                 created: created.clone(),
                 sees: sees.clone(),
                 destroyed: destroyed.clone(),
+                before_answering: before_answering.clone(),
             }),
         )
         .await;
@@ -381,7 +404,11 @@ async fn frames_fixture() -> (
         ready,
         owner,
         created,
-        Frames { sees, destroyed },
+        Frames {
+            sees,
+            destroyed,
+            before_answering,
+        },
     )
 }
 
@@ -392,6 +419,10 @@ struct Frames {
     sees: Summaries,
     /// What the worker was told to tear down. The frame that destroys work.
     destroyed: Destroyed,
+    /// **A moment inside the git round trip.** See [`Meanwhile`]: this is how
+    /// a test resumes a session at the one instant that used to be invisible
+    /// to the guard.
+    before_answering: Meanwhile,
 }
 
 /// What the worker was handed for one run, waited for.
@@ -439,6 +470,7 @@ async fn watched_fixture() -> (
                 created: Default::default(),
                 sees: Arc::new(std::sync::Mutex::new(vec![nothing_outstanding()])),
                 destroyed: Default::default(),
+                before_answering: Default::default(),
             }),
         )
         .await;
@@ -855,6 +887,7 @@ async fn connecting_a_host_path_defers_validation_to_the_execution_machine() {
                 created: Default::default(),
                 sees: Arc::new(std::sync::Mutex::new(vec![nothing_outstanding()])),
                 destroyed: Default::default(),
+                before_answering: Default::default(),
             }),
         )
         .await;
@@ -1646,6 +1679,7 @@ async fn an_empty_repository_is_connected_rather_than_refused() {
                 created: Default::default(),
                 sees: Arc::new(std::sync::Mutex::new(vec![nothing_outstanding()])),
                 destroyed: Default::default(),
+                before_answering: Default::default(),
             }),
         )
         .await;
@@ -3018,6 +3052,7 @@ async fn another_machine(state: &AppState, owner: &str, name: &str) -> Host {
                 created: Default::default(),
                 sees: Arc::new(std::sync::Mutex::new(vec![nothing_outstanding()])),
                 destroyed: Default::default(),
+                before_answering: Default::default(),
             }),
         )
         .await;
@@ -3075,6 +3110,7 @@ async fn says_its_disk(state: &AppState, host: &Host, total_mb: u64, used_mb: u6
                 created: Default::default(),
                 sees: Arc::new(std::sync::Mutex::new(vec![nothing_outstanding()])),
                 destroyed: Default::default(),
+                before_answering: Default::default(),
             }),
         )
         .await;
@@ -7094,6 +7130,204 @@ async fn a_resumed_workspace_is_not_destroyed_by_a_deferred_teardown() {
         frames.destroyed.lock().unwrap().is_empty(),
         "the teardown came back for a workspace it had already given up on"
     );
+}
+
+/// **A1: a teardown given up on stays given up on, with no summary.**
+///
+/// The teardown and the summary were one query with an `OR`, and only the
+/// teardown half asked whether it had been abandoned. So a run whose summary
+/// never arrived came back through `summary IS NULL` however firmly the
+/// teardown had been given up on — and the sweep after that deleted the
+/// workspace the sweep before it had decided to keep.
+///
+/// **No summary ever arrives here**, which is the case the `OR` let through.
+/// `describe()` is the agent's courtesy, not a guarantee: an agent killed
+/// between handing back and writing its title leaves `proposed_title` null
+/// for good.
+#[tokio::test]
+async fn a_teardown_given_up_on_does_not_return_through_the_summary() {
+    let (state, principal, host, ready, owner, _created, frames) = frames_fixture().await;
+    ready.store(true, Ordering::SeqCst);
+    let (schedule, session) = a_run_awaiting_teardown(&state, &principal, &host, &owner).await;
+
+    // Somebody picks the workspace up, and the grace runs out with no
+    // summary — so the teardown is decided on rather than deferred again,
+    // and the decision is to keep it.
+    state
+        .fleet
+        .set_status(&session, ft_core::SessionStatus::Working, None)
+        .await;
+    let past_the_grace = Utc::now() + super::super::schedules::SUMMARY_GRACE * 2;
+    crate::schedules::settle::owed(&state, past_the_grace)
+        .await
+        .unwrap();
+    let_a_teardown_arrive().await;
+    assert!(frames.destroyed.lock().unwrap().is_empty());
+    let given_up_on = runs_of(&state, &schedule)
+        .await
+        .into_iter()
+        .next()
+        .expect("the run is there");
+    assert!(
+        given_up_on
+            .detail
+            .as_deref()
+            .unwrap_or_default()
+            .contains("opened again"),
+        "the teardown has to have been given up on for this test to be about          anything: {:?}",
+        given_up_on.detail
+    );
+    assert!(given_up_on.summary.is_none(), "and no summary ever arrived");
+
+    // **And the work is handed back**, which is the state a teardown acts on.
+    // Nothing here is new information: the decision was taken above.
+    state
+        .fleet
+        .set_status(&session, ft_core::SessionStatus::HandedBack, None)
+        .await;
+    crate::schedules::settle::owed(&state, past_the_grace + chrono::TimeDelta::minutes(10))
+        .await
+        .unwrap();
+    let_a_teardown_arrive().await;
+
+    assert!(
+        frames.destroyed.lock().unwrap().is_empty(),
+        "a teardown that had been given up on came back through the summary"
+    );
+    let row = runs_of(&state, &schedule)
+        .await
+        .into_iter()
+        .next()
+        .expect("the run is there");
+    assert!(row.workspace_kept, "and the workspace is still its own");
+}
+
+/// **A2: resuming during the git round trip loses the claim, not the work.**
+///
+/// The guard read the session, then asked the machine what was in the
+/// workspace, then deleted — and that middle step is a network call. Somebody
+/// resuming inside it was past the read and invisible to the delete.
+///
+/// Reproduced by resuming *while* `Summarize` is being answered: the fixture
+/// worker holds that answer until the session has moved.
+#[tokio::test]
+async fn resuming_while_git_is_being_asked_keeps_the_workspace() {
+    let (state, principal, host, ready, owner, _created, frames) = frames_fixture().await;
+    ready.store(true, Ordering::SeqCst);
+    let (schedule, session) = a_run_awaiting_teardown(&state, &principal, &host, &owner).await;
+    state
+        .db
+        .record_proposal(&session, "Bumped four patch versions", "")
+        .await
+        .unwrap();
+
+    // **Somebody opens the workspace while git is being asked about it.**
+    // The fixture worker runs this before it answers `Summarize` and then
+    // holds the answer long enough for it to have landed, which is the one
+    // instant the old guard could not see: past its read of the session, and
+    // before its delete.
+    {
+        let state = state.clone();
+        let session = session.clone();
+        frames
+            .before_answering
+            .lock()
+            .unwrap()
+            .replace(Box::new(move || {
+                let state = state.clone();
+                let session = session.clone();
+                tokio::spawn(async move {
+                    state
+                        .fleet
+                        .set_status(&session, ft_core::SessionStatus::Working, None)
+                        .await;
+                });
+            }));
+    }
+
+    crate::schedules::settle::owed(&state, Utc::now())
+        .await
+        .unwrap();
+    let_a_teardown_arrive().await;
+
+    assert!(
+        frames.destroyed.lock().unwrap().is_empty(),
+        "somebody resumed during the git round trip and the delete went anyway"
+    );
+    let row = runs_of(&state, &schedule)
+        .await
+        .into_iter()
+        .next()
+        .expect("the run is there");
+    assert!(row.workspace_kept);
+}
+
+/// **A3: a second agent in the workspace is the one doing the work.**
+///
+/// The guard asked about the scheduled session, which is still handed back —
+/// because the person who opened the workspace started a *second* agent in
+/// it, which is what opening a finished run and picking the work up does.
+/// Tearing the workspace down takes that sibling with it.
+#[tokio::test]
+async fn a_working_second_agent_keeps_the_workspace() {
+    let (state, principal, host, ready, owner, _created, frames) = frames_fixture().await;
+    ready.store(true, Ordering::SeqCst);
+    let (schedule, session) = a_run_awaiting_teardown(&state, &principal, &host, &owner).await;
+    state
+        .db
+        .record_proposal(&session, "Bumped four patch versions", "")
+        .await
+        .unwrap();
+
+    // A second agent in the same workspace, working. The scheduled session is
+    // left exactly where the run left it.
+    let workspace = state
+        .db
+        .session(&session)
+        .await
+        .unwrap()
+        .unwrap()
+        .workspace_id
+        .expect("the run has a workspace");
+    let sibling = super::sessions::create_session_as(
+        state.clone(),
+        owner.clone(),
+        "admin".into(),
+        serde_json::from_value(serde_json::json!({
+            "prompt": "picking this up",
+            "agent": "ClaudeCode",
+            "workspaceId": workspace.as_str(),
+        }))
+        .unwrap(),
+        super::sessions::Launch::default(),
+    )
+    .await
+    .expect("a second agent in the workspace");
+    state
+        .fleet
+        .set_status(&sibling.id, ft_core::SessionStatus::Working, None)
+        .await;
+    assert_eq!(
+        state.db.session(&session).await.unwrap().unwrap().status,
+        ft_core::SessionStatus::HandedBack,
+        "the scheduled session is where the run left it, which is the point"
+    );
+
+    crate::schedules::settle::owed(&state, Utc::now())
+        .await
+        .unwrap();
+    let_a_teardown_arrive().await;
+
+    assert!(
+        frames.destroyed.lock().unwrap().is_empty(),
+        "a workspace with a working second agent in it was sent to be destroyed"
+    );
+    let row = runs_of(&state, &schedule)
+        .await
+        .into_iter()
+        .next()
+        .expect("the run is there");
+    assert!(row.workspace_kept);
 }
 
 /// **And work that appeared while the teardown waited keeps the workspace.**

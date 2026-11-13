@@ -225,7 +225,8 @@ create table schedule_runs (
     launched_at   timestamptz,
     ended_at      timestamptz,
     -- **When this run stopped being owed a teardown**, and why is on
-    -- `detail`.
+    -- `detail`. Null is "still owed"; `workspace_kept` says whether the
+    -- teardown happened or was given up on.
     --
     -- A clean run's workspace is deleted — but not at the moment the run
     -- settles, because deleting it takes the session with it and the agent's
@@ -236,11 +237,18 @@ create table schedule_runs (
     -- did not exist when it was decided.
     --
     -- So the deferred teardown re-reads the world and **abandons** rather
-    -- than retrying when the answer has changed. This is what makes
-    -- abandoning stick: null is "still owed", and a time here means nobody
-    -- is going to delete this workspace, whatever the outcome column says
-    -- about how the run ended.
-    teardown_abandoned_at timestamptz
+    -- than retrying when the answer has changed.
+    --
+    -- **And it is claimed through this column rather than decided above
+    -- it.** Reading the state and then acting on it is not a guard, it is a
+    -- window: a read, a round trip to the machine for git, and a delete, with
+    -- a resume able to land between any two of them. So the last act before
+    -- anything is destroyed is one conditional statement that writes this
+    -- column **and** proves no session in the workspace is doing anything —
+    -- the same shape as the claim and the approval. Winning it is what gives
+    -- one sweep the right to delete; losing it means somebody is working, and
+    -- that is not a race, it is an answer.
+    teardown_at timestamptz
 );
 
 -- **Not for reading.** It is the claim — the `on conflict` target, and the

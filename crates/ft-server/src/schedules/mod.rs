@@ -134,7 +134,10 @@ const ORPHAN_AFTER: chrono::TimeDelta = chrono::TimeDelta::minutes(5);
 /// `sessions.proposed_title`, which takes seconds and may land after the sweep
 /// next looks. Rather than settle with an empty summary, a run is left one
 /// more pass — and after this, settled with whatever git can see instead.
-const SUMMARY_GRACE: chrono::TimeDelta = chrono::TimeDelta::minutes(2);
+///
+/// `pub(crate)` for one reader: a test that has to run a sweep from *past*
+/// it, because what it is about is the decision taken when the wait is over.
+pub(crate) const SUMMARY_GRACE: chrono::TimeDelta = chrono::TimeDelta::minutes(2);
 
 /// For as long as the control plane runs.
 pub async fn watch(state: AppState) {
