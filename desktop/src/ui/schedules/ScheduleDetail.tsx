@@ -42,6 +42,7 @@ import {
   useScheduleRuns,
 } from "~/api/generated/schedules/schedules";
 import { destroySession, sessionWork } from "~/api/generated/sessions/sessions";
+import { useRepos } from "~/data";
 import type { Schedule, ScheduleRun } from "~/api/generated/model";
 import { BackToSchedules, RunNowButton, saysWhen } from "./SchedulesPage";
 import { NewSchedule } from "./NewSchedule";
@@ -77,6 +78,9 @@ export function ScheduleDetail({ schedule: given }: { schedule: Schedule }) {
   const client = useQueryClient();
   const confirm = useConfirm();
   const menu = useMenu<Schedule>();
+  /* For the branch row: a repository knows its own default, and a schedule
+     with no `base` cuts from it. */
+  const repos = useRepos();
 
   /**
    * **This page follows a run while one is moving.**
@@ -298,13 +302,37 @@ export function ScheduleDetail({ schedule: given }: { schedule: Schedule }) {
                   it.repos.length > 0 ? it.repos.map((r) => r.slug).join(", ") : "None",
                   true,
                 ],
-                ["Base branch", it.base ?? "—", true],
-                // **Named, not "first available".** A schedule pins the
-                // machine it runs on. One written before it did names none,
-                // and the scheduler still places those.
-                ["Machine", it.hostName ?? "First available", true],
+                // **The branch it will actually cut from, not an em dash.**
+                // An absent `base` is not "nothing" — `NewSession.base` is
+                // documented as "omit for the repository's default", so the
+                // run cuts from whatever that is. The row said `—` about a
+                // schedule with a repository, which is the one case where
+                // there is always an answer. Dropped entirely without a
+                // repository, where there is genuinely nothing to branch
+                // from.
+                ...(it.repos.length > 0
+                  ? [["Base branch", baseOf(it, repos.data), true] as [string, string, boolean]]
+                  : []),
+                // **Named, and never "first available" again.** A schedule
+                // names the machine it runs on. One written before it did
+                // names none, and the note under this card says what that
+                // means rather than the row saying words the ruling retired.
+                ["Machine", it.hostName ?? "Not named", true],
               ]}
             />
+            {/* A schedule from before machines were named. It still runs —
+                `NewSession.host_id` of `None` is the old policy, and the
+                launch path places it — so this says what will happen and how
+                to change it rather than drawing a state the rule now calls
+                impossible. Nothing migrates it behind somebody's back:
+                choosing where their work runs is theirs, and saving an edit
+                pins one, because the sheet always names a machine now. */}
+            {!it.hostId && (
+              <WhereTo className="mt-[14px]">
+                This schedule was made before a schedule named its machine. Each run starts on
+                whichever machine is free; <b>Edit</b> it to pin one.
+              </WhereTo>
+            )}
             {/* **Stacked, because every value here is a sentence.** The
                 ordinary card puts the value beside its label on one line
                 with an ellipsis, which is right for *First available* and
@@ -533,6 +561,29 @@ function History({
  * the half that says which repository. A value that is a whole *sentence*
  * belongs in `.s-stack` instead, not here.
  */
+/**
+ * The branch each run cuts from.
+ *
+ * **An absent `base` is the repository's default, not nothing.**
+ * `NewSession.base` says so — "omit for the repository's default" — so the
+ * row drew `—` about the one case where there is always an answer. Named
+ * where the repository has told us what its default is, and described where
+ * it has not: a repository can be connected before any worker has read it,
+ * and `default_branch` is null until one does.
+ *
+ * Two repositories with different defaults cannot be named in one row, so
+ * that one says what the rule is instead of picking a side.
+ */
+export function baseOf(
+  schedule: Schedule,
+  repos: { id: string; defaultBranch?: string | null }[],
+): string {
+  if (schedule.base) return schedule.base;
+  if (schedule.repos.length > 1) return "Each repository's default";
+  const its = repos.find((r) => r.id === schedule.repos[0]?.id);
+  return its?.defaultBranch ?? "The repository's default";
+}
+
 function Facts({ title, rows }: { title: string; rows: [string, string, boolean?][] }) {
   return (
     <div className="facts-card">

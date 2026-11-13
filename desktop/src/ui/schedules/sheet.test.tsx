@@ -17,7 +17,7 @@ import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { NewSchedule } from "./NewSchedule";
-import { actions } from "./ScheduleDetail";
+import { actions, baseOf } from "./ScheduleDetail";
 import { ProfileMenu, RepoMenu } from "~/ui/StartComposer";
 import { Menu, Opt, Sift, looselyMatches } from "~/ui/menus";
 import { unattendedValue } from "./controls";
@@ -380,6 +380,46 @@ describe("the cadence row's pickers", () => {
     );
     expect(short).not.toContain("placeholder");
     expect(short).toContain("Every day");
+  });
+});
+
+/**
+ * **The branch each run cuts from, which was drawn as an em dash.**
+ *
+ * `NewSession.base` is documented "omit for the repository's default", so an
+ * absent base is not nothing — it is the default branch, and the row said
+ * `—` about the one case where there is always an answer.
+ */
+describe("the base branch a schedule cuts from", () => {
+  const connected = [{ id: "r_02api", defaultBranch: "main" }];
+
+  it("names the branch the schedule set", () => {
+    expect(baseOf(saved, connected)).toBe("trunk");
+  });
+
+  it("names the repository's default where it set none", () => {
+    expect(baseOf({ ...saved, base: null } as Schedule, connected)).toBe("main");
+  });
+
+  it("says what the rule is where the repository has not been read yet", () => {
+    // A repository can be connected before any worker has looked at it, and
+    // `defaultBranch` is null until one does. Not the same as "no branch".
+    expect(baseOf({ ...saved, base: null } as Schedule, [{ id: "r_02api", defaultBranch: null }])).toBe(
+      "The repository's default",
+    );
+    expect(baseOf({ ...saved, base: null } as Schedule, [])).toBe("The repository's default");
+  });
+
+  it("does not pick a side when two repositories have their own defaults", () => {
+    const two = {
+      ...saved,
+      base: null,
+      repos: [
+        { id: "r_01web", slug: "acme/web" },
+        { id: "r_02api", slug: "acme/api" },
+      ],
+    } as Schedule;
+    expect(baseOf(two, connected)).toBe("Each repository's default");
   });
 });
 
