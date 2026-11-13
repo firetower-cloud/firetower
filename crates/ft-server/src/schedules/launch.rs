@@ -133,6 +133,91 @@ async fn created(state: &AppState, session: &SessionId) {
     );
 }
 
+/// The reason, as a sentence this feature will put its name to.
+///
+/// **A history row is `"Refused. "` and then this**, so whatever is here is
+/// read as something Firetower said about somebody's work. What arrives is an
+/// `ApiError` from the launch path, and those messages are written for
+/// several different readers: somebody standing at the New page, a fleet
+/// diagnosis, and — until this was found — a developer's note. The row read
+/// *"Refused. no host is available to take this"*, lowercase and unfinished,
+/// beside a line of this feature's own that read correctly.
+///
+/// Two rules, and they are deliberately mechanical rather than clever:
+///
+/// - **A missing reason is replaced, not printed.** The fallback is a closed
+///   set keyed on the code — this feature's own words for each thing that can
+///   refuse a launch — so an empty message can never reach a row as a
+///   dangling full stop.
+/// - **A reason that is there keeps its words and gains its punctuation.**
+///   The sentences that arrive now are written for a person and several of
+///   them are this feature's own (the disk floor's name the machine and its
+///   size, which no closed set here could). Capitalising is deliberately not
+///   done: half of them open with a machine's name, and `wren` is not `Wren`.
+fn said(code: ErrorCode, message: &str) -> String {
+    let message = message.trim();
+    if message.is_empty() {
+        return match code {
+            ErrorCode::NoCapacity => "No machine was available to take it.",
+            ErrorCode::HostUnreachable => "The machine it runs on was not responding.",
+            ErrorCode::RepoNotConnected => "A repository it checks out is not connected.",
+            ErrorCode::RepoAccessDenied => {
+                "Firetower holds no authorization for a repository it checks out."
+            }
+            ErrorCode::Forbidden => "The account it runs as may no longer do this.",
+            ErrorCode::InvalidRequest => "Something it was approved with is no longer valid.",
+            _ => "It could not be started.",
+        }
+        .to_string();
+    }
+    match message.ends_with('.') || message.ends_with('!') || message.ends_with('?') {
+        true => message.to_string(),
+        false => format!("{message}."),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// **The row read "Refused. no host is available to take this".**
+    ///
+    /// Lowercase after a full stop, nothing at the end, and the words of a
+    /// generic capacity error rather than anything this feature would say.
+    /// Fixed where it was written as well as here; this is the guard that
+    /// stops the next one arriving the same way.
+    #[test]
+    fn a_reason_is_a_finished_sentence() {
+        // Punctuation is added; words are not touched.
+        assert_eq!(
+            said(ErrorCode::NoCapacity, "wren was low on disk"),
+            "wren was low on disk."
+        );
+        assert_eq!(
+            said(ErrorCode::NoCapacity, "wren was low on disk."),
+            "wren was low on disk."
+        );
+        // **Not capitalised**, because half of these open with a machine's
+        // name and `wren` is not `Wren`.
+        assert!(said(ErrorCode::NoCapacity, "wren was low").starts_with('w'));
+    }
+
+    /// Nothing carried means this feature says it in its own words, rather
+    /// than a row ending in a dangling full stop.
+    #[test]
+    fn a_missing_reason_is_replaced_rather_than_printed() {
+        assert_eq!(
+            said(ErrorCode::NoCapacity, "   "),
+            "No machine was available to take it."
+        );
+        assert_eq!(
+            said(ErrorCode::HostUnreachable, ""),
+            "The machine it runs on was not responding."
+        );
+        assert_eq!(said(ErrorCode::Internal, ""), "It could not be started.");
+    }
+}
+
 /// Why this run is starting — which decides one gate, and nothing else.
 ///
 /// **Authorization and the clock are two questions.** Gate 0 re-reads the
@@ -201,7 +286,7 @@ pub(crate) async fn start(
                     run,
                     stopped.state,
                     None,
-                    Some(&format!("Refused. {}", stopped.detail)),
+                    Some(&format!("Refused. {}", said(stopped.code, &stopped.detail))),
                     None,
                     Some(&super::error_code(stopped.code)),
                     false,
@@ -296,7 +381,7 @@ pub(crate) async fn start(
                                     true => "Refused",
                                     false => "Failed",
                                 },
-                                e.message
+                                said(e.code, &e.message)
                             )),
                             None,
                             Some(&super::error_code(e.code)),

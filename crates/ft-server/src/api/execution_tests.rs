@@ -466,7 +466,7 @@ async fn a_retired_machine_is_readable_and_unreachable() {
         .await
         .unwrap_err();
     assert!(
-        error.message.contains("no host is available"),
+        error.message.contains("No machine was available"),
         "{}",
         error.message
     );
@@ -3411,9 +3411,10 @@ async fn a_lead_may_name_a_machine_unless_the_profile_pinned_one() {
 /// as no capacity.
 ///
 /// The pre-check is here rather than in `create_session_as`, which keeps its
-/// deliberately vague "no host is available" — there, somebody may be typing
-/// an id they were never given, and confirming it exists is the leak. Here the
-/// caller is a session of the owner's own and there is no third party.
+/// deliberately vague "No machine was available" — there, somebody may be
+/// typing an id they were never given, and confirming it exists is the leak.
+/// Here the caller is a session of the owner's own and there is no third
+/// party.
 #[tokio::test]
 async fn a_machine_the_owner_may_not_use_is_named_in_the_refusal() {
     let (state, _principal, host, ready, owner) = fixture().await;
@@ -3465,7 +3466,7 @@ async fn a_machine_the_owner_may_not_use_is_named_in_the_refusal() {
         "and the ones it may: {refused}"
     );
     assert!(
-        !refused.contains("no host is available"),
+        !refused.contains("No machine was available"),
         "which is the message for somebody typing an id, not for a lead: {refused}"
     );
 

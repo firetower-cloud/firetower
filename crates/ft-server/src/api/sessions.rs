@@ -812,14 +812,25 @@ pub(crate) async fn create_session_as(
                     what_runs_where(&up, &presence)
                 ),
             ),
-            _ => ApiError::new(ErrorCode::NoCapacity, "no host is available to take this"),
+            // **A sentence, because this is drawn to people.** It read "no
+            // host is available to take this" — lowercase, unpunctuated,
+            // written for whoever was reading a log — and a scheduled run's
+            // history line is this message under the word *Refused*, so it
+            // arrived on screen as "Refused. no host is available to take
+            // this". Still deliberately vague about *why*: a machine named by
+            // hand and not found is retired, or is somebody else's, and
+            // saying which would confirm it exists.
+            _ => ApiError::new(
+                ErrorCode::NoCapacity,
+                "No machine was available to take this.",
+            ),
         }
     })?;
 
     if host.drained {
         return Err(ApiError::new(
             ErrorCode::NoCapacity,
-            format!("{} is draining and isn't taking new work", host.name),
+            format!("{} is draining and isn't taking new work.", host.name),
         ));
     }
 
@@ -882,7 +893,7 @@ pub(crate) async fn create_session_as(
                 .await?
                 .and_then(|h| h.diagnosis)
                 .map(|d| d.summary)
-                .unwrap_or_else(|| format!("{} isn't responding", host.name));
+                .unwrap_or_else(|| format!("{} isn't responding.", host.name));
 
             return Err(ApiError::new(ErrorCode::HostUnreachable, why));
         }
@@ -4369,7 +4380,9 @@ async fn require_ready(
         .map_err(|e| {
             ApiError::new(
                 ErrorCode::HostUnreachable,
-                format!("Checking requirements: {e:#}"),
+                // Named and punctuated: this is a sentence on a history row
+                // as often as it is a line in a log.
+                format!("Firetower could not check that machine's requirements: {e:#}."),
             )
         })?;
     if !readiness.ready() {
