@@ -1434,6 +1434,13 @@ pub(crate) async fn create_session_as(
                 // deciding something is required does not make the worker
                 // install it. Writing them is best effort otherwise, which is
                 // right for a session somebody is sitting in front of.
+                //
+                // This frame only. An agent started in this workspace
+                // afterwards — relaunched, or a second one joined to it —
+                // goes over `RunAction::StartAgent`, which carries no
+                // requirement; and a child this run spawns reaches
+                // `create_session_as` with no approved versions at all. Both
+                // are best effort with nobody present, and both are open.
                 skills_required: approved_versions.is_some(),
                 persona: persona.clone().unwrap_or_default(),
             })),

@@ -66,9 +66,13 @@ pub async fn apply(
     // **Whether every one of them has to land.** Off, the long-standing
     // answer: one bundle a filesystem refuses costs that bundle and is said
     // out loud, because the set a session asked for is worth more than the
-    // one skill nobody can write. On — a run approved against named skill
-    // versions, with nobody present — the first failure is the answer, and
-    // the caller must not start the agent. See
+    // one skill nobody can write. On — an approved workspace being created,
+    // with nobody present — the first failure is the answer, and the caller
+    // must not start the agent.
+    //
+    // Only `create_workspace` passes this on. `start_agent` passes `false`
+    // whatever the session was approved with, so a relaunch is best effort;
+    // that is a gap and is named where it is, not papered over here. See
     // `ft_proto::CreateWorkspace::skills_required`.
     required: bool,
 ) -> Result<()> {
