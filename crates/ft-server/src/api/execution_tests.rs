@@ -5811,8 +5811,7 @@ async fn approving_a_revision_that_has_moved_is_refused() {
         Query(serde_json::from_value(serde_json::json!({ "revision": read })).unwrap()),
     )
     .await
-    .err()
-    .expect("that is not what this schedule says any more");
+    .expect_err("that is not what this schedule says any more");
     assert!(refused.message.contains("changed since you opened it"));
 
     let row = state.db.schedule(&made.id).await.unwrap().unwrap();
@@ -6342,8 +6341,7 @@ async fn a_schedule_cannot_be_turned_on_without_a_subscription_to_spend() {
         Query(Default::default()),
     )
     .await
-    .err()
-    .expect("there is nothing for it to spend");
+    .expect_err("there is nothing for it to spend");
     assert!(matches!(refused.code, ErrorCode::InvalidRequest));
     assert!(
         refused.message.contains("no connected"),
