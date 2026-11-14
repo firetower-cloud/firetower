@@ -147,18 +147,37 @@ impl Transport for Worker {
             let (r, w) = tokio::io::split(theirs);
             let (mut reader, writer) = Codec::new(r, w).split();
             let writer = Arc::new(tokio::sync::Mutex::new(writer));
+            // **Nothing is written until the handshake has been read.** The
+            // control plane reads `Hello` with one codec and builds a second
+            // one for the serve loop, and the first codec's read buffer is
+            // dropped with it — so a frame that lands in the same read as the
+            // `Hello` reply is read by neither, and a *partial* one desyncs
+            // the second codec and kills the connection.
+            //
+            // This was a 120 ms sleep, which is a guess at how long a
+            // handshake takes. It held on a quiet machine and not on CI:
+            // `a_full_machine_is_passed_over_for_one_with_room` failed there
+            // with `wren never came back saying what its disk was doing`.
+            //
+            // `Resume` is the exact fact the sleep was approximating.
+            // `Fleet::connect` writes it only *after* reading the `Hello`
+            // reply, so a worker that has seen it knows the first codec will
+            // not read again — and everything written from then on survives
+            // to the second one. Writes do not consume read bytes, so the
+            // intervening `live_session_ids_on` query is not a window.
+            let (handshaken, read_our_hello) = tokio::sync::oneshot::channel::<()>();
             // A worker reports its machine on a timer of its own rather than
             // when asked — `REPORT_EVERY`, with the first tick on connect.
             // Here it is quick and unending, so a test never races the first
             // reading.
-            //
-            // Not during the handshake: the control plane reads `Hello` with
-            // one codec and builds a second for the serve loop, so a frame
-            // written into that gap is read by neither.
             if let Some(said) = capacity {
                 let writer = writer.clone();
                 tokio::spawn(async move {
-                    tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+                    // A handshake that never completes means a connection
+                    // that never served, and nothing to report onto.
+                    if read_our_hello.await.is_err() {
+                        return;
+                    }
                     loop {
                         // **Usage at once, as a real worker reports it.** On
                         // Linux the workspace is recorded and its cgroup made
@@ -204,8 +223,17 @@ impl Transport for Worker {
                     }
                 });
             }
+            let mut handshaken = Some(handshaken);
             while let Ok(frame) = reader.read::<ToWorker>().await {
                 let response = match frame {
+                    // The handshake is over and our `Hello` has been read.
+                    // See the gate above; this is what releases it.
+                    ToWorker::Resume { .. } => {
+                        if let Some(tell) = handshaken.take() {
+                            let _ = tell.send(());
+                        }
+                        None
+                    }
                     ToWorker::Hello { .. } => Some(ToServer::Hello {
                         protocol: PROTOCOL_VERSION,
                         worker_version: "test".into(),
@@ -3124,32 +3152,57 @@ async fn says_its_disk(state: &AppState, host: &Host, total_mb: u64, used_mb: u6
             }),
         )
         .await;
-    // **Both facts, not just the reading.** Replacing a supervisor drops the
-    // old connection, and the write that records a host as offline can land
-    // *after* the new connection's `mark_host_online` — which leaves the row
-    // offline, out of the candidate list, and the test asserting the floor
-    // against a fleet of one. Waiting for the reading alone passed on a quiet
-    // machine and failed under a full suite.
-    // Ten seconds of patience rather than four: this is a fixture waiting for
-    // a handshake, not an assertion about how fast one is, and four was
-    // enough on a quiet machine and not under a full suite.
-    for _ in 0..500 {
-        let said = state.fleet.capacity_of(&host.id).await.is_some();
-        let online = state
-            .db
-            .host_by_id(&host.id)
-            .await
-            .ok()
-            .flatten()
-            .is_some_and(|h| h.state == ft_core::HostState::Online);
-        if said && online {
+    // **Online is asserted, not waited for.** `Fleet::supervise` returns
+    // only once the first attempt has been through `mark_host_online` and
+    // registered its worker, so by here the row *is* online — and this used
+    // to poll for it, which turned the one thing that could falsify it into
+    // a ten-second silence. What could falsify it was a replaced supervisor
+    // resurrecting itself and writing `record_diagnosis` over the top; that
+    // is fixed in `Fleet::supervised`, and this is the assertion that says
+    // so out loud. Four seconds was not enough under a full suite, ten was
+    // not enough on CI, and a third raise would have been the same patch.
+    assert!(
+        state.fleet.is_connected(&host.id).await,
+        "{} has no connection after `supervise` returned, so `supervise` found the slot \
+         still taken and did nothing",
+        host.name
+    );
+    let row = state
+        .db
+        .host_by_id(&host.id)
+        .await
+        .ok()
+        .flatten()
+        .expect("the host is still a row");
+    assert_eq!(
+        row.state,
+        ft_core::HostState::Online,
+        "{} did not come up online from a handshake that had already finished — \
+         something wrote over `mark_host_online`",
+        host.name
+    );
+
+    // **And then the reading, by value.** `is_some()` was satisfied by the
+    // *previous* worker's number, so a test that set 59.5 GB used and read
+    // back 1 GB would have been told the fixture was ready. The reporter
+    // sleeps 120 ms before its first frame and ticks every 25, so this is a
+    // wait on a frame that is certainly coming rather than on a race.
+    let want = ft_core::Capacity {
+        disk_total_mb: total_mb,
+        disk_used_mb: used_mb,
+        ..Default::default()
+    };
+    for _ in 0..250 {
+        if state.fleet.capacity_of(&host.id).await == Some(want) {
             return;
         }
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
     panic!(
-        "{} never came back saying what its disk was doing",
-        host.name
+        "{} never reported the disk it was given: wanted {total_mb} MB with {used_mb} used, \
+         last saw {:?}",
+        host.name,
+        state.fleet.capacity_of(&host.id).await
     );
 }
 
