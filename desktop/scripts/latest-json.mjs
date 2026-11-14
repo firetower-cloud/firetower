@@ -1,9 +1,14 @@
-#!/usr/bin/env node
 /**
  * `latest.json` — the updater's manifest — assembled once, by one job.
  *
- *   latest-json.mjs --repo owner/name --tag desktop-v1.2.3 --version 1.2.3 \
- *                   --signatures <dir> [--out latest.json]
+ *   node latest-json.mjs --repo owner/name --tag desktop-v1.2.3 --version 1.2.3 \
+ *                        --signatures <dir> [--out latest.json]
+ *
+ * Run with `node` and not a shebang: `pnpm test` imports this file for the
+ * two functions below, on all three platforms, and the Windows runner's git
+ * checks text files out with CRLF — where the bundler strips `#!…` and leaves
+ * the carriage return behind, which is a syntax error in a file that is
+ * otherwise fine everywhere else.
  *
  * Every installed copy of Firetower reads one fixed address for this file and
  * finds, under its own platform key, the archive to download and the minisign
