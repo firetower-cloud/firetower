@@ -360,9 +360,13 @@ jobs:
           # bytes of the asset its entry will point at, which is the only
           # thing that establishes the two belong together — a signature left
           # over from the previous build of a rebuilt tag names exactly what
-          # this one's artifact is called. Roughly 110MB over the four
-          # payloads, a few seconds to fetch on a release that takes twenty
-          # minutes, and about a tenth of a second to check.
+          # this one's artifact is called.
+          #
+          # The four payloads are 106MB, 82 of them the AppImage, and hashing
+          # all four takes 100ms. No pattern, so the `.dmg` comes down too and
+          # the transfer is nearer 121MB — a few seconds on a release that
+          # takes twenty minutes, and cheaper than keeping a list of asset
+          # names here in step with `WANTED` in the script.
           #
           # `--clobber` so that re-running this job after a leg was rebuilt
           # reads what is on the release now.

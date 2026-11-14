@@ -154,6 +154,12 @@ const TRUSTED = "trusted comment: ";
 /** The lines of a boxed minisign file. `Buffer.from` never throws here. */
 const unbox = (boxed) => Buffer.from(boxed.trim(), "base64").toString("utf8").split("\n");
 
+/* A key id the way minisign prints it in a key's own comment, so that one in
+   an error here can be compared by eye with the one in tauri.conf.json: the
+   8 bytes little-endian, which reads as the reverse of their order on the
+   wire. */
+const keyId = (id) => Buffer.from(id).reverse().toString("hex").toUpperCase();
+
 /** The 42 bytes of a minisign public key: `Ed`, the key id, then the key. */
 export function publicKey(boxed) {
   const raw = Buffer.from(unbox(boxed)[1] ?? "", "base64");
@@ -195,8 +201,7 @@ function verifiedOrThrow(name, text, payload, expected) {
   const signature = raw.subarray(10);
   if (!id.equals(expected.id)) {
     throw new Error(
-      `${name}.sig was made with key ${[...id].reverse().map((b) => b.toString(16).padStart(2, "0")).join("").toUpperCase()}, ` +
-        `and the app checks against ${[...expected.id].reverse().map((b) => b.toString(16).padStart(2, "0")).join("").toUpperCase()}.\n\n` +
+      `${name}.sig was made with key ${keyId(id)}, and the app checks against ${keyId(expected.id)}.\n\n` +
         "The manifest is not written. A signature made with any other key is one\n" +
         "every installed copy refuses, however good it is — so this is not a\n" +
         "build to re-run but a signing secret to look at: either\n" +
