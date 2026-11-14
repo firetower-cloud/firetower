@@ -18,7 +18,11 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-const read = (p) => readFileSync(new URL(`../../${p}`, import.meta.url), "utf8");
+/* Line endings normalised, because this suite runs on the Windows leg too and
+   that runner's git checks text files out with CRLF — which would leave every
+   line here ending in a `\r`, and `job()` below looking for a heading it could
+   never match. */
+const read = (p) => readFileSync(new URL(`../../${p}`, import.meta.url), "utf8").replace(/\r\n/g, "\n");
 const RELEASE = read(".github/workflows/desktop-release.yml");
 const EVERY_PR = read(".github/workflows/desktop.yml");
 
