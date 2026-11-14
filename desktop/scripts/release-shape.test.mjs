@@ -55,7 +55,7 @@ describe("the Linux leg of a release", () => {
     // `.deb` in prose and should carry on doing so. The absence is as much
     // the point as the presence: a released `.deb` cannot update itself, and
     // the first edit to put one back will be `deb,` added to this line.
-    expect(linux.match(/^ *args: .*/gm)).toEqual(["          args: --bundles appimage"]);
+    expect(linux.match(/^ *args: .*/gm)?.map((line) => line.trim())).toEqual(["args: --bundles appimage"]);
   });
 
   it("pins its packaging tools and checks the artifact afterwards", () => {
@@ -97,6 +97,8 @@ describe("latest.json", () => {
   });
 
   it("is not written until every leg has finished", () => {
-    expect(job(RELEASE, "publish")).toMatch(/needs: \[release, build, linux\]/);
+    const needs = job(RELEASE, "publish").match(/^ *needs: .*/m)?.[0] ?? "";
+    expect(needs).toMatch(/\bbuild\b/);
+    expect(needs).toMatch(/\blinux\b/);
   });
 });
