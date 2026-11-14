@@ -171,6 +171,55 @@ describe("the one interruption, at start-up", () => {
     await look();
     // The dialog is gone by the time this fails, so it cannot be the surface.
     await offerUpdate(currentBuild(), vi.fn().mockResolvedValue(true));
-    expect(shell.bridge.notify).toHaveBeenCalledWith("The update did not install", "the release is still uploading");
+    expect(shell.bridge.notify).toHaveBeenCalledWith(
+      "The update did not install",
+      "the release is still uploading. Try it again in a few minutes.",
+    );
+  });
+});
+
+/**
+ * The one failure that waiting does not fix.
+ *
+ * An update replaces the running copy in place. Where that copy lives
+ * somewhere this account cannot write to, every retry fails the same way, and
+ * "try it again in a few minutes" is an instruction to keep going round. It
+ * is likeliest on Linux — the AppImage *is* the installation, and `/opt` is a
+ * reasonable place to have put it — and there is no privilege prompt to
+ * rescue it as there is on Windows. Nothing here branches on the platform:
+ * the answer is the same wherever it happens.
+ */
+describe("what a failed install says to do next", () => {
+  const cases = [
+    "Permission denied (os error 13)",
+    "failed to copy the new version: Permission denied (os error 13)",
+    "Access is denied. (os error 5)",
+    "Read-only file system (os error 30)",
+  ];
+
+  it("sends somebody to a writable location, and not back round the loop", async () => {
+    const { whyUpdateFailed } = await fresh();
+    for (const said of cases) {
+      const answer = whyUpdateFailed(new Error(said));
+      expect(answer).toContain("somewhere you can write to");
+      expect(answer).not.toContain("a few minutes");
+      // The platform's own words are kept, at the end: they are what somebody
+      // pastes into an issue.
+      expect(answer).toContain(said);
+    }
+  });
+
+  it("still says try again for everything that might work next time", async () => {
+    const { whyUpdateFailed } = await fresh();
+    expect(whyUpdateFailed(new Error("the release is still uploading"))).toBe(
+      "the release is still uploading. Try it again in a few minutes.",
+    );
+    expect(whyUpdateFailed(new Error("Network Error."))).toBe("Network Error. Try it again in a few minutes.");
+  });
+
+  it("has something to say about a failure that came with no words", async () => {
+    const { whyUpdateFailed } = await fresh();
+    expect(whyUpdateFailed(undefined)).toBe("That didn't work. Try it again in a few minutes.");
+    expect(whyUpdateFailed({})).toBe("That didn't work. Try it again in a few minutes.");
   });
 });

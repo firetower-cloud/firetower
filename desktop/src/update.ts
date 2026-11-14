@@ -150,6 +150,46 @@ export async function takeUpdate(): Promise<void> {
   }
 }
 
+/**
+ * The permission failures, as each operating system words them.
+ *
+ * `std::io::ErrorKind::PermissionDenied` reaches the window as whatever the
+ * platform's `strerror` said, so there is a small set of sentences rather than
+ * a code to match on. The read-only one is separate because a file in a
+ * read-only mount fails differently from one in a directory you do not own.
+ */
+const CANNOT_WRITE =
+  /permission denied|os error 13|access is denied|os error 5|read-only file system|os error 30/i;
+
+/**
+ * What a failed install means, and the next thing to do about it.
+ *
+ * **"Try it again in a few minutes" is right for most of these and wrong for
+ * one.** A download that did not arrive, a release still uploading, a
+ * connection that dropped: all of them pass. An update that could not write
+ * over the running copy never fixes itself, and telling somebody to wait sends
+ * them round the same loop for as long as they are willing to.
+ *
+ * No platform branch, because there is nothing platform-specific about the
+ * answer: an installation this account cannot write to is one on all three,
+ * and only the likelihood differs. It is likeliest on Linux, where the
+ * download *is* the installation and somebody has very reasonably put it
+ * somewhere like `/opt`, and there is no way to ask for privileges mid-update
+ * as Windows has. `docs/linux.md` says it the first time; this is the second,
+ * to the one person it has already happened to.
+ */
+export function whyUpdateFailed(e: unknown): string {
+  const said = (e as { message?: string })?.message?.trim() ?? "";
+  if (CANNOT_WRITE.test(said)) {
+    return `Firetower could not replace its own files: it is installed somewhere this account cannot write to. Move it somewhere you can write to and take the update again — waiting will not help. (${said})`;
+  }
+  /* The plugin's messages are phrases rather than sentences — "the release is
+     still uploading" — so the full stop is added here instead of being asked
+     for from every place that throws one. */
+  const ended = said && !/[.!?]$/.test(said) ? `${said}.` : said;
+  return `${ended || "That didn't work."} Try it again in a few minutes.`;
+}
+
 /* "Later" is remembered for this run only; a build you skipped is offered
    again next time, because the answer to "later" is later. In between, the
    rail keeps saying so quietly. */
@@ -177,6 +217,6 @@ export async function offerUpdate(
   try {
     await takeUpdate();
   } catch (e) {
-    bridge.notify("The update did not install", (e as { message?: string })?.message ?? "Try it again from the Updates screen.");
+    bridge.notify("The update did not install", whyUpdateFailed(e));
   }
 }
