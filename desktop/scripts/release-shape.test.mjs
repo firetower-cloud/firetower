@@ -104,12 +104,16 @@ describe("the per-pull-request build", () => {
  * these three assertions are what keep both halves present to be compared.
  */
 describe("the AppImage runtime", () => {
-  it("is pinned by digest, from an immutable tag", () => {
+  it("is pinned by digest, at a tag that is not rewritten", () => {
     const pin = TOOLS.match(/^runtime-x86_64 (\S+) ([0-9a-f]{64})$/m);
     expect(pin).not.toBeNull();
     // Not `continuous`: a digest pinned to a rolling tag breaks on the next
     // upstream push, and the pressure is then to paste the new digest in.
+    // A dated tag is not an immutable one either — GitHub reports
+    // `"immutable": false` for every tag pinned in that file — so the digest
+    // is the guarantee and the tag is only an address that holds still.
     expect(pin[1]).toMatch(/type2-runtime\/releases\/download\/\d{8}\/runtime-x86_64$/);
+    expect(TOOLS).not.toMatch(/immutable\*\* tag|the immutable source/);
   });
 
   it("is handed to appimagetool rather than left to be fetched", () => {

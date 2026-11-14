@@ -105,8 +105,9 @@ fi
 cache="${XDG_CACHE_HOME:-$HOME/.cache}/tauri"
 mkdir -p "$cache"
 
-# One line per tool: the file name the bundler looks for, the immutable source,
-# and the SHA-256 of what that source served when it was pinned.
+# One line per tool: the file name the bundler looks for, where it was fetched
+# from, and the SHA-256 of what that source served when it was pinned. The
+# digest is the guarantee; the URL is only an address.
 #
 # **The file names are 2.11.4's.** CLI 2.12.0 renames the linuxdeploy entry (it
 # carries the version in the name), so a lockfile bump past it leaves this
@@ -125,13 +126,22 @@ mkdir -p "$cache"
 #
 # `runtime-x86_64` is the exception to "the name the bundler looks for":
 # nothing looks for it, and the line below is the only place its path comes
-# from. It is pinned to the newest **immutable** tag (`20251108`) rather than
-# to `continuous`, for the same reason as the AppImage plugin — a digest
-# pinned to a rolling tag breaks on the next upstream push, and the pressure
-# is then to paste the new digest in without reading what moved. Roughly half
-# its bytes differ from what `continuous` serves today, so this does change
-# which runtime ships; that is the point of pinning it, and the first CI run
-# on this branch is where anything wrong with it shows up loudly.
+# from. It is pinned to a dated tag (`20251108`) rather than to `continuous`,
+# for the same reason as the AppImage plugin — `continuous` is rewritten on
+# every upstream push, so a digest pinned to it breaks within days and the
+# pressure is then to paste the new digest in without reading what moved.
+#
+# **A dated tag is not an immutable one, and nothing here relies on it being
+# one.** GitHub's release API reports `"immutable": false` for this tag, as it
+# does for every tag pinned above; upstream could replace the asset tomorrow.
+# What makes this a pin is the digest. If the asset is replaced, the check
+# below fails and the build stops — the substitute is never accepted and never
+# packaged, which is the property worth having. The tag only has to be stable
+# enough that a passing build keeps passing.
+#
+# Roughly half its bytes differ from what `continuous` serves today, so this
+# does change which runtime ships; that is the point of pinning it, and the
+# first CI run on this branch is where anything wrong with it shows up loudly.
 tools=$(cat <<'PINS'
 linuxdeploy-x86_64.AppImage https://github.com/linuxdeploy/linuxdeploy/releases/download/1-alpha-20251107-1/linuxdeploy-x86_64.AppImage c20cd71e3a4e3b80c3483cef793cda3f4e990aca14014d23c544ca3ce1270b4d
 AppRun-x86_64 https://github.com/tauri-apps/binary-releases/releases/download/apprun-old/AppRun-x86_64 f30140a43a0a59e46db21bdefdf749b9e9f2c6946e92afabbacf98b8ae73fb4f
