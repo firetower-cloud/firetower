@@ -77,7 +77,13 @@ export const WANTED = [
   },
   {
     what: "the Linux AppImage",
-    matches: (name) => name.endsWith(".AppImage"),
+    // `.AppImage.tar.gz` as well as `.AppImage`, because which one the bundler
+    // signs depends on `createUpdaterArtifacts`: `true` signs the AppImage
+    // itself, `"v1Compatible"` wraps it first. This repository is on the
+    // former, so the plain one is what should appear — but a release is a poor
+    // place to find out that a config key moved, and if both ever turned up
+    // the two-candidates check below refuses rather than guessing.
+    matches: (name) => name.endsWith(".AppImage") || name.endsWith(".AppImage.tar.gz"),
     keys: ["linux-x86_64", "linux-x86_64-appimage"],
   },
 ];

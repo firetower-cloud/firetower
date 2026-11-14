@@ -62,12 +62,31 @@ describe("the manifest every installed copy reads", () => {
     expect(platforms["windows-x86_64-msi"].url).toBe(url("Firetower_0.29.1_x64_en-US.msi"));
   });
 
-  it("escapes a name that is legal in a bundle and not in a URL", () => {
+  it("escapes a name that is legal in an asset and not in a URL", () => {
+    // GitHub flattens spaces and brackets on upload, but not `+`, `#` or `&` —
+    // any of which a product name could carry, and all of which mean something
+    // else in a URL.
     const named = [
       ...signatures().filter((s) => !s.name.endsWith(".AppImage")),
-      { name: "My App_1.0_amd64.AppImage", signature: sig("My App_1.0_amd64.AppImage") },
+      { name: "Firetower+beta_1.0_amd64.AppImage", signature: sig("Firetower+beta_1.0_amd64.AppImage") },
     ];
-    expect(built(named).platforms["linux-x86_64"].url).toBe(url("My%20App_1.0_amd64.AppImage"));
+    expect(built(named).platforms["linux-x86_64"].url).toBe(url("Firetower%2Bbeta_1.0_amd64.AppImage"));
+  });
+
+  it("takes the wrapped AppImage too, if the bundler ever goes back to writing one", () => {
+    const wrapped = [
+      ...signatures().filter((s) => !s.name.endsWith(".AppImage")),
+      { name: "Firetower_0.29.1_amd64.AppImage.tar.gz", signature: sig("Firetower_0.29.1_amd64.AppImage.tar.gz") },
+    ];
+    expect(built(wrapped).platforms["linux-x86_64"].url).toBe(url("Firetower_0.29.1_amd64.AppImage.tar.gz"));
+  });
+
+  it("refuses to choose when both an AppImage and a wrapped one are there", () => {
+    const both = [
+      ...signatures(),
+      { name: "Firetower_0.29.1_amd64.AppImage.tar.gz", signature: sig("Firetower_0.29.1_amd64.AppImage.tar.gz") },
+    ];
+    expect(() => built(both)).toThrow(/2 candidates for the Linux AppImage/);
   });
 });
 
