@@ -640,11 +640,27 @@ impl Db {
         Ok(())
     }
 
+    /// Workspaces with no work left in them, oldest first.
+    ///
+    /// **A workspace with no sessions at all is one of them.** This used to
+    /// require `EXISTS (SELECT 1 FROM sessions …)` first, to keep the sweep
+    /// off a workspace in the seconds between making it and starting anything
+    /// in it — `NOT EXISTS` over an empty set being true. That window does not
+    /// exist: `Db::insert_session` writes the workspace and its first session
+    /// in one transaction, and nothing else in the control plane creates a
+    /// workspace, so no committed row is ever legitimately session-less. What
+    /// the guard bought instead was a row that nothing could ever collect once
+    /// its sessions had gone some other way — immortal, and with the handler
+    /// refusing to end it, unremovable by any route at all.
+    ///
+    /// No age guard either, for the same reason: there is nothing to wait for.
+    /// If a path is ever added that makes a workspace *before* its first
+    /// session, it has to do both in one transaction — or this sweep will take
+    /// it within the minute, and that is the thing to remember here.
     pub async fn workspaces_to_purge(&self, limit: i64) -> Result<Vec<WorkspaceId>> {
         let rows = sqlx::query_scalar::<_, String>(
             "SELECT w.id FROM workspaces w
-              WHERE EXISTS (SELECT 1 FROM sessions s WHERE s.workspace_id = w.id)
-                AND NOT EXISTS (
+              WHERE NOT EXISTS (
                       SELECT 1 FROM sessions s
                        WHERE s.workspace_id = w.id AND s.status <> 'Ended')
               ORDER BY w.updated_at
@@ -5623,11 +5639,24 @@ mod tests {
         );
     }
 
-    /// `NOT EXISTS` over an empty set is true, which would make every
-    /// workspace rubbish for the seconds between making it and starting
-    /// anything in it.
+    /// A workspace with nothing in it at all is rubbish — and was immortal.
+    ///
+    /// This used to assert the opposite, to protect "the seconds between
+    /// making a workspace and starting anything in it", `NOT EXISTS` over an
+    /// empty set being true. There are no such seconds: `insert_session`
+    /// writes the workspace and its first session in one transaction and
+    /// nothing else makes a workspace, so a committed row is never
+    /// legitimately session-less. What the guard actually protected was a row
+    /// whose sessions had gone some other way, which nothing could then ever
+    /// collect — and with the handler refusing to end a place whose founding
+    /// session had ended, nothing could remove it by hand either. One sat on
+    /// the reporter's dashboard for nine days.
+    ///
+    /// Both halves are here, because the second is the one that must never
+    /// regress: an empty workspace is collected, and a workspace with a live
+    /// session in it is not, however the rest of it has ended.
     #[tokio::test]
-    async fn a_workspace_with_nothing_in_it_yet_is_not_swept_away() {
+    async fn a_workspace_with_no_sessions_left_in_it_is_collected() {
         let (db, owner) = db_with_user().await;
         let host = db
             .ensure_test_host("fire-01", owner.as_str())
@@ -5637,8 +5666,8 @@ mod tests {
         let empty = WorkspaceId::new();
         sqlx::query(
             "INSERT INTO workspaces (id, created_by, host_id, name, path)
-             VALUES ($1, $2, $3, 'coming up',
-                     ('u.' || (SELECT slug FROM principals WHERE id = $2) || '.coming_up')::ltree)",
+             VALUES ($1, $2, $3, 'nothing left in it',
+                     ('u.' || (SELECT slug FROM principals WHERE id = $2) || '.nothing')::ltree)",
         )
         .bind(empty.as_str())
         .bind(&owner)
@@ -5648,8 +5677,25 @@ mod tests {
         .unwrap();
 
         assert!(
+            db.workspaces_to_purge(10).await.unwrap().contains(&empty),
+            "a workspace holding no sessions is holding nothing anybody can read"
+        );
+
+        // And the half that matters more. A session arriving in it — which is
+        // the only state the old guard was written for — takes it straight
+        // back out of the sweep's way.
+        let live = a_run(&db, &host.id, &owner).await;
+        sqlx::query("UPDATE sessions SET workspace_id = $1 WHERE id = $2")
+            .bind(empty.as_str())
+            .bind(live.as_str())
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        set_status(&db, &live, ft_core::SessionStatus::Working, None).await;
+
+        assert!(
             !db.workspaces_to_purge(10).await.unwrap().contains(&empty),
-            "a workspace being brought up has simply not started yet"
+            "somebody is working in it"
         );
     }
 
