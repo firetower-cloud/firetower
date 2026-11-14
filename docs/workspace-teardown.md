@@ -47,12 +47,33 @@ end.
 
 And a place with nothing running left in it is now removed by the handler
 rather than refused: the delete's goal is already true, which is not an error.
-`Db::purge_finished_workspace` does it in one statement carrying the sweep's own
-predicate, so a live session — including one the caller cannot see — refuses the
-delete rather than being deleted by it. That is the one place allowed to reclaim
-inline, because somebody is watching the row they just asked to be rid of. The
-sweep is still what collects every place that finishes some other way, which is
-every other way a place finishes.
+That is the one place allowed to reclaim inline, because somebody is watching
+the row they just asked to be rid of. The sweep is still what collects every
+place that finishes some other way, which is every other way a place finishes.
+
+Both of them go through `Db::purge_finished_workspace`, and that matters twice
+over.
+
+*One predicate, in one place.* A handler and a sweep each carrying their own
+idea of when a place is over would eventually disagree, and whichever was wrong
+would be deleting somebody's work. So the handler does not spell the condition
+out, and the sweep no longer deletes by id on the strength of its own listing —
+it asks again, at the moment it deletes.
+
+*And a lock, because a guarded `DELETE` on its own is not enough.* That is what
+shipped to review and review broke it. Under READ COMMITTED the `NOT EXISTS` is
+answered from the snapshot the statement began with, so a session inserted by
+another transaction and not yet committed is invisible to it: the predicate
+holds, the delete blocks on the `FOR KEY SHARE` lock that child insert takes on
+the workspace row, and when that transaction commits the delete proceeds on its
+stale answer — taking a run that has just started, with no teardown asked of
+any worker and no debt written down. `EvalPlanQual` does not help: it re-checks
+against a newer version of the target row, and the workspace row was only
+locked, never updated. So the row is taken `FOR UPDATE` first — the weaker `FOR
+NO KEY UPDATE` does not conflict with `FOR KEY SHARE` and would not wait — and
+the guarded delete runs as a second statement, with a snapshot that sees what
+the first one waited for. `a_run_starting_as_the_place_is_purged_survives_it`
+holds that schedule open on a second connection.
 
 ## The problem
 

@@ -1806,12 +1806,19 @@ pub(super) async fn destroy_session(
     // they just asked to be rid of, and a success that leaves it on the screen
     // is what they already complained about.
     //
-    // Before the connectivity check, because none of it needs the machine; and
+    // Before the connectivity check, because none of it needs the machine —
+    // which is what lets a place whose machine is away be removed at all — and
     // after the authorization above, so that what goes is only ever a place the
-    // caller may dispose of. `Db::purge_finished_workspace` carries the sweep's
-    // own predicate, so "no work left in it" is one definition in one place and
-    // a live sibling — including one this caller cannot see — refuses the
-    // delete rather than being deleted by it.
+    // caller may dispose of.
+    //
+    // `Db::purge_finished_workspace` is the same operation the sweep uses, and
+    // that is the whole of why it is not written out here: "no work left in it"
+    // is one predicate in one place, so this handler and the sweep cannot drift
+    // apart and start disagreeing about when a place is over. It also holds the
+    // row still while it decides, which is what keeps an agent somebody starts
+    // at that exact moment from being deleted along with the place. See its
+    // comment — a single guarded `DELETE` was not enough, and that was found by
+    // review rather than by this code being careful.
     if the_whole_place {
         if let Some(workspace) = session.workspace_id.as_ref() {
             if state.db.purge_finished_workspace(workspace).await? {
