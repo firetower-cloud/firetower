@@ -50,8 +50,24 @@ permissions:
 # abandoned halfway through uploading its installers. One group for every tag
 # rather than one per tag, because the point is that no two desktop releases
 # are ever in flight together.
+#
+# **`queue: max` is the half that keeps the queue, and it is a separate
+# setting from `cancel-in-progress`.** That one protects the run that is
+# executing; what happens to the runs *waiting* is `queue`, and its default
+# holds exactly one of them. So: A is in progress, a newer release B queues
+# behind it, somebody dispatches a rebuild of an older tag — and C evicts B.
+# A finishes, C correctly refuses to move `desktop-latest` backwards, and B
+# never publishes its installers or its updates at all. `queue: max` holds up
+# to 100, first in first out.
+#
+# Measured on this repository rather than read off the page, because the
+# difference is invisible until it costs a release: with the default, the
+# waiting run was cancelled the moment a third arrived; with this, both
+# stayed pending and ran in turn. (`queue: max` with `cancel-in-progress:
+# true` is a validation error, which is the right way round.)
 concurrency:
   group: desktop-release
+  queue: max
   cancel-in-progress: false
 
 jobs:

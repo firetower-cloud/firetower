@@ -170,6 +170,20 @@ describe("latest.json", () => {
     expect(concurrency).toMatch(/cancel-in-progress: false/);
   });
 
+  it("does not drop a release that is waiting behind another", () => {
+    // `cancel-in-progress: false` protects the run that is *executing*. What
+    // happens to the runs waiting is `queue`, and its default holds one: a
+    // newer release queued behind a running one is evicted by the next run to
+    // arrive, which can be a dispatched rebuild of an older tag. That run
+    // then correctly refuses to move `desktop-latest` backwards, and the
+    // release it displaced never publishes anything at all.
+    const concurrency = RELEASE.slice(RELEASE.indexOf("\nconcurrency:")).split("\njobs:")[0];
+    expect(concurrency).toMatch(/queue: max/);
+    // The combination is a workflow validation error, so this is also what
+    // keeps the two settings from being written the other way round.
+    expect(concurrency).not.toMatch(/cancel-in-progress: true/);
+  });
+
   it("is built from the payloads and not from the signatures alone", () => {
     // Naming an artifact is not signing it: the manifest job verifies every
     // signature against the bytes of the asset its entry will point at, and
