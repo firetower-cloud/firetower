@@ -3131,7 +3131,47 @@ async fn says_it_has(state: &AppState, host: &Host, found: &[(Agent, bool)]) {
 /// host is selectable — and that property belongs to the connection, not to
 /// the map.
 async fn says_its_disk(state: &AppState, host: &Host, total_mb: u64, used_mb: u64) {
+    // **Wait for the old connection's death certificate before issuing a new
+    // one.** A serve loop's last act, when it ends, is
+    // `mark_host_unreachable` — `Fleet::connect`, after it has emptied the
+    // waiting requests — and `stop_supervising` returns without waiting for
+    // that teardown, because it happens in the supervisor's own task.
+    //
+    // So it raced the *new* connection's `mark_host_online`, and about one
+    // run in six under load it landed afterwards. The row then read
+    // `Unreachable` while the host was perfectly well connected, nothing was
+    // ever going to put it back, and the fixture spent ten seconds waiting
+    // for it. That is the CI failure in
+    // `a_full_machine_is_passed_over_for_one_with_room`, and no length of
+    // patience would have fixed it.
+    //
+    // Waiting for the row to leave `Online` orders the two writes rather
+    // than hoping about them. Only when there was a connection to lose: a
+    // host that was never up has no teardown coming.
+    let had_one = state.fleet.is_connected(&host.id).await;
     state.fleet.stop_supervising(&host.id).await;
+    if had_one {
+        let mut buried = false;
+        for _ in 0..500 {
+            let online = state
+                .db
+                .host_by_id(&host.id)
+                .await
+                .ok()
+                .flatten()
+                .is_some_and(|h| h.state == ft_core::HostState::Online);
+            if !online {
+                buried = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert!(
+            buried,
+            "{}'s old connection never recorded itself as gone, so a new one would race it",
+            host.name
+        );
+    }
     state
         .fleet
         .supervise(
