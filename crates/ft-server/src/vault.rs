@@ -39,6 +39,21 @@ pub const GIT: &str = "git";
 pub const AGENT: &str = "agent";
 /// Keys for a task tracker that is not a git host, keyed by tracker id.
 pub const TRACKER: &str = "tracker";
+/// A person's grant on one connector, keyed by the connector's slug.
+///
+/// **Excluded from the reveal route**, explicitly and by name — see
+/// `api::secrets::whose`. A connector's grant is held so that a session can
+/// spend it and for nothing else, and the one route that hands a stored value
+/// back is the one place that has to say so.
+pub const CONNECTOR: &str = "connector";
+/// A client secret a connector's authorization server insisted on, keyed by
+/// the connector's id.
+///
+/// The install's own rather than a person's: the client identifies the
+/// deployment, and a secret keyed to whoever connected first would stop
+/// working when they left. Excluded from the reveal route for the same reason
+/// [`CONNECTOR`] is.
+pub const CONNECTOR_CLIENT: &str = "connector-client";
 
 /// Which secret, and whose.
 ///

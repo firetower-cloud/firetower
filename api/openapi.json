@@ -1053,6 +1053,469 @@
         }
       }
     },
+    "/api/v1/connectors": {
+      "get": {
+        "tags": [
+          "connectors"
+        ],
+        "summary": "Everything this person's library holds.",
+        "operationId": "list_connectors",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Connector"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "connectors"
+        ],
+        "summary": "Add one by URL.",
+        "description": "**Criterion 7 lives in the ordering.** The address is checked, the server is\nasked what it is, and only then is a row written — so a URL that is not an\nMCP server fails at the form, naming what went wrong, and leaves nothing\nhalf-made behind.",
+        "operationId": "create_connector",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewConnector"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Connector"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "the address is not an MCP server, is unreachable, or carries a credential in its query string",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/connectors/callback": {
+      "get": {
+        "tags": [
+          "connectors"
+        ],
+        "summary": "The browser coming back from a consent screen.",
+        "description": "**This is the third hole in the authentication gate, and the reason is\nstructural rather than convenient.** An authorization server redirects a\n*browser* here, and that browser carries no Firetower credential — the\nperson may be using the desktop app and never have signed into the web\ninterface at all. Every OAuth redirect URI in existence has this shape.\n\nWhat makes it safe is that the request authorises nothing by itself:\n\n* `state` is 32 characters of `OsRng`, **single-use** — the row is deleted\n  as it is read — and expires in fifteen minutes. A replay finds nothing.\n* **The grant lands under the person named on that row**, read from the\n  database, never from a cookie or a header on this request. A callback\n  cannot put a token under somebody else's name.\n* It discloses nothing: the page says a connector is connected or that the\n  sign-in is no longer waiting, and never which connector, whose it is, or\n  anything about this installation.\n\nAnswers HTML because a person is looking at it, in a tab they are about to\nclose.",
+        "operationId": "connector_callback",
+        "parameters": [
+          {
+            "name": "code",
+            "in": "query",
+            "description": "The authorization code",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "description": "The single-use value that names the attempt",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "error",
+            "in": "query",
+            "description": "Set where the person declined",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page saying whether it worked",
+            "content": {
+              "text/html": {}
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/connectors/{id}": {
+      "get": {
+        "tags": [
+          "connectors"
+        ],
+        "operationId": "connector_detail",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The connector",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectorDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "connectors"
+        ],
+        "summary": "Remove it, and this person's grant with it. The vault's log entry stays.",
+        "operationId": "delete_connector",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The connector",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "connectors"
+        ],
+        "operationId": "describe_connector",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The connector",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DescribeConnector"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Connector"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/connectors/{id}/authorize": {
+      "post": {
+        "tags": [
+          "connectors"
+        ],
+        "summary": "Start the browser leg: discovery, registration, PKCE, and a URL to open.",
+        "operationId": "authorize_connector",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The connector",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "`authorize` is the address to open. Where it is absent, `trouble` says why a browser sign-in cannot be offered.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Opening"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/connectors/{id}/grant": {
+      "delete": {
+        "tags": [
+          "connectors"
+        ],
+        "summary": "Drop this person's grant. The connector stays in the library.",
+        "operationId": "sign_out_of_connector",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The connector",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/connectors/{id}/probe": {
+      "post": {
+        "tags": [
+          "connectors"
+        ],
+        "summary": "Ask the server again, and record anything that has changed.",
+        "description": "A `POST` because it writes: a probe replaces the recorded answer and may\nappend a drift row. Criteria 13 and 14.",
+        "operationId": "probe_connector",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The connector",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectorDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/connectors/{id}/scopes": {
+      "get": {
+        "tags": [
+          "connectors"
+        ],
+        "summary": "What this person is about to grant, **read from the server now**.",
+        "description": "**Criterion 10.** The first step of the sign-in sheet, and the reason it is\nits own request: the list is fetched when the screen opens, from the\nserver's own metadata, so it cannot be out of date and nobody in Firetower\nhas to keep it true. `authorize` is absent here — the browser does not open\nuntil [`authorize_connector`].",
+        "operationId": "connector_scopes",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The connector",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Opening"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/connectors/{id}/token": {
+      "put": {
+        "tags": [
+          "connectors"
+        ],
+        "summary": "Store a pasted token, after checking the server will use it.",
+        "description": "Checked rather than trusted: a token the server refuses is a connector that\nreads as connected and fails on its first call, which is the state this\nproduct exists to avoid.",
+        "operationId": "set_connector_token",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The connector",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasteToken"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/consumption": {
       "get": {
         "tags": [
@@ -4773,6 +5236,98 @@
             }
           },
           "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{id}/connectors": {
+      "get": {
+        "tags": [
+          "connectors"
+        ],
+        "operationId": "session_connectors",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The session",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionConnectors"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "connectors"
+        ],
+        "summary": "Set what this session can reach.",
+        "description": "**It takes effect at the agent's next start, not now.** An agent reads its\nMCP configuration and its permission rules once, when it launches — so both\nfiles are rewritten on the worker and the answer says a restart is needed.\nSkills are different and can change mid-session; saying so here is what\nstops somebody expecting the same of this.",
+        "operationId": "choose_connectors",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The session",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChooseConnectors"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionConnectors"
+                }
+              }
+            }
+          },
+          "404": {
             "description": "",
             "content": {
               "application/json": {
@@ -9615,6 +10170,21 @@
           }
         }
       },
+      "ChooseConnectors": {
+        "type": "object",
+        "description": "The whole selection, never a delta.",
+        "required": [
+          "selected"
+        ],
+        "properties": {
+          "selected": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
       "ChooseSkills": {
         "type": "object",
         "description": "The whole selection, never a delta.",
@@ -9928,6 +10498,124 @@
             "type": "string"
           }
         }
+      },
+      "Connector": {
+        "type": "object",
+        "description": "One connector, as a screen draws it.\n\nFacts about the thing, no controls implied: what it is, what it said when it\nwas last asked, and whether **this person** can use it.",
+        "required": [
+          "id",
+          "name",
+          "slug",
+          "url",
+          "description",
+          "path",
+          "mine",
+          "connected",
+          "expired",
+          "renewable",
+          "signIn",
+          "onIn"
+        ],
+        "properties": {
+          "connected": {
+            "type": "boolean",
+            "description": "Whether **this person** holds a grant. Criterion 17's whole mechanism."
+          },
+          "description": {
+            "type": "string"
+          },
+          "expired": {
+            "type": "boolean",
+            "description": "True once the stated expiry has passed. Computed, so a screen does not\nhave to do date arithmetic to decide what to draw."
+          },
+          "expiresAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this person's grant stops working, if it says. Criterion 18: a\nsession whose grant has lapsed says so rather than failing quietly."
+          },
+          "id": {
+            "$ref": "#/components/schemas/ConnectorId"
+          },
+          "mine": {
+            "type": "boolean",
+            "description": "Theirs, rather than somebody else's. Always true in v1 — there is no\nsharing — and on the wire now so the screen that gains it does not need\na contract change."
+          },
+          "name": {
+            "type": "string"
+          },
+          "onIn": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How many sessions of this person's have it on right now."
+          },
+          "path": {
+            "$ref": "#/components/schemas/ResourcePath"
+          },
+          "probed": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Probed",
+                "description": "What the last probe found. Absent only for the moment between the row\nbeing written and the probe landing, which is inside one transaction."
+              }
+            ]
+          },
+          "renewable": {
+            "type": "boolean",
+            "description": "Whether the credential can be renewed without the browser again."
+          },
+          "signIn": {
+            "$ref": "#/components/schemas/HowToSignIn",
+            "description": "How it is signed in to: `oauth`, `token`, or `none` for a server that\nwanted nothing."
+          },
+          "slug": {
+            "type": "string",
+            "description": "What the agent calls it. Half of `mcp__<slug>__<tool>`, which is why it\nis shown: a permission card names the tool that way and somebody has to\nbe able to tell which connector that was."
+          },
+          "url": {
+            "type": "string"
+          }
+        }
+      },
+      "ConnectorDetail": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Connector"
+          },
+          {
+            "type": "object",
+            "required": [
+              "tools",
+              "drift"
+            ],
+            "properties": {
+              "drift": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/DriftRow"
+                },
+                "description": "Every time a tool's definition stopped matching, newest first."
+              },
+              "tools": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ToolRow"
+                },
+                "description": "The tool list as last measured, writes first. Empty where the server\nwould not list them — which is what `probed.shape` says, and why the\ndetail view shows permissions there instead."
+              }
+            }
+          }
+        ],
+        "description": "One connector, with what it said it can do and anything that has drifted."
+      },
+      "ConnectorId": {
+        "type": "string",
+        "description": "Identifies a connector — a remote MCP server an agent can reach."
       },
       "Consumption": {
         "type": "object",
@@ -10259,6 +10947,25 @@
           }
         }
       },
+      "DescribeConnector": {
+        "type": "object",
+        "description": "The two fields that are a person's rather than the server's.",
+        "properties": {
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The line in the model's context every turn. Editable because an\nimported one written for somebody else's work mis-fires constantly."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
       "Diagnosis": {
         "type": "object",
         "description": "Why a connection didn't happen, in terms of what to do about it.\n\nEach cause has a different fix, and the failure they arrive as — a closed\nstream — distinguishes none of them.",
@@ -10445,6 +11152,40 @@
         "properties": {
           "drained": {
             "type": "boolean"
+          }
+        }
+      },
+      "DriftRow": {
+        "type": "object",
+        "description": "One time a tool's definition stopped matching. Criterion 14.",
+        "required": [
+          "at",
+          "tool",
+          "kind"
+        ],
+        "properties": {
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "kind": {
+            "type": "string",
+            "description": "`changed`, `added` or `gone`."
+          },
+          "nowIs": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tool": {
+            "type": "string"
+          },
+          "was": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -11620,6 +12361,15 @@
         ],
         "description": "How somebody came by the access they have to a directory.\n\nNot `Route`, which is taken: the sharing sheet already has one, meaning\n*owner, directory or exception*. Two schemas of the same name do not\ncollide loudly — one silently replaces the other in every generated client,\nand the first sign is a field typed as something unrelated.\n\nFlattened, `directory_access` answers *what* they may do and loses *why* —\nwhich is the only thing that matters when the question is how to take it\naway. Revoking a grant that was never theirs to begin with changes nothing;\nthe team is what has to be left."
       },
+      "HowToSignIn": {
+        "type": "string",
+        "description": "What opens this server.\n\nNamed at length because the clients are generated into one flat namespace\nof model types and `SignIn` is already the body of `agents::sign_agent_in`\n— two Rust types of one name become one TypeScript type, and the collision\nis a compile error in three applications rather than a wrong field.",
+        "enum": [
+          "None",
+          "OAuth",
+          "Token"
+        ]
+      },
       "IncomingFile": {
         "type": "object",
         "description": "A file arriving from a drop.",
@@ -12054,6 +12804,26 @@
           },
           "repoId": {
             "$ref": "#/components/schemas/RepoId"
+          }
+        }
+      },
+      "NewConnector": {
+        "type": "object",
+        "description": "What the add form sends. Two fields, as the drawing has.",
+        "required": [
+          "name",
+          "url"
+        ],
+        "properties": {
+          "description": {
+            "type": "string",
+            "description": "The line that is in the model's context every turn. Optional on the\nform — v1's two required fields are the name and the address — and\neditable afterwards."
+          },
+          "name": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
           }
         }
       },
@@ -12687,6 +13457,49 @@
           }
         }
       },
+      "Opening": {
+        "type": "object",
+        "description": "Everything the browser leg needs, with the scopes read live.",
+        "required": [
+          "scopes",
+          "at"
+        ],
+        "properties": {
+          "at": {
+            "type": "string",
+            "description": "Which host will show the consent screen."
+          },
+          "authorize": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Where to send the person. Absent on the first step, which only shows\nwhat is about to be granted."
+          },
+          "expiresAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this attempt stops being accepted."
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "**Read from the server a moment ago**, never from a stored list.\nCriterion 10."
+          },
+          "trouble": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the browser leg cannot be offered, where it cannot — a server with\nno registration endpoint that insists on a client secret, say. The\nscreens offer a pasted token instead, and this is the sentence they show."
+          }
+        }
+      },
       "OrgId": {
         "type": "string",
         "description": "Identifies an organisation."
@@ -12770,6 +13583,18 @@
             "format": "int32",
             "description": "How many there are in total, when the source will say.",
             "minimum": 0
+          }
+        }
+      },
+      "PasteToken": {
+        "type": "object",
+        "description": "A token somebody pasted, for a server that publishes no OAuth metadata.",
+        "required": [
+          "token"
+        ],
+        "properties": {
+          "token": {
+            "type": "string"
           }
         }
       },
@@ -13097,6 +13922,110 @@
           "slug": {
             "type": "string",
             "description": "Derived from the remote, and editable before saving."
+          }
+        }
+      },
+      "Probed": {
+        "type": "object",
+        "description": "The last answer the server gave, as a screen reads it.",
+        "required": [
+          "at",
+          "shape",
+          "toolCount",
+          "writeCount",
+          "scopes",
+          "transport",
+          "capabilities",
+          "unmet",
+          "drifted"
+        ],
+        "properties": {
+          "askedFor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The version Firetower asked for, so a mismatch names both sides."
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "authority": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "capabilities": {
+            "description": "Verbatim and uninterpreted — criterion 18c."
+          },
+          "drifted": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How many tools changed definition since the list was first read."
+          },
+          "protocolVersion": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The version the server chose."
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "serverName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "serverVersion": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "shape": {
+            "type": "string",
+            "description": "`tools`, `scopes` or `silent` — criterion 13's three states."
+          },
+          "toolCount": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "transport": {
+            "type": "string"
+          },
+          "trouble": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the last probe found nothing, if that is what happened."
+          },
+          "unmet": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Declared needs no installed agent can meet. Criterion 18e."
+          },
+          "versionTrouble": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Set when the two cannot agree — criterion 18d, said rather than\nswallowed."
+          },
+          "writeCount": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How many write, by the server's own annotation, defaulting to \"it does\"."
           }
         }
       },
@@ -14583,6 +15512,38 @@
           }
         }
       },
+      "SessionConnectors": {
+        "type": "object",
+        "description": "What a session has on, and anything that stops one working.",
+        "required": [
+          "selected",
+          "available",
+          "trouble"
+        ],
+        "properties": {
+          "available": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Connector"
+            },
+            "description": "Everything this person could turn on, so the picker is one request."
+          },
+          "selected": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The connectors this session has on."
+          },
+          "trouble": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SessionTrouble"
+            },
+            "description": "The ones that are on and cannot be used, and why.\n\nCriteria 17 and 18: a connector this person holds no grant for is shown\nand counted at zero rather than sent, and a grant that has lapsed says\nso and offers to reconnect — instead of the agent telling somebody to\nrun `/mcp` in a session that has no prompt."
+          }
+        }
+      },
       "SessionId": {
         "type": "string",
         "description": "Identifies a session — the unit of work you talk to."
@@ -14643,6 +15604,33 @@
           "tokens": {
             "type": "integer",
             "format": "int64"
+          }
+        }
+      },
+      "SessionTrouble": {
+        "type": "object",
+        "description": "Why one of a session's connectors cannot be used.",
+        "required": [
+          "connectorId",
+          "name",
+          "reason"
+        ],
+        "properties": {
+          "connectorId": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "name": {
+            "type": "string"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/TroubleReason"
           }
         }
       },
@@ -15541,6 +16529,36 @@
           }
         }
       },
+      "ToolRow": {
+        "type": "object",
+        "description": "One tool, as last measured.",
+        "required": [
+          "name",
+          "description",
+          "writes",
+          "firstSeen",
+          "lastSeen"
+        ],
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "firstSeen": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastSeen": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "name": {
+            "type": "string"
+          },
+          "writes": {
+            "type": "boolean"
+          }
+        }
+      },
       "Topic": {
         "type": "string",
         "description": "What a client can subscribe to.",
@@ -15728,6 +16746,13 @@
             "description": "The key that answers for this person, as the vault addresses it —\n`scope/name/owner`. Absent when nothing is held.\n\nA handle, so a screen can ask who can reach it and offer to file it\nsomewhere. It is the *resolved* one: their own if they have connected\none, otherwise whatever a directory they work in holds."
           }
         }
+      },
+      "TroubleReason": {
+        "type": "string",
+        "enum": [
+          "NotSignedIn",
+          "Expired"
+        ]
       },
       "Turn": {
         "type": "object",

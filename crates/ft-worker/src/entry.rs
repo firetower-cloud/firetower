@@ -146,17 +146,39 @@ pub async fn run_agent(session: &str, workspace: PathBuf, agent: &str) -> Result
 /// This binary is both the agent's supervisor and the server it will call to
 /// ask a question — the agent starts the second one itself, from what is
 /// written here.
+///
+/// The session's connectors go into the same file, and their permission rules
+/// into the settings file beside it. **Both, or neither.** A session that came
+/// up able to reach a server whose write tools nobody would be asked about is
+/// the exact failure Phase A exists to prevent, so a rule that cannot be
+/// written fails the launch rather than being logged and stepped over.
 async fn arrange_asking(session: &str, workspace: &std::path::Path) -> Result<ft_core::Asking> {
     let exe = std::env::current_exe().context("finding this binary's own path")?;
     let dir = crate::agentd::dir_for(workspace);
     tokio::fs::create_dir_all(&dir).await?;
 
+    let id = ft_core::SessionId::from_stored(session);
+    let connectors = crate::connectors::of_session(workspace, &id).await;
+
+    // The rules first. If this fails there is no configuration naming the
+    // servers, so nothing can call them — which is the safe half of the
+    // ordering, and the reason it is this way round.
+    crate::settings::ask_about(workspace, &connectors)
+        .await
+        .context("writing the permission rules for this session's connectors")?;
+
     // Per session, because what is written into it names one: the approval
     // tool it configures carries the session id back, so two agents sharing a
-    // file would both answer as whichever wrote it last.
+    // file would both answer as whichever wrote it last. The connectors are
+    // per session for a second reason — one of their headers is a credential,
+    // and it is one person's.
     let config = dir.join(format!("mcp-{session}.json"));
-    let contents =
-        serde_json::to_vec_pretty(&crate::approver::mcp_config(&exe, session, workspace))?;
+    let contents = serde_json::to_vec_pretty(&crate::approver::mcp_config(
+        &exe,
+        session,
+        workspace,
+        &connectors,
+    ))?;
     tokio::fs::write(&config, contents).await?;
 
     Ok(ft_core::Asking::Ask {

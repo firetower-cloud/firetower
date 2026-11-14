@@ -15,6 +15,7 @@ pub(crate) mod agents;
 mod annotations;
 pub(crate) mod artifacts;
 mod auth;
+mod connectors;
 mod consumption;
 mod conversation;
 mod events;
@@ -611,6 +612,27 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(skills::discard_skill))
         .routes(routes!(skills::set_default))
         .routes(routes!(skills::session_skills, skills::choose_skills))
+        .routes(routes!(
+            connectors::list_connectors,
+            connectors::create_connector
+        ))
+        // Before `/{id}`, so a browser coming back from a consent screen is
+        // not read as a request for a connector called `callback`.
+        .routes(routes!(connectors::connector_callback))
+        .routes(routes!(
+            connectors::connector_detail,
+            connectors::describe_connector,
+            connectors::delete_connector
+        ))
+        .routes(routes!(connectors::probe_connector))
+        .routes(routes!(connectors::connector_scopes))
+        .routes(routes!(connectors::authorize_connector))
+        .routes(routes!(connectors::set_connector_token))
+        .routes(routes!(connectors::sign_out_of_connector))
+        .routes(routes!(
+            connectors::session_connectors,
+            connectors::choose_connectors
+        ))
         .routes(routes!(skills::skill_collisions))
         .routes(routes!(skills::share_skills))
         .routes(routes!(skills::set_repo_defaults))

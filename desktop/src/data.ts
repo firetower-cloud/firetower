@@ -16,6 +16,12 @@ import {
   useSessionSkills,
   useSkillDetail as useSkillDetailQuery,
 } from "~/api/generated/skills/skills";
+import {
+  useConnectorDetail as useConnectorDetailQuery,
+  useConnectorScopes,
+  useListConnectors,
+  useSessionConnectors,
+} from "~/api/generated/connectors/connectors";
 import { useMe } from "~/api/generated/auth/auth";
 import { useSetupState } from "~/api/generated/setup/setup";
 import { useGetUpdates } from "~/api/generated/updates/updates";
@@ -397,6 +403,49 @@ export function useSessionSkillIds(session: string) {
     // and what they have on everywhere: what "from defaults" is measured against.
     repos: q.data?.repos ?? [],
     alwaysOn: q.data?.alwaysOn ?? [],
+    loading: q.isPending,
+    error: q.error ? why(q.error) : null,
+  };
+}
+
+/** Every connector this person has, with their own grant resolved. */
+export function useConnectors() {
+  const q = useListConnectors();
+  return { data: q.data ?? [], loading: q.isPending, error: q.error ? why(q.error) : null, trouble: trouble(q.error) };
+}
+
+/** One connector, with what it said it can do and anything that has drifted. */
+export function useConnectorDetail(id: string | null) {
+  const q = useConnectorDetailQuery(id ?? "", { query: { enabled: !!id } });
+  return { data: q.data, loading: q.isPending, error: q.error ? why(q.error) : null, trouble: trouble(q.error) };
+}
+
+/**
+ * What a connector will ask for, **read from the server when this is called**.
+ *
+ * Its own request rather than a field on the connector, and `staleTime: 0` on
+ * purpose: the whole point of the scopes screen is that the list came from the
+ * server a moment ago rather than from anything stored. A cached copy would
+ * quietly turn it back into the curated list it exists not to be.
+ */
+export function useConnectorScopeList(id: string | null, enabled: boolean) {
+  const q = useConnectorScopes(id ?? "", {
+    query: { enabled: !!id && enabled, staleTime: 0, gcTime: 0 },
+  });
+  return { data: q.data, loading: q.isPending, error: q.error ? why(q.error) : null };
+}
+
+/** What one session can reach, and anything that stops one working. */
+export function useSessionConnectorIds(session: string) {
+  const q = useSessionConnectors(session);
+  return {
+    data: q.data?.selected ?? [],
+    /* Everything they could turn on, so the picker is one request rather than
+       one per section. */
+    available: q.data?.available ?? [],
+    /* The ones that are on and cannot be used: no grant of this person's, or
+       one that has lapsed. What the cards in a running session are drawn from. */
+    trouble: q.data?.trouble ?? [],
     loading: q.isPending,
     error: q.error ? why(q.error) : null,
   };

@@ -18,7 +18,7 @@
  */
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode, RefObject } from "react";
-import { ArrowUp, Diamond, Loader2, Paperclip, Square, X } from "lucide-react";
+import { ArrowUp, Diamond, Loader2, Paperclip, Plug, Square, X } from "lucide-react";
 import { interruptible, type Conversation } from "~/api/conversation";
 import type { Artifact, Attached, Control, ControlKind, Session } from "~/api/generated/model";
 import { mentionArtifact, useListArtifacts } from "~/api/generated/artifacts/artifacts";
@@ -38,7 +38,8 @@ import { Mic } from "~/ui/voice/Mic";
 import { VoiceDialog } from "~/ui/voice/Dialogs";
 import { useVoice } from "~/ui/voice/useVoice";
 import { SkillPicker } from "~/ui/SkillPicker";
-import { useAgents, useSessionSkillIds, why } from "~/data";
+import { ConnectorNotice } from "~/ui/ConnectorNotice";
+import { useAgents, useSessionConnectorIds, useSessionSkillIds, why } from "~/data";
 import { fromDefaults } from "~/skills";
 
 /**
@@ -131,6 +132,7 @@ export function Composer({
      here, so two windows on one session agree. */
   const [picking, setPicking] = useState(false);
   const skills = useSessionSkillIds(session.id);
+  const connectors = useSessionConnectorIds(session.id);
   const [chips, setChips] = useState<Chip[]>([]);
   const [refused, setRefused] = useState<string | null>(null);
   const nextId = useRef(0);
@@ -446,6 +448,10 @@ export function Composer({
     <div className="shrink-0 px-8 pb-6">
       <div className="mx-auto w-full max-w-[46rem]">
         <AccountNotice />
+        {/* Criterion 18: a lapsed grant says so here, with the way out as a
+            button. What it replaces is the agent telling somebody to run
+            `/mcp` in a session that has no prompt. */}
+        <ConnectorNotice sessionId={session.id} />
         {voice.blocked && (
           <VoiceDialog blocked={voice.blocked} onDismiss={voice.dismiss} onConfigure={voice.configure} />
         )}
@@ -596,16 +602,31 @@ export function Composer({
             {/* Beside the model and the mode, because all three decide how the
                 next turn is answered. Not ember: ember means an agent is
                 waiting on somebody, and this is not that. */}
+            {/* **One chip for both, because the window behind it answers one
+                question.** What a session can reach is its skills and its
+                connectors together; two chips would be two things to press to
+                find out one thing. The connector count leads when there is one,
+                because that is the half that changes. */}
             <button
               onClick={() => setPicking(true)}
               title={
                 fromDefaults(skills.data, skills.repos, skills.alwaysOn)
-                  ? `Which skills this agent is reading: your ${fromDefaults(skills.data, skills.repos, skills.alwaysOn)}`
-                  : "Which skills this agent is reading"
+                  ? `What this session can reach: your ${fromDefaults(skills.data, skills.repos, skills.alwaysOn)}`
+                  : "What this session can reach"
               }
               className="control shrink-0 gap-1.5 text-mute hover:bg-raise hover:text-bone"
             >
-              <Diamond className="h-3.5 w-3.5" strokeWidth={1.75} />
+              {connectors.data.length > 0 ? (
+                <Plug className="h-3.5 w-3.5" strokeWidth={1.75} />
+              ) : (
+                <Diamond className="h-3.5 w-3.5" strokeWidth={1.75} />
+              )}
+              {connectors.data.length > 0 && (
+                <span>
+                  <span className="tabular-nums">{connectors.data.length}</span>{" "}
+                  {connectors.data.length === 1 ? "connector" : "connectors"} ·{" "}
+                </span>
+              )}
               <span className="tabular-nums">{skills.data.length}</span>
               <span>{skills.data.length === 1 ? "skill" : "skills"}</span>
             </button>

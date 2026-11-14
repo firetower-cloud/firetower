@@ -49,6 +49,11 @@ export const PANES: { group: string; items: { at: string; label: string }[] }[] 
       // the wire, because the API and the spawn tool still say role.
       { at: "roles", label: "Profiles" },
       { at: "skills", label: "Skills" },
+      // Beneath Skills, and in this group, because a connector is the other
+      // half of the same question: a skill is what an agent knows, a connector
+      // is what it can reach. Both are things you turn on for a session, both
+      // cost context on every turn, and both are read by the same picker.
+      { at: "connectors", label: "Connectors" },
     ],
   },
   {

@@ -25,6 +25,7 @@ import {
   Monitor,
   PanelLeftClose,
   Pencil,
+  Plug,
   Puzzle,
   Server,
   Search,
@@ -488,6 +489,12 @@ function Customize() {
   return (
     <>
       <Row label="Skills" icon={Puzzle} on={pane(path) === "skills"} to="/configuration/skills" />
+      {/* Directly beneath Skills, as `config/panes.ts` has it: a skill is what
+          an agent knows and a connector is what it can reach, and the two are
+          chosen together in one picker. This panel is the only way to click
+          through to the pane — a pane in `PANES` with no row here is reachable
+          only by typing its address. */}
+      <Row label="Connectors" icon={Plug} on={pane(path) === "connectors"} to="/configuration/connectors" />
       <Row label="Agent profiles" icon={UsersRound} on={pane(path) === "roles"} to="/configuration/roles" />
       <Row label="Agents" icon={Blocks} on={pane(path) === "agents"} to="/configuration/agents" />
       {skills.data.length > 0 && (

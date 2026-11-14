@@ -26,8 +26,8 @@ pub mod turn;
 
 pub use grants::{Level, SubjectKind};
 pub use ids::{
-    ArtifactId, ArtifactVersionId, DeliveryId, DirectoryId, HostId, OrgId, RepoId, RoleId,
-    SessionId, SkillId, SkillVersionId, TeamId, UserId, WorkspaceId,
+    ArtifactId, ArtifactVersionId, ConnectorId, DeliveryId, DirectoryId, HostId, OrgId, RepoId,
+    RoleId, SessionId, SkillId, SkillVersionId, TeamId, UserId, WorkspaceId,
 };
 pub use path::{slug, ResourcePath};
 pub use session::{
@@ -264,6 +264,21 @@ impl Agent {
                         tool.clone(),
                         "--mcp-config".into(),
                         config.clone(),
+                        // **The configuration we wrote, and nothing else.**
+                        //
+                        // Without this a session also reads the MCP servers in
+                        // the machine account's own `~/.claude.json` — one file,
+                        // shared by every person who has a session on that
+                        // worker. So one person's server appeared in another
+                        // person's agent, with one person's credential in it,
+                        // and nobody chose that.
+                        //
+                        // It also makes the set a session has exactly the set
+                        // the control plane sent, which is what lets a
+                        // connector be counted and shown truthfully: a server
+                        // arriving from somewhere else would be in the agent's
+                        // `init` frame and in nobody's library.
+                        "--strict-mcp-config".into(),
                     ]),
                     // Nothing can answer, so nothing may be asked. Narrower
                     // than the interactive default rather than wider: this

@@ -941,6 +941,7 @@ mod tests {
         (
             AppState {
                 skills: crate::skills::Skills::new(db.pool().clone()),
+                connectors: crate::connectors::Connectors::new(db.pool().clone()),
                 roles: crate::roles::Roles::new(db.pool().clone()),
                 updates: crate::updates::Updates::new(db.pool().clone()),
                 policy: crate::auth::Policy::open(),

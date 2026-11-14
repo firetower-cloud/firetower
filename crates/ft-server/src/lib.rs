@@ -13,6 +13,7 @@ pub mod accounts;
 pub mod api;
 pub mod artifact;
 pub mod auth;
+pub mod connectors;
 pub mod db;
 pub mod delegate;
 pub mod diagnose;
@@ -80,6 +81,9 @@ pub struct AppState {
     pub access: access::Access,
     /// The skill library, and what each session is reading from it.
     pub skills: skills::Skills,
+    /// The connector library: what an agent can reach outside Firetower, and
+    /// whose credential opens it.
+    pub connectors: connectors::Connectors,
     pub roles: roles::Roles,
     /// What this deployment will accept, so `/bootstrap` can say so.
     ///
@@ -233,6 +237,7 @@ pub async fn run(config: Config) -> Result<()> {
         connections,
         access: access::Access::new(db_pool.clone()),
         skills: skills::Skills::new(db_pool.clone()),
+        connectors: connectors::Connectors::new(db_pool.clone()),
         roles: roles::Roles::new(db_pool.clone()),
         forwards: Default::default(),
         previews: Default::default(),

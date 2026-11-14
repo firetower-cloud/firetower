@@ -193,3 +193,38 @@ fn every_agent_is_told_where_an_artifact_goes() {
         );
     }
 }
+
+/// **Criterion 4.** The MCP servers a session has are the ones Firetower sent
+/// it, and nothing else.
+///
+/// Without `--strict-mcp-config` a session also reads the servers in the
+/// machine account's own `~/.claude.json` — one file, shared by every person
+/// who has a session on that worker. So one person's server, with one person's
+/// credential in it, appeared in another person's agent. Nothing else in the
+/// product would fail if this flag were dropped again, which is why it is
+/// asserted rather than trusted.
+#[test]
+fn a_session_reads_only_the_mcp_configuration_firetower_wrote() {
+    let argv = Agent::ClaudeCode
+        .launch_headless(
+            "s_01example",
+            &Asking::Ask {
+                tool: "mcp__firetower__approve".into(),
+                config: "/w/.firetower/mcp-s_01example.json".into(),
+            },
+            Start::Fresh,
+            &Default::default(),
+            None,
+        )
+        .expect("Claude Code is driven headless");
+
+    assert!(
+        argv.iter().any(|a| a == "--strict-mcp-config"),
+        "a session would otherwise read the machine account's own servers: {argv:?}"
+    );
+    assert_eq!(
+        after(&argv, "--mcp-config").as_deref(),
+        Some("/w/.firetower/mcp-s_01example.json"),
+        "and the file it does read is the one the worker wrote for this session"
+    );
+}

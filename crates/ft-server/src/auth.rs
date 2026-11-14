@@ -220,7 +220,7 @@ pub async fn require(State(gate): State<Gate>, mut request: Request, next: Next)
         .map(|ConnectInfo(a)| a.ip())
         .unwrap_or(IpAddr::from([0, 0, 0, 0]));
 
-    // Two holes in the gate, both exact paths, both deliberate.
+    // Three holes in the gate, all exact paths, all deliberate.
     //
     // `login` because signing in cannot require being signed in, and what is
     // behind it checks a password.
@@ -233,9 +233,21 @@ pub async fn require(State(gate): State<Gate>, mut request: Request, next: Next)
     // and which of three ways to sign in — to somebody who can already reach a
     // port that is never on the public internet. That is a real disclosure and
     // it is the price of being able to check whose server this is first.
+    //
+    // `connectors/callback` because an authorization server redirects a
+    // *browser* here and a browser carries no Firetower credential — the person
+    // may be using the desktop app and never have signed into the web
+    // interface at all. Every OAuth redirect URI has this shape. What makes it
+    // safe is that the request authorises nothing by itself: the `state` it
+    // carries is 32 characters of `OsRng`, single-use (the row is deleted as it
+    // is read) and valid for fifteen minutes, the grant lands under the person
+    // named on that row rather than under whoever's browser arrived, and the
+    // page it answers with says only whether the sign-in finished. See
+    // `api::connectors::connector_callback`, where all three are written down
+    // beside the code that relies on them.
     if matches!(
         request.uri().path(),
-        "/api/v1/auth/login" | "/api/v1/bootstrap"
+        "/api/v1/auth/login" | "/api/v1/bootstrap" | "/api/v1/connectors/callback"
     ) {
         return next.run(request).await;
     }

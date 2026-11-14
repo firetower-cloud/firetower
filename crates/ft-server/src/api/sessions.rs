@@ -884,6 +884,20 @@ pub(crate) async fn create_session_as(
             Vec::new()
         });
 
+    // What this person's sessions may reach, with **their** credential in it.
+    //
+    // `for_session` resolves by the person, never by what a directory holds,
+    // and drops any connector they hold no grant for rather than sending a
+    // server that would fail to authenticate. See `connectors::for_session`.
+    let connectors = state
+        .connectors
+        .for_session(&state.vault, &state.renewals, &id, &owner)
+        .await
+        .unwrap_or_else(|e| {
+            tracing::warn!("resolving this session's connectors: {e:#}");
+            Vec::new()
+        });
+
     // Each repository's own variables, opened once. Every read is a line in the
     // vault's log naming the session it was for.
     let mut per_repo_env: Vec<Vec<ft_core::dotenv::Variable>> = Vec::new();
@@ -1016,6 +1030,9 @@ pub(crate) async fn create_session_as(
                 env,
                 agent_home,
                 skills,
+                // Resolved by the person whose session this is, never by
+                // what a directory holds — see `connectors::for_session`.
+                connectors,
                 persona: persona.clone().unwrap_or_default(),
             })),
         )
@@ -1351,6 +1368,16 @@ pub(crate) async fn relaunch(
         .await
         .unwrap_or_default();
 
+    // The **session's owner**, not whoever pressed relaunch. A colleague may
+    // restart somebody's session, and a connector resolved against the wrong
+    // person would either fail to authenticate or spend a grant that is not
+    // theirs to spend.
+    let connectors = state
+        .connectors
+        .for_session(&state.vault, &state.renewals, &session.id, owner)
+        .await
+        .unwrap_or_default();
+
     state
         .fleet
         .set_status(&session.id, ft_core::SessionStatus::Starting, None)
@@ -1379,6 +1406,9 @@ pub(crate) async fn relaunch(
                 env,
                 agent_home,
                 skills,
+                // Resolved by the person whose session this is — see
+                // `connectors::for_session`.
+                connectors,
                 persona,
             },
         )
@@ -1661,6 +1691,14 @@ async fn start_another_agent(
         .await
         .unwrap_or_default();
 
+    // A second agent in one workspace is a second session, with its own
+    // selection and its own credential — resolved for whoever started it.
+    let connectors = state
+        .connectors
+        .for_session(&state.vault, &state.renewals, &id, &owner)
+        .await
+        .unwrap_or_default();
+
     state
         .fleet
         .start_agent(
@@ -1680,6 +1718,9 @@ async fn start_another_agent(
                 env,
                 agent_home,
                 skills,
+                // Resolved by the person whose session this is — see
+                // `connectors::for_session`.
+                connectors,
                 persona,
             },
         )

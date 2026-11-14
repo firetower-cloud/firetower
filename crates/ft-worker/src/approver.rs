@@ -45,6 +45,9 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::Mutex;
 
 use crate::agentd::{AgentClient, FromAgent, ToAgent};
+// The settings file this writes into has two writers; `settings` owns it.
+// See that module for why one of them cannot be here.
+use crate::settings::allow_from_now_on;
 
 /// What the agent calls this server. Must match the launch flags.
 pub const SERVER: &str = "firetower";
@@ -207,23 +210,70 @@ Restate the whole plan each call, like a todo list: 3-8 steps, one \
 `doing` at a time, the rest `pending` or `done`. Update it when a step starts \
 or finishes. It does not pause you and nobody is asked to approve it.";
 
-/// The configuration file that tells an agent to start this.
-pub fn mcp_config(exe: &std::path::Path, session_id: &str, workspace: &std::path::Path) -> Value {
-    json!({
-        "mcpServers": {
-            SERVER: {
-                "command": exe.display().to_string(),
-                // The workspace is named rather than inherited. This process is
-                // started by the agent, so its working directory is the agent's
-                // business and not something to build a file path on.
-                "args": [
-                    "mcp-approve",
-                    "--session", session_id,
-                    "--workspace", workspace.display().to_string(),
-                ],
-            }
+/// The configuration file that tells an agent to start this, and what else it
+/// may reach.
+///
+/// Both in one file because the agent is given one `--mcp-config` and
+/// `--strict-mcp-config` beside it: what is here is the whole set, and
+/// anything in the machine account's own `~/.claude.json` is not read. See
+/// `ft_core::Agent::launch_headless`.
+///
+/// A connector is an address and some headers. There is no `command`, so
+/// nothing a connector brings runs on this machine — which is the one line of
+/// this file worth reading twice.
+pub fn mcp_config(
+    exe: &std::path::Path,
+    session_id: &str,
+    workspace: &std::path::Path,
+    connectors: &[ft_proto::McpServer],
+) -> Value {
+    let mut servers = serde_json::Map::new();
+    servers.insert(
+        SERVER.to_string(),
+        json!({
+            "command": exe.display().to_string(),
+            // The workspace is named rather than inherited. This process is
+            // started by the agent, so its working directory is the agent's
+            // business and not something to build a file path on.
+            "args": [
+                "mcp-approve",
+                "--session", session_id,
+                "--workspace", workspace.display().to_string(),
+            ],
+        }),
+    );
+
+    for connector in connectors {
+        // Ours is written first and cannot be displaced: a connector called
+        // `firetower` would otherwise replace the permission tool with an
+        // address somebody typed, and the session would ask a third party for
+        // permission. The control plane refuses the name; this is the second
+        // check, where it costs nothing.
+        if connector.name == SERVER {
+            tracing::warn!("a connector may not be called {SERVER}; skipped");
+            continue;
         }
-    })
+        let headers: serde_json::Map<String, Value> = connector
+            .headers
+            .iter()
+            .map(|(k, v)| (k.clone(), Value::String(v.as_str().to_string())))
+            .collect();
+        servers.insert(
+            connector.name.clone(),
+            json!({
+                // Streamable HTTP. Claude Code 2.1.273 takes `http` and
+                // negotiates the transport itself, and an `sse` server is
+                // reached the same way — see `connectors::mcp` in the control
+                // plane, which is what decided this address is reachable
+                // before the session was ever told about it.
+                "type": "http",
+                "url": connector.url.clone(),
+                "headers": Value::Object(headers),
+            }),
+        );
+    }
+
+    json!({ "mcpServers": Value::Object(servers) })
 }
 
 /// Serve the permission tool until the agent closes our input.
@@ -783,63 +833,6 @@ async fn wait_for_a_decision(
     anyhow::bail!("the session closed before this was answered")
 }
 
-/// Write the rule down, for an agent that starts again in this workspace.
-///
-/// The second half of remembering, and the weaker one. An agent reads its
-/// settings when it starts, so this does nothing for the session in progress —
-/// that is what the in-memory set above is for. It matters when the supervisor
-/// restarts the agent and the workspace is still there.
-///
-/// Composed here rather than echoed back because the agent never offered the
-/// choice: the callback its own SDK gives a host arrives with ready-made rules
-/// to hand back, and the tool call this arrives through does not carry them.
-///
-/// Scoped to the tool rather than to these exact arguments, which is the
-/// coarser of the two readings of "always". A narrower rule would need the
-/// argument syntax for every tool, and getting that subtly wrong means a button
-/// that silently does nothing.
-///
-/// Scoped to the workspace, so it lasts as long as the session does and goes
-/// when the workspace does. Nothing here touches anybody's own configuration.
-async fn allow_from_now_on(workspace: &std::path::Path, tool_name: &str) -> Result<()> {
-    let dir = workspace.join(".claude");
-    tokio::fs::create_dir_all(&dir).await?;
-    let path = dir.join("settings.local.json");
-
-    let mut settings: serde_json::Map<String, Value> = match tokio::fs::read_to_string(&path).await
-    {
-        Ok(text) if !text.trim().is_empty() => match serde_json::from_str(&text) {
-            Ok(Value::Object(map)) => map,
-            // Somebody's real settings in a shape we do not understand.
-            // Leaving them is the only safe move.
-            _ => anyhow::bail!("{} is not an object", path.display()),
-        },
-        _ => serde_json::Map::new(),
-    };
-
-    let permissions = settings
-        .entry("permissions")
-        .or_insert_with(|| Value::Object(serde_json::Map::new()));
-    let Some(permissions) = permissions.as_object_mut() else {
-        anyhow::bail!("`permissions` is not an object");
-    };
-    let allow = permissions
-        .entry("allow")
-        .or_insert_with(|| Value::Array(Vec::new()));
-    let Some(allow) = allow.as_array_mut() else {
-        anyhow::bail!("`permissions.allow` is not a list");
-    };
-
-    let rule = Value::String(tool_name.to_string());
-    if allow.contains(&rule) {
-        return Ok(());
-    }
-    allow.push(rule);
-
-    tokio::fs::write(&path, serde_json::to_vec_pretty(&Value::Object(settings))?).await?;
-    Ok(())
-}
-
 fn reply(id: Value, result: Value) -> Value {
     json!({ "jsonrpc": "2.0", "id": id, "result": result })
 }
@@ -1084,10 +1077,58 @@ mod tests {
             std::path::Path::new("/usr/bin/firetower"),
             "s_01abc",
             std::path::Path::new("/w"),
+            &[],
         );
         let server = &config["mcpServers"][SERVER];
         assert_eq!(server["command"], "/usr/bin/firetower");
         assert_eq!(server["args"][0], "mcp-approve");
         assert_eq!(server["args"][2], "s_01abc");
+    }
+
+    fn connector(name: &str) -> ft_proto::McpServer {
+        ft_proto::McpServer {
+            name: name.into(),
+            url: "https://mcp.slack.com/mcp".into(),
+            headers: vec![("Authorization".into(), "Bearer xoxp-1".into())],
+            tools: vec!["slack_post_message".into()],
+        }
+    }
+
+    /// A connector is an address and some headers, in the same file as the
+    /// permission tool — and with no `command`, which is what "remote only"
+    /// means on disk.
+    #[test]
+    fn a_connector_is_an_address_and_never_a_command() {
+        let config = mcp_config(
+            std::path::Path::new("/usr/bin/firetower"),
+            "s_01abc",
+            std::path::Path::new("/w"),
+            &[connector("slack")],
+        );
+        let slack = &config["mcpServers"]["slack"];
+        assert_eq!(slack["type"], "http");
+        assert_eq!(slack["url"], "https://mcp.slack.com/mcp");
+        assert_eq!(slack["headers"]["Authorization"], "Bearer xoxp-1");
+        assert!(
+            slack.get("command").is_none(),
+            "v1 runs nothing on a worker"
+        );
+        // And ours is still there, which is what the session asks with.
+        assert_eq!(config["mcpServers"][SERVER]["args"][0], "mcp-approve");
+    }
+
+    /// A connector called `firetower` would replace the permission tool with
+    /// an address somebody typed, and the session would then ask a third party
+    /// whether it may run things.
+    #[test]
+    fn a_connector_cannot_displace_the_permission_tool() {
+        let config = mcp_config(
+            std::path::Path::new("/usr/bin/firetower"),
+            "s_01abc",
+            std::path::Path::new("/w"),
+            &[connector(SERVER)],
+        );
+        assert_eq!(config["mcpServers"][SERVER]["args"][0], "mcp-approve");
+        assert_eq!(config["mcpServers"].as_object().unwrap().len(), 1);
     }
 }
