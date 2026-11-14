@@ -376,10 +376,53 @@ jobs:
           #
           # The versioned release above always gets its copy, so a rebuild of
           # an old tag is still readable and comparable afterwards.
+          #
+          # **And it does not move at all if what it holds cannot be read.**
+          # Three outcomes, which are not interchangeable:
+          #
+          #   * no rolling release, or one with no manifest on it yet — there
+          #     is nothing to go backwards past, and this release is the one
+          #     that creates it. This is `github.token` on its own
+          #     repository, so a 404 is absence rather than a permission it
+          #     was refused.
+          #   * a manifest that reads — compare the versions, below.
+          #   * anything else: a rate limit, a network failure, a manifest
+          #     with no version in it. Stop, and move nothing.
+          #
+          # That last one is the point. It used to fall through to the upload
+          # with an empty `held`, which made this advisory rather than a rule:
+          # a read that went wrong was all it took to permit the one thing the
+          # rule exists to prevent. Leaving `desktop-latest` where it is is
+          # always the safe answer — it is the single address every installed
+          # copy reads, `$TAG` already has its own copy of this manifest a few
+          # lines up, and this job can be re-run once whatever failed is over.
           held=""
-          if gh release download desktop-latest -R "$GITHUB_REPOSITORY" \
-              -p latest.json -D "$RUNNER_TEMP/held" --clobber 2>/dev/null; then
-            held=$(jq -r '.version // empty' "$RUNNER_TEMP/held/latest.json")
+          rolling=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/desktop-latest" \
+            --jq '[.assets[] | select(.name == "latest.json")] | length' \
+            2>"$RUNNER_TEMP/rolling.err") || rolling=""
+          if [ -z "$rolling" ]; then
+            if ! grep -q '(HTTP 404)' "$RUNNER_TEMP/rolling.err"; then
+              cat "$RUNNER_TEMP/rolling.err" >&2
+              echo "Could not read what desktop-latest holds, so it is not being moved." >&2
+              echo "$TAG keeps its own copy of this manifest; re-run this job." >&2
+              exit 1
+            fi
+            echo "No desktop-latest release yet — this one creates it."
+            rolling=0
+          fi
+          if [ "$rolling" != 0 ]; then
+            if ! gh release download desktop-latest -R "$GITHUB_REPOSITORY" \
+                -p latest.json -D "$RUNNER_TEMP/held" --clobber; then
+              echo "desktop-latest holds a manifest that would not download, so it is" >&2
+              echo "not being moved. $TAG keeps its own copy; re-run this job." >&2
+              exit 1
+            fi
+            held=$(jq -r '.version // empty' "$RUNNER_TEMP/held/latest.json" || true)
+            if [ -z "$held" ]; then
+              echo "desktop-latest holds a manifest with no version in it, so there is" >&2
+              echo "nothing to compare $VERSION against and it is not being moved." >&2
+              exit 1
+            fi
           fi
           if [ -n "$held" ] && [ "$held" != "$VERSION" ] &&
             [ "$(printf '%s\n%s\n' "$held" "$VERSION" | sort -V | tail -1)" = "$held" ]; then

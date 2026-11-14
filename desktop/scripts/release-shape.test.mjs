@@ -15,7 +15,10 @@
  * talking about before it believes anything about it: a test that passes
  * because a rename made its subject disappear is worse than no test.
  */
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 /* Line endings normalised, because this suite runs on the Windows leg too and
@@ -179,6 +182,25 @@ describe("latest.json", () => {
     expect(publish).toMatch(/--assets "\$RUNNER_TEMP\/assets"/);
   });
 
+  it("will not advance the rolling release when it cannot read what it holds", () => {
+    // A rule that permits the regression it exists to prevent whenever a read
+    // fails is not a rule. This used to swallow the error and carry on with an
+    // empty `held`, which compared as "nothing newer is there".
+    const publish = job(RELEASE, "publish");
+    const rolling = publish.slice(publish.indexOf("held="));
+    const upload = rolling.indexOf("release upload desktop-latest");
+    expect(upload).toBeGreaterThan(0);
+    // Every path that failed to read stops before the upload...
+    const stops = [...rolling.matchAll(/exit 1/g)].map((m) => m.index);
+    expect(stops.length).toBeGreaterThan(1);
+    expect(Math.max(...stops)).toBeLessThan(upload);
+    // ...and absence is told apart from failure, so a repository with no
+    // rolling release yet can still make one.
+    expect(rolling).toMatch(/\(HTTP 404\)/);
+    // The read's own error is never discarded, which is how it fell open.
+    expect(rolling).not.toMatch(/2>\/dev\/null/);
+  });
+
   it("never points the rolling release at an older build than it already holds", () => {
     // `desktop-latest` is the single address every installed copy reads, so a
     // rebuild of an old tag dispatched after a newer release must not win it.
@@ -193,5 +215,148 @@ describe("latest.json", () => {
     const versioned = publish.indexOf('release upload "$TAG" "$RUNNER_TEMP/latest.json"');
     expect(versioned).toBeGreaterThan(0);
     expect(versioned).toBeLessThan(publish.indexOf("held="));
+  });
+});
+
+/**
+ * The rolling release's no-backwards rule, run rather than read.
+ *
+ * Everything above reads the workflow as text, which can say that an `exit 1`
+ * is written somewhere in the gate. It cannot say that there is no path to the
+ * upload without one — and that is the whole of the rule, which was advisory
+ * until it was made to fail closed: a read that went wrong left `held` empty,
+ * which compared as "nothing newer is there" and advanced `desktop-latest`
+ * anyway.
+ *
+ * So this takes the shell the publish step actually runs, from the gate to the
+ * end of it, and runs it against a `gh` that fails in each way that matters.
+ * Then it asks the only question worth asking: did `desktop-latest` move?
+ *
+ * Not on Windows: the step is `bash` on an Ubuntu runner, and the suite runs
+ * on the Windows leg too. The macOS and Linux legs cover it.
+ */
+describe.skipIf(process.platform === "win32")("the rolling release only moves forward", () => {
+  /** The publish step's script, from the gate onwards, dedented to run. */
+  function gate() {
+    const publish = job(RELEASE, "publish");
+    const marker = "        run: |\n";
+    const body = publish
+      .slice(publish.indexOf(marker) + marker.length)
+      .split("\n")
+      .map((line) => line.replace(/^ {10}/, ""))
+      .join("\n");
+    const from = body.indexOf('held=""');
+    if (from === -1) throw new Error("the gate no longer opens with `held=\"\"` — this test is reading a file that moved");
+    return body.slice(from);
+  }
+
+  /* A `gh` that logs what it was asked to do and answers as the case needs. */
+  const GH = `#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "$GH_LOG"
+case "$*" in
+  *"releases/tags/desktop-latest"*)
+    if [ -n "\${API_ERROR:-}" ]; then printf '%s\\n' "$API_ERROR" >&2; exit 1; fi
+    printf '%s\\n' "\${API_ASSETS:-1}" ;;
+  *"release download desktop-latest"*)
+    if [ -n "\${DOWNLOAD_FAILS:-}" ]; then echo "HTTP 500" >&2; exit 1; fi
+    mkdir -p "$RUNNER_TEMP/held"
+    printf '%s' "\${HELD_JSON:-}" > "$RUNNER_TEMP/held/latest.json" ;;
+esac
+exit 0
+`;
+
+  /** Runs the gate for version 0.29.1 and reports what `gh` was asked to do. */
+  function run(env = {}) {
+    const dir = mkdtempSync(join(tmpdir(), "rolling-"));
+    writeFileSync(join(dir, "gate.sh"), gate());
+    const gh = join(dir, "gh");
+    writeFileSync(gh, GH);
+    chmodSync(gh, 0o755);
+    const log = join(dir, "gh.log");
+    writeFileSync(log, "");
+    writeFileSync(join(dir, "latest.json"), '{"version":"0.29.1"}');
+
+    const result = spawnSync("bash", ["-e", join(dir, "gate.sh")], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PATH: `${dir}:${process.env.PATH}`,
+        GH_LOG: log,
+        RUNNER_TEMP: dir,
+        GITHUB_REPOSITORY: "firetower-cloud/firetower",
+        TAG: "desktop-v0.29.1",
+        VERSION: "0.29.1",
+        ...env,
+      },
+    });
+    const asked = readFileSync(log, "utf8");
+    return {
+      status: result.status,
+      moved: /release upload desktop-latest/.test(asked),
+      output: `${result.stdout}${result.stderr}`,
+    };
+  }
+
+  it("moves when it holds an older build, and when it holds this one", () => {
+    // The positive controls. Without these the rest could pass on a gate that
+    // never uploads anything at all.
+    expect(run({ HELD_JSON: '{"version":"0.29.0"}' })).toMatchObject({ status: 0, moved: true });
+    expect(run({ HELD_JSON: '{"version":"0.29.1"}' })).toMatchObject({ status: 0, moved: true });
+  });
+
+  it("does not move when it holds a newer build", () => {
+    // A rebuild of an old tag, dispatched by hand after a newer release went
+    // out. Not a failure: the versioned release keeps its own manifest.
+    const r = run({ HELD_JSON: '{"version":"0.30.0"}' });
+    expect(r).toMatchObject({ status: 0, moved: false });
+    expect(r.output).toMatch(/0\.30\.0/);
+  });
+
+  it("does not move when there is no rolling release yet", () => {
+    // The one absence that is allowed: nothing to go backwards past, so this
+    // release is the one that creates it.
+    expect(run({ API_ERROR: "gh: Not Found (HTTP 404)" })).toMatchObject({ status: 0, moved: true });
+    // Same for a rolling release that exists with no manifest on it.
+    expect(run({ API_ASSETS: "0" })).toMatchObject({ status: 0, moved: true });
+  });
+
+  /**
+   * The findings. Each of these used to end with `desktop-latest` advanced to
+   * whatever this run built, because the read's failure left `held` empty and
+   * an empty `held` skipped the comparison.
+   */
+  it("does not move when the release cannot be read", () => {
+    for (const API_ERROR of [
+      "gh: API rate limit exceeded (HTTP 403)",
+      "gh: Bad credentials (HTTP 401)",
+      "error connecting to api.github.com",
+      "gh: Server Error (HTTP 500)",
+    ]) {
+      const r = run({ API_ERROR });
+      expect(r.moved, `${API_ERROR} must not advance desktop-latest`).toBe(false);
+      expect(r.status, `${API_ERROR} must fail the job`).not.toBe(0);
+    }
+  });
+
+  it("does not move when the manifest it holds will not download", () => {
+    const r = run({ DOWNLOAD_FAILS: "1" });
+    expect(r.moved).toBe(false);
+    expect(r.status).not.toBe(0);
+    // Named as the download that failed, and not as a manifest with no
+    // version in it. The check below would stop this one too, so the only
+    // thing this branch buys is a log that says which thing went wrong —
+    // which is the entire reason it is there.
+    expect(r.output).toMatch(/would not download/);
+  });
+
+  it("does not move when the manifest it holds has no version in it", () => {
+    // An empty file, a manifest without the key, and something that is not
+    // JSON at all: there is nothing to compare against in any of them, which
+    // is not the same as there being nothing newer.
+    for (const HELD_JSON of ["", "{}", '{"platforms":{}}', "<!DOCTYPE html>"]) {
+      const r = run({ HELD_JSON });
+      expect(r.moved, `held=${JSON.stringify(HELD_JSON)} must not advance desktop-latest`).toBe(false);
+      expect(r.status, `held=${JSON.stringify(HELD_JSON)} must fail the job`).not.toBe(0);
+    }
   });
 });
