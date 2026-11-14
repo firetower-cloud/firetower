@@ -135,10 +135,12 @@ jobs:
 
       # The AppImage bundler fetches five files from the internet and runs
       # them, each one `if !exists { download }`, so putting pinned and
-      # verified copies where it looks is what stops it. It is also what fixes
-      # the white window on current distributions: the linuxdeploy Tauri hands
-      # out is older than `libwayland-client.so.0` joining the AppImage
-      # excludelist. The script explains the rest.
+      # verified copies where it looks is what stops it. A sixth, the AppImage
+      # runtime, is fetched a level deeper by the `appimagetool` inside the
+      # plugin and is handed over as `$LDAI_RUNTIME_FILE` instead. It is also
+      # what fixes the white window on current distributions: the linuxdeploy
+      # Tauri hands out is older than `libwayland-client.so.0` joining the
+      # AppImage excludelist. The script explains the rest.
       - if: matrix.platform == 'linux'
         run: $GITHUB_WORKSPACE/.github/scripts/appimage-tools.sh
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Put the AppImage packaging tools where Tauri's bundler looks, pinned and
-# verified, so it never downloads any of them itself.
+# verified, and hand the AppImage runtime to `appimagetool` by name — so that
+# nothing in the packaging chain downloads anything.
 #
 #   appimage-tools.sh
 #
@@ -15,8 +16,8 @@
 # `tauri-action` therefore runs). So a file already sitting at the path it
 # would write to is a file it uses without asking anybody.
 #
-# That is the whole mechanism here: seed the cache, and the downloads do not
-# happen.
+# That is the whole mechanism for those five: seed the cache, and their
+# downloads do not happen. The sixth, further down, needs a different one.
 #
 # Two of the five are more than a convenience:
 #
@@ -26,6 +27,35 @@
 #   * `AppRun-x86_64` is copied **inside** the AppImage, so it is not build
 #     tooling at all — it becomes code on the machine of everybody who
 #     downloads Firetower.
+#
+# ## The sixth download, one level further down
+#
+# Seeding the cache stops the bundler's own five. It does not stop
+# `appimagetool`, which the pinned `linuxdeploy-plugin-appimage` carries
+# inside it (commit `8e5b4c0`): handed an AppDir, that binary fetches the
+# **AppImage runtime** — the small ELF prepended to the squashfs, and the
+# first code that runs when somebody launches the download — from
+# `type2-runtime`'s `continuous` tag. A rolling tag, with no digest anywhere.
+# Its fetch checks that the transfer succeeded and that the length looks
+# plausible, and nothing else (`src/appimagetool_fetch_runtime.cpp`).
+#
+# That runtime ends up **inside the artifact Tauri then signs**. An upstream
+# asset replaced under that rolling tag would be embedded, signed with our own
+# updater key, and accepted as genuine Firetower by every installed copy — a
+# real signature over somebody else's code. It is also the code
+# `appimage-guard.sh` has to execute in order to extract the artifact it
+# checks.
+#
+# The cache cannot help here, because nothing looks for this file on disk. So
+# it is pinned below like the other five and handed over by name instead:
+# `linuxdeploy-plugin-appimage` turns `$LDAI_RUNTIME_FILE` into
+# `appimagetool --runtime-file` (read out of the pinned binary itself, not
+# only out of its source), and in `appimagetool` that option is an `if`/`else`
+# against the download rather than a preference — a runtime it cannot read
+# stops packaging with "Unable to load provided runtime file" and never falls
+# back to fetching one. `appimage-guard.sh` then checks the runtime that was
+# actually embedded against this pin, so losing the variable fails a build
+# instead of quietly restoring the download.
 #
 # ## Why the linuxdeploy version is a bug fix and not housekeeping
 #
@@ -92,12 +122,23 @@ mkdir -p "$cache"
 # b5eb8d05 (2024-01-04) and has kept it since; pinning upstream's copy instead
 # would have changed which display backend every Linux user gets, which is not
 # this change's business.
+#
+# `runtime-x86_64` is the exception to "the name the bundler looks for":
+# nothing looks for it, and the line below is the only place its path comes
+# from. It is pinned to the newest **immutable** tag (`20251108`) rather than
+# to `continuous`, for the same reason as the AppImage plugin — a digest
+# pinned to a rolling tag breaks on the next upstream push, and the pressure
+# is then to paste the new digest in without reading what moved. Roughly half
+# its bytes differ from what `continuous` serves today, so this does change
+# which runtime ships; that is the point of pinning it, and the first CI run
+# on this branch is where anything wrong with it shows up loudly.
 tools=$(cat <<'PINS'
 linuxdeploy-x86_64.AppImage https://github.com/linuxdeploy/linuxdeploy/releases/download/1-alpha-20251107-1/linuxdeploy-x86_64.AppImage c20cd71e3a4e3b80c3483cef793cda3f4e990aca14014d23c544ca3ce1270b4d
 AppRun-x86_64 https://github.com/tauri-apps/binary-releases/releases/download/apprun-old/AppRun-x86_64 f30140a43a0a59e46db21bdefdf749b9e9f2c6946e92afabbacf98b8ae73fb4f
 linuxdeploy-plugin-gtk.sh https://raw.githubusercontent.com/tauri-apps/linuxdeploy-plugin-gtk/dda522bce37387f1b853d9095713bfaa924c8423/linuxdeploy-plugin-gtk.sh 7804c9eef13e59bf2783aad9882ef9db8f3f3f9e8d631874b1d348d550a3693f
 linuxdeploy-plugin-gstreamer.sh https://raw.githubusercontent.com/tauri-apps/linuxdeploy-plugin-gstreamer/2a2e67491c32995a3f279ad0ecbe77abd512b42a/linuxdeploy-plugin-gstreamer.sh c107b49d84edbffc6ab226ed1007e0626a4f7aa2c3a36b7782bef62351d49e94
 linuxdeploy-plugin-appimage.AppImage https://github.com/linuxdeploy/linuxdeploy-plugin-appimage/releases/download/1-alpha-20250213-1/linuxdeploy-plugin-appimage-x86_64.AppImage 992d502a248e14ab185448ddf6f6e7d25558cb84d4623c354c3af350c25fccb3
+runtime-x86_64 https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-x86_64 2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d
 PINS
 )
 
@@ -142,3 +183,27 @@ while read -r name url want; do
 done <<EOF
 $tools
 EOF
+
+# The runtime is the one pin nothing picks up by itself: the bundler does not
+# look for it, so it reaches `appimagetool` as an environment variable, which
+# `linuxdeploy-plugin-appimage` turns into `--runtime-file`. Exported for the
+# steps that follow when this runs in Actions, and printed otherwise so that a
+# build driven by hand in this shell can be given the same thing.
+runtime="$cache/runtime-x86_64"
+if [ ! -s "$runtime" ]; then
+    echo "appimage-tools.sh: $runtime is not there after seeding" >&2
+    exit 1
+fi
+
+if [ -n "${GITHUB_ENV:-}" ]; then
+    echo "LDAI_RUNTIME_FILE=$runtime" >> "$GITHUB_ENV"
+    echo
+    echo "LDAI_RUNTIME_FILE=$runtime"
+    echo "  exported, so the bundle step hands this runtime to appimagetool"
+    echo "  rather than letting it fetch one. appimage-guard.sh checks the"
+    echo "  runtime that ends up embedded against the pin above."
+else
+    echo
+    echo "Not running in Actions, so nothing was exported. Before bundling:"
+    echo "  export LDAI_RUNTIME_FILE=$runtime"
+fi

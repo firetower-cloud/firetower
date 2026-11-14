@@ -25,6 +25,8 @@ import { describe, expect, it } from "vitest";
 const read = (p) => readFileSync(new URL(`../../${p}`, import.meta.url), "utf8").replace(/\r\n/g, "\n");
 const RELEASE = read(".github/workflows/desktop-release.yml");
 const EVERY_PR = read(".github/workflows/desktop.yml");
+const TOOLS = read(".github/scripts/appimage-tools.sh");
+const GUARD = read(".github/scripts/appimage-guard.sh");
 
 /** One job's own lines: from `  <name>:` to wherever the next job starts. */
 function job(workflow, name) {
@@ -79,6 +81,50 @@ describe("the per-pull-request build", () => {
   it("pins the same tools and runs the same guard", () => {
     expect(EVERY_PR).toMatch(/appimage-tools\.sh/);
     expect(EVERY_PR).toMatch(/appimage-guard\.sh/);
+  });
+});
+
+/**
+ * The runtime is the sixth download, and the easiest one to lose.
+ *
+ * Seeding `~/.cache/tauri` stops the five files the bundler fetches itself. It
+ * does nothing about `appimagetool`, which the AppImage plugin carries inside
+ * it and which fetches the AppImage runtime from a rolling upstream tag unless
+ * it is handed one. That runtime is the first code that runs on a user's
+ * machine and it is inside what the updater key signs, so an unpinned one is a
+ * real signature over code nobody chose.
+ *
+ * It travels from the pinning script to the bundler as `$LDAI_RUNTIME_FILE`
+ * and nothing else, which makes it exactly the kind of thing a tidy-up
+ * removes. A build that lost it still succeeds — it just quietly downloads
+ * again — so the guard compares the embedded runtime against the pin, and
+ * these three assertions are what keep both halves present to be compared.
+ */
+describe("the AppImage runtime", () => {
+  it("is pinned by digest, from an immutable tag", () => {
+    const pin = TOOLS.match(/^runtime-x86_64 (\S+) ([0-9a-f]{64})$/m);
+    expect(pin).not.toBeNull();
+    // Not `continuous`: a digest pinned to a rolling tag breaks on the next
+    // upstream push, and the pressure is then to paste the new digest in.
+    expect(pin[1]).toMatch(/type2-runtime\/releases\/download\/\d{8}\/runtime-x86_64$/);
+  });
+
+  it("is handed to appimagetool rather than left to be fetched", () => {
+    // `linuxdeploy-plugin-appimage` turns this into `--runtime-file`, which in
+    // appimagetool is an if/else against the download and not a preference.
+    expect(TOOLS).toMatch(/LDAI_RUNTIME_FILE=\$runtime" >> "\$GITHUB_ENV/);
+  });
+
+  it("is checked in the artifact, before the guard executes it", () => {
+    expect(GUARD).toMatch(/LDAI_RUNTIME_FILE/);
+    // The order is the point: extracting the AppImage runs the runtime, so
+    // the comparison has to come first or it is vouching for code it already
+    // ran. Both indexes are real positions in the file, not -1 twice.
+    const checked = GUARD.indexOf("digest_md5_at");
+    const executed = GUARD.indexOf("--appimage-extract");
+    expect(checked).toBeGreaterThan(0);
+    expect(executed).toBeGreaterThan(0);
+    expect(checked).toBeLessThan(executed);
   });
 });
 

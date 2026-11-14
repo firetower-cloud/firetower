@@ -252,6 +252,12 @@ jobs:
       # `libwayland-client`, which is what made the window come up white on
       # current distributions. The guard after the build is what keeps that
       # true if the CLI is ever bumped.
+      #
+      # It also exports `LDAI_RUNTIME_FILE`, which is how the pinned AppImage
+      # runtime reaches the bundle step below: `appimagetool` fetches that one
+      # from a rolling upstream tag unless it is handed a file, and it is both
+      # the first code that runs on a user's machine and inside what the
+      # updater key signs a few lines further down.
       - run: $GITHUB_WORKSPACE/.github/scripts/appimage-tools.sh
 
       - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
