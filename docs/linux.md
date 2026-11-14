@@ -4,7 +4,10 @@ One download: `Firetower_<version>_amd64.AppImage`, on every
 [release](https://github.com/firetower-cloud/firetower/releases). It carries
 its own GTK and WebKit, so it runs on any reasonably current distribution
 without installing anything, and it is the same application the Mac and
-Windows builds are — the same window, the same servers, the same keychain.
+Windows builds are — the same window, the same servers, and your sign-ins
+kept in the system keyring wherever there is one to keep them in. On a
+machine with no Secret Service running, Firetower says so and asks for your
+password again rather than pretending to have remembered it.
 
 It is **x86_64 only**: Intel and AMD. There is no ARM build, so a Raspberry Pi
 or an ARM laptop cannot run it.
