@@ -195,6 +195,14 @@ describe("what a failed install says to do next", () => {
     "failed to copy the new version: Permission denied (os error 13)",
     "Access is denied. (os error 5)",
     "Read-only file system (os error 30)",
+    // `ETXTBSY`: the kernel refusing to write a file that is being executed,
+    // which is what replacing a running AppImage in place is. The likeliest
+    // of these on Linux, and it was being told to wait a few minutes — for a
+    // condition that holds for exactly as long as Firetower is open.
+    "Text file busy (os error 26)",
+    // `EPERM`, which is not `EACCES`: an immutable file or a sandbox policy,
+    // reaching somebody who has already checked that they own the directory.
+    "Operation not permitted (os error 1)",
   ];
 
   it("sends somebody to a writable location, and not back round the loop", async () => {
@@ -206,6 +214,24 @@ describe("what a failed install says to do next", () => {
       // The platform's own words are kept, at the end: they are what somebody
       // pastes into an issue.
       expect(answer).toContain(said);
+    }
+  });
+
+  it("does not read a permission failure out of a number that merely starts with one", async () => {
+    // `os error 1` and `os error 5` are on the list above, and the matching is
+    // on text. Without a word boundary a dropped connection's `os error 110`
+    // and a timeout's `os error 55` both become "move Firetower somewhere you
+    // can write to", which is the wrong half of this function.
+    const { whyUpdateFailed } = await fresh();
+    for (const said of [
+      "connection closed before message completed (os error 110)",
+      "Resource temporarily unavailable (os error 11)",
+      "No such file or directory (os error 2)",
+      "os error 55",
+    ]) {
+      const answer = whyUpdateFailed(new Error(said));
+      expect(answer).toContain("a few minutes");
+      expect(answer).not.toContain("somewhere you can write to");
     }
   });
 

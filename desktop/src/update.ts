@@ -151,15 +151,35 @@ export async function takeUpdate(): Promise<void> {
 }
 
 /**
- * The permission failures, as each operating system words them.
+ * The failures that replacing the running copy in place produces, as each
+ * operating system words them.
  *
  * `std::io::ErrorKind::PermissionDenied` reaches the window as whatever the
  * platform's `strerror` said, so there is a small set of sentences rather than
- * a code to match on. The read-only one is separate because a file in a
- * read-only mount fails differently from one in a directory you do not own.
+ * a code to match on — and the same errno arrives spelled either way
+ * depending on how deep in the stack it was turned into a string, which is
+ * why both the words and the numbers are here.
+ *
+ * Five errnos, and each one is a real way for this to end:
+ *
+ *   * `EACCES` (13) and `EROFS` (30) — a directory this account does not own,
+ *     and a read-only mount. A file in a read-only mount fails differently
+ *     from one in a directory you cannot write to, so both spellings are
+ *     listed.
+ *   * `ERROR_ACCESS_DENIED` (5) is Windows's own, worded its own way.
+ *   * `EPERM` (1) — "Operation not permitted". Not the same as `EACCES`: it
+ *     is what an immutable file or a sandbox policy returns, and it reaches a
+ *     person who has already checked that they own the directory.
+ *   * `ETXTBSY` (26) — "Text file busy", the kernel refusing to open a file
+ *     for writing while it is being executed. It is the likeliest of the five
+ *     here, because on Linux the file the updater overwrites *is* the program
+ *     that is running.
+ *
+ * The numbers carry a `\b` so that `os error 1` is not also read out of
+ * `os error 13`, or `os error 5` out of a timeout's `os error 55`.
  */
 const CANNOT_WRITE =
-  /permission denied|os error 13|access is denied|os error 5|read-only file system|os error 30/i;
+  /permission denied|access is denied|operation not permitted|read-only file system|text file busy|os error (?:1|5|13|26|30)\b/i;
 
 /**
  * What a failed install means, and the next thing to do about it.
@@ -181,7 +201,7 @@ const CANNOT_WRITE =
 export function whyUpdateFailed(e: unknown): string {
   const said = (e as { message?: string })?.message?.trim() ?? "";
   if (CANNOT_WRITE.test(said)) {
-    return `Firetower could not replace its own files: it is installed somewhere this account cannot write to. Move it somewhere you can write to and take the update again — waiting will not help. (${said})`;
+    return `Firetower could not replace its own files: either it is installed somewhere this account cannot write to, or a copy of it is still running. Move it somewhere you can write to, or close the other copy, and take the update again — waiting on its own will not help. (${said})`;
   }
   /* The plugin's messages are phrases rather than sentences — "the release is
      still uploading" — so the full stop is added here instead of being asked
