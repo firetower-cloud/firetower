@@ -167,6 +167,18 @@ describe("latest.json", () => {
     expect(concurrency).toMatch(/cancel-in-progress: false/);
   });
 
+  it("is built from the payloads and not from the signatures alone", () => {
+    // Naming an artifact is not signing it: the manifest job verifies every
+    // signature against the bytes of the asset its entry will point at, and
+    // it cannot do that from `.sig` files. A signature left over from the
+    // previous build of a rebuilt tag names exactly what this build's
+    // artifact is called, so a check made from names accepts it.
+    const publish = job(RELEASE, "publish");
+    expect(publish).toMatch(/gh release download "\$TAG"[^\n]*-D "\$RUNNER_TEMP\/assets"/);
+    expect(publish).not.toMatch(/release download "\$TAG"[^\n]*-p '\*\.sig'/);
+    expect(publish).toMatch(/--assets "\$RUNNER_TEMP\/assets"/);
+  });
+
   it("never points the rolling release at an older build than it already holds", () => {
     // `desktop-latest` is the single address every installed copy reads, so a
     // rebuild of an old tag dispatched after a newer release must not win it.

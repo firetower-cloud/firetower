@@ -338,14 +338,24 @@ jobs:
           # never ran leaves none, and `latest-json.mjs` refuses to write a
           # manifest it cannot fill — which is the same check as "did every
           # platform build", without a second list to keep up to date.
+          #
+          # **Every asset and not just the `.sig` files**, because naming an
+          # artifact is not signing it. Each signature is verified against the
+          # bytes of the asset its entry will point at, which is the only
+          # thing that establishes the two belong together — a signature left
+          # over from the previous build of a rebuilt tag names exactly what
+          # this one's artifact is called. Roughly 110MB over the four
+          # payloads, a few seconds to fetch on a release that takes twenty
+          # minutes, and about a tenth of a second to check.
+          #
           # `--clobber` so that re-running this job after a leg was rebuilt
-          # reads the signatures that are on the release now.
-          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p '*.sig' -D "$RUNNER_TEMP/sigs" --clobber
+          # reads what is on the release now.
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -D "$RUNNER_TEMP/assets" --clobber
           node desktop/scripts/latest-json.mjs \
             --repo "$GITHUB_REPOSITORY" \
             --tag "$TAG" \
             --version "$VERSION" \
-            --signatures "$RUNNER_TEMP/sigs" \
+            --assets "$RUNNER_TEMP/assets" \
             --out "$RUNNER_TEMP/latest.json"
 
           # The app's updater reads one fixed address. GitHub's own `latest`
