@@ -315,7 +315,9 @@ jobs:
           # never ran leaves none, and `latest-json.mjs` refuses to write a
           # manifest it cannot fill — which is the same check as "did every
           # platform build", without a second list to keep up to date.
-          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p '*.sig' -D "$RUNNER_TEMP/sigs"
+          # `--clobber` so that re-running this job after a leg was rebuilt
+          # reads the signatures that are on the release now.
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p '*.sig' -D "$RUNNER_TEMP/sigs" --clobber
           node desktop/scripts/latest-json.mjs \
             --repo "$GITHUB_REPOSITORY" \
             --tag "$TAG" \
