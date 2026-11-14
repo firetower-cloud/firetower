@@ -1550,6 +1550,184 @@ async fn ending_a_place_a_writer_may_work_in_is_not_theirs_to_dispose_of() {
     state.fleet.stop_supervising(&host.id).await;
 }
 
+/// A machine that is not answering is refused until somebody forces it, and
+/// then the debt is written down.
+///
+/// Untested until now, and worth holding because the branch that reclaims a
+/// finished place inline runs in front of this one: a place with work still in
+/// it has to reach the connectivity check exactly as it always did, say which
+/// kind of silence it is, and — forced — leave an `owed_teardowns` row per run
+/// so the machine is still told when it comes back.
+#[tokio::test]
+async fn a_place_whose_machine_is_away_is_refused_until_it_is_forced() {
+    let (state, principal, host, _ready, owner) = fixture().await;
+    let whole_place = |force: bool| {
+        axum::extract::Query(
+            serde_json::from_value::<sessions::Removal>(
+                serde_json::json!({ "workspace": true, "force": force }),
+            )
+            .unwrap(),
+        )
+    };
+
+    let founder = ft_core::SessionId::new();
+    state
+        .db
+        .insert_session(
+            &founder,
+            &host.id,
+            &owner,
+            None,
+            "Still going",
+            "do a thing",
+            Some("agent/x"),
+            Some("main"),
+            "Shell",
+            ft_core::WorkspaceSize::Medium,
+            ft_core::Share::Equal,
+            &ft_core::Step::plan(true, false),
+            None,
+        )
+        .await
+        .unwrap();
+    let workspace = state
+        .db
+        .session(&founder)
+        .await
+        .unwrap()
+        .unwrap()
+        .workspace_id
+        .unwrap();
+
+    let sibling = ft_core::SessionId::new();
+    state
+        .db
+        .insert_run(crate::db::NewRun {
+            id: &sibling,
+            workspace_id: &workspace,
+            owner: &owner,
+            title: "Also still going",
+            prompt: "",
+            agent: "Shell",
+            steps: &ft_core::Step::plan(true, false),
+        })
+        .await
+        .unwrap();
+
+    // The machine stops answering with the work still running in it.
+    state.fleet.stop_supervising(&host.id).await;
+
+    let refused = sessions::destroy_session(
+        State(state.clone()),
+        Extension(principal.clone()),
+        Path(founder.as_str().to_string()),
+        whole_place(false),
+    )
+    .await
+    .expect_err("there is work in there and nobody to tell");
+    assert!(
+        matches!(refused.code, ErrorCode::HostUnreachable),
+        "{:?}",
+        refused.code
+    );
+    assert!(
+        refused.message.contains("isn't answering")
+            && refused
+                .message
+                .contains("it keeps running there until that machine comes back"),
+        "{}",
+        refused.message
+    );
+    for run in [&founder, &sibling] {
+        assert_ne!(
+            state.db.session(run).await.unwrap().unwrap().status,
+            ft_core::SessionStatus::Ended,
+            "a refusal changes nothing"
+        );
+    }
+
+    // A machine that was removed rather than merely away is the other
+    // sentence, because what its sessions hold is the only record of it.
+    let retired = state
+        .db
+        .ensure_host("localhost", Compute::Local, &owner)
+        .await
+        .unwrap();
+    let there = ft_core::SessionId::new();
+    state
+        .db
+        .insert_session(
+            &there,
+            &retired.id,
+            &owner,
+            None,
+            "What ran in the container",
+            "do a thing",
+            None,
+            None,
+            "Shell",
+            ft_core::WorkspaceSize::Medium,
+            ft_core::Share::Equal,
+            &ft_core::Step::plan(true, false),
+            None,
+        )
+        .await
+        .unwrap();
+    let gone = sessions::destroy_session(
+        State(state.clone()),
+        Extension(principal.clone()),
+        Path(there.as_str().to_string()),
+        whole_place(false),
+    )
+    .await
+    .expect_err("a machine that is not in the fleet cannot be asked anything");
+    assert!(
+        gone.message.contains("is not in this Firetower any more"),
+        "{}",
+        gone.message
+    );
+
+    // Forced, so it goes here and is owed there.
+    sessions::destroy_session(
+        State(state.clone()),
+        Extension(principal.clone()),
+        Path(founder.as_str().to_string()),
+        whole_place(true),
+    )
+    .await
+    .expect("forcing it is what the refusal offered");
+
+    for run in [&founder, &sibling] {
+        assert_eq!(
+            state.db.session(run).await.unwrap().unwrap().status,
+            ft_core::SessionStatus::Ended,
+            "the whole place is forgotten, not only the one named"
+        );
+    }
+    let owed: Vec<String> = sqlx::query_scalar(
+        "SELECT session_id FROM owed_teardowns WHERE host_id = $1 ORDER BY session_id",
+    )
+    .bind(host.id.as_str())
+    .fetch_all(state.db.pool())
+    .await
+    .unwrap();
+    let mut expected = vec![founder.as_str().to_string(), sibling.as_str().to_string()];
+    expected.sort();
+    assert_eq!(owed, expected, "one debt per run, paid on reconnect");
+
+    // And the row it left behind is the sweep's, the same as any other place
+    // whose work has all ended.
+    assert!(
+        state
+            .db
+            .workspaces_to_purge(10)
+            .await
+            .unwrap()
+            .contains(&workspace),
+        "nothing is running in it any more"
+    );
+}
+
 /// A machine is somebody's, and the endpoints that act on one now know it.
 ///
 /// Eight of the ten handlers in `hosts.rs` took no principal at all. A machine
