@@ -1432,6 +1432,124 @@ async fn a_place_that_has_already_finished_is_removed_even_with_its_machine_away
     assert!(state.db.session(&sibling).await.unwrap().is_none());
 }
 
+/// Ending the *place* is disposal, and the reclaim that now happens inline sits
+/// behind that question rather than in front of it.
+///
+/// Writer on a workspace is the most access anybody short of its owner can be
+/// given, and it is deliberately not enough to end the place: that is
+/// `may_share`, the same question as moving it. Nothing in this changed — what
+/// is new is that a workspace with nothing running in it is deleted by the
+/// handler, so the order of those two things is now the difference between a
+/// refusal and somebody else's workspace being gone. Every run here has
+/// already ended, so a purge that ran before the check would take the row and
+/// this test would say so.
+#[tokio::test]
+async fn ending_a_place_a_writer_may_work_in_is_not_theirs_to_dispose_of() {
+    let (state, _principal, host, _ready, owner) = fixture().await;
+
+    let org = ft_core::OrgId::from_stored(state.db.org().await.unwrap());
+    let kevin = state
+        .accounts
+        .create_user(&org, "kevin", "kevin@example.test", "member")
+        .await
+        .unwrap()
+        .0;
+    let writer = crate::auth::Principal {
+        subject: "kevin".into(),
+        via: crate::auth::Via::Session,
+        user: Some(kevin.clone()),
+    };
+
+    let founder = ft_core::SessionId::new();
+    state
+        .db
+        .insert_session(
+            &founder,
+            &host.id,
+            &owner,
+            None,
+            "Mine",
+            "do a thing",
+            Some("agent/x"),
+            Some("main"),
+            "Shell",
+            ft_core::WorkspaceSize::Medium,
+            ft_core::Share::Equal,
+            &ft_core::Step::plan(true, false),
+            None,
+        )
+        .await
+        .unwrap();
+    let workspace = state
+        .db
+        .session(&founder)
+        .await
+        .unwrap()
+        .unwrap()
+        .workspace_id
+        .unwrap();
+    state
+        .fleet
+        .set_status(&founder, ft_core::SessionStatus::Ended, None)
+        .await;
+
+    state
+        .access
+        .set_exception(
+            crate::access::FiledKind::Workspace,
+            workspace.as_str(),
+            kevin.id.as_str(),
+            crate::access::Level::Writer,
+        )
+        .await
+        .unwrap();
+    assert!(
+        state
+            .db
+            .session_to_work_in(kevin.id.as_str(), &founder)
+            .await
+            .unwrap()
+            .is_some(),
+        "the place is his to work in, which is what makes this worth checking"
+    );
+
+    let refused = sessions::destroy_session(
+        State(state.clone()),
+        Extension(writer),
+        Path(founder.as_str().to_string()),
+        axum::extract::Query(
+            serde_json::from_value::<sessions::Removal>(serde_json::json!({ "workspace": true }))
+                .unwrap(),
+        ),
+    )
+    .await
+    .expect_err("a writer is not whoever the place belongs to");
+    assert!(
+        matches!(refused.code, ErrorCode::Forbidden),
+        "{:?}",
+        refused.code
+    );
+    assert!(
+        refused
+            .message
+            .contains("ending this workspace ends every agent in it"),
+        "{}",
+        refused.message
+    );
+
+    let left: i64 = sqlx::query_scalar("SELECT count(*) FROM workspaces WHERE id = $1")
+        .bind(workspace.as_str())
+        .fetch_one(state.db.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        left, 1,
+        "and the place is still there, refused rather than reclaimed"
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
 /// A machine is somebody's, and the endpoints that act on one now know it.
 ///
 /// Eight of the ten handlers in `hosts.rs` took no principal at all. A machine
