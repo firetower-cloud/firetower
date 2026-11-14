@@ -5869,7 +5869,44 @@ mod tests {
             let workspace = workspace.clone();
             tokio::spawn(async move { db.purge_finished_workspace(&workspace).await.unwrap() })
         };
-        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+
+        // **Waited for, not slept through.** This used to give the purge 250 ms
+        // and hope, which is the one way a test like this fails silently: on a
+        // loaded machine the insert commits before the purge ever reaches the
+        // row, no two statements overlap, and the assertions below then pass
+        // against the very implementation they exist to reject. A race the test
+        // does not establish is a race the test does not protect.
+        //
+        // So the race is observed from the connection holding it open — asking
+        // "is anybody waiting on me?" rather than inspecting a table, which
+        // needs no third connection and cannot mistake another test's
+        // contention for this one's. The deadline is there so that a purge
+        // which never arrives is a failure with a sentence rather than a
+        // suite that hangs.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            let waiting: bool = sqlx::query_scalar(
+                "SELECT EXISTS (
+                   SELECT 1 FROM pg_stat_activity
+                    WHERE datname = current_database()
+                      AND wait_event_type = 'Lock'
+                      AND pg_backend_pid() = ANY (pg_blocking_pids(pid)))",
+            )
+            .fetch_one(&mut *joining)
+            .await
+            .unwrap();
+            if waiting {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "nothing ever blocked on the half-finished insert, so this is not \
+                 the schedule this test is about"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+
+        // Now, with the delete demonstrably waiting on it, the run arrives.
         joining.commit().await.unwrap();
 
         assert!(
