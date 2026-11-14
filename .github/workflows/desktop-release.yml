@@ -1,5 +1,18 @@
-# The desktop app's release: installers for macOS and Windows onto the
+# The desktop app's release: installers for macOS, Windows and Linux onto the
 # GitHub Release for a `desktop-v*` tag, signed and notarized, then published.
+#
+# **Linux is one artifact, the AppImage, and that is a decision rather than an
+# omission.** The per-pull-request build in `desktop.yml` makes a `.deb` too
+# and will carry on doing so, because it is the easier thing to install on a
+# machine you already administer. But a released download has to be able to
+# update itself, and a `.deb` cannot: the only way to update one in place is a
+# root-privileged `dpkg -i`, which an app cannot ask for mid-update the way
+# Windows can elevate. The AppImage replaces its own file and needs nothing.
+# One Linux download also means nobody has to be told which one to take.
+# Adding a format later costs nothing; removing one later strands everybody
+# who installed it, so the `.deb` comes back when there is an apt repository
+# to serve it from, and not before — please do not add it to a matrix line
+# here without that.
 #
 # Called by release.yml when release-please cuts the tag (the release is
 # published by then; the installers land on it as they are built), or run by
@@ -45,6 +58,10 @@ jobs:
           echo "id=$id" >> "$GITHUB_OUTPUT"
           echo "version=${TAG#desktop-v}" >> "$GITHUB_OUTPUT"
 
+  # The two platforms that sign with material the operating system issues:
+  # a Developer ID certificate and an Azure Trusted Signing identity. Linux is
+  # a job of its own below, and the reason it is not a third line here is
+  # written there.
   build:
     needs: release
     environment: release
@@ -132,8 +149,10 @@ jobs:
         with:
           projectPath: desktop
           releaseId: ${{ needs.release.outputs.id }}
-          includeUpdaterJson: true
-          updaterJsonPreferNsis: true
+          # The bundles and their signatures are uploaded; `latest.json` is
+          # not. The action's own manifest step has no single writer — see the
+          # `publish` job, which is the one place it is written now.
+          includeUpdaterJson: false
           args: ${{ matrix.args }} ${{ env.SIGN_CONFIG != '' && format('--config {0}', toJSON(env.SIGN_CONFIG)) || '' }}
 
       # A plain disk image from the .app: Tauri's own DMG script styles it
@@ -170,26 +189,146 @@ jobs:
         shell: bash
         run: rm -f "$RUNNER_TEMP/AuthKey.p8"
 
-  # Once both platforms are on it, the app's updater is pointed at it. The
+  # Linux: the AppImage, and nothing else on the release.
+  #
+  # **A job of its own, and that is the security boundary rather than a
+  # tidiness choice.** The step above hands `tauri-action` the Developer ID
+  # certificate and the Azure client secret with no platform condition, which
+  # is harmless while every leg in that matrix needs one of them. Linux needs
+  # neither — and packaging an AppImage *executes a third-party shell script*
+  # (`linuxdeploy-plugin-gtk.sh`, with the AppDir in its hands). Putting that
+  # script in the same environment as a code-signing certificate for two other
+  # operating systems is not a risk worth taking for twenty lines of shared
+  # setup.
+  #
+  # Written as a separate job, the scoping is structural: the Apple and Azure
+  # secrets are not named anywhere in it, so there is nothing to leak and
+  # nothing for a later edit to the matrix to leak by accident. The one secret
+  # it does hold is the updater signing key, which is the whole point of a
+  # released tier — an unsigned AppImage is one an installed copy will refuse.
+  #
+  # 22.04 and not 24.04, for the same reason as `desktop.yml`: glibc is
+  # forward- but not backward-compatible, and the AppImage carries its own GTK
+  # and WebKit but not its own libc.
+  linux:
+    needs: release
+    environment: release
+    permissions:
+      contents: write
+    runs-on: depot-ubuntu-22.04
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.release.outputs.ref }}
+
+      # Tauri's published prerequisites, plus `libdbus-1-dev` (keyring) and
+      # `xdg-utils` (the AppImage bundler copies `xdg-open` into the AppDir
+      # and refuses to continue without it). `desktop.yml` has the long
+      # version of why those two are on nobody's list.
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libxdo-dev libssl-dev \
+            libayatana-appindicator3-dev librsvg2-dev \
+            libdbus-1-dev xdg-utils
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 11
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: desktop/pnpm-lock.yaml
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+
+      - run: pnpm install --frozen-lockfile
+
+      # Pinned, checksum-verified packaging tools where the bundler looks, so
+      # it downloads none of its own — and so the AppImage does not bundle
+      # `libwayland-client`, which is what made the window come up white on
+      # current distributions. The guard after the build is what keeps that
+      # true if the CLI is ever bumped.
+      - run: $GITHUB_WORKSPACE/.github/scripts/appimage-tools.sh
+
+      - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The updater's signature on the AppImage, checked by every
+          # installed copy against the public key in `tauri.conf.json`. The
+          # same minisign key as macOS and Windows: there is no Linux-specific
+          # signing, and no Apple or Azure material in this job at all.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: desktop
+          releaseId: ${{ needs.release.outputs.id }}
+          includeUpdaterJson: false
+          # `--bundles appimage` and not the config's targets, which is the
+          # smaller change: `tauri.conf.json` lists what each platform *can*
+          # build and the command line says what this release *does*. No
+          # `.deb` on a release — the header says why.
+          args: --bundles appimage
+
+      - run: $GITHUB_WORKSPACE/.github/scripts/appimage-guard.sh src-tauri/target/release/bundle/appimage/*.AppImage
+
+  # Every platform is on the release; now the updater is pointed at it. The
   # release itself was published when the tag was cut: a draft had no tag,
   # and release-please then re-released the desktop on every push to main
   # until somebody approved the signing — four times in one morning.
+  #
+  # **This job is the only writer of `latest.json`.** It used to be written by
+  # each build leg, by `tauri-action`'s `uploadVersionJSON`: read the manifest
+  # off the release, merge in its own platform, delete the asset, upload the
+  # new one — with no lock. Two legs finishing within a few seconds of each
+  # other both read the same file and the second upload is the one that
+  # survives, so a platform silently vanishes from the manifest and every
+  # installed copy on it is told there is no update. Nothing goes red. That
+  # was live with two platforms; Linux would have been a third chance for it.
+  #
+  # So the legs upload bundles and signatures only, and the manifest is built
+  # once, here, from what is actually on the release — and this job fails
+  # rather than publishing one that is missing a platform.
   publish:
-    needs: [release, build]
+    needs: [release, build, linux]
     runs-on: depot-ubuntu-22.04
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.release.outputs.ref }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
       - env:
           GH_TOKEN: ${{ github.token }}
-          ID: ${{ needs.release.outputs.id }}
           TAG: ${{ inputs.tag }}
           VERSION: ${{ needs.release.outputs.version }}
         run: |
+          # The signatures are the evidence that a leg got to the end: one
+          # per updater artifact, uploaded beside it. A leg that failed or
+          # never ran leaves none, and `latest-json.mjs` refuses to write a
+          # manifest it cannot fill — which is the same check as "did every
+          # platform build", without a second list to keep up to date.
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p '*.sig' -D "$RUNNER_TEMP/sigs"
+          node desktop/scripts/latest-json.mjs \
+            --repo "$GITHUB_REPOSITORY" \
+            --tag "$TAG" \
+            --version "$VERSION" \
+            --signatures "$RUNNER_TEMP/sigs" \
+            --out "$RUNNER_TEMP/latest.json"
+
           # The app's updater reads one fixed address. GitHub's own `latest`
           # is the newest release of the whole repository, whichever package
           # cut it, so `latest.json` is copied onto a rolling release of the
-          # desktop's own. Its links point at this versioned release.
-          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p latest.json -D "$RUNNER_TEMP"
+          # desktop's own. Its links point at this versioned release, and the
+          # versioned release keeps its own copy so that a rebuild of an older
+          # tag can be read back and compared.
+          gh release upload "$TAG" "$RUNNER_TEMP/latest.json" -R "$GITHUB_REPOSITORY" --clobber
           gh release upload desktop-latest "$RUNNER_TEMP/latest.json" -R "$GITHUB_REPOSITORY" --clobber
           echo "published $VERSION"

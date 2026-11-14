@@ -25,6 +25,13 @@ on:
       - "desktop/**"
       - "api/openapi.json"
       - ".github/workflows/desktop.yml"
+      # The release workflow and the AppImage scripts, because `pnpm test`
+      # below asserts their shape — that the Linux leg is given no Apple or
+      # Azure credentials, that the release carries no `.deb`, and that no
+      # build leg writes `latest.json`. A check that does not run on the
+      # change it is checking is not a check.
+      - ".github/workflows/desktop-release.yml"
+      - ".github/scripts/appimage-*.sh"
 
 permissions:
   contents: read
@@ -133,7 +140,7 @@ jobs:
       # out is older than `libwayland-client.so.0` joining the AppImage
       # excludelist. The script explains the rest.
       - if: matrix.platform == 'linux'
-        run: "$GITHUB_WORKSPACE/.github/scripts/appimage-tools.sh"
+        run: $GITHUB_WORKSPACE/.github/scripts/appimage-tools.sh
 
       - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         with:
@@ -144,7 +151,7 @@ jobs:
       # above did its job: this is the only thing that notices if the pinned
       # file names stop being the ones the installed CLI looks for.
       - if: matrix.platform == 'linux'
-        run: "$GITHUB_WORKSPACE/.github/scripts/appimage-guard.sh" src-tauri/target/release/bundle/appimage/*.AppImage
+        run: $GITHUB_WORKSPACE/.github/scripts/appimage-guard.sh src-tauri/target/release/bundle/appimage/*.AppImage
 
       # Tauri's own DMG script arranges the window through Finder, which a
       # build machine has no session for; this assembles the image instead.
