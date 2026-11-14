@@ -1,5 +1,5 @@
 /**
- * Eight things a team would actually put on a clock.
+ * Six things a team would actually put on a clock.
  *
  * **These are the empty state.** A library with nothing in it draws these
  * rather than an illustration and a sentence about emptiness: what somebody
@@ -16,7 +16,7 @@ import type { Cadence } from "~/api/generated/model";
 export type Example = {
   name: string;
   /** The lucide glyph, by name, so the list stays data. */
-  icon: "package" | "refresh" | "book" | "inbox" | "layers" | "branch" | "tree" | "scroll";
+  icon: "package" | "refresh" | "book" | "inbox" | "tree" | "scroll";
   says: string;
   makes: string;
   does: string;
@@ -64,26 +64,6 @@ export const EXAMPLES: Example[] = [
     prompt:
       "Read every issue opened since your last run. For each, say which part of the codebase it is about, whether it still reproduces on main, and what the smallest fix would be. Label them and post your reading as a comment. Change no code.",
     cadence: { kind: "weekdays", at: "08:30" },
-  },
-  {
-    name: "Migration dry-run",
-    icon: "layers",
-    says: "Every day at 01:00",
-    makes: "Reports pass or fail",
-    does: "Runs every migration against an empty database and reports the first failure.",
-    prompt:
-      "Bring the stack up with docker compose against an empty database and run every migration in order. Report the first one that fails, with its output. Change nothing.",
-    cadence: { kind: "daily", at: "01:00" },
-  },
-  {
-    name: "Keep a branch rebased",
-    icon: "branch",
-    says: "Every weekday at 07:30",
-    makes: "Rebases, or asks you",
-    does: "Rebases a long-lived branch on main. Stops and asks instead of guessing at a conflict.",
-    prompt:
-      "Rebase this branch on main. If it conflicts, stop and tell me which files and why. Do not guess at a resolution.",
-    cadence: { kind: "weekdays", at: "07:30" },
   },
   {
     name: "Close the loop on stale branches",
