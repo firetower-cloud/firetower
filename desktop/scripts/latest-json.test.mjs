@@ -144,6 +144,80 @@ describe("what it refuses to copy into the manifest", () => {
     expect(() => built(rubbish)).toThrow(/not a minisign signature/);
   });
 
+  /**
+   * The pairing, which selecting by file name alone could not see.
+   *
+   * minisign's trusted comment is covered by the signature's global signature,
+   * so `file:` is evidence of what was signed rather than a label: these are
+   * the shapes where that evidence contradicts the URL the entry would carry.
+   * Each one would otherwise produce a manifest that looks complete and that
+   * every installed copy on that platform refuses — an update outage nobody
+   * notices until people stop being offered updates.
+   */
+  it("a signature belonging to another platform's payload", () => {
+    // The reproduction: a Windows signature sitting under the Linux name, so
+    // the entry pairs `file:…setup.exe` with a URL ending `.AppImage`.
+    const crossed = signatures().map((s) =>
+      s.name.endsWith(".AppImage") ? { ...s, signature: sig("Firetower_0.29.1_x64-setup.exe") } : s,
+    );
+    expect(() => built(crossed)).toThrow(/signature over Firetower_0\.29\.1_x64-setup\.exe, not over/);
+    expect(() => built(crossed)).toThrow(/Firetower_0\.29\.1_amd64\.AppImage/);
+    // And it says what to do, rather than inviting somebody to hand-edit it.
+    expect(() => built(crossed)).toThrow(/re-run\n?\s*the leg that produced this pair/);
+  });
+
+  it("a signature for another release's build of the same platform", () => {
+    const stale = signatures().map((s) =>
+      s.name.endsWith(".AppImage") ? { ...s, signature: sig("Firetower_0.29.0_amd64.AppImage") } : s,
+    );
+    expect(() => built(stale)).toThrow(/signature over Firetower_0\.29\.0_amd64\.AppImage/);
+  });
+
+  it("a signature whose trusted comment names nothing at all", () => {
+    const anonymous = signatures().map((s) =>
+      s.name.endsWith(".AppImage")
+        ? {
+            ...s,
+            signature: Buffer.from(
+              "untrusted comment: signature from tauri secret key\nRWQN3dDhlYmi8aREd+mp\ntrusted comment: file:\nKZGhGQ7hzIfduLIFOD5J\n",
+            ).toString("base64"),
+          }
+        : s,
+    );
+    expect(() => built(anonymous)).toThrow(/a file it does not name/);
+  });
+
+  /**
+   * The one gap that is allowed, and its edges.
+   *
+   * `tauri-action` appends `_<arch>` to the stem of macOS's `.app.tar.gz` on
+   * upload, so that archive alone is signed under a name the release does not
+   * use. The rule has to accept exactly that and nothing wider — these are the
+   * asset names off the published desktop-v0.29.1, where the signature really
+   * does say `file:Firetower.app.tar.gz`.
+   */
+  it("accepts the macOS archive's rename, and only that rename", () => {
+    expect(built(signatures()).platforms["darwin-aarch64"].url).toBe(url("Firetower_universal.app.tar.gz"));
+
+    const otherApp = signatures().map((s) =>
+      s.name.endsWith(".app.tar.gz") ? { ...s, signature: sig("Somebody_Else.app.tar.gz") } : s,
+    );
+    expect(() => built(otherApp)).toThrow(/signature over Somebody_Else\.app\.tar\.gz/);
+
+    // A second token is not the rename `getAssetName` performs.
+    const twoTokens = [
+      ...signatures().filter((s) => !s.name.endsWith(".app.tar.gz")),
+      { name: "Firetower_universal_extra.app.tar.gz", signature: sig("Firetower.app.tar.gz") },
+    ];
+    expect(() => built(twoTokens)).toThrow(/not over Firetower_universal_extra\.app\.tar\.gz/);
+
+    // And the gap does not extend to the platforms that are never renamed.
+    const windows = signatures().map((s) =>
+      s.name.endsWith("-setup.exe") ? { ...s, signature: sig("Firetower_x64-setup.exe") } : s,
+    );
+    expect(() => built(windows)).toThrow(/signature over Firetower_x64-setup\.exe/);
+  });
+
   it("two versions' assets on one release", () => {
     const twice = [
       ...signatures(),

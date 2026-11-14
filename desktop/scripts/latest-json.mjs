@@ -94,12 +94,58 @@ export const WANTED = [
 ];
 
 /**
- * What a `.sig` has to look like before it is copied into the manifest.
+ * The one rename an artifact undergoes between being signed and being uploaded.
  *
- * The contents of the file, verbatim, are what the updater checks — so the
- * one failure this can catch cheaply is a signature that is not one: an empty
- * file, a truncated upload, an error page saved under the right name. It
- * cannot tell a valid signature from one made with the wrong key; only an
+ * `tauri-action`'s `getAssetName` (read at 84b9d35b, the commit this
+ * repository pins) hands back `basename(path)` for everything **except**
+ * macOS's `.app.tar.gz`, which gets `_<arch>` appended to its stem so that two
+ * architectures' archives can sit on one release. `--target
+ * universal-apple-darwin` makes that `_universal`, which is why the asset is
+ * `Firetower_universal.app.tar.gz` while the archive the signature was made
+ * over is plain `Firetower.app.tar.gz`.
+ *
+ * So every other platform's signature names its asset exactly, and this is the
+ * only gap that is allowed to exist. It is written as the specific rename
+ * rather than as "near enough" on purpose: a looser rule — a shared prefix, a
+ * matching extension — is one that also accepts the pairing it exists to
+ * reject.
+ */
+const MAC_ARCHIVE = ".app.tar.gz";
+
+function paired(asset, signed) {
+  if (asset === signed) return true;
+  if (!asset.endsWith(MAC_ARCHIVE) || !signed.endsWith(MAC_ARCHIVE)) return false;
+  const stem = signed.slice(0, -MAC_ARCHIVE.length);
+  const renamed = asset.slice(0, -MAC_ARCHIVE.length);
+  /* Exactly one `_<arch>` appended, and nothing else moved. */
+  return renamed.startsWith(`${stem}_`) && /^[A-Za-z0-9]+$/.test(renamed.slice(stem.length + 1));
+}
+
+/**
+ * What a `.sig` has to look like, and what it has to be a signature *of*,
+ * before it is copied into the manifest.
+ *
+ * The contents of the file, verbatim, are what the updater checks. Two things
+ * are worth checking here, and they fail differently:
+ *
+ *   * It has to be a signature at all — not an empty file, a truncated
+ *     upload, or an error page saved under the right name.
+ *   * It has to be a signature over **the payload this entry points at**.
+ *     minisign's trusted comment is covered by the signature's own global
+ *     signature, so the `file:` Tauri writes into it is not a label anybody
+ *     can change after the fact: altering it invalidates the signature an
+ *     installed copy checks. That makes it the evidence of which artifact was
+ *     signed, and comparing it to the asset the URL names is what stops a
+ *     manifest pairing, say, a Windows signature with a Linux download.
+ *
+ * Selecting signatures by file name alone could not see that: a manifest with
+ * every key present and a signature against the wrong payload looks complete
+ * from here, and the installed updater correctly refuses the update. Nothing
+ * is compromised — the key still means what it means — but every copy on that
+ * platform is offered an update it then rejects, which is the same silent
+ * outage the single writer below exists to prevent.
+ *
+ * What it still cannot tell is a signature made with the wrong *key*; only an
  * installed copy can, and by then the update has already been offered.
  */
 function signatureOrThrow(name, text) {
@@ -116,6 +162,21 @@ function signatureOrThrow(name, text) {
         "Nothing can be published from it: an installed copy would reject the\n" +
         "update, which is the one failure mode that cannot be repaired from\n" +
         "here afterwards. Re-run the leg that produced it.",
+    );
+  }
+
+  /* `timestamp:<unix>\tfile:<name>` is what Tauri writes; the tab guard is
+     there because minisign itself allows more fields after the file name. */
+  const signed = inside.match(/\bfile:(.+)/)?.[1].split("\t")[0].trim() ?? "";
+  if (!paired(name, signed)) {
+    throw new Error(
+      `${name}.sig is a signature over ${signed || "a file it does not name"}, not over ${name}.\n\n` +
+        "The manifest is not written. An entry whose signature belongs to a\n" +
+        "different payload is one every installed copy rejects: the update is\n" +
+        "offered, the download runs, the signature check fails, and the person\n" +
+        "is left on the build they already had with nothing they can do about\n" +
+        "it. Nothing here can tell which of the two is the wrong one, so re-run\n" +
+        "the leg that produced this pair rather than editing a manifest.",
     );
   }
   return trimmed;

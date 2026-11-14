@@ -151,4 +151,35 @@ describe("latest.json", () => {
     expect(needs).toMatch(/\bbuild\b/);
     expect(needs).toMatch(/\blinux\b/);
   });
+
+  /**
+   * One run cannot clobber its own entries. Two runs are a separate question,
+   * and the answer is in two parts: they are serialised, and the rolling
+   * release refuses to go backwards even if they somehow are not.
+   */
+  it("cannot have two runs in flight at once", () => {
+    // One group for the whole workflow rather than one per tag: the point is
+    // that no two desktop releases overlap, not that a tag does not race
+    // itself. Queued, because a release abandoned halfway through uploading
+    // installers is worse than a slow one.
+    const concurrency = RELEASE.slice(RELEASE.indexOf("\nconcurrency:")).split("\njobs:")[0];
+    expect(concurrency).toMatch(/group: desktop-release\s*$/m);
+    expect(concurrency).toMatch(/cancel-in-progress: false/);
+  });
+
+  it("never points the rolling release at an older build than it already holds", () => {
+    // `desktop-latest` is the single address every installed copy reads, so a
+    // rebuild of an old tag dispatched after a newer release must not win it.
+    // Serialising runs orders them in time, not by version.
+    const publish = job(RELEASE, "publish");
+    const rolling = publish.slice(publish.indexOf("held="));
+    expect(rolling).toMatch(/sort -V/);
+    // The guard has to sit before the upload it guards, or it guards nothing.
+    expect(rolling.indexOf("sort -V")).toBeLessThan(rolling.indexOf("release upload desktop-latest"));
+    // The versioned release is uploaded either way: a rebuilt old tag still
+    // has to be readable and comparable afterwards.
+    const versioned = publish.indexOf('release upload "$TAG" "$RUNNER_TEMP/latest.json"');
+    expect(versioned).toBeGreaterThan(0);
+    expect(versioned).toBeLessThan(publish.indexOf("held="));
+  });
 });

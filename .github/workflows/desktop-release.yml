@@ -37,6 +37,23 @@ on:
 permissions:
   contents: read
 
+# **Two runs of this workflow must not overlap.** Nothing inside one can clobber
+# another leg's manifest entry any more — `publish` is the only writer — but
+# that is a property of one run. Across two, `tauri-action` deletes an existing
+# asset before re-uploading it, so a rerun racing a release can have one run
+# read the release at the moment the other has a `.sig` deleted: the manifest
+# job then fails for a reason that has nothing to do with the build. And this
+# is not hypothetical here — release-please has cut several desktop releases in
+# one morning before, which is why `release.yml` waits for an approval at all.
+#
+# Queued rather than cancelled: a release that is slow is better than one
+# abandoned halfway through uploading its installers. One group for every tag
+# rather than one per tag, because the point is that no two desktop releases
+# are ever in flight together.
+concurrency:
+  group: desktop-release
+  cancel-in-progress: false
+
 jobs:
   # Which release the assets go onto.
   release:
@@ -338,5 +355,27 @@ jobs:
           # versioned release keeps its own copy so that a rebuild of an older
           # tag can be read back and compared.
           gh release upload "$TAG" "$RUNNER_TEMP/latest.json" -R "$GITHUB_REPOSITORY" --clobber
+
+          # The rolling release only ever moves forward. Serialising runs above
+          # stops two of them interleaving, but it does not order them by
+          # version: a rebuild of an older tag, dispatched by hand after a
+          # newer release has gone out, would otherwise point every installed
+          # copy back at the older build — and that is a silent downgrade of
+          # the one address they all read, which is exactly the class of
+          # failure this job was rewritten to remove.
+          #
+          # The versioned release above always gets its copy, so a rebuild of
+          # an old tag is still readable and comparable afterwards.
+          held=""
+          if gh release download desktop-latest -R "$GITHUB_REPOSITORY" \
+              -p latest.json -D "$RUNNER_TEMP/held" --clobber 2>/dev/null; then
+            held=$(jq -r '.version // empty' "$RUNNER_TEMP/held/latest.json")
+          fi
+          if [ -n "$held" ] && [ "$held" != "$VERSION" ] &&
+            [ "$(printf '%s\n%s\n' "$held" "$VERSION" | sort -V | tail -1)" = "$held" ]; then
+            echo "desktop-latest holds $held, which is newer than $VERSION."
+            echo "Leaving it alone: $TAG keeps its own copy of this manifest."
+            exit 0
+          fi
           gh release upload desktop-latest "$RUNNER_TEMP/latest.json" -R "$GITHUB_REPOSITORY" --clobber
           echo "published $VERSION"
