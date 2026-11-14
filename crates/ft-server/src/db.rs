@@ -640,11 +640,27 @@ impl Db {
         Ok(())
     }
 
+    /// Workspaces with no work left in them, oldest first.
+    ///
+    /// **A workspace with no sessions at all is one of them.** This used to
+    /// require `EXISTS (SELECT 1 FROM sessions …)` first, to keep the sweep
+    /// off a workspace in the seconds between making it and starting anything
+    /// in it — `NOT EXISTS` over an empty set being true. That window does not
+    /// exist: `Db::insert_session` writes the workspace and its first session
+    /// in one transaction, and nothing else in the control plane creates a
+    /// workspace, so no committed row is ever legitimately session-less. What
+    /// the guard bought instead was a row that nothing could ever collect once
+    /// its sessions had gone some other way — immortal, and with the handler
+    /// refusing to end it, unremovable by any route at all.
+    ///
+    /// No age guard either, for the same reason: there is nothing to wait for.
+    /// If a path is ever added that makes a workspace *before* its first
+    /// session, it has to do both in one transaction — or this sweep will take
+    /// it within the minute, and that is the thing to remember here.
     pub async fn workspaces_to_purge(&self, limit: i64) -> Result<Vec<WorkspaceId>> {
         let rows = sqlx::query_scalar::<_, String>(
             "SELECT w.id FROM workspaces w
-              WHERE EXISTS (SELECT 1 FROM sessions s WHERE s.workspace_id = w.id)
-                AND NOT EXISTS (
+              WHERE NOT EXISTS (
                       SELECT 1 FROM sessions s
                        WHERE s.workspace_id = w.id AND s.status <> 'Ended')
               ORDER BY w.updated_at
@@ -666,6 +682,14 @@ impl Db {
     /// account switches. Anything added later that belongs to a session wants
     /// `on delete cascade` and then it is covered here too, which is the point
     /// of doing it this way rather than listing tables.
+    ///
+    /// **Nothing in the control plane calls this any more, and it should stay
+    /// that way.** Deleting a workspace by id alone trusts whatever decided it
+    /// was finished, however long ago that was — and a run started in the
+    /// meantime goes with the row. The sweep used to call it and does not;
+    /// `purge_finished_workspace` is the one that holds the row still and asks
+    /// again. This is kept because the cascade is worth testing on its own, and
+    /// that is all it is for.
     pub async fn purge_workspace(&self, workspace_id: &WorkspaceId) -> Result<u64> {
         let done = sqlx::query("DELETE FROM workspaces WHERE id = $1")
             .bind(workspace_id.as_str())
@@ -673,6 +697,78 @@ impl Db {
             .await
             .context("purging a workspace")?;
         Ok(done.rows_affected())
+    }
+
+    /// The same, but only if there is no work left in it — and it says whether
+    /// it went.
+    ///
+    /// Everything that lets go of a workspace goes through here: the sweep, and
+    /// `destroy_session` with `workspace=true` for the one case it can answer
+    /// on the spot. "Finished" is therefore one predicate in one place, which is
+    /// the point — a handler and a sweep with their own ideas of when a place is
+    /// over would eventually disagree, and the one that was wrong would be
+    /// deleting somebody's work.
+    ///
+    /// **The lock comes first, and a single guarded `DELETE` is not a
+    /// substitute for it.** That is what this was, and a security review broke
+    /// it on this schema. Under READ COMMITTED the `NOT EXISTS` is answered from
+    /// the snapshot the statement started with, so a session inserted by another
+    /// transaction and not yet committed is invisible to it. The predicate
+    /// holds; the delete then blocks on the `FOR KEY SHARE` lock that child
+    /// insert takes on this row; and when that transaction commits, the delete
+    /// proceeds on the answer it got before any of it happened — taking a run
+    /// that has just started, and its transcript, with no teardown asked of any
+    /// worker and no debt written down. `EvalPlanQual` does not catch it: it
+    /// re-checks the qual against a newer version of the *target* row, and this
+    /// row was never updated, only locked.
+    ///
+    /// So: `FOR UPDATE` on the workspace, then the guarded delete as a second
+    /// statement, which gets a snapshot of its own and sees what the first
+    /// statement waited for. `FOR UPDATE` specifically — a child insert holds
+    /// `FOR KEY SHARE` on its parent and `FOR NO KEY UPDATE` does not conflict
+    /// with that, so the weaker lock would not wait and would change nothing.
+    /// A run that starts *after* the lock is held waits for us instead, and then
+    /// either finds the place gone — a foreign key violation, which is the
+    /// truth: there is nowhere to start — or finds it still there because its
+    /// own arrival is what kept it.
+    ///
+    /// `false` is the ordinary answer — something is still running, so it is
+    /// being torn down the usual way and the sweep collects the row when the
+    /// last report arrives — and also what a workspace that is already gone
+    /// gives, which is the same nothing to do.
+    pub async fn purge_finished_workspace(&self, workspace_id: &WorkspaceId) -> Result<bool> {
+        let mut tx = self.pool.begin().await?;
+
+        // Nothing to hold still, so nothing to decide. Also the second caller's
+        // ordinary case: the sweep listed this row and somebody else got to it
+        // first.
+        let held: Option<String> =
+            sqlx::query_scalar("SELECT id FROM workspaces WHERE id = $1 FOR UPDATE")
+                .bind(workspace_id.as_str())
+                .fetch_optional(&mut *tx)
+                .await
+                .context("holding a workspace still to see whether its work has finished")?;
+        if held.is_none() {
+            // There was no row to lock, so there is nothing to hold open: the
+            // transaction goes back now rather than when the handle drops.
+            tx.rollback().await.ok();
+            return Ok(false);
+        }
+
+        let done = sqlx::query(
+            "DELETE FROM workspaces w
+              WHERE w.id = $1
+                AND NOT EXISTS (
+                      SELECT 1 FROM sessions s
+                       WHERE s.workspace_id = w.id AND s.status <> 'Ended')",
+        )
+        .bind(workspace_id.as_str())
+        .execute(&mut *tx)
+        .await
+        .context("purging a workspace whose work has finished")?;
+
+        tx.commit().await?;
+        Ok(done.rows_affected() > 0)
     }
 
     /// How much this workspace is holding, before deciding to let go of it.
@@ -5586,11 +5682,24 @@ mod tests {
         );
     }
 
-    /// `NOT EXISTS` over an empty set is true, which would make every
-    /// workspace rubbish for the seconds between making it and starting
-    /// anything in it.
+    /// A workspace with nothing in it at all is rubbish — and was immortal.
+    ///
+    /// This used to assert the opposite, to protect "the seconds between
+    /// making a workspace and starting anything in it", `NOT EXISTS` over an
+    /// empty set being true. There are no such seconds: `insert_session`
+    /// writes the workspace and its first session in one transaction and
+    /// nothing else makes a workspace, so a committed row is never
+    /// legitimately session-less. What the guard actually protected was a row
+    /// whose sessions had gone some other way, which nothing could then ever
+    /// collect — and with the handler refusing to end a place whose founding
+    /// session had ended, nothing could remove it by hand either. One sat on
+    /// the reporter's dashboard for nine days.
+    ///
+    /// Both halves are here, because the second is the one that must never
+    /// regress: an empty workspace is collected, and a workspace with a live
+    /// session in it is not, however the rest of it has ended.
     #[tokio::test]
-    async fn a_workspace_with_nothing_in_it_yet_is_not_swept_away() {
+    async fn a_workspace_with_no_sessions_left_in_it_is_collected() {
         let (db, owner) = db_with_user().await;
         let host = db
             .ensure_test_host("fire-01", owner.as_str())
@@ -5600,8 +5709,8 @@ mod tests {
         let empty = WorkspaceId::new();
         sqlx::query(
             "INSERT INTO workspaces (id, created_by, host_id, name, path)
-             VALUES ($1, $2, $3, 'coming up',
-                     ('u.' || (SELECT slug FROM principals WHERE id = $2) || '.coming_up')::ltree)",
+             VALUES ($1, $2, $3, 'nothing left in it',
+                     ('u.' || (SELECT slug FROM principals WHERE id = $2) || '.nothing')::ltree)",
         )
         .bind(empty.as_str())
         .bind(&owner)
@@ -5611,8 +5720,25 @@ mod tests {
         .unwrap();
 
         assert!(
+            db.workspaces_to_purge(10).await.unwrap().contains(&empty),
+            "a workspace holding no sessions is holding nothing anybody can read"
+        );
+
+        // And the half that matters more. A session arriving in it — which is
+        // the only state the old guard was written for — takes it straight
+        // back out of the sweep's way.
+        let live = a_run(&db, &host.id, &owner).await;
+        sqlx::query("UPDATE sessions SET workspace_id = $1 WHERE id = $2")
+            .bind(empty.as_str())
+            .bind(live.as_str())
+            .execute(&db.pool)
+            .await
+            .unwrap();
+        set_status(&db, &live, ft_core::SessionStatus::Working, None).await;
+
+        assert!(
             !db.workspaces_to_purge(10).await.unwrap().contains(&empty),
-            "a workspace being brought up has simply not started yet"
+            "somebody is working in it"
         );
     }
 
@@ -5630,6 +5756,175 @@ mod tests {
         let workspace = workspace_of(&db, &id).await;
         assert_eq!(db.purge_workspace(&workspace).await.unwrap(), 1);
         assert_eq!(db.purge_workspace(&workspace).await.unwrap(), 0);
+    }
+
+    /// The delete `destroy_session` does inline, and the live run it must not
+    /// touch.
+    ///
+    /// `purge_finished_workspace` exists so that ending a place that is
+    /// already over removes the row while somebody is looking at it, instead of
+    /// waiting on the sweep. It carries the sweep's predicate rather than the
+    /// caller's view of the place, so this is where that is held: a run that has
+    /// not ended refuses the delete, whoever can or cannot see it.
+    #[tokio::test]
+    async fn a_place_is_only_purged_on_the_way_out_when_nothing_is_running_in_it() {
+        let (db, owner) = db_with_user().await;
+        let host = db
+            .ensure_test_host("fire-01", owner.as_str())
+            .await
+            .unwrap();
+        let first = a_run(&db, &host.id, &owner).await;
+        let workspace = workspace_of(&db, &first).await;
+
+        let second = SessionId::new();
+        db.insert_run(NewRun {
+            id: &second,
+            workspace_id: &workspace,
+            owner: &owner,
+            title: "The one that joined",
+            prompt: "",
+            agent: "Codex",
+            steps: &[],
+        })
+        .await
+        .unwrap();
+
+        set_status(&db, &first, ft_core::SessionStatus::Ended, None).await;
+        assert!(
+            !db.purge_finished_workspace(&workspace).await.unwrap(),
+            "the agent that joined is still working in it"
+        );
+        assert!(
+            db.session(&second).await.unwrap().is_some(),
+            "and is still there to work in"
+        );
+
+        set_status(&db, &second, ft_core::SessionStatus::Ended, None).await;
+        assert!(
+            db.purge_finished_workspace(&workspace).await.unwrap(),
+            "with the last of them ended there is nothing left to keep"
+        );
+        assert!(db.session(&first).await.unwrap().is_none());
+        assert!(db.session(&second).await.unwrap().is_none());
+
+        assert!(
+            !db.purge_finished_workspace(&workspace).await.unwrap(),
+            "a place that has already gone is the same nothing to do"
+        );
+    }
+
+    /// **A run starting while the place is being purged is not deleted with
+    /// it.** The one that nearly shipped.
+    ///
+    /// A single guarded `DELETE` is not enough, and a security review proved it
+    /// on this schema. Under READ COMMITTED the delete's `NOT EXISTS` is
+    /// answered from the snapshot taken when the statement began, so a session
+    /// inserted and not yet committed is invisible to it: the predicate holds,
+    /// the delete then blocks on the `FOR KEY SHARE` lock that insert takes on
+    /// the parent row, and when the other transaction commits the delete
+    /// proceeds on its *old* answer — taking the run that has just arrived, and
+    /// its transcript, with no teardown asked of any worker and no debt written
+    /// down. The caller is told 202 and somebody else's agent is simply gone.
+    ///
+    /// `EvalPlanQual` does not save us: it re-checks the qual against a new
+    /// version of the *target* row, and the workspace row was never updated —
+    /// only locked.
+    ///
+    /// So the lock is taken first and the delete is a second statement, which
+    /// gets its own snapshot. This test is the schedule, held open on a second
+    /// connection, and it fails against the single-statement version.
+    #[tokio::test]
+    async fn a_run_starting_as_the_place_is_purged_survives_it() {
+        let (db, owner) = db_with_user().await;
+        let host = db
+            .ensure_test_host("fire-01", owner.as_str())
+            .await
+            .unwrap();
+        let first = a_run(&db, &host.id, &owner).await;
+        let workspace = workspace_of(&db, &first).await;
+        set_status(&db, &first, ft_core::SessionStatus::Ended, None).await;
+
+        // Somebody starts another agent in the place — `insert_run`'s own
+        // statement — and has not committed yet.
+        let mut joining = db.pool.begin().await.unwrap();
+        let joined = SessionId::new();
+        sqlx::query(
+            "INSERT INTO sessions
+               (id, user_id, workspace_id, title, prompt, agent, status,
+                steps, created_at, updated_at, number)
+             VALUES ($1, $2, $3, 'The one that joined', '', 'Shell', 'Starting',
+                     '[]'::jsonb, now(), now(), nextval('session_number_seq'))",
+        )
+        .bind(joined.as_str())
+        .bind(&owner)
+        .bind(workspace.as_str())
+        .execute(&mut *joining)
+        .await
+        .unwrap();
+
+        // ...while the place is being ended. This blocks on the row lock rather
+        // than answering, which is the whole point of it.
+        let purging = {
+            let db = db.clone();
+            let workspace = workspace.clone();
+            tokio::spawn(async move { db.purge_finished_workspace(&workspace).await.unwrap() })
+        };
+
+        // **Waited for, not slept through.** This used to give the purge 250 ms
+        // and hope, which is the one way a test like this fails silently: on a
+        // loaded machine the insert commits before the purge ever reaches the
+        // row, no two statements overlap, and the assertions below then pass
+        // against the very implementation they exist to reject. A race the test
+        // does not establish is a race the test does not protect.
+        //
+        // So the race is observed from the connection holding it open — asking
+        // "is anybody waiting on me?" rather than inspecting a table, which
+        // needs no third connection and cannot mistake another test's
+        // contention for this one's. The deadline is there so that a purge
+        // which never arrives is a failure with a sentence rather than a
+        // suite that hangs.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            let waiting: bool = sqlx::query_scalar(
+                "SELECT EXISTS (
+                   SELECT 1 FROM pg_stat_activity
+                    WHERE datname = current_database()
+                      AND wait_event_type = 'Lock'
+                      AND pg_backend_pid() = ANY (pg_blocking_pids(pid)))",
+            )
+            .fetch_one(&mut *joining)
+            .await
+            .unwrap();
+            if waiting {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "nothing ever blocked on the half-finished insert, so this is not \
+                 the schedule this test is about"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+
+        // Now, with the delete demonstrably waiting on it, the run arrives.
+        joining.commit().await.unwrap();
+
+        assert!(
+            !purging.await.unwrap(),
+            "a run arrived while the place was being let go of, so it is not finished"
+        );
+        assert!(
+            db.session(&joined).await.unwrap().is_some(),
+            "and the agent somebody just started is still there"
+        );
+        assert!(
+            db.workspaces_to_purge(10)
+                .await
+                .unwrap()
+                .iter()
+                .all(|w| w != &workspace),
+            "nor is the sweep about to take it instead"
+        );
     }
 
     /// `events.session_id` had no reference at all, so every control-plane
