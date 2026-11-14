@@ -30,10 +30,22 @@ struct Worker {
     /// worker writes — so a test can assert on those rather than stopping at
     /// `skill_pins` and inferring the rest.
     launched: Launches,
+    /// Every agent this worker was told to tear down, in order.
+    ///
+    /// Recorded rather than answered. A real worker ends the agent and reports
+    /// `StatusChanged { Ended }` back, which lands on another task — so a test
+    /// that waited for it would be waiting on a timer. What the control plane
+    /// is responsible for is asking, once per run in the place; a test plays
+    /// the worker's half itself afterwards with `Fleet::set_status`, which is
+    /// the same write that report makes.
+    destroyed: Destroys,
 }
 
 /// What the control plane told the worker to start.
 type Launches = Arc<std::sync::Mutex<Vec<ft_proto::StartAgent>>>;
+
+/// ...and what it told the worker to tear down.
+type Destroys = Arc<std::sync::Mutex<Vec<ft_core::SessionId>>>;
 #[async_trait::async_trait]
 impl Transport for Worker {
     fn describe(&self) -> String {
@@ -44,6 +56,7 @@ impl Transport for Worker {
         let ready = self.ready.clone();
         let probe = self.probe.clone();
         let launched = self.launched.clone();
+        let destroyed = self.destroyed.clone();
         tokio::spawn(async move {
             let (r, w) = tokio::io::split(theirs);
             let mut codec = Codec::new(r, w);
@@ -88,6 +101,10 @@ impl Transport for Worker {
                             result: Ok("started".into()),
                         })
                     }
+                    ToWorker::Destroy { session_id, .. } => {
+                        destroyed.lock().unwrap().push(session_id);
+                        None
+                    }
                     ToWorker::ProbeRemote { req, .. } => Some(ToServer::RemoteProbed {
                         req,
                         result: match probe.clone() {
@@ -116,11 +133,11 @@ async fn fixture() -> (
     Arc<AtomicBool>,
     String,
 ) {
-    let (state, principal, host, ready, owner, _) = watched_fixture().await;
+    let (state, principal, host, ready, owner, _, _) = watched_fixture().await;
     (state, principal, host, ready, owner)
 }
 
-/// The same fixture, and what the worker was told to start.
+/// The same fixture, and what the worker was told to start and to tear down.
 ///
 /// Separate only so the twenty tests that do not care keep their five-element
 /// tuple; there is one fixture, and this is it.
@@ -131,6 +148,7 @@ async fn watched_fixture() -> (
     Arc<AtomicBool>,
     String,
     Launches,
+    Destroys,
 ) {
     let (db, owner) = crate::db::Db::open_for_test_owned().await.unwrap();
     let accounts = crate::accounts::Accounts::new(db.pool().clone());
@@ -142,6 +160,7 @@ async fn watched_fixture() -> (
     let host = db.ensure_host("native", native(), &owner).await.unwrap();
     let ready = Arc::new(AtomicBool::new(false));
     let launched: Launches = Default::default();
+    let destroyed: Destroys = Default::default();
     let fleet = crate::fleet::Fleet::new(db.clone());
     fleet
         .supervise(
@@ -150,6 +169,7 @@ async fn watched_fixture() -> (
                 ready: ready.clone(),
                 probe: None,
                 launched: launched.clone(),
+                destroyed: destroyed.clone(),
             }),
         )
         .await;
@@ -181,7 +201,7 @@ async fn watched_fixture() -> (
         previews: Default::default(),
         public_url: "http://localhost".into(),
     };
-    (state, principal, host, ready, owner, launched)
+    (state, principal, host, ready, owner, launched, destroyed)
 }
 
 fn native() -> Compute {
@@ -562,6 +582,7 @@ async fn connecting_a_host_path_defers_validation_to_the_execution_machine() {
                 ready,
                 probe: None,
                 launched: Default::default(),
+                destroyed: Default::default(),
             }),
         )
         .await;
@@ -1135,6 +1156,282 @@ async fn ending_the_first_agent_leaves_the_others_running() {
     );
 }
 
+/// Wait for the worker to have been told to tear these runs down.
+///
+/// A teardown is told, not asked: `ToWorker::Destroy` has no reply, so the
+/// handler returns as soon as the frame is queued and the fake records it a
+/// moment later, on the connection's own task. The five seconds are not a
+/// latency expectation — both ends of this are a duplex in this process — they
+/// are the difference between a test that fails and a test that hangs.
+async fn told_to_tear_down(destroyed: &Destroys, how_many: usize) -> Vec<ft_core::SessionId> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let told = destroyed.lock().unwrap().clone();
+        if told.len() >= how_many || std::time::Instant::now() >= deadline {
+            return told;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+}
+
+/// The workspace nobody could get rid of, and the two halves of why.
+///
+/// The reported shape, exactly: a founding agent that ended on its own — which
+/// is deliberate and supported — and a sibling left at `Failed`. The status
+/// gate in `destroy_session` ran before the `workspace` flag was read, so every
+/// press of *End workspace* was answered "already ended"; and
+/// `Db::workspaces_to_purge` only collected a place in which every session had
+/// ended, so the `Failed` sibling kept the row alive. Neither half could be
+/// reached from the other, and the row sat on a dashboard for nine days.
+///
+/// Every teardown fixture before this one had a live founding session, which
+/// is why nothing caught it.
+#[tokio::test]
+async fn a_place_whose_founding_agent_has_ended_can_still_be_ended() {
+    let (state, principal, host, _ready, owner, _launched, destroyed) = watched_fixture().await;
+
+    let founder = ft_core::SessionId::new();
+    state
+        .db
+        .insert_session(
+            &founder,
+            &host.id,
+            &owner,
+            None,
+            "The one that cut it",
+            "do a thing",
+            Some("agent/x"),
+            Some("main"),
+            "Shell",
+            ft_core::WorkspaceSize::Medium,
+            ft_core::Share::Equal,
+            &ft_core::Step::plan(true, false),
+            None,
+        )
+        .await
+        .unwrap();
+
+    let workspace = state
+        .db
+        .session(&founder)
+        .await
+        .unwrap()
+        .unwrap()
+        .workspace_id
+        .unwrap();
+
+    let sibling = ft_core::SessionId::new();
+    state
+        .db
+        .insert_run(crate::db::NewRun {
+            id: &sibling,
+            workspace_id: &workspace,
+            owner: &owner,
+            title: "The one that joined",
+            prompt: "and another thing",
+            agent: "Shell",
+            steps: &ft_core::Step::plan(true, false),
+        })
+        .await
+        .unwrap();
+
+    // The state on the dashboard. `Failed` is the only status that draws the
+    // warning triangle, and the founding session being `Ended` is the only
+    // thing that produced "already ended" — so between them these two rows are
+    // the report.
+    state
+        .fleet
+        .set_status(&sibling, ft_core::SessionStatus::Failed, None)
+        .await;
+    state
+        .fleet
+        .set_status(&founder, ft_core::SessionStatus::Ended, None)
+        .await;
+
+    // Ending that one agent again is still nothing to do, and still says so in
+    // the same words. The gate did not move; it only stopped answering a
+    // question it was not asked.
+    let refused = sessions::destroy_session(
+        State(state.clone()),
+        Extension(principal.clone()),
+        Path(founder.as_str().to_string()),
+        axum::extract::Query(Default::default()),
+    )
+    .await
+    .expect_err("one agent, already ended, is nothing to end");
+    assert!(
+        matches!(refused.code, ErrorCode::SessionEnded),
+        "{:?}",
+        refused.code
+    );
+    assert_eq!(refused.message, "already ended");
+
+    // The place, which is a different question about a different thing.
+    let whole_place = || {
+        axum::extract::Query(
+            serde_json::from_value::<sessions::Removal>(serde_json::json!({ "workspace": true }))
+                .unwrap(),
+        )
+    };
+    sessions::destroy_session(
+        State(state.clone()),
+        Extension(principal.clone()),
+        Path(founder.as_str().to_string()),
+        whole_place(),
+    )
+    .await
+    .expect("the place is its owner's to be rid of, whatever became of its first agent");
+
+    // Every run in it is told, including the one that is also the place: a
+    // worktree the founding agent left behind is the workspace's, and the
+    // worker is the one that reclaims it.
+    let told = told_to_tear_down(&destroyed, 2).await;
+    assert!(
+        told.iter().any(|s| s == &sibling),
+        "the sibling that was left failed has to be ended too, got {told:?}"
+    );
+    assert!(
+        told.iter().any(|s| s == &founder),
+        "and the place itself, got {told:?}"
+    );
+
+    // The worker's half of it, which is one report per run it was told about.
+    for run in &told {
+        state
+            .fleet
+            .set_status(run, ft_core::SessionStatus::Ended, None)
+            .await;
+    }
+    for run in [&founder, &sibling] {
+        assert_eq!(
+            state.db.session(run).await.unwrap().unwrap().status,
+            ft_core::SessionStatus::Ended,
+            "every run in the place ends"
+        );
+    }
+
+    // And with that the sweep can finally have it.
+    assert_eq!(
+        crate::reclaim::sweep(&state).await.unwrap(),
+        1,
+        "the place is over, so its data goes"
+    );
+    assert!(
+        state.db.session(&founder).await.unwrap().is_none(),
+        "the row the reporter was looking at is gone"
+    );
+
+    // Pressing it twice is what somebody who has been let down for nine days
+    // does. The place is gone, so saying so is the honest answer — and not a
+    // 409 that leaves them where they started.
+    let again = sessions::destroy_session(
+        State(state.clone()),
+        Extension(principal.clone()),
+        Path(founder.as_str().to_string()),
+        whole_place(),
+    )
+    .await;
+    match again {
+        Ok(_) => {}
+        Err(e) => assert!(
+            matches!(e.code, ErrorCode::NotFound),
+            "asking again answered {:?}: {}",
+            e.code,
+            e.message
+        ),
+    }
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// A place where everything has already ended is removed, not refused.
+///
+/// The delete's goal is already true, so the only thing left to do is the row
+/// — and it goes here rather than in up to a minute's time, because somebody is
+/// looking at it.
+///
+/// Deliberately with the machine *away*, which is the harder half: there is
+/// nothing for a worker to be told, so the host-unreachable refusal has no
+/// business in front of this. With the machine answering it is the same branch,
+/// reached sooner.
+#[tokio::test]
+async fn a_place_that_has_already_finished_is_removed_even_with_its_machine_away() {
+    let (state, principal, host, _ready, owner) = fixture().await;
+
+    let founder = ft_core::SessionId::new();
+    state
+        .db
+        .insert_session(
+            &founder,
+            &host.id,
+            &owner,
+            None,
+            "All over",
+            "do a thing",
+            None,
+            None,
+            "Shell",
+            ft_core::WorkspaceSize::Medium,
+            ft_core::Share::Equal,
+            &ft_core::Step::plan(true, false),
+            None,
+        )
+        .await
+        .unwrap();
+    let workspace = state
+        .db
+        .session(&founder)
+        .await
+        .unwrap()
+        .unwrap()
+        .workspace_id
+        .unwrap();
+
+    let sibling = ft_core::SessionId::new();
+    state
+        .db
+        .insert_run(crate::db::NewRun {
+            id: &sibling,
+            workspace_id: &workspace,
+            owner: &owner,
+            title: "Also over",
+            prompt: "",
+            agent: "Shell",
+            steps: &ft_core::Step::plan(true, false),
+        })
+        .await
+        .unwrap();
+    for run in [&founder, &sibling] {
+        state
+            .fleet
+            .set_status(run, ft_core::SessionStatus::Ended, None)
+            .await;
+    }
+
+    // The machine stops answering, after everything in the place has finished.
+    state.fleet.stop_supervising(&host.id).await;
+
+    sessions::destroy_session(
+        State(state.clone()),
+        Extension(principal.clone()),
+        Path(founder.as_str().to_string()),
+        axum::extract::Query(
+            serde_json::from_value::<sessions::Removal>(serde_json::json!({ "workspace": true }))
+                .unwrap(),
+        ),
+    )
+    .await
+    .expect("there is nothing to tear down, so there is nothing to be unreachable about");
+
+    let left: i64 = sqlx::query_scalar("SELECT count(*) FROM workspaces WHERE id = $1")
+        .bind(workspace.as_str())
+        .fetch_one(state.db.pool())
+        .await
+        .unwrap();
+    assert_eq!(left, 0, "the row goes with the call, not a minute later");
+    assert!(state.db.session(&sibling).await.unwrap().is_none());
+}
+
 /// A machine is somebody's, and the endpoints that act on one now know it.
 ///
 /// Eight of the ten handlers in `hosts.rs` took no principal at all. A machine
@@ -1349,6 +1646,7 @@ async fn an_empty_repository_is_connected_rather_than_refused() {
                     empty: true,
                 }),
                 launched: Default::default(),
+                destroyed: Default::default(),
             }),
         )
         .await;
@@ -1607,7 +1905,7 @@ async fn one_persons_token_is_not_handed_to_another() {
 async fn a_profile_hands_a_second_agent_the_repositorys_defaults_too() {
     use crate::skills::{IncomingFile, NewSkill};
 
-    let (state, principal, host, ready, owner, launched) = watched_fixture().await;
+    let (state, principal, host, ready, owner, launched, _) = watched_fixture().await;
     ready.store(true, Ordering::SeqCst);
     let org = state.db.org().await.unwrap();
 
@@ -2272,7 +2570,7 @@ async fn an_open_engine_is_the_leads_to_choose_and_a_pinned_one_is_not() {
 /// error about a field the lead never set. Both come off.
 #[tokio::test]
 async fn an_open_engine_carries_neither_its_subscription_nor_its_run_settings() {
-    let (state, _principal, host, ready, owner, launched) = watched_fixture().await;
+    let (state, _principal, host, ready, owner, launched, _) = watched_fixture().await;
     let lead = a_lead_that_delegates(&state, &host, &ready, &owner, Agent::Codex).await;
 
     // A Claude Code subscription the profile pins, and the owner's default for
@@ -2580,6 +2878,7 @@ async fn another_machine(state: &AppState, owner: &str, name: &str) -> Host {
                 ready: Arc::new(AtomicBool::new(true)),
                 probe: None,
                 launched: Default::default(),
+                destroyed: Default::default(),
             }),
         )
         .await;

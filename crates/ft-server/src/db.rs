@@ -675,6 +675,43 @@ impl Db {
         Ok(done.rows_affected())
     }
 
+    /// The same, but only if there is no work left in it — and it says whether
+    /// it went.
+    ///
+    /// For the one caller that knows a place is finished because somebody just
+    /// asked for it to be ended and nothing in it is running: `destroy_session`
+    /// with `workspace=true`. The row can go there and then instead of in up to
+    /// a minute's time, which matters because the person who pressed the button
+    /// is looking at it.
+    ///
+    /// **One statement, so the decision and the delete cannot disagree.**
+    /// Reading "is anything still alive in here?" and then deleting on the
+    /// answer would be a window in which a run is started, or a worker's status
+    /// lands, and somebody's live session is deleted out from under them. And
+    /// the predicate is deliberately `workspaces_to_purge`'s, rather than the
+    /// caller's idea of it: `Db::live_runs_beside` answers *the asker's* view of
+    /// the place, and a sibling they cannot see is still a sibling. Nothing
+    /// deleted here that the sweep would not have taken anyway.
+    ///
+    /// `false` is the ordinary answer — something is still running, so it is
+    /// being torn down the usual way and the sweep collects the row when the
+    /// last report arrives — and also what a workspace that is already gone
+    /// gives, which is the same nothing to do.
+    pub async fn purge_finished_workspace(&self, workspace_id: &WorkspaceId) -> Result<bool> {
+        let done = sqlx::query(
+            "DELETE FROM workspaces w
+              WHERE w.id = $1
+                AND NOT EXISTS (
+                      SELECT 1 FROM sessions s
+                       WHERE s.workspace_id = w.id AND s.status <> 'Ended')",
+        )
+        .bind(workspace_id.as_str())
+        .execute(&self.pool)
+        .await
+        .context("purging a workspace whose work has finished")?;
+        Ok(done.rows_affected() > 0)
+    }
+
     /// How much this workspace is holding, before deciding to let go of it.
     ///
     /// Only the log, because only the log is ever large enough to be worth
@@ -5630,6 +5667,61 @@ mod tests {
         let workspace = workspace_of(&db, &id).await;
         assert_eq!(db.purge_workspace(&workspace).await.unwrap(), 1);
         assert_eq!(db.purge_workspace(&workspace).await.unwrap(), 0);
+    }
+
+    /// The delete `destroy_session` does inline, and the live run it must not
+    /// touch.
+    ///
+    /// `purge_finished_workspace` exists so that ending a place that is
+    /// already over removes the row while somebody is looking at it, instead of
+    /// waiting on the sweep. It carries the sweep's predicate rather than the
+    /// caller's view of the place, so this is where that is held: a run that has
+    /// not ended refuses the delete, whoever can or cannot see it.
+    #[tokio::test]
+    async fn a_place_is_only_purged_on_the_way_out_when_nothing_is_running_in_it() {
+        let (db, owner) = db_with_user().await;
+        let host = db
+            .ensure_test_host("fire-01", owner.as_str())
+            .await
+            .unwrap();
+        let first = a_run(&db, &host.id, &owner).await;
+        let workspace = workspace_of(&db, &first).await;
+
+        let second = SessionId::new();
+        db.insert_run(NewRun {
+            id: &second,
+            workspace_id: &workspace,
+            owner: &owner,
+            title: "The one that joined",
+            prompt: "",
+            agent: "Codex",
+            steps: &[],
+        })
+        .await
+        .unwrap();
+
+        set_status(&db, &first, ft_core::SessionStatus::Ended, None).await;
+        assert!(
+            !db.purge_finished_workspace(&workspace).await.unwrap(),
+            "the agent that joined is still working in it"
+        );
+        assert!(
+            db.session(&second).await.unwrap().is_some(),
+            "and is still there to work in"
+        );
+
+        set_status(&db, &second, ft_core::SessionStatus::Ended, None).await;
+        assert!(
+            db.purge_finished_workspace(&workspace).await.unwrap(),
+            "with the last of them ended there is nothing left to keep"
+        );
+        assert!(db.session(&first).await.unwrap().is_none());
+        assert!(db.session(&second).await.unwrap().is_none());
+
+        assert!(
+            !db.purge_finished_workspace(&workspace).await.unwrap(),
+            "a place that has already gone is the same nothing to do"
+        );
     }
 
     /// `events.session_id` had no reference at all, so every control-plane

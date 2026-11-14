@@ -1716,7 +1716,21 @@ pub(super) async fn destroy_session(
         .await?
         .ok_or_else(|| ApiError::not_found("session"))?;
 
-    if session.status == SessionStatus::Ended {
+    // **Only a single-agent end, because `Ended` is a fact about one agent and
+    // the question here may be about the place.**
+    //
+    // A workspace is named by the session that cut it, so "end this workspace"
+    // arrives as a delete of that session's id with `workspace=true`. Asked
+    // before the flag was read, this refusal made ending an agent on its own —
+    // which is deliberate and supported, see the long comment below — into the
+    // act that put a place beyond anybody's reach: the founding session was
+    // `Ended`, so every later attempt to end the *place* was answered "already
+    // ended", and a sibling left at `Failed` kept `workspaces_to_purge` from
+    // ever collecting the row. The reported one sat on a dashboard for nine
+    // days, with `force` no help because it is read further down than this.
+    //
+    // Ending one agent twice is still nothing to do, and still says so.
+    if !req.workspace && session.status == SessionStatus::Ended {
         return Err(ApiError::new(ErrorCode::SessionEnded, "already ended"));
     }
 
@@ -1771,6 +1785,44 @@ pub(super) async fn destroy_session(
     // connection into it is the same thing one layer down.
     state.forwards.stop_session(&id).await;
     state.previews.forget(&id);
+
+    // **A place with no work left in it is not a teardown to arrange. It is a
+    // row, and the row is the whole of what is being asked for.**
+    //
+    // Every agent in it has ended, so there is nothing for a worker to stop
+    // and nothing for it to report back; the worktree is already gone, or it
+    // is owed a teardown that `owed_teardowns` holds and a reconnect pays.
+    // What is left is the row, and refusing to remove it — as a 409 for a
+    // machine that is away, or as a 202 that changes nothing — is the answer
+    // the reporter had for nine days. A delete whose goal is already true is
+    // not an error.
+    //
+    // So it goes now, rather than in up to a minute's time when
+    // `reclaim::sweep` next looks. The sweep remains the only thing that ends
+    // a place that finishes some other way — the last agent reporting, a host
+    // saying so on reconnect, a machine being removed — because finishing is
+    // not one event and `reclaim` says why. This path is the exception that is
+    // allowed to delete inline for one reason: somebody is watching the row
+    // they just asked to be rid of, and a success that leaves it on the screen
+    // is what they already complained about.
+    //
+    // Before the connectivity check, because none of it needs the machine; and
+    // after the authorization above, so that what goes is only ever a place the
+    // caller may dispose of. `Db::purge_finished_workspace` carries the sweep's
+    // own predicate, so "no work left in it" is one definition in one place and
+    // a live sibling — including one this caller cannot see — refuses the
+    // delete rather than being deleted by it.
+    if the_whole_place {
+        if let Some(workspace) = session.workspace_id.as_ref() {
+            if state.db.purge_finished_workspace(workspace).await? {
+                tracing::info!(
+                    workspace = %workspace,
+                    "ending a place whose agents had all finished: the row goes with it"
+                );
+                return Ok(StatusCode::ACCEPTED);
+            }
+        }
+    }
 
     // Ending is normally the worker's word: it tears the workspace down and
     // reports it, and the row follows. With nobody listening there is no such
