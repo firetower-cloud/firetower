@@ -16,6 +16,44 @@ workspace that was already finished and works through them fifty at a time,
 which is the backlog. Only the orphaned `events` are deleted in the migration,
 because the foreign key cannot be trusted until they are gone.
 
+## Two holes, found by a workspace that sat on a dashboard for nine days
+
+Both were in what landed rather than in the plan, and each on its own was
+survivable. Together they made a place that could neither be ended by anybody
+nor collected by the sweep: the row wore a warning triangle, *End workspace*
+answered "already ended", and nothing else in the product could touch it.
+
+**A workspace with no sessions in it was never collected.** The sweep asked
+`EXISTS (SELECT 1 FROM sessions …)` before anything else, to keep itself off a
+workspace in the seconds between making it and starting the first agent in it —
+`NOT EXISTS` over an empty set being true. There are no such seconds:
+`Db::insert_session` writes the workspace and its first session in one
+transaction, and nothing else in the control plane makes a workspace, so no
+committed row is ever legitimately session-less. What the guard protected in
+practice was a row whose sessions had gone some other way, and nothing could
+ever collect that. There is no age guard in its place, for the same reason — but
+a path that ever makes a workspace *before* its first session has to do both in
+one transaction, or this sweep will take it within the minute.
+
+**Ending a place is a question about the place, not about the session that
+names it.** A workspace carries the id of the session that cut it, so "end this
+workspace" arrives as a delete of that session with `workspace=true` — and
+`destroy_session` refused it outright when that session had already ended. An
+agent ending on its own is ordinary and supported (`reclaim` and the worker's
+"the last agent out reclaims it" both depend on it), so the supported action was
+what put the place beyond reach, and `?force=true` was no escape because the
+status gate ran in front of it. The gate now applies only to a single-agent
+end.
+
+And a place with nothing running left in it is now removed by the handler
+rather than refused: the delete's goal is already true, which is not an error.
+`Db::purge_finished_workspace` does it in one statement carrying the sweep's own
+predicate, so a live session — including one the caller cannot see — refuses the
+delete rather than being deleted by it. That is the one place allowed to reclaim
+inline, because somebody is watching the row they just asked to be rid of. The
+sweep is still what collects every place that finishes some other way, which is
+every other way a place finishes.
+
 ## The problem
 
 Nothing on the session path is ever deleted. `forget_session` and `mark_cleaned`
